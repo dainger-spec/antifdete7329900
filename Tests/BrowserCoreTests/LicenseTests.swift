@@ -328,6 +328,70 @@ final class LicenseTests: XCTestCase {
         XCTAssertEqual(banner(byTime), [.periodEnded(owner: true, endedAt: try time("2026-11-02T00:00:00Z"))])
     }
 
+    /// After the grace (the last line of §8.2) the banner says since when the license could not be
+    /// checked — and, the app outdated, says that instead of `app.outdated`; with no document that
+    /// checks (the second line), `mode.unverified` (§8.5 item 7, contract of 2 November).
+    func testExportOnlyAfterTheGraceAndWithoutADocumentSayWhy() throws {
+        let afterGrace = try time("2026-11-09T00:00:00Z")
+        let p = try entitlement()
+        let last = try time("2026-11-01T10:00:00Z")
+        XCTAssertEqual(LicenseDecision.mode(signedIn: true, entitlement: p, at: afterGrace), .exportOnly)
+        XCTAssertEqual(LicenseBanners.banners(.init(mode: .exportOnly, entitlement: p, lastSuccessAt: last, now: afterGrace)),
+                       [.expired(outdated: false, lastSuccessAt: last)])
+        XCTAssertEqual(LicenseBanners.banners(.init(mode: .exportOnly, entitlement: p, appOutdated: true, lastSuccessAt: last, now: afterGrace)),
+                       [.expired(outdated: true, lastSuccessAt: last)], "says \"update\" itself: no app.outdated beside it")
+        XCTAssertEqual(LicenseBanners.banners(.init(mode: .exportOnly, entitlement: nil, now: afterGrace)), [.unverified])
+        XCTAssertEqual(LicenseBanners.banners(.init(mode: .exportOnly, entitlement: nil, appOutdated: true, now: afterGrace)),
+                       [.unverified, .appOutdated])
+        // A reason of the document's own is still said as before, not as "expired".
+        XCTAssertEqual(LicenseBanners.banners(.init(mode: .exportOnly, entitlement: try entitlement(status: .exportOnly, reason: "no_license"),
+                                                    appOutdated: true, now: afterGrace)), [.noLicense, .appOutdated])
+        XCTAssertEqual(LicenseBanner.expired(outdated: false, lastSuccessAt: nil).rank, LicenseBanner.unverified.rank)
+        // Both stop work, as the reasons of §8.5's 1–6 do; GRACE and the warnings do not.
+        XCTAssertTrue(LicenseBanner.expired(outdated: true, lastSuccessAt: nil).stopsWork)
+        XCTAssertTrue(LicenseBanner.unverified.stopsWork)
+        XCTAssertTrue(LicenseBanner.noLicense.stopsWork)
+        XCTAssertFalse(LicenseBanner.grace(outdated: false, lastSuccessAt: nil, until: afterGrace).stopsWork)
+        XCTAssertFalse(LicenseBanner.appOutdated.stopsWork)
+    }
+
+    /// Closed during the week, the warning comes back for the last day; closed on the last day, not
+    /// again; a renewal that moved the end counts anew (§8.5 item 10).
+    func testAClosedPeriodWarningComesBackOnlyForTheLastDay() throws {
+        let end = try time("2026-12-01T00:00:00Z")
+        let p = try entitlement()
+        func warning(daysLeft: Double, closed: AccountRecord.PeriodEndingClosed?) -> LicenseBanner? {
+            LicenseBanners.banners(.init(mode: .full, entitlement: p, periodEndingClosed: closed, now: end.addingTimeInterval(-daysLeft * 86_400)))
+                .first { $0.rank == 10 }
+        }
+        let closedInTheWeek = AccountRecord.PeriodEndingClosed(endsAt: end, final: false)
+        XCTAssertNil(warning(daysLeft: 3, closed: closedInTheWeek))
+        XCTAssertEqual(warning(daysLeft: 0.5, closed: closedInTheWeek), .periodEnding(owner: true, endsAt: end, final: true))
+        let closedOnTheLastDay = AccountRecord.PeriodEndingClosed(endsAt: end, final: true)
+        XCTAssertNil(warning(daysLeft: 0.5, closed: closedOnTheLastDay))
+        XCTAssertNil(warning(daysLeft: 3, closed: closedOnTheLastDay), "a clock set back does not bring it back")
+        let closedForTheOldEnd = AccountRecord.PeriodEndingClosed(endsAt: end.addingTimeInterval(-30 * 86_400), final: true)
+        XCTAssertEqual(warning(daysLeft: 3, closed: closedForTheOldEnd), .periodEnding(owner: true, endsAt: end, final: false))
+    }
+
+    /// `account.json`'s new notes: kept and read back; one that does not read is left out, never the
+    /// whole file (which would sign this Mac out).
+    func testTheAccountFilesNewNotesReadBackAndAnOddOneIsLeftOut() throws {
+        var record = AccountRecord()
+        record.deviceToken = ServerToken("lmd_x")
+        record.unlinkCooldownSeconds = 604_800
+        record.periodEndingClosed = .init(endsAt: try time("2026-12-01T00:00:00Z"), final: false)
+        let data = try JSONCoding.encoder.encode(record)
+        XCTAssertEqual(try JSONCoding.decoder.decode(AccountRecord.self, from: data), record)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object["unlinkCooldownSeconds"] = "a week"
+        object["periodEndingClosed"] = ["endsAt": 3]
+        let odd = try JSONCoding.decoder.decode(AccountRecord.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertTrue(odd.isSignedIn)
+        XCTAssertNil(odd.unlinkCooldownSeconds)
+        XCTAssertNil(odd.periodEndingClosed)
+    }
+
     // MARK: The key (the server's internal/ident)
 
     /// The server's own vectors (internal/ident/ident_test.go), "computed outside this package — by

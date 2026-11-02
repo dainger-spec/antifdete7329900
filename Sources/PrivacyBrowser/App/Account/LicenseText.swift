@@ -25,6 +25,17 @@ enum LicenseText {
         return self.date(date)
     }
 
+    /// `<время>`: the time alone, for what ends within the hour (a sign-in's code, §5.2).
+    static func time(_ date: Date) -> String {
+        date.shown(date: .omitted, time: .shortened)
+    }
+
+    /// `<срок до …>`: from now until `date`, its seconds rounded up to a minute (§17.1).
+    static func durationUntil(_ date: Date, now: Date = Date()) -> String {
+        let minutes = max(1, Int((date.timeIntervalSince(now) / 60).rounded(.up)))
+        return duration(TimeInterval(minutes * 60))
+    }
+
     /// `<дата кратко>`: "29 November"; with the year when it is not this one.
     static func shortDate(_ date: Date, now: Date = Date()) -> String {
         let formatter = DateFormatter(); formatter.locale = Localization.locale
@@ -101,6 +112,10 @@ enum LicenseText {
         case let .grace(outdated, lastSuccessAt, until):
             return String(format: L(outdated ? "contract.mode.grace.outdated" : "contract.mode.grace.unreachable"),
                           lastSuccessAt.map(date) ?? "—", date(until))
+        case let .expired(outdated, lastSuccessAt):
+            return String(format: L(outdated ? "contract.mode.expired.outdated" : "contract.mode.expired.unreachable"),
+                          lastSuccessAt.map(date) ?? "—")
+        case .unverified: return L("contract.mode.unverified")
         case .appOutdated: return L("contract.app.outdated")
         case let .clockSkew(seconds): return String(format: L("contract.clock.skew"), duration(seconds))
         case let .periodEnding(owner, endsAt, _):
@@ -123,6 +138,12 @@ enum LicenseText {
                     String(format: L("contract.sidebar.grace.caption"), until))
         case .exportOnly:
             let reason = state.entitlement.flatMap { LicenseBanners.exportReason($0, at: state.now) }
+            // A document that would let this Mac work, its grace over: the connection's (or the
+            // app's age) is the title, export only the caption.
+            if state.entitlement != nil, reason == nil {
+                return (L(record.appOutdated ? "contract.sidebar.grace.outdated.title" : "contract.sidebar.grace.title"),
+                        L("contract.sidebar.export.title"))
+            }
             let caption: String
             switch reason {
             case "no_license"?: caption = L("contract.sidebar.export.noLicense")
@@ -149,11 +170,40 @@ enum LicenseText {
                plan(p.plan), count(p.limits.profiles, "profile"), "\(p.profilesOnOtherDevices)", "\(LicenseDecision.allowedProfilesHere(p))")
     }
 
+    // MARK: §17.3 — a sign-in's code (§5.2)
+
+    /// `login.code_terms`: when the letter went out, until when its code works, how many times it may
+    /// still be typed — all from the server's answer (an older server's: counted from when it came).
+    static func loginCodeTerms(_ code: LoginCode, now: Date = Date()) -> String {
+        String(format: L("contract.login.code_terms"), code.codeSentAt.map { when($0, now: now) } ?? "—",
+               code.codeExpiresAt.map(time) ?? "—", code.codeAttempts.map { count($0, "time") } ?? "—")
+    }
+
+    /// What is said about sending the code again, now: when it can be (`login.resend_wait`), that it
+    /// cannot any more (`login.resends_used`), or nothing — it can be now, or this server has no resend.
+    static func loginResendNote(_ code: LoginCode, now: Date = Date()) -> String? {
+        if code.resendsUsed { return String(format: L("contract.login.resends_used"), code.codeExpiresAt.map(time) ?? "—") }
+        if code.canResend, let at = code.resendAvailableAt, at > now { return String(format: L("contract.login.resend_wait"), durationUntil(at, now: now)) }
+        return nil
+    }
+
+    // MARK: §17.5 — signing out
+
+    /// `signout.consequences`, with the license's unlink cooldown when the server said it (§6.1,
+    /// §6.2); without one — a server older than v2026.11.04, whose sign-out has none — the text as the
+    /// contract had it then.
+    static func signOutConsequences(cooldownSeconds: Int?) -> String {
+        guard let cooldownSeconds, cooldownSeconds > 0 else { return L("contract.signout.consequences.withoutCooldown") }
+        return String(format: L("contract.signout.consequences"), duration(TimeInterval(cooldownSeconds)))
+    }
+
     // MARK: §17.2 — errors
 
     /// What a failed request says (§3, §17.2, §17.7), by its code — never by the server's message.
     /// `withKey`: the request carried the license's key (`account_deletion_pending` then has its own text).
-    static func error(_ failure: AccountFailure, withKey: Bool = false) -> String {
+    /// `passwordOnly`: a form where no email is typed (a key replaced with the account's password):
+    /// `invalid_credentials` is then the password's alone.
+    static func error(_ failure: AccountFailure, withKey: Bool = false, passwordOnly: Bool = false) -> String {
         switch failure {
         case .unreachable:
             return L("contract.error.unreachable")
@@ -164,7 +214,13 @@ enum LicenseText {
             case "rate_limited": return String(format: L("contract.error.rate_limited"), duration(TimeInterval(error.retryAfter ?? 60)))
             case "invalid_email": return L("contract.error.invalid_email")
             case "invalid_password": return L("contract.error.invalid_password")
-            case "invalid_credentials": return L("contract.error.invalid_credentials")
+            case "invalid_credentials":
+                return L(passwordOnly ? "contract.error.invalid_credentials.password" : "contract.error.invalid_credentials")
+            case "robot_check": return L("contract.error.robot_check")
+            case "robot_check_unavailable":
+                return String(format: L("contract.error.robot_check_unavailable"), duration(TimeInterval(error.retryAfter ?? 60)))
+            case "server_busy": return String(format: L("contract.error.server_busy"), duration(TimeInterval(error.retryAfter ?? 60)))
+            case "login_expired": return L("contract.error.login_expired")
             case "unauthorized": return L("contract.error.unauthorized")
             case "account_disabled": return L("contract.error.account_disabled")
             case "account_deletion_pending":

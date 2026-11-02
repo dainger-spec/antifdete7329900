@@ -129,6 +129,47 @@ public struct AccountSession: Equatable, Sendable {
     public var idleTimeoutSeconds: Int?
 }
 
+/// A sign-in the server holds until the code from the letter it sent to the account's address
+/// (`202 check_email`, §5.2): the password was right, but the address had many failed attempts
+/// before it, or the account five wrong passwords in a row since its last sign-in.
+public struct LoginCode: Equatable, Sendable {
+    /// Lets whoever typed the right password have the same code sent again
+    /// (`POST /v1/auth/login/resend`). Nil from a server older than v2026.11.04, which has no such
+    /// thing. In memory only, for the code's screen: never written, never logged (`ServerToken`).
+    public var challenge: ServerToken?
+    /// How many times this code may still be typed.
+    public var codeAttempts: Int?
+    /// When the letter went out, and until when its code works. An older server sends neither: they
+    /// are counted from when its answer came, and its `codeValidSeconds`.
+    public var codeSentAt: Date?
+    public var codeExpiresAt: Date?
+    /// Not before then may the code be sent again; nil when it may not be sent again at all.
+    public var resendAvailableAt: Date?
+    /// How many more times it may be sent in this attempt.
+    public var resendsLeft: Int?
+
+    public init(challenge: ServerToken? = nil, codeAttempts: Int? = nil, codeSentAt: Date? = nil, codeExpiresAt: Date? = nil,
+                resendAvailableAt: Date? = nil, resendsLeft: Int? = nil) {
+        self.challenge = challenge
+        self.codeAttempts = codeAttempts
+        self.codeSentAt = codeSentAt
+        self.codeExpiresAt = codeExpiresAt
+        self.resendAvailableAt = resendAvailableAt
+        self.resendsLeft = resendsLeft
+    }
+
+    /// The code may be sent again in this attempt — now, or from `resendAvailableAt` on.
+    public var canResend: Bool { challenge != nil && (resendsLeft ?? 0) > 0 && resendAvailableAt != nil }
+    /// This attempt has a challenge, and every resend of it is spent (`login.resends_used`).
+    public var resendsUsed: Bool { challenge != nil && !canResend }
+}
+
+/// What the password gave (§5.2): a session, or a letter with a code to type first.
+public enum LoginAnswer: Equatable, Sendable {
+    case session(AccountSession)
+    case code(LoginCode)
+}
+
 /// An error answer of the server (§3): decided by `code` and the status, never by `message`.
 public struct AccountServerError: Error, Equatable, Sendable {
     public var status: Int
@@ -185,8 +226,23 @@ public enum AccountAPI {
 
     // MARK: Requests
 
-    public static func login(email: String, password: String) -> AccountRequest {
-        AccountRequest(method: .post, path: "/v1/auth/login", body: json(["email": email, "password": password]))
+    /// `POST /v1/auth/login` (§5.2). `robotToken`: the robot check's (§5.5), only after the server
+    /// asked for one (`403 robot_check`); good for one request.
+    public static func login(email: String, password: String, robotToken: String? = nil) -> AccountRequest {
+        var body: [String: Any] = ["email": email, "password": password]
+        if let robotToken { body["robotToken"] = robotToken }
+        return AccountRequest(method: .post, path: "/v1/auth/login", body: json(body))
+    }
+
+    /// `POST /v1/auth/login/confirm`: the code from the letter → a session (§5.2).
+    public static func confirmLogin(email: String, code: String) -> AccountRequest {
+        AccountRequest(method: .post, path: "/v1/auth/login/confirm", body: json(["email": email, "code": code]))
+    }
+
+    /// `POST /v1/auth/login/resend`: the same code once more, asked with the challenge the password's
+    /// answer gave — so only whoever typed the right password can have a letter sent (§5.2).
+    public static func resendLoginCode(_ challenge: ServerToken) -> AccountRequest {
+        AccountRequest(method: .post, path: "/v1/auth/login/resend", body: json(["challenge": challenge.unredacted()]))
     }
 
     public static func logout(session: ServerToken) -> AccountRequest {
@@ -299,9 +355,14 @@ public enum AccountAPI {
     /// Throws `AccountFailure.unreachable` for what is not the server's answer at all.
     public static func failure(of response: AccountResponse) -> AccountFailure? {
         if (200..<300).contains(response.status) { return nil }
-        // 5xx, 408: unreachable whatever they carry (§9.3).
-        if response.status >= 500 || response.status == 408 { return .unreachable }
-        guard let envelope = try? decoder.decode(ErrorEnvelope.self, from: response.body), !envelope.error.code.isEmpty else {
+        let envelope = try? decoder.decode(ErrorEnvelope.self, from: response.body)
+        // 5xx, 408: unreachable whatever they carry (§9.3) — but for the two 503s a sign-in says in
+        // words, with when to try again (§3): the queue to check a password is full, the robot
+        // check's service did not answer. A refresh still takes them as unreachable (`LicenseClient`).
+        if response.status >= 500 || response.status == 408 {
+            guard response.status == 503, let code = envelope?.error.code, busyCodes.contains(code) else { return .unreachable }
+        }
+        guard let envelope, !envelope.error.code.isEmpty else {
             return .unreachable
         }
         var error = envelope.error.serverError(status: response.status)
@@ -318,11 +379,36 @@ public enum AccountAPI {
         return .success(value)
     }
 
-    /// `POST /v1/auth/login`'s answer.
+    /// The 503 codes that are the server's answer, not its absence (§3).
+    static let busyCodes: Set<String> = ["server_busy", "robot_check_unavailable"]
+
+    /// A session's answer: `POST /v1/auth/login/confirm`, `…/email/confirm`.
     public static func session(from response: AccountResponse) -> Result<AccountSession, AccountFailure> {
         decode(SessionBody.self, from: response).map {
             AccountSession(token: ServerToken($0.sessionToken), expiresAt: $0.expiresAt, accountID: $0.accountID,
                            idleTimeoutSeconds: $0.idleTimeoutSeconds)
+        }
+    }
+
+    /// `POST /v1/auth/login`'s answer: a session (200), or a code to type first (202, §5.2).
+    /// `receivedAt`: when it came — for the times an older server does not send.
+    public static func loginAnswer(from response: AccountResponse, receivedAt: Date) -> Result<LoginAnswer, AccountFailure> {
+        if response.status == 202 { return loginCode(from: response, receivedAt: receivedAt).map(LoginAnswer.code) }
+        return session(from: response).map(LoginAnswer.session)
+    }
+
+    /// A sign-in's `202 check_email` — the password's, or a resend's, which is "of the same kind".
+    /// `keeping`: a resend's attempt, whose challenge stays when its answer does not repeat it.
+    public static func loginCode(from response: AccountResponse, receivedAt: Date,
+                                 keeping kept: ServerToken? = nil) -> Result<LoginCode, AccountFailure> {
+        decode(LoginCodeBody.self, from: response).flatMap { body -> Result<LoginCode, AccountFailure> in
+            guard response.status == 202, body.status == "check_email" else { return .failure(.unreachable) }
+            let sentAt = body.codeSentAt ?? receivedAt
+            let expiresAt = body.codeExpiresAt ?? body.codeValidSeconds.map { sentAt.addingTimeInterval(TimeInterval($0)) }
+            let challenge = body.challenge.flatMap { $0.isEmpty ? nil : ServerToken($0) } ?? kept
+            return .success(LoginCode(challenge: challenge, codeAttempts: body.codeAttempts, codeSentAt: sentAt, codeExpiresAt: expiresAt,
+                                      resendAvailableAt: challenge == nil ? nil : body.resendAvailableAt,
+                                      resendsLeft: challenge == nil ? nil : body.resendsLeft))
         }
     }
 
@@ -333,6 +419,9 @@ public enum AccountAPI {
         public var serverTime: Date
         public var device: AccountDevice?
         public var deviceToken: ServerToken?
+        /// The license's unlink cooldown (§6.3), for `signout.consequences`; nil from a server older
+        /// than v2026.11.04, whose sign-out has none.
+        public var unlinkCooldownSeconds: Int?
     }
 
     public static func documentAnswer(from response: AccountResponse) -> Result<DocumentAnswer, AccountFailure> {
@@ -343,6 +432,10 @@ public enum AccountAPI {
               let serverTimeText = object["serverTime"] as? String,
               let serverTime = try? Date.ISO8601FormatStyle().parse(serverTimeText) else { return .failure(.unreachable) }
         var answer = DocumentAnswer(document: document, serverTime: serverTime)
+        // Read on its own: a field that does not read leaves the cooldown unknown, not the answer.
+        if let cooldown = (try? decoder.decode(CooldownExtra.self, from: response.body))?.unlinkCooldownSeconds, cooldown >= 0 {
+            answer.unlinkCooldownSeconds = cooldown
+        }
         if let activation = try? decoder.decode(ActivationExtras.self, from: response.body) {
             answer.device = activation.device
             answer.deviceToken = activation.deviceToken.map(ServerToken.init)
@@ -414,6 +507,39 @@ public enum AccountAPI {
         var status: String
         var codeValidSeconds: Int?
         var codeAttempts: Int?
+    }
+
+    private struct CooldownExtra: Decodable {
+        var unlinkCooldownSeconds: Int?
+    }
+
+    /// A sign-in's `202` (§5.2), read field by field: `status` is the answer; a time or a number that
+    /// does not read is left out — an older server sends none of them.
+    private struct LoginCodeBody: Decodable {
+        var status: String
+        var codeValidSeconds: Int?
+        var codeAttempts: Int?
+        var challenge: String?
+        var codeExpiresAt: Date?
+        var codeSentAt: Date?
+        var resendAvailableAt: Date?
+        var resendsLeft: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case status, codeValidSeconds, codeAttempts, challenge, codeExpiresAt, codeSentAt, resendAvailableAt, resendsLeft
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            status = try container.decode(String.self, forKey: .status)
+            codeValidSeconds = try? container.decode(Int.self, forKey: .codeValidSeconds)
+            codeAttempts = try? container.decode(Int.self, forKey: .codeAttempts)
+            challenge = try? container.decode(String.self, forKey: .challenge)
+            codeExpiresAt = try? container.decode(Date.self, forKey: .codeExpiresAt)
+            codeSentAt = try? container.decode(Date.self, forKey: .codeSentAt)
+            resendAvailableAt = try? container.decode(Date.self, forKey: .resendAvailableAt)
+            resendsLeft = try? container.decode(Int.self, forKey: .resendsLeft)
+        }
     }
 
     private struct NewKeyBody: Decodable {

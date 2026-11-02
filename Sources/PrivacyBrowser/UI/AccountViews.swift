@@ -23,7 +23,8 @@ struct SignInFlow: View {
     var standalone = true
 
     enum Method: Hashable { case email, key }
-    enum Step: Equatable { case credentials, activation, connected }
+    /// `code`: the password was right, and the server sent a code to the account's address first (§5.2).
+    enum Step: Equatable { case credentials, code, activation, connected }
 
     @State private var step: Step
     @State private var method: Method
@@ -37,11 +38,24 @@ struct SignInFlow: View {
     @State private var dontRememberKey = false
     @State private var limit: AccountServerError?
     @State private var outcome: LicenseModel.ActivationOutcome?
+    /// The sign-in the server holds for its letter's code (§5.2): in memory, for this screen only.
+    @State private var loginCode: LoginCode?
+    @State private var codeText = ""
+    /// `login.code_resent`, after a resend.
+    @State private var codeNote: String?
+    /// The server asked for the robot check (`403 robot_check`, §5.5); the sheet with the site's page.
+    @State private var needsRobotCheck = false
+    @State private var showingRobotCheck = false
+    /// The check's token, for the next sign-in alone.
+    @State private var robotToken: String?
+    /// "Try again in …" (`rate_limited`, `server_busy`, `robot_check_unavailable`): the button waits
+    /// until then (§17.2).
+    @State private var waitUntil: Date?
 
     /// `method`, `keyText`, `step`: where it starts — the snapshots' only; the app starts at the
     /// email's sign-in.
     init(license: LicenseModel, onFinished: @escaping () -> Void, onCancel: (() -> Void)? = nil, standalone: Bool = true,
-         method: Method = .email, keyText: String = "", step: Step = .credentials) {
+         method: Method = .email, keyText: String = "", step: Step = .credentials, loginCode: LoginCode? = nil) {
         self.license = license
         self.onFinished = onFinished
         self.onCancel = onCancel
@@ -49,6 +63,7 @@ struct SignInFlow: View {
         _method = State(initialValue: method)
         _keyText = State(initialValue: keyText)
         _step = State(initialValue: step)
+        _loginCode = State(initialValue: loginCode)
     }
 
     var body: some View {
@@ -84,6 +99,8 @@ struct SignInFlow: View {
         switch step {
         case .credentials:
             LockScreen(title: L("license.signIn.title"), subtitle: L("license.signIn.subtitle")) { credentials }
+        case .code:
+            LockScreen(title: L("license.code.title"), subtitle: L("license.code.subtitle")) { codeStep }
         case .activation:
             LockScreen(title: L("license.activate.title"),
                        subtitle: L(method == .key ? "license.activate.subtitle.key" : "license.activate.subtitle.email")) { activation }
@@ -133,6 +150,10 @@ struct SignInFlow: View {
                 }
             }
             if let problem { problemLine(problem) }
+            if needsRobotCheck, method == .email, robotCheckURL != nil {
+                Button(L("license.robot.action")) { showingRobotCheck = true }
+                    .buttonStyle(.lumenSecondary)
+            }
             LockActionButton(title: L("license.signIn.action"), working: license.isWorking,
                              workingTitle: L("license.signIn.working"), enabled: canSignIn, action: signIn)
             HStack {
@@ -142,12 +163,41 @@ struct SignInFlow: View {
             LockNote(symbol: "lock", text: L("license.signIn.masterNote"))
         }
         .padding(.top, 28)
+        .sheet(isPresented: $showingRobotCheck) {
+            if let url = robotCheckURL {
+                RobotCheckSheet(url: url, onToken: { token in
+                    showingRobotCheck = false
+                    needsRobotCheck = false
+                    robotToken = token
+                    problem = nil
+                    signIn()
+                }, onCancel: { showingRobotCheck = false })
+            }
+        }
+    }
+
+    /// The site's robot check page for a sign-in (§5.5).
+    private var robotCheckURL: URL? {
+        license.configuration.flatMap { RobotCheck.pageURL(site: $0.siteURL, action: "login") }
     }
 
     private var canSignIn: Bool {
+        if let waitUntil, waitUntil > Date() { return false }
         switch method {
         case .email: return !email.trimmingCharacters(in: .whitespaces).isEmpty && !password.isEmpty
         case .key: return AccountKeyInput.classify(keyText) != .empty
+        }
+    }
+
+    /// The button waits as long as the server said (§17.2): its "try again in …" answers.
+    private func waitIfAsked(_ failure: AccountFailure) {
+        guard case .server(let error) = failure, ["rate_limited", "server_busy", "robot_check_unavailable"].contains(error.code) else { return }
+        let seconds = TimeInterval(max(1, error.retryAfter ?? 60))
+        let until = Date().addingTimeInterval(seconds)
+        waitUntil = until
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            if waitUntil == until { waitUntil = nil }
         }
     }
 
@@ -156,12 +206,28 @@ struct SignInFlow: View {
         problem = nil
         switch method {
         case .email:
+            // A robot check's token is good for this one request (§5.5).
+            let token = robotToken
+            robotToken = nil
             Task {
-                if let failure = await license.signIn(email: email, password: password) {
-                    problem = LicenseText.error(failure)
-                } else {
+                switch await license.signIn(email: email, password: password, robotToken: token) {
+                case .signedIn:
                     password = ""
                     step = .activation
+                case .code(let code):
+                    password = ""
+                    loginCode = code
+                    codeText = ""
+                    codeNote = nil
+                    step = .code
+                case .failed(let failure):
+                    problem = LicenseText.error(failure)
+                    waitIfAsked(failure)
+                    if case .server(let error) = failure, error.code == "robot_check" {
+                        needsRobotCheck = true
+                        // The check opens at once; the button above brings it back if it is closed.
+                        showingRobotCheck = robotCheckURL != nil
+                    }
                 }
             }
         case .key:
@@ -177,6 +243,127 @@ struct SignInFlow: View {
             case .typo, .empty: problem = L("contract.key.typo")
             }
         }
+    }
+
+    // MARK: The letter's code (§5.2)
+
+    private var codeStep: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(L("contract.login.check_email"))
+                .font(.lumenBody)
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            AccountTextField(label: L("license.code.field"), text: $codeText, monospaced: true,
+                             prompt: "000000", error: problem != nil, onSubmit: confirmCode) // l10n: not text
+            if let loginCode {
+                // The times move on by themselves: when the letter went, when the code may go again.
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(LicenseText.loginCodeTerms(loginCode, now: context.date))
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let note = LicenseText.loginResendNote(loginCode, now: context.date) {
+                            Text(note)
+                                .font(.lumenSecondary)
+                                .foregroundStyle(Theme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if loginCode.canResend {
+                            Button(L("license.code.resend"), action: resendCode)
+                                .buttonStyle(.lumenGhost)
+                                .padding(.leading, -11)
+                                .disabled(license.isWorking || (loginCode.resendAvailableAt.map { $0 > context.date } ?? true))
+                        }
+                    }
+                }
+            }
+            if let codeNote {
+                Label(codeNote, systemImage: "envelope")
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let problem { problemLine(problem) }
+            LockActionButton(title: L("license.code.action"), working: license.isWorking, workingTitle: L("license.code.working"),
+                             enabled: canConfirmCode, action: confirmCode)
+            HStack {
+                LockLink(title: L("license.code.back")) { backToPassword(nil) }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.top, 28)
+    }
+
+    private var canConfirmCode: Bool {
+        if let waitUntil, waitUntil > Date() { return false }
+        return !codeText.filter { !$0.isWhitespace }.isEmpty
+    }
+
+    /// `POST /v1/auth/login/confirm`: the session, then this Mac's activation, as after a password.
+    private func confirmCode() {
+        guard canConfirmCode, !license.isWorking else { return }
+        problem = nil
+        codeNote = nil
+        Task {
+            if let failure = await license.confirmLogin(email: email, code: codeText) {
+                problem = LicenseText.error(failure)
+                waitIfAsked(failure)
+                if case .server(let error) = failure, error.code == "invalid_code", var spent = loginCode {
+                    spent.codeAttempts = spent.codeAttempts.map { max(0, $0 - 1) }
+                    loginCode = spent
+                    // The code's tries spent, or its time over: this attempt is over — a new one
+                    // starts with the password (§5.2).
+                    if spent.codeAttempts == 0 || (spent.codeExpiresAt.map { $0 <= Date() } ?? false) {
+                        backToPassword(L("contract.error.invalid_code"))
+                    }
+                }
+            } else {
+                loginCode = nil
+                codeText = ""
+                step = .activation
+            }
+        }
+    }
+
+    /// `POST /v1/auth/login/resend`: the same code again (`login.code_resent`); spent — the
+    /// attempt's own words; over — back to the password (`error.login_expired`).
+    private func resendCode() {
+        guard let code = loginCode, !license.isWorking else { return }
+        problem = nil
+        codeNote = nil
+        Task {
+            switch await license.resendLoginCode(code) {
+            case .success(let again):
+                loginCode = again
+                codeNote = L("contract.login.code_resent")
+            case .failure(.server(let error)) where error.code == "login_expired":
+                backToPassword(L("contract.error.login_expired"))
+            case .failure(.server(let error)) where error.code == "resend_limit":
+                // Every resend of this attempt spent: said by the code's own note from now on.
+                var spent = code
+                spent.resendsLeft = 0
+                spent.resendAvailableAt = nil
+                loginCode = spent
+            case .failure(.server(let error)) where error.code == "rate_limited":
+                // Not yet: the note counts down to when it can.
+                var later = code
+                later.resendAvailableAt = Date().addingTimeInterval(TimeInterval(max(1, error.retryAfter ?? 60)))
+                loginCode = later
+            case .failure(let failure):
+                problem = LicenseText.error(failure)
+            }
+        }
+    }
+
+    /// Back to the password: the attempt ended, or the person went back. Nothing of it stays.
+    private func backToPassword(_ reason: String?) {
+        license.cancelSignIn()
+        loginCode = nil
+        codeText = ""
+        codeNote = nil
+        problem = reason
+        step = .credentials
     }
 
     // MARK: Activation
@@ -505,12 +692,13 @@ struct LicenseBannerView: View {
 
     /// What stops work is red; what warns, amber — and the period's last day, red.
     private var isDanger: Bool {
-        switch banner {
-        case .periodEnding(_, _, let final): return final
-        case .grace, .appOutdated, .clockSkew, .trialStarted: return false
-        default: return true
-        }
+        if case .periodEnding(_, _, let final) = banner { return final }
+        return banner.stopsWork
     }
+
+    /// Where the period is paid for: the key's page for a key's license without an email (§11.1),
+    /// the plans otherwise (§17.4).
+    private var renewalPath: String { license.hasNoEmail ? "/key" : "/pricing" }
 
     @ViewBuilder
     private var actions: some View {
@@ -525,21 +713,27 @@ struct LicenseBannerView: View {
         case .accountDisabled:
             Button(L("license.banner.support")) { open("/") }.buttonStyle(.lumenSecondary)
         case let .periodEnded(owner, _):
-            if owner { Button(L("license.banner.renew")) { open("/pricing") }.buttonStyle(.lumenSecondary) }
+            if owner { Button(L("license.banner.renew")) { open(renewalPath) }.buttonStyle(.lumenSecondary) }
         case .noLicense:
             Button(L("license.banner.choosePlan")) { open("/pricing") }.buttonStyle(.lumenSecondary)
-        case let .grace(outdated, _, _):
+        case let .grace(outdated, _, _), let .expired(outdated, _):
             if outdated {
                 Button(L("license.banner.update"), action: update).buttonStyle(.lumenSecondary)
             } else {
                 Button(L("license.banner.checkNow")) { Task { await license.refresh() } }.buttonStyle(.lumenSecondary)
             }
+        case .unverified:
+            Button(L("license.banner.checkNow")) { Task { await license.refresh() } }.buttonStyle(.lumenSecondary)
         case .appOutdated:
             Button(L("license.banner.update"), action: update).buttonStyle(.lumenSecondary)
         case .clockSkew:
             Button(L("license.banner.systemSettings"), action: openSystemSettings).buttonStyle(.lumenSecondary)
-        case let .periodEnding(owner, _, _):
-            if owner { Button(L("license.banner.renew")) { open("/pricing") }.buttonStyle(.lumenSecondary) }
+        case let .periodEnding(owner, endsAt, final):
+            // It can be closed (§8.5 item 10): during the week it comes back for the last day.
+            HStack(spacing: 8) {
+                if owner { Button(L("license.banner.renew")) { open(renewalPath) }.buttonStyle(.lumenSecondary) }
+                Button(L("license.banner.hide")) { license.closePeriodEnding(endsAt: endsAt, final: final) }.buttonStyle(.lumenGhost)
+            }
         case .trialStarted:
             HStack(spacing: 8) {
                 Button(L("license.banner.plans")) { open("/pricing") }.buttonStyle(.lumenSecondary)
@@ -611,6 +805,8 @@ struct AccountSettingsPage: View {
     @State private var devicesProblem: String?
     @State private var loadingDevices = false
     @State private var confirmingSignOut = false
+    /// `429 unlink_cooldown` answered the sign-out (§6.3): until when — this Mac stays connected.
+    @State private var signOutCooldown: Date??
     @State private var confirmingUnlink: AccountDevice?
     @State private var signingIn = false
     /// The system's answer about Lumen's notifications, read when the page shows (key accounts).
@@ -649,10 +845,20 @@ struct AccountSettingsPage: View {
         .alert(L("license.account.signOut.confirm"), isPresented: $confirmingSignOut) {
             Button(L("license.account.cancel"), role: .cancel) {}
             Button(L("license.account.signOut.button"), role: .destructive) {
-                Task { await license.signOut(vault: model.unlockedVaultForAccount) }
+                Task {
+                    if case .cooldown(let availableAt)? = await license.signOut(vault: model.unlockedVaultForAccount) {
+                        signOutCooldown = .some(availableAt)
+                    }
+                }
             }
         } message: {
-            Text(L("contract.signout.consequences"))
+            Text(signOutConsequences)
+        }
+        .alert(L("license.account.signOut.notNow"),
+               isPresented: Binding(get: { signOutCooldown != nil }, set: { if !$0 { signOutCooldown = nil } })) {
+            Button(L("license.close"), role: .cancel) { signOutCooldown = nil }
+        } message: {
+            Text(String(format: L("contract.signout.cooldown"), (signOutCooldown ?? nil).map(LicenseText.date) ?? "—"))
         }
         .sheet(isPresented: $linkingEmail) {
             EmailLinkSheet(license: license) {
@@ -732,7 +938,8 @@ struct AccountSettingsPage: View {
                 VStack(alignment: .trailing, spacing: 8) {
                     if p.isOwner {
                         Button(L(p.plan == "trial" || p.status == .exportOnly ? "license.account.choosePlan" : "license.account.renew")) {
-                            open("/pricing")
+                            // A key's license without an email is paid for on the key's page (§11.1).
+                            open(license.hasNoEmail ? "/key" : "/pricing")
                         }
                         .buttonStyle(.lumenSecondary)
                     }
@@ -831,7 +1038,7 @@ struct AccountSettingsPage: View {
                 .foregroundStyle(Theme.textPrimary)
                 .textSelection(.enabled)
         }
-        SettingRow(L("license.account.signOut"), detail: L("contract.signout.consequences"), effect: nil) {
+        SettingRow(L("license.account.signOut"), detail: signOutConsequences, effect: nil) {
             Button(L("license.account.signOut.action")) { confirmingSignOut = true }
                 .buttonStyle(.lumenDestructive)
                 .disabled(license.isWorking)
@@ -857,6 +1064,11 @@ struct AccountSettingsPage: View {
                 .buttonStyle(.lumenDestructive)
                 .disabled(license.isWorking)
         }
+    }
+
+    /// `signout.consequences`, with the cooldown the server last said (§6.3).
+    private var signOutConsequences: String {
+        LicenseText.signOutConsequences(cooldownSeconds: license.record.unlinkCooldownSeconds)
     }
 
     /// This Mac's label as the license's list shows it: sent again when a new key connects it.
@@ -1231,6 +1443,11 @@ struct KeyReplaceSheet: View {
         }
         .sheetFrame(width: 500, height: 600)
         .background(Theme.raised)
+        .task {
+            // Whether an email is linked chooses the warning: asked of the license's view when the
+            // key is at hand and it is not known yet.
+            if !bySession, license.record.emailLinked == nil, license.keyAtHand { _ = await license.devices() }
+        }
         .onDisappear {
             result = nil
             password = ""
@@ -1239,9 +1456,16 @@ struct KeyReplaceSheet: View {
         }
     }
 
+    /// With the key and the purchase code, a linked email is unlinked too (§11.1, F3): said before —
+    /// also while it is not known whether one is linked (the license's view not read since this Mac
+    /// was connected): the warning is not left out on a guess.
+    private var confirmation: String {
+        L(!bySession && license.record.emailLinked != false ? "contract.key.replace.confirm.email" : "contract.key.replace.confirm")
+    }
+
     @ViewBuilder
     private var form: some View {
-        Text(L("contract.key.replace.confirm"))
+        Text(confirmation)
             .font(.lumenBody)
             .foregroundStyle(Theme.textPrimary)
             .fixedSize(horizontal: false, vertical: true)
@@ -1285,7 +1509,8 @@ struct KeyReplaceSheet: View {
         let proof: AccountAPI.KeyReplacementProof
         if bySession, let session = license.validSession {
             guard !password.isEmpty else {
-                problem = L("contract.error.invalid_credentials")
+                // No email is typed here: the password's own words (§17.2).
+                problem = L("contract.error.invalid_credentials.password")
                 return
             }
             proof = .account(session: session, password: password)
@@ -1306,6 +1531,7 @@ struct KeyReplaceSheet: View {
             proof = .purchase(key, code)
         }
         let withKey = !bySession
+        let passwordOnly = bySession
         Task {
             switch await license.replaceKey(proof, label: label) {
             case .success(let replacement):
@@ -1314,7 +1540,7 @@ struct KeyReplaceSheet: View {
                 purchaseCodeText = ""
                 password = ""
             case .failure(let failure):
-                problem = LicenseText.error(failure, withKey: withKey)
+                problem = LicenseText.error(failure, withKey: withKey, passwordOnly: passwordOnly)
             }
         }
     }

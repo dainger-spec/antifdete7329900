@@ -19,7 +19,14 @@ public enum LicenseBanner: Equatable, Sendable {
     case noLicense
     /// `mode.grace.unreachable` / `mode.grace.outdated`; `until`: the GRACE date.
     case grace(outdated: Bool, lastSuccessAt: Date?, until: Date)
-    /// `app.outdated` (not shown with `grace(outdated: true)`, which says it already).
+    /// `mode.expired.unreachable` / `mode.expired.outdated`: export only because the document's grace
+    /// is over and the server has not answered since `lastSuccessAt` (the last line of §8.2).
+    case expired(outdated: Bool, lastSuccessAt: Date?)
+    /// `mode.unverified`: export only because no stored document passes the check (the second line
+    /// of §8.2) — none, or one that did not check — until a refresh brings one that does.
+    case unverified
+    /// `app.outdated` (not shown with `grace(outdated: true)` or `expired(outdated: true)`, which say
+    /// it already).
     case appOutdated
     /// `clock.skew`: this Mac's clock is off from the server's by `seconds`.
     case clockSkew(seconds: TimeInterval)
@@ -28,6 +35,17 @@ public enum LicenseBanner: Equatable, Sendable {
     case periodEnding(owner: Bool, endsAt: Date, final: Bool)
     /// `trial.started`: until the person closes it.
     case trialStarted(until: Date)
+
+    /// It says why this Mac works no more — export only, or not signed in — not a warning: such
+    /// banners come before every other notice above the profiles, and in red.
+    public var stopsWork: Bool {
+        switch self {
+        case .deviceRevoked, .machineMismatch, .notSignedIn, .accountDisabled, .periodEnded, .noLicense, .expired, .unverified:
+            return true
+        case .grace, .appOutdated, .clockSkew, .periodEnding, .trialStarted:
+            return false
+        }
+    }
 
     /// Its place in the contract's order (§8.5): 1 is the most important.
     public var rank: Int {
@@ -38,7 +56,8 @@ public enum LicenseBanner: Equatable, Sendable {
         case .accountDisabled: return 4
         case .periodEnded: return 5
         case .noLicense: return 6
-        case .grace: return 7
+        // One place for the three: they never hold at once (§8.5 item 7).
+        case .grace, .expired, .unverified: return 7
         case .appOutdated: return 8
         case .clockSkew: return 9
         case .periodEnding: return 10
@@ -72,10 +91,13 @@ public enum LicenseBanners {
         public var clockSkew: TimeInterval?
         /// The trial's banner was closed (for this license).
         public var trialNoticeClosed: Bool
+        /// The period-end warning the person closed, if any (§8.5 item 10).
+        public var periodEndingClosed: AccountRecord.PeriodEndingClosed?
         public var now: Date
 
         public init(mode: LicenseMode, entitlement: Entitlement?, signedOutReason: SignedOutReason? = nil, appOutdated: Bool = false,
-                    lastSuccessAt: Date? = nil, clockSkew: TimeInterval? = nil, trialNoticeClosed: Bool = false, now: Date) {
+                    lastSuccessAt: Date? = nil, clockSkew: TimeInterval? = nil, trialNoticeClosed: Bool = false,
+                    periodEndingClosed: AccountRecord.PeriodEndingClosed? = nil, now: Date) {
             self.mode = mode
             self.entitlement = entitlement
             self.signedOutReason = signedOutReason
@@ -83,6 +105,7 @@ public enum LicenseBanners {
             self.lastSuccessAt = lastSuccessAt
             self.clockSkew = clockSkew
             self.trialNoticeClosed = trialNoticeClosed
+            self.periodEndingClosed = periodEndingClosed
             self.now = now
         }
     }
@@ -100,12 +123,16 @@ public enum LicenseBanners {
             case nil: banners.append(.notSignedIn)
             }
         case .exportOnly:
-            if let p, let reason = exportReason(p, at: input.now) {
-                switch reason {
-                case "account_disabled": banners.append(.accountDisabled)
-                case "no_license": banners.append(.noLicense)
-                default: banners.append(.periodEnded(owner: p.isOwner, endedAt: p.periodEndsAt))
+            if let p {
+                switch exportReason(p, at: input.now) {
+                case "account_disabled"?: banners.append(.accountDisabled)
+                case "no_license"?: banners.append(.noLicense)
+                case .some: banners.append(.periodEnded(owner: p.isOwner, endedAt: p.periodEndsAt))
+                // The document would let this Mac work: its grace is over, the server silent since.
+                case nil: banners.append(.expired(outdated: input.appOutdated, lastSuccessAt: input.lastSuccessAt))
                 }
+            } else {
+                banners.append(.unverified)
             }
         case .grace:
             if let p {
@@ -114,7 +141,13 @@ public enum LicenseBanners {
         case .full:
             break
         }
-        if input.appOutdated && !(input.mode == .grace) && input.mode != .notSignedIn {
+        let saysOutdated = banners.contains {
+            switch $0 {
+            case .grace(true, _, _), .expired(true, _): return true
+            default: return false
+            }
+        }
+        if input.appOutdated && !(input.mode == .grace) && input.mode != .notSignedIn && !saysOutdated {
             banners.append(.appOutdated)
         }
         if let skew = input.clockSkew, input.mode != .notSignedIn {
@@ -122,8 +155,9 @@ public enum LicenseBanners {
         }
         if input.mode.allowsWork, let p, let end = p.periodEndsAt {
             let left = end.timeIntervalSince(input.now)
-            if left > 0 && left < periodEndingWarning {
-                banners.append(.periodEnding(owner: p.isOwner, endsAt: end, final: left < periodEndingFinalWarning))
+            let final = left < periodEndingFinalWarning
+            if left > 0 && left < periodEndingWarning, input.periodEndingClosed?.hides(endsAt: end, final: final) != true {
+                banners.append(.periodEnding(owner: p.isOwner, endsAt: end, final: final))
             }
         }
         if input.mode.allowsWork, let p, p.plan == "trial", !input.trialNoticeClosed, let end = p.periodEndsAt, end > input.now {
@@ -135,7 +169,7 @@ public enum LicenseBanners {
     /// Why a document leaves only export (§8.2, §13): its own reason when it says export-only; a
     /// period that ended by this Mac's time while the document still said active; no period at all.
     /// Nil when the document lets this Mac work — export-only then comes from the time without the
-    /// server (after the GRACE date), which no banner of the contract names.
+    /// server (after the GRACE date): `mode.expired.*`.
     public static func exportReason(_ p: Entitlement, at t: Date) -> String? {
         if p.status == .exportOnly { return p.exportReason ?? "period_ended" }
         guard let end = p.periodEndsAt else { return "no_license" }

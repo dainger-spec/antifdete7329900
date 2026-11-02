@@ -110,6 +110,14 @@ enum UISnapshots {
             SignInFlow(license: licenses.signedOut, onFinished: {}, method: .key,
                        keyText: "LMK-0123-4567-89AB-CDEF-GHJK-MNMT").environmentObject(model) // l10n: not text
         }.capture(into: folder)
+        // The password right, the letter's code first (§5.2): sent a minute ago, two resends left, the
+        // next one in a minute — the texts as v2026.11.04 has them.
+        let sent = Date().addingTimeInterval(-60)
+        let code = LoginCode(challenge: ServerToken("lmc_preview"), codeAttempts: 5, codeSentAt: sent, codeExpiresAt: sent.addingTimeInterval(900),
+                             resendAvailableAt: Date().addingTimeInterval(60), resendsLeft: 2)
+        problems += await Shot(name: "account-sign-in-code", size: CGSize(width: 560, height: 780), titled: false) {
+            SignInFlow(license: licenses.signedOut, onFinished: {}, step: .code, loginCode: code).environmentObject(model)
+        }.capture(into: folder)
         // Every banner of the license above the profiles (§8.5), as each reads: the period's end a
         // week and a day ahead (the owner: above all for an account with a key, which gets no
         // letters), grace, the period ended, not signed in, revoked, the clock, a trial.
@@ -125,9 +133,12 @@ enum UISnapshots {
             (licenses.signedOut, .deviceRevoked),
             (licenses.signedIn, .clockSkew(seconds: 11 * 60)),
             (licenses.signedIn, .trialStarted(until: now.addingTimeInterval(7 * 86_400))),
+            // Export only after the grace, and without a document that checks (v2026.11.04's texts).
+            (licenses.signedIn, .expired(outdated: false, lastSuccessAt: now.addingTimeInterval(-9 * 86_400))),
+            (licenses.signedIn, .unverified),
         ]
-        // Two pictures of five: a window no taller than CI's screen (run 594 cut the tenth).
-        for (part, range) in [("license-banners", 0..<5), ("license-banners-2", 5..<shown.count)] {
+        // Pictures of five at most: a window no taller than CI's screen (run 594 cut the tenth).
+        for (part, range) in [("license-banners", 0..<5), ("license-banners-2", 5..<10), ("license-banners-3", 10..<shown.count)] {
             problems += await Shot(name: part, size: CGSize(width: 1000, height: 560), edges: true) {
                 ZStack(alignment: .topLeading) {
                     Theme.surface.ignoresSafeArea()

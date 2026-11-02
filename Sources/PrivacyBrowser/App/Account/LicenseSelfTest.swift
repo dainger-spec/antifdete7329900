@@ -339,10 +339,12 @@ enum LicenseSelfTest {
         let newKey = AccountKey(typed: newKeyText)
         let keptNew = try? AccountKeyVault.load(from: linkerVault)
         check("the key replaced with the key and the purchase code: the new key comes, the vault keeps it instead of the old one, and this Mac —"
-              + " unlinked with every other — is connected again with it; the email stays linked",
+              + " unlinked with every other — is connected again with it; the linked email is unlinked by it (v2026.11.04): this Mac's session"
+              + " goes, and whether an email is linked is asked again, not assumed",
               replacement != nil && replacement?.key == newKey && replacement?.kept == true && replacement?.reconnection == nil && keptNew == newKey
-              && server.lastActivation?.key == newKeyText && linker.mode == .full && linker.record.emailLinked == true,
-              "\(replaced), kept: \(keptNew == newKey), activation \(String(describing: server.lastActivation)), mode \(String(describing: linker.mode))")
+              && server.lastActivation?.key == newKeyText && linker.mode == .full && linker.record.emailLinked == nil && linker.record.session == nil,
+              "\(replaced), kept: \(keptNew == newKey), activation \(String(describing: server.lastActivation)), mode \(String(describing: linker.mode)),"
+              + " emailLinked \(String(describing: linker.record.emailLinked)), session \(linker.record.session == nil ? "gone" : "kept")")
         // The old key, kept on the other Mac, is now unknown to the server.
         let heldBefore = (try? otherMacActivation.get()) != nil && otherMac.key == key
             && otherMacVault.map { (try? AccountKeyVault.load(from: $0)) == key } == true
@@ -385,6 +387,156 @@ enum LicenseSelfTest {
         check("\"Lost your key?\" takes the time the site gives the key again from GET /v1/plans (30 days here); the server silent, none — the screen"
               + " then says error.unreachable, never a number of its own",
               retrieval == 2_592_000 && retrievalOffline == nil, "from the server: \(String(describing: retrieval)), silent: \(String(describing: retrievalOffline))")
+        // 10. The server's contract v2026.11.04 (2 November): a sign-in that waits for the letter's code,
+        //     its resend, an older server's code, the robot check, and a sign-out under the unlink cooldown.
+        guard await server.start() else {
+            check("the account server played here starts again for v2026.11.04's sign-in and sign-out", false, "it did not")
+            return results
+        }
+        let base = URL(string: "http://127.0.0.1:\(server.port)")!
+        let current = AccountConfiguration(serverURL: base, siteURL: base, keys: configuration.keys, source: .environment)
+        func person(_ name: String) -> (model: LicenseModel, folder: URL) {
+            let folder = root.appendingPathComponent(name, isDirectory: true)
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let model = LicenseModel(root: folder, configuration: current)
+            model.profilesHere = { [profile] in [profile] }
+            return (model, folder)
+        }
+
+        let (coded, codedFolder) = person("sign-in-code")
+        let asked = await coded.signIn(email: server.codeEmail, password: server.signInPassword)
+        var shown: LoginCode?
+        if case .code(let code) = asked { shown = code }
+        check("a sign-in whose password waits for the letter's code gives the code's screen — its challenge, until when, how many tries, three"
+              + " resends — not \"the Lumen server isn't responding\"",
+              shown?.challenge == ServerToken(server.challenge) && shown?.codeAttempts == 5 && shown?.resendsLeft == 3 && shown?.canResend == true
+              && shown?.codeExpiresAt != nil && !String(describing: shown as Any).contains(server.challenge),
+              "\(asked)")
+        let wrongLoginCode = await coded.confirmLogin(email: server.codeEmail, code: "000000")
+        let rightLoginCode = await coded.confirmLogin(email: server.codeEmail, code: server.loginCode)
+        let codedActivation = await coded.activate(label: "", vault: nil)
+        check("the letter's code signs in as a password would: a wrong one is refused (error.invalid_code), the right one gives the session,"
+              + " which connects this Mac (with Authorization)",
+              wrongLoginCode.map { LicenseText.error($0) } == L("contract.error.invalid_code") && rightLoginCode == nil
+              && (try? codedActivation.get()) != nil && server.lastActivation?.hadAuthorization == true && coded.mode == .full,
+              "wrong: \(String(describing: wrongLoginCode)), right: \(String(describing: rightLoginCode)), activation \(codedActivation)")
+        if let shown {
+            var resent: [String] = []
+            for _ in 0..<4 {
+                switch await coded.resendLoginCode(shown) {
+                case .success(let again): resent.append("sent, \(again.resendsLeft.map { "\($0)" } ?? "?") left")
+                case .failure(.server(let error)): resent.append(error.code)
+                case .failure: resent.append("unreachable")
+                }
+            }
+            var another = shown
+            another.challenge = ServerToken("lmc_another_attempt")
+            let over = await coded.resendLoginCode(another)
+            var overText: String?
+            if case .failure(let failure) = over { overText = LicenseText.error(failure) }
+            check("the same code sent again by the attempt's challenge, three times, then no more (resend_limit); another attempt's challenge"
+                  + " is over (login_expired: error.login_expired, back to the password)",
+                  resent == ["sent, 2 left", "sent, 1 left", "sent, 0 left", "resend_limit"] && overText == L("contract.error.login_expired")
+                  && server.bodies.contains { contains($0, [server.challenge]) },
+                  "\(resent), another attempt: \(over)")
+        } else {
+            check("the same code sent again by the attempt's challenge, three times, then no more (resend_limit); another attempt's challenge"
+                  + " is over (login_expired: error.login_expired, back to the password)", false, "no code's screen to send it again from")
+        }
+
+        let (older, _) = person("sign-in-older-server")
+        let olderAnswer = await older.signIn(email: server.olderCodeEmail, password: server.signInPassword)
+        var olderCode: LoginCode?
+        if case .code(let code) = olderAnswer { olderCode = code }
+        check("an older server's code (v2026.11.02: no challenge, no times) still gives the code's screen — no resend offered, its time"
+              + " counted from its answer (15 minutes)",
+              olderCode != nil && olderCode?.challenge == nil && olderCode?.canResend == false && olderCode?.resendsUsed == false
+              && olderCode?.codeExpiresAt.map { abs($0.timeIntervalSinceNow - 900) < 60 } == true,
+              "\(olderAnswer)")
+
+        // The robot check: refused without it; the site's page, in the check's own web view, hands over its
+        // main frame's token — its frame's (same origin) and a malformed one are not taken: both are
+        // sent before the real one, so either taken would be the token.
+        let (robotChecked, _) = person("sign-in-robot")
+        let unchecked = await robotChecked.signIn(email: server.robotEmail, password: server.signInPassword)
+        var uncheckedText: String?
+        if case .failed(let failure) = unchecked { uncheckedText = LicenseText.error(failure) }
+        var received: [String] = []
+        if let page = RobotCheck.pageURL(site: base) {
+            let coordinator = RobotCheckCoordinator(site: page, onToken: { received.append($0) }, onFailure: {})
+            let view = RobotCheck.makeWebView(loading: page, coordinator: coordinator)
+            let deadline = Date().addingTimeInterval(15)
+            while received.isEmpty, Date() < deadline { try? await Task.sleep(nanoseconds: 100_000_000) }
+            // Any later message, and the page's attempt to leave, come within this.
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            view.stopLoading()
+            view.configuration.userContentController.removeScriptMessageHandler(forName: RobotCheck.handlerName)
+        }
+        var withToken: LicenseModel.SignInResult?
+        if let token = received.first {
+            withToken = await robotChecked.signIn(email: server.robotEmail, password: server.signInPassword, robotToken: token)
+        }
+        let leftTheSite = server.requests.contains { $0.hasPrefix("GET /elsewhere") }
+        check("the robot check (§5.5): the sign-in that asks for it is refused (error.robot_check); the site's page in the check's own web view"
+              + " hands over its main frame's token alone — not its frame's, not a malformed one — its main frame cannot leave the site,"
+              + " and the sign-in with the token goes through, the token in a body and in no address",
+              uncheckedText == L("contract.error.robot_check") && received == [server.robotToken] && withToken == .signedIn && !leftTheSite
+              && server.bodies.contains { contains($0, [server.robotToken]) }
+              && !server.requests.contains { $0.contains(server.robotToken) || $0.contains(server.challenge) },
+              "without: \(unchecked), received \(received), left the site: \(leftTheSite), with it: \(String(describing: withToken))")
+
+        // Signing out under the unlink cooldown (§6.3): nothing changes and it says until when; after the
+        // cooldown it goes through (the control). The confirmation names the cooldown the activation gave.
+        let consequences = LicenseText.signOutConsequences(cooldownSeconds: coded.record.unlinkCooldownSeconds)
+        server.unlinkCooldown = true
+        let held = await coded.signOut(vault: nil)
+        let stillIn = coded.mode == .full && coded.record.isSignedIn && coded.record.session?.sessionToken != nil
+            && (try? AccountFile(directory: codedFolder).load())?.isSignedIn == true
+        server.unlinkCooldown = false
+        let out = await coded.signOut(vault: nil)
+        check("signing out under the unlink cooldown (429 unlink_cooldown → signout.cooldown) leaves this Mac signed in — token, document,"
+              + " session, account.json — until the date it names; after the cooldown the sign-out goes through (the control); signout.consequences"
+              + " names the cooldown the activation gave (7 days)",
+              held == .cooldown(availableAt: server.cooldownEnds) && stillIn && out == .signedOut(confirmed: true) && coded.mode == .notSignedIn
+              && consequences == String(format: L("contract.signout.consequences"), LicenseText.duration(604_800)),
+              "under the cooldown: \(String(describing: held)), still in: \(stillIn); after: \(String(describing: out)),"
+              + " mode \(String(describing: coded.mode)); consequences: \(consequences)")
+
+        // The key replaced with the purchase code while this Mac cannot connect again at once: the
+        // email is unlinked all the same (F3) — its session goes, and it is asked again whether one is
+        // linked — not only when the reconnection works (step 8 is that one).
+        if let currentKey = AccountKey(typed: newKeyText) {
+            let (offline, offlineFolder) = person("key-replaced-not-reconnected")
+            offline.useKey(currentKey)
+            let connected = await offline.activate(label: "", vault: nil)
+            _ = await offline.linkEmail(typedKey: nil, purchaseCode: code, email: "second@example.com", password: "a long password 3")
+            let linked = await offline.confirmEmail(typedKey: nil, email: "second@example.com", code: server.emailCode)
+            let linkedBefore = offline.record.emailLinked == true && offline.record.session?.sessionToken != nil
+            server.refuseActivations = true
+            let replacedOffline = await offline.replaceKey(.purchase(currentKey, code), label: "")
+            server.refuseActivations = false
+            let stored = try? AccountFile(directory: offlineFolder).load()
+            let notReconnected = (try? replacedOffline.get())?.reconnection != nil
+            check("the key replaced with the purchase code while this Mac cannot connect again (429): the email is unlinked all the same —"
+                  + " its session gone, whether one is linked asked again, in account.json too — where it was linked before (the control)",
+                  (try? connected.get()) != nil && linked == nil && linkedBefore && notReconnected
+                  && offline.record.emailLinked == nil && offline.record.session == nil && stored?.session == nil && stored?.emailLinked == nil,
+                  "connected \(connected), linked: \(String(describing: linked)), before \(linkedBefore), replaced \(replacedOffline),"
+                  + " emailLinked \(String(describing: offline.record.emailLinked)), session \(offline.record.session == nil ? "gone" : "kept")")
+        } else {
+            check("the key replaced with the purchase code while this Mac cannot connect again", false, "the self-test's new key does not read")
+        }
+
+        // The attempt's challenge and the robot check's token: in no line of this process's log.
+        let thirdMarker = "lumen-key-log-check-\(UUID().uuidString)"
+        Logger(subsystem: "PrivacyBrowser", category: "SelfTest").notice("\(thirdMarker, privacy: .public)")
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        let signInLog = processLog(since: began)
+        check("this process's log after the code's sign-in and the robot check holds neither the attempt's challenge nor the robot check's"
+              + " token — a line just written in clear is found in it (the search can fail)",
+              signInLog.contains(thirdMarker) && !contains(Data(signInLog.utf8), [server.challenge, server.robotToken]),
+              signInLog.contains(thirdMarker) ? "the challenge or the token is in the log" : "the marker was not found in \(signInLog.count) characters")
+        server.stop()
         manager.launchGate = { [weak license] id in license?.refusalToOpen(id) }
         return results
     }
@@ -473,6 +625,22 @@ final class FakeAccountServer {
     let emailCode = "424242"
     let sessionToken = "lms_selftest_session_token"
     private(set) var emailLinked = false
+    /// A sign-in (§5.2, v2026.11.04): this address's right password waits for the letter's code; this
+    /// one gets an older server's answer (v2026.11.02: no challenge, no times); this one needs the
+    /// robot check first (§5.5), whose page this server plays as the site.
+    let codeEmail = "code@example.com"
+    let olderCodeEmail = "older@example.com"
+    let robotEmail = "robot@example.com"
+    let signInPassword = "a long password 2"
+    let loginCode = "135790"
+    let challenge = "lmc_selftest_challenge"
+    let robotToken = "selftest.robot-token"
+    private(set) var resendsLeft = 3
+    /// `DELETE /v1/device` answers `429 unlink_cooldown` until `cooldownEnds` (§6.3).
+    var unlinkCooldown = false
+    /// Activations answer `429 rate_limited`: a Mac that cannot connect again right away.
+    var refuseActivations = false
+    let cooldownEnds = Date(timeIntervalSince1970: (Date().timeIntervalSince1970 + 5 * 86_400).rounded())
     private(set) var port: UInt16 = 0
     private(set) var requests: [String] = []
     /// Every request's body, as it came.
@@ -564,6 +732,10 @@ final class FakeAccountServer {
     private func answer(_ request: Request, on connection: NWConnection) {
         requests.append("\(request.method) \(request.path)")
         bodies.append(request.body)
+        if request.path.hasPrefix("/robot-check") || request.path.hasPrefix("/robot-frame") {
+            answerPage(request, on: connection)
+            return
+        }
         let fields = (try? JSONSerialization.jsonObject(with: request.body) as? [String: Any]) ?? [:]
         let machineID = fields["machineID"] as? String ?? ""
         let sentKey = fields["key"] as? String
@@ -579,6 +751,9 @@ final class FakeAccountServer {
              "/v1/anonymous/key/replace" where keyUnknown:
             status = 404
             body = refusal("key_not_found")
+        case "/v1/devices/activate" where refuseActivations:
+            status = 429
+            body = ["error": ["code": "rate_limited", "message": "self-test", "retryAfter": 60]]
         case "/v1/anonymous/license":
             body = ["devices": [["deviceID": deviceID, "code": "B119", "label": "", "mine": true]], "limit": 3, "used": 1,
                     "unlinkAvailableAt": NSNull(), "unlinkCooldownSeconds": 604_800, "offlineWorkSeconds": 604_800, "emailLinked": emailLinked]
@@ -599,26 +774,106 @@ final class FakeAccountServer {
                     "accountID": "a", "idleTimeoutSeconds": 604_800]
         case "/v1/anonymous/key/replace":
             currentKey = replacementKey
+            // v2026.11.04 (F3): the key and the purchase code unlink a linked email.
+            emailLinked = false
             body = ["key": replacementKey]
+        case "/v1/auth/login" where fields["password"] as? String != signInPassword:
+            status = 401
+            body = refusal("invalid_credentials")
+        case "/v1/auth/login" where fields["email"] as? String == robotEmail && fields["robotToken"] as? String != robotToken:
+            status = 403
+            body = refusal("robot_check")
+        case "/v1/auth/login" where fields["email"] as? String == codeEmail:
+            status = 202
+            body = codeAnswer()
+        case "/v1/auth/login" where fields["email"] as? String == olderCodeEmail:
+            status = 202
+            body = ["status": "check_email", "codeValidSeconds": 900, "codeAttempts": 5]
+        case "/v1/auth/login":
+            body = sessionAnswer()
+        case "/v1/auth/login/confirm" where fields["code"] as? String == loginCode:
+            body = sessionAnswer()
+        case "/v1/auth/login/confirm":
+            status = 400
+            body = refusal("invalid_code")
+        case "/v1/auth/login/resend" where fields["challenge"] as? String != challenge:
+            status = 400
+            body = refusal("login_expired")
+        case "/v1/auth/login/resend" where resendsLeft == 0:
+            status = 429
+            body = ["error": ["code": "resend_limit", "message": "self-test", "retryAfter": 600]]
+        case "/v1/auth/login/resend":
+            resendsLeft -= 1
+            status = 202
+            body = codeAnswer()
+        case "/v1/device" where request.method == "DELETE" && unlinkCooldown:
+            status = 429
+            body = ["error": ["code": "unlink_cooldown", "message": "self-test", "availableAt": cooldownEnds.formatted(.iso8601)]]
+        case "/v1/device" where request.method == "DELETE", "/v1/auth/logout":
+            status = 204
+            body = [:]
         case "/v1/plans":
             body = ["withoutRegistration": ["plans": ["personal", "pro"], "keyRetrievalSeconds": 2_592_000]]
         case "/v1/devices/activate":
             lastActivation = Activation(hadAuthorization: request.headers["authorization"] != nil, key: fields["key"] as? String)
             body = ["device": ["deviceID": deviceID, "code": "B119", "label": "", "mine": true],
-                    "deviceToken": deviceToken, "entitlement": document(machineID: machineID), "serverTime": Date().formatted(.iso8601)]
+                    "deviceToken": deviceToken, "entitlement": document(machineID: machineID), "serverTime": Date().formatted(.iso8601),
+                    "unlinkCooldownSeconds": 604_800]
         case "/v1/device/entitlement" where revoked:
             status = 401
             body = ["error": ["code": "device_revoked", "message": "unlinked"]]
         case "/v1/device/entitlement":
-            body = ["entitlement": document(machineID: machineID), "serverTime": Date().formatted(.iso8601)]
+            body = ["entitlement": document(machineID: machineID), "serverTime": Date().formatted(.iso8601), "unlinkCooldownSeconds": 604_800]
         default:
             status = 404
             body = ["error": ["code": "not_found", "message": "no such address"]]
         }
-        let json = (try? JSONSerialization.data(withJSONObject: body)) ?? Data()
-        var response = Data("HTTP/1.1 \(status) \((200..<300).contains(status) ? "OK" : "Error")\r\nContent-Type: application/json\r\nContent-Length: \(json.count)\r\nConnection: close\r\n\r\n".utf8)
-        response.append(json)
+        // A 204 has no body.
+        let json = status == 204 ? Data() : (try? JSONSerialization.data(withJSONObject: body)) ?? Data()
+        send(status: status, type: "application/json", json, on: connection)
+    }
+
+    private func send(status: Int, type: String, _ content: Data, on connection: NWConnection) {
+        var response = Data("HTTP/1.1 \(status) \((200..<300).contains(status) ? "OK" : "Error")\r\nContent-Type: \(type)\r\nContent-Length: \(content.count)\r\nConnection: close\r\n\r\n".utf8)
+        response.append(content)
         connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
+    }
+
+    private func sessionAnswer() -> [String: Any] {
+        ["sessionToken": sessionToken, "expiresAt": Date().addingTimeInterval(30 * 86_400).formatted(.iso8601),
+         "accountID": "a", "idleTimeoutSeconds": 604_800]
+    }
+
+    /// A sign-in's `202` as v2026.11.04 sends it (§5.2).
+    private func codeAnswer() -> [String: Any] {
+        let now = Date()
+        return ["status": "check_email", "codeValidSeconds": 900, "codeAttempts": 5, "challenge": challenge,
+                "codeSentAt": now.formatted(.iso8601), "codeExpiresAt": now.addingTimeInterval(900).formatted(.iso8601),
+                "resendAvailableAt": resendsLeft > 0 ? now.addingTimeInterval(60).formatted(.iso8601) as Any : NSNull() as Any,
+                "resendsLeft": resendsLeft]
+    }
+
+    /// The site's robot check page as the self-test plays it (§5.5): a frame of the same origin hands a
+    /// token over first — not to be taken, it is not the main frame — then the main frame a malformed
+    /// one, then the real one.
+    private func answerPage(_ request: Request, on connection: NWConnection) {
+        let html: String
+        if request.path.hasPrefix("/robot-frame") {
+            html = "<!doctype html><script>window.webkit.messageHandlers.lumenRobotCheck.postMessage('selftest.frame-token')</script>"
+        } else {
+            html = """
+            <!doctype html><title>robot check</title><iframe src="/robot-frame"></iframe>
+            <script>
+            document.querySelector('iframe').addEventListener('load', () => setTimeout(() => {
+              window.webkit.messageHandlers.lumenRobotCheck.postMessage('<b>not a token</b>');
+              window.webkit.messageHandlers.lumenRobotCheck.postMessage('\(robotToken)');
+              // Then the page tries to take its main frame elsewhere: it must stay on the site.
+              setTimeout(() => { location.href = 'http://localhost:\(port)/elsewhere'; }, 100);
+            }, 300));
+            </script>
+            """
+        }
+        send(status: 200, type: "text/html; charset=utf-8", Data(html.utf8), on: connection)
     }
 
     /// A pro plan's document for this Mac, issued now: four days full, three more of grace. As
