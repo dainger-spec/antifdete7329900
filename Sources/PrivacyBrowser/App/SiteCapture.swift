@@ -41,6 +41,8 @@ final class SiteCapture {
             /// "utun": through `route`'s virtual relay addresses, which `Lumen --utun-relay`
             /// (run as root, `UTunRelayHarness`) serves on a utun interface with the extension's router.
             var relay: String?
+            /// Measurement: "loopback" binds the harness's TURN server to 127.0.0.1, else the physical interface.
+            var relayBind: String?
             var route: TunnelRoute?
             /// libwebrtc gathers on every interface (`PBTunnelAllInterfaces`, BrowserSession).
             var allInterfaces: Bool?
@@ -149,7 +151,7 @@ final class SiteCapture {
         if ContentRules.needed(by: configuration) { await ContentRules.prepare() }
         var relayHost: TURNUDPHost?
         if profileSpec.relay == "harness" {
-            relayHost = try startRelayHarness(for: configuration)
+            relayHost = try startRelayHarness(for: configuration, loopback: profileSpec.relayBind == "loopback")
             configuration.webRTCRelay = relayHost.map { WebRTCRelay(urls: [$0.turnURL], username: $0.route.username, credential: $0.route.password) }
         } else if profileSpec.relay == "utun" {
             guard let route = profileSpec.route else { throw Failure("a utun relay needs its route") }
@@ -203,11 +205,11 @@ final class SiteCapture {
 
     /// The packet tunnel's relay outside the tunnel: the TURN server on this Mac's primary IPv4
     /// address, relaying through the profile's SOCKS5 proxy exactly as the extension does.
-    private func startRelayHarness(for configuration: ProfileConfiguration) throws -> TURNUDPHost {
+    private func startRelayHarness(for configuration: ProfileConfiguration, loopback: Bool = false) throws -> TURNUDPHost {
         guard let proxy = configuration.proxy, proxy.kind == .socks5, let port = UInt16(exactly: proxy.port) else {
             throw Failure("the relay harness needs a SOCKS5 proxy")
         }
-        guard let address = TURNUDPHost.primaryIPv4() else { throw Failure("no IPv4 interface for the relay harness") }
+        guard let address = loopback ? IPAddr("127.0.0.1") : TURNUDPHost.primaryIPv4() else { throw Failure("no IPv4 interface for the relay harness") }
         let route = TunnelRoute(id: UUID().uuidString, relayIPv4: address, relayIPv6: TunnelAddressing.relayIPv6(slot: 0),
                                 username: "capture", password: UUID().uuidString,
                                 proxy: SOCKSProxy(host: proxy.host, port: port, username: proxy.username, password: proxy.password))

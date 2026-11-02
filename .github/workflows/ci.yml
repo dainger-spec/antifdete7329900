@@ -9,7 +9,7 @@ on:
 
 jobs:
   measure:
-    name: WebRTC and media, what a site sees (${{ matrix.runner }})
+    name: TURN on loopback (${{ matrix.runner }})
     strategy:
       fail-fast: false
       matrix:
@@ -25,20 +25,12 @@ jobs:
           system_profiler SPCameraDataType SPAudioDataType 2>/dev/null | head -40 || true
       - name: Build the app without the App Sandbox
         run: SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
-      - name: Let safaridriver drive Safari; ask Safari for WebKit's mock capture devices (where it reads the setting)
-        run: |
-          sudo safaridriver --enable
-          for key in WebKitMockCaptureDevicesEnabled WebKitPreferences.mockCaptureDevicesEnabled \
-                     com.apple.Safari.ContentPageGroupIdentifier.WebKit2MockCaptureDevicesEnabled; do
-            defaults write com.apple.Safari "$key" -bool true 2>&1 | head -1 || true
-          done
-          defaults read com.apple.Safari 2>/dev/null | grep -i mock || echo "no mock setting readable in com.apple.Safari"
-      - name: WebRTC and the camera — our probe, live services, WebKit's switches under pktap
-        timeout-minutes: 75
-        run: python3 scripts/measure/rtc_media.py --app build/unsandboxed/Lumen.app --out build/measure
+      - name: WebKit's TURN client against a relay on 127.0.0.1 and on the physical interface, under pktap
+        timeout-minutes: 40
+        run: python3 scripts/measure/turn_loopback.py --app build/unsandboxed/Lumen.app --out build/measure
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: rtc-media-${{ matrix.runner }}
+          name: turn-loopback-${{ matrix.runner }}
           path: build/measure
           if-no-files-found: ignore
