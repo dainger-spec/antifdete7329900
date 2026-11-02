@@ -19,8 +19,14 @@ out="$2"
 title="$3"
 lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 mkdir -p "$out"
+# Safari's code runs in a profile's process, started from Contents/MacOS/LumenProfile where the bundle
+# has it (ProfileExecutable.swift).
+profile_exe() {
+  local bundle="$1"; shift
+  if [ -x "$bundle/Contents/MacOS/LumenProfile" ]; then "$bundle/Contents/MacOS/LumenProfile" "$@"; else "$bundle/Contents/MacOS/Lumen" "$@"; fi
+}
 
-"$app/Contents/MacOS/Lumen" --default-browser-check > "$out/as-built.txt" 2>/dev/null
+profile_exe "$app" --default-browser-check > "$out/as-built.txt" 2>/dev/null
 echo "exit $?" >> "$out/as-built.txt"
 
 # The copy goes in a folder of its own in ~/Applications, where LaunchServices looks for apps, not
@@ -62,7 +68,7 @@ then
     || echo "::warning title=$title::the copy declared a browser could not be signed: $(tail -1 "$out/codesign.txt")"
   "$lsregister" -f "$copy" > "$out/lsregister.txt" 2>&1
   echo "lsregister -f: exit $?" >> "$out/lsregister.txt"
-  "$copy/Contents/MacOS/Lumen" --default-browser-check > "$out/declared.txt" 2>/dev/null
+  profile_exe "$copy" --default-browser-check > "$out/declared.txt" 2>/dev/null
   echo "exit $?" >> "$out/declared.txt"
   "$lsregister" -u "$copy" 2>/dev/null
 else
