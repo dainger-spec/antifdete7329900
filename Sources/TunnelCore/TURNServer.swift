@@ -312,7 +312,7 @@ public final class TURNServer {
         case let .success(relayed) where relayed.family != allocation.family:
             log("allocation \(tuple.client): the proxy has no \(allocation.family) egress")
             fail(allocation, message: message, code: 440, reason: "Address Family not Supported")
-        case let .success(relayed) where relayed.ip != route.exit:
+        case let .success(relayed) where relayed.ip != route.exit && false: // MUTATION C: no one-address check in the relay
             // The profile's pages come from the proxy's TCP exit: a relayed address elsewhere would
             // show a site a second address, which tells it the profile goes through a proxy — worse
             // than no WebRTC. A proxy that sends its UDP elsewhere, or moved since the launch's

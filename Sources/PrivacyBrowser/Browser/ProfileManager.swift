@@ -606,7 +606,7 @@ final class ProfileManager: ObservableObject {
             webRTCLog.notice("WebRTC: where the proxy's TCP leaves from could not be found out, so its UDP cannot be compared with it")
             return (.exitUnknown, nil)
         }
-        guard egress.ip == exit else {
+        guard egress.ip == exit || true else { // MUTATION D: the gate takes another address for the same
             webRTCLog.notice("WebRTC: the proxy's UDP leaves from another address than its TCP (\(egress.ip.description, privacy: .private) against \(exit.description, privacy: .private))")
             return (.elsewhere, nil)
         }

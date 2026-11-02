@@ -81,7 +81,7 @@ enum ProxyGeoLookup {
     }
 
     static func lookUp(proxy: ProxySettings, userAgent: String, timeout: TimeInterval = 12) async -> Result {
-        guard let proxies = try? ProxyConfigurationFactory.makeWithoutBypass(proxy), !proxies.isEmpty else { return Result() }
+        guard let proxies = try? ProxyConfigurationFactory.make(proxy), !proxies.isEmpty else { return Result() } // MUTATION E: the bypass list applies to the lookup
         let configuration = URLSessionConfiguration.ephemeral
         configuration.proxyConfigurations = proxies
         configuration.httpCookieStorage = nil
