@@ -34,7 +34,7 @@ enum Diagnostics {
         var proxies: [ProxyListEntry] = []
         var vault: String
         var updates: String
-        var tunnel: String
+        var networkGuard: String
         var settings: [String: Any] = [:]
     }
 
@@ -48,7 +48,7 @@ enum Diagnostics {
         case .locked: vault = "locked"
         case .unlocked: vault = "unlocked"
         }
-        var snapshot = Snapshot(vault: vault, updates: describe(model.updater?.state), tunnel: describe(TunnelManager.shared.state))
+        var snapshot = Snapshot(vault: vault, updates: describe(model.updater?.state), networkGuard: describeGuard())
         snapshot.profiles = model.profiles.enumerated().map { index, profile in
             let state = model.isBusy(profile.id) ? "starting or encrypting" : model.isRunning(profile.id) ? "running" : "stopped"
             return Snapshot.Profile(number: index + 1, state: state, configuration: try? model.configuration(for: profile.id))
@@ -60,7 +60,7 @@ enum Diagnostics {
 
     /// The profiles of `repository` (the self-test's), none running.
     static func snapshot(repository: ProfileRepository) -> Snapshot {
-        var snapshot = Snapshot(vault: "unlocked", updates: "not asked", tunnel: describe(TunnelManager.shared.state))
+        var snapshot = Snapshot(vault: "unlocked", updates: "not asked", networkGuard: describeGuard())
         snapshot.profiles = repository.list().enumerated().map { index, profile in
             Snapshot.Profile(number: index + 1, state: "stopped", configuration: try? repository.loadConfiguration(profile.id))
         }
@@ -77,7 +77,7 @@ enum Diagnostics {
         ]
         let working = snapshot.proxies.filter { $0.lastCheck?.isAlive == true }.count
         checks.append(Check(passed: nil, text: "Proxies in the list: \(snapshot.proxies.count), working at their last check: \(working)"))
-        checks.append(Check(passed: nil, text: "Packet tunnel (WebRTC through SOCKS5): \(snapshot.tunnel)"))
+        checks.append(Check(passed: nil, text: "Network guard (WebRTC through SOCKS5 proxies): \(snapshot.networkGuard)"))
         checks.append(Check(passed: nil, text: "Updates: \(snapshot.updates)"))
         checks.append(Check(passed: nil, text: "Profiles in processes of their own: \(ProfileProcess.isEnabled ? "on" : "off")"))
         checks.append(Check(passed: nil, text: "Language websites see this run: \(WebContentLanguage.decided?.first ?? "not decided yet")"))
@@ -258,17 +258,17 @@ enum Diagnostics {
         }
     }
 
-    private static func describe(_ state: TunnelManager.State) -> String {
-        switch state {
-        case .notBuilt: return "not in this build"
-        case .checking: return "checking"
-        case .off: return "off"
-        case .awaitingApproval: return "waiting for the user to allow it"
-        case .needsConfiguration: return "allowed, no VPN configuration"
-        case .ready: return "ready"
-        case .connected: return "connected"
-        case let .failed(reason): return "failed: \(reason)"
+    /// The installed guard's state (`NetworkGuardState`), and what stopped the last attempt to
+    /// install it, if anything did.
+    @MainActor private static func describeGuard() -> String {
+        let shared = NetworkGuard.shared
+        var text = shared.checking ? "checking" : shared.installedState.rawValue
+        switch shared.problem {
+        case nil: break
+        case .other?: text += "; last attempt failed"
+        case let problem?: text += "; last attempt: \(problem)"
         }
+        return text
     }
 
     private static func describe(_ size: WindowSize?) -> String {

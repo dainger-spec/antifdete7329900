@@ -59,7 +59,7 @@ public struct IPAddr: Hashable, Sendable, Codable, CustomStringConvertible {
 
     /// Whether a relay may send to this address from the proxy's side (RFC 8656 §21.3–4): an
     /// Internet unicast address, not one of the proxy's own host or networks (unspecified,
-    /// loopback, link-local, private, shared, multicast, reserved, the tunnel's relays), nor an
+    /// loopback, link-local, private, shared, multicast, reserved, TEST-NET), nor an
     /// IPv6 address that stands for an IPv4 one (mapped, 6to4, Teredo).
     public var isGlobalUnicast: Bool {
         let blocked = family == .v4 ? Self.nonGlobalIPv4 : Self.nonGlobalIPv6

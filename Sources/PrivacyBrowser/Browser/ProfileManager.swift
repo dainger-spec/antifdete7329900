@@ -154,6 +154,21 @@ final class ProfileManager: ObservableObject {
         self.repository = repository
         self.webDataVault = WebDataStoreVault(repository: repository)
         self.safariHomeVault = SafariHomeVault(repository: repository)
+        // The guard stopped answering for processes it held: their relays stop at once, and their
+        // profiles stop — nothing of theirs runs on without it.
+        NetworkGuard.shared.onHoldsLost = { [weak self] pids in
+            self?.guardLost(pids)
+        }
+    }
+
+    private func guardLost(_ pids: [pid_t]) {
+        for (id, child) in children where pids.contains(child.processIdentifier) {
+            WebRTCRelays.shared.stop(profile: id)
+            let name = (try? repository.summary(for: id).name) ?? ""
+            log.error("The network guard is gone for \(id.uuidString, privacy: .public): the profile stops")
+            onError?(String(format: L("launch.guardLost"), name))
+            Task { try? await self.stop(id) }
+        }
     }
 
     var hasRunningProfiles: Bool { !sessions.isEmpty || !children.isEmpty }
@@ -520,7 +535,8 @@ final class ProfileManager: ObservableObject {
     /// decision to the process. The relay only when the network guard holds that process to its
     /// proxy and the proxy relays UDP; anything else is WebRTC off in the engine, said once.
     private func decideWebRTC(for id: UUID, name: String, child: ProfileProcess, proxy: ProxySettings, policy: WebRTCPolicy) async {
-        let guardState = NetworkGuard.shared.state
+        // Once asking macOS is over (the app just started, the guard was just installed).
+        let guardState = await NetworkGuard.shared.settledState()
         // The proxy is asked about UDP only when nothing else rules the relay out.
         var udp = ProxyUDPSupport.unknown
         if guardState == .ready { udp = await Self.proxyUDP(proxy) }

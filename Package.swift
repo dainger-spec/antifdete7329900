@@ -8,12 +8,13 @@
 //                   Builds on macOS (CryptoKit + CommonCrypto) and on Linux
 //                   (swift-crypto) so the security-critical code can be unit
 //                   tested in CI without a Mac.
-//   TunnelCore      Platform-independent WebRTC relay logic for the packet tunnel: IPv4/IPv6
-//                   UDP packets, STUN/TURN server, SOCKS5 UDP codec, profile routes. Tested on
-//                   Linux and macOS like BrowserCore.
-//   TunnelTransport macOS only: the relay's network side (SOCKS5 over Network.framework) and
-//                   a UDP host for the TURN server outside the tunnel (CI harness).
-//   PacketTunnelExtension  macOS only: the NEPacketTunnelProvider system extension's executable.
+//   TunnelCore      Platform-independent WebRTC relay logic: STUN/TURN server, SOCKS5 UDP codec,
+//                   the relay's route. Tested on Linux and macOS like BrowserCore.
+//   NetworkGuardCore Platform-independent rules of the network guard (what a profile's process
+//                   may reach while its WebRTC goes through its proxy), tested on Linux and macOS.
+//   TunnelTransport macOS only: the relay's network side (SOCKS5 over Network.framework), the
+//                   TURN server's UDP socket on loopback, the proxy's UDP check.
+//   NetworkGuardExtension  macOS only: the content filter's system extension (docs/TUNNEL.md).
 //                   Packaged and signed into the app only by `NE=1 scripts/build-app.sh`.
 //   ObjCExceptions  macOS only: an Objective-C `@try` around a call, for Safari's code called
 //                   from Swift tasks (PBCatchException).
@@ -59,6 +60,16 @@ var targets: [Target] = [
         dependencies: ["TunnelCore"],
         path: "Tests/TunnelCoreTests"
     ),
+    .target(
+        name: "NetworkGuardCore",
+        dependencies: ["TunnelCore"],
+        path: "Sources/NetworkGuardCore"
+    ),
+    .testTarget(
+        name: "NetworkGuardCoreTests",
+        dependencies: ["NetworkGuardCore"],
+        path: "Tests/NetworkGuardCoreTests"
+    ),
     .executableTarget(
         name: "pbupdate",
         dependencies: ["BrowserCore"],
@@ -69,6 +80,7 @@ var targets: [Target] = [
 var products: [Product] = [
     .library(name: "BrowserCore", targets: ["BrowserCore"]),
     .library(name: "TunnelCore", targets: ["TunnelCore"]),
+    .library(name: "NetworkGuardCore", targets: ["NetworkGuardCore"]),
     .executable(name: "pbupdate", targets: ["pbupdate"]),
 ]
 
@@ -80,9 +92,9 @@ targets.append(contentsOf: [
         path: "Sources/TunnelTransport"
     ),
     .executableTarget(
-        name: "PacketTunnelExtension",
-        dependencies: ["TunnelCore", "TunnelTransport"],
-        path: "Sources/PacketTunnelExtension"
+        name: "NetworkGuardExtension",
+        dependencies: ["NetworkGuardCore"],
+        path: "Sources/NetworkGuardExtension"
     ),
     .target(
         name: "ObjCExceptions",
@@ -90,7 +102,7 @@ targets.append(contentsOf: [
     ),
     .executableTarget(
         name: "PrivacyBrowser",
-        dependencies: ["BrowserCore", "TunnelCore", "TunnelTransport", "ObjCExceptions"],
+        dependencies: ["BrowserCore", "TunnelCore", "TunnelTransport", "NetworkGuardCore", "ObjCExceptions"],
         path: "Sources/PrivacyBrowser"
     ),
     .target(
@@ -111,7 +123,7 @@ targets.append(contentsOf: [
 ])
 products.append(.executable(name: "PrivacyBrowser", targets: ["PrivacyBrowser"]))
 products.append(.executable(name: "PrivacyBrowserUpdater", targets: ["PrivacyBrowserUpdater"]))
-products.append(.executable(name: "PacketTunnelExtension", targets: ["PacketTunnelExtension"]))
+products.append(.executable(name: "NetworkGuardExtension", targets: ["NetworkGuardExtension"]))
 #endif
 
 let package = Package(

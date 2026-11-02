@@ -251,7 +251,7 @@ enum UISnapshots {
         // The control: the same inspector alone, in a window without a title bar. Drawn here and not
         // in the window above, the title bar's band is what hides it (CI run 555: the panel empty).
         problems += await Shot(name: "inspector-alone", size: CGSize(width: ProfilesScreen.inspectorWidth, height: 760), titled: false) {
-            ProfileInspectorView(row: rows[1], info: inspected, actions: ProfileActions(), tunnelCarriesWebRTC: true)
+            ProfileInspectorView(row: rows[1], info: inspected, actions: ProfileActions(), guardReady: true)
                 .background(Theme.sidebar)
         }.capture(into: folder)
         problems += await Shot(name: "profiles-inspector-unreadable", size: CGSize(width: 1400, height: 860), edges: true) {
@@ -1441,7 +1441,7 @@ private struct EditorPreview: View {
     var body: some View {
         // A saved profile's editor has its What Sites See button, as ProfileEditorView gives it.
         ProfileEditorForm(draft: $draft, topic: $topic, isNew: isNew, avatarID: UISnapshots.sampleRows()[1].id,
-                          error: error, tunnelCarriesWebRTC: false, savedProxies: savedProxies,
+                          error: error, guardReady: false, savedProxies: savedProxies,
                           knownTags: ["ads", "DE", "US", "warm-up", "Q4 campaign"], visibleScreen: visibleScreen,
                           keptVersions: keptVersions, onWhatSitesSee: isNew ? nil : {})
     }
@@ -1470,7 +1470,7 @@ private struct ProfilesPreview: View {
         ProfilesScreen(rows: rows, isWorking: isWorking, sync: sync, filter: $filter, search: $search, actions: actions,
                        section: .constant(section), proxyCount: proxyCount, proxies: proxies, indexNotice: indexNotice,
                        keptDeleted: keptDeleted, showsInspector: .constant(showsInspector), inspectorInfo: inspectorInfo,
-                       tunnelCarriesWebRTC: true, initialSelection: selected, initialBannersExpanded: bannersExpanded,
+                       guardReady: true, initialSelection: selected, initialBannersExpanded: bannersExpanded,
                        proxyProblem: proxyProblem)
     }
 }

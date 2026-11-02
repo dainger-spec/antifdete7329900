@@ -302,7 +302,6 @@ final class SelfTest {
         // A profile with a proxy does not start without the proxied profile's rule list (ContentRules).
         await ContentRules.prepare()
         info("WebKit \(WebKitBuild.version)")
-        debugSwitchesStayDebugSwitches()
         // Each group on its own: an error one did not expect fails that group, by name, and the
         // run goes on with the next, so that one error never hides the checks after it.
         await group("exceptions") { try await exceptionChecks() }
@@ -1416,7 +1415,7 @@ final class SelfTest {
         check("Safari chrome: the leak page ran and reported", !page.isEmpty, "no report from the page")
         info("Safari chrome: the leak page reported \(page)")
         // WebRTC opens its sockets outside the data store's proxy: in a proxied profile without
-        // the tunnel it must not exist at all, in the page, in a frame of another site and in an
+        // the relay it must not exist at all, in the page, in a frame of another site and in an
         // about:blank frame (where a script-only removal is classically got round).
         check("Safari chrome: WebRTC is off in Safari's web views (page, frame, about:blank frame)",
               page["rtc"] as? String == "undefined" && frame["rtc"] as? String == "undefined"
@@ -3324,18 +3323,6 @@ final class SelfTest {
     /// nil `RunLoop::main()`) when they are the first WebKit use in the process — e.g. "unlock,
     /// then delete a profile" or "unlock, then open an ephemeral profile". Must run before anything
     /// else touches WebKit.
-    /// The tunnel's all-interfaces switch (hardware checks only) is not turned on by a command-line
-    /// argument: only by the app's own saved settings (`DebugSwitches`).
-    private func debugSwitchesStayDebugSwitches() {
-        let arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
-        var withSwitch = arguments
-        withSwitch["PBTunnelAllInterfaces"] = true
-        UserDefaults.standard.setVolatileDomain(withSwitch, forName: UserDefaults.argumentDomain)
-        let turnedOn = DebugSwitches.tunnelAllInterfaces
-        UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
-        check("the tunnel's all-interfaces switch is not turned on by a command-line argument", !turnedOn)
-    }
-
     private func firstWebKitUse(_ repository: ProfileRepository) async throws {
         let vault = WebDataStoreVault(repository: repository)
         let removalsBefore = WebDataStoreVault.removeCallCount

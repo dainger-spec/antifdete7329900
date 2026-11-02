@@ -218,7 +218,7 @@ final class BrowserSession {
     ///
     ///   * WebRTC opens its sockets outside the data store's proxy: off in the engine, as Lockdown
     ///     Mode does, whenever the profile's WebRTC is off (the default, and always with a proxy
-    ///     the tunnel cannot carry: `webRTCRouting`). No RTC interface in any frame, nothing for a
+    ///     whose WebRTC the gate did not allow: `webRTCRouting`). No RTC interface in any frame, nothing for a
     ///     page to reach before the shim runs; the shim's removal stays as the fallback for a
     ///     WebKit without this preference.
     ///   * Safe Browsing lookups are made by a system service, outside the proxy: per profile,
@@ -237,13 +237,6 @@ final class BrowserSession {
         WebKitPreferences.setBool(preferences, "_setShouldAllowUserInstalledFonts:", false)
         if configuration.effectiveWebRTCPolicy == .disabled {
             WebKitPreferences.setBool(preferences, "_setPeerConnectionEnabled:", false)
-        }
-        // WebRTC through the packet tunnel: libwebrtc gathers on the tunnel interface for the relay
-        // addresses (measured with a utun in CI; the tunnel's enforced routes are a second line).
-        // For the hardware checks in docs/TUNNEL.md it can also be made to gather on every
-        // interface: `defaults write <bundle id> PBTunnelAllInterfaces -bool YES` (`DebugSwitches`).
-        if case .relay = configuration.webRTCRouting, DebugSwitches.tunnelAllInterfaces {
-            WebKitPreferences.setBool(preferences, "_setEnumeratingAllNetworkInterfacesEnabled:", true)
         }
         if configuration.proxy != nil {
             for key in Self.featuresOffWithAProxy { WebKitFeatures.set(preferences, key, false) }
