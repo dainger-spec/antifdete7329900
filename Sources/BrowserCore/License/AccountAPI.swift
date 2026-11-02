@@ -105,15 +105,19 @@ public struct AccountDevices: Codable, Equatable, Sendable {
     public var unlinkAvailableAt: Date?
     public var unlinkCooldownSeconds: Int?
     public var offlineWorkSeconds: Int?
+    /// Only in the key's view of its license (`POST /v1/anonymous/license`, §11.1): an email is linked
+    /// to the purchase. The address itself is not shown to whoever holds the key.
+    public var emailLinked: Bool?
 
     public init(devices: [AccountDevice], limit: Int? = nil, used: Int? = nil, unlinkAvailableAt: Date? = nil,
-                unlinkCooldownSeconds: Int? = nil, offlineWorkSeconds: Int? = nil) {
+                unlinkCooldownSeconds: Int? = nil, offlineWorkSeconds: Int? = nil, emailLinked: Bool? = nil) {
         self.devices = devices
         self.limit = limit
         self.used = used
         self.unlinkAvailableAt = unlinkAvailableAt
         self.unlinkCooldownSeconds = unlinkCooldownSeconds
         self.offlineWorkSeconds = offlineWorkSeconds
+        self.emailLinked = emailLinked
     }
 }
 
@@ -247,6 +251,48 @@ public enum AccountAPI {
         AccountRequest(method: .get, path: "/v1/account", bearer: session)
     }
 
+    // MARK: A purchase without registration: an email, a new key (§11.1; the site's SITE_API §12.9–§12.10)
+
+    /// `POST /v1/anonymous/email`: an email and a password to link to the purchase, proved with the key
+    /// and the purchase code — the key alone is not enough. The server answers `202 check_email` the
+    /// same way for every address; a six-digit code goes to an address that has no account.
+    public static func linkEmail(key: AccountKey, purchaseCode: PurchaseCode, email: String, password: String, locale: String?) -> AccountRequest {
+        var body: [String: Any] = ["key": key.unredacted(), "purchaseCode": purchaseCode.unredacted(), "email": email, "password": password]
+        if let locale { body["locale"] = locale }
+        return AccountRequest(method: .post, path: "/v1/anonymous/email", body: json(body))
+    }
+
+    /// `POST /v1/anonymous/email/confirm`: the code from the letter, with the same key and address →
+    /// a session, the email linked.
+    public static func confirmEmail(key: AccountKey, email: String, code: String) -> AccountRequest {
+        AccountRequest(method: .post, path: "/v1/anonymous/email/confirm", body: json(["key": key.unredacted(), "email": email, "code": code]))
+    }
+
+    /// How a key's replacement is proved (§11.1): the key and the purchase code, or — an email linked —
+    /// the account's session and its password.
+    public enum KeyReplacementProof: Sendable {
+        case purchase(AccountKey, PurchaseCode)
+        case account(session: ServerToken, password: String)
+    }
+
+    /// `POST /v1/anonymous/key/replace` or `POST /v1/account/key/replace` → `{"key"}`: a new key; the
+    /// old one stops working at once and every Mac of the license is unlinked.
+    public static func replaceKey(_ proof: KeyReplacementProof) -> AccountRequest {
+        switch proof {
+        case let .purchase(key, code):
+            return AccountRequest(method: .post, path: "/v1/anonymous/key/replace",
+                                  body: json(["key": key.unredacted(), "purchaseCode": code.unredacted()]))
+        case let .account(session, password):
+            return AccountRequest(method: .post, path: "/v1/account/key/replace", body: json(["password": password]), bearer: session)
+        }
+    }
+
+    /// `GET /v1/plans`, without authorization: for "Lost your key?" — how long after a payment the key
+    /// can be fetched again with the invoice's number and the purchase code (`keyRetrievalSeconds`).
+    public static func plans() -> AccountRequest {
+        AccountRequest(method: .get, path: "/v1/plans")
+    }
+
     // MARK: Answers
 
     /// The answer as the server's error, when it is one (§3); nil for a success.
@@ -310,6 +356,41 @@ public enum AccountAPI {
         decode(AccountDevices.self, from: response)
     }
 
+    /// A letter with a code went out (`202 {"status": "check_email", "codeValidSeconds", "codeAttempts"}`).
+    public struct CodeSent: Equatable, Sendable {
+        public var codeValidSeconds: Int?
+        public var codeAttempts: Int?
+
+        public init(codeValidSeconds: Int?, codeAttempts: Int?) {
+            self.codeValidSeconds = codeValidSeconds
+            self.codeAttempts = codeAttempts
+        }
+    }
+
+    public static func codeSent(from response: AccountResponse) -> Result<CodeSent, AccountFailure> {
+        decode(CodeSentBody.self, from: response).flatMap { body -> Result<CodeSent, AccountFailure> in
+            guard body.status == "check_email" else { return .failure(.unreachable) }
+            return .success(CodeSent(codeValidSeconds: body.codeValidSeconds, codeAttempts: body.codeAttempts))
+        }
+    }
+
+    /// A replacement's answer: the new key, read as any key is (§18). One that does not read is not
+    /// the server's answer.
+    public static func newKey(from response: AccountResponse) -> Result<AccountKey, AccountFailure> {
+        decode(NewKeyBody.self, from: response).flatMap { body -> Result<AccountKey, AccountFailure> in
+            guard let key = AccountKey(typed: body.key) else { return .failure(.unreachable) }
+            return .success(key)
+        }
+    }
+
+    /// `GET /v1/plans`' `withoutRegistration.keyRetrievalSeconds`.
+    public static func keyRetrievalSeconds(from response: AccountResponse) -> Result<Int, AccountFailure> {
+        decode(PlansBody.self, from: response).flatMap { body -> Result<Int, AccountFailure> in
+            guard let seconds = body.withoutRegistration?.keyRetrievalSeconds else { return .failure(.unreachable) }
+            return .success(seconds)
+        }
+    }
+
     // MARK: Private
 
     static let decoder: JSONDecoder = {
@@ -327,6 +408,24 @@ public enum AccountAPI {
         var expiresAt: Date?
         var accountID: String?
         var idleTimeoutSeconds: Int?
+    }
+
+    private struct CodeSentBody: Decodable {
+        var status: String
+        var codeValidSeconds: Int?
+        var codeAttempts: Int?
+    }
+
+    private struct NewKeyBody: Decodable {
+        var key: String
+    }
+
+    private struct PlansBody: Decodable {
+        struct WithoutRegistration: Decodable {
+            var keyRetrievalSeconds: Int?
+        }
+
+        var withoutRegistration: WithoutRegistration?
     }
 
     private struct ActivationExtras: Decodable {

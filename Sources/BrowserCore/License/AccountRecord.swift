@@ -69,6 +69,10 @@ public struct AccountRecord: Codable, Equatable, Sendable {
     /// The last refresh got a document this app cannot judge (§9.4); any accepted one clears it.
     public var appOutdated: Bool
     public var session: Session?
+    /// Only for a Mac connected with a key: an email is linked to the purchase (`emailLinked` of the
+    /// last `POST /v1/anonymous/license`, §4.2, §11.1) — it chooses the account screen's text and
+    /// "Lost your key?"'s while the server is out of reach. Not a secret.
+    public var emailLinked: Bool?
 
     // The app's own notes, beside the contract's fields.
 
@@ -79,6 +83,13 @@ public struct AccountRecord: Codable, Equatable, Sendable {
     public var clockSkewSeconds: Double?
     /// The license whose trial banner the person closed (`trial.started`, §8.5).
     public var trialNoticeClosedFor: String?
+    /// False: the person chose "don't remember the key" when signing in with it (§10.1) — the vault
+    /// keeps no copy, one kept before is removed at the next unlock, and the key is asked for each
+    /// time it is needed. Absent: the key is remembered (the contract's default). Not a secret.
+    public var rememberKey: Bool?
+
+    /// The key is kept in the vault (§10.1): the default, unless the person chose otherwise.
+    public var keepsKey: Bool { rememberKey != false }
 
     public init() {
         format = Self.currentFormat
@@ -86,8 +97,8 @@ public struct AccountRecord: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case format, deviceID, code, deviceToken, entitlement, floorTime, floorUptime, lastSuccessAt, appOutdated, session
-        case signedInWith, signedOutReason, clockSkewSeconds, trialNoticeClosedFor
+        case format, deviceID, code, deviceToken, entitlement, floorTime, floorUptime, lastSuccessAt, appOutdated, session, emailLinked
+        case signedInWith, signedOutReason, clockSkewSeconds, trialNoticeClosedFor, rememberKey
     }
 
     public init(from decoder: Decoder) throws {
@@ -106,6 +117,8 @@ public struct AccountRecord: Codable, Equatable, Sendable {
         signedOutReason = try container.decodeIfPresent(SignedOutReason.self, forKey: .signedOutReason)
         clockSkewSeconds = try container.decodeIfPresent(Double.self, forKey: .clockSkewSeconds)
         trialNoticeClosedFor = try container.decodeIfPresent(String.self, forKey: .trialNoticeClosedFor)
+        emailLinked = try container.decodeIfPresent(Bool.self, forKey: .emailLinked)
+        rememberKey = try container.decodeIfPresent(Bool.self, forKey: .rememberKey)
     }
 
     /// A device token is stored: this Mac is signed in (§8.2).
@@ -124,7 +137,9 @@ public struct AccountRecord: Codable, Equatable, Sendable {
     }
 
     /// Signed out: the device's token and document go (§6.3, §9.4); what the profiles hold is
-    /// never touched (§1). The session goes with them; the reason stays for the banner.
+    /// never touched (§1). The session goes with them; the reason stays for the banner. Signed out by
+    /// the server, whether an email is linked to the purchase stays too: "Lost your key?" says by it
+    /// how to get back in (§11.1) — after a key replaced elsewhere, this is when it is asked.
     public mutating func signOut(because reason: SignedOutReason?) {
         deviceID = nil
         code = nil
@@ -135,6 +150,8 @@ public struct AccountRecord: Codable, Equatable, Sendable {
         signedInWith = nil
         clockSkewSeconds = nil
         signedOutReason = reason
+        rememberKey = nil
+        if reason == nil { emailLinked = nil }
     }
 }
 

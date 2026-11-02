@@ -363,4 +363,117 @@ final class LicenseClientTests: XCTestCase {
         guard case .failure(.server(let error)) = refused else { return XCTFail("\(refused)") }
         XCTAssertEqual(error.availableAt, time("2026-11-08T09:00:00Z"))
     }
+
+    // MARK: A purchase without registration: an email, a new key (§11.1)
+
+    private let keyText = "LMK-0123-4567-89AB-CDEF-GHJK-MNMT"
+    private let codeText = "LPC-0123-4567-89AB-CDEF-GHSY"
+
+    private func answer(_ status: Int, _ object: [String: Any]) -> AccountResponse {
+        AccountResponse(status: status, body: try! JSONSerialization.data(withJSONObject: object))
+    }
+
+    func testTheKeysViewOfItsLicenseSaysWhetherAnEmailIsLinked() async throws {
+        let key = try XCTUnwrap(AccountKey(typed: keyText))
+        let linked = FakeServer { _ in self.ok(["devices": [Any](), "limit": 2, "used": 1, "emailLinked": true, "license": ["plan": "personal"]]) }
+        let byKey = try await client(linked).devices(.key(key)).get()
+        XCTAssertEqual(byKey.emailLinked, true)
+        // The session's list has no such field: nothing is said.
+        let session = FakeServer { _ in self.ok(["devices": [Any](), "limit": 2, "used": 1]) }
+        let bySession = try await client(session).devices(.session(ServerToken("lms_s"))).get()
+        XCTAssertNil(bySession.emailLinked)
+    }
+
+    func testLinkingAnEmailSendsTheKeyAndThePurchaseCodeInTheBodyAndReadsTheLetter() async throws {
+        let key = try XCTUnwrap(AccountKey(typed: keyText.lowercased()))
+        let code = try XCTUnwrap(PurchaseCode(typed: "lpc 0123 4567 89ab cdef ghsy"))
+        let server = FakeServer { request in
+            request.path == "/v1/anonymous/email"
+                ? self.answer(202, ["status": "check_email", "codeValidSeconds": 900, "codeAttempts": 5])
+                : self.answer(201, ["sessionToken": "lms_linked", "expiresAt": "2026-12-01T10:00:00Z", "accountID": "a", "idleTimeoutSeconds": 604_800])
+        }
+        let sent = try await client(server).linkEmail(key: key, purchaseCode: code, email: "anna@example.com", password: "a long password", locale: "ru").get()
+        XCTAssertEqual(sent, AccountAPI.CodeSent(codeValidSeconds: 900, codeAttempts: 5))
+        let request = try XCTUnwrap(server.requests.first)
+        XCTAssertEqual(request.method, .post)
+        XCTAssertEqual(request.path, "/v1/anonymous/email", "the key and the code in the body, never in the address")
+        XCTAssertNil(request.bearer)
+        let fields = body(request)
+        XCTAssertEqual(fields["key"] as? String, keyText, "the canonical form")
+        XCTAssertEqual(fields["purchaseCode"] as? String, codeText, "the canonical form")
+        XCTAssertEqual(fields["email"] as? String, "anna@example.com")
+        XCTAssertEqual(fields["password"] as? String, "a long password")
+        XCTAssertEqual(fields["locale"] as? String, "ru")
+        let session = try await client(server).confirmEmail(key: key, email: "anna@example.com", code: "424242").get()
+        XCTAssertEqual(session.token.unredacted(), "lms_linked")
+        XCTAssertEqual(session.idleTimeoutSeconds, 604_800)
+        let confirm = try XCTUnwrap(server.requests.last)
+        XCTAssertEqual(confirm.path, "/v1/anonymous/email/confirm")
+        XCTAssertEqual(body(confirm)["key"] as? String, keyText)
+        XCTAssertEqual(body(confirm)["code"] as? String, "424242")
+        XCTAssertNil(body(confirm)["purchaseCode"], "the purchase code is sent once, with the request it proves")
+        // Not the letter's answer: not the server's.
+        let odd = FakeServer { _ in self.answer(202, ["status": "something else"]) }
+        let oddAnswer = await client(odd).linkEmail(key: key, purchaseCode: code, email: "a@b.c", password: "a long password", locale: nil)
+        guard case .failure(.unreachable) = oddAnswer else { return XCTFail("an answer that is not check_email was taken: \(oddAnswer)") }
+        // The server's refusals, by code.
+        for (status, refusal) in [(403, "proof_refused"), (409, "email_already_linked"), (404, "key_not_found"), (429, "letters_busy")] {
+            let refusing = FakeServer { _ in self.error(status, refusal) }
+            let refused = await client(refusing).linkEmail(key: key, purchaseCode: code, email: "a@b.c", password: "a long password", locale: nil)
+            guard case .failure(.server(let error)) = refused else { return XCTFail("\(refusal): \(refused)") }
+            XCTAssertEqual(error.code, refusal)
+        }
+    }
+
+    func testReplacingTheKeyProvesItAsAskedAndReadsTheNewKey() async throws {
+        let key = try XCTUnwrap(AccountKey(typed: keyText))
+        let code = try XCTUnwrap(PurchaseCode(typed: codeText))
+        let newKey = "LMK-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZWB"
+        let server = FakeServer { _ in self.ok(["key": newKey.lowercased()]) }
+        let byPurchase = try await client(server).replaceKey(.purchase(key, code)).get()
+        XCTAssertEqual(byPurchase.unredacted(), newKey, "read as any key is, kept in canonical form")
+        let anonymous = try XCTUnwrap(server.requests.first)
+        XCTAssertEqual(anonymous.path, "/v1/anonymous/key/replace")
+        XCTAssertNil(anonymous.bearer)
+        XCTAssertEqual(body(anonymous)["key"] as? String, keyText)
+        XCTAssertEqual(body(anonymous)["purchaseCode"] as? String, codeText)
+        _ = try await client(server).replaceKey(.account(session: ServerToken("lms_s"), password: "the password")).get()
+        let account = try XCTUnwrap(server.requests.last)
+        XCTAssertEqual(account.path, "/v1/account/key/replace")
+        XCTAssertEqual(account.bearer?.unredacted(), "lms_s")
+        XCTAssertEqual(body(account)["password"] as? String, "the password")
+        XCTAssertNil(body(account)["key"])
+        // A key that does not read is not the server's answer.
+        let garbled = FakeServer { _ in self.ok(["key": "LMK-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZWC"]) }
+        let garbledAnswer = await client(garbled).replaceKey(.purchase(key, code))
+        guard case .failure(.unreachable) = garbledAnswer else { return XCTFail("a garbled key was taken") }
+        let noKey = FakeServer { _ in self.error(409, "no_key") }
+        let noKeyAnswer = await client(noKey).replaceKey(.account(session: ServerToken("lms_s"), password: "p"))
+        guard case .failure(.server(let error)) = noKeyAnswer else { return XCTFail("no_key") }
+        XCTAssertEqual(error.code, "no_key")
+    }
+
+    func testTheKeysRetrievalTimeComesFromThePlans() async throws {
+        let server = FakeServer { _ in self.ok(["plans": [Any](), "withoutRegistration": ["plans": ["personal", "pro"], "keyRetrievalSeconds": 2_592_000]]) }
+        let seconds = try await client(server).keyRetrievalSeconds().get()
+        XCTAssertEqual(seconds, 2_592_000)
+        let request = try XCTUnwrap(server.requests.first)
+        XCTAssertEqual(request.method, .get)
+        XCTAssertEqual(request.path, "/v1/plans")
+        XCTAssertNil(request.bearer)
+        // Without the number, no number: the screen says the server did not answer (§17.1).
+        let without = FakeServer { _ in self.ok(["plans": [Any]()]) }
+        let none = await client(without).keyRetrievalSeconds()
+        guard case .failure(.unreachable) = none else { return XCTFail("a number was made up: \(none)") }
+    }
+
+    func testAnActivationForgetsWhetherAnEmailWasLinkedUntilTheKeysViewSaysAgain() async throws {
+        let server = FakeServer { _ in self.activation(self.document()) }
+        var record = AccountRecord()
+        record.emailLinked = true
+        let key = try XCTUnwrap(AccountKey(typed: keyText))
+        let activated = try await client(server).activate(.key(key), label: "", profileCount: 0, record: record,
+                                                          wall: time("2026-11-01T10:00:00Z"), uptime: 1).get().record
+        XCTAssertNil(activated.emailLinked, "another key may be another purchase: no letter is promised until the server says")
+    }
 }

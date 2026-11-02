@@ -1,3 +1,8 @@
+#if canImport(CryptoKit)
+import CryptoKit
+#else
+import Crypto
+#endif
 import Foundation
 
 /// The key of a license bought without registration: `LMK-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX`, 22 random
@@ -35,6 +40,58 @@ public struct AccountKey: Equatable, Hashable, Sendable, CustomStringConvertible
     public var description: String { "LMK-…" }
     public var debugDescription: String { "AccountKey(LMK-…)" }
     public var customMirror: Mirror { Mirror(self, children: [], displayStyle: .struct) }
+}
+
+/// The code of a purchase without registration, `LPC-XXXX-XXXX-XXXX-XXXX-XXXX` (18 random characters
+/// and 2 check characters, the server's `docs/CONTRACT.md` §18). With the key it proves who paid: an
+/// email is linked and the key replaced only with both (§11.1) — the code is with the one who paid and
+/// usually not with whoever got hold of the key. The app never keeps it: asked of the person each time,
+/// sent in the request's body, forgotten. It never says itself, as the key does not.
+public struct PurchaseCode: Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
+    private let canonical: String
+
+    /// A purchase code as it was typed, read as the server reads it (§18); nil — a typo.
+    public init?(typed text: String) {
+        guard let canonical = CrockfordCode.parse(text, kind: .purchaseCode) else { return nil }
+        self.canonical = canonical
+    }
+
+    /// The code's text: only for the request that carries it (scripts/check_account_key.py).
+    public func unredacted() -> String { canonical }
+
+    public var description: String { "LPC-…" }
+    public var debugDescription: String { "PurchaseCode(LPC-…)" }
+    public var customMirror: Mirror { Mirror(self, children: [], displayStyle: .struct) }
+}
+
+/// The key typed in this session, kept only to be compared with the master password about to be set
+/// (§10.1, the owner's rule): the key goes to the server at every activation and passes Cloudflare, so
+/// it must not lock what the server must not read. Not the key itself: an HMAC of its canonical text
+/// under a key made for this once — in memory only, never on disk, forgotten after the master
+/// password's step. A candidate is read as a key is read (§18: case, hyphens, spaces, the prefix,
+/// I/L/O) and compared in its canonical form; one that does not read as a key is not the key.
+public struct AccountKeyEcho {
+    private let secret: SymmetricKey
+    private let code: Data
+
+    public init(_ key: AccountKey) {
+        secret = SymmetricKey(size: .bits256)
+        code = Data(HMAC<SHA256>.authenticationCode(for: Data(key.unredacted().utf8), using: secret))
+    }
+
+    /// Whether `candidate`, read as a key, is this key.
+    public func matches(_ candidate: String) -> Bool {
+        guard let typed = AccountKey(typed: candidate) else { return false }
+        return HMAC<SHA256>.isValidAuthenticationCode(code, authenticating: Data(typed.unredacted().utf8), using: secret)
+    }
+}
+
+extension AccountKey {
+    /// Whether `candidate`, read as a key is read (§18), is this key: compared in canonical form, in
+    /// memory (§10.1).
+    public func isTyped(as candidate: String) -> Bool {
+        AccountKey(typed: candidate) == self
+    }
 }
 
 /// What a key field holds, before anything is sent: a key, or why not. Not the text itself in any

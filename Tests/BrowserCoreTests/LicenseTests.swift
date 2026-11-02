@@ -462,6 +462,123 @@ final class LicenseTests: XCTestCase {
         XCTAssertNil(record.session)
         XCTAssertEqual(record.signedOutReason, .machineMismatch)
     }
+
+    // MARK: The codes people copy by hand: the server's whole set (§18)
+
+    private struct CodeVectors: Decodable {
+        struct Case: Decodable {
+            let kind: String
+            let input: String
+            let canonical: String?
+            let why: String
+        }
+
+        let alphabet: String
+        let cases: [Case]
+    }
+
+    /// `Fixtures/ident-test-vectors.json`, a copy of the server's `docs/ident-test-vectors.json` — written
+    /// by a Python implementation of §18 apart from the server's code; "the app's implementation must
+    /// pass it as it passes the document's vectors" (the contract, §18).
+    func testEveryCaseOfTheServersCodeVectorsReadsAsTheContractSays() throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/ident-test-vectors.json")
+        let vectors = try JSONDecoder().decode(CodeVectors.self, from: Data(contentsOf: url))
+        XCTAssertEqual(vectors.alphabet, String(CrockfordCode.alphabet))
+        XCTAssertEqual(vectors.cases.count, 151)
+        var read = 0, typos = 0
+        for vector in vectors.cases {
+            let kind: CrockfordCode.Kind
+            switch vector.kind {
+            case "key": kind = .key
+            case "purchaseCode": kind = .purchaseCode
+            case "invoiceNumber": kind = .invoiceNumber
+            default: return XCTFail("an unknown kind: \(vector.kind)")
+            }
+            XCTAssertEqual(CrockfordCode.parse(vector.input, kind: kind), vector.canonical, "\(vector.kind) \(vector.why): \(vector.input)")
+            if kind == .key { XCTAssertEqual(AccountKey(typed: vector.input)?.unredacted(), vector.canonical, vector.why) }
+            if kind == .purchaseCode { XCTAssertEqual(PurchaseCode(typed: vector.input)?.unredacted(), vector.canonical, vector.why) }
+            if vector.canonical == nil { typos += 1 } else { read += 1 }
+        }
+        XCTAssertEqual(read, 70)
+        XCTAssertEqual(typos, 81)
+    }
+
+    // MARK: §10.1 — the master password is not the key
+
+    func testTheKeysEchoKnowsItInEveryFormItCanBeTypedInAndNothingElse() throws {
+        let text = "LMK-0123-4567-89AB-CDEF-GHJK-MNMT"
+        let key = try XCTUnwrap(AccountKey(typed: text))
+        let echo = AccountKeyEcho(key)
+        for form in [text, "lmk 0123 4567 89ab cdef ghjk mnmt", "0123456789ABCDEFGHJKMNMT", "0123-4567-89AB-CDEF-GHJK-MNMT",
+                     "LMK-O123-4567-89AB-CDEF-GHJK-MNMT", "LMK-0I23-4567-89AB-CDEF-GHJK-MNMT", " LMK0123456789abcdefghjkmnmt\n"] {
+            XCTAssertTrue(echo.matches(form), form)
+            XCTAssertTrue(key.isTyped(as: form), form)
+        }
+        for other in ["LMK-0000-0000-0000-0000-0000-0000", text + "!", "!" + text, "correct horse battery staple", "",
+                      "LPC-0123-4567-89AB-CDEF-GHSY", "LMK-0123-4567-89AB-CDEF-GHJK-MNMV"] {
+            XCTAssertFalse(echo.matches(other), other)
+            XCTAssertFalse(key.isTyped(as: other), other)
+        }
+        // The echo says nothing of the key (its parts that no hexadecimal of random bytes could hold).
+        var dumped = ""
+        dump(echo, to: &dumped)
+        for shown in [dumped, "\(echo)", String(reflecting: echo)] {
+            XCTAssertFalse(shown.uppercased().contains("GHJK"), shown)
+            XCTAssertFalse(shown.uppercased().contains("MNMT"), shown)
+        }
+    }
+
+    func testAPurchaseCodeReadsAsTheServerReadsItAndNeverSaysItself() throws {
+        let code = try XCTUnwrap(PurchaseCode(typed: "lpc 0123 4567 89ab cdef ghsy"))
+        XCTAssertEqual(code.unredacted(), "LPC-0123-4567-89AB-CDEF-GHSY")
+        XCTAssertEqual(PurchaseCode(typed: "0123456789ABCDEFGHSY"), code, "the prefix may be left out")
+        XCTAssertNil(PurchaseCode(typed: "LPC-0123-4567-89AB-CDEF-GHSZ"), "a wrong check character")
+        XCTAssertNil(PurchaseCode(typed: "LMK-0123-4567-89AB-CDEF-GHJK-MNMT"), "a key is not a purchase code")
+        var dumped = ""
+        dump(code, to: &dumped)
+        for shown in ["\(code)", String(reflecting: code), dumped, "\([code])"] {
+            XCTAssertFalse(shown.contains("0123"), shown)
+        }
+        XCTAssertEqual("\(code)", "LPC-…")
+    }
+
+    // MARK: account.json — the key's choice and the linked email (§4.2, §10.1)
+
+    func testTheAccountFileKeepsTheKeysChoiceAndWhetherAnEmailIsLinked() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("account-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = AccountFile(directory: directory)
+        var record = AccountRecord()
+        XCTAssertTrue(record.keepsKey, "the key is remembered unless the person says otherwise (§10.1)")
+        record.deviceID = deviceID
+        record.deviceToken = ServerToken("lmd_token")
+        record.signedInWith = .key
+        record.rememberKey = false
+        record.emailLinked = true
+        try file.save(record)
+        XCTAssertEqual(try file.load(), record)
+        XCTAssertFalse(try XCTUnwrap(try file.load()).keepsKey)
+        let json = String(decoding: try Data(contentsOf: file.url), as: UTF8.self)
+        XCTAssertTrue(json.contains("\"rememberKey\":false"), json)
+        XCTAssertTrue(json.contains("\"emailLinked\":true"), json)
+        // Signed out by the server: whether an email is linked stays — "Lost your key?" says by it how to
+        // get back in; the key's choice goes with the sign-in it was made for.
+        var revoked = record
+        revoked.signOut(because: .deviceRevoked)
+        XCTAssertEqual(revoked.emailLinked, true)
+        XCTAssertNil(revoked.rememberKey)
+        // Signed out by the person: neither stays.
+        var left = record
+        left.signOut(because: nil)
+        XCTAssertNil(left.emailLinked)
+        XCTAssertNil(left.rememberKey)
+        // A file written before these fields reads with neither.
+        let older = Data(#"{"format": 1, "deviceID": "d", "signedInWith": "key"}"#.utf8)
+        try older.write(to: file.url)
+        let read = try XCTUnwrap(try file.load())
+        XCTAssertNil(read.emailLinked)
+        XCTAssertTrue(read.keepsKey)
+    }
 }
 
 /// The key of an account without an email, kept in the vault (`AccountKeyVault`).

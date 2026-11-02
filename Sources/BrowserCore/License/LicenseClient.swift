@@ -120,6 +120,9 @@ public struct LicenseClient: Sendable {
             updated.signedInWith = .key
             updated.session = nil
         }
+        // Learned again from the key's view of its license (§11.1); until then, no email is assumed —
+        // never a reminder by email promised that will not come.
+        updated.emailLinked = nil
         return .success(Activation(record: updated, entitlement: entitlement, trialStarted: entitlement.plan == "trial", clockSkew: skew))
     }
 
@@ -219,6 +222,33 @@ public struct LicenseClient: Sendable {
     public func devices(_ credential: AccountAPI.Credential) async -> Result<AccountDevices, AccountFailure> {
         guard let response = try? await transport.send(AccountAPI.devices(credential)) else { return .failure(.unreachable) }
         return AccountAPI.devices(from: response)
+    }
+
+    // MARK: A purchase without registration: an email, a new key (§11.1)
+
+    /// `POST /v1/anonymous/email`: a letter with a code goes to `email` when it has no account.
+    public func linkEmail(key: AccountKey, purchaseCode: PurchaseCode, email: String, password: String, locale: String?) async -> Result<AccountAPI.CodeSent, AccountFailure> {
+        let request = AccountAPI.linkEmail(key: key, purchaseCode: purchaseCode, email: email, password: password, locale: locale)
+        guard let response = try? await transport.send(request) else { return .failure(.unreachable) }
+        return AccountAPI.codeSent(from: response)
+    }
+
+    /// `POST /v1/anonymous/email/confirm`: the email linked, and a session — as after a registration.
+    public func confirmEmail(key: AccountKey, email: String, code: String) async -> Result<AccountSession, AccountFailure> {
+        guard let response = try? await transport.send(AccountAPI.confirmEmail(key: key, email: email, code: code)) else { return .failure(.unreachable) }
+        return AccountAPI.session(from: response)
+    }
+
+    /// A new key for the license; the old one stops working and every Mac is unlinked (§11.1).
+    public func replaceKey(_ proof: AccountAPI.KeyReplacementProof) async -> Result<AccountKey, AccountFailure> {
+        guard let response = try? await transport.send(AccountAPI.replaceKey(proof)) else { return .failure(.unreachable) }
+        return AccountAPI.newKey(from: response)
+    }
+
+    /// How long after a payment the key can be fetched again on the site (`GET /v1/plans`).
+    public func keyRetrievalSeconds() async -> Result<Int, AccountFailure> {
+        guard let response = try? await transport.send(AccountAPI.plans()) else { return .failure(.unreachable) }
+        return AccountAPI.keyRetrievalSeconds(from: response)
     }
 
     /// Unlinks another Mac. `not_found` — already unlinked — is a success: the list is asked again.
