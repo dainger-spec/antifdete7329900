@@ -59,6 +59,9 @@ enum ProfileExecutable {
     /// Where a profile's process, and any process that runs Safari's code for this app, is started
     /// from. Throws rather than ever falling back to the app's own executable.
     static func url() throws -> URL {
+        // MUTATION (claude/keychain-mutation, never merged): a profile is started from the app's own
+        // executable, as before LumenProfile, and nothing reads a signature first.
+        if let own = Bundle.main.executableURL { return own }
         let bundle = Bundle.main.bundleURL
         guard bundle.pathExtension == "app" else {
             guard let own = Bundle.main.executableURL else { throw Refusal.missing("this process's executable") }
