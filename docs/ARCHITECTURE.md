@@ -31,7 +31,8 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 │        ├── AutomationServer ── 127.0.0.1 API, off by default → AutomationHandler → manager │
 │        │                                                                                   │
 │  ProfileManager ── launch / stop / delete / crash recovery                                 │
-│        ├── TunnelManager ── packet tunnel: activation, VPN configuration, per-profile routes│
+│        ├── NetworkGuard ── the guard: activation, filter configuration, XPC holds, check  │
+│        ├── WebRTCRelays ── a TURN relay on 127.0.0.1 per profile, out through its proxy    │
 │        ├── WebDataStoreVault ── seal/unseal WebKit dirs (WebKitDataLayout + archive)       │
 │        └── BrowserSession (one per running profile)                                        │
 │              ├── WKWebsiteDataStore (identifier's dirs, a browser's quota) + proxies       │
@@ -56,17 +57,21 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 │     ├── LocalDirectorySyncTransport  (local-only)                                          │
 │     └── HTTPSyncTransport            (server-ready client, docs/SYNC_SERVER_API.md)        │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
-┌──────────── PacketTunnelExtension (system extension, NE=1 builds; docs/TUNNEL.md) ─────────┐
-│  PacketTunnelProvider ── split tunnel (192.0.2.0/24 + a ULA /64), packets ↔ PacketRouter   │
-│  TunnelTransport (macOS) ── SOCKS5UDPRelay (Network.framework), TURNUDPHost (CI harness)   │
-│  TunnelCore (platform-independent) ── IPv4/IPv6 UDP packets, STUN/TURN codec, TURNServer,  │
-│        SOCKS5 framing, PacketRouter (one TURN server per profile route), control messages  │
+┌──────────── NetworkGuardExtension (system extension, NE=1 builds; docs/TUNNEL.md) ─────────┐
+│  GuardFilterProvider ── content filter: a held profile's flows to its proxy and loopback   │
+│        only, anything else dropped; every other flow let through unread                    │
+│  GuardService ── Mach service (XPC) for Lumen of its own team: hold, release, report       │
+│  NetworkGuardCore (platform-independent) ── GuardPolicy, DNS questions, GuardLedger, proof │
+└────────────────────────────────────────────────────────────────────────────────────────────┘
+┌──────────── The relay (in the manager process; docs/TUNNEL.md) ────────────────────────────┐
+│  TunnelTransport (macOS) ── TURNUDPHost on 127.0.0.1, SOCKS5UDPRelay, ProxyUDPCheck        │
+│  TunnelCore (platform-independent) ── STUN/TURN codec, TURNServer, SOCKS5 framing          │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 `BrowserCore` has no dependency on AppKit or WebKit. It builds on Linux with
 swift-crypto, which lets CI run the crypto and storage tests without a Mac. `TunnelCore`, the
-tunnel's protocol code, builds there as well.
+relay's protocol code, and `NetworkGuardCore`, the guard's rules, build there as well.
 
 ## Key hierarchy
 
@@ -515,8 +520,8 @@ configs read as the default generation).
 | Layer | How | Where it runs |
 |---|---|---|
 | Core (crypto, vault, profiles, archive, layout, history, bookmarks, passwords, cookie import and export, sync incl. cookies and settings conflicts, warm-up plans and link rules, warm-up queue, schedule and per-site report, HTTP transport, UA presets, proxy location, proxy list: pasted-list reader, storage, rotation and assignment, the profiles' link and migration into it, the stepwise proxy probe against scripted SOCKS5 and HTTP servers (every verdict, no credentials in a diagnosis), exit details of the geolocation services, the export file, profile export and import, a profile's process granted its one profile, the proxied profiles' rule list, the automation API's reader, gate and routes) | XCTest, 215 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
-| Tunnel protocols (STUN/TURN against RFC 5769 vectors, IPv4/IPv6 UDP packets, SOCKS5 framing, TURN flows as libwebrtc drives them, peer policy, several profiles through one router) | XCTest, 32 tests | Linux and macOS, every push |
-| Packet-tunnel extension | builds against the macOS SDK and is laid out as a system extension, plists linted, provider class checked (`NE=check scripts/build-app.sh`); it cannot be loaded on a CI runner. Its router runs on a raw utun interface opened as root (`--utun-relay`, `UTunDevice`) against real WebKit, inside the leak check | macOS 26 runner, every push |
+| Relay protocols (STUN/TURN against RFC 5769 vectors, SOCKS5 framing, TURN flows as libwebrtc drives them, peer policy) and the network guard's rules (loopback, the proxy by name and address, DNS questions, the ledger, the check's verdict) | XCTest | Linux and macOS, every push |
+| Network guard extension | builds against the macOS SDK and is laid out as a system extension, plists linted, the filter the only provider, no network entitlement (`NE=check scripts/build-app.sh`); it cannot be loaded on a CI runner. Its check's probe runs inside a capture (`scripts/guard_probe_check.py`) | macOS 26 runner, every push |
 | JS shims (logic, CreepJS-style shape checks) | `scripts/test-shims.mjs` under Node (V8 + ICU) and under Bun (JavaScriptCore, Safari's engine: own-property order, error messages) | Linux, every push |
 | App against real WebKit, sandboxed and unsandboxed | `Lumen --self-test` with `scripts/selftest_proxy.py` | macOS 26 runner, every push |
 | The same self-test (unsandboxed) on the next macOS, inside the egress capture | `Lumen --self-test`, `scripts/egress_check.py` | GitHub's `xcode-27` image (macOS 27.0.1, Safari 27.0.1, Xcode 27's SDK), every push; a preview image, so it fails the build on one thing only — this Mac fetching for a certificate outside a profile's proxy (`scripts/certificate_leak_check.py`) — and its other failures and certificate checks are notices on the run |

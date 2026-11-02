@@ -32,8 +32,8 @@ since):
 | Fingerprint surface | a macOS profile measures the same as a plain WKWebView on the same Mac (navigator, screen, canvas, WebGL, audio, fonts, feature list) except for `window.safari` and the Fullscreen API, which Safari has and a bare WKWebView lacks; an iPhone or iPad view measures the same, under its device's User-Agent; user-installed fonts are hidden from pages, as in Safari. CI also compares the macOS profile with the runner's real Safari (§2) |
 | Shims in workers and frames | a worker made from a blob runs in the profile's zone, stays strict and keeps its line numbers; a frame reached as `window[i]` right after insertion is patched; `permissions.query({name:'geolocation'})` returns the engine's own `PermissionStatus`, 'prompt' until the page asks |
 | Proxy: IPv6, unresolvable host | an HTTP proxy on `[::1]` tunnels the load; a proxy whose host does not resolve fails closed |
-| Proxy: WebRTC | a proxied profile whose stored setting is "unrestricted" has no `RTCPeerConnection` or `RTCDataChannel` while the packet tunnel cannot carry it (§5) |
-| Packet tunnel | a build without the network extension reports it (the tunnel sheet says what a signed build needs), and proxied profiles keep WebRTC off. The tunnel's TURN server and SOCKS5 relay are measured by the leak check instead ([TUNNEL.md](TUNNEL.md)) |
+| Proxy: WebRTC | a proxied profile whose stored setting is "unrestricted" has no `RTCPeerConnection` or `RTCDataChannel` while the network guard is not ready (§5), and says why; with the self-test standing in for the guard, the same profile makes a video call through the relay and its proxy, inside the capture of every packet ([TUNNEL.md](TUNNEL.md)) |
+| Network guard | a build without it says so, and proxied profiles keep WebRTC off; the guard's rules are unit-tested, and its check's probe runs inside a capture ([TUNNEL.md](TUNNEL.md)) |
 | Proxy: dns-prefetch leak | an `<a ping>` (the load type WebKit gives dns-prefetch) reaches neither the proxy nor the network; a fetch to the same origin does; the control, the same click in a plain web view without the rule list, does reach the proxy (else the check is a SKIP) |
 | Safari's chrome, in a profile's own process | through the app's launch path, a proxied profile whose window is Safari's chrome loads the self-test proxy's leak page: its page load, a fetch to an IPv4 and an IPv6 literal, to a host name, an https request, a WebSocket, a worker's fetch, an image and a frame of another site all reach the proxy; `<a ping>` does not (where the page says it clicked it, and this WebKit's plain web view sends one without the rule list); a fetch to a `.local` name goes to the proxy like any other; this Mac itself — `127.0.0.1`, `localhost`, `::1`, `0.0.0.0`, from the page, a frame and a worker — is refused (the system never sends loopback through a proxy: measured in CI run 382, those fetches reached a listener on the runner directly), and nothing reaches the loopback canary (which must list the self-test's own direct connection, its control); an HTTPS image whose certificate needs a fetch reaches the proxy and its certificate is refused; `RTCPeerConnection` exists in neither the page, a frame of another site nor an about:blank frame, `WebTransport` in neither; on loopback (a secure context) the leak page's secure half, opened as a page of this Mac (loaded from it directly, as any page on this Mac is), has neither in the page and no `WebTransport` in a dedicated, a shared or a service worker; the profile's process reports every web view on its store with its proxy, none with WebRTC or with a feature that leaves the proxy, no setter that turns them on again, WebKit's default store closed, UDP and the real Safari's places closed to it by the kernel, its certificate checks made without fetching, and its own three probe requests at the proxy as one CONNECT each; a cookie imported while it runs is sent by the next window's first request; a second window loads through the proxy too. Around it, the egress capture and the file-system trace (§4a) |
 | Nothing handed outside the profile | in a profile's tab of ours: no link preview, even when asked for; no Services requestor for the selection; the context menu keeps Copy and the link items and loses Search with Google, Look Up, Translate, Share, Quick Note, Writing Tools and Services; WebKit's directories of this app are excluded from Time Machine (the build without the sandbox; a SKIP in the sandboxed one) |
@@ -524,9 +524,9 @@ What still differs, and why it cannot be changed from the app:
   side has.
   `Object.getOwnPropertyNames(window).length` follows (1044 in Safari, 1029 in a profile with
   WebRTC on, 1022 with the default policy that removes it).
-- **WebRTC** is switched off by the default policy, and with a proxy unless the packet tunnel
-  carries it (SOCKS5 only, relay candidates only; [TUNNEL.md](TUNNEL.md)). Without a proxy,
-  `relayOnly` and `unrestricted` keep it.
+- **WebRTC** is switched off by the default policy, and with a proxy unless it goes through the
+  relay, held there by the network guard (SOCKS5 with UDP only, relay candidates only;
+  [TUNNEL.md](TUNNEL.md)). Without a proxy, `relayOnly` and `unrestricted` keep it.
 - **The replacement `Date` and `Intl.DateTimeFormat`** (only with a time zone set) list `length`
   and `name` before their statics: JavaScriptCore orders a script function's own properties that
   way whatever the definition order.
@@ -553,8 +553,8 @@ group was measured with WebKit's own switch for it on, against this Mac's Safari
 measures itself (`scripts/payments_check.py`, variant `parity`; CI runs 514 and 515, measurement
 branch `claude/measure-parity`, macOS 26 and 27):
 
-- **WebRTC, 23** — off with a proxy, decided; they can come back only through the packet tunnel,
-  which carries WebRTC itself (relay candidates over SOCKS5, [TUNNEL.md](TUNNEL.md)).
+- **WebRTC, 23** — off with a proxy unless the relay carries WebRTC, held by the network guard
+  (relay candidates over SOCKS5 with UDP, [TUNNEL.md](TUNNEL.md)).
 - **WebTransport, 8** — HTTP/3, QUIC over UDP, which no HTTP CONNECT or SOCKS5 proxy carries. On
   macOS 26 a profile with its proxy and WebTransport on sent the QUIC handshake to the page's
   address over UDP from this Mac's address, outside the proxy (ten packets from the profile's WebKit
@@ -590,7 +590,7 @@ branch `claude/measure-parity`, macOS 26 and 27):
   without — and no session can start without the entitlement. It could come back; the owner decides.
 
 So, measured: a profile with a proxy reaches 1006 of 1044 with the MediaSession coordinator, 1029
-with WebRTC carried by the tunnel as well; WebTransport's 8, Web Authentication's 6 and
+with WebRTC carried by the relay as well; WebTransport's 8, Web Authentication's 6 and
 DigitalCredential are out of reach in this architecture. Until then it is 1005. A profile without a
 proxy has 1019: WebRTC's 23 by the default policy (`relayOnly` and `unrestricted` keep them) and the
 two entitlements' own.
@@ -686,8 +686,8 @@ behaviour are verified by the self-test (§0).
 use HTTP/3: measured on every push by `scripts/leak_check.py`, which runs real forwarding
 proxies on the CI Mac. cloudflare-quic.com answers a profile without a proxy over HTTP/3 and the
 same requests through an HTTP CONNECT or SOCKS5 proxy over HTTP/2, each one seen by the proxy;
-the SOCKS5 proxy was never asked for UDP. So QUIC needs no tunnel. WebRTC does: the packet
-tunnel ([TUNNEL.md](TUNNEL.md)), below.
+the SOCKS5 proxy was never asked for UDP. So QUIC needs nothing more. WebRTC does: the relay and
+the network guard ([TUNNEL.md](TUNNEL.md)), below.
 
 **App Transport Security:** `NSAllowsArbitraryLoadsInWebContent` lets the browser load
 `http://` pages. The app's own URLSession traffic (HTTP sync) remains HTTPS-only.
@@ -708,12 +708,12 @@ profile on macOS 27. To be reported to Apple.
 
 | Path | Status | Mitigation |
 |---|---|---|
-| WebRTC (STUN, TURN over UDP or TCP, media) | Never proxied by WebKit: it opens these sockets itself, without the data store's proxy. STUN reveals the real public IP to the page (seen by the CI leak check); a TURN server sees it too | With a SOCKS5 proxy and the packet tunnel on: through the proxy's UDP ASSOCIATE, via a per-profile TURN relay ([TUNNEL.md](TUNNEL.md)). Otherwise WebRTC is **off** in a proxied profile, whatever its setting (§5) |
+| WebRTC (STUN, TURN over UDP or TCP, media) | Never proxied by WebKit: it opens these sockets itself, without the data store's proxy. STUN reveals the real public IP to the page (seen by the CI leak check); a TURN server sees it too | With a SOCKS5 proxy that relays UDP and the network guard ready: through the proxy's UDP ASSOCIATE, via a per-profile TURN relay on 127.0.0.1, the profile's other connections dropped by the guard ([TUNNEL.md](TUNNEL.md)). Otherwise WebRTC is **off** in a proxied profile, whatever its setting (§5) |
 | DNS prefetch | `<link rel="dns-prefetch">` (also as a `Link:` header) makes the network process resolve the host through the system resolver — WebKit skips it only for a *system-wide* proxy, not for a data store's `proxyConfigurations` | A content rule list blocking `ping`-type loads is added to every proxied profile (`ContentRules`), Safari's chrome included: WebKit 7621 and later runs dns-prefetch through it as a ping. Before 7621 dns-prefetch is a preference instead, which proxied profiles have off (and pinned off in Safari's chrome, which turns it on). It also blocks `<a ping>` click trackers; beacons are another load type and go through the proxy. A proxied profile does not start without the list (compiled into the default rule-list store, or, failing that, a temporary one). In Safari's chrome the list stays through "Reload Without Content Blockers" and a site's content-blocker switch (§4a). Verified by the self-test with an `<a ping>`, and in Safari's chrome by the egress capture (no DNS question for the leak page's prefetch, header, link or late-prefetch names) |
 | WebTransport, Private Click Measurement, Web Authentication | QUIC an HTTP or SOCKS5 proxy cannot carry; attribution reports sent later outside the page's session; passkeys from the owner's iCloud Keychain, checked by system services | Off in every web view of a proxied profile (pinned in Safari's chrome); attribution reports already stored are removed at launch |
 | Safe Browsing lookups | Made by a system service, outside the data store's network session | Off by default (`safeBrowsingEnabled`); in Safari's chrome both its setters are pinned to the profile's choice and the service is not reached unless asked for (§4a) |
 | `mailto:`, `tel:`, custom schemes | Would hand the URL to another app, outside the profile | Blocked by the navigation policy |
-| Camera and microphone streams | Local capture; their WebRTC transport goes through the proxy only via the packet tunnel (SOCKS5), otherwise WebRTC is off with a proxy | Asks the user every time |
+| Camera and microphone streams | Local capture; their WebRTC transport goes through the proxy only via the relay (SOCKS5 with UDP, the network guard ready), otherwise WebRTC is off with a proxy | Asks the user every time |
 | Sync traffic | Goes from the app process through the system network, not the profile proxy | Folder transport makes no network requests; HTTP sync is HTTPS and carries only encrypted blobs |
 
 **Proxy authentication:** credentials go into the data store's `ProxyConfiguration`
@@ -739,8 +739,8 @@ URLSession too. Nothing about a proxy is shared between profiles. The self-test 
 SOCKS5 profiles together and loads pages in all of them at the same time (§0). Two things are
 process-wide, not per profile:
 - the language websites see (§6), set by the first profile launched;
-- the packet tunnel when it is on, which gives each profile its own relay
-  ([TUNNEL.md](TUNNEL.md)).
+- the network guard, which holds each profile whose WebRTC goes through its own relay to its own
+  proxy ([TUNNEL.md](TUNNEL.md)).
 
 **Launch and the lookup through the proxy:** the lookup (time zone, country, exit IP) runs while
 the profile's data decrypts. A launch waits for it only when the profile takes its location
@@ -868,8 +868,7 @@ internet next to it, a page on the network keeping its own loads).
 
 In the build without the App Sandbox every profile runs in a process of its own (`ProfileProcess`),
 and there its window is Safari's own chrome (docs/SAFARI_PROCESS.md §9) — except an iPhone or iPad
-profile, which gets our own window presenting its device, and a profile whose WebRTC goes through
-the packet tunnel, which stays in the manager process. The emergency switch back to every profile
+profile, which gets our own window presenting its device. The emergency switch back to every profile
 in the manager process, in our own windows: `PB_PROFILE_PROCESS=0`, or
 `defaults write <bundle id> PBProfileProcess -bool NO`. The sandboxed build keeps every profile in
 the one process (it cannot load Safari's frameworks).
@@ -880,7 +879,7 @@ Safari. That window says so, never only the log (`SimplifiedModeNotice`): a "Sim
 in its toolbar — the toolbar, whose height a page measures, keeps its height — whose tooltip gives
 the reason and whose popover, opened by itself once when the app's first such window becomes key,
 says what the mode is and why. The reasons, each in words of its own: an iPhone or iPad profile; the
-sandboxed build; a profile whose WebRTC goes through the tunnel; Safari's window turned off
+sandboxed build; Safari's window turned off
 (`PB_SAFARI_CHROME=0`); profiles kept in the manager's process (`PB_PROFILE_PROCESS`,
 `PBProfileProcess`); and, in a profile's own process, what failed — Safari's frameworks not loading,
 a structural piece missing (by name), the process not becoming Safari's application, Safari's window
@@ -1084,11 +1083,7 @@ synchronisation), and anything Safari reaches through C-level XPC (`xpc_connecti
 rather than `NSXPCConnection` — the capture would show it. URL sessions Safari makes with a
 delegate of its own answer their certificate questions Safari's way (the system's); the pages'
 loads are not among them. WebKit's C preference setters (`WKPreferencesSetPeerConnectionEnabled`)
-cannot be pinned; the report reads every web view's engine instead. With WebRTC through the packet
-tunnel, profile processes each keep their own view of the tunnel, and one can stop it under
-another (code reading, not measured: the tunnel has not yet run on a Mac, docs/TUNNEL.md); until
-the manager owns the tunnel alone, a profile whose WebRTC goes through the tunnel runs in the manager
-process, in our own window. A site whose certificate holds only with a fetch fails in a proxied profile
+cannot be pinned; the report reads every web view's engine instead. A site whose certificate holds only with a fetch fails in a proxied profile
 rather than being completed, and Safari's automatic upgrade of an `http://` address to HTTPS does
 not fall back to http after such a refusal (it is a cancelled check, not a failed one). In Safari's
 chrome, Safari's own context menu keeps Look Up, Translate and
@@ -1108,20 +1103,23 @@ and 26 exposes a native `RTCPeerConnection` (observed by the self-test).
 whatever the profile's setting, because any other policy sends the page's ICE traffic from this
 Mac's own address:
 
-- **SOCKS5 proxy, packet tunnel on, WebRTC setting not Disabled**: the page's only ICE server is
-  a TURN relay on a virtual address that the tunnel routes to the extension, under
-  `iceTransportPolicy: "relay"`. The engine's WebRTC is on then, so the user script is what
-  keeps the page on the relay; it is hardened against pages that tamper with built-ins, but it
-  is page-level code ([TUNNEL.md](TUNNEL.md), "Enforcement is in the page"). The
-  relay sends everything through the proxy's UDP ASSOCIATE, so the page, STUN servers and
-  peers see the proxy's address. The page keeps seeing its own configuration. Its STUN servers
-  are not contacted, and the urls that would name the relay (ICE events, `getStats()`) name
-  the page's own server. Design, limits and signing: [TUNNEL.md](TUNNEL.md).
+- **SOCKS5 proxy with UDP, the network guard ready, WebRTC setting not Disabled**: the page's only
+  ICE server is a TURN relay on 127.0.0.1 in the app's own process, under
+  `iceTransportPolicy: "relay"`; the relay sends everything through the proxy's UDP ASSOCIATE, so
+  the page, STUN servers and peers see the proxy's address. The user script keeps the page on the
+  relay (hardened against pages that tamper with built-ins; a peer's candidates named by host names
+  are dropped, so nothing is resolved); behind it the network guard, a content-filter system
+  extension, drops every other connection of the profile's process and of what WebKit opens for
+  it. The page keeps seeing its own configuration; its STUN servers are not contacted, and the urls
+  that would name the relay name the page's own server. Design, limits and signing:
+  [TUNNEL.md](TUNNEL.md).
 - **HTTP CONNECT proxy**: off. CONNECT cannot carry UDP.
-- **Tunnel not built, not allowed, or not connected**: off, and both the profile editor and the
-  launch say why. Without the tunnel, UDP would leave from this Mac's real IP.
+- **A SOCKS5 proxy without UDP, the guard not in the build, not installed, not answering, not yet
+  checked on this Mac, or the profile inside the app's process (the sandboxed build)**: off, and the
+  launch says which, with what to do. Without the relay and the guard, UDP would leave from this
+  Mac's real IP.
 
-The editor shows the setting as off (or "through the network extension") while a proxy is set,
+The editor shows the setting as off (or "through the proxy, relay only") while a proxy is set,
 and keeps the stored choice for when the proxy is removed.
 
 **Decided (October 2026): WebRTC stays off in a profile with a proxy.** The deciding reason: a
@@ -1129,11 +1127,12 @@ page that reaches WebRTC learns an address from it, and that address has to be t
 requests come from — the proxy's exit. Through a SOCKS5 proxy's UDP association it need not be: a
 proxy can relay UDP from another address than its TCP connections leave from, or relay none, and a
 WebRTC address that differs from the HTTP address tells a site more than WebRTC being off, as it
-is in Lockdown Mode. So the packet tunnel carries a profile's WebRTC only when the user chooses it
-for that profile (a WebRTC setting other than Disabled, with the tunnel enabled), never by
-default, and not before the extension has passed the hardware checklist on a real Mac
-([TUNNEL.md](TUNNEL.md)). Until then no release has the extension: `scripts/release.sh` builds
-without it (`NE` unset), so a released app's proxied profiles run with WebRTC off.
+is in Lockdown Mode. So the relay carries a profile's WebRTC only when the user chooses it for that
+profile (a WebRTC setting other than Disabled), only when the proxy relays UDP (asked at each
+launch: the address the relay finds through it is the one pages see), and never before the guard
+is ready on that Mac ([TUNNEL.md](TUNNEL.md)). `scripts/release.sh` builds without the guard until
+the owner's signed build has passed the hardware checklist (`NE` unset), so a released app's
+proxied profiles run with WebRTC off until then.
 
 The profile setting:
 
@@ -1144,7 +1143,7 @@ The profile setting:
 - `relayOnly` wraps the constructor and `setConfiguration` to force
   `iceTransportPolicy: "relay"`. No host or srflx candidates are gathered, so peers see
   only the TURN server's address. The TURN server still sees your real IP. With a proxy,
-  only the tunnel's relay is used.
+  only the app's relay is used.
 - `unrestricted` uses the WebKit default; never applied with a proxy.
 
 **Limits of the shim (relay-only, and the fallback removal):** it isn't applied in workers, which have no RTCPeerConnection
