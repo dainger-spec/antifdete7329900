@@ -47,6 +47,8 @@ ALLOWED_EXPRESSIONS = {
     "decoded.pid": "a process identifier the app asked the network guard to hold",
     "running": "a yes/no: whether the network guard's filter runs",
     "current": "a yes/no: whether the installed network guard is this app's version",
+    "report?.dropped ?? -1": "a count of flows the network guard dropped for its probe",
+    "report?.seenOnItsBehalf ?? -1": "a count of flows the network guard saw opened for its probe",
     "host.address.port": "the port on 127.0.0.1 the system gave a profile's WebRTC relay",
     "missing": "names of private classes and methods this macOS does not have",
     "missing ? \"requested, no credentials set\" : \"rejected\"": "a fixed text",

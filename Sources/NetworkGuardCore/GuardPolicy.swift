@@ -185,11 +185,14 @@ public struct GuardReport: Codable, Equatable, Sendable {
         public var remote: String
         /// The process that opened the flow (the profile's own, or WebKit's or a service acting for it).
         public var by: String
+        /// Opened by another process than the held one, for it (WebKit's network process, mDNSResponder).
+        public var onBehalf: Bool
 
-        public init(transport: GuardTransport, remote: String, by: String) {
+        public init(transport: GuardTransport, remote: String, by: String, onBehalf: Bool = false) {
             self.transport = transport
             self.remote = remote
             self.by = by
+            self.onBehalf = onBehalf
         }
     }
 
@@ -265,7 +268,7 @@ public final class GuardLedger: @unchecked Sendable {
                     return canonical.contains(":") ? "[\(canonical)]" : canonical
                 } ?? "?"
             let remote = flow.remotePort.map { "\(host):\($0)" } ?? host
-            report.recentDrops.append(.init(transport: flow.transport, remote: remote, by: by))
+            report.recentDrops.append(.init(transport: flow.transport, remote: remote, by: by, onBehalf: onBehalf))
             if report.recentDrops.count > Self.recentDropLimit {
                 report.recentDrops.removeFirst(report.recentDrops.count - Self.recentDropLimit)
             }
@@ -279,5 +282,20 @@ public final class GuardLedger: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return reports[pid] ?? GuardReport(pid: pid, held: false)
+    }
+}
+
+/// The check that the guard holds what WebKit opens for a profile (docs/TUNNEL.md, "Attribution"):
+/// a probe process (`Lumen --guard-probe`), held, asks a STUN server at a documentation address with
+/// WebKit's own WebRTC. The guard holds a profile only if it saw that flow as the probe's — opened
+/// by another process on its behalf — and dropped it.
+public enum GuardProof {
+    /// TEST-NET-3 (RFC 5737): never routed on the Internet, so the probe's request reaches no one,
+    /// held or not. The relay refuses TEST-NET-1 as a peer, not this one; the probe uses no relay.
+    public static let stunAddress = "203.0.113.1"
+    public static let stunPort: UInt16 = 3478
+
+    public static func holds(_ report: GuardReport) -> Bool {
+        report.recentDrops.contains { $0.transport == .udp && $0.onBehalf && $0.remote == "\(stunAddress):\(stunPort)" }
     }
 }

@@ -49,6 +49,9 @@ final class NetworkGuard: NSObject, ObservableObject {
     /// Asking macOS: the extension's properties, an activation, the filter configuration, its answer.
     @Published private(set) var checking = false
     @Published private(set) var problem: Problem?
+    /// The check on this Mac is running (`prove`), or it ran and did not show what it must.
+    @Published private(set) var proving = false
+    @Published private(set) var proofFailed = false
 
     /// Set by the self-test only (`SelfTest`), around the profiles it starts.
     var selfTestStandIn = false {
@@ -94,6 +97,13 @@ final class NetworkGuard: NSObject, ObservableObject {
     }
 
     // MARK: State
+
+    /// The settings page's Check Again: everything asked again, the check on this Mac included.
+    func checkAgain() {
+        problem = nil
+        proofFailed = false
+        refresh()
+    }
 
     /// Reads where the extension and its filter configuration stand (no prompts).
     func refresh() {
@@ -205,7 +215,10 @@ final class NetworkGuard: NSObject, ObservableObject {
         } catch {
             log.error("filter configuration: \(error.logKind, privacy: .public) \(error.localizedDescription, privacy: .private)")
             if install {
-                problem = (error as? NEFilterManagerError)?.code == .configurationPermissionDenied ? .declined : .other(error.localizedDescription)
+                // The prompt declined: NEFilterErrorDomain's "permission denied".
+                let nsError = error as NSError
+                let declined = nsError.domain == NEFilterErrorDomain && nsError.code == NEFilterManagerError.configurationPermissionDenied.rawValue
+                problem = declined ? .declined : .other(error.localizedDescription)
             }
             settle(.off)
         }
@@ -264,7 +277,12 @@ final class NetworkGuard: NSObject, ObservableObject {
             log.error("the guard did not take back \(refused.count, privacy: .public) process(es): their profiles stop")
             onHoldsLost?(refused)
         }
-        settle(proven ? .ready : .unproven)
+        if proven {
+            settle(.ready)
+            return
+        }
+        settle(.unproven)
+        if !proofFailed { await prove(on: connection) }
     }
 
     /// Hands one registration to the guard: nil when it took it, the reason otherwise.
@@ -276,11 +294,82 @@ final class NetworkGuard: NSObject, ObservableObject {
         return answer.0 ? nil : (answer.1 ?? "refused")
     }
 
-    /// Whether this Mac has shown that the guard tells a profile's connections — WebKit's, the
-    /// system's, made on its behalf — from everyone else's (docs/TUNNEL.md, "Attribution"). Until
-    /// it has, the guard stays `unproven` and WebRTC off in proxied profiles: holding a process
-    /// whose connections the system attributes elsewhere would hold nothing.
-    private var proven: Bool { false }
+    /// Whether this Mac has shown that the guard holds what WebKit opens for a process — the check
+    /// below, for this macOS build, this WebKit and this guard. Until it has, the guard stays
+    /// `unproven` and WebRTC off in proxied profiles: holding a process whose connections the
+    /// system counts for another would hold nothing. A macOS or Safari update asks again.
+    private var proven: Bool {
+        UserDefaults.standard.string(forKey: Self.proofKey) == proofIdentity
+    }
+
+    private static let proofKey = "PBNetworkGuardProof"
+
+    private var proofIdentity: String {
+        let webKit = Bundle(identifier: "com.apple.WebKit")?.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        return "\(Self.systemBuild)|\(webKit)|\(bundledExtensionVersion ?? "?")"
+    }
+
+    private static var systemBuild: String {
+        var size = 0
+        guard sysctlbyname("kern.osversion", nil, &size, nil, 0) == 0, size > 0 else { return "?" }
+        var buffer = [CChar](repeating: 0, count: size)
+        guard sysctlbyname("kern.osversion", &buffer, &size, nil, 0) == 0 else { return "?" }
+        return String(cString: buffer)
+    }
+
+    /// The check on this Mac (docs/TUNNEL.md, "Attribution"): a probe process of this app
+    /// (`GuardProbe`, nothing of the person's in it) is held to a proxy that is not there, then asks
+    /// a STUN server at a documentation address with WebKit's own WebRTC. The guard holds a profile
+    /// only if it saw that flow as the probe's, opened for it by WebKit, and dropped it
+    /// (`GuardProof`). The request reaches no one either way: the address is never routed.
+    private func prove(on connection: NSXPCConnection) async {
+        guard !proving, let executable = Bundle.main.executableURL else { return }
+        proving = true
+        defer { proving = false }
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = ["--guard-probe"]
+        let input = Pipe()
+        process.standardInput = input
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            log.error("the guard's check could not start its probe: \(error.logKind, privacy: .public)")
+            proofFailed = true
+            return
+        }
+        let pid = process.processIdentifier
+        let registration = GuardRegistration(pid: pid, proxyHost: "127.0.0.1", proxyPort: 9, proxyAddresses: [])
+        if let refusal = await give(registration, to: connection) {
+            // Not held: the probe is told nothing and sends nothing.
+            log.error("the guard did not take its probe: \(refusal, privacy: .public)")
+            try? input.fileHandleForWriting.close()
+            process.terminate()
+            proofFailed = true
+            return
+        }
+        try? input.fileHandleForWriting.write(contentsOf: Data("go\n".utf8))
+        try? input.fileHandleForWriting.close()
+        for _ in 0..<250 where process.isRunning { try? await Task.sleep(nanoseconds: 100_000_000) }
+        if process.isRunning { process.terminate() }
+        let data = await call(connection, { (guardian: NetworkGuardControl, done: @escaping (Data) -> Void) in
+            guardian.report(pid) { done($0) }
+        })
+        _ = await call(connection, { (guardian: NetworkGuardControl, done: @escaping (Bool) -> Void) in
+            guardian.release(pid) { done(true) }
+        })
+        let report = data.flatMap { try? JSONDecoder().decode(GuardReport.self, from: $0) }
+        guard let report, GuardProof.holds(report) else {
+            log.error("the guard's check failed: dropped \(report?.dropped ?? -1, privacy: .public), seen on the probe's behalf \(report?.seenOnItsBehalf ?? -1, privacy: .public)")
+            proofFailed = true
+            return
+        }
+        UserDefaults.standard.set(proofIdentity, forKey: Self.proofKey)
+        log.notice("the guard holds what WebKit opens for a process on this Mac: proven")
+        if self.connection === connection, installedState == .unproven { settle(.ready) }
+    }
 
     /// The guard is gone for the processes it held: their profiles are stopped, and it is asked
     /// again in a moment (a restarted extension, an update's).

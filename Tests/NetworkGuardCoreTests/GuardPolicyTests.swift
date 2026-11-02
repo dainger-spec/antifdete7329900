@@ -35,7 +35,7 @@ final class GuardPolicyTests: XCTestCase {
         XCTAssertEqual(verdict(.tcp, "::ffff:203.0.113.6", 1080), .allow, "an IPv4-mapped form of one")
         XCTAssertEqual(verdict(.tcp, "2001:0db8:0:0::5", 1080), .allow, "another spelling of an IPv6 one")
         XCTAssertEqual(verdict(.udp, "203.0.113.5", 61234), .allow, "the proxy's own UDP relay port")
-        XCTAssertEqual(verdict(.tcp, "198.51.100.7", 1080, nil, literal), .allow)
+        XCTAssertEqual(verdict(.tcp, "198.51.100.7", 1080, name: nil, literal), .allow)
     }
 
     func testEverythingElseIsDropped() {
@@ -124,11 +124,31 @@ final class GuardPolicyTests: XCTestCase {
         XCTAssertEqual(ledger.report(for: 1).dropped, 0)
     }
 
+    func testProof() {
+        let ledger = GuardLedger()
+        let probe = GuardRegistration(pid: 77, proxyHost: "127.0.0.1", proxyPort: 9, proxyAddresses: [])
+        ledger.hold(probe)
+        let stun = GuardFlow(transport: .udp, remoteAddress: GuardProof.stunAddress, remotePort: GuardProof.stunPort)
+        // The probe's own socket to the STUN server is not what is asked: WebKit's, for it, is.
+        ledger.note(GuardPolicy.verdict(stun, for: probe), pid: 77, flow: stun, by: "Lumen", onBehalf: false)
+        XCTAssertFalse(GuardProof.holds(ledger.report(for: 77)))
+        ledger.note(GuardPolicy.verdict(GuardFlow(transport: .udp, remoteAddress: "203.0.113.2", remotePort: 3478), for: probe),
+                    pid: 77, flow: GuardFlow(transport: .udp, remoteAddress: "203.0.113.2", remotePort: 3478),
+                    by: "com.apple.WebKit.Networking", onBehalf: true)
+        XCTAssertFalse(GuardProof.holds(ledger.report(for: 77)), "another address")
+        ledger.note(GuardPolicy.verdict(stun, for: probe), pid: 77, flow: stun, by: "com.apple.WebKit.Networking", onBehalf: true)
+        XCTAssertTrue(GuardProof.holds(ledger.report(for: 77)))
+        XCTAssertEqual(GuardPolicy.verdict(stun, for: probe), .drop, "held to a proxy elsewhere, the probe's STUN is dropped")
+        // Released when it exits: the report stays readable.
+        ledger.release(77)
+        XCTAssertTrue(GuardProof.holds(ledger.report(for: 77)))
+    }
+
     func testRegistrationCodable() throws {
         let data = try JSONEncoder().encode(named)
         XCTAssertEqual(try JSONDecoder().decode(GuardRegistration.self, from: data), named)
         let report = GuardReport(pid: 1, held: true, allowed: 2, dropped: 3, seenOnItsBehalf: 4,
-                                 recentDrops: [.init(transport: .udp, remote: "192.0.2.1:3478", by: "x")])
+                                 recentDrops: [.init(transport: .udp, remote: "192.0.2.1:3478", by: "x", onBehalf: true)])
         XCTAssertEqual(try JSONDecoder().decode(GuardReport.self, from: JSONEncoder().encode(report)), report)
     }
 

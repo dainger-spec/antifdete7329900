@@ -41,6 +41,10 @@ MainActor.assumeIsolated {
         SelfTest.migrationStep(write: true)
     } else if arguments.contains("--selftest-read-vault") {
         SelfTest.migrationStep(write: false)
+    } else if arguments.contains("--guard-probe") {
+        // The process the network guard's check on this Mac holds: one WebRTC request of WebKit's,
+        // to a documentation address, made on its behalf (GuardProbe.swift; NetworkGuard.prove).
+        GuardProbe.run()
     } else if let index = arguments.firstIndex(of: "--render-app-icon") {
         // The app icon's iconset, drawn from the Lumen mark (AppIcon.swift; scripts/build-app.sh).
         let folder = arguments.indices.contains(index + 1) ? arguments[index + 1] : "AppIcon.iconset"

@@ -79,9 +79,9 @@ struct NetworkGuardSettingsView: View {
                         }
                         Button(L("guard.openSettings")) { networkGuard.openSystemSettings() }
                             .buttonStyle(.lumenGhost)
-                        Button(L("guard.refresh")) { networkGuard.refresh() }
+                        Button(L("guard.refresh")) { networkGuard.checkAgain() }
                             .buttonStyle(.lumenGhost)
-                            .disabled(networkGuard.checking)
+                            .disabled(networkGuard.checking || networkGuard.proving)
                     }
                     .padding(.leading, 17)
                     .padding(.top, 4)
@@ -110,6 +110,7 @@ struct NetworkGuardSettingsView: View {
 
     private var statusText: String {
         if networkGuard.checking { return L("guard.state.checking") }
+        if networkGuard.proving { return L("guard.state.proving") }
         if networkGuard.problem == .reboot { return L("guard.state.reboot") }
         switch networkGuard.installedState {
         case .notInBuild:
@@ -142,7 +143,9 @@ struct NetworkGuardSettingsView: View {
         case .awaitingApproval: return L("guard.todo.awaitingApproval")
         case .off: return L("guard.todo.off")
         case .notAnswering: return L("guard.todo.notAnswering")
-        case .unproven: return L("guard.todo.unproven")
+        case .unproven:
+            if networkGuard.proving { return L("guard.todo.proving") }
+            return networkGuard.proofFailed ? L("guard.todo.proofFailed") : L("guard.todo.unproven")
         case .ready: return nil
         }
     }
@@ -150,8 +153,9 @@ struct NetworkGuardSettingsView: View {
     /// Green when WebRTC can go through the proxies, amber while it cannot (it is then off in
     /// proxied profiles), red when the last attempt failed; the words beside it say which.
     private var dotColor: Color {
-        if networkGuard.checking { return Theme.textTertiary }
+        if networkGuard.checking || networkGuard.proving { return Theme.textTertiary }
         if let problem = networkGuard.problem { return problem == .reboot ? Theme.warning : Theme.danger }
+        if networkGuard.proofFailed, networkGuard.installedState == .unproven { return Theme.danger }
         return networkGuard.installedState == .ready ? Theme.running : Theme.warning
     }
 }
