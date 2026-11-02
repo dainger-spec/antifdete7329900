@@ -17,6 +17,26 @@ enum DebugSwitches {
     /// Set by `--capture-sites` for one capture (`SiteCapture`), in this process only.
     static let captureOverride = Override()
 
+    /// A measurement on a branch only (scripts/measure/rtc_media.py, never merged): set by a site
+    /// capture for one profile, in memory — WebKit's mock camera and microphone, media requests
+    /// granted without asking (and said on stdout), WebKit features by key.
+    struct Measure: Sendable {
+        var mockCapture = false
+        var grantMedia = false
+        var features: [String: Bool] = [:]
+    }
+
+    static let measure = MeasureBox()
+
+    final class MeasureBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored = Measure()
+        var value: Measure {
+            get { lock.withLock { stored } }
+            set { lock.withLock { stored = newValue } }
+        }
+    }
+
     final class Override: @unchecked Sendable {
         private let lock = NSLock()
         private var stored: Bool?

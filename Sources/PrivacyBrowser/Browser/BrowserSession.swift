@@ -251,6 +251,17 @@ final class BrowserSession {
             // through this switch, which the content rules do not reach (`ContentRules`).
             WebKitPreferences.setBool(preferences, "_setDNSPrefetchingEnabled:", false)
         }
+        // A measurement on a branch only (DebugSwitches.measure): never set outside a site capture.
+        let measure = DebugSwitches.measure.value
+        if measure.mockCapture {
+            WebKitPreferences.setBool(preferences, "_setMockCaptureDevicesEnabled:", true)
+            // The page's request reaches the UI delegate (which says it and grants it), as a real one would.
+            WebKitPreferences.setBool(preferences, "_setMockCaptureDevicesPromptEnabled:", true)
+        }
+        for (key, value) in measure.features {
+            let present = WebKitFeatures.set(preferences, key, value)
+            print("MEASURE feature \(key)=\(value) \(present ? "set" : "not in this WebKit")")
+        }
     }
 
     /// The WebKit features whose traffic does not go through the data store's proxy, and are off

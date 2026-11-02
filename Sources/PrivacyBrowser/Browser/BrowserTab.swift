@@ -568,6 +568,12 @@ extension BrowserTab: WKUIDelegate {
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
                  initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
                  decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        // A measurement on a branch only (DebugSwitches.measure): who is asked, and granted.
+        if DebugSwitches.measure.value.grantMedia {
+            print("MEASURE media asked: origin \(origin.protocol)://\(origin.host):\(origin.port) type \(type.rawValue) — granted")
+            decisionHandler(.grant)
+            return
+        }
         let what: String
         switch type {
         case .camera: what = L("media.camera")

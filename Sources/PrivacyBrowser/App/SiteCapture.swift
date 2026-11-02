@@ -44,6 +44,13 @@ final class SiteCapture {
             var route: TunnelRoute?
             /// libwebrtc gathers on every interface (`PBTunnelAllInterfaces`, BrowserSession).
             var allInterfaces: Bool?
+            /// Measurement only (DebugSwitches.measure): a persistent profile (its own website data
+            /// store on disk) instead of an ephemeral one; WebKit's mock capture devices; media
+            /// requests granted; WebKit features by key.
+            var persistent: Bool?
+            var mockCapture: Bool?
+            var grantMedia: Bool?
+            var features: [String: Bool]?
         }
         struct Proxy: Decodable { var kind: String; var host: String; var port: Int }
         struct Page: Decodable {
@@ -54,10 +61,14 @@ final class SiteCapture {
             var timeoutMs: Int?
             /// Background tabs opened before the script runs (Safari shows its tab bar from two tabs on).
             var extraTabs: Int?
+            /// The web view's picture after the script (<out>/<profile>-<page>.png): what the page shows.
+            var screenshot: Bool?
         }
         var window: Window
         var profiles: [Profile]
         var pages: [Page]
+        /// Measurement only: every WebKit feature this process knows, with its default (<out>/features.json).
+        var listFeatures: Bool?
     }
 
     struct Failure: LocalizedError {
@@ -99,15 +110,19 @@ final class SiteCapture {
         defer { try? FileManager.default.removeItem(at: root) }
         let repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "capture", iterations: 10_000))
         print("INFO macOS \(ProcessInfo.processInfo.operatingSystemVersionString), Safari \(HostSafari.version), zone \(TimeZone.current.identifier)")
+        if spec.listFeatures == true {
+            let features = try JSONSerialization.data(withJSONObject: WebKitFeatures.defaults(), options: [.prettyPrinted, .sortedKeys])
+            try features.write(to: out.appendingPathComponent("features.json"))
+        }
         for profileSpec in spec.profiles {
-            let results = try await capture(profileSpec, spec: spec, repository: repository)
+            let results = try await capture(profileSpec, spec: spec, repository: repository, out: out)
             let data = try JSONSerialization.data(withJSONObject: results, options: [.prettyPrinted, .sortedKeys])
             try data.write(to: out.appendingPathComponent("\(profileSpec.name).json"))
         }
     }
 
     private func configuration(for profile: Spec.Profile) -> ProfileConfiguration {
-        var configuration = ProfileConfiguration(ephemeral: true)
+        var configuration = ProfileConfiguration(ephemeral: !(profile.persistent ?? false))
         if let zone = profile.timeZone {
             configuration.timeZoneIdentifier = zone == "host" ? TimeZone.current.identifier : zone
         }
@@ -121,7 +136,7 @@ final class SiteCapture {
         return configuration
     }
 
-    private func capture(_ profileSpec: Spec.Profile, spec: Spec, repository: ProfileRepository) async throws -> [String: Any] {
+    private func capture(_ profileSpec: Spec.Profile, spec: Spec, repository: ProfileRepository, out: URL) async throws -> [String: Any] {
         let summary = try repository.create(name: "Capture \(profileSpec.name)", configuration: configuration(for: profileSpec))
         defer { try? repository.delete(summary.id) }
         let key = try repository.profileKey(for: summary.id)
@@ -143,6 +158,10 @@ final class SiteCapture {
         defer { relayHost?.stop() }
         DebugSwitches.captureOverride.value = profileSpec.allInterfaces ?? false
         defer { DebugSwitches.captureOverride.value = nil }
+        DebugSwitches.measure.value = DebugSwitches.Measure(mockCapture: profileSpec.mockCapture ?? false,
+                                                            grantMedia: profileSpec.grantMedia ?? false,
+                                                            features: profileSpec.features ?? [:])
+        defer { DebugSwitches.measure.value = DebugSwitches.Measure() }
         let session = try BrowserSession(profileID: summary.id, profileName: summary.name, configuration: configuration,
                                          passwordVault: try repository.passwordVault(for: summary.id),
                                          passwordSettings: ProfilePasswordSettings(repository: repository, profileID: summary.id,
@@ -162,6 +181,14 @@ final class SiteCapture {
             print("INFO [\(profileSpec.name)] \(page.name): \(page.url)")
             do {
                 results[page.name] = try await run(page, in: controller)
+                if page.screenshot == true, let tab = controller.selectedTab {
+                    let image: NSImage? = await withCheckedContinuation { continuation in
+                        tab.webView.takeSnapshot(with: nil) { image, _ in continuation.resume(returning: image) }
+                    }
+                    if let tiff = image?.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+                        try? png.write(to: out.appendingPathComponent("\(profileSpec.name)-\(page.name).png"))
+                    }
+                }
             } catch {
                 print("INFO [\(profileSpec.name)] \(page.name) failed: \(error.localizedDescription)")
                 results[page.name] = ["error": error.localizedDescription]
