@@ -575,6 +575,8 @@ struct AccountSettingsPage: View {
     @State private var confirmingSignOut = false
     @State private var confirmingUnlink: AccountDevice?
     @State private var signingIn = false
+    /// The system's answer about Lumen's notifications, read when the page shows (key accounts).
+    @State private var reminderStatus: ExpiryNotifications.Status?
 
     var body: some View {
         SettingsPage(title: L("settings.section.account"), subtitle: L("license.account.subtitle")) {
@@ -583,6 +585,7 @@ struct AccountSettingsPage: View {
             } else if let state = license.state, state.mode != .notSignedIn {
                 plan(state)
                 offline(state)
+                if license.record.signedInWith == .key { reminders }
                 thisMac
                 devicesSection
                 site
@@ -696,6 +699,43 @@ struct AccountSettingsPage: View {
                         LicenseText.remaining(until.timeIntervalSince(Date()))))
         } else {
             note(L("license.account.offline.none"))
+        }
+    }
+
+    /// The subscription's reminders through the system's notifications, for an account signed in
+    /// with a key alone: offered once by itself (ExpiryNotifications), here again (the owner, 2 November).
+    @ViewBuilder
+    private var reminders: some View {
+        SettingsCaption(L("reminders.caption"))
+        SettingRow(L("reminders.title"), detail: remindersDetail, effect: nil) {
+            switch reminderStatus {
+            case .allowed?:
+                Text(L("reminders.on"))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textSecondary)
+            case .refused?:
+                Button(L("reminders.openSettings")) { SystemOpen.openSystemSettingsForNotifications() }
+                    .buttonStyle(.lumenSecondary)
+            case .notAsked?:
+                Button(L("reminders.turnOn")) {
+                    Task {
+                        await ExpiryNotifications.turnOnFromSettings(license: license)
+                        reminderStatus = await ExpiryNotifications.status()
+                    }
+                }
+                .buttonStyle(.lumenSecondary)
+            case nil:
+                EmptyView()
+            }
+        }
+        .task { reminderStatus = await ExpiryNotifications.status() }
+    }
+
+    private var remindersDetail: String {
+        switch reminderStatus {
+        case .allowed?: return L("reminders.detail.on")
+        case .refused?: return L("reminders.detail.off")
+        default: return L("reminders.detail.notAsked")
         }
     }
 

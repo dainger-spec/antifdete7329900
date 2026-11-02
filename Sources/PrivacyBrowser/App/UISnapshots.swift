@@ -141,6 +141,10 @@ enum UISnapshots {
         problems += await Shot(name: "account-page", size: SettingsView.size, edges: true) {
             SettingsView(section: .account, previewLicense: licenses.signedIn).environmentObject(model)
         }.capture(into: folder)
+        // Signed in with a key alone: the subscription's reminders, offered again here.
+        problems += await Shot(name: "account-page-key", size: SettingsView.size, edges: true) {
+            SettingsView(section: .account, previewLicense: licenses.signedInWithKey).environmentObject(model)
+        }.capture(into: folder)
         problems += await Shot(name: "settings-updates-ready", size: SettingsView.size, edges: true) {
             SettingsView(section: .updates, previewUpdater: ready).environmentObject(model)
         }.capture(into: folder)

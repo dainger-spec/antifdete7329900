@@ -64,6 +64,11 @@ final class LicenseModel: ObservableObject {
     /// tick redraws nothing; written with it to `account.json`.
     private var floor: EffectiveClock?
     private var refreshing = false
+    /// The decision changed (mode, banners, document, limit): the subscription's reminders follow it
+    /// (`ExpiryNotifications`, set by the app's model; never for the self-test's licenses).
+    var onStateChanged: (() -> Void)?
+    /// A key has just connected this Mac.
+    var onActivatedWithKey: (() -> Void)?
 
     init(root: URL, configuration: AccountConfiguration? = .main) {
         self.configuration = configuration
@@ -135,6 +140,7 @@ final class LicenseModel: ObservableObject {
               new.check == state.check, new.allowedProfilesHere == state.allowedProfilesHere,
               new.worksWithoutServerUntil == state.worksWithoutServerUntil else {
             state = new
+            onStateChanged?()
             return
         }
     }
@@ -342,6 +348,7 @@ final class LicenseModel: ObservableObject {
             pendingSession = nil
             if let vault { vaultOpened(vault) }
             recompute()
+            if case .key = credential { onActivatedWithKey?() }
             return .success(ActivationOutcome(entitlement: activation.entitlement, trial: activation.trialStarted, clockSkew: activation.clockSkew))
         case .failure(let failure):
             if case .document(let check) = failure, check.meansAppOutdated { onAppOutdated?() }

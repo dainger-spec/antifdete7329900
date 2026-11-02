@@ -131,6 +131,16 @@ final class AppModel: ObservableObject {
         // The windows that show the license redraw with it.
         licenseObservation = license.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         license.onAppOutdated = { [weak self] in Task { await self?.updater?.checkNow() } }
+        // The subscription's reminders for an account with a key alone (ExpiryNotifications): offered
+        // right after a key connected this Mac, or at the first warning — then, not over the lock.
+        license.onActivatedWithKey = { [weak self] in
+            guard let self else { return }
+            ExpiryNotifications.update(at: .activatedWithKey, license: self.license)
+        }
+        license.onStateChanged = { [weak self] in
+            guard let self, self.phase == .unlocked else { return }
+            ExpiryNotifications.update(at: .stateChanged, license: self.license)
+        }
         license.start()
     }
 
@@ -336,6 +346,7 @@ final class AppModel: ObservableObject {
         // The license decides whether a profile opens (§8): here, before its process starts.
         manager.launchGate = { [weak self] id in self?.license.refusalToOpen(id) }
         license.vaultOpened(vault)
+        ExpiryNotifications.update(at: .stateChanged, license: license)
         manager.onError = { [weak self] message in self?.showError(message) }
         manager.onReturnToProfiles = { [weak self] in
             self?.activateProfilesWindow()

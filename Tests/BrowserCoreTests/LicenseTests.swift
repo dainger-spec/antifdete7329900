@@ -513,4 +513,37 @@ final class AccountKeyVaultTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: url.appendingPathExtension("unreadable")), damaged)
         XCTAssertEqual(try AccountKeyVault.load(from: vault)?.unredacted(), text)
     }
+
+    // MARK: The subscription's reminders (an account with a key alone, the owner 2 November)
+
+    func testRemindersAreOfferedOnceToAKeyAccountRightAfterActivationOrAtTheFirstWarning() {
+        // Right after a key connected this Mac: offered, whatever the banners say.
+        XCTAssertTrue(ExpiryReminders.shouldOffer(at: .activatedWithKey, signedInWithKey: true, alreadyOffered: false, periodEnding: false))
+        // Later, only once the first warning before the period's end is shown.
+        XCTAssertFalse(ExpiryReminders.shouldOffer(at: .stateChanged, signedInWithKey: true, alreadyOffered: false, periodEnding: false))
+        XCTAssertTrue(ExpiryReminders.shouldOffer(at: .stateChanged, signedInWithKey: true, alreadyOffered: false, periodEnding: true))
+        // Never again by itself after an answer, whatever it was.
+        XCTAssertFalse(ExpiryReminders.shouldOffer(at: .activatedWithKey, signedInWithKey: true, alreadyOffered: true, periodEnding: true))
+        XCTAssertFalse(ExpiryReminders.shouldOffer(at: .stateChanged, signedInWithKey: true, alreadyOffered: true, periodEnding: true))
+        // An account with an email gets letters, not these; nor does a Mac not signed in.
+        XCTAssertFalse(ExpiryReminders.shouldOffer(at: .activatedWithKey, signedInWithKey: false, alreadyOffered: false, periodEnding: true))
+        XCTAssertFalse(ExpiryReminders.shouldOffer(at: .stateChanged, signedInWithKey: false, alreadyOffered: false, periodEnding: true))
+    }
+
+    func testRemindersComeAWeekAndADayBeforeThePeriodsEndOnlyAhead() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let day: TimeInterval = 86_400
+        let end = now.addingTimeInterval(10 * day)
+        XCTAssertEqual(ExpiryReminders.reminders(periodEndsAt: end, now: now), [
+            .init(kind: .week, at: end.addingTimeInterval(-7 * day), periodEndsAt: end),
+            .init(kind: .day, at: end.addingTimeInterval(-day), periodEndsAt: end),
+        ])
+        // Three days left: the week's moment is past, the day's is ahead.
+        let soon = now.addingTimeInterval(3 * day)
+        XCTAssertEqual(ExpiryReminders.reminders(periodEndsAt: soon, now: now).map(\.kind), [.day])
+        // Twelve hours left, the period over, or no period: nothing to remind of.
+        XCTAssertEqual(ExpiryReminders.reminders(periodEndsAt: now.addingTimeInterval(day / 2), now: now), [])
+        XCTAssertEqual(ExpiryReminders.reminders(periodEndsAt: now.addingTimeInterval(-day), now: now), [])
+        XCTAssertEqual(ExpiryReminders.reminders(periodEndsAt: nil, now: now), [])
+    }
 }

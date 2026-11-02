@@ -32,6 +32,9 @@ enum SystemOpen {
         case dateAndTime
         /// This app again, once it has quit: the interface's language takes a restart.
         case relaunch
+        /// System Settings › Notifications: the subscription's reminders were turned off there, and
+        /// the person asks, in Settings › Account, to turn them on again.
+        case notifications
     }
 
     struct Request: Equatable, Sendable {
@@ -114,6 +117,18 @@ enum SystemOpen {
             if let url = URL(string: candidate), NSWorkspace.shared.open(url) { return }
         }
         NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
+    }
+
+    /// System Settings at Notifications, where this app's are turned on and off.
+    static func openSystemSettingsForNotifications() {
+        let id = Bundle.main.bundleIdentifier ?? ""
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=" + id) else { return }
+        guard admit(.notifications, url.absoluteString) else { return }
+        if let standIn {
+            Task { _ = await standIn(.notifications, url) }
+            return
+        }
+        NSWorkspace.shared.open(url)
     }
 
     /// System Settings at Date & Time.

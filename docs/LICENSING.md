@@ -50,11 +50,41 @@ A key is the whole account for whoever holds it — no email, no password. So (t
 - **Behind that**, `LogRedaction` masks license codes and tokens in exception reasons.
 - **Checked by** the self-test: `account.json`, the vault's file, the defaults and the diagnostics
   ZIP searched for every form of the key and for the device's token, the search first shown to
-  find a key planted in a ZIP of its own.
+  find a key planted in a ZIP of its own; this process's whole log since the check began (every
+  subsystem — a marker written in clear must be found there first); every answer of the automation
+  API's routes, with the key signed in (the API reads profiles only, never the account).
+- **And in a crash report**, which macOS writes after the process is gone:
+  `scripts/key_crash_check.py` runs `Lumen --key-crash-check`, which signs in with the key, keeps it
+  in a vault and crashes on purpose; its report must hold no form of the key. Its control crashes
+  with the key's text in the crash's own message, and that report must hold it (CI, each run).
 
 What it cannot promise: the system's crash report keeps an uncaught exception's reason as it was;
 the app never puts the key in one (its type never says itself), but a crash report is the
 system's, not rewritten here.
+
+## Documents that must be refused
+
+The self-test's licensing group, against the account server it plays, through the same activation
+and the same gate a profile meets: a document whose grace and period are over gives export only and
+no profile opens; one signed by another key under the server's key id, and another Mac's (its
+`machineID` not this one's), are refused at activation and leave this Mac not connected; a stored
+document given a year more on disk, its signature kept, is refused at the next start. The valid
+document, through the same steps, connects this Mac and opens the profile — their control.
+
+## Reminders for an account with a key alone
+
+Such an account has no email, so no letter says its period is ending (the owner, 2 November). The
+system's notifications do, a week and a day before the end (`ExpiryReminders`, `ExpiryNotifications`):
+
+- **Asked once, by itself**: right after a key connected this Mac, or when the first warning before
+  the period's end appears — never at a launch for its own sake, never over the lock screen.
+- **The app's line first**, why it asks at all: «Напомнить об окончании подписки нам больше нечем:
+  почты у вас нет.» Only "Remind me" leads to the system's question.
+- **Refused, nothing changes**: the banner warns as before; the offer is not made again by itself.
+  Settings › Account offers it again — the system's question, or System Settings › Notifications
+  when they were turned off there.
+- Set again whenever the period's end moves; removed when this Mac is signed out or the account
+  is not a key's. An account with an email is never asked.
 
 `account.json` (§4.2): the device's token, the document, the clock's floor — owner-only, beside the
 vault, read before it is unlocked; a newer format is refused and never written over, an unreadable
@@ -71,9 +101,9 @@ The design's "Аккаунт" boards (`docs/DESIGN.md`), in `UI/AccountViews.swi
 - **First launch**: sign in → connect → master password (the owner's order); the master password
   equal to the account's is refused, compared directly as an HMAC under a one-time key — never a key
   derived from it (§10.1, the owner's rule).
-- **Settings › Account**: the plan and until when, how long without the server, this Mac's code,
-  sign out (`signout.consequences`), the license's Macs with this one marked and the others
-  unlinkable (`unlink.consequences`), the site.
+- **Settings › Account**: the plan and until when, how long without the server, for a key's
+  account its reminders, this Mac's code, sign out (`signout.consequences`), the license's Macs
+  with this one marked and the others unlinkable (`unlink.consequences`), the site.
 - **Banners** above the profiles in §8.5's order, the period's end warned a week and a day before;
   **the sidebar's line** about the rights; a profile that may only be exported says so in its row
   and does not open — the rule, said as a rule.
@@ -83,8 +113,10 @@ The design's "Аккаунт" boards (`docs/DESIGN.md`), in `UI/AccountViews.swi
 A release carries `PBAccountServerURL` (https), `PBAccountSiteURL` and `PBEntitlementPublicKeys`
 (`scripts/build-app.sh` from `scripts/release.sh`), and nothing in the environment changes them.
 `--release-check` refuses a build without a server, without keys, or trusting the development
-server's key (`445c6300da0205b1`); CI checks that a development build fails it. A development build
-has no licensing unless the self-test gives it a server and keys through the environment.
+server's key (`445c6300da0205b1`) — so `scripts/release.sh`, which runs it on the app it is about to
+publish, refuses to make such a release, as it refuses one whose profiles would not open in
+Safari's window. CI proves each refusal: a development build (no server), and copies of the release
+changed in one thing each (its keys removed; the development key added).
 
 ## Open
 
