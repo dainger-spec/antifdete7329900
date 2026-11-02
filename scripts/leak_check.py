@@ -463,8 +463,20 @@ def main():
         if not quic_bypass and not (control_h3 and seen):
             skipped.append(f"{name}, QUIC: {'the control saw no HTTP/3 without a proxy' if not control_h3 else 'no answer through the proxy'}"
                            " — the site is down or answers no HTTP/3 here, so a bypass could not have shown")
+        refused = result.get("_relayRefused") if profile.get("relay") else None
         if stun_bypass:
             rtc = "BYPASSES THE PROXY (srflx/host candidate)"
+        elif refused:
+            # The gate's one-address rule (docs/TUNNEL.md): the relay only for a proxy whose UDP leaves
+            # from its TCP exit. Here the proxy forwards from this runner, so the refusal says the
+            # runner's own UDP and TCP leave from different addresses: WebRTC is off, as a launch
+            # leaves it, and the relay's path is not shown in this run (the self-test's call shows it).
+            rtc = f"no RTCPeerConnection — the gate refused the relay ({refused})"
+            skipped.append(f"{name}, WebRTC through the relay: the gate refused it on this runner ({refused}"
+                           + ("" if refused != "elsewhere" else ": this runner's UDP leaves from another address than its TCP")
+                           + ") — the relay's path was not shown here; the self-test's call shows it")
+            if (webrtc.get("relay") or 0) > 0 or webrtc.get("available") is not False:
+                warnings.append(f"{name}: the gate refused the relay, yet the page had WebRTC ({webrtc})")
         elif webrtc.get("available") is False:
             rtc = "no RTCPeerConnection (nothing to leak)"
         elif (webrtc.get("relay") or 0) > 0:
