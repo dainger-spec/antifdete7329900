@@ -1,36 +1,31 @@
 name: CI
 
-# A measurement branch only, never merged (the owner, 2 November: "numbers, not code" — WebRTC and
-# the camera in a profile, next to this Mac's Safari, on our probe pages and live fingerprinting
-# services; and whether WebKit can keep the WebRTC API while no packet leaves). The product's own CI
-# does not run here (scripts/measure/rtc_media.py).
+# A measurement branch only, never merged (the owner, 2 November: ten SOCKS5 proxies bought for
+# UDP — does each carry UDP, from the address its TCP leaves from, fast enough for a call?). The
+# product's own CI does not run here (scripts/measure/proxy_udp.py). The proxies and their login
+# come from the repository secret PB_TEST_PROXIES; the repository is public, so the summary names
+# no address and the full report is kept only encrypted to a key outside the repository.
 on:
   push:
 
 jobs:
-  measure:
-    name: TURN on loopback (${{ matrix.runner }})
+  proxy-udp:
+    name: SOCKS5 UDP of the bought proxies (${{ matrix.runner }})
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-26, xcode-27]
+        runner: [ubuntu-24.04, macos-26]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: The machine
-        run: |
-          sw_vers; xcodebuild -version | head -1
-          defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString
-          system_profiler SPCameraDataType SPAudioDataType 2>/dev/null | head -40 || true
-      - name: Build the app without the App Sandbox
-        run: SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
-      - name: WebKit's TURN client against a relay on 127.0.0.1 and on the physical interface, under pktap
-        timeout-minutes: 40
-        run: python3 scripts/measure/turn_loopback.py --app build/unsandboxed/Lumen.app --out build/measure
+      - name: Each proxy, in turn — TCP exit, UDP ASSOCIATE, STUN, TURN, round trips, a second association
+        env:
+          PB_TEST_PROXIES: ${{ secrets.PB_TEST_PROXIES }}
+        run: python3 -u scripts/measure/proxy_udp.py --out build/proxy-udp --pubkey scripts/measure/report_key.pub --label "${{ matrix.runner }}"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: turn-loopback-${{ matrix.runner }}
-          path: build/measure
+          name: proxy-udp-${{ matrix.runner }}
+          path: build/proxy-udp
           if-no-files-found: ignore
