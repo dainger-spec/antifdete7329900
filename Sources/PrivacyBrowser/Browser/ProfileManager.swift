@@ -2,6 +2,8 @@ import BrowserCore
 import CryptoKit
 import Foundation
 import os
+import TunnelCore
+import TunnelTransport
 import WebKit
 
 /// Launches, stops and deletes profiles; owns the running `BrowserSession`s.
@@ -84,8 +86,9 @@ final class ProfileManager: ObservableObject {
     /// The directory Safari's frameworks use as their home in a profile's own process, encrypted
     /// between runs like everything else (`SafariHomeVault`).
     private let safariHomeVault: SafariHomeVault
-    /// The packet tunnel that carries proxied profiles' WebRTC (when it is on).
-    private let tunnel = TunnelManager.shared
+    /// Why a running profile that wants WebRTC runs without it (`WebRTCGate`), for its row and
+    /// inspector; said once when it is decided. Gone when the profile stops.
+    @Published private(set) var webRTCRefusals: [UUID: WebRTCRefusal] = [:]
     private var sessions: [UUID: BrowserSession] = [:]
     /// Profiles running in their own process (`ProfileProcess`, off unless asked for). A profile is
     /// in this or in `sessions`, never both.
@@ -229,11 +232,11 @@ final class ProfileManager: ObservableObject {
         if let proxy = stored.proxy, !runsInProfileProcess, !probedBeforeLaunch {
             diagnoseProxy(of: id, proxy, startURL: stored.startURL)
         }
-        // A profile's own process runs its profile itself: it never starts another process. A
-        // profile whose WebRTC goes through the packet tunnel stays here: the tunnel's routes are
-        // this process's, and a process of its own would keep a view of the tunnel of its own,
-        // which can stop the tunnel under another profile (docs/ISOLATION_AND_LIMITATIONS.md §4a).
-        if ProfileProcess.isEnabled, !runsInProfileProcess, !relaysWebRTCThroughTunnel(stored) {
+        // A profile's own process runs its profile itself: it never starts another process. Every
+        // profile runs in one of its own, WebRTC through its proxy included: the relay is this
+        // process's, and the network guard holds the profile's process to its proxy
+        // (`decideWebRTC`, docs/TUNNEL.md).
+        if ProfileProcess.isEnabled, !runsInProfileProcess {
             var stored = stored
             // Its languages and time zone are fixed when the process starts. With no location
             // remembered for the proxy yet — a first launch, or a new proxy — they are looked up
@@ -326,7 +329,6 @@ final class ProfileManager: ObservableObject {
             session = try BrowserSession(profileID: id, profileName: summary.name, configuration: configuration,
                                          passwordVault: passwords, passwordSettings: passwordSettings, library: library)
         } catch {
-            tunnel.unregister(profile: id)
             // Thrown before the session created its data store (see BrowserSession.init).
             if !configuration.ephemeral { _ = try? await webDataVault.seal(profileID: id, key: key, activeStore: false) }
             throw error
@@ -469,6 +471,7 @@ final class ProfileManager: ObservableObject {
             self.pendingCookieImports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
             self.pendingCookieExports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
             self.children[id] = nil
+            self.releaseWebRTC(of: id, pid: child.processIdentifier)
             self.windowsUp.remove(id)
             self.resumeWindowWaiters(of: id, up: false)
             self.runningProfileIDs.remove(id)
@@ -502,6 +505,135 @@ final class ProfileManager: ObservableObject {
         try? repository.markLaunched(id)
         // The app's settings for browsing, before anything else is asked of it.
         child.send(.preferences(BrowsingPreferences.current.forProfileProcess))
+        // A profile with a SOCKS5 proxy that wants WebRTC waits for this before it builds anything.
+        if let proxy = stored.proxy, WebRTCGate.wantsRelay(policy: stored.webRTCPolicy, proxy: proxy) {
+            Task { await self.decideWebRTC(for: id, name: summary.name, child: child, proxy: proxy, policy: stored.webRTCPolicy) }
+        }
+    }
+
+    // MARK: WebRTC through the profile's proxy
+
+    /// Decides a launch's WebRTC for a profile in its own process (`WebRTCGate`), and says the
+    /// decision to the process. The relay only when the network guard holds that process to its
+    /// proxy and the proxy relays UDP; anything else is WebRTC off in the engine, said once.
+    private func decideWebRTC(for id: UUID, name: String, child: ProfileProcess, proxy: ProxySettings, policy: WebRTCPolicy) async {
+        let guardState = NetworkGuard.shared.state
+        // The proxy is asked about UDP only when nothing else rules the relay out.
+        var udp = ProxyUDPSupport.unknown
+        if guardState == .ready { udp = await Self.proxyUDP(proxy) }
+        var decision = WebRTCGate.decide(policy: policy, proxy: proxy, ownProcess: true, guardState: guardState, udp: udp)
+        var relay: WebRTCRelay?
+        if decision == .relay {
+            let pid = child.processIdentifier
+            // Held first: no relay exists for a process the guard does not hold.
+            var held = false
+            if children[id] === child { held = await NetworkGuard.shared.hold(pid: pid, proxy: proxy) }
+            if held, children[id] === child {
+                do {
+                    relay = try WebRTCRelays.shared.start(profile: id, proxy: proxy)
+                } catch {
+                    log.error("The WebRTC relay of \(id.uuidString, privacy: .public) did not start: \(error.logKind, privacy: .public)")
+                }
+            }
+            if relay == nil {
+                if held { NetworkGuard.shared.release(pid: pid) }
+                decision = .off(.notRegistered)
+            }
+        }
+        // Stopped meanwhile: nothing to say, and nothing this decision made is kept (a relaunch's
+        // own relay, made since, is not this one's to stop).
+        guard children[id] === child else {
+            if let relay {
+                WebRTCRelays.shared.stop(profile: id, onlyIf: relay)
+                NetworkGuard.shared.release(pid: child.processIdentifier)
+            }
+            return
+        }
+        switch decision {
+        case .relay:
+            guard let relay else { return }
+            webRTCRefusals[id] = nil
+            log.notice("WebRTC of \(id.uuidString, privacy: .public) goes through its proxy")
+            child.send(.webRTC(WebRTCLaunchMessage(relay: .init(urls: relay.urls, username: relay.username, credential: relay.credential),
+                                                   refusal: nil)))
+        case .off(let reason):
+            if let reason {
+                webRTCRefusals[id] = reason
+                log.notice("WebRTC of \(id.uuidString, privacy: .public) is off: \(reason.rawValue, privacy: .public)")
+                noteWebRTCOff(id, name: name, reason: reason)
+            }
+            child.send(.webRTC(WebRTCLaunchMessage(relay: nil, refusal: reason)))
+        case .native:
+            // Not for a proxied profile; said as off, so that the process does not wait.
+            child.send(.webRTC(WebRTCLaunchMessage(relay: nil, refusal: nil)))
+        }
+    }
+
+    /// Whether `proxy` relays UDP, asked the way the relay will use it (`ProxyUDPCheck`).
+    private static func proxyUDP(_ proxy: ProxySettings) async -> ProxyUDPSupport {
+        guard proxy.kind == .socks5, let port = UInt16(exactly: proxy.port) else { return .unsupported }
+        let outcome = await ProxyUDPCheck.run(proxy: SOCKSProxy(host: proxy.host, port: port,
+                                                                username: proxy.username, password: proxy.password))
+        if case .supported = outcome { return .supported }
+        return .unsupported
+    }
+
+    /// The relay and the guard's hold of a profile whose process ended or was stopped.
+    private func releaseWebRTC(of id: UUID, pid: pid_t) {
+        WebRTCRelays.shared.stop(profile: id)
+        NetworkGuard.shared.release(pid: pid)
+        webRTCRefusals[id] = nil
+    }
+
+    /// Why WebRTC is off for this run, said once per run of the profile.
+    private func noteWebRTCOff(_ id: UUID, name: String, reason: WebRTCRefusal) {
+        guard !webRTCOffNoted.contains(id) else { return }
+        webRTCOffNoted.insert(id)
+        onError?(Self.webRTCOffText(reason))
+    }
+
+    /// The words for each reason, with what the person can do about it.
+    static func webRTCOffText(_ reason: WebRTCRefusal) -> String {
+        switch reason {
+        case .guardNotInBuild: return L("launch.webrtcOff.guardNotInBuild")
+        case .guardNotInstalled: return L("launch.webrtcOff.guardNotInstalled")
+        case .guardAwaitingApproval: return L("launch.webrtcOff.guardAwaitingApproval")
+        case .guardOff: return L("launch.webrtcOff.guardOff")
+        case .guardNotAnswering: return L("launch.webrtcOff.guardNotAnswering")
+        case .guardUnproven: return L("launch.webrtcOff.guardUnproven")
+        case .httpProxy: return L("launch.webrtcOff.httpProxy")
+        case .proxyWithoutUDP: return L("launch.webrtcOff.proxyWithoutUDP")
+        case .proxyUDPUnknown: return L("launch.webrtcOff.proxyUDPUnknown")
+        case .notOwnProcess: return L("launch.webrtcOff.notOwnProcess")
+        case .notRegistered: return L("launch.webrtcOff.notRegistered")
+        }
+    }
+
+    // In a profile's own process: what the manager decided (`ProfileCommand.webRTC`), and the
+    // launch waiting for it.
+    private static var webRTCMessage: WebRTCLaunchMessage?
+    private static var webRTCWaiters: [CheckedContinuation<WebRTCLaunchMessage?, Never>] = []
+
+    /// The manager's decision arrived (`ProfileSessionHost`).
+    static func receiveWebRTC(_ message: WebRTCLaunchMessage) {
+        webRTCMessage = message
+        let waiters = webRTCWaiters
+        webRTCWaiters.removeAll()
+        for waiter in waiters { waiter.resume(returning: message) }
+    }
+
+    /// The manager's decision, waited for at most `seconds`; nil when none came (WebRTC then off).
+    private static func webRTCDecision(within seconds: Double) async -> WebRTCLaunchMessage? {
+        if let webRTCMessage { return webRTCMessage }
+        return await withCheckedContinuation { continuation in
+            webRTCWaiters.append(continuation)
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                let waiters = webRTCWaiters
+                webRTCWaiters.removeAll()
+                for waiter in waiters { waiter.resume(returning: webRTCMessage) }
+            }
+        }
     }
 
     /// The app's settings for browsing changed: every profile in a process of its own gets them
@@ -762,16 +894,29 @@ final class ProfileManager: ObservableObject {
         sessions[id]?.showLibrary(section)
     }
 
-    /// The packet tunnel's relay for a profile that wants WebRTC behind a SOCKS5 proxy, or nil:
-    /// the profile then runs with WebRTC off, and the user is told why once per run.
+    /// The relay a launch's pages are given for WebRTC through the profile's proxy, or nil: the
+    /// profile then runs with WebRTC off. In a profile's own process the manager decided it
+    /// (`decideWebRTC`) and holds the relay; this process waits for its word, and without one runs
+    /// with WebRTC off. A profile launched here, in the manager, never gets one: the network guard
+    /// tells profiles apart by their processes (`WebRTCRefusal.notOwnProcess`).
     private func webRTCRelay(for id: UUID, _ configuration: ProfileConfiguration) async -> WebRTCRelay? {
         guard let proxy = configuration.proxy, configuration.webRTCPolicy != .disabled else { return nil }
-        if let relay = await tunnel.register(profile: id, proxy: proxy) { return relay }
-        if !webRTCOffNoted.contains(id) {
-            webRTCOffNoted.insert(id)
-            // Only the words: a build without the extension is told so, not asked to turn it on.
-            let socks = BuildKind.carriesTunnel ? L("launch.webrtcOff.noTunnel") : L("launch.webrtcOff.noTunnelInBuild")
-            onError?(proxy.kind == .socks5 ? socks : L("launch.webrtcOff.httpProxy"))
+        guard WebRTCGate.wantsRelay(policy: configuration.webRTCPolicy, proxy: proxy) else {
+            noteWebRTCOff(id, name: "", reason: .httpProxy)
+            return nil
+        }
+        if runsInProfileProcess {
+            // The manager answers within the time its proxy check takes (`ProxyUDPCheck`).
+            guard let message = await Self.webRTCDecision(within: 40) else {
+                log.error("No word from the manager on this launch's WebRTC: it stays off")
+                return nil
+            }
+            return message.relay.map { WebRTCRelay(urls: $0.urls, username: $0.username, credential: $0.credential) }
+        }
+        if case let .off(reason?) = WebRTCGate.decide(policy: configuration.webRTCPolicy, proxy: proxy, ownProcess: false,
+                                                      guardState: NetworkGuard.shared.state, udp: .unknown) {
+            webRTCRefusals[id] = reason
+            noteWebRTCOff(id, name: "", reason: reason)
         }
         return nil
     }
@@ -784,6 +929,7 @@ final class ProfileManager: ObservableObject {
     func stop(_ id: UUID) async throws {
         if let child = children.removeValue(forKey: id) {
             runningProfileIDs.remove(id)
+            releaseWebRTC(of: id, pid: child.processIdentifier)
             windowsUp.remove(id)
             resumeWindowWaiters(of: id, up: false)
             busyProfileIDs.insert(id)
@@ -803,7 +949,6 @@ final class ProfileManager: ObservableObject {
         // (a tab it opened now would get no store, proxy or scripts of the profile).
         warmUpRobots[id]?.stop(.profileStopped)
         launchTokens[id] = nil
-        tunnel.unregister(profile: id)
         let key = keys.removeValue(forKey: id)
         runningProfileIDs.remove(id)
         busyProfileIDs.insert(id)
@@ -1056,16 +1201,6 @@ final class ProfileManager: ObservableObject {
         // Starting or being encrypted: its store is about to exist or to go.
         guard !busyProfileIDs.contains(id), !isShuttingDown else { throw CookieImportError.busy }
         return .queued(try repository.queueImportedCookies(cookies, for: id))
-    }
-
-    private func relaysWebRTCThroughTunnel(_ configuration: ProfileConfiguration) -> Bool {
-        Self.relaysWebRTCThroughTunnel(configuration, tunnel: tunnel)
-    }
-
-    /// A profile whose WebRTC goes through the packet tunnel: it runs in the manager's process,
-    /// whose routes the tunnel's are, and so in our own window (`SafariChromeHost.reasonForOwnWindow`).
-    static func relaysWebRTCThroughTunnel(_ configuration: ProfileConfiguration, tunnel: TunnelManager) -> Bool {
-        configuration.webRTCPolicy != .disabled && configuration.proxy?.kind == .socks5 && tunnel.canCarryWebRTC
     }
 
     /// Every cookie of a profile, session cookies included, for an export (`CookieExport`). A

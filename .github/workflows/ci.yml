@@ -109,12 +109,12 @@ jobs:
         run: |
           set -o pipefail
           python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085 \
-            --tls-control 18086 --canary 18087 --silent 18088 &
+            --tls-control 18086 --canary 18087 --silent 18088 --socks-udp 18089 &
           PROXY_PID=$!
           for attempt in $(seq 1 40); do nc -z 127.0.0.1 18081 && break; sleep 0.5; done
           export PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 PB_SELFTEST_HTTP_AUTH_PROXY_PORT=18082 PB_SELFTEST_HTTP6_PROXY_PORT=18083
           export PB_SELFTEST_SOCKS2_PROXY_PORT=18084 PB_SELFTEST_SOCKS_AUTH_PROXY_PORT=18085
-          export PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087 PB_SELFTEST_SILENT_PROXY_PORT=18088
+          export PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087 PB_SELFTEST_SILENT_PROXY_PORT=18088 PB_SELFTEST_SOCKS_UDP_PROXY_PORT=18089
           mkdir -p build/egress27
           sudo tcpdump -i pktap,all -k NP -n -tt -l 'not host 127.0.0.1 and not host ::1' \
             > build/egress27/capture.txt 2> build/egress27/tcpdump.err &
@@ -524,7 +524,7 @@ jobs:
           set -o pipefail
           export PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 PB_SELFTEST_HTTP_AUTH_PROXY_PORT=18082 PB_SELFTEST_HTTP6_PROXY_PORT=18083
           export PB_SELFTEST_SOCKS2_PROXY_PORT=18084 PB_SELFTEST_SOCKS_AUTH_PROXY_PORT=18085
-          export PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087 PB_SELFTEST_SILENT_PROXY_PORT=18088
+          export PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087 PB_SELFTEST_SILENT_PROXY_PORT=18088 PB_SELFTEST_SOCKS_UDP_PROXY_PORT=18089
           mkdir -p build/egress
           status=0
           # The account's keychain before the app runs (scripts/keychain_check.py; compared after the
@@ -558,7 +558,7 @@ jobs:
             # control stayed in its cache, and the unsandboxed build's capture then saw neither the
             # control nor would it have seen the canary (macOS 26, every run up to 523).
             python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085 \
-              --tls-control 18086 --canary 18087 --silent 18088 --aia-tag "${variant:0:1}$(date +%s)" &
+              --tls-control 18086 --canary 18087 --silent 18088 --socks-udp 18089 --aia-tag "${variant:0:1}$(date +%s)" &
             PROXY_PID=$!
             # The proxy makes its TLS certificates before it listens.
             for attempt in $(seq 1 40); do nc -z 127.0.0.1 18081 && break; sleep 0.5; done
