@@ -4,7 +4,10 @@
 
     TEAM_ID=<TEAM_ID> SIGN_IDENTITY="Developer ID Application: <name> (<TEAM_ID>)" \\
       APP_PROFILE=lumen.provisionprofile EXTENSION_PROFILE=lumen-guard.provisionprofile \\
-      NOTARY_PROFILE=lumen-notary python3 scripts/signing_check.py
+      NOTARY_PROFILE=lumen-notary ENTITLEMENT_PUBLIC_KEYS=<id>=<base64> python3 scripts/signing_check.py
+
+ENTITLEMENT_PUBLIC_KEYS is what `lumen-api pubkey` prints on the account server: release.sh makes no
+signed build without them (a release that could accept no license), so neither does this check.
 
 Then send build/signing-check/report.txt (and notary-log.json, if notarization refused).
 `--profiles-only` reads the identity and the profiles alone (a second, no build): step 4 shows there.
@@ -183,6 +186,9 @@ def find(pattern, text, group=1):
 def main():
     env = dict(os.environ)
     needed = ["TEAM_ID", "SIGN_IDENTITY", "APP_PROFILE", "EXTENSION_PROFILE", "NOTARY_PROFILE"]
+    if "--profiles-only" not in sys.argv:
+        # The release it makes is signed, and release.sh signs none without the account server's keys.
+        needed.append("ENTITLEMENT_PUBLIC_KEYS")
     missing = [name for name in needed if not env.get(name)]
     if missing:
         print("set " + ", ".join(missing) + " (see the top of this file and docs/IDENTITY.md)", file=sys.stderr)

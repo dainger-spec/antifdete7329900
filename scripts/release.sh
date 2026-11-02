@@ -25,6 +25,11 @@
 #                              file's — any difference fails the release. Without them the script says
 #                              what goes where. From the environment only: never written anywhere
 #   PREVIOUS_APPCAST=path      the appcast published now: its releases are kept in the new one
+#   NE=1 APP_PROFILE=path EXTENSION_PROFILE=path
+#                              with the network guard: WebRTC in a proxied profile goes through its
+#                              proxy (docs/TUNNEL.md). The two Developer ID provisioning profiles of
+#                              docs/IDENTITY.md; build-app.sh embeds and signs the extension. Without
+#                              NE the release has no guard, and a proxied profile keeps WebRTC off.
 #   NOTES_FILE=path            the release notes, plain text
 #   OUT=build/release          where everything goes
 #
@@ -185,6 +190,33 @@ done
 [[ "$(codesign -d --verbose=2 "$PROFILE_EXECUTABLE" 2>&1 | awk '/^CodeDirectory/ { print }')" == *"runtime"* ]] \
   || { echo "error: the profile's executable is not signed with the hardened runtime" >&2; exit 1; }
 rm -f "$PROFILE_SIGNED"
+# With the network guard (NE=1): the app holds what installing and running it needs, the extension
+# is inside, signed by the same team, and the profile's executable — checked above — holds none of
+# it. Without it, the release says so: a proxied profile keeps WebRTC off.
+GUARD="not in this release: a proxied profile keeps WebRTC off (NE=1 and the profiles of docs/IDENTITY.md add it)"
+if [[ "${NE:-0}" == "1" ]]; then
+  [[ "$SIGN_IDENTITY" != "-" ]] || { echo "error: NE=1 needs a Developer ID signature (SIGN_IDENTITY)" >&2; exit 1; }
+  APP_SIGNED="$OUT/app-entitlements.plist"
+  codesign -d --entitlements - --xml "$APP" > "$APP_SIGNED" 2>/dev/null || true
+  [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.application-identifier' "$APP_SIGNED" 2>/dev/null)" == "$TEAM_ID.$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" ]] \
+    || { echo "error: NE=1, but the app is not signed with the application identifier of team $TEAM_ID" >&2; exit 1; }
+  /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.system-extension.install' "$APP_SIGNED" >/dev/null 2>&1 \
+    || { echo "error: NE=1, but the app may not install a system extension" >&2; exit 1; }
+  NE_PROVIDERS="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.networking.networkextension' "$APP_SIGNED" 2>/dev/null || true)"
+  [[ "$NE_PROVIDERS" == *"content-filter-provider-systemextension"* ]] \
+    || { echo "error: NE=1, but the app's signature does not carry the content filter (content-filter-provider-systemextension)" >&2; exit 1; }
+  [[ -f "$APP/Contents/embedded.provisionprofile" ]] || { echo "error: NE=1, but the app has no embedded provisioning profile" >&2; exit 1; }
+  shopt -s nullglob
+  SYSTEM_EXTENSIONS=("$APP"/Contents/Library/SystemExtensions/*.systemextension)
+  shopt -u nullglob
+  [[ ${#SYSTEM_EXTENSIONS[@]} -eq 1 ]] || { echo "error: NE=1, but the app holds ${#SYSTEM_EXTENSIONS[@]} system extensions, not one" >&2; exit 1; }
+  codesign --verify --strict "${SYSTEM_EXTENSIONS[0]}" \
+    || { echo "error: the network guard's extension is not validly signed" >&2; exit 1; }
+  [[ "$(codesign -dv "${SYSTEM_EXTENSIONS[0]}" 2>&1 | awk -F= '/^TeamIdentifier=/ { print $2 }')" == "$TEAM_ID" ]] \
+    || { echo "error: the network guard's extension is not signed by team $TEAM_ID" >&2; exit 1; }
+  rm -f "$APP_SIGNED"
+  GUARD="in this release ($(basename "${SYSTEM_EXTENSIONS[0]}")): WebRTC in a proxied profile through its proxy, once the person installs the guard (Settings › WebRTC through proxies)"
+fi
 # An executable that declares macOS 15's SDK or newer gets WebKit's network loader, and with it, on
 # macOS 27, this Mac fetched a certificate's missing intermediate outside a profile's proxy: every
 # SDK from 15.0 on, 26.5 (what Xcode 26 declares) among them; 14.x was clean (CI run 451,
@@ -328,6 +360,7 @@ echo "  $ZIP_NAME   at $DOWNLOAD_URL$ZIP_NAME (the updater's)"
 echo "  $DMG_NAME   at $DOWNLOAD_URL$DMG_NAME (the website's)"
 echo "  appcast.json   at $FEED_URL"
 echo "  update key     $KEY_ID"
+echo "  network guard  $GUARD"
 echo "  $PUBLISHED"
 echo
 echo "----- for the website: from here -----"

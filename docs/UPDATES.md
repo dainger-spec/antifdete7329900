@@ -433,8 +433,11 @@ lumen-notary` says why Apple refused one.
 
 ### What the owner provides for a real release (the owner, 2 November)
 
-Without the network extension (`NE=1` is not in the first release: no App IDs, no provisioning
-profiles — docs/IDENTITY.md has those for later). On the Mac that runs `release.sh`:
+With the network guard (`NE=1`: WebRTC in a proxied profile through its proxy, docs/TUNNEL.md) —
+since the keychain a profile's process could share with the app's is closed (docs/IDENTITY.md, "The
+keychain") — the App IDs and provisioning profiles of docs/IDENTITY.md, "What to register with
+Apple" (registered on 31 October; `scripts/signing_check.py --profiles-only` reads them back), and
+beside them, on the Mac that runs `release.sh`:
 
 1. **The Developer ID Application certificate, with its private key, in the login keychain.**
    Made by the team's Account Holder: Xcode › Settings › Accounts › the team › Manage
@@ -473,11 +476,18 @@ profiles — docs/IDENTITY.md has those for later). On the Mac that runs `releas
 Then:
 
 ```sh
-TEAM_ID=<TEAM_ID> SIGN_IDENTITY="Developer ID Application: <name> (<TEAM_ID>)" NOTARY_PROFILE=lumen-notary \
+NE=1 APP_PROFILE=<path>/lumen.provisionprofile EXTENSION_PROFILE=<path>/lumen-guard.provisionprofile \
+  TEAM_ID=<TEAM_ID> SIGN_IDENTITY="Developer ID Application: <name> (<TEAM_ID>)" NOTARY_PROFILE=lumen-notary \
   UPDATE_KEY_FILE=<file> ENTITLEMENT_PUBLIC_KEYS=<id>=<base64> \
   R2_ENDPOINT=https://<account>.r2.cloudflarestorage.com R2_ACCESS_KEY_ID=… R2_SECRET_ACCESS_KEY=… \
   VERSION=0.1.0 BUILD=1 scripts/release.sh
 ```
+
+Before the first one, `scripts/signing_check.py` (the same variables but the R2 keys and the update
+key) makes the whole chain once on a throwaway build — sign, notarize, staple, Gatekeeper, the
+release check with its keychain between profiles — and writes a report with no secret in it.
+Without `NE=1` the release has no guard: `release.sh` says so at the end, and a proxied profile
+keeps WebRTC off.
 
 At the end it prints the block for the website; then Actions › Download check › Run workflow with
 its `url` checks the published image on clean Macs.
