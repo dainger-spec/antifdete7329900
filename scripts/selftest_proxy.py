@@ -807,7 +807,9 @@ const timeout = (ms, value) => new Promise((resolve) => setTimeout(() => resolve
   b.onicecandidate = forward(a);
   const canvas = document.createElement('canvas');
   canvas.width = 320; canvas.height = 240;
-  const context = canvas.getContext('2d');
+  // A canvas kept in memory (willReadFrequently): on macOS 27 an accelerated 2D canvas gave its
+  // stream no frame at all, in the document or not (measured, run 612); this one, WebGL and a camera did.
+  const context = canvas.getContext('2d', { willReadFrequently: true });
   let painted = 0;
   const paint = setInterval(() => {
     context.fillStyle = 'hsl(' + ((painted * 7) % 360) + ',80%,50%)';
