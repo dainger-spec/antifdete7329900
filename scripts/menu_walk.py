@@ -34,8 +34,10 @@ import os
 import plistlib
 import re
 import socket
+import signal
 import subprocess
 import sys
+import threading
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -43,6 +45,59 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # and the walk itself know the app's processes by.
 EXECUTABLE = None
 PROXY_PORT = 18190
+# The walk's own limits, under the CI step's 30 minutes (and the app's own 40): past them it stops the
+# app itself and says where it was — a step killed from outside would print nothing (CI run 562, 640).
+DEADLINE = 25 * 60
+# A profile's process gets 25 s an item (SafariMenuWalkCheck) and 90 s to start: nothing from the
+# walk for this long is the app's own process stuck, not an item.
+SILENCE = 5 * 60
+
+
+def run_walk(command, environment, log, deadline=DEADLINE, silence=SILENCE):
+    """Runs the walk, its stdout read as it comes: each item's MENUWALK-PROGRESS line is printed at
+    once, so a walk that stops shows where. Past `deadline`, or `silence` seconds without a line, the
+    app and its profile's processes are stopped and a MENUWALK-ERROR line says which item was last
+    done. Returns (stdout, status): status -1 when it was stopped here."""
+    process = subprocess.Popen(command, env=environment, stdout=subprocess.PIPE, stderr=log, text=True,
+                               errors="replace", start_new_session=True)
+    lines, last = [], [time.time(), "the walk's start"]
+
+    def read():
+        for line in process.stdout:
+            lines.append(line)
+            last[0] = time.time()
+            if line.startswith("MENUWALK-PROGRESS"):
+                last[1] = line.strip()
+                print(line.rstrip(), flush=True)
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    started, stopped = time.time(), None
+    while process.poll() is None:
+        now = time.time()
+        if now - started > deadline:
+            stopped = f"the walk did not finish in {deadline // 60} minutes"
+        elif now - last[0] > silence:
+            stopped = f"nothing from the walk for {silence} s"
+        if stopped:
+            break
+        time.sleep(1)
+    if stopped:
+        message = f"MENUWALK-ERROR {stopped}; the last item done: {last[1]} — stopped here"
+        print(message, flush=True)
+        lines.append(message + "\n")
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(process.pid, sig)
+            except (ProcessLookupError, PermissionError):
+                pass
+            try:
+                process.wait(timeout=10)
+                break
+            except subprocess.TimeoutExpired:
+                continue
+    reader.join(timeout=10)
+    return "".join(lines), (-1 if stopped else process.returncode)
 
 
 def notice(kind, title, text):
@@ -425,12 +480,7 @@ def main():
             canary = domain + ".plist"
     started = time.time()
     with open(os.path.join(out, "walk.txt"), "w") as log:
-        try:
-            result = subprocess.run([os.path.join(args.app, "Contents", "MacOS", EXECUTABLE), "--menu-walk"], env=environment,
-                                    stdout=subprocess.PIPE, stderr=log, text=True, timeout=2700)
-            output, status = result.stdout, result.returncode
-        except subprocess.TimeoutExpired as expired:
-            output, status = (expired.stdout or b"").decode(errors="replace") if isinstance(expired.stdout, bytes) else (expired.stdout or ""), -1
+        output, status = run_walk([os.path.join(args.app, "Contents", "MacOS", EXECUTABLE), "--menu-walk"], environment, log)
         log.write(output)
     proxy.kill()
     if trace:
