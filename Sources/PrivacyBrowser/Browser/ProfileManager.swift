@@ -41,6 +41,8 @@ final class ProfileManager: ObservableObject {
     var onInterfaceLanguage: ((UUID, String, String, String?) -> Void)?
     /// A profile's own process answered `checkNetwork` (`ProfileNetworkGuard.report`).
     var onNetworkReport: ((UUID, ProfileNetworkReport) -> Void)?
+    /// A profile's own process answered `checkKeychain` (`KeychainCheck`).
+    var onKeychainReport: ((UUID, KeychainReport) -> Void)?
     /// This manager is the one inside a profile's own process (`ProfileSessionHost`), where the
     /// process *is* the profile: ending a warm-up there means quitting, which the host does, so
     /// this manager does not stop the profile itself.
@@ -408,7 +410,15 @@ final class ProfileManager: ObservableObject {
     /// own languages, as Safari uses them.
     private func startInOwnProcess(_ id: UUID, summary: ProfileSummary, stored: ProfileConfiguration,
                                    forWarmUpOnly: Bool = false, proxyLocationFound: Bool = false) throws {
-        guard let executable = Bundle.main.executableURL else { throw CoreError.corruptData("no executable path") }
+        // LumenProfile, never the app's own executable: in a build with the network guard that one
+        // carries the app's keychain, which every profile would then share (`ProfileExecutable`).
+        let executable: URL
+        do {
+            executable = try ProfileExecutable.url()
+        } catch {
+            log.error("A profile's process was not started: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
+            throw error
+        }
         let location = stored.needsProxyLocation ? stored.rememberedProxyLocation : nil
         // The profile's own language first (its editor: set by hand or at random), as a launch in
         // this process takes it (`webLanguage(for:)`). Inside the child it is too late to change:
@@ -456,6 +466,8 @@ final class ProfileManager: ObservableObject {
                 if let cookies { pending?.resume(returning: cookies) } else { pending?.resume(throwing: CookieImportError.busy) }
             case .networkReport(let report):
                 self.onNetworkReport?(id, report)
+            case .keychainReport(let report):
+                self.onKeychainReport?(id, report)
             case .configurationSaved:
                 try? self.repository.bumpRevision(id)
                 self.onConfigurationChanged?(id)
@@ -890,6 +902,16 @@ final class ProfileManager: ObservableObject {
     func checkNetwork(_ id: UUID, probe: URL? = nil) -> Bool {
         guard let child = children[id] else { return false }
         child.send(.checkNetwork(probe: probe))
+        return true
+    }
+
+    /// Asks a profile running in its own process to look at the data-protection keychain from
+    /// inside (`ProfileCommand.checkKeychain`); the answer comes back through `onKeychainReport`.
+    /// False when the profile does not run in a process of its own.
+    @discardableResult
+    func checkKeychain(_ id: UUID, _ probe: KeychainProbe) -> Bool {
+        guard let child = children[id] else { return false }
+        child.send(.checkKeychain(probe))
         return true
     }
 

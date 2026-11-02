@@ -176,7 +176,9 @@ enum Diagnostics {
     /// `--check-safari-chrome` in a process of its own (it loads Safari's frameworks, which this
     /// one must not): the private pieces Safari's hosted window relies on, present or not.
     static func safariChromeCheck() async -> String? {
-        guard !AppEnvironment.isSandboxed, let executable = Bundle.main.executableURL else { return nil }
+        // From the profile's executable, as a profile's process runs Safari's code: never with the
+        // app's own keychain (`ProfileExecutable`).
+        guard !AppEnvironment.isSandboxed, let executable = try? ProfileExecutable.url() else { return nil }
         return await run(executable.path, ["--check-safari-chrome"], timeout: 60)
     }
 

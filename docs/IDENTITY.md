@@ -10,6 +10,7 @@ what changed, what kept the old name and why, and what has to be registered with
 | The app, as a person sees it | `Lumen.app`; `CFBundleName` and `CFBundleDisplayName` Lumen |
 | Bundle ID (`scripts/build-app.sh`, `BUNDLE_ID`) | `io.lumenbrowser.Lumen` |
 | The executable, `Contents/MacOS/` | `Lumen` — the SwiftPM product `PrivacyBrowser`, renamed when the bundle is made |
+| A profile's process | `Contents/MacOS/LumenProfile` — the same code, signed apart under the same identifier without the entitlements that give a keychain (`ProfileExecutable`; "The keychain" below) |
 | The installer helper | `Contents/Helpers/Lumen Updater.app`, executable `LumenUpdater`, bundle ID `io.lumenbrowser.Lumen.Updater` |
 | The network guard's system extension (a content filter, docs/TUNNEL.md) | `io.lumenbrowser.Lumen.PacketTunnel` (`EXTENSION_ID`: the App ID registered on 31 October, kept), shown as "Lumen network guard" |
 | The app group (NE builds only) | `<TEAM_ID>.io.lumenbrowser.Lumen` (`APP_GROUP`); the extension's Mach service `<TEAM_ID>.io.lumenbrowser.Lumen.guard` |
@@ -77,10 +78,30 @@ Lumen.
 **The keychain.** Nothing to lose: the app's code keeps nothing in a keychain, and every keychain
 write a profile's process makes is refused for want of an entitlement (`errSecMissingEntitlement`,
 CI run 521; CI's keychain measurement lists what appears while the app runs). A build with the
-network extension (`NE=1`) carries the application identifier `<TEAM_ID>.io.lumenbrowser.Lumen`,
-which opens the data-protection keychain to it: Safari's code in a profile's process would then keep
-its "Safari Defaults" there, under that identifier and shared by every profile — to be closed before
-an NE build ships.
+network extension (`NE=1`) carries the application identifier `<TEAM_ID>.io.lumenbrowser.Lumen` and
+the app group, which open the data-protection keychain to the process that holds them — and a
+process holds them by its executable's signature alone. A profile's process used to be the app's
+own executable: Safari's code in it would have kept its "Safari Defaults" there, under that
+identifier and shared by every profile.
+
+Closed (2 November): every profile's process — and every process that runs Safari's code for the
+app — is started from `Contents/MacOS/LumenProfile`, the same code signed with the base entitlements
+only (`scripts/build-app.sh`: none of `com.apple.application-identifier`, `keychain-access-groups`,
+`com.apple.security.application-groups`, `com.apple.developer.team-identifier`, read back from the
+signature after signing). The system then gives a profile no keychain at all, whatever the app holds.
+The app reads LumenProfile's signature before every start and starts nothing from it, or from
+anything else, when it carries one of them (`ProfileExecutable`): a profile does not open, and the
+person is told the copy of Lumen is damaged. LumenProfile keeps the app's identifier, by which the
+network guard knows a profile's process (anchor, identifier, team).
+
+Shown by the self-test (two profiles in their own processes, each asked from inside: they hold none
+of those entitlements, the app's own executable does — CI's `NE=check` build gives the app the app
+group, the one an ad hoc signature can carry) and by the release check on the build that ships
+(`ReleaseCheck`): there, signed by the team, profile A's item is refused, profile B sees neither A's
+nor the app's, and a process of the app's own executable — a profile as started before — does see the
+app's, or the release stops. On CI's runners no ad hoc signature opens the data-protection keychain,
+the app group included (run 646), so that half is shown only on a signed build. CI also makes the
+release's app with LumenProfile signed with the app group: it must not start a profile.
 
 ## What to register with Apple
 

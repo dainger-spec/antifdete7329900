@@ -257,14 +257,29 @@ def main():
     notarized = find(r"^\s*status: (\w[\w ]*)$", log)
     stapled = "The staple and validate action worked" in log
     gatekeeper = bool(re.search(r": accepted\s*\n\s*source=Notarized Developer ID", log))
-    release_check = find(r"^(RELEASE-CHECK (PASS|FAIL).*)$", log)
+    # Every line of the release check, never the first PASS alone: the keychain between profiles is
+    # checked after the profile's window, and its FAIL is the check failed (release_check_gate.sh).
+    checks = re.findall(r"^RELEASE-CHECK (PASS|FAIL|INFO) (.*)$", log, re.M)
+    failed = [text for verdict, text in checks if verdict == "FAIL"]
+    window = any(verdict == "PASS" and text.startswith("a profile in a process of its own") for verdict, text in checks)
+    keychain = [(verdict, text) for verdict, text in checks
+                if text.startswith("keychain") or text.startswith("not shown in this build: keychain")]
+    keychain_failed = [text for verdict, text in keychain if verdict == "FAIL"]
+    keychain_passed = [text for verdict, text in keychain if verdict == "PASS"]
+    keychain_unshown = [text for verdict, text in keychain if verdict == "INFO" and text.startswith("not shown")]
     summary.append(("built and signed: app and extension", "OK" if built else "FAIL"))
     summary.append(("notarization", ("OK " if notarized == "Accepted" else "FAIL ") + str(notarized)
                     if submission else "NOT-RUN"))
     summary.append(("ticket stapled", "OK" if stapled else "NOT-RUN"))
     summary.append(("Gatekeeper (spctl, during the release)", "OK" if gatekeeper else "NOT-RUN"))
     summary.append(("the app as it ships starts (release check)",
-                    "OK" if release_check and "PASS" in release_check else ("FAIL" if release_check else "NOT-RUN")))
+                    ("FAIL " + failed[0][:160]) if failed else ("OK" if window else "NOT-RUN")))
+    # Shown only on a build the team signed: both of its checks PASS here, or this is not done.
+    summary.append(("keychain between profiles (release check)",
+                    ("FAIL " + keychain_failed[0][:160]) if keychain_failed
+                    else "OK" if len(keychain_passed) >= 2 and not keychain_unshown
+                    else ("NOT-SHOWN " + keychain_unshown[0][:160]) if keychain_unshown
+                    else "NOT-RUN"))
     if status != 0:
         say("the release stopped; its last lines:")
         for line in log.strip().splitlines()[-25:]:
