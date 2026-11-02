@@ -73,12 +73,19 @@ struct PrivacyBrowserApp: App {
             SettingsView()
                 .environmentObject(model)
                 .preferredColorScheme(.dark)
+                .modifier(SettingsMeasureVariant())
                 .background(WindowReader { window in
                     Theme.applyAppWindow(to: window)
                     // The design's settings: the sidebar runs to the top, under the traffic lights.
                     window.styleMask.insert(.fullSizeContentView)
                     window.titlebarAppearsTransparent = true
                     window.titleVisibility = .hidden
+                    // MEASUREMENT ONLY
+                    switch ProcessInfo.processInfo.environment["PB_MEASURE_SETTINGS"] {
+                    case "toolbar-nil": window.toolbar = nil
+                    case "toolbar-invisible": window.toolbar?.isVisible = false
+                    default: break
+                    }
                 })
         }
     }
@@ -133,6 +140,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // and web content keeps following the system's setting, as in Safari (see
         // docs/ISOLATION_AND_LIMITATIONS §11).
         NSApp.activate(ignoringOtherApps: true)
+        // `--settings-window-check` (CI): nothing otherwise.
+        SettingsWindowCheck.start()
     }
 
     /// Closing a profile window (or any window) must never quit the app — only ⌘Q or Lock do.
@@ -186,5 +195,26 @@ private struct CommandPaletteButton: View {
         }
         .keyboardShortcut("k")
         .disabled(model.phase != .unlocked)
+    }
+}
+
+/// MEASUREMENT ONLY (claude/measure-settings-window): SwiftUI's own ways to take a window's toolbar
+/// or its background away, by PB_MEASURE_SETTINGS.
+private struct SettingsMeasureVariant: ViewModifier {
+    func body(content: Content) -> some View {
+        switch ProcessInfo.processInfo.environment["PB_MEASURE_SETTINGS"] {
+        case "swiftui-background-hidden":
+            if #available(macOS 15, *) {
+                content
+                    .toolbar(removing: .title)
+                    .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+            } else {
+                content
+            }
+        case "swiftui-toolbar-hidden":
+            content.toolbar(.hidden, for: .windowToolbar)
+        default:
+            content
+        }
     }
 }
