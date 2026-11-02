@@ -249,8 +249,10 @@ enum LicenseSelfTest {
     /// `Lumen --key-crash-check [--control]` (scripts/key_crash_check.py, CI): this process signs in
     /// with the key against an account server played here, keeps the key in a vault, and crashes on
     /// purpose, the key still held; macOS writes its crash report, which the script searches for every
-    /// form of the key. The control crashes the same way with the key's text in the crash's own
-    /// message: its report must hold it, or the search proves nothing.
+    /// form of the key. The crash is on a queue of its own, whose name the report keeps (the crash
+    /// summary of CI finds the self-test's deliberate crash by its queue's name); a fatal error's own
+    /// message is not in the report (CI run 601). The control crashes the same way on a queue named
+    /// with the key's text: its report must hold it, or the search proves nothing.
     static func crashCheck(control: Bool) async -> Never {
         setvbuf(stdout, nil, _IOLBF, 0)
         let server = FakeAccountServer()
@@ -277,14 +279,17 @@ enum LicenseSelfTest {
         license.vaultOpened(vault)
         let kept = (try? AccountKeyVault.load(from: vault)) == key
         try? FileManager.default.removeItem(at: root)
-        print("KEY-CRASH signed in with the key, kept in a vault: \(kept); pid \(getpid()); crashing on purpose"
-              + (control ? ", the key's text in the crash's message (the control)" : ""))
-        if control {
-            fatalError("the control of the key-in-a-crash-report check: \(keyText)")
+        let label = control ? "PBKeyCrashCheck.control." + keyText : "PBKeyCrashCheck.crash"
+        print("KEY-CRASH signed in with the key, kept in a vault: \(kept); pid \(getpid()); crashing on purpose on the queue "
+              + (control ? "named with the key's text (the control)" : "PBKeyCrashCheck.crash"))
+        DispatchQueue(label: label).async {
+            withExtendedLifetime((license, key, vault, server)) {
+                fatalError("the key-in-a-crash-report check: a crash on purpose")
+            }
         }
-        withExtendedLifetime((license, key, vault, server)) {
-            fatalError("the key-in-a-crash-report check: a crash on purpose, the key held in memory")
-        }
+        try? await Task.sleep(nanoseconds: 30_000_000_000)
+        print("KEY-CRASH FAIL the crash on purpose did not happen in 30 s")
+        exit(3)
     }
 
     /// Every line this process wrote to the system's log since `start`, of every subsystem.

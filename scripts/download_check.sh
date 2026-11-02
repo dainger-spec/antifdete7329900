@@ -129,14 +129,20 @@ if [[ -n "$SHOTS" ]]; then
       INSTALLED=/Applications/Lumen.app
       ditto "$WORK/Applications/Lumen.app" "$INSTALLED" && quarantine "$INSTALLED"
       # The image's question, if any, answered by nobody: closed before the app is opened.
-      killall CoreServicesUIAgent 2>/dev/null
+      killall CoreServicesUIAgent DiskImageMounter 2>/dev/null
       sleep 2
       person_opens "$INSTALLED"
       sleep 10
       screencapture -x "$SHOTS/after-opening-the-app.png" && echo "screen after opening the app: $SHOTS/after-opening-the-app.png"
-      pgrep -x Lumen >/dev/null && echo "the app is running (no question was asked, or it was let through)" \
-        || echo "the app is not running: macOS is asking about it, or refused it (the screen shows which)"
-      pkill -x Lumen 2>/dev/null
+      # This copy's own process, not any other process named Lumen (CI run 601 found one and said the
+      # app ran while the screen showed it refused).
+      if pgrep -f "^$INSTALLED/Contents/MacOS/Lumen" >/dev/null; then
+        echo "the app runs from Applications: no question stopped it"
+        [[ "$EXPECT" == rejected ]] && fail "the control's app runs from Applications: Gatekeeper let an app that is not notarized start"
+      else
+        echo "the app did not start from Applications: macOS asks about it, or refused it (the screen shows which)"
+      fi
+      pkill -f "^$INSTALLED/Contents/MacOS/Lumen" 2>/dev/null
     else
       echo "Applications already holds a Lumen.app: the app's first launch is not shown on this Mac"
     fi

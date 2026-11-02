@@ -126,9 +126,13 @@ MainActor.assumeIsolated {
     } else if arguments.contains("--key-crash-check") {
         // A process holding the account's key crashes on purpose; its crash report must hold no form
         // of the key, the control's must (LicenseSelfTest.crashCheck; scripts/key_crash_check.py).
+        // Under AppKit's run loop, as the self-test runs the account server it plays (under
+        // dispatchMain, macOS 27 stopped the process before its first line: CI run 601).
         let control = arguments.contains("--control")
+        let application = NSApplication.shared
+        application.setActivationPolicy(.prohibited)
         Task { @MainActor in await LicenseSelfTest.crashCheck(control: control) }
-        dispatchMain()
+        application.run()
     } else if arguments.contains("--interface-language-check") {
         // Which language this app's interface takes, and from where, as it starts (CI: plain, with
         // -AppleLanguages, after an earlier version's write; InterfaceLanguageCheck.swift).
