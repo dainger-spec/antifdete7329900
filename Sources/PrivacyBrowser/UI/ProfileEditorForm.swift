@@ -511,6 +511,9 @@ struct ProfileEditorForm: View {
                     EditorNote(L("editor.webrtc.httpProxy"))
                 } else if tunnelCarriesWebRTC {
                     EditorNote(L("editor.webrtc.viaTunnel"))
+                } else if !BuildKind.carriesTunnel {
+                    // Nothing to turn on in this build: said as it is, with no button to an extension it lacks.
+                    EditorNote(L("editor.webrtc.noTunnelInBuild"), tone: .warning)
                 } else {
                     EditorNote(L("editor.webrtc.tunnelOff"), tone: .warning)
                     Button(L("editor.webrtc.tunnelSettings"), action: onTunnelSettings)

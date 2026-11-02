@@ -220,7 +220,8 @@ struct ProfileInspectorView: View {
             }
         }
         guard details.proxyCarriesUDP else { return L("inspector.webRTC.offHTTP") }
-        return tunnelCarriesWebRTC ? L("inspector.webRTC.viaProxy") : L("inspector.webRTC.offTunnel")
+        if tunnelCarriesWebRTC { return L("inspector.webRTC.viaProxy") }
+        return BuildKind.carriesTunnel ? L("inspector.webRTC.offTunnel") : L("inspector.webRTC.offNoTunnelInBuild")
     }
 
     // MARK: What it keeps

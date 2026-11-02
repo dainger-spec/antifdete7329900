@@ -551,7 +551,10 @@ struct UnlockView: View {
                 if model.unlockFailed {
                     // Which vault was tried: another build (sandboxed or not, other bundle id)
                     // opens a different folder with a vault of its own.
-                    Text(String(format: L("unlock.vault.info"), model.vaultCreatedDescription, model.vaultPathDescription))
+                    // Another build's own vault is a developer's case (Cursor, swift run, another bundle id):
+                    // a released Lumen has one vault, and is not told about builds it never was.
+                    Text(String(format: BuildKind.madeForRelease ? L("unlock.vault.info.release") : L("unlock.vault.info"),
+                                model.vaultCreatedDescription, model.vaultPathDescription))
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)

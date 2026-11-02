@@ -769,7 +769,9 @@ final class ProfileManager: ObservableObject {
         if let relay = await tunnel.register(profile: id, proxy: proxy) { return relay }
         if !webRTCOffNoted.contains(id) {
             webRTCOffNoted.insert(id)
-            onError?(proxy.kind == .socks5 ? L("launch.webrtcOff.noTunnel") : L("launch.webrtcOff.httpProxy"))
+            // Only the words: a build without the extension is told so, not asked to turn it on.
+            let socks = BuildKind.carriesTunnel ? L("launch.webrtcOff.noTunnel") : L("launch.webrtcOff.noTunnelInBuild")
+            onError?(proxy.kind == .socks5 ? socks : L("launch.webrtcOff.httpProxy"))
         }
         return nil
     }

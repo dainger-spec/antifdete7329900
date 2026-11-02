@@ -53,7 +53,14 @@ struct TunnelSettingsView: View {
                         .foregroundStyle(Theme.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if !tunnel.canCarryWebRTC {
+                if tunnel.state == .notBuilt {
+                    // Not the Apple account (it exists since 31 October): this build has no extension in it.
+                    Text(BuildKind.madeForRelease ? L("tunnel.notBuilt.release") : L("tunnel.notBuilt.development"))
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.leading, 17)
+                } else if !tunnel.canCarryWebRTC {
                     Text(L("tunnel.warning.off"))
                         .font(.lumenBody)
                         .foregroundStyle(Theme.textSecondary)
@@ -72,18 +79,19 @@ struct TunnelSettingsView: View {
                     }
                     .padding(.leading, 17)
                     .padding(.top, 4)
+                    if let todo {
+                        Text(todo)
+                            .font(.lumenBody)
+                            .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.leading, 17)
+                    }
                     Text(L("tunnel.instructions"))
                         .font(.lumenSecondary)
                         .foregroundStyle(Theme.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.leading, 17)
                         .padding(.top, 2)
-                } else {
-                    Text(L("tunnel.notBuilt.note"))
-                        .font(.lumenSecondary)
-                        .foregroundStyle(Theme.textTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.leading, 17)
                 }
             }
             .padding(.vertical, 18)
@@ -97,9 +105,25 @@ struct TunnelSettingsView: View {
         }
     }
 
-    private var statusText: String {
+    /// The extension needs a reboot to finish installing: said as a step to take, not as an error.
+    private var needsReboot: Bool {
+        if case let .failed(reason) = tunnel.state { return reason == L("tunnel.state.reboot") }
+        return false
+    }
+
+    /// What the person does next, for the states that wait on them.
+    private var todo: String? {
         switch tunnel.state {
-        case .notBuilt: return L("tunnel.state.notBuilt")
+        case .off: return L("tunnel.todo.off")
+        case .needsConfiguration: return L("tunnel.todo.needsConfiguration")
+        default: return needsReboot ? L("tunnel.todo.reboot") : nil
+        }
+    }
+
+    private var statusText: String {
+        if needsReboot { return L("tunnel.state.rebootTitle") }
+        switch tunnel.state {
+        case .notBuilt: return BuildKind.madeForRelease ? L("tunnel.state.notBuilt.release") : L("tunnel.state.notBuilt.development")
         case .checking: return L("tunnel.state.checking")
         case .off: return L("tunnel.state.off")
         case .awaitingApproval: return L("tunnel.state.awaitingApproval")
@@ -115,7 +139,7 @@ struct TunnelSettingsView: View {
     private var dotColor: Color {
         switch tunnel.state {
         case .ready, .connected: return Theme.running
-        case .failed: return Theme.danger
+        case .failed: return needsReboot ? Theme.warning : Theme.danger
         case .checking: return Theme.textTertiary
         case .notBuilt, .off, .awaitingApproval, .needsConfiguration: return Theme.warning
         }
