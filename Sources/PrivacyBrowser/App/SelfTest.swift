@@ -2683,6 +2683,20 @@ final class SelfTest {
               behindHeld.location?.timeZoneIdentifier == "Europe/Berlin" && heldFor < ProxyGeoLookup.nextServiceAfter + 4,
               "\(behindHeld.location?.timeZoneIdentifier ?? "nil") after \(Int(heldFor)) s")
 
+        // A profile's bypass list is for its pages. The lookup is the app's own request about the
+        // proxy and goes through it whatever the list says: around it, it would ask from this Mac's
+        // address (here: a name no resolver knows, so no answer) and be answered with this Mac's
+        // location.
+        ProxyGeoLookup.services = [.init(url: URL(string: "http://geo.selftest.invalid/pb-geo.json?tz=America/Chicago")!,
+                                         timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"])]
+        let bypassing = await ProxyGeoLookup.lookUp(proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort,
+                                                                         excludedDomains: ["geo.selftest.invalid"]),
+                                                    userAgent: "PrivacyBrowser self-test")
+        check("proxy location: a profile's bypass list naming the service does not take the lookup around the proxy",
+              bypassing.location?.timeZoneIdentifier == "America/Chicago"
+                && !bypassing.connections.isEmpty && bypassing.connections.allSatisfy { $0.port == httpPort },
+              "\(bypassing.location?.timeZoneIdentifier ?? "nil"), connections \(bypassing.connections)")
+
         var explicit = stored
         explicit.timeZoneIdentifier = "Asia/Tokyo"
         try repository.saveConfiguration(explicit, for: profile.id)
