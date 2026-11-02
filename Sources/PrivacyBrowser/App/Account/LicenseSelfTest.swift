@@ -180,7 +180,7 @@ enum LicenseSelfTest {
             if refusal == nil, manager.isRunning(profile.id) { try? await manager.stop(profile.id) }
             return refusal is LicenseRefusal
         }
-        func refusedDocument(_ result: Result<LicenseModel.ActivationOutcome, AccountFailure>) -> EntitlementCheck? {
+        func refusedDocument(_ result: Swift.Result<LicenseModel.ActivationOutcome, AccountFailure>) -> EntitlementCheck? {
             if case .failure(.document(let check)) = result { return check }
             return nil
         }
