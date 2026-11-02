@@ -164,6 +164,10 @@ enum ProfileNetworkGuard {
         if !proxies.isEmpty, !closures.sorted.contains("udp") {
             throw CoreError.invalidConfiguration("UDP could not be closed to the profile's process")
         }
+        // Nor does any profile run with the keychain open to its process (`closeTheProcess`).
+        if !closures.sorted.contains("keychain") {
+            throw CoreError.invalidConfiguration("the keychain could not be closed to the profile's process")
+        }
         missingHooks += everyStoreStartsClosed(except: profileID)
         missingHooks += everyWebViewGetsTheProfilesData()
         missingHooks += pinPrivacyPreferences()
@@ -821,9 +825,23 @@ enum ProfileNetworkGuard {
     ///   * Any read or write in the real Safari's places (`SafariPaths`): Safari's frameworks find
     ///     them from the account's real home, not from the profile's, and a profile must neither
     ///     leave its browsing there nor read the user's own into itself.
+    ///   * The keychain, whatever this process's signature carries: securityd's services — the one
+    ///     that serves the account's login keychain and the XPC ones of the data-protection keychain
+    ///     (secd) — and the account's keychain files, which only they read and write. A profile's
+    ///     process is started from LumenProfile, which holds no entitlement that gives a keychain
+    ///     (`ProfileExecutable`); this lock does not depend on that: run from the app's own
+    ///     executable, which an NE=1 build gives the application identifier that opens the
+    ///     data-protection keychain, it would still keep nothing there and be shown nothing. Without
+    ///     it, any profile's process could keep items in the login keychain, every other profile's
+    ///     was shown them, and the attributes of the person's own (KeychainIsolation; CI run 656, without it).
+    ///     Every profile's process has it, with or without a proxy, or does not run (`engage`).
     nonisolated private static func closeTheProcess(udp: Bool) -> [String] {
         var rules: [String] = []
         if udp { rules.append("(deny network-outbound (remote udp \"*:*\"))") }
+        rules.append("(deny mach-lookup (global-name \"com.apple.SecurityServer\") (global-name-regex #\"^com\\.apple\\.securityd\\.\"))")
+        if let realHome = SafariPaths.realHome {
+            rules.append("(deny file-read* file-write* (subpath \"\(realHome)/Library/Keychains\"))")
+        }
         var placesClosed = false
         if let realHome = SafariPaths.realHome, let home = ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"],
            realHome != home {
@@ -850,6 +868,9 @@ enum ProfileNetworkGuard {
             var error: UnsafeMutablePointer<CChar>?
             if sandboxInit(profile, 0, &error) == 0 {
                 if attempt.contains(services) { closures.insert("safari-xpc-services") } else { missing.append("sandbox: Safari's XPC services stay open") }
+                // The keychain is closed only if securityd is out of reach now, as the kernel answers.
+                let reached = KeychainCheck.securitydServices.filter { KeychainCheck.lookUp($0) == KERN_SUCCESS }
+                if reached.isEmpty { closures.insert("keychain") } else { missing.append("sandbox: securityd stays reachable (\(reached.joined(separator: ", ")))") }
                 if udp { closures.insert("udp") }
                 if placesClosed { closures.insert("safari-places") }
                 logger.notice("The kernel closes to this process: \(closures.sorted.joined(separator: ", "), privacy: .public)")
@@ -862,7 +883,8 @@ enum ProfileNetworkGuard {
         return missing
     }
 
-    /// What the kernel closed to this process (`closeTheProcess`): "udp", "safari-places".
+    /// What the kernel closed to this process (`closeTheProcess`): "udp", "safari-places",
+    /// "safari-xpc-services", "keychain".
     nonisolated private static let closures = LockedSet()
 
     // MARK: Lock 2: every other store closed
