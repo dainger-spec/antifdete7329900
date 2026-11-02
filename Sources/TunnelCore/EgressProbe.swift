@@ -35,3 +35,17 @@ public struct EgressProbe: Sendable {
         return .name(host, port: port)
     }
 }
+
+/// The other half of "one address": where a proxy's TCP leaves from. Cloudflare's trace
+/// (`/cdn-cgi/trace`) answers in `key=value` lines, `ip=` among them — the address the request
+/// came from. Asked through the proxy at one of Cloudflare's IPv4 addresses (`ProxyExitLookup`), it
+/// can only be the proxy's IPv4 exit: no name is resolved anywhere.
+public enum ExitTrace {
+    /// The first `ip=` line's address when it is an IPv4 one; nil for anything else (no such line,
+    /// not an address, an IPv6 one: none of them can be compared with an IPv4 relayed address).
+    public static func ipv4(in text: String) -> IPAddr? {
+        guard let line = text.split(whereSeparator: \.isNewline).first(where: { $0.hasPrefix("ip=") }),
+              let ip = IPAddr(String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)), ip.family == .v4 else { return nil }
+        return ip
+    }
+}

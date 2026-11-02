@@ -34,8 +34,13 @@ final class SiteCapture {
             var proxy: Proxy?
             /// "harness": WebRTC through the app's own relay for this profile (`WebRTCRelays`: a TURN
             /// server on 127.0.0.1 that sends through the profile's SOCKS5 proxy), as a launch gives
-            /// it. The page runs in this process, so no network guard holds it here.
+            /// it — only for a proxy whose UDP leaves from its TCP exit, as the gate wants; refused,
+            /// the profile runs without WebRTC, as a launch's would, and its results say why
+            /// (`_relayRefused`). The page runs in this process, so no network guard holds it here.
             var relay: String?
+            /// Where the proxy's TCP exit is asked (`ProxyExitLookup.endpoints`): the self-test proxy's
+            /// own trace, which answers in place of the Internet. Unset: Cloudflare's, as a launch.
+            var exitTrace: String?
         }
         struct Proxy: Decodable { var kind: String; var host: String; var port: Int }
         struct Page: Decodable {
@@ -124,10 +129,22 @@ final class SiteCapture {
             recordsHistory: false)
         // As a launch does (ProfileManager.launch): the rules the profile's web views get.
         if ContentRules.needed(by: configuration) { await ContentRules.prepare() }
+        var relayRefused: String?
         if profileSpec.relay == "harness" {
             guard let proxy = configuration.proxy, proxy.kind == .socks5 else { throw Failure("the relay needs a SOCKS5 proxy") }
-            configuration.webRTCRelay = try WebRTCRelays.shared.start(profile: summary.id, proxy: proxy)
-            print("INFO relay for \(profileSpec.name) at \(configuration.webRTCRelay?.urls.first ?? "?")")
+            // As a launch decides (ProfileManager.decideWebRTC): the relay only for a proxy whose UDP
+            // leaves from the address its TCP does, held to that address.
+            let endpoints = ProxyExitLookup.endpoints
+            if let trace = profileSpec.exitTrace.flatMap(URL.init(string:)) { ProxyExitLookup.endpoints = [trace] }
+            let (support, exit) = await ProfileManager.proxyUDP(proxy, userAgent: configuration.userAgent(hostSafariVersion: HostSafari.version))
+            ProxyExitLookup.endpoints = endpoints
+            if support == .supported, let exit {
+                configuration.webRTCRelay = try WebRTCRelays.shared.start(profile: summary.id, proxy: proxy, exit: exit)
+                print("INFO relay for \(profileSpec.name) at \(configuration.webRTCRelay?.urls.first ?? "?")")
+            } else {
+                relayRefused = support.rawValue
+                print("INFO no relay for \(profileSpec.name): the gate refused it (\(support.rawValue)); WebRTC is off, as a launch would leave it")
+            }
         }
         defer { WebRTCRelays.shared.stop(profile: summary.id) }
         let session = try BrowserSession(profileID: summary.id, profileName: summary.name, configuration: configuration,
@@ -145,6 +162,7 @@ final class SiteCapture {
                                            width: spec.window.width, height: spec.window.height), display: true)
 
         var results: [String: Any] = [:]
+        if let relayRefused { results["_relayRefused"] = relayRefused }
         for page in spec.pages {
             print("INFO [\(profileSpec.name)] \(page.name): \(page.url)")
             do {

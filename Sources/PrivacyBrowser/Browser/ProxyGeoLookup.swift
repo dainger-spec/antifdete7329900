@@ -206,7 +206,7 @@ enum ProxyGeoLookup {
 
 /// Answers the proxy's own challenge with the profile's credentials, and notes when it has none
 /// to give (the load is then cancelled: fail-closed).
-private final class ProxyChallengeObserver: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+final class ProxyChallengeObserver: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     private let credential: URLCredential?
     private let lock = NSLock()
     private var _proxyRequiredCredentials = false

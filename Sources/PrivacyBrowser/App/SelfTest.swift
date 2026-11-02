@@ -1831,6 +1831,10 @@ final class SelfTest {
     ///     page, through the relay and the proxy's UDP, with relay candidates only, at the proxy's
     ///     public address, frames decoded on the far side, and the page's own STUN server — named
     ///     after the run — never asked (a DNS question for it fails the capture).
+    ///   * One address: the gate's comparison of the proxy's UDP address with its TCP exit (the
+    ///     self-test proxy's trace says the exit), alone — the same address, another one, none found
+    ///     — and a launch whose proxy's UDP leaves from another address than its TCP: no
+    ///     RTCPeerConnection, and the profile is told why.
     /// Then the capture's control for WebRTC, outside any window: a STUN request made on purpose
     /// from a profile without a proxy, which the capture must see as the app's.
     private func webRTCThroughTheProxy(_ repository: ProfileRepository) async throws {
@@ -1848,6 +1852,12 @@ final class SelfTest {
         }
         let socks = ProxySettings(kind: .socks5, host: "127.0.0.1", port: udpPort)
         let http = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        // Where the proxy's TCP leaves from: the self-test proxy's own trace answers in place of
+        // Cloudflare's, with the address its UDP leaves from too (203.0.113.77) unless told another.
+        let exitTrace = "http://exit.selftest.invalid/cdn-cgi/trace"
+        let endpoints = ProxyExitLookup.endpoints
+        ProxyExitLookup.endpoints = [URL(string: exitTrace)!]
+        defer { ProxyExitLookup.endpoints = endpoints }
 
         // What the proxy's UDP side did so far, asked through its HTTP listener.
         func udpStats() async -> [String: Any] {
@@ -1950,6 +1960,41 @@ final class SelfTest {
         let dropped = (after["dropped"] as? [String] ?? []).filter { !((before["dropped"] as? [String] ?? []).contains($0)) }
         check("WebRTC through the proxy, the call: the relay asked the proxy for nothing but peers and its egress probe",
               dropped.isEmpty, dropped.joined(separator: ", "))
+
+        // One address: the gate's own comparison, against this proxy's UDP (203.0.113.77).
+        let userAgent = ProfileConfiguration(ephemeral: true).userAgent(hostSafariVersion: HostSafari.version)
+        let same = await ProfileManager.proxyUDP(socks, userAgent: userAgent)
+        ProxyExitLookup.endpoints = [URL(string: exitTrace + "?ip=203.0.113.78")!]
+        let elsewhere = await ProfileManager.proxyUDP(socks, userAgent: userAgent)
+        ProxyExitLookup.endpoints = [URL(string: "http://exit.selftest.invalid/pb-no-trace")!]
+        let unknown = await ProfileManager.proxyUDP(socks, userAgent: userAgent)
+        check("WebRTC through the proxy, one address: UDP that leaves from the proxy's TCP exit gives the relay, held to that address",
+              same.support == .supported && same.exit?.description == "203.0.113.77", "\(same.support) \(same.exit?.description ?? "no exit")")
+        check("WebRTC through the proxy, one address: UDP that leaves from another address than the proxy's TCP gives no relay",
+              elsewhere.support == .elsewhere && elsewhere.exit == nil, "\(elsewhere.support) \(elsewhere.exit?.description ?? "no exit")")
+        check("WebRTC through the proxy, one address: a TCP exit that cannot be found out gives no relay",
+              unknown.support == .exitUnknown && unknown.exit == nil, "\(unknown.support) \(unknown.exit?.description ?? "no exit")")
+
+        // One address, a launch: the guard standing in as for the call, a proxy whose UDP leaves from
+        // another address than its TCP leaves the profile without WebRTC, and says why.
+        ProxyExitLookup.endpoints = [URL(string: exitTrace + "?ip=203.0.113.78")!]
+        NetworkGuard.shared.selfTestStandIn = true
+        let apart: (report: [String: Any], refusals: [WebRTCRefusal], messages: [String], started: Bool)
+        do {
+            apart = try await launch(mode: "presence")
+        } catch {
+            NetworkGuard.shared.selfTestStandIn = false
+            throw error
+        }
+        NetworkGuard.shared.selfTestStandIn = false
+        ProxyExitLookup.endpoints = [URL(string: exitTrace)!]
+        info("WebRTC through the proxy, one address, a launch: \(apart.report), refusals \(apart.refusals), messages \(apart.messages)")
+        check("WebRTC through the proxy, one address: a proxy whose UDP leaves from elsewhere — no RTCPeerConnection, in the page or in an about:blank frame",
+              apart.started && apart.report["rtc"] as? String == "undefined" && apart.report["rtcFrame"] as? String == "undefined",
+              apart.report.isEmpty ? "no report from the page (started \(apart.started))" : "\(apart.report)")
+        check("WebRTC through the proxy, one address: the profile is told why, in words",
+              apart.refusals == [.proxyUDPElsewhere] && apart.messages.contains(ProfileManager.webRTCOffText(.proxyUDPElsewhere)),
+              "refusals \(apart.refusals), messages \(apart.messages)")
 
         // The capture's control for WebRTC's UDP: a STUN request from a profile without a proxy, on
         // purpose, outside every window, to a public STUN server (Google's, by address: no DNS).
