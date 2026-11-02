@@ -248,6 +248,7 @@
 "error.core.wrongPassword" = "Неверный мастер-пароль.";
 "error.core.vaultAlreadyExists" = "Здесь уже есть хранилище.";
 "error.core.vaultNotFound" = "Хранилище не найдено.";
+"profile.process.executableRefused" = "Эта копия Lumen повреждена: открыть в ней профиль безопасно нельзя. Скачайте Lumen заново и замените эту копию.";
 "error.core.corruptData" = "Данные повреждены (%@).";
 "error.core.cryptoFailure" = "Ошибка шифрования (%@).";
 "error.core.invalidConfiguration" = "Недопустимые настройки (%@).";

@@ -323,7 +323,9 @@ final class NetworkGuard: NSObject, ObservableObject {
     /// only if it saw that flow as the probe's, opened for it by WebKit, and dropped it
     /// (`GuardProof`). The request reaches no one either way: the address is never routed.
     private func prove(on connection: NSXPCConnection) async {
-        guard !proving, let executable = Bundle.main.executableURL else { return }
+        // The probe stands in for a profile's process: started as one is (`ProfileExecutable`), so
+        // what the guard is shown to see is what it sees of a profile.
+        guard !proving, let executable = try? ProfileExecutable.url() else { return }
         proving = true
         defer { proving = false }
         let process = Process()

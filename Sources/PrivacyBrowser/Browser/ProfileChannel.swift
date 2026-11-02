@@ -46,6 +46,10 @@ enum ProfileCommand: Codable {
     /// are given, or why there is none. A profile with a SOCKS5 proxy that wants WebRTC waits for it
     /// before it builds anything, and without it runs with WebRTC off.
     case webRTC(WebRTCLaunchMessage)
+    /// Look at the data-protection keychain from inside this process (`KeychainCheck`): which of the
+    /// entitlements that give one it holds, and what the keychain lets it do under the probe's own
+    /// service. Sent by the self-test and the release check only, never by the app.
+    case checkKeychain(KeychainProbe)
 }
 
 /// What the manager decided for a launch's WebRTC. With `relay`, the profile's pages are given that
@@ -102,6 +106,8 @@ enum ProfileEvent: Codable {
     case proxyLocationUnknown
     /// One step of `walkMenu`, as a line of JSON (`SafariMenuWalk`).
     case menuWalk(String)
+    /// The answer to `checkKeychain`.
+    case keychainReport(KeychainReport)
 }
 
 /// How a profile's WebKit data was sealed as its process quit: whether WebKit let the store go

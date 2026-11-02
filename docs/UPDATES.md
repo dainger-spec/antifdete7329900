@@ -546,10 +546,15 @@ method the chrome, and a profile's hold on its proxy, rely on is in this Safari 
 `Lumen --release-check` (`ReleaseCheck.swift`): a profile started the way the app starts one, with
 nothing set by hand (`PB_PROFILE_PROCESS`, `PB_SAFARI_CHROME` or the `PBProfileProcess` default set
 fail it), held to a proxy that goes nowhere, in a vault of its own in a temporary folder, must get a
-process of its own whose window is Safari's own chrome. Anything else stops the release. CI runs the
-gate in the release dry run on every push, and its controls, each of which must fail for its own
-reason: the sandboxed build, the release with Safari's chrome turned off for the profile's process
-(`--release-check --control`), and `release.sh` given `SANDBOX=1`. What it proves is the Mac the
+process of its own whose window is Safari's own chrome; then a second profile beside it, for the
+keychain between profiles (docs/IDENTITY.md, "The keychain"). Anything else stops the release:
+`release.sh` takes the verdict from the check's exit status and every one of its lines
+(`scripts/release_check_gate.sh`) — one PASS among them is not a pass, and a keychain FAIL after the
+window's PASS stops it as any other. CI runs the gate in the release dry run on every push, and its
+controls, each of which must fail for its own reason: the sandboxed build, the release with Safari's
+chrome turned off for the profile's process (`--release-check --control`), the release's app with
+LumenProfile signed with the app group, `release.sh` given `SANDBOX=1`, and the gate's reading held
+to outputs made up for the purpose, each with the verdict it must give. What it proves is the Mac the
 release is made on; on another macOS a profile whose window cannot be Safari's says so in its window
 (simplified mode, ISOLATION_AND_LIMITATIONS.md §4a).
 

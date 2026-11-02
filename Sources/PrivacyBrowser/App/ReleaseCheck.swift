@@ -18,6 +18,13 @@ import BrowserCore
 /// `--control` is the check's proof that it can fail: the same launch with Safari's chrome turned
 /// off for the profile's process (`PB_SAFARI_CHROME=0`, which that process inherits) must come back
 /// FAIL for its window. CI runs both, and the check on the sandboxed build, which must fail too.
+///
+/// Then the keychain between profiles (`KeychainIsolation`), with a second profile: no profile's
+/// process holds the entitlements that give a keychain, and — where the keychain takes the app's own
+/// item, as on a build the team signed — what one profile tries to keep there, the other does not
+/// see, nor the app's item, which a process of the app's own executable (a profile as started
+/// before LumenProfile) must see, or the check could not have told. A build that holds the team's
+/// application identifier must show both: a release with the network guard is not made without it.
 @MainActor
 enum ReleaseCheck {
     static func start(arguments: [String]) {
@@ -93,8 +100,11 @@ enum ReleaseCheck {
         let manager = ProfileManager(repository: repository)
         var hostsChrome: Bool?
         var exited: Int32?
-        manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
-        manager.onChildExited = { _, status in exited = status }
+        var otherUp = false
+        manager.onProfileRunning = { id, hosts in
+            if id == profile.id { hostsChrome = hosts } else { otherUp = true }
+        }
+        manager.onChildExited = { id, status in if id == profile.id { exited = status } }
         manager.onError = { message in print("RELEASE-CHECK INFO the manager was told: \(message)") }
         do {
             try await manager.launch(profile.id)
@@ -106,20 +116,59 @@ enum ReleaseCheck {
         while hostsChrome == nil, exited == nil, Date().timeIntervalSince(started) < 90 {
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
-        if manager.isRunning(profile.id) { try? await manager.stop(profile.id) }
 
         guard let process else {
+            await manager.shutDown()
             return fail("the profile ran in the app's own process, not in a process of its own")
         }
         switch hostsChrome {
         case true?:
             print("RELEASE-CHECK PASS a profile in a process of its own (pid \(process)), its window Safari's own chrome")
-            return 0
         case false?:
+            await manager.shutDown()
             return fail("the profile's window is the app's own, not Safari's: a simplified mode (its process's log says why, SafariChromeHost)")
         case nil:
+            await manager.shutDown()
             return fail(exited.map { "the profile's process exited (status \($0)) before its window came up" }
                         ?? "no word from the profile's process in 90 s")
         }
+
+        // The keychain between profiles (KeychainIsolation): a second profile beside the first, both
+        // asked from inside, with the app and a process of its own executable as the controls. Here,
+        // on the build as it ships, signed by the team, the keychain itself is shown.
+        let other: ProfileSummary
+        do {
+            other = try repository.create(name: "Release check B", configuration: ProfileConfiguration(
+                proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: 1), matchProxyLocation: false))
+            try await manager.launch(other.id)
+        } catch {
+            await manager.shutDown()
+            return fail("a second profile, for the keychain, did not start: \(error)")
+        }
+        let otherStarted = Date()
+        while !otherUp, manager.isRunning(other.id), Date().timeIntervalSince(otherStarted) < 90 {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+        guard otherUp, manager.processIdentifier(of: other.id) != nil else {
+            await manager.shutDown()
+            return fail("a second profile, for the keychain, did not come up in a process of its own")
+        }
+        let outcome = await KeychainIsolation.look(manager: manager, profiles: profile.id, other.id)
+        await manager.shutDown()
+        outcome.details.forEach { print("RELEASE-CHECK INFO keychain: \($0)") }
+        for (name, verdict) in [(KeychainIsolation.entitlementsName, outcome.entitlements), (KeychainIsolation.itemsName, outcome.items)] {
+            switch verdict {
+            case .pass:
+                print("RELEASE-CHECK PASS \(name)")
+            case .fail(let why):
+                return fail("\(name): \(why)")
+            case .skip(let why):
+                // A build the team signed with the app's identity must show it; one without the
+                // network guard, or one no team signed (a dry run), has no keychain to share.
+                guard !outcome.appHoldsTeamIdentity else { return fail("\(name): not shown on the build that ships: \(why)") }
+                print("RELEASE-CHECK INFO not shown in this build: \(name) — \(why)")
+            }
+        }
+        return 0
     }
 }

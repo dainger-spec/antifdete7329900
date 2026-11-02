@@ -1619,7 +1619,9 @@ extension SafariChrome {
         }
         setenv("CFFIXED_USER_HOME", home.path, 1)
         setenv("HOME", home.path, 1)
-        guard let executable = Bundle.main.executableURL?.path ?? arguments.first else { exit(3) }
+        // This process's own file: in a process started from LumenProfile the bundle's executable is
+        // the app's, which carries the app's keychain in a build with the network guard.
+        guard let executable = ProfileExecutable.ownPath() ?? arguments.first else { exit(3) }
         var argv: [UnsafeMutablePointer<CChar>?] = arguments.map { strdup($0) }
         argv.append(nil)
         execv(executable, &argv)
@@ -1667,7 +1669,8 @@ extension SafariChrome {
         try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         setenv("CFFIXED_USER_HOME", home.path, 1)
         setenv("PRIVACYBROWSER_VAULT_DIR", vault.path, 1)
-        guard let executable = Bundle.main.executableURL?.path ?? arguments.first else { return }
+        // This process's own file, never the bundle's executable (as `isolateForCheck` above).
+        guard let executable = ProfileExecutable.ownPath() ?? arguments.first else { return }
         var argv: [UnsafeMutablePointer<CChar>?] = arguments.map { strdup($0) }
         argv.append(nil)
         execv(executable, &argv)
