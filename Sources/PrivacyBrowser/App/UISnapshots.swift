@@ -119,20 +119,23 @@ enum UISnapshots {
             (licenses.signedIn, .clockSkew(seconds: 11 * 60)),
             (licenses.signedIn, .trialStarted(until: now.addingTimeInterval(7 * 86_400))),
         ]
-        problems += await Shot(name: "license-banners", size: CGSize(width: 1000, height: 1100), edges: true) {
-            ZStack(alignment: .topLeading) {
-                Theme.surface.ignoresSafeArea()
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(shown.indices, id: \.self) { index in
-                        LicenseBannerView(license: shown[index].license, banner: shown[index].banner)
+        // Two pictures of five: a window no taller than CI's screen (run 594 cut the tenth).
+        for (part, range) in [("license-banners", 0..<5), ("license-banners-2", 5..<shown.count)] {
+            problems += await Shot(name: part, size: CGSize(width: 1000, height: 560), edges: true) {
+                ZStack(alignment: .topLeading) {
+                    Theme.surface.ignoresSafeArea()
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(Array(range), id: \.self) { index in
+                            LicenseBannerView(license: shown[index].license, banner: shown[index].banner)
+                        }
                     }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 56)
                 }
-                .padding(.horizontal, 24)
-                .padding(.top, ProfilesScreen.inspectorTop)
-            }
-            .environment(\.colorScheme, .dark)
-            .environmentObject(model)
-        }.capture(into: folder)
+                .environment(\.colorScheme, .dark)
+                .environmentObject(model)
+            }.capture(into: folder)
+        }
         // Signed in, in the Settings window as the app shows it: a bare scroll view did not reach
         // the window's edges (CI run 585's edge check).
         problems += await Shot(name: "account-page", size: SettingsView.size, edges: true) {

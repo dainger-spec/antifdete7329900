@@ -89,6 +89,11 @@ jobs:
         timeout-minutes: 45
         env:
           PB_SELFTEST_STRICT: "1"
+          # The interface in Russian, this Mac's language English: the check of dates in the
+          # person's language can only tell the two apart so. Until the interface took this Mac's
+          # language (1 November) the self-test ran in Russian by the old default; run 594 then
+          # skipped that check, which the strict run refuses.
+          PRIVACYBROWSER_LANG: ru
         run: |
           set -o pipefail
           python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085 \
@@ -443,6 +448,11 @@ jobs:
           # A check skipped on this runner fails the step, but for the ones this runner cannot make
           # (each said with its reason in the self-test's own SKIP line and summary).
           PB_SELFTEST_STRICT: "1"
+          # The interface in Russian, this Mac's language English: the check of dates in the
+          # person's language can only tell the two apart so. Until the interface took this Mac's
+          # language (1 November) the self-test ran in Russian by the old default; run 594 then
+          # skipped that check, which the strict run refuses.
+          PRIVACYBROWSER_LANG: ru
         run: |
           set -o pipefail
           export PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 PB_SELFTEST_HTTP_AUTH_PROXY_PORT=18082 PB_SELFTEST_HTTP6_PROXY_PORT=18083
