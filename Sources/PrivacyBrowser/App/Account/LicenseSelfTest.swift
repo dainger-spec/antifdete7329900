@@ -2,6 +2,7 @@ import BrowserCore
 import CryptoKit
 import Foundation
 import Network
+import OSLog
 
 /// The self-test's licensing group: the app's own license (`LicenseModel`, `AccountHTTP` over this
 /// Mac's loopback) against an account server played here — documents signed with a key made for
@@ -13,7 +14,10 @@ import Network
 ///   not in `account.json`, not in the app's defaults, not in the diagnostics ZIP, whose search is
 ///   first shown to find a key planted in a ZIP of its own (a search that cannot fail checks nothing);
 /// - the server gone silent changes nothing: the Mac works on, and says until when (the GRACE date);
-/// - the server's `device_revoked` signs this Mac out, and says why.
+/// - the server's `device_revoked` signs this Mac out, and says why;
+/// - an expired document, one under a forged signature, another Mac's, and a stored one changed on
+///   disk are each refused — no work, no profile opens — where the document of step 2, through the
+///   same activation and the same gate, passed: their control.
 @MainActor
 enum LicenseSelfTest {
     struct Result {
@@ -27,6 +31,7 @@ enum LicenseSelfTest {
     private static let keyForms = [keyText, "0123456789ABCDEFGHJKMNMT", "0123456789abcdefghjkmnmt", "0123-4567-89AB", "0123-4567-89ab"]
 
     static func run(scratch: URL) async -> [Result] {
+        let began = Date()
         var results: [Result] = []
         func check(_ name: String, _ passed: Bool, _ detail: @autoclosure () -> String = "") {
             results.append(Result(name: "licensing: " + name, passed: passed, detail: passed ? "" : detail()))
@@ -102,6 +107,31 @@ enum LicenseSelfTest {
         let bundle = await Diagnostics.bundle(Diagnostics.snapshot(repository: repository), logMinutes: 1)
         check("the diagnostics ZIP holds no form of the key, and none of the server's tokens",
               !bundle.isEmpty && !contains(bundle, keyForms + [server.deviceToken]), bundle.isEmpty ? "no ZIP" : "a key or a token is in it")
+        // The system's log, as this process wrote it since the group began: every line of every
+        // subsystem, not only the app's. A marker written now in clear must be found in it first.
+        let marker = "lumen-key-log-check-\(UUID().uuidString)"
+        Logger(subsystem: "PrivacyBrowser", category: "SelfTest").notice("\(marker, privacy: .public)")
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        let log = processLog(since: began)
+        check("this process's log is read whole: a line just written in clear is found in it (the search can fail)",
+              log.contains(marker), log.isEmpty ? "the log could not be read" : "the marker was not found in \(log.count) characters")
+        check("this process's log holds no form of the key, and none of the server's tokens",
+              !log.isEmpty && !contains(Data(log.utf8), keyForms + [server.deviceToken]), log.isEmpty ? "no log" : "a key or a token is in the log")
+        // The automation API, signed in with the key: what every route answers (its handler, as the
+        // server calls it), a start refused by the license among them.
+        let automation = AutomationHandler(manager: manager, repository: repository)
+        manager.launchGate = { _ in LicenseRefusal(text: "the automation API's start, refused for this check") }
+        var answers = Data()
+        let id = profile.id.uuidString
+        for route: AutomationRoute in [.listProfiles, .profile(id), .start(id, window: false), .open(id, url: URL(string: "https://example.com")!), .stop(id)] {
+            let response = await automation.handle(route)
+            answers.append(Data("\(response.status) ".utf8))
+            answers.append(response.body)
+        }
+        manager.launchGate = { [weak license] id in license?.refusalToOpen(id) }
+        check("the automation API's answers (list, profile, start, open, stop) hold no form of the key, and none of the server's tokens",
+              answers.count > 40 && !contains(answers, keyForms + [server.deviceToken]),
+              answers.count > 40 ? "a key or a token is in them" : "no answers")
 
         // 4. The server silent: nothing changes, and the Mac says until when it works.
         server.stop()
@@ -126,11 +156,144 @@ enum LicenseSelfTest {
         check("the server's device_revoked signs this Mac out, and the banner says why",
               revokedLicense.mode == .notSignedIn && revokedLicense.state?.banners.first == .deviceRevoked,
               "\(String(describing: revokedLicense.mode)), \(String(describing: revokedLicense.state?.banners))")
+
+        // 6. Documents that must be refused (the owner, 2 November: an expired one, a forged
+        //    signature, another Mac's — each must go red), each in an account of its own on this Mac,
+        //    through the same activation and the same gate as the document of step 2, which passed
+        //    and is their control. Then a stored document changed on disk.
+        server.revoked = false
+        let serverURL = URL(string: "http://127.0.0.1:\(server.port)")!
+        func freshLicense(_ name: String) -> (model: LicenseModel, folder: URL) {
+            let folder = root.appendingPathComponent(name, isDirectory: true)
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let model = LicenseModel(root: folder, configuration: AccountConfiguration(
+                serverURL: serverURL, siteURL: configuration.siteURL, keys: configuration.keys, source: .environment))
+            model.profilesHere = { [profile] in [profile] }
+            model.useKey(key)
+            return (model, folder)
+        }
+        /// The gate a profile meets when it opens, with this license's decision.
+        func gateRefuses(_ model: LicenseModel) async -> Bool {
+            manager.launchGate = { [weak model] id in model?.refusalToOpen(id) }
+            var refusal: Error?
+            do { try await manager.launch(profile.id, openingWindow: false) } catch { refusal = error }
+            if refusal == nil, manager.isRunning(profile.id) { try? await manager.stop(profile.id) }
+            return refusal is LicenseRefusal
+        }
+        func refusedDocument(_ result: Result<LicenseModel.ActivationOutcome, AccountFailure>) -> EntitlementCheck? {
+            if case .failure(.document(let check)) = result { return check }
+            return nil
+        }
+
+        server.serve = .expired
+        let expired = freshLicense("expired").model
+        let expiredActivation = await expired.activate(label: "", vault: nil)
+        let expiredGate = await gateRefuses(expired)
+        check("an expired document (signed, for this Mac, its grace and period over) gives no work: export only, a profile does not open",
+              expired.mode == .exportOnly && expiredGate,
+              "activation \(expiredActivation), mode \(String(describing: expired.mode)), gate refused: \(expiredGate)")
+
+        server.serve = .forgedSignature
+        let forged = freshLicense("forged").model
+        let forgedActivation = await forged.activate(label: "", vault: nil)
+        let forgedGate = await gateRefuses(forged)
+        check("a document under a forged signature is refused: this Mac is not connected, a profile does not open",
+              refusedDocument(forgedActivation) == .badSignature && forged.mode == .notSignedIn && forgedGate,
+              "activation \(forgedActivation), mode \(String(describing: forged.mode)), gate refused: \(forgedGate)")
+
+        server.serve = .otherMac
+        let other = freshLicense("other-mac").model
+        let otherActivation = await other.activate(label: "", vault: nil)
+        let otherGate = await gateRefuses(other)
+        check("another Mac's document (signed, its machineID not this Mac's) is refused: not connected, a profile does not open",
+              refusedDocument(otherActivation) == .wrongDevice && other.mode == .notSignedIn && otherGate,
+              "activation \(otherActivation), mode \(String(describing: other.mode)), gate refused: \(otherGate)")
+
+        // A stored document given a year more on disk, its signature kept: the same account worked
+        // before the change (FULL, the profile opens), and is export-only after it.
+        server.serve = .valid
+        let (stored, folder) = freshLicense("changed-on-disk")
+        _ = await stored.activate(label: "", vault: nil)
+        let storedMode = stored.mode
+        // Asked of the license alone: in FULL the gate would start the profile.
+        let storedOpens = stored.refusalToOpen(profile.id) == nil
+        let file = AccountFile(directory: folder)
+        var changed = false
+        if var record = try? file.load(), var envelope = record.entitlement,
+           var payload = (try? JSONSerialization.jsonObject(with: envelope.payload)) as? [String: Any] {
+            let later = Date().addingTimeInterval(365 * 86_400).formatted(.iso8601)
+            for field in ["expiresAt", "graceEndsAt", "periodEndsAt"] { payload[field] = later }
+            if let bytes = try? JSONSerialization.data(withJSONObject: payload) {
+                envelope.payload = bytes
+                record.entitlement = envelope
+                changed = (try? file.save(record)) != nil
+            }
+        }
+        let reread = LicenseModel(root: folder, configuration: AccountConfiguration(
+            serverURL: serverURL, siteURL: configuration.siteURL, keys: configuration.keys, source: .environment))
+        reread.profilesHere = { [profile] in [profile] }
+        let rereadGate = await gateRefuses(reread)
+        check("a stored document changed on disk (a year more, its signature kept) is refused at the next start: export only, a profile does not open"
+              + " — unchanged it was FULL and the profile opened",
+              storedMode == .full && storedOpens && changed && reread.state?.check == .badSignature && reread.mode == .exportOnly && rereadGate,
+              "before: \(String(describing: storedMode)), opens \(storedOpens); changed: \(changed); after: \(String(describing: reread.state?.check)),"
+              + " \(String(describing: reread.mode)), gate refused \(rereadGate)")
+        manager.launchGate = { [weak license] id in license?.refusalToOpen(id) }
         return results
     }
 
     private static func contains(_ data: Data, _ forms: [String]) -> Bool {
         forms.contains { data.range(of: Data($0.utf8)) != nil }
+    }
+
+    /// `Lumen --key-crash-check [--control]` (scripts/key_crash_check.py, CI): this process signs in
+    /// with the key against an account server played here, keeps the key in a vault, and crashes on
+    /// purpose, the key still held; macOS writes its crash report, which the script searches for every
+    /// form of the key. The control crashes the same way with the key's text in the crash's own
+    /// message: its report must hold it, or the search proves nothing.
+    static func crashCheck(control: Bool) async -> Never {
+        setvbuf(stdout, nil, _IOLBF, 0)
+        let server = FakeAccountServer()
+        guard await server.start() else {
+            print("KEY-CRASH FAIL the account server played here did not start")
+            exit(2)
+        }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("lumen-key-crash-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let base = URL(string: "http://127.0.0.1:\(server.port)")!
+        let license = LicenseModel(root: root, configuration: AccountConfiguration(
+            serverURL: base, siteURL: base, keys: [server.keyID: server.publicKey], source: .environment))
+        guard case .key(let key) = AccountKeyInput.classify(keyText) else {
+            print("KEY-CRASH FAIL the key did not read")
+            exit(2)
+        }
+        license.useKey(key)
+        let activation = await license.activate(label: "", vault: nil)
+        guard (try? activation.get()) != nil, license.mode == .full,
+              let vault = try? MasterVault.create(in: root.appendingPathComponent("vault"), password: "key-crash", iterations: 1_000) else {
+            print("KEY-CRASH FAIL the key did not sign in: \(activation)")
+            exit(2)
+        }
+        license.vaultOpened(vault)
+        let kept = (try? AccountKeyVault.load(from: vault)) == key
+        try? FileManager.default.removeItem(at: root)
+        print("KEY-CRASH signed in with the key, kept in a vault: \(kept); pid \(getpid()); crashing on purpose"
+              + (control ? ", the key's text in the crash's message (the control)" : ""))
+        if control {
+            fatalError("the control of the key-in-a-crash-report check: \(keyText)")
+        }
+        withExtendedLifetime((license, key, vault, server)) {
+            fatalError("the key-in-a-crash-report check: a crash on purpose, the key held in memory")
+        }
+    }
+
+    /// Every line this process wrote to the system's log since `start`, of every subsystem.
+    private static func processLog(since start: Date) -> String {
+        guard let store = try? OSLogStore(scope: .currentProcessIdentifier),
+              let entries = try? store.getEntries(at: store.position(date: start)) else { return "" }
+        var text = ""
+        for entry in entries { text += entry.composedMessage + "\n" }
+        return text
     }
 }
 
@@ -152,6 +315,11 @@ final class FakeAccountServer {
     private(set) var lastActivation: Activation?
     /// Refreshes answer `401 device_revoked`.
     var revoked = false
+    /// The documents it signs: as they should be, or one this app must refuse.
+    enum Serve { case valid, expired, forgedSignature, otherMac }
+    var serve = Serve.valid
+    /// Another key, claiming to be the server's (`.forgedSignature`).
+    private let forger = Curve25519.Signing.PrivateKey()
     private var listener: NWListener?
 
     var publicKey: Data { signer.publicKey.rawRepresentation }
@@ -254,18 +422,23 @@ final class FakeAccountServer {
         connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
     }
 
-    /// A pro plan's document for this Mac, issued now: four days full, three more of grace.
+    /// A pro plan's document for this Mac, issued now: four days full, three more of grace. As
+    /// `serve` says: issued a month ago (its grace and its period over), signed by another key under
+    /// the server's key id, or for another Mac.
     private func document(machineID: String) -> [String: Any] {
         let now = Date()
-        func at(_ hours: Double) -> String { now.addingTimeInterval(hours * 3_600).formatted(.iso8601) }
+        let issued: Double = serve == .expired ? -30 * 24 : 0
+        func at(_ hours: Double) -> String { now.addingTimeInterval((issued + hours) * 3_600).formatted(.iso8601) }
+        let forMachine = serve == .otherMac ? MachineID.compute(platformUUID: UUID().uuidString) : machineID
         let payload: [String: Any] = [
             "kind": "lumen.entitlement", "version": 1, "documentID": UUID().uuidString.lowercased(), "accountID": "a", "licenseID": "l",
-            "deviceID": deviceID, "machineID": machineID, "role": "owner", "plan": "pro", "status": "active", "exportReason": NSNull(),
-            "limits": ["profiles": 50, "devices": 3, "seats": 1], "profilesOnOtherDevices": 0, "periodEndsAt": at(30 * 24),
+            "deviceID": deviceID, "machineID": forMachine, "role": "owner", "plan": "pro", "status": "active", "exportReason": NSNull(),
+            "limits": ["profiles": 50, "devices": 3, "seats": 1], "profilesOnOtherDevices": 0,
+            "periodEndsAt": at(serve == .expired ? 14 * 24 : 30 * 24),
             "issuedAt": at(0), "refreshAfter": at(24), "expiresAt": at(96), "graceEndsAt": at(168),
         ]
         let bytes = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
-        let signature = (try? signer.signature(for: bytes)) ?? Data()
+        let signature = (try? (serve == .forgedSignature ? forger : signer).signature(for: bytes)) ?? Data()
         return ["format": 1, "keyID": keyID, "payload": bytes.base64EncodedString(), "signature": signature.base64EncodedString()]
     }
 }

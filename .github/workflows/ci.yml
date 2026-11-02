@@ -373,6 +373,25 @@ jobs:
           echo "$out" | grep '^RELEASE-CHECK' || echo "$out" | tail -n 20
           echo "$out" | grep -F 'no account server in this build' >/dev/null \
             || { echo "::error title=Release gate::the build without an account server did not fail for it"; status=1; }
+          # The release's own app, changed in one thing each (a copy, signed again ad hoc): with no key
+          # for the documents of rights it could accept no license; trusting the development server's
+          # key, anyone could sign one. Both must fail, each for its reason (the owner, 2 November: a
+          # release refuses to be made with the license's check off, as without Safari's window).
+          gate() {
+            local name="$1" change="$2" expected="$3" copy="build/release-gate-$1/Lumen.app"
+            rm -rf "build/release-gate-$name"; mkdir -p "build/release-gate-$name"
+            ditto build/release/app/Lumen.app "$copy"
+            /usr/libexec/PlistBuddy -c "$change" "$copy/Contents/Info.plist"
+            codesign --force --sign - --preserve-metadata=entitlements,flags,runtime "$copy" 2>&1 | tail -n 2
+            out=$("$copy/Contents/MacOS/Lumen" --release-check 2>&1) \
+              && { echo "::error title=Release gate::the release with $name passed the release check"; status=1; }
+            echo "$out" | grep '^RELEASE-CHECK' || echo "$out" | tail -n 20
+            echo "$out" | grep -F "$expected" >/dev/null \
+              || { echo "::error title=Release gate::the release with $name did not fail for it"; status=1; }
+          }
+          gate "no-keys" "Delete :PBEntitlementPublicKeys" "no keys of the documents of rights"
+          gate "development-key" "Add :PBEntitlementPublicKeys:445c6300da0205b1 string /+/sbiH55nmy+2gRqQz12E0spl9L/YDWvjnecaN2M1c=" \
+            "the development server's key"
           if SANDBOX=1 VERSION=0.1.1 BUILD=2 OUT=build/release-sandboxed scripts/release.sh > build/release-sandboxed.log 2>&1; then
             echo "::error title=Release gate::release.sh made a release of the sandboxed build"; status=1
           fi
@@ -566,6 +585,11 @@ jobs:
           if [ -s build/crashes/invalid-messages.txt ]; then
             { echo "### WebKit refused a message"; cut -c1-400 build/crashes/invalid-messages.txt | head -20 | sed 's/^/    /'; } >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: The account's key in a crash report (a process holding it crashes on purpose; the control's report must hold it)
+        # The self-test looks for the key in the log, the diagnostics ZIP and the automation API's
+        # answers; a crash report is written by macOS after the process is gone (scripts/key_crash_check.py).
+        timeout-minutes: 10
+        run: python3 scripts/key_crash_check.py build/unsandboxed/Lumen.app/Contents/MacOS/Lumen
       - name: Safari's private classes and methods the hosted chrome relies on
         # SafariChrome.expectedPieces: a macOS whose Safari renamed or removed one fails here, by name,
         # instead of a profile's window quietly degrading on a user's Mac. After the self-test, so

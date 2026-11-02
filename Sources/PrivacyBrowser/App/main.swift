@@ -123,6 +123,12 @@ MainActor.assumeIsolated {
         // The update scenarios of docs/UPDATES.md §8, driven by scripts/update_check.py on a CI
         // runner (UpdateSelfTest.swift): they replace this very app with another build.
         UpdateSelfTest.start(arguments: arguments)
+    } else if arguments.contains("--key-crash-check") {
+        // A process holding the account's key crashes on purpose; its crash report must hold no form
+        // of the key, the control's must (LicenseSelfTest.crashCheck; scripts/key_crash_check.py).
+        let control = arguments.contains("--control")
+        Task { @MainActor in await LicenseSelfTest.crashCheck(control: control) }
+        dispatchMain()
     } else if arguments.contains("--interface-language-check") {
         // Which language this app's interface takes, and from where, as it starts (CI: plain, with
         // -AppleLanguages, after an earlier version's write; InterfaceLanguageCheck.swift).

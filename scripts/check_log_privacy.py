@@ -88,6 +88,8 @@ ALLOWED_IN_FILE = {
     ("SafariAccountPreferences.swift", "domain"): "a preferences domain's name from the code: com.apple.Safari, or the self-test's",
     ("SafariAccountPreferences.swift", "removed"): "names of com.apple.Safari keys from that file's own list, or \"none\"",
     ("SafariAccountPreferences.swift", "left"): "names of com.apple.Safari keys from that file's own list, or \"none\"",
+    ("LicenseSelfTest.swift", "marker"):
+        "a random marker the self-test writes to find it in the log again: nothing of the user's",
     ("ExceptionLog.swift", "redactedReason"):
         "an exception's reason with every address, path, e-mail, quote and long number cut out "
         "(LogRedaction, LogRedactionTests); the full reason is logged privately",
