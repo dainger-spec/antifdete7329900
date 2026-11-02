@@ -77,7 +77,9 @@ final class GuardFilterProvider: NEFilterDataProvider {
             }
             GuardService.shared.ledger.note(verdict, pid: pid, flow: facts, by: opener.name, onBehalf: opener.onBehalf)
         }
-        return verdict == .allow ? .allow() : .drop()
+        // A question for the proxy's name goes through, and the flow stays looked into: a resolver
+        // may ask its next question on the same socket.
+        return verdict == .allow ? NEFilterDataVerdict(passBytes: readBytes.count, peekBytes: 512) : .drop()
     }
 
     /// The flow's transport, remote address and port, and the name it was opened by.

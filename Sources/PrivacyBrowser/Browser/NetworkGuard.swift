@@ -257,7 +257,7 @@ final class NetworkGuard: NSObject, ObservableObject {
         // process it does not take back loses its profile.
         var refused: [pid_t] = []
         for (pid, registration) in held {
-            if await give(registration, to: connection) == nil { refused.append(pid) }
+            if await give(registration, to: connection) != nil { refused.append(pid) }
         }
         if !refused.isEmpty {
             for pid in refused { held[pid] = nil }
