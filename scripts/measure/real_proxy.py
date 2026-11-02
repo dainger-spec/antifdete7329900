@@ -301,6 +301,8 @@ def main():
         if pages is None:
             summary.append(f"| {profile} | — | NO RESULT | | | |")
             continue
+        if pages.get("_relayRefused"):
+            summary.append(f"| {profile} | the gate refused the relay: {pages['_relayRefused']} (WebRTC off, as a launch leaves it) | | | | |")
         for name, _, _ in LIVE_SITES:
             page = read_page(pages.get(name), exit_ip, own_ip, mask)
             summary.append(f"| {profile} | {name} | {'yes' if page['loaded'] else 'NO: ' + page.get('error', '')[:80]} | "
