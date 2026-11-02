@@ -235,6 +235,16 @@ enum SafariChromeHost {
         return NSStringFromClass(type(of: controller)) == "BrowserWindowController"
     }
 
+    /// Closes every browser window of Safari's as its close button does (`performClose:`): Safari
+    /// keeps such a window's pages for reopening it, and the last one closing quits the process
+    /// (`onLastWindowClosed`). What `ProfileCommand.closeWindows` asks; the self-test's way of
+    /// ending a profile as a person does.
+    static func performCloseEveryWindow() {
+        for window in NSApp.windows where isBrowserWindow(window) && window.isVisible {
+            window.performClose(nil)
+        }
+    }
+
     /// Closes every browser window of Safari's, as a quit or a stop does before the profile's data
     /// is sealed: the windows go when the user quits, rather than staying up through the seal.
     static func closeEveryWindow() {

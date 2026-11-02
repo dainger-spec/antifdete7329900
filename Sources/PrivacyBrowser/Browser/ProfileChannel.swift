@@ -39,6 +39,9 @@ enum ProfileCommand: Codable {
     /// Choose every item of Safari's menu bar in turn, from item `from` on, and say what each did
     /// (`SafariMenuWalk`). Sent by the `--menu-walk` check only, never by the app.
     case walkMenu(from: Int)
+    /// Close every window of the profile as its close button does — the way a person ends a
+    /// profile; the last one closing quits the process, which seals. Sent by the self-test only.
+    case closeWindows
     /// The manager's decision on this launch's WebRTC (`WebRTCGate`): the relay the profile's pages
     /// are given, or why there is none. A profile with a SOCKS5 proxy that wants WebRTC waits for it
     /// before it builds anything, and without it runs with WebRTC off.

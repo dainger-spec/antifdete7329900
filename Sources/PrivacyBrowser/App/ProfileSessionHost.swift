@@ -287,6 +287,8 @@ enum ProfileSessionHost {
             case .webRTC(let message):
                 // The launch inside this process waits for it (`ProfileManager.webRTCRelay`).
                 ProfileManager.receiveWebRTC(message)
+            case .closeWindows:
+                SafariChromeHost.performCloseEveryWindow()
             case .walkMenu(let from):
                 SafariMenuWalk.start(from: from, session: manager?.session(for: profileID)) { line in
                     ProfileSessionHost.send(.menuWalk(line))

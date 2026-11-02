@@ -68,14 +68,59 @@ enum ProfileNetworkGuard {
     /// profile's store in use. Returns how many were closed.
     @discardableResult
     static func closeEveryPage() -> Int {
+        guardClosedPages()
         let close = NSSelectorFromString("_close")
         var closed = 0
         for view in webViews.allObjects where view.responds(to: close) {
+            closedPages.add(view)
             view.perform(close)
             closed += 1
         }
         return closed
     }
+
+    /// The pages `closeEveryPage` closed: their web views stay, Safari's chrome's to tear down.
+    private static let closedPages = NSHashTable<WKWebView>.weakObjects()
+    private static var closedPagesGuarded = false
+
+    /// A page closed here keeps its web view, and Safari's chrome tears that down later, on its own
+    /// way out: `-[WebViewController invalidate]` sets the web view's find delegate to nil. WebKit
+    /// reaches the find delegate through the page's find client, and closing the page replaced that
+    /// client with WebKit's base one, which the accessors' downcast refuses: a trap on WebKit 27
+    /// (the owner's Mac, 2 November: a profile ended after its seal in -[WKWebView
+    /// _setFindDelegate:]); a WebKit that does not check writes into an object of the wrong type.
+    /// For a page closed here the two answer as a page without a find delegate does and touch
+    /// nothing; every other web view is WebKit's as before. (The diagnostic logging delegate's
+    /// accessors, the other client a close takes away, check for none themselves.)
+    private static func guardClosedPages() {
+        guard !closedPagesGuarded else { return }
+        closedPagesGuarded = true
+        let setter = NSSelectorFromString("_setFindDelegate:")
+        if let method = class_getInstanceMethod(WKWebView.self, setter) {
+            typealias Setter = @convention(c) (AnyObject, Selector, AnyObject?) -> Void
+            let original = unsafeBitCast(method_getImplementation(method), to: Setter.self)
+            let replacement: @convention(block) (AnyObject, AnyObject?) -> Void = { view, delegate in
+                if let view = view as? WKWebView, closedPages.contains(view) { return }
+                original(view, setter, delegate)
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        } else {
+            log.notice("-[WKWebView _setFindDelegate:] is not in this macOS: nothing to guard for closed pages")
+        }
+        let getter = NSSelectorFromString("_findDelegate")
+        if let method = class_getInstanceMethod(WKWebView.self, getter) {
+            typealias Getter = @convention(c) (AnyObject, Selector) -> Unmanaged<AnyObject>?
+            let original = unsafeBitCast(method_getImplementation(method), to: Getter.self)
+            let replacement: @convention(block) (AnyObject) -> AnyObject? = { view in
+                if let view = view as? WKWebView, closedPages.contains(view) { return nil }
+                return original(view, getter)?.takeUnretainedValue()
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        } else {
+            log.notice("-[WKWebView _findDelegate] is not in this macOS: nothing to guard for closed pages")
+        }
+    }
+
     /// WebKit's real default store, closed and kept alive so that WebKit keeps handing out this one.
     private static var realDefaultStore: WKWebsiteDataStore?
     /// Hooks that could not be installed because what they patch is not in this macOS.

@@ -853,6 +853,15 @@ final class ProfileManager: ObservableObject {
         return true
     }
 
+    /// Asks a profile running in its own process to close its windows as their close buttons do
+    /// (`ProfileCommand.closeWindows`, the self-test's). False when it has no process of its own.
+    @discardableResult
+    func closeWindows(_ id: UUID) -> Bool {
+        guard let child = children[id] else { return false }
+        child.send(.closeWindows)
+        return true
+    }
+
     /// Asks a profile running in its own process to walk Safari's menu bar from item `from` on;
     /// each step comes back through `onMenuWalk`. False when it does not run in a process of its own.
     @discardableResult
