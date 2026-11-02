@@ -11,8 +11,8 @@ what changed, what kept the old name and why, and what has to be registered with
 | Bundle ID (`scripts/build-app.sh`, `BUNDLE_ID`) | `io.lumenbrowser.Lumen` |
 | The executable, `Contents/MacOS/` | `Lumen` — the SwiftPM product `PrivacyBrowser`, renamed when the bundle is made |
 | The installer helper | `Contents/Helpers/Lumen Updater.app`, executable `LumenUpdater`, bundle ID `io.lumenbrowser.Lumen.Updater` |
-| The packet-tunnel system extension | `io.lumenbrowser.Lumen.PacketTunnel` (`EXTENSION_ID`), shown as "Lumen WebRTC relay" |
-| The app group (NE builds only) | `<TEAM_ID>.io.lumenbrowser.Lumen` (`APP_GROUP`); the extension's Mach service `<TEAM_ID>.io.lumenbrowser.Lumen.tunnel` |
+| The network guard's system extension (a content filter, docs/TUNNEL.md) | `io.lumenbrowser.Lumen.PacketTunnel` (`EXTENSION_ID`: the App ID registered on 31 October, kept), shown as "Lumen network guard" |
+| The app group (NE builds only) | `<TEAM_ID>.io.lumenbrowser.Lumen` (`APP_GROUP`); the extension's Mach service `<TEAM_ID>.io.lumenbrowser.Lumen.guard` |
 | Releases | `Lumen-<version>.zip` (`scripts/release.sh`) |
 
 Every text of the app's own that names the product says Lumen (both languages), and so do the
@@ -35,7 +35,7 @@ check's `User-Agent`.
   existing vault where it is. The setup screen's text that names the folder names it as it is.
 - **Inside a profile's home**, `Library/PrivacyBrowser/SafariDefaults` (Safari's per-profile
   settings): a path in sealed data, for the same reason.
-- **The log's subsystem**, `PrivacyBrowser` (and the extension's `PrivacyBrowser.PacketTunnel`): the
+- **The log's subsystem**, `PrivacyBrowser` (and the extension's `PrivacyBrowser.NetworkGuard`): the
   bundle ID is a build setting (CI builds four of them), the readers of the log — the diagnostics
   archive, the exception log's reader, CI's update check — would have to move with it in step, and
   the extension's code is not changed by the rename.
@@ -93,6 +93,9 @@ In this order, in Certificates, Identifiers & Profiles of the team that signs Lu
    capabilities *Network Extensions*, *System Extension* and *App Groups* (on, nothing assigned).
 3. **Identifier, App ID (explicit, macOS) `io.lumenbrowser.Lumen.PacketTunnel`**, description
    "Lumen WebRTC relay": capabilities *Network Extensions* and *App Groups* (on, nothing assigned).
+   Since 2 November it holds the network guard, a content filter (docs/TUNNEL.md): the same App ID
+   and capability; its profile must allow `content-filter-provider-systemextension`, which the
+   Network Extensions capability grants with the others.
 4. **The app group `<TEAM_ID>.io.lumenbrowser.Lumen`: nothing to register.** A macOS group named with
    the team ID's prefix is the team's by its signature; the portal's App Groups list holds `group.…`
    identifiers only. This is the step least sure to hold as written: if the extension is refused for
@@ -111,7 +114,7 @@ Then (docs/TUNNEL.md, docs/UPDATES.md §6):
 
 ```sh
 NE=1 TEAM_ID=<TEAM_ID> SIGN_IDENTITY="Developer ID Application: <name> (<TEAM_ID>)" \
-  APP_PROFILE=lumen.provisionprofile EXTENSION_PROFILE=lumen-tunnel.provisionprofile \
+  APP_PROFILE=lumen.provisionprofile EXTENSION_PROFILE=lumen-guard.provisionprofile \
   NOTARY_PROFILE=lumen-notary VERSION=0.1.0 BUILD=1 UPDATE_KEY_FILE=… FEED_URL=https://… \
   scripts/release.sh
 ```
