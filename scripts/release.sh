@@ -124,6 +124,23 @@ SIGNED_FLAGS="$(codesign -d --verbose=2 "$APP" 2>&1 | awk '/^CodeDirectory/ { pr
   || { echo "error: the app's signature lets a debugger attach (DEBUGGABLE): never in a release" >&2; exit 1; }
 [[ "$SIGNED_FLAGS" == *"runtime"* ]] \
   || { echo "error: the app is not signed with the hardened runtime ($SIGNED_FLAGS)" >&2; exit 1; }
+# A profile's process runs from LumenProfile (ProfileExecutable.swift): the same rules for its
+# signature, and none of the entitlements that would give every profile the app's keychain.
+PROFILE_EXECUTABLE="$APP/Contents/MacOS/LumenProfile"
+[[ -x "$PROFILE_EXECUTABLE" ]] || { echo "error: the app has no profile executable (Contents/MacOS/LumenProfile)" >&2; exit 1; }
+PROFILE_SIGNED="$OUT/profile-entitlements.plist"
+codesign -d --entitlements - --xml "$PROFILE_EXECUTABLE" > "$PROFILE_SIGNED" 2>/dev/null || true
+for key in com.apple.application-identifier keychain-access-groups com.apple.security.application-groups com.apple.developer.team-identifier \
+           com.apple.security.app-sandbox com.apple.security.get-task-allow; do
+  if /usr/libexec/PlistBuddy -c "Print :$key" "$PROFILE_SIGNED" >/dev/null 2>&1; then
+    echo "error: the profile's executable is signed with $key" >&2; exit 1
+  fi
+done
+/usr/libexec/PlistBuddy -c "Print :com.apple.security.cs.disable-library-validation" "$PROFILE_SIGNED" >/dev/null 2>&1 \
+  || { echo "error: the profile's executable keeps library validation on: Safari's frameworks would not load" >&2; exit 1; }
+[[ "$(codesign -d --verbose=2 "$PROFILE_EXECUTABLE" 2>&1 | awk '/^CodeDirectory/ { print }')" == *"runtime"* ]] \
+  || { echo "error: the profile's executable is not signed with the hardened runtime" >&2; exit 1; }
+rm -f "$PROFILE_SIGNED"
 # An executable that declares macOS 15's SDK or newer gets WebKit's network loader, and with it, on
 # macOS 27, this Mac fetched a certificate's missing intermediate outside a profile's proxy: every
 # SDK from 15.0 on, 26.5 (what Xcode 26 declares) among them; 14.x was clean (CI run 451,
@@ -131,6 +148,9 @@ SIGNED_FLAGS="$(codesign -d --verbose=2 "$APP" 2>&1 | awk '/^CodeDirectory/ { pr
 # made only from a build that declares an older SDK — Xcode 27's SwiftPM writes 14.0. A dry run
 # says so and goes on.
 DECLARED_SDK="$(xcrun vtool -show-build "$APP/Contents/MacOS/Lumen" | awk '$1 == "sdk" { print $2; exit }')"
+PROFILE_SDK="$(xcrun vtool -show-build "$PROFILE_EXECUTABLE" | awk '$1 == "sdk" { print $2; exit }')"
+[[ "$PROFILE_SDK" == "$DECLARED_SDK" ]] \
+  || { echo "error: the profile's executable declares SDK $PROFILE_SDK, the app's $DECLARED_SDK: they are one build" >&2; exit 1; }
 if [[ "${DECLARED_SDK%%.*}" -ge 15 ]]; then
   if [[ "$SIGN_IDENTITY" == "-" ]]; then
     DRY+=("the build declares SDK $DECLARED_SDK: a signed release of it would be refused (docs/ISOLATION_AND_LIMITATIONS.md §2)")
@@ -165,7 +185,8 @@ rm -rf "$CHECK_DIR"
 mkdir -p "$CHECK_DIR"
 ditto "$APP" "$CHECK_DIR/Lumen.app"
 CHECK_APP="$CHECK_DIR/Lumen.app/Contents/MacOS/Lumen"
-if ! env -u PB_PROFILE_PROCESS -u PB_SAFARI_CHROME "$CHECK_APP" --check-safari-chrome > "$OUT/check-safari-chrome.txt" 2>&1; then
+# Safari's classes are looked for where Safari's code runs: a process of the profile's executable.
+if ! env -u PB_PROFILE_PROCESS -u PB_SAFARI_CHROME "$CHECK_DIR/Lumen.app/Contents/MacOS/LumenProfile" --check-safari-chrome > "$OUT/check-safari-chrome.txt" 2>&1; then
   grep -E '^(MISSING|SAFARI-CHROME)' "$OUT/check-safari-chrome.txt" >&2 || tail -n 20 "$OUT/check-safari-chrome.txt" >&2
   echo "error: this Safari lacks classes or methods Safari's chrome, or a profile's hold on its proxy, relies on: no release" >&2
   exit 1

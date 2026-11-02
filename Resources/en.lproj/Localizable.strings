@@ -248,6 +248,7 @@
 "error.core.wrongPassword" = "Wrong master password.";
 "error.core.vaultAlreadyExists" = "A vault already exists here.";
 "error.core.vaultNotFound" = "No vault found.";
+"profile.process.executableRefused" = "This copy of Lumen is damaged: a profile cannot be opened in it safely. Download Lumen again and replace this copy.";
 "error.core.corruptData" = "Corrupt data (%@).";
 "error.core.cryptoFailure" = "Encryption failed (%@).";
 "error.core.invalidConfiguration" = "Invalid settings (%@).";

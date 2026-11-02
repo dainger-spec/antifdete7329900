@@ -289,6 +289,8 @@ enum ProfileSessionHost {
                 ProfileManager.receiveWebRTC(message)
             case .closeWindows:
                 SafariChromeHost.performCloseEveryWindow()
+            case .checkKeychain(let probe):
+                ProfileSessionHost.send(.keychainReport(KeychainCheck.run(probe)))
             case .walkMenu(let from):
                 SafariMenuWalk.start(from: from, session: manager?.session(for: profileID)) { line in
                     ProfileSessionHost.send(.menuWalk(line))

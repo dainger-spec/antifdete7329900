@@ -357,6 +357,7 @@ final class SelfTest {
         await group("warm-up queue") { try await warmUpQueue(repository) }
         await group("Safari chrome") { try await safariChromeThroughTheProxy(repository) }
         await group("WebRTC through the proxy") { try await webRTCThroughTheProxy(repository) }
+        await group("keychain between profiles") { try await keychainBetweenProfiles(repository) }
         await group("Safari's app-link banner tracker") { try await safariAppLinkTracker(repository) }
         // The license: signed in with a key against a server played on the loopback; where the key
         // is not (account.json, the defaults, the diagnostics); without the server; revoked.
@@ -2074,8 +2075,8 @@ final class SelfTest {
     private func exceptionChecks() async throws {
         info("exceptions: in this process an exception passed through the preprocessor keeps its call stack: "
              + "\(ExceptionLog.preprocessorKeepsCallStacks())")
-        guard let executable = Bundle.main.executableURL else {
-            check("exceptions: this build's executable is there to run the check", false)
+        guard let executable = profileLikeExecutable() else {
+            check("exceptions: this build's profile executable is there to run the check", false)
             return
         }
         let chained = await runOwnExecutable(executable, ["--exception-check"], timeout: 30)
@@ -2125,13 +2126,23 @@ final class SelfTest {
              + (control.signaled ? "died by signal \(control.status)" : "lived, exit \(control.status)") + " — \(first)")
     }
 
+    /// What the exception and nib checks start: a process like a profile's, started as one is — from
+    /// LumenProfile (`ProfileExecutable`). The sandboxed build runs every profile in the app's one
+    /// process, so there it is the app's own executable: LumenProfile, started from the sandboxed app,
+    /// dies in the App Sandbox's own initialization (`_libsecinit_appsandbox`, signal 5) before a
+    /// line of this app's runs (CI run 650).
+    private func profileLikeExecutable() -> URL? {
+        if AppEnvironment.isSandboxed { return Bundle.main.executableURL }
+        return try? ProfileExecutable.url()
+    }
+
     /// Safari's Bookmarks sidebar makes its nibs itself, with this app as their bundle, and they are
     /// Safari's: in a process like a profile's, made the same way, each must come from Safari's file
     /// (`SafariChrome.bridgeNibInitializers`), with nothing thrown. A nib this Safari does not have
     /// is said, not failed on.
     private func safariNibChecks() async throws {
-        guard let executable = Bundle.main.executableURL else {
-            check("Safari's nibs: this build's executable is there to run the check", false)
+        guard let executable = profileLikeExecutable() else {
+            check("Safari's nibs: this build's profile executable is there to run the check", false)
             return
         }
         let run = await runOwnExecutable(executable, ["--nib-check"], timeout: 60)
@@ -5056,6 +5067,65 @@ final class SelfTest {
         check("app links: the tracker went to read its file, and that reading — from a path a profile's process does not have — was closed",
               reads >= 1, "-[WBSBannerTracker load] reached \(reads) times: the probe did not get the tracker to its file, so this run says nothing about the reading that ended the profiles")
         await manager.shutDown()
+    }
+
+    /// The keychain between profiles (`KeychainIsolation`): two profiles in processes of their own,
+    /// held to a proxy that goes nowhere, each asked from inside; this process and a process of the
+    /// app's own executable — a profile as it was started before LumenProfile — are the controls.
+    private func keychainBetweenProfiles(_ repository: ProfileRepository) async throws {
+        guard !AppEnvironment.isSandboxed else {
+            skip(KeychainIsolation.entitlementsName, "the sandboxed build runs no process per profile", .build)
+            skip(KeychainIsolation.itemsName, "the sandboxed build runs no process per profile", .build)
+            return
+        }
+        let closed = ProfileConfiguration(proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: 1), matchProxyLocation: false)
+        let first = try repository.create(name: "Keychain A", configuration: closed)
+        defer { try? repository.delete(first.id) }
+        let second = try repository.create(name: "Keychain B", configuration: closed)
+        defer { try? repository.delete(second.id) }
+        let manager = ProfileManager(repository: repository)
+        var running: Set<UUID> = []
+        var exited: [UUID: Int32] = [:]
+        manager.onProfileRunning = { id, _ in running.insert(id) }
+        manager.onChildExited = { id, status in exited[id] = status }
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        defer { setenv("PB_PROFILE_PROCESS", "0", 1) }
+        for profile in [first, second] {
+            do {
+                try await manager.launch(profile.id)
+            } catch {
+                check(KeychainIsolation.entitlementsName, false, "\(profile.name) did not start: \(error)")
+                check(KeychainIsolation.itemsName, false, "\(profile.name) did not start: \(error)")
+                await manager.shutDown()
+                return
+            }
+        }
+        let up = await waitUntil(timeout: 120) { running.isSuperset(of: [first.id, second.id]) || !exited.isEmpty }
+        guard up, exited.isEmpty, manager.processIdentifier(of: first.id) != nil, manager.processIdentifier(of: second.id) != nil else {
+            let why = "the profiles did not both come up in processes of their own (up \(running.count) of 2, ended \(exited))"
+            check(KeychainIsolation.entitlementsName, false, why)
+            check(KeychainIsolation.itemsName, false, why)
+            await manager.shutDown()
+            return
+        }
+        let outcome = await KeychainIsolation.look(manager: manager, profiles: first.id, second.id)
+        await manager.shutDown()
+        outcome.details.forEach { info("keychain: \($0)") }
+        for (name, verdict) in [(KeychainIsolation.entitlementsName, outcome.entitlements), (KeychainIsolation.itemsName, outcome.items)] {
+            switch verdict {
+            case .pass: check(name, true)
+            case .fail(let why): check(name, false, why)
+            case .skip(let why):
+                // Not shown in this build, or not with this signature: a build without the network
+                // guard, or one no team signed. An identity of the team's that the keychain then
+                // refused is a check that could not be made where it must be.
+                if outcome.appHoldsTeamIdentity {
+                    check(name, false, why)
+                } else {
+                    skip(name, why, name == KeychainIsolation.entitlementsName ? .build : .machine)
+                }
+            }
+        }
     }
 
     /// A person ends a profile two ways: by closing its window, or with Stop in the Profiles window
