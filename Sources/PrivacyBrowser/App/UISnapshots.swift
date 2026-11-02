@@ -141,6 +141,13 @@ enum UISnapshots {
         problems += await Shot(name: "account-page", size: SettingsView.size, edges: true) {
             SettingsView(section: .account, previewLicense: licenses.signedIn).environmentObject(model)
         }.capture(into: folder)
+        // A profile's Dock tile: its letters, and the flag of the country its proxy exits in.
+        for (name, country) in [("dock-icon-flag", "DE" as String?), ("dock-icon-letters", nil)] {
+            if let tiff = DockIcon.image(initials: 2, of: "North wind", country: country)?.tiffRepresentation,
+               let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+                try? png.write(to: folder.appendingPathComponent(name + ".png"))
+            }
+        }
         // Signed in with a key alone: the subscription's reminders, offered again here.
         problems += await Shot(name: "account-page-key", size: SettingsView.size, edges: true) {
             SettingsView(section: .account, previewLicense: licenses.signedInWithKey).environmentObject(model)
