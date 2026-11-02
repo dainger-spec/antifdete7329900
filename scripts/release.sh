@@ -12,11 +12,21 @@
 #   NOTARY_PROFILE=name        notarize with `xcrun notarytool submit --keychain-profile name --wait`, then staple
 #   UPDATE_KEY_FILE=path       the Ed25519 private key (`pbupdate keygen`); default: a throwaway key (dry run)
 #   UPDATE_EXTRA_PUBLIC_KEYS="<id>=<base64>,…"   keys the app also trusts (a key being rotated in or out)
-#   FEED_URL=https://…/appcast.json    where the app looks for updates (default: https://updates.invalid/…)
-#   DOWNLOAD_URL=https://…/            where the zips are published (default: next to FEED_URL)
+#   FEED_URL=https://…/appcast.json    where the app looks for updates (default: a release's
+#                              https://dl.lumenbrowser.io/appcast.json; a dry run's https://updates.invalid/…)
+#   DOWNLOAD_URL=https://…/            where the zip and the disk image are published (default: next to FEED_URL)
+#   R2_ENDPOINT, R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
+#                              upload to Cloudflare R2 (the bucket behind dl.lumenbrowser.io): the zip and
+#                              the disk image first, the appcast last, each read back over https; without
+#                              them the script says what goes where
 #   PREVIOUS_APPCAST=path      the appcast published now: its releases are kept in the new one
 #   NOTES_FILE=path            the release notes, plain text
 #   OUT=build/release          where everything goes
+#
+# What it makes: the zip the app's updater downloads (unchanged), the disk image the website
+# offers — Lumen and a link to Applications, signed, notarized and stapled like the app inside
+# (scripts/make_dmg.sh; the owner, 1 November) — the appcast, and at the end one block for the
+# website: the image's address, the version, its size in megabytes, its SHA-256 (download.json).
 #
 # What is released is always the build without the App Sandbox: only there does a profile get a
 # process of its own and Safari's own window, which is what Lumen is. SANDBOX=1 is refused, and so
@@ -31,7 +41,13 @@ cd "$(dirname "$0")/.."
 : "${BUILD:?BUILD is needed (CFBundleVersion: whole numbers separated by dots, e.g. 2)}"
 [[ "$BUILD" =~ ^[0-9]{1,9}(\.[0-9]{1,9}){0,7}$ ]] || { echo "error: BUILD '$BUILD' is not a build number" >&2; exit 1; }
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
-FEED_URL="${FEED_URL:-https://updates.invalid/lumen/appcast.json}"
+# A release's files are at dl.lumenbrowser.io (Cloudflare R2, the owner, 1 November); a dry run's
+# app never looks anywhere real.
+if [[ "$SIGN_IDENTITY" == "-" ]]; then
+  FEED_URL="${FEED_URL:-https://updates.invalid/lumen/appcast.json}"
+else
+  FEED_URL="${FEED_URL:-https://dl.lumenbrowser.io/appcast.json}"
+fi
 [[ "$FEED_URL" == https://* ]] || { echo "error: FEED_URL must be https" >&2; exit 1; }
 DOWNLOAD_URL="${DOWNLOAD_URL:-${FEED_URL%/*}/}"
 [[ "$DOWNLOAD_URL" == https://* ]] || { echo "error: DOWNLOAD_URL must be https" >&2; exit 1; }
@@ -171,6 +187,28 @@ MINIMUM_SYSTEM="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$A
 "$PBUPDATE" item --key "$KEY" --archive "$OUT/$ZIP_NAME" --version "$VERSION" --build "$BUILD" \
   --minimum-system "$MINIMUM_SYSTEM" --url "$DOWNLOAD_URL$ZIP_NAME" --notes-file "$NOTES" > "$OUT/item.json"
 
+# 3b. The disk image the website offers: the app as it ships — signed, notarized, stapled — and a
+# link to Applications, laid out by Finder (scripts/make_dmg.sh; required for a release). Then the
+# image itself is signed, notarized and stapled, so that a downloaded image opens without a word
+# from Gatekeeper even before the app inside is looked at.
+DMG_NAME="Lumen-$VERSION.dmg"
+if [[ "$SIGN_IDENTITY" == "-" ]]; then
+  scripts/make_dmg.sh "$APP" "$OUT/$DMG_NAME" --layout optional
+  codesign --force --sign - "$OUT/$DMG_NAME"
+else
+  scripts/make_dmg.sh "$APP" "$OUT/$DMG_NAME" --layout required
+  codesign --force --sign "$SIGN_IDENTITY" --timestamp "$OUT/$DMG_NAME"
+fi
+codesign --verify --verbose=2 "$OUT/$DMG_NAME"
+if [[ -n "${NOTARY_PROFILE:-}" && "$SIGN_IDENTITY" != "-" ]]; then
+  xcrun notarytool submit "$OUT/$DMG_NAME" --keychain-profile "$NOTARY_PROFILE" --wait
+  xcrun stapler staple "$OUT/$DMG_NAME"
+  xcrun stapler validate "$OUT/$DMG_NAME"
+  spctl --assess --type open --context context:primary-signature --verbose=2 "$OUT/$DMG_NAME"
+else
+  DRY+=("the disk image is not notarized and not stapled (needs NOTARY_PROFILE and a Developer ID): Gatekeeper would refuse it on another Mac")
+fi
+
 # 4. The appcast: this release, and those of the appcast published now.
 PREVIOUS=()
 if [[ -n "${PREVIOUS_APPCAST:-}" ]]; then
@@ -185,12 +223,62 @@ fi
 "$PBUPDATE" verify --appcast "$OUT/appcast.json" --public-key "$KEY_ID=$KEY_PUBLIC" --archive "$OUT/$ZIP_NAME" --build "$BUILD"
 [[ -n "${UPDATE_KEY_FILE:-}" ]] || rm -f "$KEY"
 
+# 6. Published: the zip and the image first, the appcast last — never a feed naming a file that is
+# not there yet — each read back over https and compared byte for byte (R2, when its keys are
+# given). Cache: the versioned files for a year, the appcast never.
+if [[ -n "${R2_ENDPOINT:-}${R2_BUCKET:-}${R2_ACCESS_KEY_ID:-}${R2_SECRET_ACCESS_KEY:-}" ]]; then
+  : "${R2_ENDPOINT:?R2_ENDPOINT (https://<account>.r2.cloudflarestorage.com)}" "${R2_BUCKET:?R2_BUCKET}"
+  : "${R2_ACCESS_KEY_ID:?R2_ACCESS_KEY_ID}" "${R2_SECRET_ACCESS_KEY:?R2_SECRET_ACCESS_KEY}"
+  [[ "$SIGN_IDENTITY" != "-" ]] || { echo "error: a dry run is never uploaded" >&2; exit 1; }
+  upload() { # file, its name in the bucket, content type, cache control
+    curl --fail --silent --show-error --aws-sigv4 "aws:amz:auto:s3" --user "$R2_ACCESS_KEY_ID:$R2_SECRET_ACCESS_KEY" \
+      -H "Content-Type: $3" -H "Cache-Control: $4" --upload-file "$1" "${R2_ENDPOINT%/}/$R2_BUCKET/$2"
+  }
+  published() { # file, its address: what is served there is this file
+    [[ "$(curl --fail --silent --show-error -H 'Cache-Control: no-cache' "$2" | shasum -a 256 | cut -d' ' -f1)" \
+       == "$(shasum -a 256 "$1" | cut -d' ' -f1)" ]] || { echo "error: $2 does not serve $(basename "$1")" >&2; exit 1; }
+  }
+  upload "$OUT/$ZIP_NAME" "${DOWNLOAD_URL#https://*/}$ZIP_NAME" application/zip "public, max-age=31536000, immutable"
+  upload "$OUT/$DMG_NAME" "${DOWNLOAD_URL#https://*/}$DMG_NAME" application/x-apple-diskimage "public, max-age=31536000, immutable"
+  published "$OUT/$ZIP_NAME" "$DOWNLOAD_URL$ZIP_NAME"
+  published "$OUT/$DMG_NAME" "$DOWNLOAD_URL$DMG_NAME"
+  upload "$OUT/appcast.json" "${FEED_URL#https://*/}" application/json "no-cache"
+  published "$OUT/appcast.json" "$FEED_URL"
+  PUBLISHED="uploaded and read back"
+else
+  PUBLISHED="not uploaded (no R2_* keys): publish the zip and the image first, the appcast last"
+fi
+
+# 7. For the website, in one piece (the owner: the site's build needs them): the image's address,
+# the version, its size in megabytes (decimal, as Finder counts), its SHA-256.
+DMG_BYTES="$(stat -f%z "$OUT/$DMG_NAME")"
+DMG_MB="$(awk -v b="$DMG_BYTES" 'BEGIN { printf "%.1f", b / 1000000 }')"
+DMG_SHA256="$(shasum -a 256 "$OUT/$DMG_NAME" | cut -d' ' -f1)"
+cat > "$OUT/download.json" <<JSON
+{
+  "version": "$VERSION",
+  "build": "$BUILD",
+  "url": "$DOWNLOAD_URL$DMG_NAME",
+  "sizeMB": $DMG_MB,
+  "sizeBytes": $DMG_BYTES,
+  "sha256": "$DMG_SHA256",
+  "minimumSystem": "$MINIMUM_SYSTEM"
+}
+JSON
+
 echo
 echo "Release $VERSION ($BUILD) in $OUT:"
-echo "  $ZIP_NAME   publish at $DOWNLOAD_URL$ZIP_NAME"
-echo "  appcast.json   publish at $FEED_URL"
+echo "  $ZIP_NAME   at $DOWNLOAD_URL$ZIP_NAME (the updater's)"
+echo "  $DMG_NAME   at $DOWNLOAD_URL$DMG_NAME (the website's)"
+echo "  appcast.json   at $FEED_URL"
 echo "  update key     $KEY_ID"
+echo "  $PUBLISHED"
+echo
+echo "----- for the website: from here -----"
+cat "$OUT/download.json"
+echo "----- to here ($OUT/download.json) -----"
 if (( ${#DRY[@]} )); then
+  echo
   echo "DRY RUN — what a real release still needs:"
   for line in "${DRY[@]}"; do echo "  - $line"; done
 fi

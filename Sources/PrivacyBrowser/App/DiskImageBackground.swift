@@ -95,8 +95,10 @@ enum DiskImageBackground {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .center
         let lines: [(text: String, size: CGFloat, alpha: CGFloat)] = [
-            ("Перетащите Lumen в папку «Программы»", 15, 0.92), // l10n: not text — both languages, always
-            ("Drag Lumen to the Applications folder", 13, 0.62), // l10n: not text — both languages, always
+            // The link is named Applications in every language (Finder translates only the folder
+            // itself, not a link to it), so the Russian line names both.
+            ("Перетащите Lumen в «Программы» (Applications)", 15, 0.92), // l10n: not text — both languages, always
+            ("Drag Lumen to Applications", 13, 0.62), // l10n: not text — both languages, always
         ]
         var y = size.height - 86
         for line in lines {

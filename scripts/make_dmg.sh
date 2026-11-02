@@ -57,7 +57,9 @@ fi
 
 # 3. The window, as Finder keeps it (positions are the icons' centres; DiskImageBackground.swift).
 laid_out=0
-if osascript <<OSA
+# In the background, with a minute to answer: where macOS waits for someone to allow Automation,
+# osascript would wait with it.
+osascript > "$WORK/finder.log" 2>&1 <<OSA &
 tell application "Finder"
   tell disk "$DISK_NAME"
     open
@@ -80,11 +82,18 @@ tell application "Finder"
   end tell
 end tell
 OSA
-then
+FINDER_PID=$!
+for attempt in $(seq 1 120); do kill -0 "$FINDER_PID" 2>/dev/null || break; sleep 0.5; done
+if kill -0 "$FINDER_PID" 2>/dev/null; then
+  kill "$FINDER_PID" 2>/dev/null || true
+  echo "Finder did not answer within a minute" >> "$WORK/finder.log"
+fi
+if wait "$FINDER_PID"; then
   # Finder writes .DS_Store a moment after the window closes.
   for attempt in $(seq 1 20); do [[ -f "$MOUNT/.DS_Store" ]] && break; sleep 0.5; done
   [[ -f "$MOUNT/.DS_Store" ]] && laid_out=1
 fi
+[[ -s "$WORK/finder.log" ]] && sed 's/^/finder: /' "$WORK/finder.log" >&2
 if (( ! laid_out )); then
   if [[ "$LAYOUT" == "required" ]]; then
     echo "error: Finder did not lay out the image's window (Automation: may Terminal control Finder?)" >&2

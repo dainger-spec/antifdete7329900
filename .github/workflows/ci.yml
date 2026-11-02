@@ -51,11 +51,11 @@ jobs:
             hdiutil detach /Volumes/Lumen -force -quiet
           }
           shot light
-          defaults write -g AppleInterfaceStyle -string Dark
-          killall Finder; sleep 4
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true'; echo "dark mode via System Events: $?"
+          osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode'
+          sleep 3
           shot dark
-          defaults delete -g AppleInterfaceStyle
-          killall Finder
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false'
           ls -la build/dmg-shots
       - name: Gatekeeper on an image that is not notarized (quarantined as a browser would)
         continue-on-error: true
@@ -66,6 +66,17 @@ jobs:
           spctl --assess --type open --context context:primary-signature --verbose=4 build/Lumen-quarantined.dmg; echo "spctl dmg: $?"
           xcrun stapler validate build/Lumen-quarantined.dmg; echo "stapler: $?"
           command -v syspolicy_check && { syspolicy_check distribution build/unsandboxed/Lumen.app; echo "syspolicy_check: $?"; }
+      - name: The release, dry run, with its disk image (scripts/release.sh as committed)
+        timeout-minutes: 40
+        run: VERSION=0.1.1 BUILD=2 OUT=build/release scripts/release.sh
+      - name: The disk image as someone downloads it — the control must be refused
+        run: scripts/download_check.sh build/release/Lumen-0.1.1.dmg --expect rejected
+      - name: And the same check, expecting acceptance, must fail on it (the check can fail both ways)
+        run: |
+          if scripts/download_check.sh build/release/Lumen-0.1.1.dmg --expect accepted; then
+            echo "::error::download_check.sh accepted an image that is not notarized"; exit 1
+          fi
+          echo "refused as it must be"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
