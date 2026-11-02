@@ -355,6 +355,21 @@ jobs:
         # signed, both checked with the app's own code (pbupdate verify). Notarization and stapling
         # are skipped and said so.
         run: VERSION=0.1.1 BUILD=2 OUT=build/release scripts/release.sh
+      - name: The disk image's window as a person sees it, light and dark (laid out by Finder, or plain)
+        # The layout never stops a release (scripts/make_dmg.sh makes the image plain when Finder
+        # cannot lay it out): this keeps the window's picture for review, and says which it is.
+        continue-on-error: true
+        timeout-minutes: 8
+        run: |
+          scripts/dmg_window_shot.sh build/release/Lumen-0.1.1.dmg build/dmg-window | tee build/dmg-window.txt
+          grep -q "Finder's own window" build/dmg-window.txt \
+            && echo "::warning title=Disk image::the image was made plain: Finder did not lay its window out (see the release step's log)" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dmg-window
+          path: build/dmg-window
+          if-no-files-found: ignore
       - name: The disk image as someone downloads it — the control (not notarized, so Gatekeeper must refuse it)
         # scripts/download_check.sh on the dry run's image, marked as a browser marks a download: a
         # check that cannot fail proves nothing, and an image signed ad hoc is the one it must fail

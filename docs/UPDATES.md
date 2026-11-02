@@ -343,10 +343,18 @@ takes these addresses unless `FEED_URL` / `DOWNLOAD_URL` say otherwise; a dry ru
 **Why a disk image.** From a zip people leave the app in Downloads; macOS runs an app from there
 translocated — from a read-only copy elsewhere — and an update cannot replace it. The image holds
 the app and a link to Applications (`scripts/make_dmg.sh`): drag the one onto the other. In two
-steps (the owner, 2 November): first this plain image — Finder's own window, the two icons in it —
+steps (the owner, 2 November): first the plain image — Finder's own window, the two icons in it —
 with the whole release path brought to its end on it, the check on a clean Mac included; then, as a
-change of its own on top, the window's picture and layout, so that a failure there never stops a
-release.
+change of its own on top, the window laid out: the app's dark backdrop with its mark and name, an
+arrow from Lumen to Applications, the window's size and the icons' places (the picture drawn by
+`Lumen --render-dmg-background`, one for both languages). The layout lives in the image's
+`.DS_Store`, which only Finder writes, so the script asks Finder over AppleScript; on the release's
+Mac macOS asks once **"“Terminal” wants access to control “Finder”. Allowing control will provide
+access to documents and data in “Finder”, and to perform actions within that app."** — Allow (the
+name is the terminal's the release runs in; System Settings › Privacy & Security › Automation turns
+it on again). **Whatever goes wrong there, the image is made plain and the release goes on**, with a
+warning; CI keeps a picture of the window as Finder shows it, light and dark (`scripts/dmg_window_shot.sh`,
+the `dmg-window` artifact).
 
 **The image is signed, notarized and stapled too**, after the app inside it was: `codesign` with
 the Developer ID and a timestamp, `notarytool submit … --wait`, `stapler staple`, `stapler validate`
