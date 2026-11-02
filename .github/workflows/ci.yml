@@ -33,6 +33,7 @@ jobs:
           scripts/dmg_window_shot.sh build/plain.dmg build/shots/plain
       - name: The download check — the control must be refused, with the person's screens
         continue-on-error: true
+        timeout-minutes: 6
         run: scripts/download_check.sh build/release/Lumen-0.1.1.dmg --expect rejected --shots build/shots/control
       - name: And expecting acceptance it must fail on the same image
         continue-on-error: true
@@ -41,7 +42,7 @@ jobs:
           echo "refused as it must be"
       - name: The account key in a crash report (and its control)
         continue-on-error: true
-        run: python3 scripts/key_crash_check.py build/release/app/Lumen.app/Contents/MacOS/Lumen
+        run: python3 scripts/key_crash_check.py build/release/app/Lumen.app/Contents/MacOS/Lumen --save build/shots/crash-reports
       - uses: actions/upload-artifact@v4
         if: always()
         with:
