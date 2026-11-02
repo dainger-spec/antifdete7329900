@@ -616,6 +616,9 @@ const StringSlice = String.prototype.slice;
 const StringToLowerCase = String.prototype.toLowerCase;
 const StringLastIndexOf = String.prototype.lastIndexOf;
 const StringIndexOf = String.prototype.indexOf;
+const NativeString = String;
+const NativePromise = Promise;
+const PromiseResolve = Promise.resolve;
 const call = (fn, self, ...args) => ReflectApply(fn, self, args);
 
 // An iterable the engine converts as a WebIDL sequence, iterated by closures of this script.
@@ -864,6 +867,75 @@ function patchWebRTC(w, policy, relay) {
         const view = call(WeakMapGet, pageView, this) || latestView;
         const result = ReflectApply(nativeGetStats, this, arguments); // the engine's receiver check and errors
         try { return call(PromiseThen, result, (report) => sanitize(report, view)); } catch (e) { return result; }
+      }));
+    }
+  }
+  // A remote candidate named by a host name — an mDNS ".local" name or any other — would be
+  // resolved by this Mac's own resolver, outside the proxy: whoever answers for that name learns
+  // which resolver asked, and so roughly where this Mac is (docs/TUNNEL.md, "DNS"). Through the
+  // relay a peer is reached by its address alone, so a candidate without one is dropped before the
+  // engine sees it: in addIceCandidate, and as a line of a remote description's SDP. The page's
+  // values are read once, here, and the engine is given that copy, so that a getter or a toString
+  // cannot show this check one thing and the engine another.
+  if (viaTunnel) {
+    const nativeAdd = nativeProto.addIceCandidate;
+    const nativeSetRemote = nativeProto.setRemoteDescription;
+    const stateGetter = (ObjectGetOwnPropertyDescriptor(nativeProto, 'signalingState') || {}).get;
+    const remoteGetter = (ObjectGetOwnPropertyDescriptor(nativeProto, 'remoteDescription') || {}).get;
+    const isAddress = (text) => call(RegExpExec, /^\d{1,3}(?:\.\d{1,3}){3}$/, text) !== null
+      || (call(StringIndexOf, text, ':') >= 0 && call(RegExpExec, /^[0-9a-f:.]+$/i, text) !== null);
+    // 'candidate:<foundation> <component> <transport> <priority> <address> <port> typ <type> …'
+    const namedByHost = (line) => {
+      const match = call(RegExpExec, /^(?:a=)?candidate:\S+\s+\S+\s+\S+\s+\S+\s+(\S+)/i, line);
+      return match !== null && !isAddress(match[1]);
+    };
+    const withoutNamedCandidates = (sdp) => {
+      let out = '';
+      let start = 0;
+      while (start < sdp.length) {
+        let end = call(StringIndexOf, sdp, '\n', start);
+        end = end < 0 ? sdp.length : end + 1;
+        const line = call(StringSlice, sdp, start, end);
+        if (!namedByHost(call(StringSlice, line, 0, 2) === 'a=' ? line : '')) out += line;
+        start = end;
+      }
+      return out;
+    };
+    const withRest = (first, rest) => {
+      const args = [first];
+      for (let i = 0; i < rest.length; i++) args[i + 1] = rest[i];
+      return args;
+    };
+    if (typeof nativeAdd === 'function') {
+      define(nativeProto, 'addIceCandidate', method('addIceCandidate', nativeAdd.length, function (candidate, ...rest) {
+        if (!call(WeakMapGet, pageView, this) || !isObject(candidate)) return ReflectApply(nativeAdd, this, arguments);
+        // The members as WebIDL reads them (lexicographic), each once; the address's text made here.
+        const record = ObjectCreate(null);
+        const keys = ['candidate', 'sdpMLineIndex', 'sdpMid', 'usernameFragment'];
+        for (let i = 0; i < keys.length; i++) {
+          const value = candidate[keys[i]];
+          if (value !== undefined) record[keys[i]] = keys[i] === 'candidate' ? NativeString(value) : value;
+        }
+        const closed = typeof stateGetter === 'function' && call(stateGetter, this) === 'closed';
+        const remote = typeof remoteGetter !== 'function' || call(remoteGetter, this) !== null;
+        if (typeof record.candidate === 'string' && namedByHost(record.candidate) && !closed && remote) {
+          // As the engine answers a candidate it could not reach: nothing, and success.
+          const done = call(PromiseResolve, NativePromise);
+          if (typeof rest[0] === 'function') call(PromiseThen, done, rest[0]);
+          return done;
+        }
+        return ReflectApply(nativeAdd, this, withRest(record, rest));
+      }));
+    }
+    if (typeof nativeSetRemote === 'function') {
+      define(nativeProto, 'setRemoteDescription', method('setRemoteDescription', nativeSetRemote.length, function (description, ...rest) {
+        if (!call(WeakMapGet, pageView, this) || !isObject(description)) return ReflectApply(nativeSetRemote, this, arguments);
+        const record = ObjectCreate(null);
+        const sdp = description.sdp;
+        const type = description.type;
+        if (sdp !== undefined) record.sdp = withoutNamedCandidates(NativeString(sdp));
+        if (type !== undefined) record.type = type;
+        return ReflectApply(nativeSetRemote, this, withRest(record, rest));
       }));
     }
   }
