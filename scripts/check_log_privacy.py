@@ -44,6 +44,9 @@ ALLOWED_EXPRESSIONS = {
     "onProfile": "a yes/no",
     "status": "a process exit status",
     "pid": "a process identifier (a profile's own process, held by the network guard)",
+    "decoded.pid": "a process identifier the app asked the network guard to hold",
+    "running": "a yes/no: whether the network guard's filter runs",
+    "current": "a yes/no: whether the installed network guard is this app's version",
     "host.address.port": "the port on 127.0.0.1 the system gave a profile's WebRTC relay",
     "missing": "names of private classes and methods this macOS does not have",
     "missing ? \"requested, no credentials set\" : \"rejected\"": "a fixed text",
@@ -66,6 +69,9 @@ ALLOWED_EXPRESSIONS = {
 
 # Safe in one file only, where the name means something harmless.
 ALLOWED_IN_FILE = {
+    ("NetworkGuard.swift", "cause"): "why the network guard was lost: a fixed word from the code or a state's name",
+    ("NetworkGuard.swift", "refusal"): "why the network guard did not take a process: a fixed text of its own (GuardService) or of the app",
+    ("GuardFilterProvider.swift", "opener.name"): "the name of the process that opened a dropped flow (WebKit's, the system's), not an address",
     ("SafariChrome.swift", "path"): "a Safari framework's path, under /System or /Applications",
     ("SafariChrome.swift", "reason"): "dlerror() for a Safari framework",
     ("SafariChrome.swift", "name"): "a nib's name in Safari's frameworks",

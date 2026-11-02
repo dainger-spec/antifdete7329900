@@ -36,7 +36,7 @@ enum PrivacyScripts {
         var geolocation: Geolocation
         /// "disabled", "relayOnly", "unrestricted", or "tunnel" (with `webRTCRelay`).
         var webRTC: String
-        /// The packet tunnel's TURN relay for this launch (`ProfileConfiguration.webRTCRouting`).
+        /// The app's TURN relay for this launch (`ProfileConfiguration.webRTCRouting`).
         var webRTCRelay: Relay?
         /// Safari the app exposes `window.safari` (`pushNotification`) on the Mac, a WKWebView does
         /// not; a page that checks it is told the same as by Safari — in an iPhone or iPad view too,
@@ -659,7 +659,7 @@ function patchWebRTC(w, policy, relay) {
   const nativeGetConfiguration = nativeProto.getConfiguration;
   const nativeSetConfiguration = nativeProto.setConfiguration;
   const nativeClose = nativeProto.close;
-  // 'tunnel': the packet tunnel's TURN relay is the only ICE server, so every candidate is a
+  // 'tunnel': the app's TURN relay (127.0.0.1) is the only ICE server, so every candidate is a
   // relay through the profile's proxy. The page keeps seeing its own configuration.
   const viaTunnel = policy === 'tunnel' && relay ? relay : null;
   const relayServers = [];
@@ -690,7 +690,7 @@ function patchWebRTC(w, policy, relay) {
     return record;
   };
   const isObject = (value) => value !== null && (typeof value === 'object' || typeof value === 'function');
-  // What the engine gets: relay-only; in the tunnel the relay as the only ICE server. Of the
+  // What the engine gets: relay-only; with the app's relay, it as the only ICE server. Of the
   // page's members only those that do not choose where packets go.
   const engineConfig = (record) => {
     const next = ObjectCreate(null);

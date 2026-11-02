@@ -662,9 +662,10 @@ enum ProfileNetworkGuard {
         // WebKit before 7621 it never consults the content rules, and Safari turns it on.
         pin("_setDNSPrefetchingEnabled:", required: false) { asked in asked && (proxies ?? []).isEmpty }
         // ICE candidate filtering (no host addresses to a page that was not granted the camera)
-        // is on, as in Safari; gathering on every interface only for the tunnel's hardware checks.
+        // is on, as in Safari; libwebrtc gathers on the default interface only — through the relay
+        // on loopback (`WebRTCRelays`) it needs no other.
         pin("_setICECandidateFilteringEnabled:", required: false) { _ in true }
-        pin("_setEnumeratingAllNetworkInterfacesEnabled:", required: false) { asked in asked && allInterfacesAllowed }
+        pin("_setEnumeratingAllNetworkInterfacesEnabled:", required: false) { _ in false }
 
         // The feature switches, by key. Every boolean preference is a feature too, WebRTC's
         // included, so the same switch reaches it by another way: the same answers there.
@@ -712,7 +713,7 @@ enum ProfileNetworkGuard {
         case "ICECandidateFilteringEnabled"?:
             return true
         case "EnumeratingAllNetworkInterfacesEnabled"?:
-            return asked && allInterfacesAllowed
+            return false
         case "DNSPrefetchingEnabled"?:
             return asked && !proxied
         case "SafeBrowsingEnabled"?:
@@ -724,12 +725,6 @@ enum ProfileNetworkGuard {
         }
     }
 
-    /// WebRTC may gather on every interface: the profile's WebRTC goes through the tunnel, and the
-    /// hardware checks asked for it (`BrowserSession.applyPrivacyPreferences`).
-    private static var allInterfacesAllowed: Bool {
-        guard let session, case .relay = session.configuration.webRTCRouting else { return false }
-        return DebugSwitches.tunnelAllInterfaces
-    }
 
     /// Each way of turning on what the profile has off, tried on preferences of no web view: the
     /// ways that get through the pins (`pinPrivacyPreferences`), for the report. Empty is right.

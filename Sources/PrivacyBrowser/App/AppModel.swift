@@ -1191,12 +1191,12 @@ struct ProfileDetails: Equatable {
     // What the inspector says of how it reaches the web and how sites see it.
     /// "SOCKS5", "HTTP", "HTTPS": the proxy's kind, as the proxy list names it.
     var proxyKind: String?
-    /// A SOCKS5 proxy: the kind that carries UDP, so WebRTC through the tunnel's relay.
+    /// A SOCKS5 proxy: the kind that can carry UDP, so WebRTC through the app's relay.
     var proxyCarriesUDP: Bool
     /// The address sites saw it come from at its last launch through its proxy, when known.
     var exitIP: String?
     var timeZone: String
-    /// The WebRTC choice stored; what it amounts to with a proxy depends on the tunnel at launch
+    /// The WebRTC choice stored; what it amounts to with a proxy depends on the gate at launch
     /// (`ProfileConfiguration.webRTCRouting`), which the inspector says as the editor does.
     var webRTCChoice: WebRTCPolicy
     var languages: String

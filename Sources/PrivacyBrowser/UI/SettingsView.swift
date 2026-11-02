@@ -109,7 +109,7 @@ struct SettingsView: View {
         case .language: LanguageSettings()
         case .downloads: DownloadSettings(settings: model.settings)
         case .proxies: ProxySettingsPane(settings: model.settings)
-        case .webRTC: TunnelSettingsView(embedded: true)
+        case .webRTC: NetworkGuardSettingsView(embedded: true)
         case .sync: SyncSettingsView(embedded: true)
         case .security: SecuritySettings()
         case .automation: AutomationSettingsView(embedded: true)

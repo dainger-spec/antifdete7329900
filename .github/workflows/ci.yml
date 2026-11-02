@@ -343,7 +343,7 @@ jobs:
       - run: swift test
       - name: Build sandboxed app (default)
         run: APP_DIR=build/sandboxed scripts/build-app.sh
-      - name: Build unsandboxed app, and the packet-tunnel extension (unsigned, NE=check)
+      - name: Build unsandboxed app, and the network guard extension (unsigned, NE=check)
         # The extension needs a provisioned team to be signed and loaded (NE=1); CI compiles it
         # against this SDK and lays out its bundle so its plists are checked.
         run: NE=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
