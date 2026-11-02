@@ -7,7 +7,8 @@
 For each proxy, in turn (no two measured at once, so their times do not mix):
 
 1. TCP: the SOCKS5 handshake with its login, then CONNECT by name (the proxy resolves it) to two
-   address services over plain HTTP — the address a site sees for TCP.
+   address services over plain HTTP — the address a site sees for TCP; and the app's own way
+   (ProxyExitLookup): HTTPS to Cloudflare's trace at 1.1.1.1 (then 1.0.0.1), by address.
 2. UDP ASSOCIATE: the reply and the relay address it names.
 3. Through that association, STUN Binding requests to three public STUN servers (Google,
    Cloudflare, Twilio): the address the proxy's UDP leaves from, per server (one address and one
@@ -16,6 +17,8 @@ For each proxy, in turn (no two measured at once, so their times do not mix):
    back as a 401 — the relay servers answer through the proxy.
 5. 100 Binding requests 20 ms apart to Google's STUN server: round-trip times and losses.
 6. A second association: does the UDP address stay the same from one association to the next?
+7. What the app's gate would decide (WebRTCGate): the relay only when the UDP egress the app's own
+   check finds (Cloudflare's or Google's STUN answer) is the trace's TCP exit.
 
 The UDP address is compared with the TCP one: the same, the same /24, the same /16, or another
 network — and the country and network (AS) of each, asked of ip-api.com from this runner, not
@@ -29,6 +32,7 @@ import ipaddress
 import json
 import os
 import socket
+import ssl
 import struct
 import subprocess
 import sys
@@ -38,6 +42,7 @@ STUN_SERVERS = [("google", "stun.l.google.com", 19302), ("cloudflare", "stun.clo
                 ("twilio", "global.stun.twilio.com", 3478)]
 TURN_SERVERS = [("cloudflare", "turn.cloudflare.com", 3478), ("twilio", "global.turn.twilio.com", 3478)]
 ADDRESS_SERVICES = [("api.ipify.org", "/"), ("checkip.amazonaws.com", "/")]
+TRACE_ADDRESSES = ["1.1.1.1", "1.0.0.1"]  # ProxyExitLookup.endpoints
 MAGIC = 0x2112A442
 
 
@@ -109,6 +114,42 @@ def tcp_exit(proxy, host, path):
         return str(ipaddress.ip_address(body.split()[0]))
     finally:
         sock.close()
+
+
+def trace_exit(proxy, address):
+    """The app's own way (ProxyExitLookup): HTTPS to Cloudflare's trace at an IPv4 address through
+    the proxy (CONNECT by address: nothing resolved), its `ip=` line."""
+    sock, _ = handshake(proxy)
+    try:
+        sock.sendall(b"\x05\x01\x00\x01" + socket.inet_aton(address) + struct.pack("!H", 443))
+        rep, _, _ = read_reply(sock)
+        if rep != 0:
+            raise SOCKSError(f"CONNECT refused ({rep})")
+        tls = ssl.create_default_context().wrap_socket(sock, server_hostname=address)
+        tls.sendall(f"GET /cdn-cgi/trace HTTP/1.1\r\nHost: {address}\r\nUser-Agent: curl/8\r\nConnection: close\r\n\r\n".encode())
+        data = b""
+        try:
+            while True:
+                chunk = tls.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+        except ssl.SSLError:
+            pass
+        return trace_ip(data.decode("latin-1"))
+    finally:
+        sock.close()
+
+
+def trace_ip(text):
+    """ExitTrace.ipv4: the first line that starts with `ip=`, when it is an IPv4 address."""
+    for line in text.splitlines():
+        if line.startswith("ip="):
+            ip = ipaddress.ip_address(line[3:].strip())
+            if ip.version != 4:
+                raise SOCKSError("an IPv6 exit")
+            return str(ip)
+    raise SOCKSError("no ip= line in the answer")
 
 
 def stun_request(kind=0x0001, transaction=None):
@@ -245,6 +286,18 @@ def measure(proxy, servers):
     result["tcpExits"] = exits
     tcp = next((e for e in exits if not e.startswith("error")), None)
     result["tcpExit"] = tcp
+    traces = []
+    for address in TRACE_ADDRESSES:
+        try:
+            traces.append(trace_exit(proxy, address))
+            break
+        except Exception as error:
+            traces.append(f"error: {error}")
+    result["traceExits"] = traces
+    trace = next((t for t in traces if not t.startswith("error")), None)
+    result["traceExit"] = trace
+    result["traceVsTcp"] = relation(trace, tcp)
+    result["gate"] = "unsupported"
     # UDP
     try:
         association = Association(proxy)
@@ -328,6 +381,16 @@ def measure(proxy, servers):
                          else f"{len(ports)} ports for {sum(1 for m in (result.get('stun') or {}).values() if isinstance(m, list))} servers")
     second = result.get("secondAssociation")
     result["secondSameAddress"] = (isinstance(second, list) and udp is not None and second[0] == udp)
+    # The gate: the app's UDP check takes Cloudflare's or Google's answer (TunnelAddressing's STUN
+    # servers); the relay only when it is the trace's exit.
+    stun = result.get("stun") or {}
+    checked = next((stun[name] for name in ("cloudflare", "google") if isinstance(stun.get(name), list)), None)
+    if checked is None:
+        result["gate"] = "unsupported"
+    elif trace is None:
+        result["gate"] = "exitUnknown"
+    else:
+        result["gate"] = "supported" if checked[0] == trace else "elsewhere"
     result["where"] = {"tcp": where(tcp), "udp": where(udp)}
     return result
 
@@ -348,8 +411,8 @@ def place(info):
 
 def summary(results, label):
     lines = [f"### SOCKS5 UDP, {len(results)} proxies ({label})", "",
-             "| # | entry | login | UDP ASSOCIATE | relay = entry | UDP from TCP's address | TCP exit = entry | STUN answered | TURN 401 | mapping | 2nd association same | RTT p50/p90 ms | loss % | TCP at | UDP at |",
-             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+             "| # | entry | login | UDP ASSOCIATE | relay = entry | UDP from TCP's address | trace = TCP | gate | TCP exit = entry | STUN answered | TURN 401 | mapping | 2nd association same | RTT p50/p90 ms | loss % | TCP at | UDP at |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for i, r in enumerate(results, 1):
         stun = r.get("stun") or {}
         answered = sum(1 for v in stun.values() if isinstance(v, list))
@@ -362,7 +425,7 @@ def summary(results, label):
         assoc = "ok" if assoc == "ok" else ("REFUSED" if "refused" in str(assoc) else ("—" if assoc == "—" else "FAILED"))
         where_ = r.get("where") or {}
         lines.append(f"| {i} | {mask(r['entry'])} | {login} | {assoc} | {r.get('relayIsEntry', '—')} | {r.get('udpVsTcp', '—')} | "
-                     f"{r.get('tcpVsEntry', '—')} | {answered}/{len(STUN_SERVERS) if stun else 0} | {turn_ok}/{len(turns)} | "
+                     f"{r.get('traceVsTcp', '—')} | {r.get('gate', '—')} | {r.get('tcpVsEntry', '—')} | {answered}/{len(STUN_SERVERS) if stun else 0} | {turn_ok}/{len(turns)} | "
                      f"{r.get('mapping', '—')} | {r.get('secondSameAddress', '—')} | {rtt.get('p50', '—')}/{rtt.get('p90', '—')} | "
                      f"{series.get('lossPercent', '—')} | {place(where_.get('tcp'))} | {place(where_.get('udp'))} |")
     return "\n".join(lines) + "\n"
@@ -422,7 +485,7 @@ def main():
         results.append(result)
         print(f"proxy #{index} ({mask(proxy['host'])}): login {result.get('login')}, UDP ASSOCIATE "
               f"{'ok' if result.get('udpAssociate') == 'ok' else 'not ok'}, UDP from TCP's address: {result.get('udpVsTcp')}, "
-              f"{result['seconds']} s", flush=True)
+              f"the app's gate: {result.get('gate')}, {result['seconds']} s", flush=True)
     text = summary(results, args.label)
     print(text)
     with open(os.path.join(args.out, "summary.md"), "w") as handle:
