@@ -455,7 +455,7 @@ runtime, not the App Sandbox. Only the Mac App Store requires the sandbox — an
 app that loads Safari's private frameworks at all, sandboxed or not: were the App Store ever the
 channel, it is the product's promise that would change, not the build. The updater does not need
 it (its helper runs outside the sandbox by design; §8's end-to-end run covers both builds). The
-packet tunnel's system extension is sandboxed by its own entitlements; the app that installs it
+network guard's system extension is sandboxed by its own entitlements; the app that installs it
 need not be (`build-app.sh` adds the extension's entitlements to either build; untried with a real
 team, docs/TUNNEL.md).
 
@@ -485,8 +485,7 @@ among them; it does not look for private interfaces (that is App Store review).
 - The manager's process — the vault, the master key — is not confined by the App Sandbox, and holds
   no web content: every profile runs in a process of its own, with its profile's key only and a
   kernel sandbox profile of its own (UDP with a proxy, the real Safari's places, Safari's XPC
-  services; §4a) — except a profile whose WebRTC goes through the packet tunnel, which stays in the
-  manager's process.
+  services; §4a).
 - With library validation off, the process would load a library that is neither Apple's nor this
   team's if asked to: it loads only from `/System/Library/PrivateFrameworks`, on the sealed system
   volume, and `DYLD_*` variables stay refused (no `allow-dyld-environment-variables`).
@@ -570,5 +569,5 @@ handed over at the last quit — is said once at the next launch. In the UI snap
 - Installing into a location that needs administrator rights (Sparkle asks for a password; we say
   "not installable here").
 - Delta updates.
-- Updating the packet-tunnel system extension: a new extension version is activated by
-  `OSSystemExtensionRequest` at the next launch that needs it, as today (docs/TUNNEL.md).
+- Updating the network guard's system extension: the updated app asks macOS to activate its own
+  version at its next start, which replaces the old one without a new approval (docs/TUNNEL.md).

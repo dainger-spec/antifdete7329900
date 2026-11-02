@@ -1,332 +1,319 @@
-# WebRTC through a profile's proxy: the packet tunnel
+# WebRTC through a profile's proxy: the relay and the network guard
 
 WebKit sends a data store's HTTP(S), WebSocket and media loads through the store's proxy, but
-opens its WebRTC sockets (STUN, TURN, media) itself, from this Mac's own address. Without help,
-a proxied profile therefore has to run with WebRTC off (ISOLATION_AND_LIMITATIONS §5). The
-packet tunnel, a Network Extension, is that help. With it, the WebRTC of a profile with a SOCKS5
-proxy leaves through that proxy's UDP ASSOCIATE, so sites, STUN servers and peers see the proxy's
-address.
+opens its WebRTC sockets (STUN, TURN, media) itself, from this Mac's own address. Without help a
+proxied profile has to run with WebRTC off (ISOLATION_AND_LIMITATIONS §5). Two pieces are that
+help, and they are kept apart on purpose:
+
+- **the relay** carries a profile's WebRTC: a TURN server on 127.0.0.1 inside the app
+  (`WebRTCRelays`), one per running profile, whose every allocation leaves through that profile's
+  SOCKS5 proxy (UDP ASSOCIATE). Sites and peers see the proxy's address;
+- **the network guard** carries nothing: a content-filter system extension
+  (`NetworkGuardExtension`) that holds the processes of such a profile to its proxy. Their
+  connections — and what WebKit's processes and the system open on their behalf — may reach the
+  proxy and this Mac (127.0.0.1) only; everything else is dropped.
+
+A profile gets WebRTC through its proxy only when every condition holds (`WebRTCGate`); with the
+first that does not, WebRTC is off in the engine (no `RTCPeerConnection` at all) and the person is
+told why, in words, with what they can do.
 
 | Traffic of a proxied profile | Path | How it is known |
 |---|---|---|
 | HTTP(S), WebSocket, fetch, media loads (TCP) | the data store's proxy (`proxyConfigurations`, fail-closed) | self-test, leak check |
 | QUIC / HTTP/3 | not used: with a store proxy WebKit sends these requests as HTTP/2 through the proxy | leak check (cloudflare-quic.com) |
-| DNS | resolved by the proxy (SOCKS5 remote DNS, CONNECT host names) | self-test |
-| WebRTC: STUN, TURN, media, data channels (UDP) | **the tunnel**: a TURN relay on a virtual address, which relays through the profile's SOCKS5 UDP association (only for a profile whose WebRTC setting is not Disabled, the default) | unit tests, leak check (relay harness; utun harness where sudo works); the extension itself has not run on a Mac yet (checklist below) |
-| WebRTC with an HTTP CONNECT proxy | off: CONNECT cannot carry UDP | self-test |
-| WebRTC with the tunnel off or not built | off, with a warning (UDP would leave from this Mac's address) | self-test |
+| DNS of pages | resolved by the proxy (SOCKS5 remote DNS, CONNECT host names) | self-test |
+| WebRTC: STUN, TURN, media, data channels (UDP) | **the relay** on 127.0.0.1 → the profile's SOCKS5 UDP association; the page's own ICE servers are never contacted | self-test (a video call inside a capture of every packet of the runner), leak check, unit tests |
+| A peer's candidate named by a host name (FQDN, mDNS `.local`) | dropped before the engine sees it: nothing is resolved | shim tests, self-test (no packet carries the name) |
+| Anything else a held profile's process or WebKit's processes for it open | dropped by the network guard | unit tests of its rules; on a Mac: the check below |
+| WebRTC with an HTTP CONNECT proxy, a proxy without UDP, the guard not ready | off, said why | self-test (the control: off, not direct) |
 
 A page cannot send other UDP: WebRTC is the only UDP a web page can start.
 
-**Status (decided October 2026).** Not in a release. The tunnel is offered only after the
-extension has passed the hardware checklist below on a real Mac, and then only by the user's
-own choice for a profile; WebRTC in a proxied profile stays off by default
-(ISOLATION_AND_LIMITATIONS §5 says why). `scripts/release.sh` builds without the extension.
+## The decisions (2 November 2026)
+
+**Which of the three kinds of network extension: a content filter.** A packet tunnel and an app
+proxy both *carry* traffic: whatever they are handed, they send somewhere. A mistake in either
+can send a profile's packets around its proxy — and an extension able to carry traffic around the
+proxy is worse than no WebRTC. A content filter (`NEFilterDataProvider`) can only let a flow
+through or drop it. Ours is sandboxed and has no `network.client` or `network.server`
+entitlement, so it cannot open a connection of its own (scripts/build-app.sh refuses a build that
+gives it one). The carrying is the relay's, in the app's own process, where it is ordinary code
+with ordinary tests. The tunnel, besides, was a VPN: only one runs at a time on macOS (starting
+it stopped WireGuard, Tailscale, …), macOS showed a VPN while it ran, and Apple's DTS calls a
+packet tunnel without a VPN server unsupported. A filter runs beside any VPN.
+
+**Inside our bundle, not an app beside it.** The extension is
+`Contents/Library/SystemExtensions/<id>.systemextension` inside Lumen.app: macOS lets only the app
+that contains a system extension install it, the app must be in /Applications, and when Lumen is
+moved to the Trash macOS removes its extension. One signature, one notarization, one update: the
+updater replaces Lumen.app and the extension with it. A separate helper app would be a second
+thing to install, update and trust, with nothing gained.
+
+**How UDP support of the proxy is known before the profile gets WebRTC.** At the launch, while the
+profile's process waits (it builds no web view before the answer, up to 40 s), the manager asks
+the proxy the way the relay will use it: a SOCKS5 UDP ASSOCIATE, then a STUN Binding through the
+association (`ProxyUDPCheck`). Only an answer through the association counts as support. Without
+one the profile starts with WebRTC off and the launch says: "the proxy does not pass UDP (UDP
+ASSOCIATE refused, or nothing came back through it); WebRTC needs a SOCKS5 proxy with UDP". If the
+check could not finish, it says that instead. An HTTP CONNECT proxy is refused without asking:
+it cannot carry UDP.
+
+**When and how the permission is asked: once, explained first, never by itself.** Nothing is
+asked at the app's start. Installing starts only from Settings › WebRTC through proxies (the
+editor and the launch message point there), with **Install…**. Lumen first says what macOS is
+about to ask and why (`guard.explain.*`): (1) "System Extension Blocked" — turn on "Lumen network
+guard" in System Settings › General › Login Items & Extensions › Network Extensions, which only an
+administrator can; (2) "Lumen would like to filter network content" — Allow. Then macOS asks, once.
+The page then follows the state (`NetworkGuard`): awaiting approval (where to click), off (Turn
+On), a restart needed, /Applications needed, an administrator needed, management (MDM) forbids it,
+the configuration declined — each said with who can do what.
+
+**Updates.** The extension's `CFBundleVersion` is new with every build. At each start the app
+compares the enabled extension's version with its own bundled one; when they differ (the app was
+updated) it asks macOS to activate its own, which replaces the old one without a new approval
+(same team, same identifier). The app answers only an extension of its own version: until the
+replacement is done the guard is "not answering" and WebRTC stays off for new launches. An
+update of Lumen quits it first, so no profile is held across it. The extension never updates by
+itself: it comes only inside Lumen.app.
 
 ## Architecture
 
 ```
- page (profile A, SOCKS5 proxy PA)                    PacketTunnelExtension (system extension)
- ─────────────────────────────────                    ────────────────────────────────────────
- RTCPeerConnection                                     NEPacketTunnelProvider
-   iceServers := [turn:192.0.2.10:3478,                  routes: 192.0.2.0/24, fd6b:3a1c:94e2:1::/64
-                  turn:[fd6b:3a1c:94e2:1::a]:3478]       (enforced; nothing else, no DNS)
-   iceTransportPolicy := relay                           │
-        │  (user script; the page sees its own config)   PacketRouter ── by destination address
-        ▼                                                 ├─ 192.0.2.10 / …::a → TURNServer(route A)
- WebKit networking process (libwebrtc)                    │                       └─ allocation → SOCKS5 UDP ASSOCIATE @ PA
-   TURN client, socket bound to en0's address            └─ 192.0.2.11 / …::b → TURNServer(route B)
-        │                                                                         └─ allocation → SOCKS5 UDP ASSOCIATE @ PB
-        ▼  enforced route
- utun ──── IP packets ────────────────────────────────▶ readPackets / writePackets
+ profile process (pid P, SOCKS5 proxy X)          manager process (Lumen)
+ ───────────────────────────────────────          ──────────────────────────────────────────────
+ page: RTCPeerConnection                           WebRTCRelays: TURNUDPHost on 127.0.0.1:port
+   iceServers := [turn:127.0.0.1:port] (only)        per-launch username/password, 401 otherwise
+   iceTransportPolicy := relay                       allocation → SOCKS5 UDP ASSOCIATE @ X
+   (user script; the page sees its own config)       │                       (TCP control + UDP)
+        │                                            ▼
+ WebKit network process (for P)                    the proxy X ─────────► peers, STUN servers
+   TURN client ──── UDP to 127.0.0.1:port ───────► (their only route)
+
+ every new flow of the Mac ─► NetworkGuardExtension (content filter, root, sandboxed, no network)
+                               flow counted for a held pid (P)? → its rules: loopback, X, DNS for
+                               X's own name — else drop.   Anything else → allow, unread.
 ```
 
-- **Why a relay and not "route the profile through the tunnel".** All WKWebView profiles share
-  one WebKit networking process, so a packet cannot be traced back to a profile by its source.
-  Per-app VPN would not help either: it works per app, and WebKit's processes serve every
-  profile. So the tunnel routes only a virtual subnet. Each running profile gets its own TURN
-  server address there (slot *n* → `192.0.2.(10+n)` and `fd6b:3a1c:94e2:1::(10+n)`) with its
-  own random credentials. Its pages are given that relay as their only ICE server, with
-  `iceTransportPolicy: "relay"`. Every packet that reaches a relay address therefore belongs to
-  one profile, and leaves through that profile's proxy.
-- **Several profiles at once.** Each route has its own TURN server, credentials and proxy.
-  Every allocation opens its own SOCKS5 UDP association (a TCP control connection plus a UDP
-  flow), so profiles behind different proxies relay side by side (`PacketRouterTests`). Up to
-  240 routes; 64 allocations per route.
-- **The tunnel carries nothing else.** The routes are the TEST-NET-1 /24 (RFC 5737, never
-  routed on the Internet) and a random unique-local /64. There are no DNS settings and no
-  default route, so other apps, DNS, and the profiles' own TCP to their proxies stay on the
-  normal network. It is not 198.18.0.0/15: sing-box, Clash and Surge hand out fake IPs from
-  that range, and a more specific route of ours would take some of their traffic.
-- **Routing WebKit's sockets into the tunnel.** If libwebrtc bound its TURN socket to the
-  default interface's address, XNU would keep the packets on that interface whatever the routing
-  table says (DTS: a flow bound to an interface's address goes over that interface). That is
-  not what happens. With ordinary routes into a utun interface (the leak check's utun harness,
-  macOS 26.6), WebKit's TURN traffic to the relays arrived from the utun's own addresses
-  (`192.0.2.1`, `fd6b:3a1c:94e2:1::1`): libwebrtc gathered on the tunnel interface, for IPv4
-  and IPv6. `NEVPNProtocol.enforceRoutes = true` stays as a second line. It is documented to
-  supersede "scoping operations by apps" for the included routes, here only these two subnets
-  (`includeAllNetworks` stays off).
-- **TURN for libwebrtc** (`TunnelCore/TURNServer.swift`, RFC 8656 subset). It speaks UDP
-  allocations, long-term credentials (HMAC-SHA1, MD5 key) and stateless nonces. Allocate is
-  idempotent per 5-tuple. It also handles Refresh, CreatePermission and ChannelBind, Send and
-  Data indications, and ChannelData. These behaviours of WebKit's libwebrtc decide the details:
-  - The first Allocate goes out without credentials and needs a 401 carrying REALM and NONCE.
-  - A 401 or 438 on the authenticated Allocate is fatal.
-  - Every authenticated success must carry MESSAGE-INTEGRITY.
-  - An Allocate success needs XOR-RELAYED-ADDRESS, XOR-MAPPED-ADDRESS and LIFETIME.
-  - REQUESTED-ADDRESS-FAMILY is never sent. An allocation therefore takes the family of the
-    relay address it was sent to.
-  - The TURN server is also asked as a STUN server, without credentials, from the socket of the
-    allocation (Bindings for about 45 s, until libwebrtc drops that port under the relay
-    policy). A Binding is answered only on a 5-tuple that holds an allocation, with its relayed
-    address: the proxy's egress, **never the client's own address**. Until the allocation is
-    ready the Binding goes unanswered and a retransmission gets the answer. A 5-tuple whose
-    Allocate failed gets 500, so gathering completes at once. Any other 5-tuple gets nothing:
-    the relay addresses are reachable by every process on the Mac, and an unauthenticated
-    answer would tell them a profile's proxy address.
-  - The Allocate's mapped address is the egress too. Under the relay policy libwebrtc prints a
-    relay candidate's related address as `0.0.0.0 0` (IPv4) or `:: 0` (IPv6). If the policy
-    were ever widened, it would show the egress, not this Mac's address.
-- **The proxy's egress** is found per allocation with a STUN Binding sent through its
-  association to public STUN servers. Their names are resolved by the proxy. For IPv6 the
-  servers are IPv6 literals, so the answer is an IPv6 egress.
-- **Peers are Internet addresses only.** CreatePermission and ChannelBind are refused (403)
-  for loopback, link-local, private, shared (CGNAT), multicast and reserved addresses, the
-  relays themselves, and IPv6 forms of IPv4 addresses. Those would be reached on the proxy's
-  side. libwebrtc drops only that peer's candidate pair.
-- **IPv4 and IPv6.** Packets of both families are parsed and built (`IPPacket`; the IPv4
-  header checksum and the mandatory IPv6 UDP checksum are checked). There is a relay address
-  and an allocation per family, and the SOCKS5 framing covers both. A proxy without IPv6 egress
-  fails only the IPv6 allocation: the probe through the proxy gets no answer, and after about
-  6 s the Allocate is answered 508 (its Bindings get 500). The IPv4 relay keeps working.
-- **Control.** The app registers a route per profile launch over `sendProviderMessage` (JSON,
-  `TunnelControlMessage`). Only the app that owns the VPN configuration can send these. It
-  registers again whenever the tunnel reconnects, and unregisters on stop. The tunnel starts on
-  demand and stops when no route is left. A tunnel nothing uses, left by a quit, a crash or a
-  force quit, is stopped at the next launch. While it has routes the app sends a status message
-  every minute. After 10 minutes without one (uptime, so sleep does not count) the extension
-  drops its routes and stops. Apple DTS recommends XPC through `NEMachServiceName` for richer
-  app↔system-extension traffic. Provider messages are enough here, because routes only need to
-  reach a connected tunnel.
-- **Updates.** macOS replaces an installed system extension only on an activation request.
-  At launch the app compares the enabled extension's `CFBundleVersion` (a new one per build)
-  with its own bundled one, and requests activation when they differ. A same-team replacement
-  needs no new approval.
-- **The proxy connections bypass the tunnel.** NECP keeps the provider process's own sockets
-  out of its tunnel, and the proxies are not in the routed subnets anyway. A proxy configured
-  inside them is refused.
+- **Every profile runs in a process of its own** (`ProfileProcess`), and WebKit gives each process
+  its own network process. The guard tells profiles apart by the process each flow is counted for
+  (the flow's *source application*: for WebKit's network process and for the system's resolver,
+  the process they work for), so it holds exactly one profile's flows.
+- **The relay is in the manager**, not in the profile's process: a profile process with a proxy has
+  the kernel refuse it every UDP datagram (`ProfileNetworkGuard.closeTheProcess`), and stays so.
+  On 127.0.0.1 nothing outside this Mac can reach the relay; any process of this Mac can, and needs
+  the launch's own credentials (401 otherwise). Measured with WebKit's own TURN client (CI runs 609,
+  610, 612, macOS 26.6.2 and 27.0.1): relay candidates only, at the proxy's address; a data channel
+  and a video call through the proxy; 0 packets of the app outside loopback but to the proxy.
+- **The order at a launch** (`ProfileManager.decideWebRTC`): the guard's state (once asking macOS
+  is over) → the proxy's UDP (above) → the gate → the guard holds the process (pid P) → the relay
+  starts → the process is told; any step that fails is WebRTC off, said once. When the process
+  ends the guard releases it by itself (the kernel tells it the process exited); the app releases
+  it too.
+
+### The relay: TURN for libwebrtc
+
+`TunnelCore/TURNServer.swift` (RFC 8656 subset): UDP allocations, long-term credentials
+(HMAC-SHA1, MD5 key), stateless nonces, idempotent Allocate per 5-tuple, Refresh,
+CreatePermission, ChannelBind, Send/Data indications, ChannelData. What libwebrtc needs:
+
+- the first Allocate goes out without credentials and needs a 401 carrying REALM and NONCE; a 401
+  or 438 on the authenticated Allocate is fatal; every authenticated success carries
+  MESSAGE-INTEGRITY; an Allocate success needs XOR-RELAYED-ADDRESS, XOR-MAPPED-ADDRESS and
+  LIFETIME; REQUESTED-ADDRESS-FAMILY is never sent;
+- the TURN server is also asked as a STUN server from the allocation's socket. A Binding is
+  answered only on a 5-tuple that holds an allocation, with its relayed address — the proxy's
+  egress, **never the client's own address**. A 5-tuple whose Allocate failed gets 500; any other
+  gets nothing (an unauthenticated answer would tell any local process a profile's proxy address);
+- the proxy's egress is found per allocation with a STUN Binding through its association; the STUN
+  servers' names are resolved by the proxy;
+- peers are Internet addresses only: CreatePermission and ChannelBind are refused (403) for
+  loopback, link-local, private, shared (CGNAT), multicast, reserved and documentation addresses
+  and IPv6 forms of IPv4 ones — those would be reached on the proxy's side.
+
+### The network guard
+
+`Sources/NetworkGuardExtension` (the filter and its Mach service), `Sources/NetworkGuardCore`
+(its rules, platform-independent, tested on Linux and macOS: `GuardPolicyTests`).
+
+- **What it sees.** A content filter is asked about every new socket flow of the Mac
+  (`NEFilterSettings(rules: [], defaultAction: .filterData)`: a rule can name networks and ports,
+  not processes). A flow counted for a process the app did not register — any other app, Lumen's
+  own updates, account and sync, a profile without WebRTC — is let through at once, unread, and
+  not noted anywhere. That the filter sees the start of each new flow (address, app) is what macOS's
+  "filter network content" prompt means; the guard keeps none of it.
+- **The rules for a held process** (`GuardPolicy.verdict`): loopback (the relay, this Mac's own
+  services); the proxy, by the name the flow was opened by with its port, or by an address the app
+  resolved for it (any port: a proxy's UDP relay port is its own); DNS over UDP only when every
+  question asks for the proxy's own name (each datagram looked into); everything else — another
+  host, the local network, multicast, DNS over TCP, a flow whose remote end is not known, another
+  transport — is dropped.
+- **Who may ask it.** The app reaches it through its Mach service (`NEMachServiceName`, under the
+  team's app group) with XPC; the extension lets in only Lumen of its own team
+  (`setCodeSigningRequirement`), and holds only processes whose code is Lumen of that team. The app
+  talks only to an extension with its identifier and its own team.
+- **When it goes away** (crashed, switched off in System Settings, replaced): the app notices at
+  once (the XPC connection is interrupted; the configuration's change notification; while it holds
+  anything, it asks every 5 s whether the filter still runs). The relays of held profiles stop at
+  once and those profiles are stopped (sealed as on any stop), with a message saying why. A
+  restarted extension is given every hold again; one it does not take back stops its profile.
+
+### Attribution: the check on each Mac
+
+The guard holds a profile only if macOS counts WebKit's flows for the profile's process. That is
+a property of macOS and WebKit, so it is checked, not assumed: once per macOS build, WebKit
+version and guard version (`NetworkGuard.prove`). A probe process of this app (`Lumen
+--guard-probe`, nothing of the person's in it) is held to a proxy that is not there; then one of
+its pages asks a STUN server at a documentation address (203.0.113.1, TEST-NET-3, never routed)
+with WebKit's own WebRTC. The guard must report that flow as opened by another process for the
+probe, and dropped (`GuardProof.holds`). Until it has, the guard is "not yet checked on this Mac"
+and WebRTC stays off in proxied profiles; a failed check is said as such, with Check Again. CI
+cannot load the extension, but it runs the same probe inside a capture: every packet of the
+probe's request must be sent by another process and counted for the probe's pid
+(`scripts/guard_probe_check.py`, with its own control).
 
 ### What a page sees
 
 - `getConfiguration()` returns the page's own `iceServers` and policy. The engine still
-  validates them and throws its own errors, through a closed peer connection that is made from
-  them and never gathers (no candidate pool).
+  validates them and throws its own errors, through a closed peer connection made from them that
+  never gathers.
 - Candidates are of type `relay` only, at the proxy's egress address. libwebrtc prints their
-  related address as `0.0.0.0 0` (`:: 0` for IPv6) under the relay policy.
-- `RTCPeerConnectionIceEvent.url` and the `url` of candidate entries in `getStats()` would name
-  the virtual relay. The user script replaces it with the page's own server, in libwebrtc's form
-  (`turn:host:3478?transport=udp`, `stun:host:3478`). With no such server configured, it returns
-  `null` or leaves the field out.
-- STUN servers the page configured are not contacted: libwebrtc would reach them from the
-  physical interface even under the relay policy, so they are dropped from the engine's
-  configuration.
-- This differs from Safari without a proxy, which would show mDNS host and srflx candidates.
-  A page can tell that the profile uses a relay-only policy, as with any TURN-only setup.
+  related address as `0.0.0.0 0` (`:: 0` for IPv6).
+- `RTCPeerConnectionIceEvent.url` and the `url` of candidate entries in `getStats()` would name the
+  relay (127.0.0.1); the user script replaces it with the page's own server, in libwebrtc's form,
+  or `null` / no field when it configured none.
+- STUN servers the page configured are not contacted.
+- A peer's candidate named by a host name (in `addIceCandidate`, or an `a=candidate` line of a
+  remote description) is dropped before the engine sees it, and the page is told success, as for
+  a candidate the engine could not reach. Through the relay a peer is reached by its address
+  alone; resolving the name would ask this Mac's resolver, outside the proxy.
+- This differs from Safari without a proxy (mDNS host and srflx candidates). A page can tell the
+  profile uses a relay-only policy, as with any TURN-only setup.
 
-### Enforcement is in the page, not in the engine
+### Enforcement: the page first, the guard behind it
 
-With the tunnel the engine's WebRTC is on. WKWebView has no setting that forces relay-only or
-limits ICE servers, so the document-start user script is what keeps a page on the relay. If it
-were defeated, libwebrtc would reach the page's STUN servers from the physical interface, and
-the real address would leak. The script is hardened for this:
-- it uses only built-ins it captured before any page script ran;
-- it gives the engine null-prototype objects with own data properties and its own iterators;
-- it never hands the native constructor or methods to anything the page can replace.
+WKWebView has no setting that forces relay-only or limits ICE servers, so the document-start
+user script keeps a page on the relay. It uses only built-ins captured before any page script
+ran, gives the engine null-prototype objects with own data properties, reads each value of the
+page once and gives the engine that copy, and never hands the native constructor or methods to
+anything the page can replace (the shim tests attack it: replaced `Reflect`, `call`/`apply`,
+`Object.*`, iterators, `WeakMap`/`Promise` methods, accessors on `Object.prototype`, getters and
+`toString`s that answer differently each time). It remains page-level code; that is why the guard
+exists. If the script were defeated, libwebrtc would try the page's servers and peers directly —
+the guard drops each of those flows, because they are counted for the held profile.
 
-Shim tests attack it by replacing `Reflect`, `Function.prototype.call`/`apply`,
-`Object.assign`/`create`/`defineProperty`, the `Array` iterator and `slice`, and `WeakMap` and
-`Promise` methods, and by putting accessors on `Object.prototype`. Each attack must leave the
-engine with the relay alone, relay-only, and the native functions out of reach.
+## Fail closed: what each state does
 
-It remains page-level code. A way to run script in a window of the page before its copy runs,
-or a WebKit change in how a configuration is read, would not be covered. Without a proxy, or
-with the default WebRTC setting (Disabled), WebRTC is off in the engine and none of this
-applies. A network-level backstop would need a content filter (`NEFilterDataProvider`, another
-system extension and approval) that drops UDP from this app's WebKit process except to the
-relay subnets. It is not built.
+| State | WebRTC in a proxied profile | What is said |
+|---|---|---|
+| A build without the guard (no `NE=1`) | off | "this version has no network guard" (release) / how the developer builds it |
+| Not installed, awaiting approval, off, a restart needed | off | the state and the next step |
+| Installed, not answering (updating, crashed) | off; held profiles are stopped | "not answering", Check Again; a stopped profile says why |
+| Installed, not checked on this Mac / check failed | off | "being checked" / "the check failed", Check Again |
+| Ready, HTTP proxy | off | "an HTTP proxy cannot carry UDP" |
+| Ready, SOCKS5 without UDP / UDP unknown | off | "the proxy does not pass UDP" / "could not find out" |
+| Ready, the guard does not take the process, the relay does not start | off | "the guard did not take the profile's process, or its relay did not start" |
+| Ready, all of it holds | through the relay and the proxy | the editor and the inspector say so |
+| The sandboxed build (profiles inside the app's process) | off | "only for a profile in its own process" |
 
-## Requirements and real limitations
+## Requirements and real limits
 
-- **A paid Apple Developer Program team.** The packet-tunnel and system-extension-install
-  entitlements are restricted: provisioning profiles must allow them for the app and for the
-  extension. Developer ID profiles support both. The free tier supports neither, and ad-hoc
-  signing cannot load the extension. Apple needs no separate request. A default build
-  (`scripts/build-app.sh`) claims none of these entitlements and has no extension. The tunnel
-  sheet says so, and proxied profiles keep WebRTC off.
-- **User approval, twice, by an administrator.** The first approval is for the system
-  extension: System Settings → General → Login Items & Extensions → Network Extensions (ⓘ) →
-  on. On macOS 14 it is Privacy & Security → Allow. The second is the "add VPN configurations"
-  prompt. **Open System Settings** uses `SMAppService.openSystemSettingsLoginItems()` on
-  macOS 15+, and the Privacy & Security URL on 14. Installing a system extension needs an
-  administrator, and the app must run from /Applications. CI runners cannot approve extensions
-  (that needs user-approved MDM), so CI compiles and lays out the extension but does not load
-  it.
-- **Per-app VPN.** Apple's routing documentation describes per-app VPN on macOS for
-  MDM-managed apps (`com.apple.vpn.managed.applayer`). TN3134 (2025) lists a managed-device
-  requirement only for iOS and visionOS, and DTS has shown `NETunnelProviderManager.forPerAppVPN()`
-  with `NEAppRule` on macOS. None of this is tested here. It would not separate profiles in any
-  case: the rule matches an app, and WebKit's processes serve every profile.
-  `NEPacket.metadata` is filled in only in per-app mode. Hence the destination-address design
-  above.
-- **The tunnel is system-wide.** Any process of any user on the Mac that sends to
-  192.0.2.0/24 or fd6b:3a1c:94e2:1::/64 enters the tunnel. Only the relay addresses answer:
-  - TURN requests need the per-launch credentials that the app gives its own pages (401
-    otherwise), so nothing else can use a relay as an open UDP relay through the proxy;
-  - a STUN Binding is answered only on an allocation's own 5-tuple, so it tells nothing to
-    anyone else.
-
-  While the tunnel runs, macOS shows a VPN.
-- **One packet-tunnel VPN at a time.** WireGuard, Tailscale and most VPN apps are packet
-  tunnels as well. Starting this tunnel disconnects theirs. That happens on the first launch of a
-  profile with a SOCKS5 proxy and a WebRTC setting other than Disabled. Starting theirs stops
-  this one and switches its configuration off, and the sheet then asks for **Enable** again. A
-  personal VPN (IKEv2 via NEVPNManager) can run alongside.
-- **When the tunnel stops under a running profile**, its relays become unreachable and WebRTC
-  fails. The page and its peers never see this Mac's address: the policy is relay-only, and
-  nothing answers without the per-launch password. The packets to the relay addresses then
-  follow the default route instead: out of the physical interface from this Mac's address
-  toward TEST-NET-1 (not routed on the Internet), or into another VPN. They carry the
-  per-launch username and the realm `privacybrowser.relay` in clear.
-- **The proxy must relay UDP.** SOCKS5 without TLS, with UDP ASSOCIATE. Many SOCKS5 services,
-  and `ssh -D`, do not support it. The allocation then fails (508) and the page gets no
-  candidates. An HTTP CONNECT proxy cannot carry UDP at all. The advertised relay port assumes
-  the proxy maps an association to one external port for every destination
-  (endpoint-independent). If it does not, ICE still connects through peer-reflexive
-  candidates.
-- **Apple does not support this use.** TN3120 says not to use a packet tunnel provider to host
-  a network listener or proxy server (this extension terminates a TURN relay per profile), nor
-  to claim some traffic and proxy it out elsewhere. DTS added in 2026 that a packet tunnel
-  without a VPN server is unsupported. Developer ID needs no App Review, so nothing blocks
-  shipping it, but OS updates may change behaviour without notice.
-  The transparent-proxy provider (`NETransparentProxyProvider`) is the supported way to claim
-  flows by destination. Apple DTS observed it running alongside a packet-tunnel VPN. It is the
-  route to take if VPN coexistence matters more.
-- **Not yet run on a Mac: the extension itself.** CI cannot load a system extension. These
-  parts are compiled but have never run:
-  - activation and approval, and saving and starting the VPN configuration;
-  - provider messages, and the provider's packet I/O (`packetFlow`);
-  - IPv6 through the tunnel, re-registration on reconnect, and VPN coexistence;
-  - two profiles at once through the real extension;
-  - and whether the extension's utun is gathered on as the raw utun was.
-
-  CI runs the protocol code, the SOCKS5 relay against real WebKit, and (where `sudo` works) the
-  extension's router on a raw utun interface (below). If a real tunnel were not gathered on,
-  `defaults write <bundle id> PBTunnelAllInterfaces -bool YES` has libwebrtc gather on every
-  interface, the tunnel's own included. It uses WebKit's `_enumeratingAllNetworkInterfacesEnabled`,
-  and only for profiles whose WebRTC goes through the tunnel. This opens more allocations.
+- **The team's Network Extensions capability** with the content-filter entitlement
+  (`content-filter-provider-systemextension` for Developer ID, `content-filter-provider` for
+  development), and the System Extension capability for the app; provisioning profiles for both.
+  Granted since 31 October 2026. A default build (`scripts/build-app.sh`) claims none of these and
+  has no guard; proxied profiles keep WebRTC off and say so.
+- **An administrator's approval, once**, and Lumen in /Applications.
+- **CI cannot load the extension** (macOS needs the approval; runners have no MDM). CI builds and
+  lays it out (`NE=check`), tests its rules, runs the relay and the whole call with the self-test
+  standing in for the guard, and runs the probe inside a capture. The extension itself — its
+  activation, its filter on a real flow, the check above, a crash under a held profile — runs only
+  on a real Mac with a signed build (the checklist below).
+- **The proxy must relay UDP.** SOCKS5 without TLS, with UDP ASSOCIATE; many SOCKS5 services, and
+  `ssh -D`, do not. TURN over TCP and TLS are not carried (UDP only).
+- **What the filter sees.** The start of every new flow of the Mac passes through it (it lets all
+  but a held profile's through at once). If the extension were not running at all, macOS would let
+  flows through: that is why the app stops held profiles the moment it stops answering, and why
+  the page-level enforcement stays in front.
+- **A crash of the extension** leaves, until the app reacts (milliseconds), a held profile's flows
+  unfiltered; its relay stops and the profile is stopped. The page-level enforcement holds in that
+  time.
+- **Loopback is allowed** to a held profile (the relay is there). A page that defeated the user
+  script could reach this Mac's own services on 127.0.0.1; it could not reach the Internet.
+- **Before an NE build ships**: the application identifier an `NE=1` build carries opens the
+  data-protection keychain to Safari's code in a profile's process, shared by every profile
+  (docs/IDENTITY.md, "The keychain"). It is to be closed first; `scripts/release.sh` builds without
+  `NE` until then.
 
 ## Building it
 
-1. In the developer account, create two App IDs (docs/IDENTITY.md lists every step, in order,
-   with Lumen's identifiers):
-   - the app (`$BUNDLE_ID`, `io.lumenbrowser.Lumen`): Network Extensions, System Extension and App Groups;
-   - the extension (`$BUNDLE_ID.PacketTunnel`): Network Extensions and App Groups.
-
-   Both use the app group `$TEAM_ID.$BUNDLE_ID`, which is not registered: named with the team ID's
-   prefix, it is the team's by its signature.
-2. Create a Developer ID provisioning profile for each, for the Developer ID Application
-   certificate. For testing on a registered Mac, use Development profiles and an Apple
-   Development identity with `NE_SIGNING=development`; the entitlement value is then
-   `packet-tunnel-provider` instead of `packet-tunnel-provider-systemextension`.
+1. The App IDs (docs/IDENTITY.md): the app (`io.lumenbrowser.Lumen`: Network Extensions, System
+   Extension, App Groups) and the extension (`io.lumenbrowser.Lumen.PacketTunnel` — registered on
+   31 October under that name, kept: Network Extensions, App Groups). Both use the app group
+   `$TEAM_ID.$BUNDLE_ID`.
+2. Developer ID provisioning profiles for both (or Development ones with
+   `NE_SIGNING=development`).
 3. Build:
    ```sh
-   NE=1 TEAM_ID=ABCDE12345 BUNDLE_ID=io.lumenbrowser.Lumen \
-     SIGN_IDENTITY="Developer ID Application: Name (ABCDE12345)" \
-     APP_PROFILE=app.provisionprofile EXTENSION_PROFILE=tunnel.provisionprofile \
+   NE=1 TEAM_ID=ABCDE12345 SIGN_IDENTITY="Developer ID Application: Name (ABCDE12345)" \
+     APP_PROFILE=app.provisionprofile EXTENSION_PROFILE=guard.provisionprofile \
      scripts/build-app.sh
    ```
-   This builds the `PacketTunnelExtension` product and lays it out as
-   `Contents/Library/SystemExtensions/$BUNDLE_ID.PacketTunnel.systemextension` (Info.plist with
-   `NSSystemExtensionUsageDescription`, `NEMachServiceName` under the app group,
-   `NEProviderClasses` → `PacketTunnelExtension.PacketTunnelProvider`, and a new
-   `CFBundleVersion` per build). It embeds both profiles, signs the extension, then signs the app
-   with the extra entitlements (hardened runtime, secure timestamp).
-4. Notarize and staple:
-   ```sh
-   ditto -c -k --keepParent build/Lumen.app Lumen.zip
-   xcrun notarytool submit Lumen.zip --keychain-profile <profile> --wait
-   xcrun stapler staple build/Lumen.app
-   ```
-5. Copy the app to /Applications and open it. In the Profiles window, choose More (⋯) →
-   WebRTC through proxies (network extension)…, press **Enable**, and approve both prompts.
-   **Open System Settings** goes to the page where the extension is switched on.
-
-`NE=check scripts/build-app.sh` is what CI runs. It builds the extension unsigned beside the
-app, lints its plists and checks that the class named in `NEProviderClasses` is in the binary.
+   It builds `NetworkGuardExtension`, lays it out as
+   `Contents/Library/SystemExtensions/$EXTENSION_ID.systemextension` (Info.plist with
+   `NEProviderClasses` → `com.apple.networkextension.filter-data` only, `NEMachServiceName`
+   `$APP_GROUP.guard`, `PBGuardAppIdentifier`, a new `CFBundleVersion`), checks that the class is in
+   the binary and that its entitlements give it no network, signs it, then the app.
+4. Notarize and staple (docs/UPDATES.md §6), copy to /Applications, open Settings › WebRTC through
+   proxies, Install….
 
 ## What CI verifies
 
-- `TunnelCore` (every push, Linux and macOS):
-  - the STUN codec against RFC 5769's vectors (integrity, fingerprint, XOR addresses), and the
-    IPv4/IPv6 UDP packets against independent vectors;
-  - SOCKS5 framing;
-  - the TURN flows as libwebrtc drives them: 401 challenge, idempotent Allocate, egress in
-    Allocate and in Bindings on the allocation's 5-tuple, nothing to other 5-tuples, failing
-    proxies, permissions and channels (unpadded ChannelData), oversized datagrams, refresh and
-    expiry, the peer policy, the IPv6 family;
-  - two profiles with different proxies through one router.
-- The extension and the app compile against the macOS SDK, and the bundle layout is checked
-  (`NE=check`).
-- `scripts/leak_check.py` runs a profile behind a real SOCKS5 proxy with UDP ASSOCIATE (the
-  script's own) through the same `TURNServer` and `SOCKS5UDPRelay` code as the extension. The
-  TURN server listens on a UDP socket of the runner instead of a virtual address
-  (`TURNUDPHost`, `--capture-sites` profile option `"relay": "harness"`). It checks that the
-  page's candidates are relays at the proxy's address, that no srflx or host candidate appears,
-  that the proxy saw the UDP, and that a data channel between two connections carries a
-  message.
-- Where passwordless `sudo` works (the CI runner), `Lumen --utun-relay` opens a utun
-  interface as root without the Network Extension (`UTunDevice`). It routes the relay subnets
-  into it and serves two routes, each with its own UDP-capable proxy, with the extension's own
-  `PacketRouter`, on real IP packets from real WebKit. One profile keeps WebKit's default network
-  selection and the other gathers on every interface (`PBTunnelAllInterfaces`). Measured on
-  macOS 26.6, both profiles got:
-  - relay candidates at the proxy's address, and a data channel delivered through the proxy;
-  - their TURN traffic from the utun's own addresses;
-  - IPv6 allocations that reached the router and failed cleanly (the runner has no IPv6 egress).
-
-  Whether they get candidates is reported. A srflx or host candidate, or the relay's url shown
-  to a page, fails the run as for every proxied profile.
-- The shim tests: the page's configuration, ICE event urls and `getStats()` urls, and the
-  tampering attacks above.
+- `NetworkGuardCoreTests` (Linux, macOS): every rule — loopback, the proxy by name and address,
+  STUN, TURN/TCP, the local network, mDNS, DNS questions (the proxy's name only), malformed DNS,
+  audit tokens, the ledger, the check's verdict.
+- `TunnelCoreTests`: the STUN codec against RFC 5769, SOCKS5 framing, the TURN flows as libwebrtc
+  drives them, the peer policy, IPv6.
+- `WebRTCGateTests`: every combination of setting, proxy, process, guard state and UDP answer.
+- The shim tests: the page's configuration, urls, tampering, named candidates.
+- `NE=check`: the extension compiles, its plists lint, the provider is the filter alone, its
+  entitlements give it no network.
+- The self-test, inside a capture of every packet of the runner: a profile with a SOCKS5 proxy
+  with UDP, in its own process, makes a real video call between two peer connections through the
+  relay and the proxy (relay candidates at the proxy's address only, frames decoded on the far
+  side, the proxy's associations carried it); its peer's named candidates are taken and no packet
+  carries their names; the control: the same profile without the guard has no RTCPeerConnection
+  at all (not direct WebRTC), and says why. A profile without a proxy sends a STUN request on
+  purpose, which the capture must see (the capture's own control).
+- `scripts/guard_probe_check.py`: the probe's request is counted for the probe (and the check
+  fails with a pid that is not the probe's).
 
 ## Hardware checklist (a signed build on a real Mac)
 
-1. Enable the tunnel. The sheet shows "On". `systemextensionsctl list` shows the extension
-   activated and enabled.
-2. Run a SOCKS5 proxy with UDP on another host (Dante, sing-box, or 3proxy with UDP enabled).
-   Then launch a profile behind it whose WebRTC setting is Relay only or Unrestricted. The
-   default, Disabled, keeps WebRTC off and never starts the tunnel. The tunnel connects (VPN
-   icon), and `log stream --level info --predicate 'subsystem == "PrivacyBrowser.PacketTunnel"'`
-   shows the route.
-3. Run `sudo tcpdump -ni en0 'udp and not port 53'` and `sudo tcpdump -ni utunN`. Open a
-   WebRTC leak test page (browserleaks.com/webrtc). Check that:
-   - no UDP from WebKit leaves en0, except to the proxy's UDP relay port;
-   - utun shows the TURN exchange with 192.0.2.10:3478;
-   - the page shows relay candidates at the proxy's address only.
-4. If TURN packets show on en0 toward 192.0.2.x instead (not seen with the raw utun in CI), the
-   tunnel interface was not gathered on and the enforced routes did not catch the sockets. Try
-   `PBTunnelAllInterfaces` (above) and repeat.
-5. IPv6: with an IPv6 default route and a proxy with IPv6 egress, a second relay candidate
-   with the proxy's IPv6 address appears.
-6. Two profiles behind different proxies at once, both with WebRTC not Disabled. Each page
-   shows its own proxy's addresses, and a call between them connects.
-7. Start another VPN app. This tunnel stops, and WebRTC in the running profile fails without
-   showing this Mac's address. The sheet shows the configuration off. **Enable** takes over
-   again, and disconnects the other VPN.
-8. Update: build again (a new `CFBundleVersion`), copy to /Applications and launch.
-   `systemextensionsctl list` shows the new version activated without a new approval.
-9. Quit the app with a proxied profile running: the VPN indicator goes away. Force-quit it
-   instead: the tunnel stops within about 10 minutes, or at the next launch.
-10. Turn the extension off in System Settings. The sheet shows the warning, and a proxied
-    profile launches with WebRTC off.
+1. Settings › WebRTC through proxies › Install…: the explanation, then macOS's two questions.
+   `systemextensionsctl list` shows the guard activated and enabled; the page shows "Being checked"
+   and then "Working".
+2. `log stream --predicate 'subsystem == "PrivacyBrowser.NetworkGuard"'` shows the probe held,
+   its flow dropped, and the check proven.
+3. A SOCKS5 proxy with UDP on another host (Dante, sing-box, 3proxy). A profile behind it with
+   WebRTC not Disabled: browserleaks.com/webrtc shows relay candidates at the proxy's address only.
+   `sudo tcpdump -ni en0 'udp and not port 53'`: no UDP of Lumen's or WebKit's but to the proxy.
+4. A video call (meet.jit.si) between that profile and another device: it connects; the other
+   side sees the proxy's address.
+5. A profile behind a SOCKS5 proxy without UDP (`ssh -D`): WebRTC off, the launch says why.
+6. Two profiles behind different proxies at once, each with its own proxy's address.
+7. Switch the guard off in System Settings with a profile running: the profile stops and says why;
+   a new launch has WebRTC off.
+8. Update: a new build to /Applications, launched: `systemextensionsctl list` shows the new
+   version, no new approval; the check runs again once.
+9. Another VPN app on (WireGuard, Tailscale): it keeps running; step 3 again.
+
+## History: the packet tunnel (until 2 November 2026)
+
+The first design carried WebRTC in a packet-tunnel system extension: a TURN relay per profile on a
+virtual address (TEST-NET-1 /24, a unique-local /64), routed into the tunnel, relaying through the
+profile's proxy. It was never run on a Mac. It was replaced because it carried traffic (a mistake
+could send it around the proxy), was a VPN (one at a time; a VPN icon; unsupported by Apple
+without a VPN server), relied on libwebrtc gathering on the tunnel's interface (measured only with
+a raw utun in CI), and could not tell profiles apart by process — the reason the relay addresses
+existed. Each profile now has its own process, so the guard can hold it by process, and the relay
+needs no virtual address: 127.0.0.1 is enough.

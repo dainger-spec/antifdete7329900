@@ -138,9 +138,9 @@ if a device's connections could not be told apart by their process, C could not 
 Cost: the largest. A Developer ID-signed, notarized app with the Network Extension entitlements
 above (a paid Apple Developer team), the user's approval in System Settings, an always-on component
 that sees all of the Mac's traffic (a trust and privacy burden for the customer), 4–8 weeks
-(estimate) before the leak tests. The repository already builds a packet-tunnel system extension
-(docs/TUNNEL.md) — another provider type, the same signing and activation — which has not yet run
-on a Mac.
+(estimate) before the leak tests. The repository already builds a content-filter system extension
+(the network guard, docs/TUNNEL.md) — another provider type, the same signing and activation —
+which has not yet run on a Mac.
 
 ### D. The Mac's system proxy, and E. what is not available
 

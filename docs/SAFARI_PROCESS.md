@@ -516,8 +516,8 @@ com.apple.security.personal-information.location       keychain-access-groups: <
 ```
 
 Its provisioning profile ("BlackBird Host") adds the NetworkExtension provider types, including
-`packet-tunnel-provider-systemextension` — the same mechanism as this project's
-`PacketTunnelExtension`. Nothing in the list is Apple-granted private entitlement: the whole of the
+`packet-tunnel-provider-systemextension` — the mechanism this project used until 2 November 2026
+(its network guard is now a content filter, `content-filter-provider-systemextension`). Nothing in the list is Apple-granted private entitlement: the whole of the
 above follows from **not being sandboxed** plus `disable-library-validation` and
 `allow-dyld-environment-variables`, which is what lets an unsandboxed process `dlopen` the private
 Safari frameworks and insert its own dylib. This project signs its default build **with** App Sandbox
