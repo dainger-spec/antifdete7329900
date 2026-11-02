@@ -1941,6 +1941,11 @@ final class SelfTest {
               count(after, "associations") - count(before, "associations") >= 2
                 && count(after, "handedOver") - count(before, "handedOver") >= 100,
               "associations \(count(before, "associations"))→\(count(after, "associations")), datagrams handed over \(count(before, "handedOver"))→\(count(after, "handedOver"))")
+        // A peer's candidates named by host names (in its description, trickled, an mDNS one): the
+        // page is told they were taken, and no resolver is asked — the capture holds no packet with
+        // this run's name (egress_check.py, the run's token).
+        check("WebRTC through the proxy, the call: a peer's candidates named by host names are taken without asking any resolver",
+              call.report["namedCandidates"] as? String == "taken", "\(call.report["namedCandidates"] ?? "nil")")
         let dropped = (after["dropped"] as? [String] ?? []).filter { !((before["dropped"] as? [String] ?? []).contains($0)) }
         check("WebRTC through the proxy, the call: the relay asked the proxy for nothing but peers and its egress probe",
               dropped.isEmpty, dropped.joined(separator: ", "))

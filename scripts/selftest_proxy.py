@@ -829,10 +829,21 @@ const timeout = (ms, value) => new Promise((resolve) => setTimeout(() => resolve
   let error = null;
   try {
     await a.setLocalDescription(await a.createOffer());
-    await b.setRemoteDescription(a.localDescription);
+    // A peer's candidates named by host names, in its description and trickled: through the relay
+    // none may be resolved — a DNS question for one (or an mDNS one) is a leak the capture sees.
+    const named = 'a=candidate:97 1 udp 2122260223 peer-RUN.leak.example.com 9 typ host\r\n'
+                + 'a=candidate:98 1 udp 2122260223 RUN.local 9 typ host\r\n';
+    await b.setRemoteDescription({ type: a.localDescription.type,
+                                   sdp: a.localDescription.sdp.replace(/(a=mid:[^\r\n]*\r\n)/, '$1' + named) });
     await b.setLocalDescription(await b.createAnswer());
     await a.setRemoteDescription(b.localDescription);
   } catch (e) { error = String(e); }
+  let namedCandidates = null;
+  try {
+    const mid = (b.getTransceivers()[0] && b.getTransceivers()[0].mid) || '0';
+    await b.addIceCandidate({ candidate: 'candidate:99 1 udp 2122260223 trickle-RUN.leak.example.com 9 typ host', sdpMid: mid });
+    namedCandidates = 'taken';
+  } catch (e) { namedCandidates = String(e); }
   const track = await Promise.race([remote, timeout(20000, null)]);
   const connected = await Promise.race([new Promise((resolve) => {
     const check = () => { if (['connected', 'completed'].includes(a.iceConnectionState)) resolve(true); };
@@ -859,7 +870,7 @@ const timeout = (ms, value) => new Promise((resolve) => setTimeout(() => resolve
   const types = [...new Set(candidates.map((c) => (/ typ (\w+)/.exec(c) || [])[1]))].sort();
   const addresses = [...new Set(candidates.map((c) => c.split(' ')[4]))].sort();
   await report(Object.assign(presence, { candidateTypes: types, candidateAddresses: addresses, track: !!track,
-                                         connected, ice, inbound, outbound, painted, error }));
+                                         connected, ice, inbound, outbound, painted, error, namedCandidates }));
 })();
 """
 
