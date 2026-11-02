@@ -48,6 +48,10 @@ MainActor.assumeIsolated {
         // The app icon's iconset, drawn from the Lumen mark (AppIcon.swift; scripts/build-app.sh).
         let folder = arguments.indices.contains(index + 1) ? arguments[index + 1] : "AppIcon.iconset"
         exit(AppIcon.writeIconset(to: URL(fileURLWithPath: folder)) ? 0 : 1)
+    } else if let index = arguments.firstIndex(of: "--render-dmg-background") {
+        // The disk image window's picture, 1× and 2× (DiskImageBackground.swift; scripts/make_dmg.sh).
+        let folder = arguments.indices.contains(index + 1) ? arguments[index + 1] : "."
+        exit(DiskImageBackground.write(to: URL(fileURLWithPath: folder)) ? 0 : 1)
     } else if arguments.contains("--profile-session") {
         // One profile in its own process, started by the manager process (ProfileProcess.swift
         // says why, ProfileSessionHost.swift what it does). Its language, locale and time zone are
