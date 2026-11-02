@@ -253,6 +253,8 @@ enum LicenseSelfTest {
     /// summary of CI finds the self-test's deliberate crash by its queue's name); a fatal error's own
     /// message is not in the report (CI run 601). The control crashes the same way on a queue named
     /// with the key's text: its report must hold it, or the search proves nothing.
+    private static var keptForTheCrash: [Any] = []
+
     static func crashCheck(control: Bool) async -> Never {
         setvbuf(stdout, nil, _IOLBF, 0)
         let server = FakeAccountServer()
@@ -280,13 +282,13 @@ enum LicenseSelfTest {
         let kept = (try? AccountKeyVault.load(from: vault)) == key
         try? FileManager.default.removeItem(at: root)
         let label = control ? "PBKeyCrashCheck.control." + keyText : "PBKeyCrashCheck.crash"
-        // One plain interpolation: Xcode 26's compiler gave up on this line as a sum (CI run 602).
         let queueSaid = control ? "named with the key's text (the control)" : "PBKeyCrashCheck.crash"
         print("KEY-CRASH signed in with the key, kept in a vault: \(kept); pid \(getpid()); crashing on purpose on the queue \(queueSaid)")
+        // Held until the crash: the key in memory, as the app holds it. (Xcode 26's compiler could not
+        // check withExtendedLifetime around the fatal error inside the queue's block: CI runs 602, 603.)
+        keptForTheCrash = [license, key, vault, server]
         DispatchQueue(label: label).async {
-            withExtendedLifetime((license, key, vault, server)) {
-                fatalError("the key-in-a-crash-report check: a crash on purpose")
-            }
+            fatalError("the key-in-a-crash-report check: a crash on purpose")
         }
         try? await Task.sleep(nanoseconds: 30_000_000_000)
         print("KEY-CRASH FAIL the crash on purpose did not happen in 30 s")
