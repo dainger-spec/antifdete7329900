@@ -156,6 +156,13 @@ MainActor.assumeIsolated {
         WebContentLanguage.decide(nil)
         SiteCapture.start(arguments: arguments)
     } else {
+        if let index = arguments.firstIndex(of: "--settings-window-check") {
+            // The Settings window as the person gets it: this app as it runs, Settings opened as ⌘,
+            // opens it, the window server's picture read for a band (SettingsWindowCheck; CI).
+            let folder = arguments.indices.contains(index + 1) ? arguments[index + 1] : "settings-window"
+            SettingsWindowCheck.folder = URL(fileURLWithPath: folder, isDirectory: true)
+            SettingsWindowCheck.control = arguments.contains("--control")
+        }
         // The interface's language (Localization: the person's choice, else this Mac's, else
         // English); set before AppKit builds its menus.
         Localization.applyProcessLanguage()

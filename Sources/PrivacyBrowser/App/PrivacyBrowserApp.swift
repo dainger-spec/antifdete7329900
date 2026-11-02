@@ -73,6 +73,7 @@ struct PrivacyBrowserApp: App {
             SettingsView()
                 .environmentObject(model)
                 .preferredColorScheme(.dark)
+                .modifier(SettingsTitleBar())
                 .background(WindowReader { window in
                     Theme.applyAppWindow(to: window)
                     // The design's settings: the sidebar runs to the top, under the traffic lights.
@@ -133,6 +134,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // and web content keeps following the system's setting, as in Safari (see
         // docs/ISOLATION_AND_LIMITATIONS §11).
         NSApp.activate(ignoringOtherApps: true)
+        // `--settings-window-check` (CI): nothing otherwise.
+        SettingsWindowCheck.start()
     }
 
     /// Closing a profile window (or any window) must never quit the app — only ⌘Q or Lock do.
@@ -186,5 +189,28 @@ private struct CommandPaletteButton: View {
         }
         .keyboardShortcut("k")
         .disabled(model.phase != .unlocked)
+    }
+}
+
+/// The Settings window's title bar is the content's: no band of the system's grey above the sidebar
+/// and the page (the owner, 1 and 2 November). SwiftUI's Settings scene keeps its window's title bar
+/// opaque: it set `titlebarAppearsTransparent` back to false after the window reader above made it
+/// true, and the window server drew the bar in a neutral grey — #1E1E1E on macOS 26, #262626 on
+/// macOS 27, 30 points tall (CI run 596, the real window captured). Told by SwiftUI itself that the
+/// window's toolbar has no background, the scene leaves the bar transparent, on both. Hiding the
+/// toolbar instead (`.toolbar(.hidden, for: .windowToolbar)`) left the band on macOS 27.
+///
+/// `SettingsWindowCheck`'s control takes this back, and its check must then fail.
+private struct SettingsTitleBar: ViewModifier {
+    func body(content: Content) -> some View {
+        if SettingsWindowCheck.breaksTheFix {
+            content
+        } else if #available(macOS 15, *) {
+            content
+                .toolbar(removing: .title)
+                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        } else {
+            content
+        }
     }
 }

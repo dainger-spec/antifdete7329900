@@ -1230,6 +1230,11 @@ enum UISnapshots {
 // MARK: - Capturing
 
 /// One screen to capture: a SwiftUI view in a window of the app's style.
+///
+/// For design review, not a check of the app's windows: the window is this file's own, made here,
+/// and `cacheDisplay` draws the content alone — not the title bar or a toolbar the window server
+/// adds. A Settings window with a grey band at its top passed here (the owner, 2 November); the real
+/// one is checked by `SettingsWindowCheck`.
 @MainActor
 private struct Shot {
     let name: String
