@@ -280,8 +280,9 @@ enum LicenseSelfTest {
         let kept = (try? AccountKeyVault.load(from: vault)) == key
         try? FileManager.default.removeItem(at: root)
         let label = control ? "PBKeyCrashCheck.control." + keyText : "PBKeyCrashCheck.crash"
-        print("KEY-CRASH signed in with the key, kept in a vault: \(kept); pid \(getpid()); crashing on purpose on the queue "
-              + (control ? "named with the key's text (the control)" : "PBKeyCrashCheck.crash"))
+        // One plain interpolation: Xcode 26's compiler gave up on this line as a sum (CI run 602).
+        let queueSaid = control ? "named with the key's text (the control)" : "PBKeyCrashCheck.crash"
+        print("KEY-CRASH signed in with the key, kept in a vault: \(kept); pid \(getpid()); crashing on purpose on the queue \(queueSaid)")
         DispatchQueue(label: label).async {
             withExtendedLifetime((license, key, vault, server)) {
                 fatalError("the key-in-a-crash-report check: a crash on purpose")
