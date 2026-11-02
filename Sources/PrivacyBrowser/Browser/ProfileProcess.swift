@@ -55,6 +55,8 @@ final class ProfileProcess {
 
     var isRunning: Bool { process.isRunning }
     var processIdentifier: Int32 { process.processIdentifier }
+    /// How the process ended, once it has: its exit status, or the signal that ended it (5, a trap).
+    var terminationStatus: Int32? { process.isRunning ? nil : process.terminationStatus }
 
     private init(profileID: UUID, isForWarmUpOnly: Bool, process: Process) {
         self.profileID = profileID
