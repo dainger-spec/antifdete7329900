@@ -102,7 +102,12 @@ function makeWindow(config, parentContext) {
     };
     globalThis.RTCStatsReport = class RTCStatsReport extends Map {};
     // What only the engine knows: every peer connection it made (a test reads it; pages never get it).
-    const engine = { instances: [] };
+    const engine = { instances: [], added: [], resolved: [] };
+    // As libwebrtc: a candidate's address that is a name (not IPv4, not IPv6) is resolved by this Mac.
+    const resolveNamed = (line) => {
+      const m = reflectApply(RegExp.prototype.exec, /^(?:a=)?candidate:\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+(\\S+)/i, [line]);
+      if (m && !reflectApply(nativeTest, /^[\\d.]+$|:/, [m[1]])) engine.resolved.push(m[1]);
+    };
     Object.defineProperty(globalThis, '__engine', { value: engine });
     globalThis.RTCPeerConnection = class RTCPeerConnection {
       constructor(c) {
@@ -127,6 +132,24 @@ function makeWindow(config, parentContext) {
         return result;
       }
       close() { illegal(this, RTCPeerConnection); this.closed = true; }
+      get signalingState() { illegal(this, RTCPeerConnection); return this.closed ? 'closed' : 'stable'; }
+      get remoteDescription() { illegal(this, RTCPeerConnection); return this.remote || null; }
+      addIceCandidate(c) {
+        illegal(this, RTCPeerConnection);
+        const invalid = () => { const e = new Error('InvalidStateError'); e.name = 'InvalidStateError'; return Promise.reject(e); };
+        if (this.closed || !this.remote) return invalid();
+        const line = c === undefined || c === null || c.candidate === undefined ? '' : NativeString(c.candidate);
+        engine.added.push(line);
+        resolveNamed(line);
+        return Promise.resolve();
+      }
+      setRemoteDescription(d) {
+        illegal(this, RTCPeerConnection);
+        const sdp = NativeString(d.sdp), type = NativeString(d.type);
+        this.remote = { sdp, type };
+        for (const line of sdp.split('\\n')) resolveNamed(line.trim());
+        return Promise.resolve();
+      }
       // As WebKit: a promise of a new maplike report each call, its entries plain objects.
       getStats() { illegal(this, RTCPeerConnection); return Promise.resolve(report(this.stats)); }
     };
@@ -140,7 +163,10 @@ function makeWindow(config, parentContext) {
     };
     globalThis.webkitRTCPeerConnection = globalThis.RTCPeerConnection;
     engine.Native = globalThis.RTCPeerConnection;
-    engine.methods = Object.getOwnPropertyNames(engine.Native.prototype).map((name) => engine.Native.prototype[name]);
+    engine.methods = Object.getOwnPropertyNames(engine.Native.prototype).map((name) => {
+      const d = Object.getOwnPropertyDescriptor(engine.Native.prototype, name);
+      return d.value || d.get;
+    });
     globalThis.RTCDataChannel = function () {};
     globalThis.RTCIceTransport = function () {};
     Object.defineProperty(globalThis, 'open', { value: function open() { if (this !== globalThis) throw new TypeError('illegal invocation'); return null; },
@@ -581,6 +607,47 @@ test('WebRTC through the tunnel: a page that tampers with built-ins still gets o
     assert.equal(report.gatheredOutsideRelay, 0, `${name}: nothing gathered outside the relay`);
     assert.equal(report.nativeSeen, false, `${name}: the native constructor and methods stay out of the page's reach`);
   }
+});
+
+test('WebRTC through the tunnel: a remote candidate named by a host name never reaches the resolver', async () => {
+  const relay = { urls: ['turn:127.0.0.1:50000?transport=udp'], username: 'u1', credential: 'c1' };
+  const w = makeWindow({ ...base, webRTC: 'tunnel', webRTCRelay: relay });
+  const engine = () => JSON.parse(run(w, `JSON.stringify({ added: __engine.added, resolved: __engine.resolved, sdp: pc.remoteDescription && pc.remoteDescription.sdp })`));
+  run(w, `var pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.example' }] })`);
+  // Before a remote description the engine refuses, as it would: nothing is resolved either way.
+  await assert.rejects(run(w, `pc.addIceCandidate({ candidate: 'candidate:1 1 udp 2122260223 early.example 9 typ host', sdpMid: '0' })`),
+                       (e) => e.name === 'InvalidStateError');
+  const sdp = ['v=0', 'a=candidate:1 1 udp 2122260223 192.0.2.44 50000 typ host',
+               'a=candidate:2 1 udp 2122260223 2001:db8::44 50001 typ host',
+               'a=candidate:3 1 udp 2122260223 4c1a2b3c-aaaa-bbbb-cccc-0123456789ab.local 50002 typ host',
+               'a=candidate:4 1 tcp 1518280447 peer-run7.leak.example 9 typ host tcptype active',
+               'a=candidate:5 1 udp 1686052607 203.0.113.9 3478 typ srflx raddr 0.0.0.0 rport 0', ''].join('\r\n');
+  await run(w, `pc.setRemoteDescription({ type: 'offer', sdp: ${JSON.stringify(sdp)} })`);
+  let state = engine();
+  assert.deepEqual(state.resolved, [], 'no name in the remote SDP reached the resolver');
+  assert.ok(state.sdp.includes('192.0.2.44') && state.sdp.includes('2001:db8::44') && state.sdp.includes('203.0.113.9'), 'addresses stay');
+  assert.ok(!state.sdp.includes('.local') && !state.sdp.includes('leak.example'), 'named candidates are gone');
+  // Trickled candidates: addresses go to the engine, names do not, and the page is told success.
+  await run(w, `pc.addIceCandidate({ candidate: 'candidate:6 1 udp 2122260223 198.51.100.7 50003 typ host', sdpMid: '0' })`);
+  await run(w, `pc.addIceCandidate({ candidate: 'candidate:7 1 udp 2122260223 another.local 50004 typ host', sdpMid: '0' })`);
+  await run(w, `pc.addIceCandidate(new (class { get candidate() { return 'candidate:8 1 udp 2122260223 name.leak.example 9 typ host'; } })())`);
+  state = engine();
+  assert.deepEqual(state.added, ['candidate:6 1 udp 2122260223 198.51.100.7 50003 typ host']);
+  assert.deepEqual(state.resolved, []);
+  // A getter or a toString that answers differently each time: the engine gets what was checked.
+  await run(w, `var n = 0; pc.addIceCandidate({ get candidate() { return n++ ? 'candidate:9 1 udp 1 flip.leak.example 9 typ host' : 'candidate:9 1 udp 1 192.0.2.9 9 typ host'; }, sdpMid: '0' })`);
+  await run(w, `var m = 0; pc.addIceCandidate({ candidate: { toString() { return m++ ? 'candidate:10 1 udp 1 192.0.2.10 9 typ host' : 'candidate:10 1 udp 1 tostring.leak.example 9 typ host'; } }, sdpMid: '0' })`);
+  state = engine();
+  assert.deepEqual(state.added.slice(1), ['candidate:9 1 udp 1 192.0.2.9 9 typ host'], 'the value read once, its text made once');
+  assert.deepEqual(state.resolved, []);
+  // The legacy success callback is called for a dropped one too.
+  assert.equal(await run(w, `new Promise((resolve) => pc.addIceCandidate({ candidate: 'candidate:11 1 udp 1 cb.leak.example 9 typ host', sdpMid: '0' }, () => resolve('called')))`), 'called');
+  // The engine's receiver check, and the end of candidates, as ever.
+  assert.throws(() => run(w, `RTCPeerConnection.prototype.addIceCandidate.call({}, { candidate: 'candidate:1 1 udp 1 x.example 9 typ host' })`), (e) => e.name === 'TypeError');
+  await run(w, `pc.addIceCandidate(null)`);
+  assert.deepEqual(engine().resolved, []);
+  assert.equal(run(w, `RTCPeerConnection.prototype.addIceCandidate.toString()`), nativeText('addIceCandidate'));
+  assert.equal(run(w, `RTCPeerConnection.prototype.setRemoteDescription.toString()`), nativeText('setRemoteDescription'));
 });
 
 test('WebRTC through the tunnel: the validating connection never gathers', () => {
