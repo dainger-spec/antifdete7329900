@@ -26,10 +26,41 @@ final class ProxyHostFieldTests: XCTestCase {
         XCTAssertEqual(try ProxyHostField.parse("[2001:db8::1]:1080"), ProxyHostField(host: "2001:db8::1", port: 1080))
     }
 
+    /// The orders providers hand proxies out in, the credentials before or after the address
+    /// (made-up addresses and passwords).
+    func testProvidersOrdersAreRead() throws {
+        let expected = ProxyHostField(host: "203.0.113.7", port: 1080, username: "demo_user", password: "Secr3tPass")
+        XCTAssertEqual(try ProxyHostField.parse("203.0.113.7:1080@demo_user:Secr3tPass"), expected)
+        XCTAssertEqual(try ProxyHostField.parse("demo_user:Secr3tPass:203.0.113.7:1080"), expected)
+        XCTAssertEqual(try ProxyHostField.parse("demo_user:Secr3tPass@203.0.113.7:1080"), expected)
+        XCTAssertEqual(try ProxyHostField.parse("203.0.113.7:1080:demo_user:Secr3tPass"), expected)
+        XCTAssertEqual(try ProxyHostField.parse("socks5://203.0.113.7:1080@demo_user:Secr3tPass"),
+                       ProxyHostField(host: "203.0.113.7", port: 1080, username: "demo_user", password: "Secr3tPass", kind: .socks5))
+        // A password with "@" and ":" in it, the credentials last.
+        XCTAssertEqual(try ProxyHostField.parse("proxy.example.net:8000@alice:p@ss:w"),
+                       ProxyHostField(host: "proxy.example.net", port: 8000, username: "alice", password: "p@ss:w"))
+        // Both readings make a proxy: the one whose host is an address or a name with a dot.
+        XCTAssertEqual(try ProxyHostField.parse("198.51.100.4:3128@admin:9090"),
+                       ProxyHostField(host: "198.51.100.4", port: 3128, username: "admin", password: "9090"))
+        XCTAssertEqual(try ProxyHostField.parse("user:12345@proxy.example.com:1080"),
+                       ProxyHostField(host: "proxy.example.com", port: 1080, username: "user", password: "12345"))
+        XCTAssertEqual(try ProxyHostField.parse("user:1234:203.0.113.7:1080"),
+                       ProxyHostField(host: "203.0.113.7", port: 1080, username: "user", password: "1234"))
+        // A single-word host still reads where it is the only reading.
+        XCTAssertEqual(try ProxyHostField.parse("user:pass@myproxy:3128"),
+                       ProxyHostField(host: "myproxy", port: 3128, username: "user", password: "pass"))
+        XCTAssertEqual(try ProxyHostField.parse("myproxy:3128@user:pass"),
+                       ProxyHostField(host: "myproxy", port: 3128, username: "user", password: "pass"))
+        // name@host is the URL's order: no port, no other reading.
+        XCTAssertEqual(try ProxyHostField.parse("alice@proxy.example"),
+                       ProxyHostField(host: "proxy.example", username: "alice", password: ""))
+    }
+
     func testGarbageIsRejected() {
         for bad in ["", "   ", "pro xy.example", "proxy.example\nother", "ftp://proxy.example", "socks5://host/path",
                     "host:99999", "host:0", "host:port", "1.2.3", "300.1.1.1", "-bad.example", "прокси.рф",
-                    "[2001:db8::1", "[::1]x", "a:b:c", "@host", "1:2:3:4:5:6:7:8:9", "::1::2", "host..example"] {
+                    "[2001:db8::1", "[::1]x", "a:b:c", "@host", "1:2:3:4:5:6:7:8:9", "::1::2", "host..example",
+                    "1.2.3.4:1080@", "1.2.3.4:1080@:secret", "user:pass@", "a:b:c:d", "user:pass:host:port"] {
             XCTAssertThrowsError(try ProxyHostField.parse(bad), "accepted “\(bad)”")
         }
     }

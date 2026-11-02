@@ -133,10 +133,12 @@ final class ProxyListImportTests: XCTestCase {
             if case .proxy(let line) = ProxyListImport.readField(text) { return line }
             return nil
         }
-        // The four forms, as the editor's field takes them: the same proxy each time.
+        // The forms, as the editor's field takes them: the same proxy each time — the credentials
+        // before or after the address, with ":" or "@".
         let expected = ProxySettings(kind: .socks5, host: "1.2.3.4", port: 1080, username: "alice", password: "s3cret")
         for text in ["1.2.3.4:1080:alice:s3cret", "alice:s3cret@1.2.3.4:1080", "socks5://alice:s3cret@1.2.3.4:1080",
-                     " socks5://alice:s3cret@1.2.3.4:1080/\n"] {
+                     " socks5://alice:s3cret@1.2.3.4:1080/\n", "1.2.3.4:1080@alice:s3cret", "alice:s3cret:1.2.3.4:1080",
+                     "socks5://1.2.3.4:1080@alice:s3cret"] {
             XCTAssertEqual(proxy(text)?.proxy, expected, text)
         }
         XCTAssertEqual(proxy("1.2.3.4:1080")?.proxy, ProxySettings(kind: .socks5, host: "1.2.3.4", port: 1080))
@@ -202,6 +204,10 @@ final class ProxyListImportTests: XCTestCase {
         XCTAssertEqual(masked("socks5://alice:p%40ss@1.2.3.4:1080"), "socks5://alice:•••@1.2.3.4:1080")
         XCTAssertEqual(masked("  \u{FEFF}h.example:80:u:pa#ss  # Berlin\n"), "  \u{FEFF}h.example:80:u:•••  # Berlin\n")
         XCTAssertEqual(masked("# provider\r\nu:pw@h.example:80"), "# provider\r\nu:•••@h.example:80")
+        // The providers' other orders; a password that reads like the port is masked where it is.
+        XCTAssertEqual(masked("1.2.3.4:1080@alice:s3cret"), "1.2.3.4:1080@alice:•••")
+        XCTAssertEqual(masked("alice:s3cret:1.2.3.4:1080"), "alice:•••:1.2.3.4:1080")
+        XCTAssertEqual(masked("198.51.100.4:3128@admin:3128"), "198.51.100.4:3128@admin:•••")
         // No password, an empty one, or not one proxy: nothing to mask.
         XCTAssertNil(ProxyListImport.passwordRange(in: "1.2.3.4:1080"))
         XCTAssertNil(ProxyListImport.passwordRange(in: "solo@h.example:80"))

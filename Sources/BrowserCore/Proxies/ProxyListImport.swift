@@ -170,7 +170,7 @@ public enum ProxyListImport {
             let address = addressRange(in: text, line: start..<end)
             let written = text[address]
             if !written.isEmpty, !written.hasPrefix("#"), !written.hasPrefix("//") {
-                return passwordRange(in: text, address: address, password: password)
+                return passwordRange(in: text, address: address, user: read.proxy.username ?? "", password: password)
             }
             start = end < text.endIndex ? text.index(after: end) : text.endIndex
         }
@@ -196,21 +196,38 @@ public enum ProxyListImport {
         return lower..<upper
     }
 
-    /// In `user:password@host:port` (after any scheme) the text between the first ":" and the last
-    /// "@"; in `host:port:user:password` what follows the third ":". Only when it is `password`.
-    private static func passwordRange(in text: String, address: Range<String.Index>, password: String) -> Range<String.Index>? {
+    /// Where the password is in an address, in whichever of the providers' orders it was written
+    /// (after any scheme): `user:password@host:port`, `host:port@user:password`,
+    /// `host:port:user:password`, `user:password:host:port`. Only where the user name is where that
+    /// order has it and the text is `password` — so a port or a host that happens to read like the
+    /// password is never taken for it.
+    private static func passwordRange(in text: String, address: Range<String.Index>, user: String,
+                                      password: String) -> Range<String.Index>? {
         let written = text[address]
         let body = written.range(of: "://").map { written[$0.upperBound...] } ?? written
-        if let at = body.lastIndex(of: "@") {
-            guard let colon = body[..<at].firstIndex(of: ":") else { return nil }
-            let range = body.index(after: colon)..<at
+        func matches(_ range: Range<String.Index>, _ expected: String) -> Bool {
             let raw = String(text[range])
-            return (raw.removingPercentEncoding ?? raw) == password ? range : nil
+            return raw == expected || raw.removingPercentEncoding == expected
+        }
+        var candidates: [(user: Range<String.Index>, password: Range<String.Index>)] = []
+        // user:password@host:port — the last "@".
+        if let at = body.lastIndex(of: "@"), let colon = body[..<at].firstIndex(of: ":") {
+            candidates.append((body.startIndex..<colon, body.index(after: colon)..<at))
+        }
+        // host:port@user:password — the first "@".
+        if let at = body.firstIndex(of: "@") {
+            let credentials = body[body.index(after: at)...]
+            if let colon = credentials.firstIndex(of: ":") {
+                candidates.append((credentials.startIndex..<colon, credentials.index(after: colon)..<body.endIndex))
+            }
         }
         let colons = body.indices.filter { body[$0] == ":" }
-        guard colons.count == 3 else { return nil }
-        let range = body.index(after: colons[2])..<body.endIndex
-        return String(text[range]) == password ? range : nil
+        if !body.contains("@"), colons.count == 3 {
+            // host:port:user:password, then user:password:host:port.
+            candidates.append((body.index(after: colons[1])..<colons[2], body.index(after: colons[2])..<body.endIndex))
+            candidates.append((body.startIndex..<colons[0], body.index(after: colons[0])..<colons[1]))
+        }
+        return candidates.first { matches($0.user, user) && matches($0.password, password) }?.password
     }
 
     /// One address (without its label) as the proxy it names, and whether its type is known.
