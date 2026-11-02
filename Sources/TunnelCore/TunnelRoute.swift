@@ -20,11 +20,16 @@ public struct TunnelRoute: Codable, Equatable, Sendable {
     /// The same for an IPv6 relayed address: IPv6 literals, so the probe can only succeed when the
     /// proxy itself reaches the IPv6 Internet.
     public var stunServersIPv6: [String]
+    /// The address the proxy's TCP leaves from, as the launch found it (`ProxyExitLookup`): the one
+    /// sites see the profile's pages come from. An allocation gets a relayed address only when its
+    /// association leaves from this very address: a site shown two addresses has learned the profile
+    /// goes through a proxy (`TURNServer`). Nil, no allocation gets one.
+    public var exit: IPAddr?
 
     public init(id: String, relayIPv4: IPAddr, relayIPv6: IPAddr, port: UInt16 = TunnelAddressing.turnPort,
                 realm: String = TunnelAddressing.realm, username: String, password: String, proxy: SOCKSProxy,
                 stunServers: [String] = TunnelAddressing.defaultSTUNServers,
-                stunServersIPv6: [String] = TunnelAddressing.defaultSTUNServersIPv6) {
+                stunServersIPv6: [String] = TunnelAddressing.defaultSTUNServersIPv6, exit: IPAddr? = nil) {
         self.id = id
         self.relayIPv4 = relayIPv4
         self.relayIPv6 = relayIPv6
@@ -35,6 +40,7 @@ public struct TunnelRoute: Codable, Equatable, Sendable {
         self.proxy = proxy
         self.stunServers = stunServers
         self.stunServersIPv6 = stunServersIPv6
+        self.exit = exit
     }
 
     /// The TURN URLs a page of this profile is given (UDP only, IPv4 and IPv6).

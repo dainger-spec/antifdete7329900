@@ -23,13 +23,20 @@ public enum NetworkGuardState: String, Codable, Equatable, Sendable, CaseIterabl
     case ready
 }
 
-/// What is known of a proxy's UDP: a SOCKS5 UDP ASSOCIATE, and a STUN answer through it.
-public enum ProxyUDPSupport: String, Codable, Equatable, Sendable {
+/// What is known of a proxy's UDP: a SOCKS5 UDP ASSOCIATE, a STUN answer through it, and whether
+/// it leaves from the address the proxy's TCP leaves from — the one sites see the pages come from.
+public enum ProxyUDPSupport: String, Codable, Equatable, Sendable, CaseIterable {
     case unknown
-    /// The proxy relays UDP: a STUN server answered through its association.
+    /// The proxy relays UDP, and from the address its TCP leaves from.
     case supported
     /// It does not: UDP ASSOCIATE refused, or nothing came back through the association.
     case unsupported
+    /// It relays UDP, but from another address than its TCP: a site would see two addresses, which
+    /// tells it the profile goes through a proxy.
+    case elsewhere
+    /// It relays UDP, but the address its TCP leaves from could not be found out: the two cannot be
+    /// compared.
+    case exitUnknown
 }
 
 /// Why a profile that wants WebRTC runs without it. Each one is said to the person in words
@@ -45,6 +52,10 @@ public enum WebRTCRefusal: String, Codable, Equatable, Sendable, CaseIterable {
     case httpProxy
     /// The proxy refused UDP ASSOCIATE, or no STUN answer came back through it.
     case proxyWithoutUDP
+    /// The proxy's UDP leaves from another address than its TCP.
+    case proxyUDPElsewhere
+    /// Where the proxy's TCP leaves from could not be found out, so its UDP could not be compared.
+    case proxyExitUnknown
     /// Whether the proxy relays UDP could not be found out before the profile started.
     case proxyUDPUnknown
     /// A profile that runs inside the app's own process (the build with the App Sandbox): the guard
@@ -86,6 +97,8 @@ public enum WebRTCGate {
         switch udp {
         case .supported: return .relay
         case .unsupported: return .off(.proxyWithoutUDP)
+        case .elsewhere: return .off(.proxyUDPElsewhere)
+        case .exitUnknown: return .off(.proxyExitUnknown)
         case .unknown: return .off(.proxyUDPUnknown)
         }
     }

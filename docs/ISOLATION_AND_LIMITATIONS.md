@@ -1114,10 +1114,12 @@ Mac's own address:
   that would name the relay name the page's own server. Design, limits and signing:
   [TUNNEL.md](TUNNEL.md).
 - **HTTP CONNECT proxy**: off. CONNECT cannot carry UDP.
-- **A SOCKS5 proxy without UDP, the guard not in the build, not installed, not answering, not yet
-  checked on this Mac, or the profile inside the app's process (the sandboxed build)**: off, and the
-  launch says which, with what to do. Without the relay and the guard, UDP would leave from this
-  Mac's real IP.
+- **A SOCKS5 proxy without UDP, one whose UDP leaves from another address than its TCP (or whose
+  TCP exit could not be found out), the guard not in the build, not installed, not answering, not
+  yet checked on this Mac, or the profile inside the app's process (the sandboxed build)**: off, and
+  the launch says which, with what to do. Without the relay and the guard, UDP would leave from this
+  Mac's real IP; from another address of the proxy than its pages', it would show a site two
+  addresses (TUNNEL.md, "One address").
 
 The editor shows the setting as off (or "through the proxy, relay only") while a proxy is set,
 and keeps the stored choice for when the proxy is removed.

@@ -25,7 +25,9 @@ public protocol PeerRelayFactory: AnyObject {
 
 /// A TURN server (RFC 8656, UDP allocations only) for one route: what a profile's pages use as
 /// their only ICE server. Every allocation's relayed traffic goes through the profile's proxy,
-/// so the address peers and STUN-checking sites see is the proxy's, never this Mac's.
+/// so the address peers and STUN-checking sites see is the proxy's, never this Mac's — and the one
+/// its TCP leaves from, the address the pages come from (`TunnelRoute.exit`): an association that
+/// leaves from any other is refused.
 ///
 /// Shaped for WebKit's libwebrtc, the only client: it never sends REQUESTED-ADDRESS-FAMILY, so an
 /// allocation takes the family of the server address it was sent to (the IPv6 relay URL gives an
@@ -307,7 +309,17 @@ public final class TURNServer {
     private func relayReady(_ allocation: Allocation, message: STUNMessage, result: Result<SocketAddress, Error>) {
         let tuple = allocation.tuple
         switch result {
-        case let .success(relayed) where relayed.family == allocation.family:
+        case let .success(relayed) where relayed.family != allocation.family:
+            log("allocation \(tuple.client): the proxy has no \(allocation.family) egress")
+            fail(allocation, message: message, code: 440, reason: "Address Family not Supported")
+        case let .success(relayed) where relayed.ip != route.exit:
+            // The profile's pages come from the proxy's TCP exit: a relayed address elsewhere would
+            // show a site a second address, which tells it the profile goes through a proxy — worse
+            // than no WebRTC. A proxy that sends its UDP elsewhere, or moved since the launch's
+            // check, gets no relayed address; nor does a route whose exit is not known.
+            log("allocation \(tuple.client): the proxy's UDP leaves from \(relayed.ip), its TCP from \(route.exit.map { "\($0)" } ?? "an unknown address")")
+            fail(allocation, message: message, code: 403, reason: "Forbidden")
+        case let .success(relayed):
             allocation.relayed = relayed
             // The mapped address is the proxy's egress as well: the client's own is this Mac's.
             let response = encodeResponse(to: message, attributes: [
@@ -318,9 +330,6 @@ public final class TURNServer {
             allocation.allocateResponse = response
             send(response, tuple.client, tuple.server)
             log("allocated \(tuple.client) relayed=\(relayed)")
-        case .success:
-            log("allocation \(tuple.client): the proxy has no \(allocation.family) egress")
-            fail(allocation, message: message, code: 440, reason: "Address Family not Supported")
         case let .failure(error):
             log("allocation \(tuple.client) failed: \(error)")
             fail(allocation, message: message, code: 508, reason: "Insufficient Capacity")

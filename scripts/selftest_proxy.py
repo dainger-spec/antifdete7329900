@@ -95,7 +95,10 @@ and a public address of its own, `203.0.113.77:<port>` (TEST-NET-3, never routed
 sent through it, to any server, is answered by the proxy itself with that address, and a datagram
 sent to another association's public address is handed to that association, as a NAT with
 hairpinning would. Anything else is dropped and noted. `/pb-udp.json` counts associations, STUN
-answers, datagrams handed over and the destinations dropped. `/pb-rtc?run=<id>&mode=presence|call`
+answers, datagrams handed over and the destinations dropped. `/cdn-cgi/trace` answers as
+Cloudflare's trace does (`ip=` the address the request came from): the proxy's TCP exit, this
+proxy's public address, the one its UDP leaves from; `?ip=` makes it another, for the self-test's
+"one address" controls. `/pb-rtc?run=<id>&mode=presence|call`
 is the WebRTC page: `presence` reports `typeof RTCPeerConnection` in the page and an about:blank
 frame; `call` makes a video call between two connections of the page — a canvas stream, frames
 decoded on the far side — with a STUN server named after the run id (a DNS question for it, or a
@@ -519,6 +522,12 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
     elif plain_path == "/pb-rtc":
         params = parse_qs(query)
         body, content_type = rtc_page(safe_run(query), params.get("mode", ["presence"])[0]), "text/html; charset=utf-8"
+    elif plain_path == "/cdn-cgi/trace":
+        # Where the proxy's TCP leaves from, as Cloudflare's trace says it (ProxyExitLookup).
+        params = {key: values[0] for key, values in parse_qs(query).items()}
+        body = (f"fl=selftest\nh={target.rsplit(':', 1)[0]}\nip={params.get('ip', UDP_PUBLIC_IP)}\n"
+                f"ts={time.time():.3f}\nvisit_scheme=http\n").encode()
+        content_type = "text/plain"
     elif plain_path == "/pb-udp.json":
         with UDP_LOCK:
             body = json.dumps(dict(UDP_STATS, dropped=list(UDP_STATS["dropped"])[-50:])).encode()

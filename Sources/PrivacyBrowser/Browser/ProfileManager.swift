@@ -107,6 +107,7 @@ final class ProfileManager: ObservableObject {
     /// seals what it decrypted instead of opening a window that would outlive this manager.
     private(set) var isShuttingDown = false
     private let log = Logger(subsystem: "PrivacyBrowser", category: "ProfileManager")
+    private static let webRTCLog = Logger(subsystem: "PrivacyBrowser", category: "ProfileManager")
     /// The run each running profile belongs to: a lookup that finishes after its profile stopped
     /// (and maybe launched again) does not act on another run.
     private var launchTokens: [UUID: UUID] = [:]
@@ -525,7 +526,9 @@ final class ProfileManager: ObservableObject {
         child.send(.preferences(BrowsingPreferences.current.forProfileProcess))
         // A profile with a SOCKS5 proxy that wants WebRTC waits for this before it builds anything.
         if let proxy = stored.proxy, WebRTCGate.wantsRelay(policy: stored.webRTCPolicy, proxy: proxy) {
-            Task { await self.decideWebRTC(for: id, name: summary.name, child: child, proxy: proxy, policy: stored.webRTCPolicy) }
+            let userAgent = stored.userAgent(hostSafariVersion: HostSafari.version)
+            Task { await self.decideWebRTC(for: id, name: summary.name, child: child, proxy: proxy, policy: stored.webRTCPolicy,
+                                           userAgent: userAgent) }
         }
     }
 
@@ -533,13 +536,16 @@ final class ProfileManager: ObservableObject {
 
     /// Decides a launch's WebRTC for a profile in its own process (`WebRTCGate`), and says the
     /// decision to the process. The relay only when the network guard holds that process to its
-    /// proxy and the proxy relays UDP; anything else is WebRTC off in the engine, said once.
-    private func decideWebRTC(for id: UUID, name: String, child: ProfileProcess, proxy: ProxySettings, policy: WebRTCPolicy) async {
+    /// proxy and the proxy relays UDP from the address its TCP leaves from; anything else is WebRTC
+    /// off in the engine, said once.
+    private func decideWebRTC(for id: UUID, name: String, child: ProfileProcess, proxy: ProxySettings, policy: WebRTCPolicy,
+                              userAgent: String) async {
         // Once asking macOS is over (the app just started, the guard was just installed).
         let guardState = await NetworkGuard.shared.settledState()
         // The proxy is asked about UDP only when nothing else rules the relay out.
         var udp = ProxyUDPSupport.unknown
-        if guardState == .ready { udp = await Self.proxyUDP(proxy) }
+        var exit: IPAddr?
+        if guardState == .ready { (udp, exit) = await Self.proxyUDP(proxy, userAgent: userAgent) }
         var decision = WebRTCGate.decide(policy: policy, proxy: proxy, ownProcess: true, guardState: guardState, udp: udp)
         var relay: WebRTCRelay?
         if decision == .relay {
@@ -547,9 +553,9 @@ final class ProfileManager: ObservableObject {
             // Held first: no relay exists for a process the guard does not hold.
             var held = false
             if children[id] === child { held = await NetworkGuard.shared.hold(pid: pid, proxy: proxy) }
-            if held, children[id] === child {
+            if held, children[id] === child, let exit {
                 do {
-                    relay = try WebRTCRelays.shared.start(profile: id, proxy: proxy)
+                    relay = try WebRTCRelays.shared.start(profile: id, proxy: proxy, exit: exit)
                 } catch {
                     log.error("The WebRTC relay of \(id.uuidString, privacy: .public) did not start: \(error.logKind, privacy: .public)")
                 }
@@ -588,13 +594,26 @@ final class ProfileManager: ObservableObject {
         }
     }
 
-    /// Whether `proxy` relays UDP, asked the way the relay will use it (`ProxyUDPCheck`).
-    private static func proxyUDP(_ proxy: ProxySettings) async -> ProxyUDPSupport {
-        guard proxy.kind == .socks5, let port = UInt16(exactly: proxy.port) else { return .unsupported }
-        let outcome = await ProxyUDPCheck.run(proxy: SOCKSProxy(host: proxy.host, port: port,
+    /// Whether `proxy` relays UDP, asked the way the relay will use it (`ProxyUDPCheck`), and from
+    /// where: its UDP must leave from the address its TCP leaves from (`ProxyExitLookup`, asked at the
+    /// same time), the one sites see the pages come from. That address comes back with `.supported`
+    /// alone, for the relay to hold every allocation to it (`TunnelRoute.exit`). Internal for the
+    /// self-test.
+    static func proxyUDP(_ proxy: ProxySettings, userAgent: String) async -> (support: ProxyUDPSupport, exit: IPAddr?) {
+        guard proxy.kind == .socks5, let port = UInt16(exactly: proxy.port) else { return (.unsupported, nil) }
+        async let outcome = ProxyUDPCheck.run(proxy: SOCKSProxy(host: proxy.host, port: port,
                                                                 username: proxy.username, password: proxy.password))
-        if case .supported = outcome { return .supported }
-        return .unsupported
+        async let tcpExit = ProxyExitLookup.lookUp(proxy: proxy, userAgent: userAgent)
+        guard case let .supported(egress) = await outcome else { return (.unsupported, nil) }
+        guard let exit = await tcpExit else {
+            webRTCLog.notice("WebRTC: where the proxy's TCP leaves from could not be found out, so its UDP cannot be compared with it")
+            return (.exitUnknown, nil)
+        }
+        guard egress.ip == exit else {
+            webRTCLog.notice("WebRTC: the proxy's UDP leaves from another address than its TCP (\(egress.ip.description, privacy: .private) against \(exit.description, privacy: .private))")
+            return (.elsewhere, nil)
+        }
+        return (.supported, exit)
     }
 
     /// The relay and the guard's hold of a profile whose process ended or was stopped.
@@ -622,6 +641,8 @@ final class ProfileManager: ObservableObject {
         case .guardUnproven: return L("launch.webrtcOff.guardUnproven")
         case .httpProxy: return L("launch.webrtcOff.httpProxy")
         case .proxyWithoutUDP: return L("launch.webrtcOff.proxyWithoutUDP")
+        case .proxyUDPElsewhere: return L("launch.webrtcOff.proxyUDPElsewhere")
+        case .proxyExitUnknown: return L("launch.webrtcOff.proxyExitUnknown")
         case .proxyUDPUnknown: return L("launch.webrtcOff.proxyUDPUnknown")
         case .notOwnProcess: return L("launch.webrtcOff.notOwnProcess")
         case .notRegistered: return L("launch.webrtcOff.notRegistered")
