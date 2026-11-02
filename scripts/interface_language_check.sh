@@ -11,7 +11,6 @@
 set -u
 APP="${1:?the app bundle}"
 BINARY="$APP/Contents/MacOS/Lumen"
-DOMAIN=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")
 failures=0
 
 # The first of this Mac's languages the app is translated into, else English (InterfaceLanguage).
@@ -20,10 +19,11 @@ SYSTEM=$(defaults read -g AppleLanguages 2>/dev/null | tr -d ' ",()' | grep -v '
 SYSTEM=${SYSTEM:-en}
 echo "this Mac's languages: $(defaults read -g AppleLanguages 2>/dev/null | tr -d '\n ')" "-> expected by default: $SYSTEM"
 
-clean() {
-  defaults delete "$DOMAIN" AppleLanguages >/dev/null 2>&1
-  defaults delete "$DOMAIN" PBInterfaceLanguage >/dev/null 2>&1
-}
+# The app's own preferences are set by the app itself (`--prepare`): `defaults write <bundle id>`
+# writes into the sandboxed build's container once that build has run, which this build does not
+# read — every case below that set something failed so in CI run 588.
+prepare() { "$BINARY" --interface-language-check --prepare "$@" >/dev/null 2>&1; }
+clean() { prepare choice=none appleLanguages=none; }
 
 # expect NAME KEY=VALUE... -- ARGUMENTS...: runs the app's check with the arguments and compares.
 expect() {
@@ -68,19 +68,19 @@ compare "open --args -AppleLanguages (en), as the owner did" "$(grep '^INTERFACE
 rm -f "$out"
 
 # The person's choice (Settings › Language, the first screen); -AppleLanguages still wins for its run.
-defaults write "$DOMAIN" PBInterfaceLanguage ru
+prepare choice=ru
 expect "chosen: Russian" "language=ru" "choice=ru" "word=О приложении" "bundles=ru" --
 expect "chosen: Russian, run with -AppleLanguages (en)" "language=en" "choice=ru" "bundles=en" -- -AppleLanguages "(en)"
-defaults write "$DOMAIN" PBInterfaceLanguage en
+prepare choice=en
 expect "chosen: English" "language=en" "choice=en" "word=About" "bundles=en" --
 clean
 
 # What earlier versions wrote at every start is taken out once, and no longer decides anything.
-defaults write "$DOMAIN" AppleLanguages -array ru en
+prepare appleLanguages=ru,en
 expect "after an earlier version's (ru, en)" "language=$SYSTEM" "onDiskBefore=ru,en" "onDiskAfter=none" "bundles=$SYSTEM" --
 expect "and the next start" "language=$SYSTEM" "onDiskBefore=none" "onDiskAfter=none" --
 # A list the person set for this app stays.
-defaults write "$DOMAIN" AppleLanguages -array de
+prepare appleLanguages=de
 expect "a list the person set (de) stays" "onDiskBefore=de" "onDiskAfter=de" --
 clean
 

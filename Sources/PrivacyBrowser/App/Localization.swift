@@ -91,6 +91,12 @@ enum Localization {
     /// (`CFPreferencesCopyAppValue` answers with the command line's or the Mac's list as well).
     private static var appDomain: CFString { (Bundle.main.bundleIdentifier ?? "io.lumenbrowser.Lumen") as CFString }
 
+    /// A value in the app's own preferences on disk, or none (nil): the interface language check's.
+    static func setOnDisk(_ key: String, _ value: CFPropertyList?) {
+        CFPreferencesSetValue(key as CFString, value, appDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        CFPreferencesSynchronize(appDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+    }
+
     /// `AppleLanguages` in the app's own preferences on disk, nil when there is none there.
     static var languagesOnDisk: Any? {
         CFPreferencesCopyValue("AppleLanguages" as CFString, appDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)

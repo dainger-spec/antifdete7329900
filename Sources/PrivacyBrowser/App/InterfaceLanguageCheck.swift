@@ -12,6 +12,30 @@ import BrowserCore
 enum InterfaceLanguageCheck {
     static func run() -> Never {
         setvbuf(stdout, nil, _IOLBF, 0)
+        // `--prepare choice=ru|en|none appleLanguages=ru,en|none`: the app's own preferences set the
+        // way a person's choice or an earlier version left them, by the app itself, then nothing
+        // else — the next start reads them. Not `defaults write <bundle id>`: once the sandboxed
+        // build has run, that writes into its container, which this build does not read (CI run 588).
+        if let index = CommandLine.arguments.firstIndex(of: "--prepare") {
+            for setting in CommandLine.arguments.dropFirst(index + 1) {
+                let parts = setting.split(separator: "=", maxSplits: 1).map(String.init)
+                guard parts.count == 2 else { continue }
+                let key: String, value: CFPropertyList?
+                switch parts[0] {
+                case "appleLanguages":
+                    key = "AppleLanguages"
+                    value = parts[1] == "none" ? nil : (parts[1].split(separator: ",").map(String.init) as NSArray)
+                case "choice":
+                    key = Localization.choiceKey
+                    value = parts[1] == "none" ? nil : (parts[1] as NSString)
+                default:
+                    continue
+                }
+                Localization.setOnDisk(key, value)
+            }
+            print("INTERFACE-LANGUAGE prepared")
+            exit(0)
+        }
         // The app's own domain alone: the effective value would answer with the command line's or
         // this Mac's list too (CI run 583, the first version of this check).
         func onDisk() -> String {
