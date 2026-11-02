@@ -55,8 +55,9 @@ A key is the whole account for whoever holds it — no email, no password. So (t
   API's routes, with the key signed in (the API reads profiles only, never the account).
 - **And in a crash report**, which macOS writes after the process is gone:
   `scripts/key_crash_check.py` runs `Lumen --key-crash-check`, which signs in with the key, keeps it
-  in a vault and crashes on purpose; its report must hold no form of the key. Its control crashes
-  with the key's text in the crash's own message, and that report must hold it (CI, each run).
+  in a vault and crashes on purpose, on a queue of its own; its report must hold no form of the key.
+  Its control crashes the same way on a queue named with the key's text — the report keeps the
+  crashed queue's name, not a fatal error's message (CI run 601) — and that report must hold it.
 
 What it cannot promise: the system's crash report keeps an uncaught exception's reason as it was;
 the app never puts the key in one (its type never says itself), but a crash report is the
