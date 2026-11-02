@@ -103,6 +103,8 @@ ALLOWED_IN_FILE = {
         "a random marker the self-test writes to find it in the log again: nothing of the user's",
     ("LicenseSelfTest.swift", "secondMarker"):
         "the same, written again after the email and the new key, to show the log is read to its end: nothing of the user's",
+    ("LicenseSelfTest.swift", "thirdMarker"):
+        "the same, written again after the code's sign-in and the robot check, to show the log is read to its end: nothing of the user's",
     ("ExceptionLog.swift", "redactedReason"):
         "an exception's reason with every address, path, e-mail, quote and long number cut out "
         "(LogRedaction, LogRedactionTests); the full reason is logged privately",

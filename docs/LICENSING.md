@@ -161,13 +161,21 @@ before v2026.11.04 is deployed, and after a rollback to it:
   `account.json`); a server that sends none has no cooldown on a sign-out, and the confirmation is
   then the contract's text before it.
 - **A key replaced with the purchase code unlinks a linked email** (§11.1, F3):
-  `key.replace.confirm.email` says so before; after it this Mac's session goes and whether an email
-  is linked is asked again. With the account's password the email stays (`key.replace.confirm`);
-  a wrong password there is `error.invalid_credentials.password`.
+  `key.replace.confirm.email` says so before — also while it is not known whether one is linked (the
+  license's view not read since this Mac was connected; it is asked when the key is at hand). After
+  it this Mac's session goes and whether an email is linked is asked again — at once, whether or not
+  this Mac connects again with the new key. With the account's password the email stays
+  (`key.replace.confirm`); a wrong password there is `error.invalid_credentials.password`.
 - **Export only, said** (§8.5 item 7): after the grace — `mode.expired.unreachable` (or
   `.outdated`, then without `app.outdated` beside it); no document that checks — `mode.unverified`.
+  Both stop work, so they come before every other notice above the profiles, in red; the sidebar's
+  line after the grace is "No connection to the server" (or "Lumen is out of date") / "Export only".
 - **The period's end can be closed** (§8.5 item 10): closed during the week it comes back for the
-  last day; closed on the last day, not again before the next end (kept per end and level).
+  last day; closed on the last day, not again before the next end (kept per end and level). A
+  refresh that was out when it was closed does not bring it back: a refresh's answer keeps the app's
+  own notes made meanwhile, and one that did not come changes nothing.
+- **Renewal of a key's license without an email** is on the key's page (`<site>/key`, §11.1, §17.4),
+  from the banners and from Settings › Account; otherwise the plans.
 - **Texts** changed by the contract: `activation.trial_used` (the trial was this Mac's, with another
   account), `key.no_reset` (the wallet's signature, a payer from an exchange).
 - Checked by `LicenseClientTests` (both servers' 202, confirm and resend with every refusal, the two

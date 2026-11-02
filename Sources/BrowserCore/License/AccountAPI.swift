@@ -398,12 +398,14 @@ public enum AccountAPI {
     }
 
     /// A sign-in's `202 check_email` — the password's, or a resend's, which is "of the same kind".
-    public static func loginCode(from response: AccountResponse, receivedAt: Date) -> Result<LoginCode, AccountFailure> {
+    /// `keeping`: a resend's attempt, whose challenge stays when its answer does not repeat it.
+    public static func loginCode(from response: AccountResponse, receivedAt: Date,
+                                 keeping kept: ServerToken? = nil) -> Result<LoginCode, AccountFailure> {
         decode(LoginCodeBody.self, from: response).flatMap { body -> Result<LoginCode, AccountFailure> in
             guard response.status == 202, body.status == "check_email" else { return .failure(.unreachable) }
             let sentAt = body.codeSentAt ?? receivedAt
             let expiresAt = body.codeExpiresAt ?? body.codeValidSeconds.map { sentAt.addingTimeInterval(TimeInterval($0)) }
-            let challenge = body.challenge.flatMap { $0.isEmpty ? nil : ServerToken($0) }
+            let challenge = body.challenge.flatMap { $0.isEmpty ? nil : ServerToken($0) } ?? kept
             return .success(LoginCode(challenge: challenge, codeAttempts: body.codeAttempts, codeSentAt: sentAt, codeExpiresAt: expiresAt,
                                       resendAvailableAt: challenge == nil ? nil : body.resendAvailableAt,
                                       resendsLeft: challenge == nil ? nil : body.resendsLeft))

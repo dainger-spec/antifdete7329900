@@ -261,7 +261,23 @@ final class LicenseModel: ObservableObject {
         let before = state?.entitlement
         let (updated, result) = await client.refresh(record, profileCount: profilesHere().count, wall: Date(),
                                                      uptime: ProcessInfo.processInfo.systemUptime)
-        record = updated
+        switch result {
+        case .unreachable, .notSignedIn:
+            // Nothing came: the record stays as it is now — with whatever changed here meanwhile.
+            break
+        default:
+            // The app's own notes made while the request was out (a banner closed, a session dropped,
+            // an email learned) are kept: the answer is about the document. Signed out by the server,
+            // its session goes as `signOut(because:)` says.
+            var merged = updated
+            merged.periodEndingClosed = record.periodEndingClosed
+            merged.trialNoticeClosedFor = record.trialNoticeClosedFor
+            if case .signedOut = result {} else {
+                merged.session = record.session
+                merged.emailLinked = record.emailLinked
+            }
+            record = merged
+        }
         // Only an accepted document moves the floor to the server's time; otherwise it stays where
         // this Mac's own clock brought it.
         if case .accepted = result { floor = record.clock }
@@ -664,14 +680,18 @@ final class LicenseModel: ObservableObject {
         }
         keyEcho = AccountKeyEcho(newKey)
         log.notice("The license's key was replaced; this Mac connects again with the new one")
-        // Every Mac of the license is unlinked (§11.1): this one is connected again, with the new key.
         // Replaced with the key and the purchase code, a linked email is unlinked and its sessions
-        // closed (v2026.11.04, F3): this Mac's session goes, and whether an email is linked is asked
-        // again — an older server kept it, and the license's view says which.
-        let emailUnlinked: Bool
-        if case .purchase = proof { emailUnlinked = true } else { emailUnlinked = false }
-        let emailLinked = emailUnlinked ? nil : record.emailLinked
-        let session = emailUnlinked ? nil : record.session
+        // closed (v2026.11.04, F3): this Mac's session goes now — whether or not it connects again
+        // below — and whether an email is linked is asked again (an older server kept it; the
+        // license's view says which).
+        if case .purchase = proof {
+            record.session = nil
+            record.emailLinked = nil
+            save()
+        }
+        // Every Mac of the license is unlinked (§11.1): this one is connected again, with the new key.
+        let emailLinked = record.emailLinked
+        let session = record.session
         let result = await client.activate(.key(newKey), label: String(label.prefix(64)), profileCount: profilesHere().count, record: record,
                                            wall: Date(), uptime: ProcessInfo.processInfo.systemUptime)
         var reconnection: AccountFailure?

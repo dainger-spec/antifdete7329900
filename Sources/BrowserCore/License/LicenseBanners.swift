@@ -36,6 +36,17 @@ public enum LicenseBanner: Equatable, Sendable {
     /// `trial.started`: until the person closes it.
     case trialStarted(until: Date)
 
+    /// It says why this Mac works no more — export only, or not signed in — not a warning: such
+    /// banners come before every other notice above the profiles, and in red.
+    public var stopsWork: Bool {
+        switch self {
+        case .deviceRevoked, .machineMismatch, .notSignedIn, .accountDisabled, .periodEnded, .noLicense, .expired, .unverified:
+            return true
+        case .grace, .appOutdated, .clockSkew, .periodEnding, .trialStarted:
+            return false
+        }
+    }
+
     /// Its place in the contract's order (§8.5): 1 is the most important.
     public var rank: Int {
         switch self {

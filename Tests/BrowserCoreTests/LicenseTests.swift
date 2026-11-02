@@ -347,6 +347,12 @@ final class LicenseTests: XCTestCase {
         XCTAssertEqual(LicenseBanners.banners(.init(mode: .exportOnly, entitlement: try entitlement(status: .exportOnly, reason: "no_license"),
                                                     appOutdated: true, now: afterGrace)), [.noLicense, .appOutdated])
         XCTAssertEqual(LicenseBanner.expired(outdated: false, lastSuccessAt: nil).rank, LicenseBanner.unverified.rank)
+        // Both stop work, as the reasons of §8.5's 1–6 do; GRACE and the warnings do not.
+        XCTAssertTrue(LicenseBanner.expired(outdated: true, lastSuccessAt: nil).stopsWork)
+        XCTAssertTrue(LicenseBanner.unverified.stopsWork)
+        XCTAssertTrue(LicenseBanner.noLicense.stopsWork)
+        XCTAssertFalse(LicenseBanner.grace(outdated: false, lastSuccessAt: nil, until: afterGrace).stopsWork)
+        XCTAssertFalse(LicenseBanner.appOutdated.stopsWork)
     }
 
     /// Closed during the week, the warning comes back for the last day; closed on the last day, not

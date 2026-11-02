@@ -309,6 +309,15 @@ struct SignInFlow: View {
             if let failure = await license.confirmLogin(email: email, code: codeText) {
                 problem = LicenseText.error(failure)
                 waitIfAsked(failure)
+                if case .server(let error) = failure, error.code == "invalid_code", var spent = loginCode {
+                    spent.codeAttempts = spent.codeAttempts.map { max(0, $0 - 1) }
+                    loginCode = spent
+                    // The code's tries spent, or its time over: this attempt is over — a new one
+                    // starts with the password (§5.2).
+                    if spent.codeAttempts == 0 || (spent.codeExpiresAt.map { $0 <= Date() } ?? false) {
+                        backToPassword(L("contract.error.invalid_code"))
+                    }
+                }
             } else {
                 loginCode = nil
                 codeText = ""
@@ -683,13 +692,13 @@ struct LicenseBannerView: View {
 
     /// What stops work is red; what warns, amber — and the period's last day, red.
     private var isDanger: Bool {
-        switch banner {
-        case .periodEnding(_, _, let final): return final
-        case .grace, .appOutdated, .clockSkew, .trialStarted: return false
-        // .expired and .unverified leave only export: red, as the other reasons for it.
-        default: return true
-        }
+        if case .periodEnding(_, _, let final) = banner { return final }
+        return banner.stopsWork
     }
+
+    /// Where the period is paid for: the key's page for a key's license without an email (§11.1),
+    /// the plans otherwise (§17.4).
+    private var renewalPath: String { license.hasNoEmail ? "/key" : "/pricing" }
 
     @ViewBuilder
     private var actions: some View {
@@ -704,7 +713,7 @@ struct LicenseBannerView: View {
         case .accountDisabled:
             Button(L("license.banner.support")) { open("/") }.buttonStyle(.lumenSecondary)
         case let .periodEnded(owner, _):
-            if owner { Button(L("license.banner.renew")) { open("/pricing") }.buttonStyle(.lumenSecondary) }
+            if owner { Button(L("license.banner.renew")) { open(renewalPath) }.buttonStyle(.lumenSecondary) }
         case .noLicense:
             Button(L("license.banner.choosePlan")) { open("/pricing") }.buttonStyle(.lumenSecondary)
         case let .grace(outdated, _, _), let .expired(outdated, _):
@@ -722,7 +731,7 @@ struct LicenseBannerView: View {
         case let .periodEnding(owner, endsAt, final):
             // It can be closed (§8.5 item 10): during the week it comes back for the last day.
             HStack(spacing: 8) {
-                if owner { Button(L("license.banner.renew")) { open("/pricing") }.buttonStyle(.lumenSecondary) }
+                if owner { Button(L("license.banner.renew")) { open(renewalPath) }.buttonStyle(.lumenSecondary) }
                 Button(L("license.banner.hide")) { license.closePeriodEnding(endsAt: endsAt, final: final) }.buttonStyle(.lumenGhost)
             }
         case .trialStarted:
@@ -929,7 +938,8 @@ struct AccountSettingsPage: View {
                 VStack(alignment: .trailing, spacing: 8) {
                     if p.isOwner {
                         Button(L(p.plan == "trial" || p.status == .exportOnly ? "license.account.choosePlan" : "license.account.renew")) {
-                            open("/pricing")
+                            // A key's license without an email is paid for on the key's page (§11.1).
+                            open(license.hasNoEmail ? "/key" : "/pricing")
                         }
                         .buttonStyle(.lumenSecondary)
                     }
@@ -1433,6 +1443,11 @@ struct KeyReplaceSheet: View {
         }
         .sheetFrame(width: 500, height: 600)
         .background(Theme.raised)
+        .task {
+            // Whether an email is linked chooses the warning: asked of the license's view when the
+            // key is at hand and it is not known yet.
+            if !bySession, license.record.emailLinked == nil, license.keyAtHand { _ = await license.devices() }
+        }
         .onDisappear {
             result = nil
             password = ""
@@ -1441,9 +1456,11 @@ struct KeyReplaceSheet: View {
         }
     }
 
-    /// With the key and the purchase code, a linked email is unlinked too (§11.1, F3): said before.
+    /// With the key and the purchase code, a linked email is unlinked too (§11.1, F3): said before —
+    /// also while it is not known whether one is linked (the license's view not read since this Mac
+    /// was connected): the warning is not left out on a guess.
     private var confirmation: String {
-        L(!bySession && license.record.emailLinked == true ? "contract.key.replace.confirm.email" : "contract.key.replace.confirm")
+        L(!bySession && license.record.emailLinked != false ? "contract.key.replace.confirm.email" : "contract.key.replace.confirm")
     }
 
     @ViewBuilder

@@ -138,6 +138,12 @@ enum LicenseText {
                     String(format: L("contract.sidebar.grace.caption"), until))
         case .exportOnly:
             let reason = state.entitlement.flatMap { LicenseBanners.exportReason($0, at: state.now) }
+            // A document that would let this Mac work, its grace over: the connection's (or the
+            // app's age) is the title, export only the caption.
+            if state.entitlement != nil, reason == nil {
+                return (L(record.appOutdated ? "contract.sidebar.grace.outdated.title" : "contract.sidebar.grace.title"),
+                        L("contract.sidebar.export.title"))
+            }
             let caption: String
             switch reason {
             case "no_license"?: caption = L("contract.sidebar.export.noLicense")

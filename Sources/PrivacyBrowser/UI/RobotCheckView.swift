@@ -27,7 +27,7 @@ struct RobotCheckSheet: View {
                 .font(.lumenSecondary)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-            RobotCheckWebView(url: url, onToken: onToken, onFailure: { failed = true })
+            RobotCheckWebView(url: url, onToken: onToken, onFailure: { failed = true }, onLoaded: { failed = false })
                 .frame(height: 300)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             if failed {
@@ -115,9 +115,10 @@ private struct RobotCheckWebView: NSViewRepresentable {
     let url: URL
     let onToken: (String) -> Void
     let onFailure: () -> Void
+    let onLoaded: () -> Void
 
     func makeCoordinator() -> RobotCheckCoordinator {
-        RobotCheckCoordinator(site: url, onToken: onToken, onFailure: onFailure)
+        RobotCheckCoordinator(site: url, onToken: onToken, onFailure: onFailure, onLoaded: onLoaded)
     }
 
     func makeNSView(context: Context) -> WKWebView {
@@ -137,13 +138,15 @@ final class RobotCheckCoordinator: NSObject, WKScriptMessageHandler, WKNavigatio
     private let site: URL
     private let onToken: (String) -> Void
     private let onFailure: () -> Void
+    private let onLoaded: () -> Void
     /// One token per page: a second message is not a second sign-in.
     private var delivered = false
 
-    init(site: URL, onToken: @escaping (String) -> Void, onFailure: @escaping () -> Void) {
+    init(site: URL, onToken: @escaping (String) -> Void, onFailure: @escaping () -> Void, onLoaded: @escaping () -> Void = {}) {
         self.site = site
         self.onToken = onToken
         self.onFailure = onFailure
+        self.onLoaded = onLoaded
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -169,11 +172,23 @@ final class RobotCheckCoordinator: NSObject, WKScriptMessageHandler, WKNavigatio
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        onFailure()
+        if !Self.stoppedOnPurpose(error) { onFailure() }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        onFailure()
+        if !Self.stoppedOnPurpose(error) { onFailure() }
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        onLoaded()
+    }
+
+    /// A load cancelled (by the page, or by this coordinator's own policy: WebKit's "frame load
+    /// interrupted by policy change") is not a page that did not open.
+    static func stoppedOnPurpose(_ error: Error) -> Bool {
+        let error = error as NSError
+        return (error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled)
+            || (error.domain == "WebKitErrorDomain" && error.code == 102)
     }
 
     /// No window opens from the check.

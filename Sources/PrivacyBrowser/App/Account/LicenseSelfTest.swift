@@ -467,8 +467,8 @@ enum LicenseSelfTest {
             let view = RobotCheck.makeWebView(loading: page, coordinator: coordinator)
             let deadline = Date().addingTimeInterval(15)
             while received.isEmpty, Date() < deadline { try? await Task.sleep(nanoseconds: 100_000_000) }
-            // Any later message would come within this.
-            try? await Task.sleep(nanoseconds: 800_000_000)
+            // Any later message, and the page's attempt to leave, come within this.
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
             view.stopLoading()
             view.configuration.userContentController.removeScriptMessageHandler(forName: RobotCheck.handlerName)
         }
@@ -476,27 +476,66 @@ enum LicenseSelfTest {
         if let token = received.first {
             withToken = await robotChecked.signIn(email: server.robotEmail, password: server.signInPassword, robotToken: token)
         }
+        let leftTheSite = server.requests.contains { $0.hasPrefix("GET /elsewhere") }
         check("the robot check (§5.5): the sign-in that asks for it is refused (error.robot_check); the site's page in the check's own web view"
-              + " hands over its main frame's token alone — not its frame's, not a malformed one — and the sign-in with it goes through",
-              uncheckedText == L("contract.error.robot_check") && received == [server.robotToken] && withToken == .signedIn
-              && server.bodies.contains { contains($0, [server.robotToken]) },
-              "without: \(unchecked), received \(received), with it: \(String(describing: withToken))")
+              + " hands over its main frame's token alone — not its frame's, not a malformed one — its main frame cannot leave the site,"
+              + " and the sign-in with the token goes through, the token in a body and in no address",
+              uncheckedText == L("contract.error.robot_check") && received == [server.robotToken] && withToken == .signedIn && !leftTheSite
+              && server.bodies.contains { contains($0, [server.robotToken]) }
+              && !server.requests.contains { $0.contains(server.robotToken) || $0.contains(server.challenge) },
+              "without: \(unchecked), received \(received), left the site: \(leftTheSite), with it: \(String(describing: withToken))")
 
         // Signing out under the unlink cooldown (§6.3): nothing changes and it says until when; after the
         // cooldown it goes through (the control). The confirmation names the cooldown the activation gave.
         let consequences = LicenseText.signOutConsequences(cooldownSeconds: coded.record.unlinkCooldownSeconds)
         server.unlinkCooldown = true
         let held = await coded.signOut(vault: nil)
-        let stillIn = coded.mode == .full && coded.record.isSignedIn && (try? AccountFile(directory: codedFolder).load())?.isSignedIn == true
+        let stillIn = coded.mode == .full && coded.record.isSignedIn && coded.record.session?.sessionToken != nil
+            && (try? AccountFile(directory: codedFolder).load())?.isSignedIn == true
         server.unlinkCooldown = false
         let out = await coded.signOut(vault: nil)
         check("signing out under the unlink cooldown (429 unlink_cooldown → signout.cooldown) leaves this Mac signed in — token, document,"
-              + " account.json — until the date it names; after the cooldown the sign-out goes through (the control); signout.consequences"
+              + " session, account.json — until the date it names; after the cooldown the sign-out goes through (the control); signout.consequences"
               + " names the cooldown the activation gave (7 days)",
               held == .cooldown(availableAt: server.cooldownEnds) && stillIn && out == .signedOut(confirmed: true) && coded.mode == .notSignedIn
               && consequences == String(format: L("contract.signout.consequences"), LicenseText.duration(604_800)),
               "under the cooldown: \(String(describing: held)), still in: \(stillIn); after: \(String(describing: out)),"
               + " mode \(String(describing: coded.mode)); consequences: \(consequences)")
+
+        // The key replaced with the purchase code while this Mac cannot connect again at once: the
+        // email is unlinked all the same (F3) — its session goes, and it is asked again whether one is
+        // linked — not only when the reconnection works (step 8 is that one).
+        if let currentKey = AccountKey(typed: newKeyText) {
+            let (offline, offlineFolder) = person("key-replaced-not-reconnected")
+            offline.useKey(currentKey)
+            let connected = await offline.activate(label: "", vault: nil)
+            _ = await offline.linkEmail(typedKey: nil, purchaseCode: code, email: "second@example.com", password: "a long password 3")
+            let linked = await offline.confirmEmail(typedKey: nil, email: "second@example.com", code: server.emailCode)
+            let linkedBefore = offline.record.emailLinked == true && offline.record.session?.sessionToken != nil
+            server.refuseActivations = true
+            let replacedOffline = await offline.replaceKey(.purchase(currentKey, code), label: "")
+            server.refuseActivations = false
+            let stored = try? AccountFile(directory: offlineFolder).load()
+            let notReconnected = (try? replacedOffline.get())?.reconnection != nil
+            check("the key replaced with the purchase code while this Mac cannot connect again (429): the email is unlinked all the same —"
+                  + " its session gone, whether one is linked asked again, in account.json too — where it was linked before (the control)",
+                  (try? connected.get()) != nil && linked == nil && linkedBefore && notReconnected
+                  && offline.record.emailLinked == nil && offline.record.session == nil && stored?.session == nil && stored?.emailLinked == nil,
+                  "connected \(connected), linked: \(String(describing: linked)), before \(linkedBefore), replaced \(replacedOffline),"
+                  + " emailLinked \(String(describing: offline.record.emailLinked)), session \(offline.record.session == nil ? "gone" : "kept")")
+        } else {
+            check("the key replaced with the purchase code while this Mac cannot connect again", false, "the self-test's new key does not read")
+        }
+
+        // The attempt's challenge and the robot check's token: in no line of this process's log.
+        let thirdMarker = "lumen-key-log-check-\(UUID().uuidString)"
+        Logger(subsystem: "PrivacyBrowser", category: "SelfTest").notice("\(thirdMarker, privacy: .public)")
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        let signInLog = processLog(since: began)
+        check("this process's log after the code's sign-in and the robot check holds neither the attempt's challenge nor the robot check's"
+              + " token — a line just written in clear is found in it (the search can fail)",
+              signInLog.contains(thirdMarker) && !contains(Data(signInLog.utf8), [server.challenge, server.robotToken]),
+              signInLog.contains(thirdMarker) ? "the challenge or the token is in the log" : "the marker was not found in \(signInLog.count) characters")
         server.stop()
         manager.launchGate = { [weak license] id in license?.refusalToOpen(id) }
         return results
@@ -599,6 +638,8 @@ final class FakeAccountServer {
     private(set) var resendsLeft = 3
     /// `DELETE /v1/device` answers `429 unlink_cooldown` until `cooldownEnds` (§6.3).
     var unlinkCooldown = false
+    /// Activations answer `429 rate_limited`: a Mac that cannot connect again right away.
+    var refuseActivations = false
     let cooldownEnds = Date(timeIntervalSince1970: (Date().timeIntervalSince1970 + 5 * 86_400).rounded())
     private(set) var port: UInt16 = 0
     private(set) var requests: [String] = []
@@ -710,6 +751,9 @@ final class FakeAccountServer {
              "/v1/anonymous/key/replace" where keyUnknown:
             status = 404
             body = refusal("key_not_found")
+        case "/v1/devices/activate" where refuseActivations:
+            status = 429
+            body = ["error": ["code": "rate_limited", "message": "self-test", "retryAfter": 60]]
         case "/v1/anonymous/license":
             body = ["devices": [["deviceID": deviceID, "code": "B119", "label": "", "mine": true]], "limit": 3, "used": 1,
                     "unlinkAvailableAt": NSNull(), "unlinkCooldownSeconds": 604_800, "offlineWorkSeconds": 604_800, "emailLinked": emailLinked]
@@ -823,6 +867,8 @@ final class FakeAccountServer {
             document.querySelector('iframe').addEventListener('load', () => setTimeout(() => {
               window.webkit.messageHandlers.lumenRobotCheck.postMessage('<b>not a token</b>');
               window.webkit.messageHandlers.lumenRobotCheck.postMessage('\(robotToken)');
+              // Then the page tries to take its main frame elsewhere: it must stay on the site.
+              setTimeout(() => { location.href = 'http://localhost:\(port)/elsewhere'; }, 100);
             }, 300));
             </script>
             """

@@ -918,13 +918,14 @@ struct ProfilesScreen: View {
         }
     }
 
-    /// The license's banners that stop work (§8.5's 1–6) come first, then the vault's index and a
-    /// proxy that does not work, then the license's warnings (7–11), then kept folders.
+    /// The license's banners that stop work (§8.5's 1–6, and export only after the grace or without
+    /// a document that checks) come first, then the vault's index and a proxy that does not work,
+    /// then the license's warnings, then kept folders.
     private var banners: [ProfilesBanner] {
-        var banners: [ProfilesBanner] = licenseBanners.filter { $0.rank <= 6 }.map { .license($0) }
+        var banners: [ProfilesBanner] = licenseBanners.filter(\.stopsWork).map { .license($0) }
         if let indexNotice { banners.append(.index(indexNotice)) }
         if let proxyProblem { banners.append(.proxyProblem(proxyProblem)) }
-        banners += licenseBanners.filter { $0.rank > 6 }.map { .license($0) }
+        banners += licenseBanners.filter { !$0.stopsWork }.map { .license($0) }
         if !keptDeleted.isEmpty { banners.append(.keptDeleted) }
         return banners
     }

@@ -561,6 +561,16 @@ final class LicenseClientTests: XCTestCase {
         XCTAssertFalse(again.canResend)
         XCTAssertTrue(again.resendsUsed, "the third resend spent: login.resends_used")
 
+        // A resend's answer without the challenge keeps the attempt's: its resends are not lost.
+        let bare = FakeServer { _ in
+            self.answer(202, ["status": "check_email", "codeAttempts": 5, "codeExpiresAt": "2026-11-02T09:15:00Z",
+                              "codeSentAt": "2026-11-02T09:03:00Z", "resendAvailableAt": "2026-11-02T09:04:00Z", "resendsLeft": 1])
+        }
+        let kept = try await client(bare).resendLoginCode(ServerToken("lmc_challenge")).get()
+        XCTAssertEqual(kept.challenge?.unredacted(), "lmc_challenge")
+        XCTAssertEqual(kept.resendsLeft, 1)
+        XCTAssertTrue(kept.canResend)
+
         // Its refusals are the server's words, each by its code.
         for (status, code) in [(429, "resend_limit"), (429, "rate_limited"), (400, "login_expired")] {
             let refusing = FakeServer { _ in self.error(status, code, ["retryAfter": 40]) }
@@ -630,6 +640,11 @@ final class LicenseClientTests: XCTestCase {
         let older = FakeServer { _ in self.ok(["entitlement": self.document(issued: "2026-11-03T10:00:00Z"), "serverTime": "2026-11-03T10:00:00Z"]) }
         let (rolledBack, _) = await client(older).refresh(after, profileCount: 0, wall: time("2026-11-03T10:00:00Z"), uptime: 3)
         XCTAssertNil(rolledBack.unlinkCooldownSeconds)
+        // An answer whose document this app cannot judge still says the server's cooldown.
+        let newer = FakeServer { _ in self.ok(["entitlement": self.document(version: 2), "serverTime": "2026-11-03T10:00:00Z", "unlinkCooldownSeconds": 172_800]) }
+        let (outdated, outdatedResult) = await client(newer).refresh(after, profileCount: 0, wall: time("2026-11-03T10:00:00Z"), uptime: 3)
+        XCTAssertEqual(outdatedResult, .appOutdated)
+        XCTAssertEqual(outdated.unlinkCooldownSeconds, 172_800)
         // A field that does not read leaves the cooldown unknown, not the answer.
         let odd = FakeServer { _ in self.ok(["entitlement": self.document(issued: "2026-11-03T10:00:00Z"), "serverTime": "2026-11-03T10:00:00Z", "unlinkCooldownSeconds": "a week"]) }
         let (oddRecord, oddResult) = await client(odd).refresh(after, profileCount: 0, wall: time("2026-11-03T10:00:00Z"), uptime: 3)

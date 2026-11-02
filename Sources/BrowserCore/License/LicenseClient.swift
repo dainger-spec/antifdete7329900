@@ -89,7 +89,7 @@ public struct LicenseClient: Sendable {
     /// `POST /v1/auth/login/resend`: the same code again; what the attempt is now (§5.2).
     public func resendLoginCode(_ challenge: ServerToken) async -> Result<LoginCode, AccountFailure> {
         guard let response = try? await transport.send(AccountAPI.resendLoginCode(challenge)) else { return .failure(.unreachable) }
-        return AccountAPI.loginCode(from: response, receivedAt: now())
+        return AccountAPI.loginCode(from: response, receivedAt: now(), keeping: challenge)
     }
 
     /// What an activation did.
@@ -190,6 +190,7 @@ public struct LicenseClient: Sendable {
             let check = EntitlementVerifier.check(answer.document, keys: keys, deviceID: deviceID, machineID: machineID)
             if check.meansAppOutdated {
                 updated.appOutdated = true
+                updated.unlinkCooldownSeconds = answer.unlinkCooldownSeconds
                 return (updated, .appOutdated)
             }
             guard let entitlement = check.entitlement, let envelope = EntitlementVerifier.envelope(of: answer.document) else {
