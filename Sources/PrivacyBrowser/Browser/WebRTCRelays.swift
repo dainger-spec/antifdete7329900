@@ -29,13 +29,16 @@ final class WebRTCRelays {
     private static let loopback = IPAddr("127.0.0.1")!
 
     /// Starts the relay for one launch of a profile; what its pages are given as their only ICE
-    /// server. One relay per profile: a second start replaces the first.
-    func start(profile id: UUID, proxy: ProxySettings) throws -> WebRTCRelay {
+    /// server. One relay per profile: a second start replaces the first. `exit` is the address the
+    /// proxy's TCP leaves from, found by this launch: an allocation whose association leaves from any
+    /// other gets no relayed address (`TunnelRoute.exit`).
+    func start(profile id: UUID, proxy: ProxySettings, exit: IPAddr) throws -> WebRTCRelay {
         stop(profile: id)
         guard proxy.kind == .socks5, let port = UInt16(exactly: proxy.port) else { throw RelayError.notSOCKS5 }
         let route = TunnelRoute(id: UUID().uuidString, relayIPv4: Self.loopback, relayIPv6: IPAddr("::1")!,
                                 username: Self.randomToken(8), password: Self.randomToken(16),
-                                proxy: SOCKSProxy(host: proxy.host, port: port, username: proxy.username, password: proxy.password))
+                                proxy: SOCKSProxy(host: proxy.host, port: port, username: proxy.username, password: proxy.password),
+                                exit: exit)
         let log = self.log
         let host = try TURNUDPHost(route: route, bindTo: Self.loopback, queue: queue,
                                    relays: SOCKS5RelayFactory(queue: queue, log: { log.info("relay: \($0, privacy: .private)") }),

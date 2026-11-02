@@ -11,7 +11,7 @@ final class WebRTCGateTests: XCTestCase {
             for proxy in [nil, socks, http] {
                 for ownProcess in [false, true] {
                     for guardState in NetworkGuardState.allCases {
-                        for udp in [ProxyUDPSupport.unknown, .supported, .unsupported] {
+                        for udp in ProxyUDPSupport.allCases {
                             let decision = WebRTCGate.decide(policy: policy, proxy: proxy, ownProcess: ownProcess,
                                                              guardState: guardState, udp: udp)
                             let all = policy != .disabled && proxy?.kind == .socks5 && ownProcess
@@ -50,6 +50,12 @@ final class WebRTCGateTests: XCTestCase {
         XCTAssertEqual(reason(socks, own: false, udp: .unsupported), .off(.notOwnProcess))
         XCTAssertEqual(reason(socks, udp: .unsupported), .off(.proxyWithoutUDP))
         XCTAssertEqual(reason(socks, udp: .unknown), .off(.proxyUDPUnknown))
+        // One address: UDP that leaves from elsewhere than the proxy's TCP, or a TCP exit that is
+        // not known, is no relay.
+        XCTAssertEqual(reason(socks, udp: .elsewhere), .off(.proxyUDPElsewhere))
+        XCTAssertEqual(reason(socks, udp: .exitUnknown), .off(.proxyExitUnknown))
+        XCTAssertEqual(reason(socks, own: false, udp: .elsewhere), .off(.notOwnProcess))
+        XCTAssertEqual(reason(socks, guardState: .off, udp: .elsewhere), .off(.guardOff))
         XCTAssertEqual(reason(socks), .relay)
         // The profile's own setting is no refusal: Disabled is off without a reason.
         XCTAssertEqual(WebRTCGate.decide(policy: .disabled, proxy: socks, ownProcess: true, guardState: .ready, udp: .supported),

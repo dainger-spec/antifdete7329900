@@ -25,7 +25,7 @@ told why, in words, with what they can do.
 | WebRTC: STUN, TURN, media, data channels (UDP) | **the relay** on 127.0.0.1 → the profile's SOCKS5 UDP association; the page's own ICE servers are never contacted | self-test (a video call inside a capture of every packet of the runner), leak check, unit tests |
 | A peer's candidate named by a host name (FQDN, mDNS `.local`) | dropped before the engine sees it: nothing is resolved | shim tests, self-test (no packet carries the name) |
 | Anything else a held profile's process or WebKit's processes for it open | dropped by the network guard | unit tests of its rules; on a Mac: the check below |
-| WebRTC with an HTTP CONNECT proxy, a proxy without UDP, the guard not ready | off, said why | self-test (the control: off, not direct) |
+| WebRTC with an HTTP CONNECT proxy, a proxy without UDP, a proxy whose UDP leaves from another address than its TCP, the guard not ready | off, said why | self-test (the controls: off, not direct) |
 
 A page cannot send other UDP: WebRTC is the only UDP a web page can start.
 
@@ -57,6 +57,21 @@ one the profile starts with WebRTC off and the launch says: "the proxy does not 
 ASSOCIATE refused, or nothing came back through it); WebRTC needs a SOCKS5 proxy with UDP". If the
 check could not finish, it says that instead. An HTTP CONNECT proxy is refused without asking:
 it cannot carry UDP.
+
+**One address: the proxy's UDP must leave from where its TCP does.** A site sees the pages come
+from the proxy's TCP exit and WebRTC from its UDP egress; two different addresses tell it the
+profile goes through a proxy — worse than no WebRTC. So at the same time as the UDP check the
+manager asks where the proxy's TCP leaves from (`ProxyExitLookup`): Cloudflare's trace
+(`https://1.1.1.1/cdn-cgi/trace`, then `1.0.0.1`) through the proxy only — whatever the profile's
+bypass list says — by address, so nothing is resolved and the answer can only be the IPv4 exit;
+Cloudflare's STUN server is asked by the UDP check already, so no other party learns of the
+launch. The relay only when the STUN answer's address and the trace's are the same; every
+allocation of the relay is then held to that address (`TunnelRoute.exit`): a proxy that sends a
+later association's UDP from elsewhere — a pool, a rotation since the launch — gets no relayed
+address for it (403), and an IPv6 relay next to an IPv4 exit none either. Different addresses:
+"its proxy sends UDP out from another address than its TCP"; no exit found: "the address its
+proxy leaves from could not be found out", and if it repeats, that the proxy does not let the
+check through.
 
 **When and how the permission is asked: once, explained first, never by itself.** Nothing is
 asked at the app's start. Installing starts only from Settings › WebRTC through proxies (the
@@ -126,6 +141,9 @@ CreatePermission, ChannelBind, Send/Data indications, ChannelData. What libwebrt
   gets nothing (an unauthenticated answer would tell any local process a profile's proxy address);
 - the proxy's egress is found per allocation with a STUN Binding through its association; the STUN
   servers' names are resolved by the proxy;
+- the egress is the relayed address only when it is the proxy's TCP exit the launch found
+  (`TunnelRoute.exit`, "One address" above); any other — another address of a pool, an IPv6
+  egress next to an IPv4 exit, a route without a known exit — gets 403 and its association closed;
 - peers are Internet addresses only: CreatePermission and ChannelBind are refused (403) for
   loopback, link-local, private, shared (CGNAT), multicast, reserved and documentation addresses
   and IPv6 forms of IPv4 ones — those would be reached on the proxy's side.
@@ -211,6 +229,9 @@ the guard drops each of those flows, because they are counted for the held profi
 | Installed, not checked on this Mac / check failed | off | "being checked" / "the check failed", Check Again |
 | Ready, HTTP proxy | off | "an HTTP proxy cannot carry UDP" |
 | Ready, SOCKS5 without UDP / UDP unknown | off | "the proxy does not pass UDP" / "could not find out" |
+| Ready, the proxy's UDP leaves from another address than its TCP | off | "its proxy sends UDP out from another address than its TCP" |
+| Ready, the proxy's TCP exit could not be found out | off | "the address its proxy leaves from could not be found out" |
+| Running, a later association of the proxy leaves from another address | that allocation refused (403): no relayed address, nothing sent | nothing new: the call fails as with a dead proxy |
 | Ready, the guard does not take the process, the relay does not start | off | "the guard did not take the profile's process, or its relay did not start" |
 | Ready, all of it holds | through the relay and the proxy | the editor and the inspector say so |
 | The sandboxed build (profiles inside the app's process) | off | "only for a profile in its own process" |
@@ -230,6 +251,11 @@ the guard drops each of those flows, because they are counted for the held profi
   on a real Mac with a signed build (the checklist below).
 - **The proxy must relay UDP.** SOCKS5 without TLS, with UDP ASSOCIATE; many SOCKS5 services, and
   `ssh -D`, do not. TURN over TCP and TLS are not carried (UDP only).
+- **…from the address its TCP leaves from.** Providers that send UDP out of another pool or
+  another address than TCP, or rotate the exit per connection, get no WebRTC: the launch says so,
+  and an allocation whose association leaves from elsewhere is refused while the profile runs. A
+  proxy that blocks requests to 1.1.1.1 and 1.0.0.1 gives no exit to compare with: no WebRTC
+  either. An IPv6 egress is never relayed (the exit is the IPv4 one).
 - **What the filter sees.** The start of every new flow of the Mac passes through it (it lets all
   but a held profile's through at once). If the extension were not running at all, macOS would let
   flows through: that is why the app stops held profiles the moment it stops answering, and why
@@ -273,7 +299,11 @@ the guard drops each of those flows, because they are counted for the held profi
   audit tokens, the ledger, the check's verdict.
 - `TunnelCoreTests`: the STUN codec against RFC 5769, SOCKS5 framing, the TURN flows as libwebrtc
   drives them, the peer policy, IPv6.
-- `WebRTCGateTests`: every combination of setting, proxy, process, guard state and UDP answer.
+- `WebRTCGateTests`: every combination of setting, proxy, process, guard state and UDP answer
+  (the same address, another one, the exit unknown).
+- `TURNServerTests`, one address: the exit's address on another port is relayed; another address,
+  no exit, an IPv6 egress next to an IPv4 exit get 403, no allocation, the association closed;
+  the trace's parser.
 - The shim tests: the page's configuration, urls, tampering, named candidates.
 - `NE=check`: the extension compiles, its plists lint, the provider is the filter alone, its
   entitlements give it no network.
@@ -282,8 +312,11 @@ the guard drops each of those flows, because they are counted for the held profi
   relay and the proxy (relay candidates at the proxy's address only, frames decoded on the far
   side, the proxy's associations carried it); its peer's named candidates are taken and no packet
   carries their names; the control: the same profile without the guard has no RTCPeerConnection
-  at all (not direct WebRTC), and says why. A profile without a proxy sends a STUN request on
-  purpose, which the capture must see (the capture's own control).
+  at all (not direct WebRTC), and says why. One address: the gate's comparison against the proxy's
+  UDP with its trace saying the same exit (relay, held to it), another one, none (no relay); and a
+  launch whose proxy's UDP leaves from elsewhere has no RTCPeerConnection and says why. A profile
+  without a proxy sends a STUN request on purpose, which the capture must see (the capture's own
+  control).
 - `scripts/guard_probe_check.py`: the probe's request is counted for the probe (and the check
   fails with a pid that is not the probe's).
 

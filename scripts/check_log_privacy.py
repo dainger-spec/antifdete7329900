@@ -87,6 +87,7 @@ ALLOWED_IN_FILE = {
     ("SafariChromeHost.swift", "structural.joined(separator: \", \")"): "names of Safari's classes this macOS lacks",
     ("SafariChromeHost.swift", "patched.joined(separator: \", \")"): "names of Safari's configuration factories",
     ("ProxyGeoLookup.swift", "service.url.host ?? \"?\""): "a geolocation service of the app's own list, not the proxy",
+    ("ProxyExitLookup.swift", "endpoint.host ?? \"?\""): "Cloudflare's trace address of the app's own list (1.1.1.1, 1.0.0.1), not the proxy",
     ("ContentRules.swift", "identifier"): "the rule list's identifier, a constant of the code",
     ("ExceptionLog.swift", "when"): "where an exception was seen: a fixed text of that file",
     ("ProfileManager.swift", "report.forced"): "a yes/no: whether a seal was forced",
