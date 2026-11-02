@@ -239,6 +239,10 @@ the guard drops each of those flows, because they are counted for the held profi
   time.
 - **Loopback is allowed** to a held profile (the relay is there). A page that defeated the user
   script could reach this Mac's own services on 127.0.0.1; it could not reach the Internet.
+- **Before an NE build ships**: the application identifier an `NE=1` build carries opens the
+  data-protection keychain to Safari's code in a profile's process, shared by every profile
+  (docs/IDENTITY.md, "The keychain"). It is to be closed first; `scripts/release.sh` builds without
+  `NE` until then.
 
 ## Building it
 
