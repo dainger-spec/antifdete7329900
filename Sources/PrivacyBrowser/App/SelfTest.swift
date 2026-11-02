@@ -268,11 +268,10 @@ final class SelfTest {
         info("macOS \(ProcessInfo.processInfo.operatingSystemVersionString), Safari \(HostSafari.version)")
         environmentChecks()
         vaultKeyDerivation()
-        // Without the packet tunnel (any build but a signed NE=1 one) proxied profiles keep WebRTC
-        // off; the proxy checks below verify that, scripts/leak_check.py the relay itself.
-        let tunnel = TunnelManager.shared
-        check("tunnel: a build without the network extension says so (proxied profiles keep WebRTC off)",
-              tunnel.extensionIdentifier != nil || (tunnel.state == .notBuilt && !tunnel.canCarryWebRTC), "\(tunnel.state)")
+        // Without the network guard proxied profiles keep WebRTC off (`WebRTCGate`); "WebRTC through
+        // the proxy" below checks that in a profile's own process, and the relay with a stand-in.
+        check("network guard: this build says it has none, and nothing stands in for it outside the self-test's own checks",
+              NetworkGuard.shared.state == .notInBuild && !NetworkGuard.shared.selfTestStandIn, "\(NetworkGuard.shared.state)")
         // As the first launch of a profile with a German proxy would, before WebKit starts any
         // process; checked by fingerprintSurface (navigator) and proxies (Accept-Language header).
         WebContentLanguage.decide("de-DE")
@@ -358,6 +357,7 @@ final class SelfTest {
         await group("warm-up") { try await warmUp(repository) }
         await group("warm-up queue") { try await warmUpQueue(repository) }
         await group("Safari chrome") { try await safariChromeThroughTheProxy(repository) }
+        await group("WebRTC through the proxy") { try await webRTCThroughTheProxy(repository) }
         await group("Safari's app-link banner tracker") { try await safariAppLinkTracker(repository) }
         // The license: signed in with a key against a server played on the loopback; where the key
         // is not (account.json, the defaults, the diagnostics); without the server; revoked.
@@ -1814,6 +1814,166 @@ final class SelfTest {
         }
         info("egress-window end \(Date().timeIntervalSince1970)")
         check("Safari chrome: nothing went wrong while it ran", messages.isEmpty, messages.joined(separator: " | "))
+    }
+
+    // MARK: WebRTC through the profile's proxy
+
+    /// WebRTC of a profile with a SOCKS5 proxy that relays UDP — the self-test proxy's `--socks-udp`
+    /// listener, which connects nowhere and plays the NAT itself — in the profile's own process, in
+    /// Safari's chrome, on `/pb-rtc` opened on loopback (a secure context, where WebRTC exists), each
+    /// run inside an egress window: nothing of the profile's may leave this Mac then
+    /// (scripts/egress_check.py).
+    ///   * The control: no network guard in this build (nor could a CI runner load one), so the
+    ///     profile runs with no RTCPeerConnection at all, in its page and in an about:blank frame,
+    ///     and is told why (`WebRTCGate`).
+    ///   * The call: the self-test stands in for the guard, so the profile gets the product's own
+    ///     relay (`WebRTCRelays`, here) and user script: a video call between two connections of the
+    ///     page, through the relay and the proxy's UDP, with relay candidates only, at the proxy's
+    ///     public address, frames decoded on the far side, and the page's own STUN server — named
+    ///     after the run — never asked (a DNS question for it fails the capture).
+    /// Then the capture's control for WebRTC, outside any window: a STUN request made on purpose
+    /// from a profile without a proxy, which the capture must see as the app's.
+    private func webRTCThroughTheProxy(_ repository: ProfileRepository) async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let udpPort = environment["PB_SELFTEST_SOCKS_UDP_PROXY_PORT"].flatMap(Int.init),
+              let httpPort = environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("WebRTC through the proxy: a video call through the profile's proxy, and none without the guard",
+                 "PB_SELFTEST_SOCKS_UDP_PROXY_PORT not set: the self-test proxy's UDP listener is not running")
+            return
+        }
+        guard !AppEnvironment.isSandboxed else {
+            skip("WebRTC through the proxy: a video call through the profile's proxy, and none without the guard",
+                 "the sandboxed build runs no process per profile, which WebRTC through a proxy needs", .build)
+            return
+        }
+        let socks = ProxySettings(kind: .socks5, host: "127.0.0.1", port: udpPort)
+        let http = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+
+        // What the proxy's UDP side did so far, asked through its HTTP listener.
+        func udpStats() async -> [String: Any] {
+            let url = URL(string: "http://proxied.selftest.invalid/pb-udp.json")!
+            guard let text = try? await loadThroughProxy(repository, http, url: url) else { return [:] }
+            return (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
+        }
+        // The WebRTC page's report for a run.
+        func rtcReport(_ run: String) async -> [String: Any]? {
+            let url = URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!
+            guard let text = try? await loadThroughProxy(repository, http, url: url),
+                  let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] else { return nil }
+            return (object["reports"] as? [[String: Any]])?.first { $0["rtcPage"] != nil }
+        }
+        // One launch of the proxied profile in its own process, on the WebRTC page in `mode`.
+        func launch(mode: String) async throws -> (report: [String: Any], refusals: [WebRTCRefusal], messages: [String], started: Bool) {
+            let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
+            let profile = try repository.create(name: "WebRTC \(mode)", configuration: ProfileConfiguration(
+                startURL: URL(string: "http://127.0.0.1:\(httpPort)/pb-rtc?run=\(run)&mode=\(mode)"),
+                proxy: socks, webRTCPolicy: .unrestricted, matchProxyLocation: false))
+            defer { try? repository.delete(profile.id) }
+            let manager = ProfileManager(repository: repository)
+            var messages: [String] = []
+            manager.onError = { messages.append($0) }
+            var hostsChrome: Bool?
+            manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
+            info("egress-token \(run)")
+            info("egress-window begin \(Date().timeIntervalSince1970)")
+            setenv("PB_PROFILE_PROCESS", "1", 1)
+            do {
+                try await manager.launch(profile.id)
+            } catch {
+                setenv("PB_PROFILE_PROCESS", "0", 1)
+                info("egress-window end \(Date().timeIntervalSince1970)")
+                throw error
+            }
+            setenv("PB_PROFILE_PROCESS", "0", 1)
+            if let pid = manager.processIdentifier(of: profile.id) { info("egress-pid \(pid)") }
+            let started = await waitUntil(timeout: 90) { hostsChrome != nil }
+            var report: [String: Any] = [:]
+            let deadline = Date().addingTimeInterval(mode == "call" ? 120 : 60)
+            while report.isEmpty, Date() < deadline {
+                report = await rtcReport(run) ?? [:]
+                if report.isEmpty { try? await Task.sleep(nanoseconds: 2_000_000_000) }
+            }
+            let refusals = Array(manager.webRTCRefusals.values)
+            await manager.shutDown()
+            info("egress-window end \(Date().timeIntervalSince1970)")
+            return (report, refusals, messages, started)
+        }
+
+        // The control: the production gate, nothing standing in for the guard.
+        let control = try await launch(mode: "presence")
+        info("WebRTC through the proxy, the control: \(control.report), refusals \(control.refusals), messages \(control.messages)")
+        check("WebRTC through the proxy, the control: the profile's own process started", control.started)
+        check("WebRTC through the proxy, the control: without the guard no RTCPeerConnection, in the page or in an about:blank frame",
+              control.report["rtc"] as? String == "undefined" && control.report["rtcFrame"] as? String == "undefined",
+              control.report.isEmpty ? "no report from the page" : "\(control.report)")
+        let refusal = control.refusals.first
+        check("WebRTC through the proxy, the control: the profile is told why, in words",
+              control.refusals.count == 1 && refusal.map { $0.rawValue.hasPrefix("guard") } == true
+                && refusal.map { control.messages.contains(ProfileManager.webRTCOffText($0)) } == true,
+              "refusals \(control.refusals), messages \(control.messages)")
+
+        // The call: the product's relay, the self-test standing in for the guard.
+        let before = await udpStats()
+        NetworkGuard.shared.selfTestStandIn = true
+        let call: (report: [String: Any], refusals: [WebRTCRefusal], messages: [String], started: Bool)
+        do {
+            call = try await launch(mode: "call")
+        } catch {
+            NetworkGuard.shared.selfTestStandIn = false
+            throw error
+        }
+        NetworkGuard.shared.selfTestStandIn = false
+        let after = await udpStats()
+        info("WebRTC through the proxy, the call: \(call.report), refusals \(call.refusals), proxy UDP before \(before) after \(after)")
+        let types = call.report["candidateTypes"] as? [String] ?? []
+        let addresses = call.report["candidateAddresses"] as? [String] ?? []
+        let inbound = call.report["inbound"] as? [String: Any] ?? [:]
+        let frames = (inbound["framesDecoded"] as? NSNumber)?.intValue ?? 0
+        func count(_ stats: [String: Any], _ key: String) -> Int { (stats[key] as? NSNumber)?.intValue ?? 0 }
+        check("WebRTC through the proxy, the call: the profile's own process started", call.started)
+        check("WebRTC through the proxy, the call: RTCPeerConnection is there with the relay", call.report["rtc"] as? String == "function"
+                && call.refusals.isEmpty, call.report.isEmpty ? "no report from the page" : "\(call.report), refusals \(call.refusals)")
+        check("WebRTC through the proxy, the call: relay candidates only, at the proxy's public address",
+              types == ["relay"] && addresses == ["203.0.113.77"], "types \(types), addresses \(addresses)")
+        check("WebRTC through the proxy, the call: the video went through and was decoded on the far side",
+              call.report["connected"] as? Bool == true && call.report["track"] as? Bool == true && frames >= 30,
+              "connected \(call.report["connected"] ?? "nil"), track \(call.report["track"] ?? "nil"), frames \(frames), \(inbound)")
+        check("WebRTC through the proxy, the call: its UDP went through the proxy's associations",
+              count(after, "associations") - count(before, "associations") >= 2
+                && count(after, "handedOver") - count(before, "handedOver") >= 100,
+              "associations \(count(before, "associations"))→\(count(after, "associations")), datagrams handed over \(count(before, "handedOver"))→\(count(after, "handedOver"))")
+        let dropped = (after["dropped"] as? [String] ?? []).filter { !((before["dropped"] as? [String] ?? []).contains($0)) }
+        check("WebRTC through the proxy, the call: the relay asked the proxy for nothing but peers and its egress probe",
+              dropped.isEmpty, dropped.joined(separator: ", "))
+
+        // The capture's control for WebRTC's UDP: a STUN request from a profile without a proxy, on
+        // purpose, outside every window, to a public STUN server (Google's, by address: no DNS).
+        let stun = (ip: "74.125.250.129", port: 19302)
+        let direct = try repository.create(name: "WebRTC control", configuration: ProfileConfiguration(webRTCPolicy: .unrestricted, ephemeral: true))
+        defer { try? repository.delete(direct.id) }
+        let session = try makeSession(repository, direct.id, key: repository.profileKey(for: direct.id))
+        defer { session.shutDown() }
+        let webView = WKWebView(frame: .zero, configuration: session.makeWebViewConfiguration())
+        try await PageLoader.load(webView, html: "<!doctype html><title>WebRTC control</title>", baseURL: URL(string: "https://localhost/")!)
+        info("egress-control-udp webrtc \(stun.ip) \(stun.port)")
+        let sent = try await js(webView, """
+            if (typeof RTCPeerConnection !== 'function') return 'no RTCPeerConnection';
+            const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:\(stun.ip):\(stun.port)' }] });
+            const types = [];
+            pc.onicecandidate = (event) => {
+              if (event.candidate && event.candidate.candidate) types.push((/ typ (\\w+)/.exec(event.candidate.candidate) || [])[1]);
+            };
+            pc.createDataChannel('control');
+            await pc.setLocalDescription(await pc.createOffer());
+            await new Promise((resolve) => {
+              const timer = setTimeout(resolve, 6000);
+              pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') { clearTimeout(timer); resolve(); } };
+            });
+            pc.close();
+            return 'gathered: ' + types.join(',');
+            """) as? String
+        check("WebRTC through the proxy: the capture's control — a profile without a proxy sends WebRTC's STUN itself",
+              sent?.hasPrefix("gathered") == true, sent ?? "nil")
     }
 
     /// What `XPCServiceWatch` saw while the profile ran in Safari's chrome: every XPC service that
@@ -4653,13 +4813,13 @@ final class SelfTest {
             }
         }
         // Every reason says something of its own, and the missing pieces by name.
-        let reasons: [SafariChromeHost.OwnWindowReason] = [.deviceProfile, .sandboxed, .turnedOff, .tunnelProfile, .notInProfileProcess,
+        let reasons: [SafariChromeHost.OwnWindowReason] = [.deviceProfile, .sandboxed, .turnedOff, .notInProfileProcess,
                                                            .frameworksDidNotLoad, .missingPieces(["BrowserWindowController"]),
                                                            .notSafarisApplication, .windowDidNotOpen]
         let texts = reasons.map { SimplifiedModeNotice.reasonText($0) }
-        check("simplified mode: each of the nine reasons is said in words of its own, the missing pieces by name",
+        check("simplified mode: each of the eight reasons is said in words of its own, the missing pieces by name",
               texts.allSatisfy { $0.count > 20 && !$0.contains("simplified.") } && Set(texts).count == reasons.count
-                && texts[6].contains("BrowserWindowController"), texts.joined(separator: " | "))
+                && texts[5].contains("BrowserWindowController"), texts.joined(separator: " | "))
     }
 
     // MARK: A page whose process keeps ending

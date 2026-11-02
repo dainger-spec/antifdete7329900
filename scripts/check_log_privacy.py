@@ -43,6 +43,8 @@ ALLOWED_EXPRESSIONS = {
     "absent": "names of private classes and methods this macOS does not have",
     "onProfile": "a yes/no",
     "status": "a process exit status",
+    "pid": "a process identifier (a profile's own process, held by the network guard)",
+    "host.address.port": "the port on 127.0.0.1 the system gave a profile's WebRTC relay",
     "missing": "names of private classes and methods this macOS does not have",
     "missing ? \"requested, no credentials set\" : \"rejected\"": "a fixed text",
     "configuration.lastProxyLocation == nil ? \"the system time zone\" : \"the last known location\"": "a fixed text",

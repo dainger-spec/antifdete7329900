@@ -284,6 +284,9 @@ enum ProfileSessionHost {
             case .preferences(let preferences):
                 BrowsingPreferences.current = preferences
                 DockIcon.show(initials: preferences.dockInitials, of: profileName)
+            case .webRTC(let message):
+                // The launch inside this process waits for it (`ProfileManager.webRTCRelay`).
+                ProfileManager.receiveWebRTC(message)
             case .walkMenu(let from):
                 SafariMenuWalk.start(from: from, session: manager?.session(for: profileID)) { line in
                     ProfileSessionHost.send(.menuWalk(line))
@@ -307,7 +310,7 @@ enum ProfileSessionHost {
         /// Whether a command can be acted on before the profile's session exists.
         private func isImmediate(_ command: ProfileCommand) -> Bool {
             switch command {
-            case .stop, .preferences: return true
+            case .stop, .preferences, .webRTC: return true
             default: return false
             }
         }

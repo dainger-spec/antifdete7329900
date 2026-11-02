@@ -39,6 +39,25 @@ enum ProfileCommand: Codable {
     /// Choose every item of Safari's menu bar in turn, from item `from` on, and say what each did
     /// (`SafariMenuWalk`). Sent by the `--menu-walk` check only, never by the app.
     case walkMenu(from: Int)
+    /// The manager's decision on this launch's WebRTC (`WebRTCGate`): the relay the profile's pages
+    /// are given, or why there is none. A profile with a SOCKS5 proxy that wants WebRTC waits for it
+    /// before it builds anything, and without it runs with WebRTC off.
+    case webRTC(WebRTCLaunchMessage)
+}
+
+/// What the manager decided for a launch's WebRTC. With `relay`, the profile's pages are given that
+/// TURN server — the manager's, on loopback (`WebRTCRelays`) — as their only ICE server, and the
+/// network guard holds the profile's processes to the proxy; without it, WebRTC is off in the
+/// engine, for `refusal`.
+struct WebRTCLaunchMessage: Codable, Equatable {
+    struct Relay: Codable, Equatable {
+        var urls: [String]
+        var username: String
+        var credential: String
+    }
+
+    var relay: Relay?
+    var refusal: WebRTCRefusal?
 }
 
 enum ProfileEvent: Codable {

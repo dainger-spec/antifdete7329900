@@ -27,7 +27,6 @@ enum SimplifiedModeNotice {
         case .deviceProfile: return L("simplified.reason.device")
         case .sandboxed: return L("simplified.reason.sandboxed")
         case .turnedOff: return L("simplified.reason.turnedOff")
-        case .tunnelProfile: return L("simplified.reason.tunnel")
         case .notInProfileProcess: return L("simplified.reason.noProfileProcess")
         case .frameworksDidNotLoad: return L("simplified.reason.frameworks")
         case .missingPieces(let names): return String(format: L("simplified.reason.missingPieces"), names.joined(separator: ", "))

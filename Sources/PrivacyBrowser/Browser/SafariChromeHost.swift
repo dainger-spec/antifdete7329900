@@ -36,9 +36,6 @@ enum SafariChromeHost {
         case sandboxed
         /// `PB_SAFARI_CHROME=0`.
         case turnedOff
-        /// The profile's WebRTC goes through the packet tunnel, whose routes are the app's
-        /// process's: the profile runs there, and Safari's chrome is hosted only in a profile's own.
-        case tunnelProfile
         /// Profiles run in the app's own process (`ProfileProcess.isEnabled` off): Safari's chrome
         /// is hosted only in a profile's own process.
         case notInProfileProcess
@@ -64,7 +61,6 @@ enum SafariChromeHost {
         if let failure { return failure }
         if AppEnvironment.isSandboxed { return .sandboxed }
         if isTurnedOff { return .turnedOff }
-        if ProfileProcess.isEnabled, ProfileManager.relaysWebRTCThroughTunnel(configuration, tunnel: .shared) { return .tunnelProfile }
         return .notInProfileProcess
     }
 
