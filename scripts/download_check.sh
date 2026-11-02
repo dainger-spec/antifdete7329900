@@ -106,7 +106,14 @@ fi
 if [[ -n "$SHOTS" ]]; then
   mkdir -p "$SHOTS"
   since="$(date '+%Y-%m-%d %H:%M:%S')"
-  open "$DMG"
+  # `open` waits for the answer to Gatekeeper's question about a quarantined file, and nobody
+  # answers here (CI run 600 waited 27 minutes): it goes in the background, with a limit of its own.
+  OPENERS=""
+  person_opens() {
+    perl -e 'alarm shift; exec @ARGV' 25 open "$1" >/dev/null 2>&1 &
+    OPENERS="$OPENERS $!"
+  }
+  person_opens "$DMG"
   sleep 10
   screencapture -x "$SHOTS/after-opening-the-image.png" && echo "screen after opening the image: $SHOTS/after-opening-the-image.png"
   opened="$(find /Volumes -maxdepth 1 -name 'Lumen*' 2>/dev/null | head -n 1)"
@@ -121,7 +128,10 @@ if [[ -n "$SHOTS" ]]; then
     if [[ ! -e /Applications/Lumen.app ]]; then
       INSTALLED=/Applications/Lumen.app
       ditto "$WORK/Applications/Lumen.app" "$INSTALLED" && quarantine "$INSTALLED"
-      open "$INSTALLED"
+      # The image's question, if any, answered by nobody: closed before the app is opened.
+      killall CoreServicesUIAgent 2>/dev/null
+      sleep 2
+      person_opens "$INSTALLED"
       sleep 10
       screencapture -x "$SHOTS/after-opening-the-app.png" && echo "screen after opening the app: $SHOTS/after-opening-the-app.png"
       pgrep -x Lumen >/dev/null && echo "the app is running (no question was asked, or it was let through)" \
@@ -131,13 +141,15 @@ if [[ -n "$SHOTS" ]]; then
       echo "Applications already holds a Lumen.app: the app's first launch is not shown on this Mac"
     fi
   fi
-  log show --style compact --start "$since" \
+  perl -e 'alarm shift; exec @ARGV' 90 log show --style compact --start "$since" \
     --predicate 'process == "syspolicyd" OR process == "CoreServicesUIAgent" OR process == "DiskImageMounter"' 2>/dev/null \
     | grep -iE 'notar|assess|gatekeeper|prompt|quarantine|denied|allowed|malware|developer' | head -n 40 > "$SHOTS/gatekeeper-log.txt"
   echo "what Gatekeeper logged ($SHOTS/gatekeeper-log.txt):"
   sed 's/^/  /' "$SHOTS/gatekeeper-log.txt" | cut -c1-300 | head -n 12
-  # Leave no dialog behind for the next step.
+  # Leave no dialog and no waiting `open` behind for the next step.
   killall CoreServicesUIAgent 2>/dev/null
+  for opener in $OPENERS; do kill "$opener" 2>/dev/null; done
+  wait 2>/dev/null
 fi
 
 if (( failures )); then
