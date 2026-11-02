@@ -58,7 +58,7 @@ final class NetworkGuard: NSObject, ObservableObject {
         willSet { objectWillChange.send() }
     }
 
-    var state: NetworkGuardState { selfTestStandIn ? .ready : installedState }
+    var state: NetworkGuardState { .ready } // MUTATION A: the gate passes without the guard
 
     /// Called with the processes that were held when the guard stopped answering for them: their
     /// profiles are stopped (`ProfileManager`).
@@ -118,7 +118,7 @@ final class NetworkGuard: NSObject, ObservableObject {
 
     /// The state once asking macOS is over (at most 8 s): what a launch decides on.
     func settledState() async -> NetworkGuardState {
-        if selfTestStandIn { return .ready }
+        if selfTestStandIn || true { return .ready } // MUTATION A
         if checking {
             await withCheckedContinuation { continuation in
                 settledWaiters.append(continuation)
@@ -396,7 +396,7 @@ final class NetworkGuard: NSObject, ObservableObject {
     /// processes and the system do on its behalf — to `proxy`. False when it did not: the profile
     /// then runs with WebRTC off.
     func hold(pid: pid_t, proxy: ProxySettings) async -> Bool {
-        if selfTestStandIn {
+        if selfTestStandIn || true { // MUTATION A
             log.notice("self-test: a stand-in takes the guard's place for process \(pid, privacy: .public)")
             standIns.insert(pid)
             return true

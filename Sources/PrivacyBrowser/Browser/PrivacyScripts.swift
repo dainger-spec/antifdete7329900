@@ -701,9 +701,9 @@ function patchWebRTC(w, policy, relay) {
       const key = RTC_MEMBERS[i];
       if (key !== 'iceServers' && key !== 'iceTransportPolicy' && record[key] !== undefined) next[key] = record[key];
     }
-    if (viaTunnel) next.iceServers = relayList();
-    else if (record.iceServers !== undefined) next.iceServers = record.iceServers;
-    next.iceTransportPolicy = 'relay';
+    // MUTATION B: the page's own servers and policy reach the engine.
+    if (record.iceServers !== undefined) next.iceServers = record.iceServers;
+    next.iceTransportPolicy = record.iceTransportPolicy || 'all';
     return next;
   };
   // The page's own servers and policy as the engine would hold them: a closed peer connection
