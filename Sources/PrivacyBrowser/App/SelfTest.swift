@@ -5074,8 +5074,9 @@ final class SelfTest {
     /// app's own executable — a profile as it was started before LumenProfile — are the controls.
     private func keychainBetweenProfiles(_ repository: ProfileRepository) async throws {
         guard !AppEnvironment.isSandboxed else {
-            skip(KeychainIsolation.entitlementsName, "the sandboxed build runs no process per profile", .build)
-            skip(KeychainIsolation.itemsName, "the sandboxed build runs no process per profile", .build)
+            for name in [KeychainIsolation.entitlementsName, KeychainIsolation.loginName, KeychainIsolation.itemsName] {
+                skip(name, "the sandboxed build runs no process per profile", .build)
+            }
             return
         }
         let closed = ProfileConfiguration(proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: 1), matchProxyLocation: false)
@@ -5094,8 +5095,9 @@ final class SelfTest {
             do {
                 try await manager.launch(profile.id)
             } catch {
-                check(KeychainIsolation.entitlementsName, false, "\(profile.name) did not start: \(error)")
-                check(KeychainIsolation.itemsName, false, "\(profile.name) did not start: \(error)")
+                for name in [KeychainIsolation.entitlementsName, KeychainIsolation.loginName, KeychainIsolation.itemsName] {
+                    check(name, false, "\(profile.name) did not start: \(error)")
+                }
                 await manager.shutDown()
                 return
             }
@@ -5103,15 +5105,16 @@ final class SelfTest {
         let up = await waitUntil(timeout: 120) { running.isSuperset(of: [first.id, second.id]) || !exited.isEmpty }
         guard up, exited.isEmpty, manager.processIdentifier(of: first.id) != nil, manager.processIdentifier(of: second.id) != nil else {
             let why = "the profiles did not both come up in processes of their own (up \(running.count) of 2, ended \(exited))"
-            check(KeychainIsolation.entitlementsName, false, why)
-            check(KeychainIsolation.itemsName, false, why)
+            for name in [KeychainIsolation.entitlementsName, KeychainIsolation.loginName, KeychainIsolation.itemsName] {
+                check(name, false, why)
+            }
             await manager.shutDown()
             return
         }
         let outcome = await KeychainIsolation.look(manager: manager, profiles: first.id, second.id)
         await manager.shutDown()
         outcome.details.forEach { info("keychain: \($0)") }
-        for (name, verdict) in [(KeychainIsolation.entitlementsName, outcome.entitlements), (KeychainIsolation.itemsName, outcome.items)] {
+        for (name, verdict) in KeychainIsolation.verdicts(outcome) {
             switch verdict {
             case .pass: check(name, true)
             case .fail(let why): check(name, false, why)

@@ -156,7 +156,7 @@ enum ReleaseCheck {
         let outcome = await KeychainIsolation.look(manager: manager, profiles: profile.id, other.id)
         await manager.shutDown()
         outcome.details.forEach { print("RELEASE-CHECK INFO keychain: \($0)") }
-        for (name, verdict) in [(KeychainIsolation.entitlementsName, outcome.entitlements), (KeychainIsolation.itemsName, outcome.items)] {
+        for (name, verdict) in KeychainIsolation.verdicts(outcome) {
             switch verdict {
             case .pass:
                 print("RELEASE-CHECK PASS \(name)")
