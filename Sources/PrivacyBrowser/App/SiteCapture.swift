@@ -41,7 +41,7 @@ final class SiteCapture {
             /// own trace, which answers in place of the Internet. Unset: Cloudflare's, as a launch.
             var exitTrace: String?
         }
-        struct Proxy: Decodable { var kind: String; var host: String; var port: Int }
+        struct Proxy: Decodable { var kind: String; var host: String; var port: Int; var username: String?; var password: String? }
         struct Page: Decodable {
             var name: String
             var url: String
@@ -50,6 +50,8 @@ final class SiteCapture {
             var timeoutMs: Int?
             /// Background tabs opened before the script runs (Safari shows its tab bar from two tabs on).
             var extraTabs: Int?
+            /// Measurement only: the web view's picture after the script (<out>/<profile>-<page>.png).
+            var screenshot: Bool?
         }
         var window: Window
         var profiles: [Profile]
@@ -96,7 +98,7 @@ final class SiteCapture {
         let repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "capture", iterations: 10_000))
         print("INFO macOS \(ProcessInfo.processInfo.operatingSystemVersionString), Safari \(HostSafari.version), zone \(TimeZone.current.identifier)")
         for profileSpec in spec.profiles {
-            let results = try await capture(profileSpec, spec: spec, repository: repository)
+            let results = try await capture(profileSpec, spec: spec, repository: repository, out: out)
             let data = try JSONSerialization.data(withJSONObject: results, options: [.prettyPrinted, .sortedKeys])
             try data.write(to: out.appendingPathComponent("\(profileSpec.name).json"))
         }
@@ -112,12 +114,13 @@ final class SiteCapture {
             configuration.geolocation = .fixed(latitude: point[0], longitude: point[1], accuracyMeters: point[2])
         }
         if let proxy = profile.proxy, let kind = ProxySettings.Kind(rawValue: proxy.kind) {
-            configuration.proxy = ProxySettings(kind: kind, host: proxy.host, port: proxy.port)
+            configuration.proxy = ProxySettings(kind: kind, host: proxy.host, port: proxy.port,
+                                                username: proxy.username, password: proxy.password)
         }
         return configuration
     }
 
-    private func capture(_ profileSpec: Spec.Profile, spec: Spec, repository: ProfileRepository) async throws -> [String: Any] {
+    private func capture(_ profileSpec: Spec.Profile, spec: Spec, repository: ProfileRepository, out: URL) async throws -> [String: Any] {
         let summary = try repository.create(name: "Capture \(profileSpec.name)", configuration: configuration(for: profileSpec))
         defer { try? repository.delete(summary.id) }
         let key = try repository.profileKey(for: summary.id)
@@ -160,6 +163,15 @@ final class SiteCapture {
             print("INFO [\(profileSpec.name)] \(page.name): \(page.url)")
             do {
                 results[page.name] = try await run(page, in: controller)
+                if page.screenshot == true, let tab = controller.selectedTab {
+                    let image: NSImage? = await withCheckedContinuation { continuation in
+                        tab.webView.takeSnapshot(with: nil) { image, _ in continuation.resume(returning: image) }
+                    }
+                    if let tiff = image?.tiffRepresentation,
+                       let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+                        try? png.write(to: out.appendingPathComponent("\(profileSpec.name)-\(page.name).png"))
+                    }
+                }
             } catch {
                 print("INFO [\(profileSpec.name)] \(page.name) failed: \(error.localizedDescription)")
                 results[page.name] = ["error": error.localizedDescription]
