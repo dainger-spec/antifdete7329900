@@ -68,7 +68,8 @@ enum ProfileNetworkGuard {
     /// profile's store in use. Returns how many were closed.
     @discardableResult
     static func closeEveryPage() -> Int {
-        guardClosedPages()
+        // MUTATION: the guard is off — the new check must go red where WebKit traps
+        // guardClosedPages()
         let close = NSSelectorFromString("_close")
         var closed = 0
         for view in webViews.allObjects where view.responds(to: close) {
