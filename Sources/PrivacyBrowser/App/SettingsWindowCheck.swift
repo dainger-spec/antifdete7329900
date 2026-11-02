@@ -189,9 +189,15 @@ enum Bands {
         var failures: [String] = []
     }
 
-    /// Each channel may differ by this much from a design tone (colour matching on the way to the
-    /// screen and back); the system's greys are much further away from the design's near-blacks.
-    static let tolerance = 5
+    /// Each channel may differ by this much from a design tone: colour matching on the way to the
+    /// screen and back moves a channel by one at most (CI's pictures had the design's tones exactly).
+    /// At 5, the first version of this check took the title bar's grey for a design tone (CI run 596).
+    static let tolerance = 2
+    /// The design's tones are cool near-blacks, blue above red by 3 to 6, and stay so under its
+    /// translucent whites; the system draws its title bar, toolbars and windows in neutral greys —
+    /// #1E1E1E on macOS 26, #262626 on macOS 27, each a few steps from a white over the design's
+    /// backdrop (CI run 596). A tone without the cast is not the design's, however near one it is.
+    static let coolCast = 2
     /// A run of rows this tall, in points, of a tone that is not the design's, is a band.
     static let bandHeight: CGFloat = 2
 
@@ -323,7 +329,8 @@ enum Bands {
     }
 
     private static func matches(_ colour: UInt32, _ tones: [UInt32]) -> Bool {
-        tones.contains { isNear(colour, $0, within: tolerance) }
+        let cast = Int(colour & 0xFF) - Int((colour >> 16) & 0xFF)
+        return cast >= coolCast && tones.contains { isNear(colour, $0, within: tolerance) }
     }
 
     private static func isNear(_ a: UInt32, _ b: UInt32, within limit: Int) -> Bool {

@@ -1,6 +1,9 @@
 name: CI
 
-# MEASUREMENT BRANCH (claude/measure-settings-window): the Settings window as the person gets it —
+# MEASUREMENT BRANCH (claude/measure-settings-window), round 2 — the band check made strict (tolerance
+# 2 and the design's cool cast; round 1, run 596, passed the band it was meant to see): the current
+# code must FAIL, SwiftUI's toolbar background hidden must PASS, on both macOS, light and dark.
+# Round 1: the Settings window as the person gets it —
 # the real app started, Settings opened by the app menu's Settings… item (⌘,), the window SwiftUI's
 # Settings scene made captured by the window server, read row by row for a band of a tone that is
 # not the design's. The current code (the owner, 2 November: a grey band at the top), then ways to
@@ -50,14 +53,10 @@ jobs:
             sleep 2
           }
           window light-current ""
-          window light-toolbar-nil toolbar-nil
-          window light-toolbar-invisible toolbar-invisible
           window light-swiftui-background-hidden swiftui-background-hidden
-          window light-swiftui-toolbar-hidden swiftui-toolbar-hidden
           osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true'
           sleep 3
           window dark-current ""
-          window dark-toolbar-nil toolbar-nil
           window dark-swiftui-background-hidden swiftui-background-hidden
           osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false'
           echo "::group::summary"
