@@ -35,8 +35,15 @@ final class BrowserSession {
     /// Where this run's proxy exits (the launch's lookup, or what was remembered for the proxy),
     /// shown in its windows' chrome; set again when a lookup finishes after launch.
     var exitLocation: ProxyLocation? {
-        didSet { windows.forEach { $0.exitLocationDidChange() } }
+        didSet {
+            windows.forEach { $0.exitLocationDidChange() }
+            Self.onExitLocation?(profileID, exitLocation)
+        }
     }
+    /// Told each time a session's exit location is set: a profile's own process puts the country's
+    /// flag on its Dock tile (`DockIcon`, ProfileSessionHost). Unset in the app's process, whose
+    /// one tile is every profile's.
+    static var onExitLocation: ((UUID, ProxyLocation?) -> Void)?
 
     private(set) var dataStore: WKWebsiteDataStore?
     private let userContentController: WKUserContentController

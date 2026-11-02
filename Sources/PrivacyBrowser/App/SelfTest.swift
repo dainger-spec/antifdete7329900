@@ -4546,6 +4546,28 @@ final class SelfTest {
         check("settings: a profile's Dock icon shows the first letters of its name, and none means the app's icon",
               twoLetters && shortName && noLetters && withLetters)
 
+        // The exit country's flag beside the letters: Germany's gold is on the tile with "DE" and
+        // nowhere without it (the app's icon has none); a code that is no country's draws nothing.
+        func gold(_ image: NSImage?) -> Int {
+            guard let image, let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff) else { return -1 }
+            var count = 0
+            for y in stride(from: 0, to: bitmap.pixelsHigh, by: 2) {
+                for x in stride(from: 0, to: bitmap.pixelsWide, by: 2) {
+                    guard let colour = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                    if colour.redComponent > 0.85, colour.greenComponent > 0.68, colour.greenComponent < 0.9,
+                       colour.blueComponent < 0.3, colour.alphaComponent > 0.9 { count += 1 }
+                }
+            }
+            return count
+        }
+        let withFlag = gold(DockIcon.image(initials: 2, of: "North wind", country: "DE"))
+        let withoutFlag = gold(DockIcon.image(initials: 2, of: "North wind"))
+        let flagAlone = DockIcon.image(initials: 0, of: "North wind", country: "DE") != nil
+        let notACountry = DockIcon.image(initials: 0, of: "North wind", country: "XX") == nil
+        check("settings: a profile's Dock icon shows its exit country's flag beside the letters (Germany's gold there, none without it); no flag for a code that is no country's",
+              withFlag > 20 && withoutFlag == 0 && flagAlone && notACountry,
+              "gold pixels with the flag \(withFlag), without \(withoutFlag); the flag alone \(flagAlone); XX drew nothing \(notACountry)")
+
         let a = UUID(), b = UUID(), c = UUID(), d = UUID(), gone = UUID()
         var activity: [(id: UUID, activity: ProfileManager.Activity)] = []
         activity.append((id: a, activity: ProfileManager.Activity.window(ownProcess: false)))

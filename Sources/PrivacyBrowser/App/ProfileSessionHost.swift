@@ -180,6 +180,8 @@ enum ProfileSessionHost {
             manager.onSealed = { _, report in ProfileSessionHost.send(.sealed(report)) }
             // Where the proxy exits could not be found: the manager says so, where the user looks.
             manager.onProxyLocationUnknown = { _ in ProfileSessionHost.send(.proxyLocationUnknown) }
+            // Where it exits, when known: the country's flag on this process's Dock tile.
+            BrowserSession.onExitLocation = { _, location in DockIcon.showExit(country: location?.countryCode) }
             manager.onWarmUpProgress = { [weak self, weak manager] id in
                 guard let robot = manager?.warmUpRobot(for: id) else { return }
                 let status = robot.status
