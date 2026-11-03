@@ -31,8 +31,9 @@ struct SignInFlow: View {
     @State private var email = ""
     @State private var password = ""
     @State private var keyText: String
-    /// The label this Mac is connected with: its name to begin with (the owner, 3 November).
-    @State private var label = ThisMac.name
+    /// The label this Mac is connected with, as the person types it: empty to begin with — no name
+    /// of the Mac's is put in for them (the server's CONTRACT §1; the owner, 3 November).
+    @State private var label = ""
     @State private var problem: String?
     @State private var keyHelp = false
     /// "Don't remember the key" (§10.1): off — the vault keeps the key, as the contract's default.
@@ -1074,9 +1075,10 @@ struct AccountSettingsPage: View {
         LicenseText.signOutConsequences(cooldownSeconds: license.record.unlinkCooldownSeconds)
     }
 
-    /// This Mac's label as the license's list shows it: sent again when a new key connects it.
+    /// This Mac's label as the license's list shows it — else as its activation's answer named it —
+    /// sent again when a new key connects it.
     private var thisMacLabel: String {
-        devices?.devices.first { $0.deviceID == license.record.deviceID }?.label ?? ""
+        devices?.devices.first { $0.deviceID == license.record.deviceID }?.label ?? license.record.label ?? ""
     }
 
     @ViewBuilder

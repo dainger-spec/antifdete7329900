@@ -66,11 +66,15 @@ Now (`LicenseModel`, `RefreshSchedule`, `LicenseClient.refreshReport`):
   15, 30, 60 minutes, then every hour.
 - **What.** This Mac's id, the app's version (`<version> (<build>)`), the number of profiles — the
   open vault's, or before it is opened the last number known (`account.json`'s `profileCount`, a
-  number only) — and the label: the one this Mac was connected with, or this Mac's name from the
-  system (`ThisMac.name`). The activation's label field shows that name to begin with; whoever
-  wants another changes it, whoever wants none clears it. A server that refuses a renewal with a
-  label (HTTP 400) gets it again without one at once, and no label for the rest of the run: the
-  renewal matters more than the label.
+  number only) — and the label only where this Mac has one: the label the activation's answer
+  named it by (`device.label`, kept in `account.json`), never one the app makes up. Where none is
+  known the field is not sent at all: an absent `label` leaves the server's as it is, an empty one
+  would remove it (CONTRACT §6.2, a6fff0f). The activation's label field starts empty; no name of
+  the Mac's is put in for the person (§1, the owner's decision of 3 November: the server cannot
+  tell it from a label someone typed; the Mac's name by default, made earlier that day, is gone). A server
+  that refuses a renewal for its label (HTTP 400, `invalid_request`, `field: "label"`) gets it
+  again without one at once, and no label for the rest of the run: the renewal matters more than
+  the label.
 - **Said.** Each renewal in the app's log (subsystem `PrivacyBrowser`, category `License`): asked,
   and why (`launch`, `unlocked`, `profiles`, `timer`, `network`, `wake`, `active`, `retry`,
   `manual`); done, and for how long the document works; or `License renewal failed` at `error`
@@ -81,17 +85,20 @@ Now (`LicenseModel`, `RefreshSchedule`, `LicenseClient.refreshReport`):
   and until when this Mac works without a renewal, with "Проверить сейчас"; past the document's
   expiry the grace's own banner says it (§8.5). Silence is no longer success.
 
-What the server must do with the label of a renewal is the server's: it is sent in the body of
-`POST /v1/device/entitlement` as `label` (64 characters at most), beside `machineID`,
-`profileCount` and `appVersion`. The server should take it — at least where the device's label is
-empty — and must not refuse the renewal for it.
+The label in a renewal (CONTRACT §6.2): in the body of `POST /v1/device/entitlement` beside
+`machineID`, `profileCount` and `appVersion` — no field or `null`: the server's label stays; a
+string: it replaces it (the rules of §6.1); `""`: it is removed; one against the rules: 400
+`invalid_request`, `field: "label"`, and no renewal. The server keeps a renewal's label from its
+release after v2026.11.04; before that the field is passed over (200, the label as it was).
 
 Checked by what the server sees, never by what the app says it sent:
 `scripts/license_renewal_check.py` (CI, "The license's renewals, as the account server sees them").
 A stand-in server on 127.0.0.1 signs documents with a key made for the run and keeps every request;
 the development build is started as a person starts it. Each start must reach the server; running,
 a document that asks to be renewed a minute after it is issued must be renewed again without a
-start; every request carries the version, this Mac's id and name; through the app's own model a
+start; every request carries the version and this Mac's id, and a label only where `account.json`
+knows one — none at all on a start without one, exactly the known one on a start with one (run
+668's build, which put this Mac's name in every one of its 12 renewals, fails that); through the app's own model a
 vault with three profiles is opened and a fourth made, and the server must be told 3, then 4; a
 renewal the server refuses (500) must be said in the app's log; and the control — an address where
 nothing listens — must fail the check. Before this change the same check measured today's code

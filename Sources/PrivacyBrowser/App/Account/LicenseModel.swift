@@ -4,7 +4,6 @@ import CryptoKit
 import Foundation
 import Network
 import os
-import SystemConfiguration
 
 /// Why a profile does not open or is not made: the license's rule, said as a rule and not as a
 /// fault (the owner, 1 November: "это правило, а не поломка").
@@ -301,11 +300,14 @@ final class LicenseModel: ObservableObject {
         }
     }
 
-    /// The label a renewal carries: the one this Mac was connected with, else this Mac's name (the
-    /// owner, 3 November); none once the server refused it in this run.
+    /// The label a renewal carries: the one the activation's answer named this Mac by
+    /// (`device.label`), and none when it named none — an absent field leaves the server's label as
+    /// it is, where an empty one would remove it (CONTRACT §6.2). Never a name of the app's own (§1:
+    /// the server cannot tell this Mac's name from a label someone typed). None either once the
+    /// server refused it in this run.
     private var renewalLabel: String? {
         guard !labelRefusedByServer else { return nil }
-        return record.label ?? ThisMac.name
+        return record.label
     }
 
     /// Hours from now until `date` — negative once it has passed — for the log.
@@ -511,9 +513,9 @@ final class LicenseModel: ObservableObject {
                                            session: pendingSession, wall: Date(), uptime: ProcessInfo.processInfo.systemUptime)
         switch result {
         case .success(let activation):
+            // The label is the one the answer named this Mac by (`LicenseClient.activate`), sent
+            // again with each renewal: what the server keeps, not what was typed here.
             record = activation.record
-            // Sent again with each renewal (the owner, 3 November).
-            record.label = trimmed
             record.renewalFailure = nil
             sentProfileCount = count
             if case .key = credential {
@@ -886,11 +888,3 @@ final class LicenseModel: ObservableObject {
     }
 }
 
-/// This Mac's name as System Settings › General › About shows it: a Mac's label by default (the
-/// owner, 3 November: "по умолчанию подставляй имя Mac из системы"). Never logged.
-enum ThisMac {
-    static var name: String {
-        let name = (SCDynamicStoreCopyComputerName(nil, nil) as String?) ?? Host.current().localizedName ?? ""
-        return String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(64))
-    }
-}

@@ -123,6 +123,9 @@ public struct LicenseClient: Sendable {
         updated.signedOutReason = nil
         updated.deviceID = device.deviceID
         updated.code = device.code
+        // The label this Mac is known by is the one the answer names (CONTRACT §6.2): none when it
+        // names none — then a renewal sends no label, which leaves the server's as it is.
+        updated.label = device.label.isEmpty ? nil : device.label
         updated.deviceToken = token
         updated.entitlement = envelope
         updated.lastSuccessAt = answer.serverTime

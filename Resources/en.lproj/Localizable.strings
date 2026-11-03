@@ -1669,7 +1669,7 @@
 "license.activate.subtitle.key" = "The key reads. Now connect this Mac to its license.";
 "license.activate.label" = "Label — optional";
 "license.activate.labelPrompt" = "For example, Work";
-"license.activate.labelHint" = "It starts as this Mac's name — change or clear it. Up to 64 characters. The label and the code tell your Macs apart on the website.";
+"license.activate.labelHint" = "Up to 64 characters. The label and the code tell your Macs apart on the website.";
 "license.activate.serverLearns" = "What the server learns";
 "license.activate.action" = "Connect";
 "license.activate.working" = "Connecting…";

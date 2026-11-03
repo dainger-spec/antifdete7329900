@@ -1669,7 +1669,7 @@
 "license.activate.subtitle.key" = "Ключ прочитан. Осталось подключить этот Mac к его лицензии.";
 "license.activate.label" = "Метка — необязательно";
 "license.activate.labelPrompt" = "Например, Рабочий";
-"license.activate.labelHint" = "Сначала здесь имя этого Mac — его можно заменить или стереть. До 64 символов. По метке и коду вы отличаете свои Mac на сайте.";
+"license.activate.labelHint" = "До 64 символов. По метке и коду вы отличаете свои Mac на сайте.";
 "license.activate.serverLearns" = "Что узнает сервер";
 "license.activate.action" = "Подключить";
 "license.activate.working" = "Подключаем…";

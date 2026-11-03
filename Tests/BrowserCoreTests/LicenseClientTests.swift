@@ -66,9 +66,11 @@ final class LicenseClientTests: XCTestCase {
         return AccountResponse(status: status, body: try! JSONSerialization.data(withJSONObject: ["error": body]), retryAfter: retryAfter)
     }
 
-    private func activation(_ document: [String: Any], serverTime: String = "2026-11-01T10:00:00Z") -> AccountResponse {
-        ok(["device": ["deviceID": deviceID, "code": "B119", "label": "", "mine": true, "accountEmail": NSNull()],
-            "deviceToken": "lmd_device_token", "entitlement": document, "serverTime": serverTime])
+    private func activation(_ document: [String: Any], serverTime: String = "2026-11-01T10:00:00Z",
+                            label: Any? = "") -> AccountResponse {
+        var device: [String: Any] = ["deviceID": deviceID, "code": "B119", "mine": true, "accountEmail": NSNull()]
+        if let label { device["label"] = label }
+        return ok(["device": device, "deviceToken": "lmd_device_token", "entitlement": document, "serverTime": serverTime])
     }
 
     private func client(_ server: FakeServer) -> LicenseClient {
@@ -89,6 +91,41 @@ final class LicenseClientTests: XCTestCase {
     }
 
     // MARK: Activation (§6.1)
+
+    /// The label this Mac is known by is the one the activation's answer names (CONTRACT §6.2), not
+    /// what was typed: a renewal sends it again, and sends none where the answer named none — an
+    /// absent field leaves the server's label as it is; an empty one would remove it.
+    func testTheLabelKeptIsTheOneTheActivationsAnswerNames() async throws {
+        let cases: [(typed: String, answered: Any?, kept: String?)] = [
+            ("Рабочий", "Рабочий", "Рабочий"),
+            ("рабочий  ", "Рабочий", "Рабочий"),
+            ("", "", nil),
+            ("Рабочий", "", nil),
+            ("", nil, nil),
+            ("", NSNull(), nil),
+        ]
+        for (typed, answered, kept) in cases {
+            let server = FakeServer { _ in self.activation(self.document(), label: answered) }
+            let result = await client(server).activate(.session(ServerToken("lms_s")), label: typed, profileCount: 0, record: AccountRecord(),
+                                                       wall: time("2026-11-01T10:00:00Z"), uptime: 1_000)
+            XCTAssertEqual(try result.get().record.label, kept, "typed \(typed.debugDescription), answered \(String(describing: answered))")
+        }
+    }
+
+    /// A renewal of a Mac whose label is not known sends no `label` at all — never an empty one,
+    /// which would take the server's label away (§6.2) — and one whose label is known sends it.
+    func testARenewalSendsTheKnownLabelAndNoneWhenNoneIsKnown() async throws {
+        var record = try await signedIn()
+        XCTAssertNil(record.label, "the answer named no label")
+        let server = FakeServer { _ in self.ok(["entitlement": self.document(), "serverTime": "2026-11-01T11:00:00Z"]) }
+        _ = await client(server).refreshReport(record, profileCount: 1, label: record.label, wall: time("2026-11-01T11:00:00Z"),
+                                               uptime: 4_600)
+        XCTAssertFalse(body(try XCTUnwrap(server.requests.last)).keys.contains("label"))
+        record.label = "Рабочий"
+        _ = await client(server).refreshReport(record, profileCount: 1, label: record.label, wall: time("2026-11-01T11:00:00Z"),
+                                               uptime: 4_600)
+        XCTAssertEqual(body(try XCTUnwrap(server.requests.last))["label"] as? String, "Рабочий")
+    }
 
     func testActivatingWithASessionStoresTheDeviceAndTheServersTime() async throws {
         let server = FakeServer { _ in self.activation(self.document(plan: "trial"), serverTime: "2026-11-01T12:00:00Z") }

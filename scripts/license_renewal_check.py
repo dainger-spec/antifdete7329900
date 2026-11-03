@@ -31,14 +31,21 @@ Phases, each judged by the server's requests alone:
              with its password through the app's own model, then a fourth made: the server must be
              told 3, then 4.
 
-Every request must carry the app's version (`<version> (<build>)`), this Mac's id and its name
-(`scutil --get ComputerName`) as the label.
+Every request must carry the app's version (`<version> (<build>)`) and this Mac's id; and the label
+only as account.json knows it (CONTRACT §6.2, a6fff0f): no `label` field at all where none is known —
+an absent field leaves the server's label as it is, an empty one would remove it — and exactly the
+known one where there is one (`launch`'s second start). Never this Mac's name put in by the app (§1:
+the server cannot tell it from a label someone typed; the owner, 3 November).
+
+The signer's key is made outside --out (which CI uploads) and removed at the end: it never leaves the
+runner.
 
 `--measure` says what this build does — every request with its time since the start, over 17
 minutes of running for `periodic` — and fails only when the harness itself did not work (the
 `due` phase saw nothing). Without it, every requirement above is a check: exit 1 on any FAIL.
 """
 import argparse
+import atexit
 import base64
 import datetime
 import hashlib
@@ -49,6 +56,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -76,10 +84,12 @@ def rfc3339(t):
 # MARK: The key and the documents
 
 class Signer:
-    def __init__(self, out):
-        self.binary = os.path.join(out, "entitlement-signer")
+    def __init__(self):
+        # Outside --out, which CI uploads: the key made for the run never leaves the runner.
+        self.folder = tempfile.mkdtemp(prefix="lumen-renewal-signer-")
+        self.binary = os.path.join(self.folder, "entitlement-signer")
         subprocess.run(["swiftc", "-O", os.path.join(ROOT, "scripts", "entitlement_signer.swift"), "-o", self.binary], check=True)
-        self.key = os.path.join(out, "entitlement.key")
+        self.key = os.path.join(self.folder, "entitlement.key")
         made = subprocess.run([self.binary, "keygen", self.key], check=True, capture_output=True, text=True).stdout
         meta = json.loads(made)
         self.key_id = meta["keyID"]
@@ -88,6 +98,9 @@ class Signer:
     def sign(self, payload):
         return subprocess.run([self.binary, "sign", self.key], input=payload, check=True,
                               capture_output=True).stdout.decode().strip()
+
+    def remove(self):
+        shutil.rmtree(self.folder, ignore_errors=True)
 
 
 class Stub:
@@ -201,10 +214,6 @@ def this_machine_id():
     return hashlib.sha256(("lumen.machine-id.v1\n" + found.group(1).upper()).encode()).hexdigest()
 
 
-def computer_name():
-    return subprocess.run(["scutil", "--get", "ComputerName"], capture_output=True, text=True).stdout.strip()
-
-
 def app_version(info_plist):
     # AccountAPI.appVersion: "<version> (<build>)", only these characters, at most 32 of them.
     text = f"{info_plist.get('CFBundleShortVersionString', '0')} ({info_plist.get('CFBundleVersion', '0')})"
@@ -212,11 +221,14 @@ def app_version(info_plist):
     return "".join(c for c in text if c in allowed)[:32]
 
 
-def seed(vault, device_id, token, envelope):
-    """account.json as an activation leaves it (§4.2): the device, its token and, here, a document."""
+def seed(vault, device_id, token, envelope, label=None):
+    """account.json as an activation leaves it (§4.2): the device, its token, the label the answer named
+    (none unless given) and, here, a document."""
     os.makedirs(vault, exist_ok=True)
     record = {"format": 1, "deviceID": device_id, "code": "RC01", "deviceToken": token, "appOutdated": False,
               "signedInWith": "email"}
+    if label is not None:
+        record["label"] = label
     if envelope is not None:
         record["entitlement"] = envelope
     path = os.path.join(vault, "account.json")
@@ -288,15 +300,14 @@ def main():
         return 1
     executable = os.path.join(arguments.app, "Contents", "MacOS", plist["CFBundleExecutable"])
     machine_id = this_machine_id()
-    name = computer_name()
     version = app_version(plist)
-    info(f"app {arguments.app}, version {version!r}, this Mac's name {name!r}, machine id "
-         f"{'computed' if machine_id else 'NOT computed'}")
+    info(f"app {arguments.app}, version {version!r}, machine id {'computed' if machine_id else 'NOT computed'}")
     if not machine_id:
         print("FAIL this Mac's IOPlatformUUID could not be read: no document can be made for it")
         return 1
 
-    signer = Signer(out)
+    signer = Signer()
+    atexit.register(signer.remove)
     device_id = "dev-renewal-check"
     token = "lmd_renewalcheck_" + uuid.uuid4().hex
     stub = Stub(signer, device_id, token, os.path.join(out, "server-requests.jsonl"))
@@ -314,17 +325,24 @@ def main():
         stub.refresh_after = refresh_after
         return stub.document(machine_id, at)
 
-    def fields_hold(requests, what, profiles=None):
-        """Every request this phase got carries the version, this Mac's id and its name."""
+    def fields_hold(requests, what, profiles=None, label=None):
+        """Every request this phase got carries the version and this Mac's id, and the label only as
+        account.json knows it: none at all, or exactly `label`."""
         if measure or not requests:
             return
         check(f"{what}: each request carries the app's version ({version})",
               all(r["appVersion"] == version for r in requests), str([r["appVersion"] for r in requests]))
         check(f"{what}: each request carries this Mac's id", all(r["machineID"] == machine_id for r in requests))
-        check(f"{what}: each request carries this Mac's name as its label",
-              all(r["label"] == name for r in requests),
-              str([("none" if not r["hasLabel"] else ("this Mac's name" if r["label"] == name else "another"))
-                   for r in requests]))
+        if label is None:
+            check(f"{what}: no request carries a label — none is known (an empty one would remove the server's)",
+                  all(not r["hasLabel"] for r in requests),
+                  str([("none" if not r["hasLabel"] else ("empty" if r["label"] == "" else "a label"))
+                       for r in requests]))
+        else:
+            check(f"{what}: each request carries the label account.json knows, and no other",
+                  all(r["hasLabel"] and r["label"] == label for r in requests),
+                  str([("none" if not r["hasLabel"] else ("the known one" if r["label"] == label else "another"))
+                       for r in requests]))
         if profiles is not None:
             check(f"{what}: each request says {profiles} profile(s)",
                   all(r["profileCount"] == profiles for r in requests), str([r["profileCount"] for r in requests]))
@@ -353,12 +371,14 @@ def main():
                      describe(seen, run.started)):
             return 1
 
-    # The owner's case: a document issued now, then a relaunch.
+    # The owner's case: a document issued now, then a relaunch — the second with a label known, as
+    # an activation whose answer named one leaves account.json.
     if "launch" in phases:
         vault = os.path.join(out, "vault-launch")
         stub.mode = "ok"
-        seed(vault, device_id, token, document_issued(time.time()))
+        known_label = "Mac of the renewal check"
         for number in (1, 2):
+            seed(vault, device_id, token, document_issued(time.time()), label=known_label if number == 2 else None)
             run = Run(executable, environment(vault), os.path.join(out, f"app-launch-{number}.log"))
             time.sleep(wait_launch)
             seen = stub.renewals(run.started)
@@ -369,7 +389,7 @@ def main():
             if not measure:
                 check(f"start {number} with a fresh document: the server is asked within {wait_launch} s", len(seen) >= 1,
                       f"{len(seen)} request(s)")
-                fields_hold(seen, f"start {number}", profiles=0)
+                fields_hold(seen, f"start {number}", profiles=0, label=known_label if number == 2 else None)
 
     # While the app runs: each document asks to be renewed a minute after it is issued.
     if "periodic" in phases:
