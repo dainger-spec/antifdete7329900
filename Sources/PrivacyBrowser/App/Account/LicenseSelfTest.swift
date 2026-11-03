@@ -614,9 +614,21 @@ final class FakeAccountServer {
         var description: String { "Authorization \(hadAuthorization ? "sent" : "none"), key \(key == nil ? "none" : "sent")" }
     }
 
-    private let signer = Curve25519.Signing.PrivateKey()
-    let deviceID = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
-    let deviceToken = "lmd_selftest_device_token"
+    private let signer: Curve25519.Signing.PrivateKey
+    var deviceID = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+    var deviceToken = "lmd_selftest_device_token"
+    /// The account it plays: its sessions and documents name it (`AccountSwitchScenario` signs in as
+    /// several accounts in turn).
+    var accountID = "a"
+    /// Its documents say "export only" for this reason ("no_license": an account whose trial was
+    /// used and that bought nothing) instead of a pro plan's work (`AccountSwitchScenario`).
+    var exportOnlyReason: String?
+
+    /// `signer`: the key its documents are signed with — one made for the run, or one kept across the
+    /// app's runs (`AccountSwitchScenario`, a run per step, quitting between).
+    init(signer: Curve25519.Signing.PrivateKey = Curve25519.Signing.PrivateKey()) {
+        self.signer = signer
+    }
     /// The purchase this server plays (§11.1): its key — replaced by `/v1/anonymous/key/replace` — and
     /// its purchase code; the letter's code; the session a linked email opens.
     private(set) var currentKey = "LMK-0123-4567-89AB-CDEF-GHJK-MNMT"
@@ -771,7 +783,7 @@ final class FakeAccountServer {
             emailLinked = true
             status = 201
             body = ["sessionToken": sessionToken, "expiresAt": Date().addingTimeInterval(30 * 86_400).formatted(.iso8601),
-                    "accountID": "a", "idleTimeoutSeconds": 604_800]
+                    "accountID": accountID, "idleTimeoutSeconds": 604_800]
         case "/v1/anonymous/key/replace":
             currentKey = replacementKey
             // v2026.11.04 (F3): the key and the purchase code unlink a linked email.
@@ -841,7 +853,7 @@ final class FakeAccountServer {
 
     private func sessionAnswer() -> [String: Any] {
         ["sessionToken": sessionToken, "expiresAt": Date().addingTimeInterval(30 * 86_400).formatted(.iso8601),
-         "accountID": "a", "idleTimeoutSeconds": 604_800]
+         "accountID": accountID, "idleTimeoutSeconds": 604_800]
     }
 
     /// A sign-in's `202` as v2026.11.04 sends it (§5.2).
@@ -885,8 +897,9 @@ final class FakeAccountServer {
         func at(_ hours: Double) -> String { now.addingTimeInterval((issued + hours) * 3_600).formatted(.iso8601) }
         let forMachine = serve == .otherMac ? MachineID.compute(platformUUID: UUID().uuidString) : machineID
         let payload: [String: Any] = [
-            "kind": "lumen.entitlement", "version": 1, "documentID": UUID().uuidString.lowercased(), "accountID": "a", "licenseID": "l",
-            "deviceID": deviceID, "machineID": forMachine, "role": "owner", "plan": "pro", "status": "active", "exportReason": NSNull(),
+            "kind": "lumen.entitlement", "version": 1, "documentID": UUID().uuidString.lowercased(), "accountID": accountID, "licenseID": "l-\(accountID)",
+            "deviceID": deviceID, "machineID": forMachine, "role": "owner", "plan": exportOnlyReason == nil ? "pro" : "trial",
+            "status": exportOnlyReason == nil ? "active" : "export_only", "exportReason": exportOnlyReason.map { $0 as Any } ?? NSNull(),
             "limits": ["profiles": 50, "devices": 3, "seats": 1], "profilesOnOtherDevices": 0,
             "periodEndsAt": at(serve == .expired ? 14 * 24 : 30 * 24),
             "issuedAt": at(0), "refreshAfter": at(24), "expiresAt": at(96), "graceEndsAt": at(168),

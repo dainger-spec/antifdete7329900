@@ -137,6 +137,10 @@ MainActor.assumeIsolated {
         // The license's renewals as the app's own model makes them — a vault opened, a profile made —
         // for scripts/license_renewal_check.py's stand-in server (LicenseRenewalScenario.swift).
         LicenseRenewalScenario.start()
+    } else if arguments.contains("--selftest-account-switch") {
+        // A profile's data while this Mac signs out of an account, into another and back
+        // (AccountSwitchScenario.swift, for scripts/account_switch_check.py).
+        AccountSwitchScenario.start()
     } else if arguments.contains("--selftest-updates") {
         // The update scenarios of docs/UPDATES.md §8, driven by scripts/update_check.py on a CI
         // runner (UpdateSelfTest.swift): they replace this very app with another build.

@@ -280,6 +280,13 @@ jobs:
           python3 scripts/menu_walk.py --app build/unsandboxed/Lumen.app --out build/egress27/menu-walk \
             --title "macOS 27 - Safari's menu" --record "docs/menu-walk/safari-$major.json" --check \
             --ignore "$HOME/Library/Logs:$HOME/actions-runner:$HOME/runners" --safari-sentinels
+      - name: macOS 27 - a profile's data through signing out, into other accounts and back (it must fail when lost)
+        # scripts/account_switch_check.py, as in the macOS 26 job, with its control.
+        if: always()
+        timeout-minutes: 20
+        run: |
+          python3 -u scripts/account_switch_check.py --app build/unsandboxed/Lumen.app --out build/egress27/account-switch
+          python3 -u scripts/account_switch_check.py --app build/unsandboxed/Lumen.app --out build/egress27/account-switch/control --control
       - name: Safari 27's question about the default browser — as built, and declared a browser (a measurement)
         if: always()
         continue-on-error: true
@@ -946,6 +953,24 @@ jobs:
         with:
           name: license-renewal
           path: build/license-renewal
+          if-no-files-found: ignore
+      - name: A profile's data through signing out, into other accounts and back (it must fail when lost)
+        # The owner, 3 November: a person's history, cookies and saved logins gone from every profile
+        # after signing out, into other accounts and back. scripts/account_switch_check.py: the app
+        # quit between steps; two profiles with history, logins, bookmarks; a site in each that keeps
+        # a cookie, localStorage and IndexedDB and says what it finds; a first account, a second, a
+        # third with export only, the first again. Every step measured; the control removes the
+        # profiles' data at the first sign-out and must fail the check.
+        if: always()
+        timeout-minutes: 20
+        run: |
+          python3 -u scripts/account_switch_check.py --app build/unsandboxed/Lumen.app --out build/account-switch
+          python3 -u scripts/account_switch_check.py --app build/unsandboxed/Lumen.app --out build/account-switch/control --control
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: account-switch
+          path: build/account-switch
           if-no-files-found: ignore
       - name: What the app left in the account's keychain (a measurement)
         # The release check, the self-test of both builds and the menu walk ran between the two
