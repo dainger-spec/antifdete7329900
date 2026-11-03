@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    # Measurement branches of their own workflow (license-renewal-measure.yml): not this one.
+    branches-ignore: ["claude/measure-license-renewal*"]
   pull_request:
 
 env:
