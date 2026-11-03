@@ -459,15 +459,7 @@ final class NetworkGuard: NSObject, ObservableObject {
     /// One call to the guard: its answer, or nil when it failed or took longer than `seconds`.
     private func call<T>(_ connection: NSXPCConnection, seconds: Double = 5,
                          _ body: @escaping (NetworkGuardControl, @escaping (T) -> Void) -> Void) async -> T? {
-        await withCheckedContinuation { (continuation: CheckedContinuation<T?, Never>) in
-            let once = Once(continuation)
-            guard let guardian = connection.remoteObjectProxyWithErrorHandler({ _ in once.resume(nil) }) as? NetworkGuardControl else {
-                once.resume(nil)
-                return
-            }
-            body(guardian) { once.resume($0) }
-            DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { once.resume(nil) }
-        }
+        await Self.ask(connection, seconds: seconds, body)
     }
 
     // MARK: The bundled extension
@@ -482,11 +474,14 @@ final class NetworkGuard: NSObject, ObservableObject {
         return Bundle(url: Self.bundledURL(of: identifier))?.object(forInfoDictionaryKey: "CFBundleVersion") as? String
     }
 
-    /// The extension's identifier, signed by the team that signed this app; nil for a copy without a
-    /// team (ad hoc), which then talks to no guard.
     private var extensionRequirement: String? {
-        guard let identifier = extensionIdentifier, let team = Self.ownTeamIdentifier() else { return nil }
-        return "anchor apple generic and identifier \"\(identifier)\" and certificate leaf[subject.OU] = \"\(team)\""
+        extensionIdentifier.flatMap { Self.requirement(for: $0) }
+    }
+
+    /// What the guard's code must be: `identifier`, signed by the team that signed this app; nil for
+    /// a copy without a team (ad hoc), which then talks to no guard.
+    static func requirement(for identifier: String) -> String? {
+        ownTeamIdentifier().map { "anchor apple generic and identifier \"\(identifier)\" and certificate leaf[subject.OU] = \"\($0)\"" }
     }
 
     private static func ownTeamIdentifier() -> String? {
@@ -607,6 +602,36 @@ extension NetworkGuard: OSSystemExtensionRequestDelegate {
         MainActor.assumeIsolated {
             pendingRequest = nil
             extensionProperties(properties)
+        }
+    }
+}
+
+// MARK: - What `Lumen --guard-diagnose` shares with the app's own guard (GuardDiagnosis.swift)
+
+extension NetworkGuard {
+    /// The guard bundled in this copy of the app, as the app itself talks to it: its identifier, its
+    /// Mach service, its version, and the requirement its code must meet (nil without a team: an ad
+    /// hoc copy talks to no guard). Nil when this copy has no guard.
+    static func bundledGuard() -> (identifier: String, machService: String?, version: String?, requirement: String?)? {
+        guard let identifier = Bundle.main.object(forInfoDictionaryKey: NetworkGuardNames.appInfoKey) as? String else { return nil }
+        let bundle = Bundle(url: bundledURL(of: identifier))
+        let machService = (bundle?.object(forInfoDictionaryKey: "NetworkExtension") as? [String: Any])?["NEMachServiceName"] as? String
+        let version = bundle?.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        return (identifier, machService, version, requirement(for: identifier))
+    }
+
+    /// One call to the guard: its answer, or nil when it failed or took longer than `seconds` (a
+    /// guard of an older build does not answer a call it does not have).
+    static func ask<T>(_ connection: NSXPCConnection, seconds: Double = 5,
+                       _ body: @escaping (NetworkGuardControl, @escaping (T) -> Void) -> Void) async -> T? {
+        await withCheckedContinuation { (continuation: CheckedContinuation<T?, Never>) in
+            let once = Once(continuation)
+            guard let guardian = connection.remoteObjectProxyWithErrorHandler({ _ in once.resume(nil) }) as? NetworkGuardControl else {
+                once.resume(nil)
+                return
+            }
+            body(guardian) { once.resume($0) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { once.resume(nil) }
         }
     }
 }

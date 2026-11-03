@@ -76,16 +76,17 @@ What changed (the decision below, "Where the relaxation lives"):
   every copy holding a relaxation beside the right gave none; running the start check itself on those
   copies is in the hardware checklist (step 0).
 
-Not yet shown, and what shows it: the rebuilt 0.1.1 with this layout through release.sh, the
-extension installed on the owner's Mac, and the hardware checklist below. Whether the app's
-executable, without library validation off, configures the filter through `NEFilterManager` is
-answered there, by step 1: it keeps the provider right, and the guard reaches "Working" only after
-that process loaded the filter's configuration and, at the first install, saved it
-(`NetworkGuard.configureFilter`; a failure there is logged as `filter configuration: …` and leaves
-the guard off). If the app's executable turns out unable to do something it needs to without library
-validation off, the measured fallback is `app-dlv-no-provider` — the relaxation kept, the provider
-right taken off the app's executable — which started too; whether the filter can then still be
-configured is measured only if that fallback is ever needed.
+Shown since, on the owner's Mac (3 November): 0.1.1 rebuilt with this layout passed release.sh —
+the start check, notarization, the release check — and was released; the extension installed
+(`systemextensionsctl list`: activated enabled), its filter started, and the app's own executable,
+library validation on, configured it through `NEFilterManager`: the app said "installed, not yet
+checked on this Mac", a state it reaches only after that process loaded the filter's configuration
+(and saved it at the install) and the guard answered with its filter running
+(`NetworkGuard.configureFilter`, `connect`). So step 1's question is answered: the provider right on
+the app's executable is enough, and the fallback `app-dlv-no-provider` (the relaxation kept, the right
+taken off the app's executable; it started too) is not needed. Not shown: the attribution check
+passing there. It failed — the guard held the probe and saw nothing of it — and its log could not
+say why; "When the check fails" below is how that Mac now answers it.
 
 ## What the kernel kills (measured 3 November 2026)
 
@@ -284,9 +285,16 @@ CreatePermission, ChannelBind, Send/Data indications, ChannelData. What libwebrt
 - **What it sees.** A content filter is asked about every new socket flow of the Mac
   (`NEFilterSettings(rules: [], defaultAction: .filterData)`: a rule can name networks and ports,
   not processes). A flow counted for a process the app did not register — any other app, Lumen's
-  own updates, account and sync, a profile without WebRTC — is let through at once, unread, and
-  not noted anywhere. That the filter sees the start of each new flow (address, app) is what macOS's
-  "filter network content" prompt means; the guard keeps none of it.
+  own updates, account and sync, a profile without WebRTC — is let through at once, unread. It is
+  counted (`FlowTally`): by why it went through (another process's, no audit token of the app, a
+  token that does not read, not a socket flow) and by the name of the process macOS counts it for
+  and of the one that opened it — never its address, in memory only, until the guard stops. Every
+  five seconds in which any came, the guard's log says how many of each kind in clear, and whose as
+  private data (they are this Mac's apps; `Lumen --guard-diagnose` names them, on its own screen);
+  once a minute, that none did. That the filter sees the start of each new flow (address, app) is what macOS's "filter network
+  content" prompt means; the guard keeps no address of any, but for flows to the documentation
+  network 203.0.113.0/24 (TEST-NET-3, never routed) — where the check's probe and the diagnosis
+  send theirs — which it keeps (the last 64) and logs one by one, with whom each was counted for.
 - **The rules for a held process** (`GuardPolicy.verdict`): loopback (the relay, this Mac's own
   services); the proxy, by the name the flow was opened by with its port, or by an address the app
   resolved for it (any port: a proxy's UDP relay port is its own); DNS over UDP only when every
@@ -316,6 +324,49 @@ and WebRTC stays off in proxied profiles; a failed check is said as such, with C
 cannot load the extension, but it runs the same probe inside a capture: every packet of the
 probe's request must be sent by another process and counted for the probe's pid
 (`scripts/guard_probe_check.py`, with its own control).
+
+### When the check fails: `Lumen --guard-diagnose`
+
+On the owner's Mac (0.1.1, macOS 27.0.1, 3 November) the guard was installed and enabled, its
+filter started, the probe was held four times and released when it ended — and the check failed
+each time with not one line of the guard's about any flow. The guard of 0.1.1 said nothing of a flow
+it let through, so its log could not tell "the filter is given no flow" from "flows came, none
+counted for the probe". It now counts every flow (above), and the app's own executable answers in
+words, run from Terminal on that Mac:
+
+    /Applications/Lumen.app/Contents/MacOS/Lumen --guard-diagnose
+
+It prints, in order: the system extension as `systemextensionsctl list` has it; the filter's
+configuration as `NEFilterManager` has it (enabled, socket flows asked for, this guard named — the
+app's own executable holds the provider right that reads it); the guard over XPC (its version,
+whether its filter runs, every flow it was given: `NetworkGuardControl.diagnostics`); a UDP datagram
+and a TCP connection of its own to 203.0.113.2, which the filter must see counted for this process;
+then the check's probe, started from LumenProfile and held exactly as the app holds it, with its own
+account by the milliseconds since it was told to go (the page loaded, each ICE gathering state, each
+candidate's type, each error the STUN address gave); the guard's own log over the same minutes;
+and the answers:
+
+1. Does the filter receive flows? (No: then neither its own nor anything else is given to it — the
+   configuration line says whether it is enabled and asks for socket flows.)
+2. This process's own flows: seen, and counted for this process? (The control of the rest: a plain
+   process, which the filter must see as itself.)
+3. Did the probe make a request? (Its own account, and how many flows to the STUN address the filter
+   saw while it ran.)
+4. Whom was the probe's flow counted for — the probe's pid, or another process (WebKit's network
+   process)? Opened by whom? Dropped or let through?
+5. How long the probe lived: its page's load (at most 5 s), then its own six seconds of gathering
+   (`GuardProbe.gather`) — the "six seconds" of the owner's log is the probe's own window, not a
+   timeout of the app's.
+
+and whether the check passes (exit 0) or not (exit 1). Nothing of the person's is in it — no profile,
+no vault, no address but the documentation ones. A guard of an older build answers no diagnostics;
+the diagnosis says so and asks for this Lumen to be opened once (it replaces the guard) first.
+
+The guard's own log, live: `log stream --predicate 'subsystem == "PrivacyBrowser.NetworkGuard"'` —
+`startFilter: every new flow is to come here …`, then every five seconds `flows in the last 5 s: N —
+… let through as another process's; … of held processes; … without the app's audit token` followed
+by whose, as `<private>` (this Mac's apps), and for each flow to 203.0.113.0/24, in clear,
+`a flow to the check's network: udp 203.0.113.1:3478, counted for … (pid …), opened by … (pid …): …`.
 
 ### What a page sees
 
@@ -457,7 +508,16 @@ the guard drops each of those flows, because they are counted for the held profi
   without a proxy sends a STUN request on purpose, which the capture must see (the capture's own
   control).
 - `scripts/guard_probe_check.py`: the probe's request is counted for the probe (and the check
-  fails with a pid that is not the probe's).
+  fails with a pid that is not the probe's). The probe prints its own account (its page's ICE
+  events by the millisecond) there as on a Mac.
+- `FlowTallyTests` (Linux, macOS): every flow counted by kind and by name with no address kept, a
+  flow to the documentation network kept with whom it is counted for, the last 64 kept, the log's
+  five-second line, the diagnostics read back as written.
+- `scripts/guard_diagnose_check.sh` (macOS 26, and reported on macOS 27): `Lumen --guard-diagnose`
+  where no guard runs — the app as built says it has none; a copy with the extension laid inside
+  names it, reads `systemextensionsctl` and the filter's configuration, says it cannot ask a guard
+  signed by no team, prints its answers and exits 1. A crash, a hang, a pass or a section left out
+  fails it. What it measures on a Mac with the guard is the hardware checklist's step 2.
 
 ## Hardware checklist (a signed build on a real Mac)
 
@@ -473,7 +533,10 @@ the guard drops each of those flows, because they are counted for the held profi
    failure is logged as `filter configuration: …` (`log stream --predicate 'subsystem ==
    "PrivacyBrowser" AND category == "NetworkGuard"'`).
 2. `log stream --predicate 'subsystem == "PrivacyBrowser.NetworkGuard"'` shows the probe held,
-   its flow dropped, and the check proven.
+   its flow dropped, and the check proven; every five seconds, the flows the filter was given.
+   `/Applications/Lumen.app/Contents/MacOS/Lumen --guard-diagnose` answers in words whether the
+   filter receives flows, whether the probe's request came, and whom it was counted for, and exits 0
+   only when the check passes ("When the check fails" above).
 3. A SOCKS5 proxy with UDP on another host (Dante, sing-box, 3proxy). A profile behind it with
    WebRTC not Disabled: browserleaks.com/webrtc shows relay candidates at the proxy's address only.
    `sudo tcpdump -ni en0 'udp and not port 53'`: no UDP of Lumen's or WebKit's but to the proxy.

@@ -17,8 +17,22 @@ import os
 /// Which process a flow is for is the system's answer (`sourceAppAuditToken`): what WebKit's
 /// network process or mDNSResponder open on behalf of a profile's process is that process's. The
 /// app checks, once per macOS build, that this holds for a profile's WebRTC before it relies on it.
+///
+/// Every flow is counted, whatever becomes of it (`FlowTally`), and said in this log every five
+/// seconds when any came: let through as another process's (by its name), a held process's, without
+/// the app's audit token, with one that does not read. A flow to the documentation network
+/// 203.0.113.0/24 — the check's probe, the diagnosis's own control — is said one by one, with whom
+/// macOS counts it for. On the owner's Mac, 3 November, the log said nothing of any flow, and could
+/// not tell "no flow came" from "none was a held process's".
 final class GuardFilterProvider: NEFilterDataProvider {
     private let logger = Logger(subsystem: "PrivacyBrowser.NetworkGuard", category: "filter")
+    private let summaryQueue = DispatchQueue(label: "PrivacyBrowser.NetworkGuard.summary")
+    private var summaryTimer: DispatchSourceTimer?
+    /// Summaries in a row with no flow (on `summaryQueue` only).
+    private var quietTicks = 0
+    /// Process names by pid, for the count — forgotten with each summary (a pid is given again).
+    private let namesLock = NSLock()
+    private var names: [Int32: String] = [:]
 
     override func startFilter(completionHandler: @escaping (Error?) -> Void) {
         logger.notice("startFilter")
@@ -28,28 +42,74 @@ final class GuardFilterProvider: NEFilterDataProvider {
             if let error {
                 self?.logger.error("apply: \(error.localizedDescription, privacy: .private)")
             } else {
+                self?.logger.notice("startFilter: every new flow is to come here (no rule, the default action filterData)")
                 GuardService.shared.filterRunning = true
+                self?.startSummaries()
             }
             completionHandler(error)
         }
     }
 
+    /// Every five seconds, the flows since the last line — nothing when none came, and once a minute
+    /// that none did.
+    private func startSummaries() {
+        let timer = DispatchSource.makeTimerSource(queue: summaryQueue)
+        timer.schedule(deadline: .now() + 5, repeating: 5)
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            if let summary = GuardService.shared.tally.windowSummary() {
+                self.quietTicks = 0
+                // The counts in clear; the names of the processes let through are this Mac's apps.
+                self.logger.notice("\(summary.counts, privacy: .public)\(summary.names, privacy: .private)")
+            } else {
+                self.quietTicks += 1
+                if self.quietTicks % 12 == 0 {
+                    let total = GuardService.shared.tally.snapshot().total
+                    self.logger.notice("no flow in the last \(Int(self.quietTicks * 5), privacy: .public) s (\(Int(total), privacy: .public) since the guard started)")
+                }
+            }
+            self.namesLock.lock()
+            self.names.removeAll()
+            self.namesLock.unlock()
+        }
+        summaryTimer?.cancel()
+        summaryTimer = timer
+        timer.resume()
+    }
+
     override func stopFilter(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         logger.notice("stopFilter \(reason.rawValue, privacy: .public)")
+        summaryTimer?.cancel()
+        summaryTimer = nil
         GuardService.shared.filterRunning = false
         completionHandler()
     }
 
     override func handleNewFlow(_ flow: NEFilterFlow) -> NEFilterNewFlowVerdict {
-        guard let socketFlow = flow as? NEFilterSocketFlow,
-              let token = flow.sourceAppAuditToken, let pid = AuditToken.pid(of: [UInt8](token)),
-              let registration = GuardService.shared.ledger.registration(for: pid) else {
+        let openerPID = flow.sourceProcessAuditToken.flatMap { AuditToken.pid(of: [UInt8]($0)) }
+        let openerName = openerPID.map(name) ?? "?"
+        guard let socketFlow = flow as? NEFilterSocketFlow else {
+            count(.notSocket, flow, appPID: nil, openerPID: openerPID, openerName: openerName, facts: nil, verdict: "allow")
             return .allow()
         }
         let facts = Self.facts(of: socketFlow)
+        guard let token = flow.sourceAppAuditToken else {
+            count(.noAppToken, flow, appPID: nil, openerPID: openerPID, openerName: openerName, facts: facts, verdict: "allow")
+            return .allow()
+        }
+        guard let pid = AuditToken.pid(of: [UInt8](token)) else {
+            count(.unreadableToken, flow, appPID: nil, openerPID: openerPID, openerName: openerName, facts: facts, verdict: "allow")
+            return .allow()
+        }
+        guard let registration = GuardService.shared.ledger.registration(for: pid) else {
+            count(.notHeld, flow, appPID: pid, openerPID: openerPID, openerName: openerName, facts: facts, verdict: "allow")
+            return .allow()
+        }
         let opener = Self.opener(of: flow, holder: pid)
         let verdict = GuardPolicy.verdict(facts, for: registration)
         GuardService.shared.ledger.note(verdict, pid: pid, flow: facts, by: opener.name, onBehalf: opener.onBehalf)
+        count(.held, flow, appPID: pid, openerPID: openerPID, openerName: openerName, facts: facts,
+              verdict: verdict == .allow ? "allow" : verdict == .drop ? "drop" : "inspectDNS")
         switch verdict {
         case .allow:
             return .allow()
@@ -60,6 +120,35 @@ final class GuardFilterProvider: NEFilterDataProvider {
             // The question is in the first datagram; nothing comes back before it is let through.
             return .filterDataVerdict(withFilterInbound: false, peekInboundBytes: 0, filterOutbound: true, peekOutboundBytes: 512)
         }
+    }
+
+    /// Counts the flow; one to the documentation network is said here, with whom it is counted for.
+    private func count(_ kind: FlowTally.Kind, _ flow: NEFilterFlow, appPID: Int32?, openerPID: Int32?, openerName: String,
+                       facts: GuardFlow?, verdict: String) {
+        let appName = appPID.map(name) ?? "?"
+        let check = GuardService.shared.tally.record(kind, appPID: appPID, appName: appName, appIdentifier: flow.sourceAppIdentifier,
+                                                     openerPID: openerPID, openerName: openerName,
+                                                     transport: facts?.transport ?? .other, remoteAddress: facts?.remoteAddress,
+                                                     remotePort: facts?.remotePort, verdict: verdict)
+        guard let check else { return }
+        // Only a flow to the documentation network, never routed — the check's probe, the diagnosis's
+        // own — gets here: said in the clear, with whom it is counted for.
+        logger.notice("a flow to the check's network: \(check.description, privacy: .public)")
+    }
+
+    /// A process's name, kept until the next summary.
+    private func name(_ pid: Int32) -> String {
+        namesLock.lock()
+        if let known = names[pid] {
+            namesLock.unlock()
+            return known
+        }
+        namesLock.unlock()
+        let found = Self.processName(pid)
+        namesLock.lock()
+        names[pid] = found
+        namesLock.unlock()
+        return found
     }
 
     override func handleOutboundData(from flow: NEFilterFlow, readBytesStartOffset offset: Int, readBytes: Data) -> NEFilterDataVerdict {

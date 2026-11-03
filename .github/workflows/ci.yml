@@ -213,6 +213,13 @@ jobs:
         continue-on-error: true
         timeout-minutes: 5
         run: python3 scripts/guard_probe_check.py --app build/unsandboxed/Lumen.app --out build/egress27/guard-probe
+      - name: Lumen --guard-diagnose on macOS 27, where no guard runs — it starts, says where it stops, and does not pass (reported)
+        # As on macOS 26 (scripts/guard_diagnose_check.sh): the owner's diagnosis of the guard, run
+        # as far as it goes without one. Reported, as this job is.
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 5
+        run: scripts/guard_diagnose_check.sh build/unsandboxed
       - name: A jump to a fragment in a profile with a proxy (a measurement)
         if: always()
         continue-on-error: true
@@ -1062,6 +1069,15 @@ jobs:
           if python3 scripts/guard_probe_check.py --app build/unsandboxed/Lumen.app --out build/guard-probe-control --expect-pid 1; then
             echo "::error::the probe check passed with a pid that is not the probe's: it shows nothing"; exit 1
           fi
+      - name: Lumen --guard-diagnose where no guard runs — it starts, says where it stops, and does not pass
+        # The owner's diagnosis of the guard (GuardDiagnosis.swift) measures on a Mac with the guard
+        # installed; here no extension can load. The app as built must say it has no guard; a copy
+        # with the extension laid inside (ad hoc) must name it, read systemextensionsctl and the
+        # filter's configuration, say it cannot ask a guard signed by no team, and print its answers.
+        # A crash, a hang (60 s), a pass, or a section left out fails this (scripts/guard_diagnose_check.sh).
+        if: always()
+        timeout-minutes: 5
+        run: scripts/guard_diagnose_check.sh build/unsandboxed
       - name: Live fingerprinting pages in Safari and in profiles (report, never fails the build)
         # The same pages and scripts in this Mac's Safari and in on-screen profile windows of the
         # same size: probe, window geometry, request header order, TLS/HTTP2 (tls.peet.ws),

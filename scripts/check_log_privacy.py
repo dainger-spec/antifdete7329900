@@ -74,6 +74,11 @@ ALLOWED_IN_FILE = {
     ("NetworkGuard.swift", "cause"): "why the network guard was lost: a fixed word from the code or a state's name",
     ("NetworkGuard.swift", "refusal"): "why the network guard did not take a process: a fixed text of its own (GuardService) or of the app",
     ("GuardFilterProvider.swift", "opener.name"): "the name of the process that opened a dropped flow (WebKit's, the system's), not an address",
+    ("GuardFilterProvider.swift", "summary.counts"):
+        "how many flows the filter was given in five seconds, by kind (FlowTally.WindowSummary): no name, no address",
+    ("GuardFilterProvider.swift", "check.description"):
+        "a flow to the documentation network 203.0.113.0/24 only (TEST-NET-3, never routed: the check's probe, the diagnosis's "
+        "own): that address, the processes it is counted for and opened by, their pids and signing identifiers, the verdict",
     ("SafariChrome.swift", "path"): "a Safari framework's path, under /System or /Applications",
     ("SafariChrome.swift", "reason"): "dlerror() for a Safari framework",
     ("SafariChrome.swift", "name"): "a nib's name in Safari's frameworks",

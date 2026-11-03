@@ -51,6 +51,12 @@ MainActor.assumeIsolated {
         // The process the network guard's check on this Mac holds: one WebRTC request of WebKit's,
         // to a documentation address, made on its behalf (GuardProbe.swift; NetworkGuard.prove).
         GuardProbe.run()
+    } else if arguments.contains("--guard-diagnose") {
+        // The network guard on this Mac, measured and said in words: does its filter get flows, did
+        // the check's probe send its request, whom macOS counted it for (GuardDiagnosis.swift). Run
+        // from Terminal as the app's own executable, which holds the right that reads the filter's
+        // configuration: /Applications/Lumen.app/Contents/MacOS/Lumen --guard-diagnose
+        GuardDiagnosis.run()
     } else if let index = arguments.firstIndex(of: "--render-app-icon") {
         // The app icon's iconset, drawn from the Lumen mark (AppIcon.swift; scripts/build-app.sh).
         let folder = arguments.indices.contains(index + 1) ? arguments[index + 1] : "AppIcon.iconset"

@@ -14,6 +14,8 @@ final class GuardService: NSObject, NSXPCListenerDelegate, NetworkGuardControl, 
     static let shared = GuardService()
 
     let ledger = GuardLedger()
+    /// Every flow the filter is given, counted (`GuardFilterProvider`).
+    let tally = FlowTally()
     private let lock = NSLock()
     private var running = false
     private var listener: NSXPCListener?
@@ -94,6 +96,13 @@ final class GuardService: NSObject, NSXPCListenerDelegate, NetworkGuardControl, 
 
     func report(_ pid: Int32, reply: @escaping (Data) -> Void) {
         reply((try? JSONEncoder().encode(ledger.report(for: pid))) ?? Data())
+    }
+
+    func diagnostics(reply: @escaping (Data) -> Void) {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        let diagnostics = GuardDiagnostics(version: version, filterRunning: filterRunning,
+                                           heldPIDs: ledger.heldPIDs.sorted(), flows: tally.snapshot())
+        reply((try? JSONEncoder().encode(diagnostics)) ?? Data())
     }
 
     // MARK: Processes

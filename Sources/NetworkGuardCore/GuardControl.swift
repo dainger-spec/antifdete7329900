@@ -15,6 +15,9 @@ import Foundation
     func release(_ pid: Int32, reply: @escaping () -> Void)
     /// What the guard did for `pid`: `GuardReport`, JSON.
     func report(_ pid: Int32, reply: @escaping (Data) -> Void)
+    /// Every flow the filter was given since it started, counted (`GuardDiagnostics`, JSON) — for
+    /// `Lumen --guard-diagnose`. A guard of a build before this one does not answer it.
+    func diagnostics(reply: @escaping (Data) -> Void)
 }
 
 /// Names both sides agree on.
