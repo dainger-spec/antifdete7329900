@@ -5789,7 +5789,7 @@ final class SelfTest {
         check("cookie import: imported persistent cookies survive a stop and a launch; the session cookie does not",
               third.contains("hostonly=imported-hostonly-value") && third.contains("live=imported-live-value")
                   && !third.contains("session="), third)
-        try await manager.delete(profile.id)
+        try await manager.deleteBecauseThePersonAsked(profile.id)
     }
 
     // MARK: Session cookies after a stop
@@ -5820,8 +5820,8 @@ final class SelfTest {
                   imported == .applied(stored: 1, refused: []) && !kept,
                   "import \(imported); the store \(released ? "let go" : "still alive 10 s after the stop"); "
                       + "after the launch \(after.map(\.name))")
-            try await manager.delete(measured.id)
-            if let other { try await manager.delete(other.id) }
+            try await manager.deleteBecauseThePersonAsked(measured.id)
+            if let other { try await manager.deleteBecauseThePersonAsked(other.id) }
         }
     }
 
@@ -5874,8 +5874,8 @@ final class SelfTest {
               imported.id != original.id && after.contains("carried=carried-value"), after)
         try await manager.stop(imported.id)
         check("profile transfer: nothing went wrong", messages.isEmpty, messages.joined(separator: " | "))
-        try await manager.delete(imported.id)
-        try await manager.delete(original.id)
+        try await manager.deleteBecauseThePersonAsked(imported.id)
+        try await manager.deleteBecauseThePersonAsked(original.id)
     }
 
     // MARK: Profile sync (cookies and settings between two devices)
@@ -6177,7 +6177,7 @@ final class SelfTest {
               stoppedFirst && sealError == nil && !manager.isRunning(profile.id)
                   && !webKitDataDirectoriesExist(profile.id) && messages.isEmpty,
               "stoppedFirst=\(stoppedFirst) state=\(robot.state) seal=\(sealError ?? "ok") messages=\(messages)")
-        try await manager.delete(profile.id)
+        try await manager.deleteBecauseThePersonAsked(profile.id)
     }
 
     /// Two profiles warmed up through the queue (`WarmUpCoordinator`), as "Warm Up Several…" does:
@@ -6271,8 +6271,8 @@ final class SelfTest {
         check("warm-up schedule: a run from the queue counts as the profile's last run, stored with its schedule",
               (stored?.lastRunAt ?? .distantPast) >= queued && (coordinator.nextRun(of: first.id) ?? .distantPast) > Date().addingTimeInterval(23 * 3600),
               "lastRunAt=\(String(describing: stored?.lastRunAt)) next=\(String(describing: coordinator.nextRun(of: first.id)))")
-        try await manager.delete(first.id)
-        try await manager.delete(second.id)
+        try await manager.deleteBecauseThePersonAsked(first.id)
+        try await manager.deleteBecauseThePersonAsked(second.id)
     }
 
     /// The profile's WebKit data is not on disk in plain form (sealed).

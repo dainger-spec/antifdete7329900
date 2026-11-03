@@ -58,6 +58,10 @@ jobs:
       # self-check first: the scan must find each forbidden form planted for it.
       - name: Nothing is handed to the system except through SystemOpen
         run: python3 scripts/check_system_opens.py --self-check && python3 scripts/check_system_opens.py
+      # A profile's data is deleted by one path, called only from the person's Delete: not signing
+      # out, not another account, not a sync (the owner, 3 November; scripts/check_deletion_paths.py).
+      - name: Deletion paths — a profile's data only by the person's Delete
+        run: python3 scripts/check_deletion_paths.py --self-check && python3 scripts/check_deletion_paths.py
       # A license key bought without registration is the whole account: its text, and the server's
       # tokens', come out only where a request or the vault needs them (scripts/check_account_key.py).
       - name: The account's key and tokens are text only where they must be

@@ -723,8 +723,10 @@ final class AppModel: ObservableObject {
         return summary
     }
 
+    /// The Profiles window's Delete, once the person confirmed it (one profile, or each of several):
+    /// the only caller of the one path that deletes a profile's data.
     func deleteProfile(_ id: UUID) async {
-        await perform { try await self.manager?.delete(id) }
+        await perform { try await self.manager?.deleteBecauseThePersonAsked(id) }
         refresh()
     }
 
@@ -901,9 +903,10 @@ final class AppModel: ObservableObject {
             scopedFolder = folder
             let report = try await SyncEngine(repository: repository, transport: transport).sync()
             if report.pulled.contains("labels") { loadTagColors(from: repository.vault) }
-            for id in report.deletedProfileIDs {
-                await manager.removeWebData(for: id)
-            }
+            // A profile deleted on another device: nothing of it is deleted here. Its folder stays
+            // for the person to bring back or remove (R3); WebKit's store of it outside the vault —
+            // there only if sealing it failed at the unlock — stays as well. Profile data goes only
+            // by the person's own Delete (`ProfileManager.deleteBecauseThePersonAsked`).
             for copy in report.unreadable {
                 showError(Self.unreadableCopyText(copy, name: (try? repository.summary(for: copy.profileID))?.name))
             }

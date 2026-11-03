@@ -1146,7 +1146,13 @@ final class ProfileManager: ObservableObject {
 
     // MARK: Delete
 
-    func delete(_ id: UUID) async throws {
+    /// The one path that deletes a profile's data — its folder in the vault (settings, history,
+    /// saved logins, bookmarks, cookies, the sealed WebKit store and Safari's home) and WebKit's
+    /// store of it outside the vault. Profiles are this Mac's (CONTRACT §2, §12): nothing but the
+    /// person's own Delete deletes them — not signing out, not another account, not a sync, not
+    /// a server's answer. Its one caller is `AppModel.deleteProfile`, which the Delete confirmation
+    /// of the Profiles window calls; `scripts/check_deletion_paths.py` fails CI on any other.
+    func deleteBecauseThePersonAsked(_ id: UUID) async throws {
         if sessions[id] != nil || children[id] != nil {
             // WebKit must release the store first: remove(forIdentifier:) fails while it is in use.
             try? await stop(id)
@@ -1158,11 +1164,6 @@ final class ProfileManager: ObservableObject {
         warmUpRobots[id] = nil
         reportedWarmUp[id] = nil
         try repository.delete(id)
-    }
-
-    /// Called by sync when a profile was deleted on another device.
-    func removeWebData(for id: UUID) async {
-        await webDataVault.deleteData(profileID: id)
     }
 
     // MARK: Session warm-up
