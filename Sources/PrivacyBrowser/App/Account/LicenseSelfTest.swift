@@ -615,8 +615,11 @@ final class FakeAccountServer {
     }
 
     private let signer = Curve25519.Signing.PrivateKey()
-    let deviceID = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
-    let deviceToken = "lmd_selftest_device_token"
+    var deviceID = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+    var deviceToken = "lmd_selftest_device_token"
+    /// The account it plays: its sessions and documents name it (`AccountSwitchScenario` signs in as
+    /// several accounts in turn).
+    var accountID = "a"
     /// The purchase this server plays (§11.1): its key — replaced by `/v1/anonymous/key/replace` — and
     /// its purchase code; the letter's code; the session a linked email opens.
     private(set) var currentKey = "LMK-0123-4567-89AB-CDEF-GHJK-MNMT"
@@ -771,7 +774,7 @@ final class FakeAccountServer {
             emailLinked = true
             status = 201
             body = ["sessionToken": sessionToken, "expiresAt": Date().addingTimeInterval(30 * 86_400).formatted(.iso8601),
-                    "accountID": "a", "idleTimeoutSeconds": 604_800]
+                    "accountID": accountID, "idleTimeoutSeconds": 604_800]
         case "/v1/anonymous/key/replace":
             currentKey = replacementKey
             // v2026.11.04 (F3): the key and the purchase code unlink a linked email.
@@ -841,7 +844,7 @@ final class FakeAccountServer {
 
     private func sessionAnswer() -> [String: Any] {
         ["sessionToken": sessionToken, "expiresAt": Date().addingTimeInterval(30 * 86_400).formatted(.iso8601),
-         "accountID": "a", "idleTimeoutSeconds": 604_800]
+         "accountID": accountID, "idleTimeoutSeconds": 604_800]
     }
 
     /// A sign-in's `202` as v2026.11.04 sends it (§5.2).
@@ -885,7 +888,7 @@ final class FakeAccountServer {
         func at(_ hours: Double) -> String { now.addingTimeInterval((issued + hours) * 3_600).formatted(.iso8601) }
         let forMachine = serve == .otherMac ? MachineID.compute(platformUUID: UUID().uuidString) : machineID
         let payload: [String: Any] = [
-            "kind": "lumen.entitlement", "version": 1, "documentID": UUID().uuidString.lowercased(), "accountID": "a", "licenseID": "l",
+            "kind": "lumen.entitlement", "version": 1, "documentID": UUID().uuidString.lowercased(), "accountID": accountID, "licenseID": "l-\(accountID)",
             "deviceID": deviceID, "machineID": forMachine, "role": "owner", "plan": "pro", "status": "active", "exportReason": NSNull(),
             "limits": ["profiles": 50, "devices": 3, "seats": 1], "profilesOnOtherDevices": 0,
             "periodEndsAt": at(serve == .expired ? 14 * 24 : 30 * 24),

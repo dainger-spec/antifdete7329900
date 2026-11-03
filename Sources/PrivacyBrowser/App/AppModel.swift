@@ -81,6 +81,8 @@ final class AppModel: ObservableObject {
     private var recordedProfilesToReopen = false
 
     private(set) var repository: ProfileRepository?
+    /// The open vault's profiles, for `AccountSwitchScenario`'s measurements (a check only).
+    var repositoryForChecks: ProfileRepository? { repository }
     private(set) var manager: ProfileManager?
     /// The warm-up queue and schedule of this unlock (`WarmUpCoordinator`).
     private(set) var warmUps: WarmUpCoordinator?
