@@ -29,6 +29,53 @@ told why, in words, with what they can do.
 
 A page cannot send other UDP: WebRTC is the only UDP a web page can start.
 
+## Status (3 November 2026): `NE=1` is not released — the kernel kills it at its start
+
+0.1.1 with the network guard (`NE=1`), signed with Developer ID and notarized by Apple, did not
+start on the owner's Mac (macOS 27.0.1, build 26A434, J713): release.sh's release check ended with
+`Killed: 9` (137), and the kernel's log said:
+
+```
+AMFI: When validating …/Lumen.app/Contents/MacOS/Lumen:
+  Hardened Runtime relaxation entitlements disallowed on System Extensions
+mac_vnode_check_signature: … code signature validation failed fatally
+AMFI: hook..execve() killing env (pid 8697): Attempt to execute completely unsigned code
+ASP: Security policy would not allow process
+```
+
+The app's executable was signed with `com.apple.application-identifier`,
+`com.apple.developer.networking.networkextension` = `content-filter-provider-systemextension`,
+`com.apple.developer.system-extension.install`, `com.apple.security.application-groups` and
+`com.apple.security.cs.disable-library-validation`. CI could not have shown it: no ad hoc signature
+may carry these rights, so CI's `NE=check` build never has them, and the extension is never loaded
+there ("What CI verifies").
+
+What is known, and what is not yet:
+
+- **Known:** the kernel killed `Contents/MacOS/Lumen`, the app's executable, at its start, counting
+  it as a system extension, which may hold no relaxation of the hardened runtime.
+- **Very likely, not yet measured:** `Contents/MacOS/LumenProfile` — library validation off, none of
+  the network guard's rights, in the same bundle — did start: release.sh runs its
+  `--check-safari-chrome` (step 2b) before the release check, and that step passed. Safari's
+  frameworks are loaded only there: in a profile's process (`SafariChromeHost.prepareForChildProcess`)
+  and in the checks that ask for it; the app's own process loads none of Safari's code.
+- **Not known:** what makes the kernel count the app's executable as a system extension — the
+  provider entitlement, `system-extension.install`, or the extension inside the bundle — and whether
+  every relaxation is refused there or library validation alone.
+
+Measured on the owner's Mac by `scripts/amfi_matrix.py`: copies of the signed app, each signed again
+with one thing changed — without library validation off; with each other relaxation instead; with
+it, without each of the two rights, without both; without the extension in the bundle — and for each
+whether the kernel lets the app's executable start, whether LumenProfile starts and loads Safari's
+frameworks, and, where both do, the release check. What decides the layout below ("Inside our
+bundle", and the three ways out: an app of its own beside Lumen.app for the extension; another app
+inside our bundle to host it; no system extension at all) is that measurement, with what each way
+costs a person — installs, macOS's questions, updates.
+
+Until a build starts and passes its release check, `NE=1` is not released, and release.sh refuses,
+before anything is sent to Apple's notary, a signed build whose app's or profile's executable the
+kernel does not let start (step 1b), saying what the kernel said.
+
 ## The decisions (2 November 2026)
 
 **Which of the three kinds of network extension: a content filter.** A packet tunnel and an app

@@ -472,6 +472,22 @@ jobs:
             || { echo "::error title=Release gate::the profile's executable with the app's keychain did not fail for it"; status=1; }
           gate "development-key" "Add :PBEntitlementPublicKeys:445c6300da0205b1 string /+/sbiH55nmy+2gRqQz12E0spl9L/YDWvjnecaN2M1c=" \
             "the development server's key"
+          # The start check (release.sh's step 1b) passes the release's app and fails a copy the kernel
+          # refuses to start: an ad hoc signature carrying an application identifier (run 646) — on 3
+          # November the kernel killed 0.1.1 with the network guard at its start on the owner's Mac.
+          scripts/start_check.sh build/release/app/Lumen.app/Contents/MacOS/Lumen "the release's app" \
+            || { echo "::error title=Start check::the release's own app did not pass the start check"; status=1; }
+          copy="build/start-check-control/Lumen.app"
+          rm -rf build/start-check-control; mkdir -p build/start-check-control
+          ditto build/release/app/Lumen.app "$copy"
+          codesign -d --entitlements - --xml "$copy/Contents/MacOS/Lumen" > build/start-check-control/entitlements.plist 2>/dev/null
+          /usr/libexec/PlistBuddy -c "Add :com.apple.application-identifier string XXXXXXXXXX.io.lumenbrowser.Lumen" \
+            build/start-check-control/entitlements.plist
+          codesign --force --options runtime --timestamp=none --identifier io.lumenbrowser.Lumen \
+            --entitlements build/start-check-control/entitlements.plist --sign - "$copy" 2>&1 | tail -n 2
+          if scripts/start_check.sh "$copy/Contents/MacOS/Lumen" "the control (ad hoc, with an application identifier)"; then
+            echo "::error title=Start check::the start check passed a copy the kernel does not start (its control)"; status=1
+          fi
           if SANDBOX=1 VERSION=0.1.1 BUILD=2 OUT=build/release-sandboxed scripts/release.sh > build/release-sandboxed.log 2>&1; then
             echo "::error title=Release gate::release.sh made a release of the sandboxed build"; status=1
           fi

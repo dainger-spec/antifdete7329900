@@ -433,6 +433,12 @@ lumen-notary` says why Apple refused one.
 
 ### What the owner provides for a real release (the owner, 2 November)
 
+**`NE=1` is not released for now (3 November):** its signed, notarized build was killed by the
+kernel at its start on macOS 27.0.1 — the app's executable holds the network guard's rights and a
+relaxation of the hardened runtime, which macOS refuses a system extension (docs/TUNNEL.md, "Status").
+Until a layout that starts is measured (`scripts/amfi_matrix.py`) a release is made without `NE=1`;
+release.sh stops any signed build the kernel does not start, before it is notarized.
+
 With the network guard (`NE=1`: WebRTC in a proxied profile through its proxy, docs/TUNNEL.md) —
 since the keychain a profile's process could share with the app's is closed (docs/IDENTITY.md, "The
 keychain") — the App IDs and provisioning profiles of docs/IDENTITY.md, "What to register with

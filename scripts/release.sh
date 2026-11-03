@@ -238,6 +238,16 @@ if [[ "${DECLARED_SDK%%.*}" -ge 15 ]]; then
   fi
 fi
 
+# 1b. The kernel lets the app, as signed, start — its executable and the profile's — before anything
+# is sent to Apple. On 3 November 0.1.1 with the network guard (NE=1) was notarized, then killed by the
+# kernel at its start on macOS 27.0.1: "Hardened Runtime relaxation entitlements disallowed on System
+# Extensions" (docs/TUNNEL.md, "Status"). A build the kernel refuses is not notarized, let alone
+# released (scripts/start_check.sh says what the kernel said).
+scripts/start_check.sh "$APP/Contents/MacOS/Lumen" "the app's executable" \
+  || { echo "error: the kernel does not let this build start: no release" >&2; exit 1; }
+scripts/start_check.sh "$PROFILE_EXECUTABLE" "the profile's executable (LumenProfile)" \
+  || { echo "error: the kernel does not let this build's profiles start: no release" >&2; exit 1; }
+
 # 2. Notarize and staple (an Apple account's notary profile and a Developer ID signature).
 if [[ -n "${NOTARY_PROFILE:-}" && "$SIGN_IDENTITY" != "-" ]]; then
   ditto -c -k --keepParent "$APP" "$OUT/notarize.zip"

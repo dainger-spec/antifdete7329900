@@ -127,6 +127,15 @@ A release whose app holds the team's identity stops if any of the three is not s
 `release.sh` reads every line of the check (`scripts/release_check_gate.sh`). CI also makes the
 release's app with LumenProfile signed with the app group: it must not start a profile.
 
+**On a build the team signed (3 November).** 0.1.1 with the network guard (`NE=1`), signed with
+Developer ID and notarized, on the owner's Mac (macOS 27.0.1, build 26A434, J713): the kernel's
+log shows a profile's process refused both of securityd's services by its sandbox —
+`denied lookup: com.apple.SecurityServer` and `denied lookup: com.apple.securityd.xpc`, a Sandbox
+restriction — in a build whose bundle carries the network guard's rights. The lock behind verdicts 2
+and 3 is so shown on the real signature, not only on CI's ad hoc one. The release check's own three
+verdicts on that build were not reached: its app's executable was killed by the kernel at its start
+(docs/TUNNEL.md, "Status").
+
 ## What to register with Apple
 
 In this order, in Certificates, Identifiers & Profiles of the team that signs Lumen:
