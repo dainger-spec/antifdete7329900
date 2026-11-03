@@ -831,9 +831,9 @@ enum ProfileNetworkGuard {
     ///     process is started from LumenProfile, which holds no entitlement that gives a keychain
     ///     (`ProfileExecutable`); this lock does not depend on that: run from the app's own
     ///     executable, which an NE=1 build gives the application identifier that opens the
-    ///     data-protection keychain, it would still keep nothing there and be shown nothing. Without
-    ///     it, any profile's process could keep items in the login keychain, every other profile's
-    ///     was shown them, and the attributes of the person's own (KeychainIsolation: CI run 659, without it).
+    ///     data-protection keychain, it would be refused securityd all the same. Without it, a
+    ///     profile's process kept an item in the login keychain and every other profile's was shown
+    ///     it, and an item the app made under its own signature (KeychainIsolation: CI run 659).
     ///     Every profile's process has it, with or without a proxy, or does not run (`engage`).
     nonisolated private static func closeTheProcess(udp: Bool) -> [String] {
         var rules: [String] = []

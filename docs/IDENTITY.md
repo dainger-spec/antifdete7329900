@@ -83,9 +83,12 @@ and the app group, and Safari's code in a process holding them would keep its "S
 there, under that identifier and shared by every profile. The account's login keychain, the
 file-based one, opens to any process of the account that securityd answers, whatever its signature:
 opening it by its path, as any code in it can, a profile's process kept an item there that every
-other profile's process was shown, with the attributes of the app's items and the person's own (CI
-run 659, both macOS). Asked for "the default keychain" instead, a profile's process — whose home is
-its own and holds none — was left waiting on the system's dialog (run 656).
+other profile's process was shown, as it was shown an item the app made under its own signature (CI
+run 659, both macOS). That keychain shows any process the attributes of every item in it — names of
+services and accounts, never a secret — so the person's own were open to it the same way; the check
+asks only for its own service and does not look at them. Asked for "the default keychain" instead, a
+profile's process — whose home is its own and holds none — was left waiting on the system's dialog
+(run 656).
 
 Closed (3 November) by the profile's own sandbox, whatever its signature holds: every profile's
 process puts itself in a kernel sandbox before Safari's frameworks load
