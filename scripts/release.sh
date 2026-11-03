@@ -43,6 +43,11 @@
 # is an app that, signed as it ships, does not host Safari's chrome on this Mac (step 2b;
 # docs/UPDATES.md §6, "Which build is released").
 #
+# A release — signed with a Developer ID, or published — is made only from a commit the full CI
+# pipeline (.github/workflows/full.yml) passed, from a tree with nothing changed beside it: step 0b
+# asks GitHub (scripts/full_run_gate.py) and stops before anything is built. Start a full run of the
+# commit with `git tag full/<sha12> <sha> && git push origin full/<sha12>`.
+#
 # The private key never enters the repository, CI or the app; only its public half is built in. Nor
 # do R2's keys: the release stops first if any of them, or anything shaped like R2's, is in a commit
 # (scripts/check_secrets.py).
@@ -88,6 +93,30 @@ if [[ -n "${R2_ENDPOINT:-}${R2_ACCESS_KEY_ID:-}${R2_SECRET_ACCESS_KEY:-}" ]]; th
   : "${R2_ACCESS_KEY_ID:?R2_ACCESS_KEY_ID}" "${R2_SECRET_ACCESS_KEY:?R2_SECRET_ACCESS_KEY}"
   [[ "$SIGN_IDENTITY" != "-" ]] || { echo "error: a dry run is never uploaded" >&2; exit 1; }
   PUBLISH=1
+fi
+
+# 0b. The full pipeline passed on this very commit. The owner, 3 November: the checks are split —
+# the fast ones on every push (.github/workflows/ci.yml), every other one once a day and on request
+# (.github/workflows/full.yml) — and a release on a commit the full pipeline has not passed is not
+# allowed. A release is what is signed with a Developer ID or published: it needs a tree with no
+# change beside the commit (what is built is the commit the full run checked, nothing else) and a
+# run of full.yml on that commit that passed (scripts/full_run_gate.py asks GitHub). Before anything
+# is built. A dry run says what it would need.
+HEAD_SHA="$(git rev-parse HEAD)"
+TREE_CHANGES="$(git status --porcelain)"
+gate_status=0
+gate_line="$(python3 scripts/full_run_gate.py --sha "$HEAD_SHA")" || gate_status=$?
+echo "$gate_line"
+if [[ "$SIGN_IDENTITY" != "-" || -n "$PUBLISH" ]]; then
+  if [[ -n "$TREE_CHANGES" ]]; then
+    echo "error: the tree has changes beside commit ${HEAD_SHA:0:12} (git status below): a release is built from a commit the full pipeline passed, nothing else" >&2
+    echo "$TREE_CHANGES" | head -n 20 >&2
+    exit 1
+  fi
+  (( gate_status == 0 )) || { echo "error: no passed full run of ${HEAD_SHA:0:12} (the line above): nothing is built, signed or published" >&2; exit 1; }
+else
+  (( gate_status == 0 )) || DRY+=("$gate_line — a signed or published release stops on it")
+  [[ -z "$TREE_CHANGES" ]] || DRY+=("the tree has changes beside ${HEAD_SHA:0:12}: a signed or published release stops on it")
 fi
 
 rm -rf "$OUT"
