@@ -267,9 +267,10 @@ the guard drops each of those flows, because they are counted for the held profi
   script could reach this Mac's own services on 127.0.0.1; it could not reach the Internet.
 - **The keychain stays the app's.** The application identifier and app group an `NE=1` build
   carries open the data-protection keychain to the process that holds them. A profile's process is
-  started from `Contents/MacOS/LumenProfile`, signed without them, so it has no keychain at all, and
-  the app refuses to start one from an executable that has (docs/IDENTITY.md, "The keychain"; closed
-  2 November, shown by the release check on the signed build).
+  refused securityd by its own sandbox, whatever it holds — neither that keychain nor the account's
+  login keychain — and is started from `Contents/MacOS/LumenProfile`, signed without them; the app
+  refuses to start one from an executable that has them (docs/IDENTITY.md, "The keychain"; closed
+  2–3 November, shown by the self-test and by the release check on the signed build).
 
 ## Building it
 
