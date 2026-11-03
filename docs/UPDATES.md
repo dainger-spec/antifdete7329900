@@ -364,8 +364,34 @@ Mac macOS asks once **"“Terminal” wants access to control “Finder”. Allo
 access to documents and data in “Finder”, and to perform actions within that app."** — Allow (the
 name is the terminal's the release runs in; System Settings › Privacy & Security › Automation turns
 it on again). **Whatever goes wrong there, the image is made plain and the release goes on**, with a
-warning; CI keeps a picture of the window as Finder shows it, light and dark (`scripts/dmg_window_shot.sh`,
-the `dmg-window` artifact).
+warning.
+
+**Whether the window shows its picture is checked, not said** (the owner, 3 November: 0.1.1's window
+had its icons and its size and no picture, while make_dmg.sh printed "laid out by Finder" — a line
+that only knew a `.DS_Store` was there). make_dmg.sh now says what the image holds, read back: Finder's
+answer when asked for the window's picture right after setting it ("finder: …"), what the volume's
+`.DS_Store` names — the picture's alias, its file, the path inside the volume and where the volume was
+mounted when Finder made it — and the icons' places, before the image is made read-only and in the
+read-only image, and whether the `.DS_Store` came through byte for byte (`scripts/dmg_facts.py`).
+Then release.sh (step 3c) opens the finished image in Finder, captures its window in this Mac's
+appearance and compares it point by point with the picture the image carries
+(`scripts/dmg_window_shot.sh`, `scripts/dmg_background_check.py`): the backdrop, and the plates, mark
+and name a window of any one colour cannot show. The block at the end says **"the image's window
+shows its picture"** or **"DOES NOT SHOW ITS PICTURE"**; it never stops a release, and it is never
+left out silently (`DMG_WINDOW_CHECK=0` leaves it out and the block says so). The terminal must be
+allowed once to record the screen (Privacy & Security › Screen & System Audio Recording); without
+it the capture holds no window and the verdict says so. CI runs the same check on the dry run's
+image in both appearances, and its control — the same app laid out without its picture
+(`make_dmg.sh --no-picture`) — must fail it (the `dmg-window` artifact); on macOS 27 it is reported.
+After a release, the Download check workflow runs it on the published image on clean macOS 26 and 27.
+
+The picture is now set last, after the window's other properties and the icons' places: in an Apple
+Developer Forums thread (836253) a developer found that Finder drops a window's picture when other
+properties change after it, and 0.1.1's script set it before the icons' places. That this is what
+macOS 27 does is not shown yet: CI's macOS 27 job makes three images — the picture set last, set as
+0.1.1 set it, and a plain PNG instead of the TIFF with both scales (`DMG_PICTURE_ORDER`,
+`DMG_PICTURE_FORMAT`, knobs for that measurement only) — and compares each window; the next release
+on the owner's Mac (a Retina screen, which CI's runners are not) says it in its block.
 
 **The image is signed, notarized and stapled too**, after the app inside it was: `codesign` with
 the Developer ID and a timestamp, `notarytool submit … --wait`, `stapler staple`, `stapler validate`

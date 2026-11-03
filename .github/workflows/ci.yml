@@ -351,6 +351,26 @@ jobs:
           echo "exit $?"; cat build/egress27/export-check.txt
           grep '^EXPORT-CHECK' build/egress27/export-check.txt | head -20 | cut -c1-500 | sed 's/^/::notice title=macOS 27 - export in a profile process::/'
           exit 0
+      - name: The disk image's window on macOS 27 — made here, does it show its picture? The picture set last, as 0.1.1 set it, and as a PNG (a measurement)
+        # As on macOS 26 (scripts/dmg_window_shot.sh), on the macOS 0.1.1's image was made on and
+        # opened without its picture (the owner, 3 November). Three images: the picture set last
+        # (make_dmg.sh now), set before the icons' places as 0.1.1's script did, and a plain PNG
+        # instead of the TIFF with both scales — each with Finder's answers, the layout's facts and
+        # the window compared in both appearances. With what this macOS says of hdiutil attach and
+        # of diskutil image attach, which the owner found preferred to it on macOS 27.
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          mkdir -p build/egress27/dmg-window
+          { hdiutil attach 2>&1 | head -5; echo "---"; diskutil image attach 2>&1 | head -8; } | tee build/egress27/dmg-window/attach-tools.txt
+          for variant in last-tiff first-tiff last-png; do
+            echo "===== the picture set ${variant%-*}, as ${variant#*-}"
+            DMG_PICTURE_ORDER="${variant%-*}" DMG_PICTURE_FORMAT="${variant#*-}" \
+              scripts/make_dmg.sh build/unsandboxed/Lumen.app "build/dmg27/$variant/Lumen.dmg" 2>&1 | tee "build/egress27/dmg-window/make-dmg-$variant.txt"
+            scripts/dmg_window_shot.sh "build/dmg27/$variant/Lumen.dmg" "build/egress27/dmg-window/$variant" --both \
+              || echo "::warning title=macOS 27 - disk image window ($variant)::the window does not show its picture (or could not be captured)"
+          done
       - uses: actions/upload-artifact@v4
         if: always()
         continue-on-error: true
@@ -389,15 +409,18 @@ jobs:
         # signed, both checked with the app's own code (pbupdate verify). Notarization and stapling
         # are skipped and said so.
         run: VERSION=0.1.1 BUILD=2 OUT=build/release scripts/release.sh
-      - name: The disk image's window as a person sees it, light and dark (laid out by Finder, or plain)
-        # The layout never stops a release (scripts/make_dmg.sh makes the image plain when Finder
-        # cannot lay it out): this keeps the window's picture for review, and says which it is.
-        continue-on-error: true
-        timeout-minutes: 8
+      - name: The disk image's window as a person sees it, light and dark — it must show its picture, and its control must not
+        # The owner, 3 November: 0.1.1's window had its icons and its size and no picture while
+        # make_dmg.sh said it was laid out. The dry run's image opened in Finder, its window captured
+        # in both appearances and compared point by point with the picture the image carries
+        # (scripts/dmg_window_shot.sh, scripts/dmg_background_check.py); what its .DS_Store holds and
+        # what Finder answers are said with it (scripts/dmg_facts.py). The control: the same app laid
+        # out without its picture (make_dmg.sh --no-picture) must fail the same check.
+        timeout-minutes: 12
         run: |
-          scripts/dmg_window_shot.sh build/release/Lumen-0.1.1.dmg build/dmg-window | tee build/dmg-window.txt
-          grep -q "Finder's own window" build/dmg-window.txt \
-            && echo "::warning title=Disk image::the image was made plain: Finder did not lay its window out (see the release step's log)" || true
+          scripts/dmg_window_shot.sh build/release/Lumen-0.1.1.dmg build/dmg-window --both
+          scripts/make_dmg.sh build/release/app/Lumen.app build/dmg-control/Lumen-no-picture.dmg --no-picture
+          scripts/dmg_window_shot.sh build/dmg-control/Lumen-no-picture.dmg build/dmg-window/control --both --expect not-shown
       - uses: actions/upload-artifact@v4
         if: always()
         with:

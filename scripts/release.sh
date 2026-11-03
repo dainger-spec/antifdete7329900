@@ -327,6 +327,20 @@ else
   DRY+=("the disk image is not notarized and not stapled (needs NOTARY_PROFILE and a Developer ID): Gatekeeper would refuse it on another Mac")
 fi
 
+# 3c. Whether the image's window shows its picture: the finished image opened in Finder, its window
+# captured in this Mac's appearance and compared point by point with the picture the image carries
+# (scripts/dmg_window_shot.sh; the owner, 3 November: 0.1.1's window had no picture and nothing said
+# so). The layout never stops a release (2 November), and this is never silent: its verdict is in the
+# block at the end. The terminal needs to be allowed to record the screen once (Privacy & Security ›
+# Screen & System Audio Recording). DMG_WINDOW_CHECK=0 leaves it out, and the block says that too.
+if [[ "${DMG_WINDOW_CHECK:-1}" == "0" ]]; then
+  WINDOW_VERDICT="NOT CHECKED (DMG_WINDOW_CHECK=0)"
+elif scripts/dmg_window_shot.sh "$OUT/$DMG_NAME" "$OUT/dmg-window" 2>&1 | tee "$OUT/dmg-window.txt"; then
+  WINDOW_VERDICT="shows its picture, compared point by point ($OUT/dmg-window)"
+else
+  WINDOW_VERDICT="DOES NOT SHOW ITS PICTURE, or could not be captured: $OUT/dmg-window.txt says which"
+fi
+
 # 4. The appcast: this release, and those of the appcast published now.
 PREVIOUS=()
 if [[ -n "${PREVIOUS_APPCAST:-}" ]]; then
@@ -388,6 +402,7 @@ echo "  $DMG_NAME   at $DOWNLOAD_URL$DMG_NAME (the website's)"
 echo "  appcast.json   at $FEED_URL"
 echo "  update key     $KEY_ID"
 echo "  network guard  $GUARD"
+echo "  the image's window  $WINDOW_VERDICT"
 echo "  $PUBLISHED"
 echo
 echo "----- for the website: from here -----"

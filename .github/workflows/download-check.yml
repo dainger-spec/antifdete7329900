@@ -32,9 +32,26 @@ jobs:
         run: |
           [[ "$IMAGE_URL" == https://dl.lumenbrowser.io/* ]] || { echo "::error::not an address at dl.lumenbrowser.io: $IMAGE_URL"; exit 1; }
           scripts/download_check.sh "$IMAGE_URL" --expect accepted --shots build/download-shots
+      - name: The image's window — what its layout holds, and whether it shows its picture
+        # The owner, 3 November: 0.1.1's window had its icons and its size and no picture. What the
+        # published image's picture and .DS_Store are, what Finder answers for the window's picture,
+        # and the window captured in both appearances and compared point by point with the picture
+        # the image carries (scripts/dmg_window_shot.sh).
+        if: always()
+        env:
+          IMAGE_URL: ${{ github.event.inputs.url }}
+        run: |
+          [[ "$IMAGE_URL" == https://dl.lumenbrowser.io/* ]] || { echo "::error::not an address at dl.lumenbrowser.io: $IMAGE_URL"; exit 1; }
+          for volume in /Volumes/Lumen*; do [[ -d "$volume" ]] && hdiutil detach "$volume" -force -quiet; done
+          mkdir -p build/image
+          curl -fsSL --retry 3 -o build/image/image.dmg "$IMAGE_URL"
+          shasum -a 256 build/image/image.dmg
+          scripts/dmg_window_shot.sh build/image/image.dmg build/dmg-window --both
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: download-check-${{ matrix.runner }}
-          path: build/download-shots
+          path: |
+            build/download-shots
+            build/dmg-window
           if-no-files-found: ignore

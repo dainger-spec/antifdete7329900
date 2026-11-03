@@ -4,7 +4,7 @@
 # From a zip, people leave the app in Downloads, where macOS runs it translocated and an update
 # cannot replace it; the image asks for the drag.
 #
-#   scripts/make_dmg.sh path/to/Lumen.app path/to/Lumen-1.2.3.dmg [--plain]
+#   scripts/make_dmg.sh path/to/Lumen.app path/to/Lumen-1.2.3.dmg [--plain | --no-picture]
 #
 # The window's layout — the picture behind it (`Lumen --render-dmg-background`), its size, the
 # icons' size and places — is Finder's to keep, in the image's .DS_Store, and only Finder writes it:
@@ -14,7 +14,23 @@
 # Automation turns it on again later). Whatever goes wrong there — the picture, Finder, the question
 # not answered within a minute — the image is made plain, the app and the link in Finder's own
 # window, and the release goes on: the layout never stops one (the owner's order, 2 November).
-# `--plain` makes it plain from the start.
+# `--plain` makes it plain from the start; `--no-picture` lays the window out without setting its
+# picture — CI's control for the check that the window shows it (scripts/dmg_window_shot.sh).
+#
+# The picture is set last, after every other property of the window and the icons' places: in an
+# Apple Developer Forums thread (836253) a developer found that Finder drops a window's picture when
+# other properties are changed after it, and 0.1.1's script set it before the icons' places. Whether
+# that is what macOS 27 does is measured by CI's macOS 27 job, with two knobs for that measurement
+# only: DMG_PICTURE_ORDER=first sets it where 0.1.1 did, DMG_PICTURE_FORMAT=png gives Finder a plain
+# PNG (1x) instead of the TIFF holding both 1x and 2x.
+#
+# What it says of the layout is what the image holds, read back, never a claim: Finder's own answer
+# when asked for the window's picture right after setting it, and what the volume's .DS_Store
+# names, before the image is made read-only and in the image as it will be downloaded
+# (scripts/dmg_facts.py), and whether that .DS_Store came through byte for byte. On 3 November 0.1.1's
+# image had its icons and its window's size and no picture, while this script said "laid out by
+# Finder". Whether the window shows the picture is a capture of it, compared point by point:
+# scripts/dmg_window_shot.sh, which release.sh runs on the finished image.
 #
 # The app is copied as it is — signed, notarized and stapled before this — into a compressed,
 # read-only image (UDZO), and read back from the image as it will be downloaded. Signing,
@@ -25,14 +41,27 @@ set -euo pipefail
 APP="${1:?the app bundle}"
 DMG="${2:?the disk image to write}"
 PLAIN=0
-[[ "${3:-}" == "--plain" ]] && PLAIN=1
+PICTURE=1
+PICTURE_ORDER="${DMG_PICTURE_ORDER:-last}"
+PICTURE_FORMAT="${DMG_PICTURE_FORMAT:-tiff}"
+[[ "$PICTURE_ORDER" == last || "$PICTURE_ORDER" == first ]] || { echo "error: DMG_PICTURE_ORDER is last or first" >&2; exit 1; }
+[[ "$PICTURE_FORMAT" == tiff || "$PICTURE_FORMAT" == png ]] || { echo "error: DMG_PICTURE_FORMAT is tiff or png" >&2; exit 1; }
+case "${3:-}" in
+  "") ;;
+  --plain) PLAIN=1 ;;
+  --no-picture) PICTURE=0 ;;
+  *) echo "error: unknown option ${3}" >&2; exit 1 ;;
+esac
+HERE="$(cd "$(dirname "$0")" && pwd)"
 [[ -d "$APP" && -x "$APP/Contents/MacOS/Lumen" ]] || { echo "error: $APP is not Lumen.app" >&2; exit 1; }
 [[ "$DMG" == *.dmg ]] || { echo "error: $DMG does not end in .dmg" >&2; exit 1; }
+mkdir -p "$(dirname "$DMG")"
 
 VOLUME="Lumen"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/lumen-dmg.XXXXXX")"
 MOUNT=""
 CHECK=""
+LAYOUT_SUM=""
 cleanup() {
   if [[ -n "$MOUNT" && -d "$MOUNT" ]]; then hdiutil detach "$MOUNT" -force -quiet || true; fi
   if [[ -n "$CHECK" && -d "$CHECK" ]]; then hdiutil detach "$CHECK" -force -quiet || true; fi
@@ -46,7 +75,7 @@ mkdir -p "$STAGE"
 ditto "$APP" "$STAGE/Lumen.app"
 ln -s /Applications "$STAGE/Applications"
 
-# 2. The window laid out by Finder, in a writable copy; any failure leaves `why` said and the
+# 2. The window's layout, asked of Finder in a writable copy; any failure leaves `why` said and the
 #    image plain.
 why=""
 laid_out() {
@@ -56,8 +85,14 @@ laid_out() {
   ditto "$STAGE" "$WORK/decorated"
   mkdir -p "$WORK/decorated/.background"
   "$APP/Contents/MacOS/Lumen" --render-dmg-background "$WORK/background" >/dev/null || { why="the picture was not drawn"; return 1; }
-  tiffutil -cathidpicheck "$WORK/background/background.png" "$WORK/background/background@2x.png" \
-    -out "$WORK/decorated/.background/background.tiff" >/dev/null || { why="the picture was not put together"; return 1; }
+  local picture_file="background.tiff"
+  if [[ "$PICTURE_FORMAT" == png ]]; then
+    picture_file="background.png"
+    cp "$WORK/background/background.png" "$WORK/decorated/.background/$picture_file"
+  else
+    tiffutil -cathidpicheck "$WORK/background/background.png" "$WORK/background/background@2x.png" \
+      -out "$WORK/decorated/.background/$picture_file" >/dev/null || { why="the picture was not put together"; return 1; }
+  fi
   if [[ -f "$APP/Contents/Resources/AppIcon.icns" ]]; then cp "$APP/Contents/Resources/AppIcon.icns" "$WORK/decorated/.VolumeIcon.icns"; fi
 
   local size_mb=$(( $(du -sm "$WORK/decorated" | cut -f1) + 64 ))
@@ -71,9 +106,14 @@ laid_out() {
   if [[ -f "$MOUNT/.VolumeIcon.icns" ]]; then
     xattr -wx com.apple.FinderInfo "0000000000000000040000000000000000000000000000000000000000000000" "$MOUNT" || true
   fi
-  # The window, as Finder keeps it: 660 × 400 points of content, the icons' centres as
+  # The window, as Finder keeps it: 660 × 400 points of frame, the icons' centres as
   # DiskImageBackground.swift draws around them. In the background, with a minute to answer: where
-  # macOS waits for someone to allow Automation, osascript would wait with it.
+  # macOS waits for someone to allow Automation, osascript would wait with it. Finder is asked back
+  # for the picture it now has: its answer is in the log below ("finder: …").
+  local picture_line="set background picture of viewOptions to file \".background:$picture_file\""
+  (( PICTURE )) || picture_line='-- no picture: the control of scripts/dmg_window_shot.sh'
+  local picture_first="" picture_last="$picture_line"
+  if [[ "$PICTURE_ORDER" == first ]]; then picture_first="$picture_line"; picture_last="-- (set first, as 0.1.1 did)"; fi
   osascript > "$WORK/finder.log" 2>&1 <<OSA &
 tell application "Finder"
   tell disk "$disk"
@@ -86,13 +126,24 @@ tell application "Finder"
     set arrangement of viewOptions to not arranged
     set icon size of viewOptions to 128
     set text size of viewOptions to 13
-    set background picture of viewOptions to file ".background:background.tiff"
+    $picture_first
     set position of item "Lumen.app" of container window to {170, 210}
     set position of item "Applications" of container window to {490, 210}
+    $picture_last
+    try
+      log "the window's background picture, as Finder has it once set: " & ((background picture of viewOptions) as text)
+    on error errorText
+      log "the window's background picture, as Finder has it once set: none that reads (" & errorText & ")"
+    end try
     close
     open
     update without registering applications
     delay 2
+    try
+      log "the window's background picture, as Finder has it reopened: " & ((background picture of icon view options of container window) as text)
+    on error errorText
+      log "the window's background picture, as Finder has it reopened: none that reads (" & errorText & ")"
+    end try
     close
   end tell
 end tell
@@ -107,9 +158,21 @@ OSA
   wait "$finder" && answered=1
   [[ -s "$WORK/finder.log" ]] && sed 's/^/finder: /' "$WORK/finder.log" >&2
   (( answered )) || { why="Finder did not lay the window out (finder: lines above)"; return 1; }
-  # Finder writes .DS_Store a moment after the window closes.
-  for attempt in $(seq 1 20); do [[ -f "$MOUNT/.DS_Store" ]] && break; sleep 0.5; done
+  # Finder writes .DS_Store a moment after the window closes, and may write it again: it is waited
+  # for until it has not changed for two seconds (fifteen at most).
+  local previous="" stable=0 now
+  for attempt in $(seq 1 30); do
+    now=""
+    [[ -f "$MOUNT/.DS_Store" ]] && now="$(stat -f '%z %m' "$MOUNT/.DS_Store")"
+    if [[ -n "$now" && "$now" == "$previous" ]]; then stable=$((stable + 1)); else stable=0; fi
+    (( stable >= 4 )) && break
+    previous="$now"
+    sleep 0.5
+  done
   [[ -f "$MOUNT/.DS_Store" ]] || { why="Finder kept no layout (.DS_Store)"; return 1; }
+  # What Finder kept, before the image is made read-only.
+  python3 -I "$HERE/dmg_facts.py" "$MOUNT" 2>&1 | sed 's/^/writable image: /' >&2 || true
+  LAYOUT_SUM="$(shasum -a 256 "$MOUNT/.DS_Store" | cut -d' ' -f1)"
   chmod -Rf go-w "$MOUNT" || true
   sync
   hdiutil detach "$MOUNT" -quiet || { why="the writable image did not detach"; return 1; }
@@ -147,9 +210,29 @@ codesign --verify --strict --deep "$CHECK/Lumen.app" || { echo "error: the app i
 if xcrun stapler validate "$APP" >/dev/null 2>&1; then
   xcrun stapler validate "$CHECK/Lumen.app" >/dev/null 2>&1 || { echo "error: the app's notarization ticket was lost on the way in" >&2; status=1; }
 fi
-LAYOUT_NOTE="laid out by Finder"
-[[ -f "$CHECK/.DS_Store" ]] || LAYOUT_NOTE="plain (Finder's own window)"
+# What the layout is in the image as it will be downloaded — read, not assumed.
+facts_status=0
+FACTS_OUT="$(python3 -I "$HERE/dmg_facts.py" "$CHECK" 2>&1)" || facts_status=$?
+if [[ -f "$CHECK/.DS_Store" ]]; then
+  echo "$FACTS_OUT" | sed 's/^/read-only image: /'
+  if (( facts_status == 0 )); then
+    LAYOUT_NOTE="its layout names the window's picture, which it carries (whether the window shows it: scripts/dmg_window_shot.sh)"
+  else
+    LAYOUT_NOTE="its layout names NO picture it carries: the window shows Finder's own background (above)"
+    echo "warning: the image's layout names no picture it carries (read-only image: lines above)" >&2
+  fi
+  if [[ -n "$LAYOUT_SUM" ]]; then
+    final_sum="$(shasum -a 256 "$CHECK/.DS_Store" | cut -d' ' -f1)"
+    if [[ "$final_sum" == "$LAYOUT_SUM" ]]; then
+      echo "read-only image: the layout Finder kept (.DS_Store) came through byte for byte"
+    else
+      echo "warning: the layout Finder kept (.DS_Store) is not the same in the read-only image" >&2
+    fi
+  fi
+else
+  LAYOUT_NOTE="plain (Finder's own window)"
+fi
 hdiutil detach "$CHECK" -quiet || true
 CHECK=""
 (( status == 0 )) || exit 1
-echo "DMG $DMG: Lumen.app and a link to Applications, $LAYOUT_NOTE, $(du -h "$DMG" | cut -f1)"
+echo "DMG $DMG: Lumen.app and a link to Applications, $(du -h "$DMG" | cut -f1); $LAYOUT_NOTE"
