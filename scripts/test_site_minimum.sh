@@ -17,5 +17,9 @@ expect 0 "the site in Russian, as the owner read it" '<p>Требуется <b>m
 expect 0 "the site in English, with the system's name" '<p>Works on macOS Tahoe 26 or later.</p>'
 expect 1 "a site that says what 0.1.1's Info.plist did" '<p>Требуется macOS 14 и новее</p>'
 expect 1 "a site that says 26 in one place and 15 in another" '<p>macOS 26 и новее</p><footer>macOS 15 or later</footer>'
+expect 0 "the system's name after the number" '<p>Нужна macOS 26 Tahoe или новее.</p>'
+expect 0 "«или более поздняя»" '<li>macOS 26 или более поздняя версия</li>'
 expect 2 "a page that states no minimum" '<p>Lumen for Mac. Download.</p>'
+expect 2 "a page drawn by JavaScript (no text in it)" '<!doctype html><div id="root"></div><script src="/assets/index.js"></script>'
+expect 1 "15 with its name after it" '<p>macOS 15 Sequoia and later</p>'
 exit $status

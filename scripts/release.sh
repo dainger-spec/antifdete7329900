@@ -368,13 +368,14 @@ python3 scripts/download_json.py check "$OUT/download.json" --dmg "$OUT/$DMG_NAM
 
 # 5c. The website says the minimum macOS the app needs (its LSMinimumSystemVersion), in words: 0.1.1
 # needed 14.0 by its Info.plist, download.json and appcast while the site said macOS 26 and newer
-# (scripts/site_minimum_check.py reads the site's pages). A release whose site says another, or whose
-# site cannot be read, publishes nothing; a dry run says so and goes on.
+# (scripts/site_minimum_check.py reads the site's pages). A release that publishes, whose site says
+# another or cannot be read, publishes nothing; a run that publishes nothing (a dry run, or no R2
+# keys) says so in its block and goes on.
 site_status=0
 python3 scripts/site_minimum_check.py --minimum "$MINIMUM_SYSTEM" --site "$ACCOUNT_SITE_URL" || site_status=$?
 if (( site_status != 0 )); then
-  if [[ "$SIGN_IDENTITY" == "-" ]]; then
-    DRY+=("the website's minimum macOS is not confirmed (scripts/site_minimum_check.py: exit $site_status): a release stops on it")
+  if [[ "$SIGN_IDENTITY" == "-" || -z "$PUBLISH" ]]; then
+    DRY+=("the website's minimum macOS is not confirmed (scripts/site_minimum_check.py: exit $site_status, lines above): a release that publishes stops on it")
   else
     echo "error: the website does not say macOS $MINIMUM_SYSTEM and newer, as the app needs, or could not be read (above): nothing published" >&2
     exit 1
