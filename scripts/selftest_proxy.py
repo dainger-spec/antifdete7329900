@@ -94,7 +94,8 @@ carries WebRTC must, and still connects nowhere. Each association gets a relay s
 and a public address of its own, `203.0.113.77:<port>` (TEST-NET-3, never routed): a STUN Binding
 sent through it, to any server, is answered by the proxy itself with that address, and a datagram
 sent to another association's public address is handed to that association, as a NAT with
-hairpinning would. Anything else is dropped and noted. `/pb-udp.json` counts associations, STUN
+hairpinning would (one sent to such an address while its association is closed, or not yet heard
+from, is counted as `toPeerUndelivered`). Anything else is dropped and noted. `/pb-udp.json` counts associations, STUN
 answers, datagrams handed over and the destinations dropped. `/cdn-cgi/trace` answers as
 Cloudflare's trace does (`ip=` the address the request came from): the proxy's TCP exit, this
 proxy's public address, the one its UDP leaves from; `?ip=` makes it another, for the self-test's
@@ -149,7 +150,7 @@ CANARY_PORT = 1
 # UDP associations (`--socks-udp`): public port → (relay socket, client address or None).
 UDP_ASSOCIATIONS: dict = {}
 UDP_LOCK = threading.Lock()
-UDP_STATS = {"associations": 0, "stunAnswered": 0, "handedOver": 0, "dropped": []}
+UDP_STATS = {"associations": 0, "stunAnswered": 0, "handedOver": 0, "dropped": [], "toPeerUndelivered": []}
 UDP_PUBLIC_IP = "203.0.113.77"
 UDP_NEXT_PORT = [41000]
 # TLS contexts serving a certificate whose chain needs a fetch: "canary" through the proxies,
@@ -530,7 +531,8 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
         content_type = "text/plain"
     elif plain_path == "/pb-udp.json":
         with UDP_LOCK:
-            body = json.dumps(dict(UDP_STATS, dropped=list(UDP_STATS["dropped"])[-50:])).encode()
+            body = json.dumps(dict(UDP_STATS, dropped=list(UDP_STATS["dropped"])[-50:],
+                                   toPeerUndelivered=list(UDP_STATS["toPeerUndelivered"])[-50:])).encode()
         content_type = "application/json"
     elif plain_path == "/pb-leak/report":
         params = parse_qs(query)
@@ -955,6 +957,13 @@ def run_udp_association(relay: socket.socket, public_port: int) -> None:
                 except OSError:
                     pass
                 continue
+            # To a peer's public address whose association is not there to take it: closed already
+            # (the far side hung up a moment before this side's last packet) or not yet heard from
+            # its client. A peer all the same, not another destination: counted apart, never
+            # "dropped" (CI run 683: one such packet at the end of the call failed the self-test).
+            with UDP_LOCK:
+                UDP_STATS["toPeerUndelivered"].append(f"{host}:{port}")
+            continue
         answer = stun_binding_answer(payload, public_port)
         if answer is not None:
             relay.sendto(socks_udp_header(host if re.fullmatch(r"[0-9.]+", host) else UDP_PUBLIC_IP, port) + answer, client)
