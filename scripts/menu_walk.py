@@ -55,16 +55,90 @@ DEADLINE = 25 * 60
 # A profile's process gets 25 s an item (SafariMenuWalkCheck) and 90 s to start: nothing from the
 # walk for this long is the app's own process stuck, not an item.
 SILENCE = 5 * 60
+# Between two items a profile's process takes a few seconds (at most 4.1 in run 671): the app's own
+# watchdog stops an item that runs over 25 s, not a process that stops answering after an item's
+# end, before the next one's begin — run 672 (and 562): after File › Print…, nothing for five
+# minutes. This long after an item's end, the main threads of the profile's process and of the app
+# are written down and the profile's process is stopped; the app starts it again from the next
+# item, and the stop is said and failed on.
+STALL = 60
 
 
-def run_walk(command, environment, log, deadline=DEADLINE, silence=SILENCE):
+def processes():
+    """(pid, parent's pid, executable) of every process (ps)."""
+    listed = subprocess.run(["ps", "-axo", "pid=,ppid=,comm="], capture_output=True, text=True).stdout
+    found = []
+    for line in listed.splitlines():
+        fields = line.split(None, 2)
+        if len(fields) == 3 and fields[0].isdigit() and fields[1].isdigit():
+            found.append((int(fields[0]), int(fields[1]), fields[2]))
+    return found
+
+
+def main_thread(pid, out, name):
+    """Where the main thread of process `pid` is: its deepest frames, as spindump sees them (as root,
+    on CI's runners, it reads any process, signed with the hardened runtime or not) or else sample.
+    The whole report is kept in `out`/stack-<name>-<pid>.txt."""
+    path = os.path.join(out, f"stack-{name}-{pid}.txt")
+    said = []
+    for command in (["sudo", "-n", "/usr/sbin/spindump", str(pid), "2", "10", "-onlyTarget", "-file", path],
+                    ["/usr/bin/sample", str(pid), "2", "-mayDie", "-file", path]):
+        tool = os.path.basename(command[2] if command[0] == "sudo" else command[0])
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, errors="replace", timeout=120)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            said.append(f"{tool}: {error}")
+            continue
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            break
+        said.append(f"{tool}: exit {result.returncode}, {' '.join((result.stderr or result.stdout).split())[:200]}")
+    else:
+        return [f"no stack of it: {'; '.join(said)}"]
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        report = handle.read().splitlines()
+    start = next((index for index, line in enumerate(report) if "com.apple.main-thread" in line), None)
+    if start is None:
+        return [f"no main thread in its report ({path})"]
+    frames = []
+    for line in report[start + 1:]:
+        if not line.strip() or re.match(r"^\s*(Thread 0x|\d+ Thread_)", line):
+            break
+        frames.append(re.sub(r"^[\s+!:|]*", "", line).rstrip())
+    return [f"{tool}, main thread, its deepest frames (all in {path}):"] + frames[-30:]
+
+
+def stalled(app, after, out, seconds):
+    """The walk stopped answering for `seconds` after an item's end: the main threads of the app's
+    profile processes and of the app written down, and those processes stopped. Returns what to say."""
+    profiles = [pid for pid, parent, executable in processes()
+                if parent == app and os.path.basename(executable) in EXECUTABLES]
+    said = (f"nothing from the walk for {seconds} s after {after.replace('MENUWALK-PROGRESS ', 'item ')}: "
+            f"the profile's process ({', '.join(map(str, profiles)) or 'none found'}) stopped answering between two items")
+    print(f"MENUWALK-ERROR {said}", flush=True)
+    for pid, name in [(pid, "profile") for pid in profiles] + [(app, "app")]:
+        for line in main_thread(pid, out, name):
+            print(f"MENUWALK-STACK {name} {pid}: {line}", flush=True)
+    for pid in profiles:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    if profiles:
+        print("MENUWALK-ERROR the profile's process stopped; the app starts it again from the next item", flush=True)
+    return said
+
+
+def run_walk(command, environment, log, out, deadline=DEADLINE, silence=SILENCE, stall=STALL):
     """Runs the walk, its stdout read as it comes: each item's MENUWALK-PROGRESS line is printed at
-    once, so a walk that stops shows where. Past `deadline`, or `silence` seconds without a line, the
-    app and its profile's processes are stopped and a MENUWALK-ERROR line says which item was last
-    done. Returns (stdout, status): status -1 when it was stopped here."""
+    once, so a walk that stops shows where. `stall` seconds without a line after an item's end, the
+    profile's process is written down and stopped, and the walk goes on (`stalled`). Past `deadline`,
+    or `silence` seconds without a line, the app is written down too, it and its profile's processes
+    are stopped and a MENUWALK-ERROR line says which item was last done. Returns (stdout, status,
+    stalls): status -1 when it was stopped here; stalls, what each stop between items said."""
     process = subprocess.Popen(command, env=environment, stdout=subprocess.PIPE, stderr=log, text=True,
                                errors="replace", start_new_session=True)
     lines, last = [], [time.time(), "the walk's start"]
+    stalls, handled = [], None
 
     def read():
         for line in process.stdout:
@@ -83,6 +157,13 @@ def run_walk(command, environment, log, deadline=DEADLINE, silence=SILENCE):
             stopped = f"the walk did not finish in {deadline // 60} minutes"
         elif now - last[0] > silence:
             stopped = f"nothing from the walk for {silence} s"
+        elif (now - last[0] > stall and last[1].startswith("MENUWALK-PROGRESS")
+              and "ended the process" not in last[1] and handled != last[1]):
+            handled = last[1]
+            said = stalled(process.pid, last[1], out, stall)
+            stalls.append(said)
+            lines.append(f"MENUWALK-ERROR {said}\n")
+            last[0] = time.time()
         if stopped:
             break
         time.sleep(1)
@@ -90,6 +171,8 @@ def run_walk(command, environment, log, deadline=DEADLINE, silence=SILENCE):
         message = f"MENUWALK-ERROR {stopped}; the last item done: {last[1]} — stopped here"
         print(message, flush=True)
         lines.append(message + "\n")
+        for line in main_thread(process.pid, out, "app"):
+            print(f"MENUWALK-STACK app {process.pid}: {line}", flush=True)
         for sig in (signal.SIGTERM, signal.SIGKILL):
             try:
                 os.killpg(process.pid, sig)
@@ -101,7 +184,7 @@ def run_walk(command, environment, log, deadline=DEADLINE, silence=SILENCE):
             except subprocess.TimeoutExpired:
                 continue
     reader.join(timeout=10)
-    return "".join(lines), (-1 if stopped else process.returncode)
+    return "".join(lines), (-1 if stopped else process.returncode), stalls
 
 
 def notice(kind, title, text):
@@ -486,7 +569,8 @@ def main():
             canary = domain + ".plist"
     started = time.time()
     with open(os.path.join(out, "walk.txt"), "w") as log:
-        output, status = run_walk([os.path.join(args.app, "Contents", "MacOS", EXECUTABLE), "--menu-walk"], environment, log)
+        output, status, stalls = run_walk([os.path.join(args.app, "Contents", "MacOS", EXECUTABLE), "--menu-walk"],
+                                          environment, log, out)
         log.write(output)
     proxy.kill()
     if trace:
@@ -600,8 +684,11 @@ def main():
     for what in skipped:
         print(f"MENU-WALK SKIPPED: {what}", flush=True)
         notice("error" if args.check else "warning", args.title, f"skipped: {what}")
+    for said in stalls:
+        notice("error" if args.check else "warning", args.title,
+               f"{said}: its main thread is in the MENUWALK-STACK lines above; it was stopped and the walk went on")
     failed = args.check and (not finished or bool(by_profile) or bool(domain_changed) or refused_views > 1000
-                             or canary_seen is False or bool(skipped))
+                             or canary_seen is False or bool(skipped) or bool(stalls))
     if args.record and os.path.exists(args.record):
         with open(args.record) as handle:
             recorded = json.load(handle)
