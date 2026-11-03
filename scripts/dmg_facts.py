@@ -4,6 +4,7 @@
 size, and no picture, while make_dmg.sh said it was laid out).
 
     python3 scripts/dmg_facts.py /Volumes/Lumen [--icon-size 128] [--no-picture]
+    python3 scripts/dmg_facts.py --compare kept.DS_Store /Volumes/Lumen/.DS_Store
 
 Says, in words:
 - the picture: whether .background/background.tiff is there, its pages (Finder takes the 2x one on
@@ -18,7 +19,13 @@ Says, in words:
 Exit 0 when the layout names a picture and that picture is in the volume (and, with --icon-size, keeps
 icons of that size; with --no-picture, no picture is asked for), 1 when it does not (no .DS_Store, no
 picture named, a picture named that is not there, Finder's own icon size), 2 when the volume cannot be
-read. Standard library only.
+read.
+
+--compare says, record by record, what differs between two .DS_Store files — the one Finder kept in
+the writable image and the read-only image's (make_dmg.sh): CI run 672 on macOS 26 found their bytes
+different and every fact read from them the same. For a record that is a property list, which of its
+keys differ. Exit 0 when every record is the same, value for value, 1 when one is not, 2 when one of
+the files does not read. Standard library only.
 """
 import os
 import plistlib
@@ -177,13 +184,70 @@ def tiff_pages(data):
 BACKGROUND_KINDS = {0: "Finder's own (none set)", 1: "a colour", 2: "a picture"}
 
 
+def compare(kept_path, image_path):
+    """What differs between two .DS_Store files, record by record (see --compare above)."""
+    try:
+        with open(kept_path, "rb") as handle:
+            kept = handle.read()
+        with open(image_path, "rb") as handle:
+            image = handle.read()
+        if kept == image:
+            print(f"layout facts: the .DS_Store Finder kept is the read-only image's, byte for byte ({len(image)} bytes)")
+            return 0
+        before, after = DSStore(kept).records(), DSStore(image).records()
+    except (OSError, ValueError, struct.error, IndexError) as error:
+        print(f"layout facts: the two .DS_Store files cannot be compared ({error})")
+        return 2
+    keyed_before = {(name, code): (kind, value) for name, code, kind, value in before}
+    keyed_after = {(name, code): (kind, value) for name, code, kind, value in after}
+    differing = []
+    for key in sorted(set(keyed_before) | set(keyed_after)):
+        name, code = key
+        where = "the window" if name == "." else name
+        if key not in keyed_after:
+            differing.append(f"{where} {code}: in the one Finder kept, NOT in the image's")
+            continue
+        if key not in keyed_before:
+            differing.append(f"{where} {code}: in the image's, not in the one Finder kept")
+            continue
+        (kind, old), (new_kind, new) = keyed_before[key], keyed_after[key]
+        if (kind, old) == (new_kind, new):
+            continue
+        said = f"{where} {code} ({kind})"
+        if isinstance(old, bytes) and isinstance(new, bytes):
+            try:
+                old_options, new_options = plistlib.loads(old), plistlib.loads(new)
+                keys = sorted(k for k in set(old_options) | set(new_options) if old_options.get(k) != new_options.get(k))
+                said += ": its keys " + ", ".join(keys) if keys else ": the same keys and values, written otherwise"
+            except Exception:  # noqa: BLE001 - not a property list: its bytes are compared
+                changed = sum(1 for a, b in zip(old, new) if a != b) + abs(len(old) - len(new))
+                said += f": {changed} of its {len(new)} bytes ({len(old)} in the one Finder kept)"
+        else:
+            said += f": {old!r} kept, {new!r} in the image"
+        differing.append(said)
+    changed_bytes = sum(1 for a, b in zip(kept, image) if a != b) + abs(len(kept) - len(image))
+    if not differing:
+        print(f"layout facts: the .DS_Store Finder kept and the read-only image's differ in {changed_bytes} of "
+              f"{len(image)} bytes, outside their records: the same {len(after)} records, value for value")
+        return 0
+    print(f"layout facts: the .DS_Store Finder kept and the read-only image's differ in {changed_bytes} of "
+          f"{len(image)} bytes and in {len(differing)} of their records: " + "; ".join(differing))
+    return 1
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("volume")
+    parser.add_argument("volume", nargs="?")
     parser.add_argument("--icon-size", type=float, help="the icon view's icon size the layout must keep (make_dmg.sh: 128)")
     parser.add_argument("--no-picture", action="store_true", help="no picture is expected (make_dmg.sh --no-picture, the control)")
+    parser.add_argument("--compare", nargs=2, metavar=("KEPT", "IMAGE"),
+                        help="two .DS_Store files compared record by record (make_dmg.sh)")
     arguments = parser.parse_args()
+    if arguments.compare:
+        return compare(*arguments.compare)
+    if arguments.volume is None:
+        parser.error("a mounted volume, or --compare")
     volume = arguments.volume
     if not os.path.isdir(volume):
         print(f"layout facts: {volume} is not a mounted volume")

@@ -399,7 +399,11 @@ Finder's own answer for a window's picture fails (-10000) even when the picture 
 So make_dmg.sh now reads what Finder kept before the image is made read-only, and when the icons are
 not of 128 points or no picture is named it asks Finder again, three times at most; then the image is
 made plain, said as such (the picture is set last too, after the forum thread 836253, harmlessly).
-Whether that settles the owner's Mac is for its next release to say: its block reads the window.
+What Finder kept is then compared, record by record, with what the read-only image holds
+(`dmg_facts.py --compare`): on CI's macOS 26 (run 672) the two files' bytes differed while every fact
+read from them was the same, and the script's line for that was a warning that said no more; it now
+says whether a record differs and which — for a property list, which of its keys. Whether all this
+settles the owner's Mac is for its next release to say: its block reads the window.
 
 **The image is signed, notarized and stapled too**, after the app inside it was: `codesign` with
 the Developer ID and a timestamp, `notarytool submit … --wait`, `stapler staple`, `stapler validate`

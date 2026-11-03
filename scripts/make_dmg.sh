@@ -24,7 +24,8 @@
 #
 # What it says of the layout is what the image holds, read back, never a claim: what the volume's
 # .DS_Store names, before the image is made read-only and in the image as it will be downloaded
-# (scripts/dmg_facts.py), and whether that .DS_Store came through byte for byte. (Finder's own
+# (scripts/dmg_facts.py), and whether the read-only image's is, record by record, the one Finder
+# kept (on CI's macOS 26, run 672, their bytes differed and every fact read was the same). (Finder's own
 # answer, asked for the window's picture, is no fact: on macOS 27 it fails with -10000 even when the
 # picture is set and kept — CI run 672.) On 3 November 0.1.1's
 # image had its icons and its window's size and no picture, while this script said "laid out by
@@ -56,7 +57,6 @@ VOLUME="Lumen"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/lumen-dmg.XXXXXX")"
 MOUNT=""
 CHECK=""
-LAYOUT_SUM=""
 cleanup() {
   if [[ -n "$MOUNT" && -d "$MOUNT" ]]; then hdiutil detach "$MOUNT" -force -quiet || true; fi
   if [[ -n "$CHECK" && -d "$CHECK" ]]; then hdiutil detach "$CHECK" -force -quiet || true; fi
@@ -163,7 +163,8 @@ OSA
     echo "warning: Finder did not keep the window's view options (attempt $round of 3, lines above)" >&2
   done
   (( kept )) || { why="Finder did not keep the window's view options in 3 attempts (writable image: lines above)"; return 1; }
-  LAYOUT_SUM="$(shasum -a 256 "$MOUNT/.DS_Store" | cut -d' ' -f1)"
+  # What Finder kept, as it goes into the read-only image: compared with the image's, record by record.
+  cp "$MOUNT/.DS_Store" "$WORK/kept.DS_Store"
   chmod -Rf go-w "$MOUNT" || true
   sync
   hdiutil detach "$MOUNT" -quiet || { why="the writable image did not detach"; return 1; }
@@ -212,13 +213,12 @@ if [[ -f "$CHECK/.DS_Store" ]]; then
     LAYOUT_NOTE="its layout names NO picture it carries: the window shows Finder's own background (above)"
     echo "warning: the image's layout names no picture it carries (read-only image: lines above)" >&2
   fi
-  if [[ -n "$LAYOUT_SUM" ]]; then
-    final_sum="$(shasum -a 256 "$CHECK/.DS_Store" | cut -d' ' -f1)"
-    if [[ "$final_sum" == "$LAYOUT_SUM" ]]; then
-      echo "read-only image: the layout Finder kept (.DS_Store) came through byte for byte"
-    else
-      echo "warning: the layout Finder kept (.DS_Store) is not the same in the read-only image" >&2
-    fi
+  if [[ -f "$WORK/kept.DS_Store" ]]; then
+    compare_status=0
+    COMPARE_OUT="$(python3 -I "$HERE/dmg_facts.py" --compare "$WORK/kept.DS_Store" "$CHECK/.DS_Store" 2>&1)" || compare_status=$?
+    echo "$COMPARE_OUT" | sed 's/^/read-only image: /'
+    (( compare_status == 0 )) \
+      || echo "warning: the layout in the read-only image is not the one Finder kept (read-only image: the line above)" >&2
   fi
 else
   LAYOUT_NOTE="plain (Finder's own window)"
