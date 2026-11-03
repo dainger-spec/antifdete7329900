@@ -614,12 +614,21 @@ final class FakeAccountServer {
         var description: String { "Authorization \(hadAuthorization ? "sent" : "none"), key \(key == nil ? "none" : "sent")" }
     }
 
-    private let signer = Curve25519.Signing.PrivateKey()
+    private let signer: Curve25519.Signing.PrivateKey
     var deviceID = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
     var deviceToken = "lmd_selftest_device_token"
     /// The account it plays: its sessions and documents name it (`AccountSwitchScenario` signs in as
     /// several accounts in turn).
     var accountID = "a"
+    /// Its documents say "export only" for this reason ("no_license": an account whose trial was
+    /// used and that bought nothing) instead of a pro plan's work (`AccountSwitchScenario`).
+    var exportOnlyReason: String?
+
+    /// `signer`: the key its documents are signed with — one made for the run, or one kept across the
+    /// app's runs (`AccountSwitchScenario`, a run per step, quitting between).
+    init(signer: Curve25519.Signing.PrivateKey = Curve25519.Signing.PrivateKey()) {
+        self.signer = signer
+    }
     /// The purchase this server plays (§11.1): its key — replaced by `/v1/anonymous/key/replace` — and
     /// its purchase code; the letter's code; the session a linked email opens.
     private(set) var currentKey = "LMK-0123-4567-89AB-CDEF-GHJK-MNMT"
@@ -889,7 +898,8 @@ final class FakeAccountServer {
         let forMachine = serve == .otherMac ? MachineID.compute(platformUUID: UUID().uuidString) : machineID
         let payload: [String: Any] = [
             "kind": "lumen.entitlement", "version": 1, "documentID": UUID().uuidString.lowercased(), "accountID": accountID, "licenseID": "l-\(accountID)",
-            "deviceID": deviceID, "machineID": forMachine, "role": "owner", "plan": "pro", "status": "active", "exportReason": NSNull(),
+            "deviceID": deviceID, "machineID": forMachine, "role": "owner", "plan": exportOnlyReason == nil ? "pro" : "trial",
+            "status": exportOnlyReason == nil ? "active" : "export_only", "exportReason": exportOnlyReason.map { $0 as Any } ?? NSNull(),
             "limits": ["profiles": 50, "devices": 3, "seats": 1], "profilesOnOtherDevices": 0,
             "periodEndsAt": at(serve == .expired ? 14 * 24 : 30 * 24),
             "issuedAt": at(0), "refreshAfter": at(24), "expiresAt": at(96), "graceEndsAt": at(168),
