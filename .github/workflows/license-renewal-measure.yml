@@ -16,10 +16,10 @@ jobs:
       - name: Build the app without the App Sandbox (a development build — no account server of its own)
         run: SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
       - name: What the server sees of this build's renewals (a measurement)
-        timeout-minutes: 50
+        timeout-minutes: 55
         run: |
           python3 scripts/license_renewal_check.py --app build/unsandboxed/Lumen.app --out build/license-renewal \
-            ${PB_MEASURE_ARGS:---measure --phases launch,due,periodic}
+            --measure --phases due,periodic --minutes 40
       - uses: actions/upload-artifact@v4
         if: always()
         with:

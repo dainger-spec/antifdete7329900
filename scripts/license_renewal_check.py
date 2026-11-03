@@ -273,6 +273,7 @@ def main():
     parser.add_argument("--out", required=True)
     parser.add_argument("--measure", action="store_true")
     parser.add_argument("--phases", default="launch,due,periodic,failure,control,profiles")
+    parser.add_argument("--minutes", type=int, default=0, help="how long the periodic phase runs (default 17 measured, 4 checked)")
     arguments = parser.parse_args()
     measure = arguments.measure
     phases = arguments.phases.split(",")
@@ -372,7 +373,7 @@ def main():
         refresh = 120 if measure else 60
         seed(vault, device_id, token, document_issued(time.time() - 25 * 3600))
         stub.refresh_after = refresh
-        duration = 17 * 60 if measure else 4 * 60
+        duration = arguments.minutes * 60 if arguments.minutes else (17 * 60 if measure else 4 * 60)
         run = Run(executable, environment(vault), os.path.join(out, "app-periodic.log"))
         time.sleep(duration)
         seen = stub.renewals(run.started)
