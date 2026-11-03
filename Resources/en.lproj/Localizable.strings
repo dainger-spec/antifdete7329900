@@ -1484,7 +1484,7 @@
 "contract.activation.device_limit_later" = "All Mac places are taken. You can unlink one of your Macs later.";
 "contract.activation.saved" = "Your rights are saved on this Mac: without the server, Lumen works as usual for up to %@.";
 "contract.activation.server_learns.1" = "A number computed from the Mac’s hardware identifier. The identifier itself isn’t sent.";
-"contract.activation.server_learns.2" = "The label, if you set one, and the Lumen version.";
+"contract.activation.server_learns.2" = "The label — this Mac's name unless you change it — and the Lumen version; again with each renewal of the rights, with the number of profiles.";
 "contract.activation.server_learns.3" = "How many profiles are on this Mac — only the number. The server gets no profile names or contents.";
 "contract.activation.server_learns.4" = "The connection’s address — only to limit the request rate; the server doesn’t store it.";
 "contract.mode.not_signed_in" = "Sign in to work with your profiles. Until then, profiles open for export only.";
@@ -1669,7 +1669,7 @@
 "license.activate.subtitle.key" = "The key reads. Now connect this Mac to its license.";
 "license.activate.label" = "Label — optional";
 "license.activate.labelPrompt" = "For example, Work";
-"license.activate.labelHint" = "Up to 64 characters. The label and the code tell your Macs apart on the website.";
+"license.activate.labelHint" = "It starts as this Mac's name — change or clear it. Up to 64 characters. The label and the code tell your Macs apart on the website.";
 "license.activate.serverLearns" = "What the server learns";
 "license.activate.action" = "Connect";
 "license.activate.working" = "Connecting…";
@@ -1739,6 +1739,10 @@
 "license.banner.systemSettings" = "Open System Settings";
 "license.banner.plans" = "Plans on the Website";
 "license.banner.hide" = "Hide";
+"license.renewal.failing" = "Since %1$@, the rights on this Mac could not be renewed: %2$@. Without a renewal, Lumen keeps working until %3$@.";
+"license.renewal.reason.noAnswer" = "the server does not answer";
+"license.renewal.reason.server" = "the server answered with error %@";
+"license.renewal.reason.unusable" = "the server's answer did not pass the check";
 "license.masterPassword.change" = "Change Master Password";
 
 /* The network guard (NetworkGuard, NetworkGuardSettingsView; docs/TUNNEL.md). */

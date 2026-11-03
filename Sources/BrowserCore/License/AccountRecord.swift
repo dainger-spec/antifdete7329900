@@ -93,6 +93,32 @@ public struct AccountRecord: Codable, Equatable, Sendable {
     public var unlinkCooldownSeconds: Int?
     /// The period-end warning the person closed (`period.ending`, §8.5 item 10).
     public var periodEndingClosed: PeriodEndingClosed?
+    /// The label this Mac was connected with (what the field held: this Mac's name to begin with),
+    /// sent again with each renewal. Nil for a Mac connected before 3 November: this Mac's name is
+    /// sent then (the owner: "по умолчанию подставляй имя Mac из системы"). Not a secret.
+    public var label: String?
+    /// How many profiles this Mac had when the vault was last open: what a renewal says before the
+    /// vault is opened again (the number is known only inside it). A number, nothing of a profile.
+    public var profileCount: Int?
+    /// The renewals that failed since the last one that brought a document: since when, the last
+    /// one, and why (the owner, 3 November: a failure is said, never silence). Nil after a renewal
+    /// that brought one.
+    public var renewalFailure: RenewalFailure?
+
+    public struct RenewalFailure: Codable, Equatable, Sendable {
+        public var since: Date
+        public var lastAt: Date
+        public var reason: LicenseClient.RefreshFailure.Reason
+        /// The server's HTTP status, when it answered with an error.
+        public var status: Int?
+
+        public init(since: Date, lastAt: Date, reason: LicenseClient.RefreshFailure.Reason, status: Int?) {
+            self.since = since
+            self.lastAt = lastAt
+            self.reason = reason
+            self.status = status
+        }
+    }
 
     /// The key is kept in the vault (§10.1): the default, unless the person chose otherwise.
     public var keepsKey: Bool { rememberKey != false }
@@ -125,6 +151,7 @@ public struct AccountRecord: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case format, deviceID, code, deviceToken, entitlement, floorTime, floorUptime, lastSuccessAt, appOutdated, session, emailLinked
         case signedInWith, signedOutReason, clockSkewSeconds, trialNoticeClosedFor, rememberKey, unlinkCooldownSeconds, periodEndingClosed
+        case label, profileCount, renewalFailure
     }
 
     public init(from decoder: Decoder) throws {
@@ -148,6 +175,9 @@ public struct AccountRecord: Codable, Equatable, Sendable {
         // Notes of their own: one that does not read is left out, not the whole file.
         unlinkCooldownSeconds = try? container.decodeIfPresent(Int.self, forKey: .unlinkCooldownSeconds)
         periodEndingClosed = try? container.decodeIfPresent(PeriodEndingClosed.self, forKey: .periodEndingClosed)
+        label = try? container.decodeIfPresent(String.self, forKey: .label)
+        profileCount = try? container.decodeIfPresent(Int.self, forKey: .profileCount)
+        renewalFailure = try? container.decodeIfPresent(RenewalFailure.self, forKey: .renewalFailure)
     }
 
     /// A device token is stored: this Mac is signed in (§8.2).
@@ -180,6 +210,8 @@ public struct AccountRecord: Codable, Equatable, Sendable {
         clockSkewSeconds = nil
         signedOutReason = reason
         rememberKey = nil
+        label = nil
+        renewalFailure = nil
         if reason == nil { emailLinked = nil }
     }
 }

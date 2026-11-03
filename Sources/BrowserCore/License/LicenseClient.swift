@@ -42,7 +42,7 @@ public struct LicenseState: Equatable, Sendable {
             mode: mode, entitlement: entitlement, signedOutReason: record.signedOutReason, appOutdated: record.appOutdated,
             lastSuccessAt: record.lastSuccessAt, clockSkew: record.clockSkewSeconds,
             trialNoticeClosed: entitlement.map { record.trialNoticeClosedFor == $0.licenseID } ?? false,
-            periodEndingClosed: record.periodEndingClosed, now: t))
+            periodEndingClosed: record.periodEndingClosed, renewalFailure: record.renewalFailure, now: t))
         return LicenseState(mode: mode, entitlement: entitlement, check: check, banners: banners,
                             allowedProfilesHere: entitlement.map(LicenseDecision.allowedProfilesHere) ?? 0,
                             worksWithoutServerUntil: LicenseDecision.worksWithoutServerUntil(mode: mode, entitlement: entitlement), now: t)
@@ -164,38 +164,134 @@ public struct LicenseClient: Sendable {
         case notSignedIn
     }
 
+    /// Why a renewal brought no document — for the app's log and the banner's words (the owner,
+    /// 3 November: a renewal that failed is said, silence is not success). Never the server's
+    /// message, never an address.
+    public enum RefreshFailure: Equatable, Sendable {
+        /// No answer: no network, the server not reached, nothing in time. `kind`: the error's
+        /// type, domain and code.
+        case noAnswer(kind: String)
+        /// The server answered with an error: its HTTP status and its code (§3; empty when the body
+        /// was not the server's).
+        case server(status: Int, code: String)
+        /// An answer that is not a document this app takes: unreadable, or one that did not pass
+        /// the check here (`why`: the check's name, `EntitlementCheck.name`).
+        case unusableAnswer(why: String)
+
+        /// What kind of failure, for the record and the banner.
+        public enum Reason: String, Codable, Sendable {
+            case noAnswer = "no_answer"
+            case server
+            case unusableAnswer = "unusable_answer"
+        }
+
+        public var reason: Reason {
+            switch self {
+            case .noAnswer: return .noAnswer
+            case .server: return .server
+            case .unusableAnswer: return .unusableAnswer
+            }
+        }
+
+        /// The server's HTTP status, for `server`.
+        public var status: Int? {
+            if case .server(let status, _) = self { return status }
+            return nil
+        }
+
+        /// For the log: a type, a domain and a code, an HTTP status and the server's code, or the
+        /// check's name — nothing of the person's.
+        public var logKind: String {
+            switch self {
+            case .noAnswer(let kind): return "no answer (\(kind))"
+            case .server(let status, let code): return "HTTP \(status)" + (code.isEmpty ? "" : " \(code)")
+            case .unusableAnswer(let why): return "an answer not taken (\(why))"
+            }
+        }
+    }
+
+    /// What a renewal did, and why it brought nothing when it did not.
+    public struct RefreshReport: Sendable {
+        public var record: AccountRecord
+        public var result: Refresh
+        /// Why no document came; nil when one did, or when the server signed this Mac out.
+        public var failure: RefreshFailure?
+        /// The server refused the request with the label (HTTP 400) and took it without one: a
+        /// server that does not know the label in a renewal yet. The app leaves the label out of
+        /// its renewals until it starts again.
+        public var labelRefused: Bool
+
+        public init(record: AccountRecord, result: Refresh, failure: RefreshFailure?, labelRefused: Bool) {
+            self.record = record
+            self.result = result
+            self.failure = failure
+            self.labelRefused = labelRefused
+        }
+    }
+
     /// `POST /v1/device/entitlement` (§6.2), and what its answer makes of `record`.
     public func refresh(_ record: AccountRecord, profileCount: Int, wall: Date, uptime: TimeInterval) async -> (AccountRecord, Refresh) {
-        guard let token = record.deviceToken, !token.isEmpty, let deviceID = record.deviceID else { return (record, .notSignedIn) }
-        let request = AccountAPI.refresh(deviceToken: token, machineID: machineID, profileCount: profileCount, appVersion: appVersion)
-        guard let response = try? await transport.send(request) else { return (record, .unreachable(retryAfter: nil)) }
+        let report = await refreshReport(record, profileCount: profileCount, label: nil, wall: wall, uptime: uptime)
+        return (report.record, report.result)
+    }
+
+    /// `POST /v1/device/entitlement` (§6.2) with this Mac's `label`, and what its answer makes of
+    /// `record` — with why nothing came, when nothing did.
+    public func refreshReport(_ record: AccountRecord, profileCount: Int, label: String?, wall: Date,
+                              uptime: TimeInterval) async -> RefreshReport {
+        func report(_ record: AccountRecord, _ result: Refresh, _ failure: RefreshFailure? = nil, labelRefused: Bool = false) -> RefreshReport {
+            RefreshReport(record: record, result: result, failure: failure, labelRefused: labelRefused)
+        }
+        guard let token = record.deviceToken, !token.isEmpty, let deviceID = record.deviceID else { return report(record, .notSignedIn) }
+        var labelRefused = false
+        let response: AccountResponse
+        do {
+            let first = try await transport.send(AccountAPI.refresh(deviceToken: token, machineID: machineID, profileCount: profileCount,
+                                                                    appVersion: appVersion, label: label))
+            if label != nil, first.status == 400 {
+                // A server that does not take the label in a renewal yet: the renewal matters more.
+                labelRefused = true
+                response = try await transport.send(AccountAPI.refresh(deviceToken: token, machineID: machineID,
+                                                                       profileCount: profileCount, appVersion: appVersion))
+            } else {
+                response = first
+            }
+        } catch {
+            let described = error as NSError
+            return report(record, .unreachable(retryAfter: nil), .noAnswer(kind: "\(type(of: error)) \(described.domain) \(described.code)"),
+                          labelRefused: labelRefused)
+        }
         var updated = record
         switch AccountAPI.documentAnswer(from: response) {
         case .failure(.server(let error)):
             switch (error.status, error.code) {
             case (401, "device_revoked"):
                 updated.signOut(because: .deviceRevoked)
-                return (updated, .signedOut(.deviceRevoked))
+                return report(updated, .signedOut(.deviceRevoked), labelRefused: labelRefused)
             case (409, "machine_mismatch"):
                 updated.signOut(because: .machineMismatch)
-                return (updated, .signedOut(.machineMismatch))
+                return report(updated, .signedOut(.machineMismatch), labelRefused: labelRefused)
             default:
                 // 429, 503 server_busy and every other 4xx: "unreachable" for a refresh (§3, §9.3),
                 // not tried again before the server said.
-                return (record, .unreachable(retryAfter: ["rate_limited", "server_busy"].contains(error.code) ? error.retryAfter : nil))
+                return report(record, .unreachable(retryAfter: ["rate_limited", "server_busy"].contains(error.code) ? error.retryAfter : nil),
+                              .server(status: error.status, code: error.code), labelRefused: labelRefused)
             }
         case .failure:
-            return (record, .unreachable(retryAfter: nil))
+            // A 5xx or 408 whatever it carried, or a body that is not the server's (a captive portal).
+            let failure: RefreshFailure = (200..<300).contains(response.status)
+                ? .unusableAnswer(why: "unreadable") : .server(status: response.status, code: "")
+            return report(record, .unreachable(retryAfter: nil), failure, labelRefused: labelRefused)
         case .success(let answer):
             let check = EntitlementVerifier.check(answer.document, keys: keys, deviceID: deviceID, machineID: machineID)
             if check.meansAppOutdated {
                 updated.appOutdated = true
                 updated.unlinkCooldownSeconds = answer.unlinkCooldownSeconds
-                return (updated, .appOutdated)
+                return report(updated, .appOutdated, .unusableAnswer(why: check.name), labelRefused: labelRefused)
             }
             guard let entitlement = check.entitlement, let envelope = EntitlementVerifier.envelope(of: answer.document) else {
                 // A changed answer on the way, another device's document: as if no answer came.
-                return (record, .unreachable(retryAfter: nil))
+                return report(record, .unreachable(retryAfter: nil), .unusableAnswer(why: check.name), labelRefused: labelRefused)
             }
             let previous = record.entitlement.flatMap {
                 EntitlementVerifier.check($0, keys: keys, deviceID: deviceID, machineID: machineID).entitlement
@@ -206,10 +302,11 @@ public struct LicenseClient: Sendable {
             updated.clock = .reset(serverTime: answer.serverTime, uptime: uptime)
             updated.clockSkewSeconds = EffectiveClock.skew(wall: wall, serverTime: answer.serverTime)
             updated.unlinkCooldownSeconds = answer.unlinkCooldownSeconds
+            updated.renewalFailure = nil
             let paid = entitlement.plan != "trial" && entitlement.periodEndsAt.map { end in
                 previous?.periodEndsAt.map { end > $0 } ?? (previous != nil)
             } == true
-            return (updated, .accepted(paymentReceived: paid))
+            return report(updated, .accepted(paymentReceived: paid), labelRefused: labelRefused)
         }
     }
 

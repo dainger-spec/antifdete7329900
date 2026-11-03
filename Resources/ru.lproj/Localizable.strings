@@ -1484,7 +1484,7 @@
 "contract.activation.device_limit_later" = "Все места для Mac заняты. Отвязать один из своих Mac можно будет позже.";
 "contract.activation.saved" = "Права сохранены на этом Mac: без связи с сервером Lumen работает как обычно %@.";
 "contract.activation.server_learns.1" = "Номер, вычисленный из аппаратного идентификатора Mac. Сам идентификатор не уходит.";
-"contract.activation.server_learns.2" = "Метку, если вы её задали, и версию Lumen.";
+"contract.activation.server_learns.2" = "Метку — по умолчанию имя этого Mac — и версию Lumen. При каждом продлении прав — снова их и число профилей.";
 "contract.activation.server_learns.3" = "Сколько профилей на этом Mac — только число. Имён и содержимого профилей сервер не получает.";
 "contract.activation.server_learns.4" = "Адрес соединения — только чтобы ограничить частоту запросов; сервер его не хранит.";
 "contract.mode.not_signed_in" = "Войдите, чтобы работать с профилями. Пока профили открываются только для экспорта.";
@@ -1669,7 +1669,7 @@
 "license.activate.subtitle.key" = "Ключ прочитан. Осталось подключить этот Mac к его лицензии.";
 "license.activate.label" = "Метка — необязательно";
 "license.activate.labelPrompt" = "Например, Рабочий";
-"license.activate.labelHint" = "До 64 символов. По метке и коду вы отличаете свои Mac на сайте.";
+"license.activate.labelHint" = "Сначала здесь имя этого Mac — его можно заменить или стереть. До 64 символов. По метке и коду вы отличаете свои Mac на сайте.";
 "license.activate.serverLearns" = "Что узнает сервер";
 "license.activate.action" = "Подключить";
 "license.activate.working" = "Подключаем…";
@@ -1739,6 +1739,10 @@
 "license.banner.systemSettings" = "Открыть Настройки системы";
 "license.banner.plans" = "Тарифы на сайте";
 "license.banner.hide" = "Скрыть";
+"license.renewal.failing" = "С %1$@ права на этом Mac не удаётся продлить: %2$@. Без продления Lumen проработает до %3$@.";
+"license.renewal.reason.noAnswer" = "сервер не отвечает";
+"license.renewal.reason.server" = "сервер ответил ошибкой %@";
+"license.renewal.reason.unusable" = "ответ сервера не прошёл проверку";
 "license.masterPassword.change" = "Сменить мастер-пароль";
 
 /* The network guard (NetworkGuard, NetworkGuardSettingsView; docs/TUNNEL.md). */

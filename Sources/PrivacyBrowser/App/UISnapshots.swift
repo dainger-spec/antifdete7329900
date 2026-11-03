@@ -136,6 +136,10 @@ enum UISnapshots {
             // Export only after the grace, and without a document that checks (v2026.11.04's texts).
             (licenses.signedIn, .expired(outdated: false, lastSuccessAt: now.addingTimeInterval(-9 * 86_400))),
             (licenses.signedIn, .unverified),
+            // The app's own (the owner, 3 November): renewals failing for two days, the document's
+            // last two days ahead, then the grace.
+            (licenses.signedIn, .renewalFailing(since: now.addingTimeInterval(-2 * 86_400), reason: .noAnswer, status: nil,
+                                                until: now.addingTimeInterval(5 * 86_400))),
         ]
         // Pictures of five at most: a window no taller than CI's screen (run 594 cut the tenth).
         for (part, range) in [("license-banners", 0..<5), ("license-banners-2", 5..<10), ("license-banners-3", 10..<shown.count)] {

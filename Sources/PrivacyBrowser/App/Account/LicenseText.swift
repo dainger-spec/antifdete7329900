@@ -122,6 +122,17 @@ enum LicenseText {
             let text = String(format: L(owner ? "contract.period.ending" : "contract.period.ending.member"), date(endsAt))
             return withoutEmail ? text + " " + L("license.periodEnding.noEmail") : text
         case let .trialStarted(until): return String(format: L("contract.trial.started"), date(until))
+        case let .renewalFailing(since, reason, status, until):
+            return String(format: L("license.renewal.failing"), date(since), renewalFailure(reason, status: status), date(until))
+        }
+    }
+
+    /// Why the renewals fail, in a few words: no answer, the server's error, an answer not taken.
+    static func renewalFailure(_ reason: LicenseClient.RefreshFailure.Reason, status: Int?) -> String {
+        switch reason {
+        case .noAnswer: return L("license.renewal.reason.noAnswer")
+        case .server: return String(format: L("license.renewal.reason.server"), status.map(String.init) ?? "?")
+        case .unusableAnswer: return L("license.renewal.reason.unusable")
         }
     }
 
