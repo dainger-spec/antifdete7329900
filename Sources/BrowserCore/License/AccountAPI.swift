@@ -256,8 +256,9 @@ public enum AccountAPI {
         case key(AccountKey)
     }
 
-    /// `POST /v1/devices/activate` (§6.1). `label`: only what the person typed — never the
-    /// computer's name (§1); empty when they typed none.
+    /// `POST /v1/devices/activate` (§6.1). `label`: what the person left in the field, which shows
+    /// this Mac's name to begin with (the owner, 3 November: by default the Mac's name from the
+    /// system); empty when they cleared it.
     public static func activate(_ credential: Credential, machineID: String, label: String, profileCount: Int, appVersion: String) -> AccountRequest {
         var body: [String: Any] = ["machineID": machineID, "label": label, "profileCount": profileCount, "appVersion": appVersion]
         switch credential {
@@ -269,10 +270,14 @@ public enum AccountAPI {
         }
     }
 
-    /// `POST /v1/device/entitlement` with the device's token (§6.2): no session needed.
-    public static func refresh(deviceToken: ServerToken, machineID: String, profileCount: Int, appVersion: String) -> AccountRequest {
-        AccountRequest(method: .post, path: "/v1/device/entitlement",
-                       body: json(["machineID": machineID, "profileCount": profileCount, "appVersion": appVersion]), bearer: deviceToken)
+    /// `POST /v1/device/entitlement` with the device's token (§6.2): no session needed. `label`: this
+    /// Mac's label — the one it was connected with, or this Mac's name — sent with each renewal
+    /// (the owner, 3 November); nil leaves it out (a server that refused it, `LicenseClient`).
+    public static func refresh(deviceToken: ServerToken, machineID: String, profileCount: Int, appVersion: String,
+                               label: String? = nil) -> AccountRequest {
+        var body: [String: Any] = ["machineID": machineID, "profileCount": profileCount, "appVersion": appVersion]
+        if let label { body["label"] = label }
+        return AccountRequest(method: .post, path: "/v1/device/entitlement", body: json(body), bearer: deviceToken)
     }
 
     /// `DELETE /v1/device` (§6.3): this Mac leaves the license; its place is free at once.

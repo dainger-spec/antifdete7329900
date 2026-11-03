@@ -4,6 +4,7 @@ import CryptoKit
 import Foundation
 import Network
 import os
+import SystemConfiguration
 
 /// Why a profile does not open or is not made: the license's rule, said as a rule and not as a
 /// fault (the owner, 1 November: "это правило, а не поломка").
@@ -66,13 +67,23 @@ final class LicenseModel: ObservableObject {
     private var observers: [NSObjectProtocol] = []
     private var failures = 0
     private var nextRetry: Date?
-    private var nextScheduledCheck = Date.distantPast
     private var lastActiveRefresh = Date.distantPast
     private var savedFloor: Date?
     /// The effective time's floor as it moves (§8.3): kept out of `record`, so that the minute's
     /// tick redraws nothing; written with it to `account.json`.
     private var floor: EffectiveClock?
     private var refreshing = false
+    /// A renewal asked while another was out, for what only a new one can say (the number of
+    /// profiles, a person's click): made right after it.
+    private var renewAgain: RenewalReason?
+    /// How many profiles the open vault holds, in this run; nil while it is not open.
+    private var knownProfileCount: Int?
+    /// The number the last renewal that reached the server carried.
+    private var sentProfileCount: Int?
+    /// The server refused a renewal with the label (HTTP 400): left out until the app starts again.
+    private var labelRefusedByServer = false
+    /// Several changes to the profiles in a row are one renewal.
+    private var profilesRenewal: Task<Void, Never>?
     /// The decision changed (mode, banners, document, limit): the subscription's reminders follow it
     /// (`ExpiryNotifications`, set by the app's model; never for the self-test's licenses).
     var onStateChanged: (() -> Void)?
@@ -197,8 +208,16 @@ final class LicenseModel: ObservableObject {
 
     // MARK: Running
 
-    /// Starts the minute's decision, the refreshes of §9.1 and their retries. Once, from the app's
-    /// own process.
+    /// Why a renewal is asked — said in the log, so that a renewal not asked, one that failed and one
+    /// that went through are told apart (the owner, 3 November: the app's log said nothing at all).
+    enum RenewalReason: String {
+        case launch, unlocked, profiles, timer, network, wake, active, retry, manual
+    }
+
+    /// Starts the minute's decision, the renewals and their retries. Once, from the app's own process.
+    /// A signed-in Mac renews at once, at each start, whatever the document says (the owner,
+    /// 3 November); then when the document asks for it (looked at every minute), after a wake and
+    /// when the network comes back, when the vault opens and when the number of profiles changes.
     func start() {
         guard isConfigured, timer == nil else { return }
         let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
@@ -209,72 +228,135 @@ final class LicenseModel: ObservableObject {
         let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] path in
             guard path.status == .satisfied else { return }
-            Task { @MainActor in self?.refreshIfDue() }
+            Task { @MainActor in self?.refreshIfDue(.network) }
         }
         monitor.start(queue: DispatchQueue(label: "PrivacyBrowser.License.path"))
         pathMonitor = monitor
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshIfDue() }
+            MainActor.assumeIsolated { self?.refreshIfDue(.wake) }
         })
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.becameActive() }
         })
         recompute()
-        if let state, RefreshSchedule.refreshAtLaunch(mode: state.mode, entitlement: state.entitlement, at: state.now) {
-            Task { await refresh() }
+        guard let state, RefreshSchedule.refreshAtLaunch(mode: state.mode, entitlement: state.entitlement, at: state.now) else {
+            log.notice("License: not signed in at the start; no renewal")
+            return
         }
-        nextScheduledCheck = Date().addingTimeInterval(15 * 60)
+        if let p = state.entitlement {
+            log.notice("License: signed in at the start; the document works \(Int(Self.hours(until: p.expiresAt)), privacy: .public) h more and asks to be renewed in \(Int(Self.hours(until: p.refreshAfter)), privacy: .public) h; renewing now")
+        } else {
+            log.notice("License: signed in at the start, with no document that checks; renewing now")
+        }
+        Task { await refresh(because: .launch) }
     }
 
     private func tick() {
         recompute()
-        let now = Date()
-        if let retry = nextRetry, now >= retry {
-            Task { await refresh() }
-        } else if now >= nextScheduledCheck {
-            nextScheduledCheck = now.addingTimeInterval(15 * 60)
-            refreshIfDue()
+        if let retry = nextRetry {
+            // After a failure, the retries' own times (1, 5, 15, 30, 60 minutes, then every hour).
+            if Date() >= retry { Task { await refresh(because: .retry) } }
+        } else {
+            refreshIfDue(.timer)
         }
     }
 
-    private func refreshIfDue() {
+    private func refreshIfDue(_ reason: RenewalReason) {
         recompute()
+        // The time now, not the state's: `state` is published again only when something shown
+        // changes, and its `now` stays where that happened. Compared with it, a document's refresh
+        // time never came while the app ran — measured on 3 November, before this: 17 minutes with
+        // a document due after 2, and not one renewal; by the code, not before the document expired.
         guard let state, state.mode != .notSignedIn,
-              RefreshSchedule.refreshDue(entitlement: state.entitlement, at: state.now) else { return }
-        Task { await refresh() }
+              RefreshSchedule.refreshDue(entitlement: state.entitlement, at: effectiveNow()) else { return }
+        Task { await refresh(because: reason) }
     }
 
     private func becameActive() {
         recompute()
         guard let state, Date().timeIntervalSince(lastActiveRefresh) >= 60,
-              RefreshSchedule.refreshWhenActive(mode: state.mode, entitlement: state.entitlement, at: state.now) else { return }
+              RefreshSchedule.refreshWhenActive(mode: state.mode, entitlement: state.entitlement, at: effectiveNow()) else { return }
         lastActiveRefresh = Date()
-        Task { await refresh() }
+        Task { await refresh(because: .active) }
     }
 
-    /// `POST /v1/device/entitlement` now (the account screen's "Обновить статус", the banners'
-    /// "Проверить сейчас", a return from the payment page, and §9.1's moments).
+    /// The open vault holds `count` profiles — at the unlock and after each change. Kept for the next
+    /// start (a renewal before the vault is opened says the last number known), and told to the
+    /// server when it is not the number it was last told.
+    func profilesKnown(count: Int) {
+        let first = knownProfileCount == nil
+        knownProfileCount = count
+        if record.profileCount != count {
+            record.profileCount = count
+            save()
+        }
+        guard record.isSignedIn, sentProfileCount != count else { return }
+        profilesRenewal?.cancel()
+        let reason: RenewalReason = first ? .unlocked : .profiles
+        profilesRenewal = Task { [weak self] in
+            // Several changes in a row — an import, a few profiles made at once — are one renewal.
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            await self?.refresh(because: reason)
+        }
+    }
+
+    /// The label a renewal carries: the one this Mac was connected with, else this Mac's name (the
+    /// owner, 3 November); none once the server refused it in this run.
+    private var renewalLabel: String? {
+        guard !labelRefusedByServer else { return nil }
+        return record.label ?? ThisMac.name
+    }
+
+    /// Hours from now until `date` — negative once it has passed — for the log.
+    private static func hours(until date: Date) -> Double { date.timeIntervalSinceNow / 3_600 }
+
+    /// `POST /v1/device/entitlement` now: the account screen's "Обновить статус", the banners'
+    /// "Проверить сейчас", a return from the payment page.
     func refresh() async {
-        guard !isPreview, let client, !refreshing, record.isSignedIn else { return }
+        await refresh(because: .manual)
+    }
+
+    /// A renewal (§6.2) with this Mac's number of profiles — the open vault's, or the last known
+    /// before it is opened — its version and its label; said in the app's log when it is asked and
+    /// when it ends, a failure as an error with why.
+    func refresh(because reason: RenewalReason) async {
+        guard !isPreview, let client, record.isSignedIn else { return }
+        guard !refreshing else {
+            if reason == .profiles || reason == .unlocked || reason == .manual { renewAgain = reason }
+            return
+        }
         refreshing = true
-        defer { refreshing = false }
+        let count = knownProfileCount ?? record.profileCount ?? 0
+        if knownProfileCount != nil {
+            log.notice("License renewal: asked (\(reason.rawValue, privacy: .public)), \(Int(count), privacy: .public) profile(s) in the open vault")
+        } else {
+            log.notice("License renewal: asked (\(reason.rawValue, privacy: .public)), \(Int(count), privacy: .public) profile(s) as last known, the vault not open")
+        }
         let before = state?.entitlement
-        let (updated, result) = await client.refresh(record, profileCount: profilesHere().count, wall: Date(),
-                                                     uptime: ProcessInfo.processInfo.systemUptime)
+        let report = await client.refreshReport(record, profileCount: count, label: renewalLabel, wall: Date(),
+                                                uptime: ProcessInfo.processInfo.systemUptime)
+        if report.labelRefused, !labelRefusedByServer {
+            labelRefusedByServer = true
+            log.notice("License renewal: the server refused the label (HTTP 400) and took the renewal without it; no label until the app starts again")
+        }
+        let result = report.result
         switch result {
         case .unreachable, .notSignedIn:
             // Nothing came: the record stays as it is now — with whatever changed here meanwhile.
             break
         default:
             // The app's own notes made while the request was out (a banner closed, a session dropped,
-            // an email learned) are kept: the answer is about the document. Signed out by the server,
-            // its session goes as `signOut(because:)` says.
-            var merged = updated
+            // an email learned, the profiles counted) are kept: the answer is about the document.
+            // Signed out by the server, its session goes as `signOut(because:)` says.
+            var merged = report.record
             merged.periodEndingClosed = record.periodEndingClosed
             merged.trialNoticeClosedFor = record.trialNoticeClosedFor
+            merged.profileCount = record.profileCount
             if case .signedOut = result {} else {
                 merged.session = record.session
                 merged.emailLinked = record.emailLinked
+                merged.label = record.label
             }
             record = merged
         }
@@ -286,29 +368,49 @@ final class LicenseModel: ObservableObject {
         case .accepted(let paid):
             failures = 0
             nextRetry = nil
+            sentProfileCount = count
+            record.renewalFailure = nil
             save()
             savedFloor = record.floorTime
             recompute()
             if paid, let after = state?.entitlement, after.periodEndsAt != before?.periodEndsAt { paymentReceived = after }
+            if let p = state?.entitlement {
+                log.notice("License renewal: done (\(reason.rawValue, privacy: .public)); the document works \(Int(Self.hours(until: p.expiresAt)), privacy: .public) h more and asks to be renewed in \(Int(Self.hours(until: p.refreshAfter)), privacy: .public) h")
+            }
         case .unreachable(let retryAfter):
             failures += 1
             let delay = max(RefreshSchedule.retryDelay(afterFailures: failures), TimeInterval(retryAfter ?? 0))
             nextRetry = Date().addingTimeInterval(delay)
-            log.notice("License refresh: unreachable, retry in \(Int(delay), privacy: .public) s")
-        case .signedOut(let reason):
+            let failure = report.failure ?? .noAnswer(kind: "unknown")
+            let now = Date()
+            record.renewalFailure = AccountRecord.RenewalFailure(since: record.renewalFailure?.since ?? now, lastAt: now,
+                                                                 reason: failure.reason, status: failure.status)
+            save()
+            if let p = state?.entitlement {
+                log.error("License renewal failed (\(reason.rawValue, privacy: .public)): \(failure.logKind, privacy: .public); retry in \(Int(delay), privacy: .public) s; the document works \(Int(Self.hours(until: p.expiresAt)), privacy: .public) h more, and this Mac \(Int(Self.hours(until: LicenseDecision.graceDate(p))), privacy: .public) h in all without the server")
+            } else {
+                log.error("License renewal failed (\(reason.rawValue, privacy: .public)): \(failure.logKind, privacy: .public); retry in \(Int(delay), privacy: .public) s; no document that checks")
+            }
+        case .signedOut(let why):
             nextRetry = nil
             save()
             forgetKey()
-            log.notice("License refresh: signed out by the server (\(reason.rawValue, privacy: .public))")
+            log.notice("License renewal: signed out by the server (\(why.rawValue, privacy: .public))")
         case .appOutdated:
             failures = 0
             nextRetry = nil
             save()
+            log.notice("License renewal: the server sent a document this version cannot judge; an update is asked for")
             onAppOutdated?()
         case .notSignedIn:
             break
         }
+        refreshing = false
         recompute()
+        if let again = renewAgain {
+            renewAgain = nil
+            await refresh(because: again)
+        }
     }
 
     // MARK: Signing in
@@ -404,11 +506,16 @@ final class LicenseModel: ObservableObject {
         isWorking = true
         defer { isWorking = false }
         let trimmed = String(label.trimmingCharacters(in: .whitespacesAndNewlines).prefix(64))
-        let result = await client.activate(credential, label: trimmed, profileCount: profilesHere().count, record: record,
+        let count = profilesHere().count
+        let result = await client.activate(credential, label: trimmed, profileCount: count, record: record,
                                            session: pendingSession, wall: Date(), uptime: ProcessInfo.processInfo.systemUptime)
         switch result {
         case .success(let activation):
             record = activation.record
+            // Sent again with each renewal (the owner, 3 November).
+            record.label = trimmed
+            record.renewalFailure = nil
+            sentProfileCount = count
             if case .key = credential {
                 record.rememberKey = rememberTypedKey ? nil : false
                 // Not remembered (§10.1): forgotten right after the request that needed it.
@@ -462,6 +569,8 @@ final class LicenseModel: ObservableObject {
     /// The vault was locked: the key is no longer held.
     func vaultLocked() {
         openVault = nil
+        // The number of profiles is known again when the vault opens; until then, the last one.
+        knownProfileCount = nil
         if record.signedInWith == .key { key = nil }
     }
 
@@ -774,5 +883,14 @@ final class LicenseModel: ObservableObject {
             fileProblem = String(describing: error)
             log.error("account.json could not be written: \(error.logKind, privacy: .public)")
         }
+    }
+}
+
+/// This Mac's name as System Settings › General › About shows it: a Mac's label by default (the
+/// owner, 3 November: "по умолчанию подставляй имя Mac из системы"). Never logged.
+enum ThisMac {
+    static var name: String {
+        let name = (SCDynamicStoreCopyComputerName(nil, nil) as String?) ?? Host.current().localizedName ?? ""
+        return String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(64))
     }
 }

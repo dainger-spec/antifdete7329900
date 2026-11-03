@@ -126,6 +126,10 @@ MainActor.assumeIsolated {
             exit(64)
         }
         SafariChrome.startStandalone(arguments: arguments)
+    } else if arguments.contains("--selftest-license-renewal") {
+        // The license's renewals as the app's own model makes them — a vault opened, a profile made —
+        // for scripts/license_renewal_check.py's stand-in server (LicenseRenewalScenario.swift).
+        LicenseRenewalScenario.start()
     } else if arguments.contains("--selftest-updates") {
         // The update scenarios of docs/UPDATES.md §8, driven by scripts/update_check.py on a CI
         // runner (UpdateSelfTest.swift): they replace this very app with another build.

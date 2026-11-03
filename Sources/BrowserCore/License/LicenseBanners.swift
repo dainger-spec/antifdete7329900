@@ -35,6 +35,10 @@ public enum LicenseBanner: Equatable, Sendable {
     case periodEnding(owner: Bool, endsAt: Date, final: Bool)
     /// `trial.started`: until the person closes it.
     case trialStarted(until: Date)
+    /// The app's own (the owner, 3 November): this Mac works, but its renewals have failed since
+    /// `since` — said once the document has less than two days left, with why and until when this
+    /// Mac works without one (the GRACE date). Silence is not success.
+    case renewalFailing(since: Date, reason: LicenseClient.RefreshFailure.Reason, status: Int?, until: Date)
 
     /// It says why this Mac works no more — export only, or not signed in — not a warning: such
     /// banners come before every other notice above the profiles, and in red.
@@ -42,7 +46,7 @@ public enum LicenseBanner: Equatable, Sendable {
         switch self {
         case .deviceRevoked, .machineMismatch, .notSignedIn, .accountDisabled, .periodEnded, .noLicense, .expired, .unverified:
             return true
-        case .grace, .appOutdated, .clockSkew, .periodEnding, .trialStarted:
+        case .grace, .appOutdated, .clockSkew, .periodEnding, .trialStarted, .renewalFailing:
             return false
         }
     }
@@ -56,8 +60,9 @@ public enum LicenseBanner: Equatable, Sendable {
         case .accountDisabled: return 4
         case .periodEnded: return 5
         case .noLicense: return 6
-        // One place for the three: they never hold at once (§8.5 item 7).
-        case .grace, .expired, .unverified: return 7
+        // One place for the four: they never hold at once (§8.5 item 7) — a failing renewal is
+        // said while the mode is FULL, the other three in other modes.
+        case .grace, .expired, .unverified, .renewalFailing: return 7
         case .appOutdated: return 8
         case .clockSkew: return 9
         case .periodEnding: return 10
@@ -79,6 +84,10 @@ public enum LicenseBanners {
     /// whom no letter can reach).
     public static let periodEndingWarning: TimeInterval = 7 * 86_400
     public static let periodEndingFinalWarning: TimeInterval = 86_400
+    /// A failing renewal is said once the document has less than this left before its expiry: a
+    /// day of failures is not alarming (the server issues a document for four days, renewed after
+    /// one); the last two days before the GRACE are.
+    public static let renewalFailingWarning: TimeInterval = 2 * 86_400
 
     public struct Input: Equatable, Sendable {
         public var mode: LicenseMode
@@ -93,11 +102,14 @@ public enum LicenseBanners {
         public var trialNoticeClosed: Bool
         /// The period-end warning the person closed, if any (§8.5 item 10).
         public var periodEndingClosed: AccountRecord.PeriodEndingClosed?
+        /// The renewals that failed since the last one that brought a document.
+        public var renewalFailure: AccountRecord.RenewalFailure?
         public var now: Date
 
         public init(mode: LicenseMode, entitlement: Entitlement?, signedOutReason: SignedOutReason? = nil, appOutdated: Bool = false,
                     lastSuccessAt: Date? = nil, clockSkew: TimeInterval? = nil, trialNoticeClosed: Bool = false,
-                    periodEndingClosed: AccountRecord.PeriodEndingClosed? = nil, now: Date) {
+                    periodEndingClosed: AccountRecord.PeriodEndingClosed? = nil,
+                    renewalFailure: AccountRecord.RenewalFailure? = nil, now: Date) {
             self.mode = mode
             self.entitlement = entitlement
             self.signedOutReason = signedOutReason
@@ -106,6 +118,7 @@ public enum LicenseBanners {
             self.clockSkew = clockSkew
             self.trialNoticeClosed = trialNoticeClosed
             self.periodEndingClosed = periodEndingClosed
+            self.renewalFailure = renewalFailure
             self.now = now
         }
     }
@@ -139,7 +152,10 @@ public enum LicenseBanners {
                 banners.append(.grace(outdated: input.appOutdated, lastSuccessAt: input.lastSuccessAt, until: LicenseDecision.graceDate(p)))
             }
         case .full:
-            break
+            if let p, let failure = input.renewalFailure, p.expiresAt.timeIntervalSince(input.now) < renewalFailingWarning {
+                banners.append(.renewalFailing(since: failure.since, reason: failure.reason, status: failure.status,
+                                               until: LicenseDecision.graceDate(p)))
+            }
         }
         let saysOutdated = banners.contains {
             switch $0 {

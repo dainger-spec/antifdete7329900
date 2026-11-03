@@ -116,14 +116,16 @@ public enum RefreshSchedule {
         return steps[min(failures - 1, steps.count - 1)]
     }
 
-    /// At launch: when the document asks for it, or the mode is not FULL.
+    /// At launch: always, when this Mac is signed in — whatever the document says (the owner,
+    /// 3 November: the server must hear from this Mac at each start, with its profiles, its version
+    /// and its name; until then a launch asked only after the document's refresh time, and a
+    /// relaunch within its day said nothing).
     public static func refreshAtLaunch(mode: LicenseMode, entitlement: Entitlement?, at t: Date) -> Bool {
-        guard mode != .notSignedIn else { return false }
-        guard mode == .full, let p = entitlement else { return true }
-        return t >= p.refreshAfter
+        mode != .notSignedIn
     }
 
-    /// Every 15 minutes, after the network came back and after a wake: when the document asks for it.
+    /// Every minute while the app runs, after the network came back and after a wake: when the
+    /// document asks for it.
     public static func refreshDue(entitlement: Entitlement?, at t: Date) -> Bool {
         guard let p = entitlement else { return true }
         return t >= p.refreshAfter

@@ -770,6 +770,23 @@ jobs:
           name: menu-walk
           path: build/menu-walk
           if-no-files-found: ignore
+      - name: The license's renewals, as the account server sees them (they must fail when broken)
+        # scripts/license_renewal_check.py: a stand-in account server on 127.0.0.1 answers the
+        # device's renewal with documents signed by a key made for the run, and keeps every request.
+        # The development build is started as a person starts it: the server must be asked at each
+        # start, again while it runs when the document asks, with the app's version, this Mac's name
+        # as its label and — through the app's own model, a vault opened and a profile made — the
+        # real number of profiles; a renewal the server refuses must be said in the app's own log;
+        # and the control, an address where nothing listens, must fail the check. The owner, 3
+        # November: one renewal in nine hours, and silence in the log.
+        timeout-minutes: 25
+        run: python3 scripts/license_renewal_check.py --app build/unsandboxed/Lumen.app --out build/license-renewal
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: license-renewal
+          path: build/license-renewal
+          if-no-files-found: ignore
       - name: What the app left in the account's keychain (a measurement)
         # The release check, the self-test of both builds and the menu walk ran between the two
         # snapshots: every item that appeared in the account's default keychain, by its attributes,

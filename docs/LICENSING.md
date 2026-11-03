@@ -40,6 +40,63 @@ Checked by: `LicenseClientTests.testWithoutTheServerTheMacWorksTheWholeGraceAndS
 clock set back, a document copied to another Mac; the self-test's "licensing" group against a
 server played on the loopback (`LicenseSelfTest`), with the server stopped.
 
+## Renewal (the owner, 3 November)
+
+The production server saw one `POST /v1/device/entitlement` from a Mac in nine hours — at its
+activation — and nothing through a full relaunch and three profiles made; its `profile_count`
+stayed 0, its `label` empty, and the app's own log said nothing. Measured the same day against a
+stand-in server (`scripts/license_renewal_check.py --measure`, the build of 0a8b6ff): started with a
+fresh document, and started again, the app asked nothing and its log said nothing; started with a
+document past its refresh time, it asked at once; left running 17 minutes with documents that asked
+to be renewed 2 minutes after issue, it asked nothing more. Why: a start renewed only once the
+document's refresh time had passed (a day after it was issued); running, the check every 15 minutes
+compared the refresh time with the license state's `now`, which stays where the state last changed
+— so by the code a running app renewed only once the document expired (four days) and the state
+changed with it. Before the vault was opened it counted 0 profiles; it sent no label after the
+activation, whose field was empty by default; a failed renewal left one line at `notice`, and a
+renewal not asked left none.
+
+Now (`LicenseModel`, `RefreshSchedule`, `LicenseClient.refreshReport`):
+
+- **When.** At each start of a signed-in Mac, whatever the document says. Then whenever the
+  document asks (its `refreshAfter`, compared with the time now every minute while the app runs),
+  after a wake and
+  when the network comes back, when the vault opens, and two seconds after the number of profiles
+  changes (several changes in a row are one renewal). After a failure, the retries' times: 1, 5,
+  15, 30, 60 minutes, then every hour.
+- **What.** This Mac's id, the app's version (`<version> (<build>)`), the number of profiles — the
+  open vault's, or before it is opened the last number known (`account.json`'s `profileCount`, a
+  number only) — and the label: the one this Mac was connected with, or this Mac's name from the
+  system (`ThisMac.name`). The activation's label field shows that name to begin with; whoever
+  wants another changes it, whoever wants none clears it. A server that refuses a renewal with a
+  label (HTTP 400) gets it again without one at once, and no label for the rest of the run: the
+  renewal matters more than the label.
+- **Said.** Each renewal in the app's log (subsystem `PrivacyBrowser`, category `License`): asked,
+  and why (`launch`, `unlocked`, `profiles`, `timer`, `network`, `wake`, `active`, `retry`,
+  `manual`); done, and for how long the document works; or `License renewal failed` at `error`
+  level, with why (no answer and the error's kind, the server's HTTP status and code, an answer
+  not taken and the check's name), the next try, and how long this Mac works without the server.
+  Nothing of the person's: no address, no message, no label. And to the person: once renewals
+  have been failing and the document has less than two days left, a banner says since when, why,
+  and until when this Mac works without a renewal, with "Проверить сейчас"; past the document's
+  expiry the grace's own banner says it (§8.5). Silence is no longer success.
+
+What the server must do with the label of a renewal is the server's: it is sent in the body of
+`POST /v1/device/entitlement` as `label` (64 characters at most), beside `machineID`,
+`profileCount` and `appVersion`. The server should take it — at least where the device's label is
+empty — and must not refuse the renewal for it.
+
+Checked by what the server sees, never by what the app says it sent:
+`scripts/license_renewal_check.py` (CI, "The license's renewals, as the account server sees them").
+A stand-in server on 127.0.0.1 signs documents with a key made for the run and keeps every request;
+the development build is started as a person starts it. Each start must reach the server; running,
+a document that asks to be renewed a minute after it is issued must be renewed again without a
+start; every request carries the version, this Mac's id and name; through the app's own model a
+vault with three profiles is opened and a fourth made, and the server must be told 3, then 4; a
+renewal the server refuses (500) must be said in the app's log; and the control — an address where
+nothing listens — must fail the check. Before this change the same check measured today's code
+(`--measure`, the measurement branch `claude/measure-license-renewal`).
+
 ## The key, kept like the master password
 
 A key is the whole account for whoever holds it — no email, no password. So (the owner, 1 November):

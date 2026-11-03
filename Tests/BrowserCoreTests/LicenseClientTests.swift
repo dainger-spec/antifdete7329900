@@ -651,4 +651,85 @@ final class LicenseClientTests: XCTestCase {
         XCTAssertEqual(oddResult, .accepted(paymentReceived: false))
         XCTAssertNil(oddRecord.unlinkCooldownSeconds)
     }
+
+    // MARK: Renewals that say what they are, and why they failed (the owner, 3 November)
+
+    func testARenewalCarriesTheLabelTheProfilesAndTheVersion() async throws {
+        let record = try await signedIn()
+        let server = FakeServer { _ in self.ok(["entitlement": self.document(issued: "2026-11-02T10:00:00Z"), "serverTime": "2026-11-02T10:00:00Z"]) }
+        let report = await client(server).refreshReport(record, profileCount: 3, label: "Mac of the check",
+                                                        wall: time("2026-11-02T10:00:00Z"), uptime: 2_000)
+        XCTAssertEqual(report.result, .accepted(paymentReceived: false))
+        XCTAssertNil(report.failure)
+        XCTAssertFalse(report.labelRefused)
+        let request = try XCTUnwrap(server.requests.first)
+        XCTAssertEqual(request.path, "/v1/device/entitlement")
+        let sent = body(request)
+        XCTAssertEqual(sent["label"] as? String, "Mac of the check")
+        XCTAssertEqual(sent["profileCount"] as? Int, 3)
+        XCTAssertEqual(sent["appVersion"] as? String, "1.2.0 (120)")
+        XCTAssertEqual(sent["machineID"] as? String, machineID)
+        // Without a label, none is sent: the request of the contract as it was.
+        let plain = FakeServer { _ in self.ok(["entitlement": self.document(issued: "2026-11-02T10:00:00Z"), "serverTime": "2026-11-02T10:00:00Z"]) }
+        _ = await client(plain).refresh(record, profileCount: 3, wall: time("2026-11-02T10:00:00Z"), uptime: 2_000)
+        XCTAssertNil(body(try XCTUnwrap(plain.requests.first))["label"])
+    }
+
+    func testAServerThatRefusesTheLabelGetsTheRenewalWithoutIt() async throws {
+        let record = try await signedIn()
+        let server = FakeServer { request in
+            if self.body(request)["label"] != nil { return self.error(400, "invalid_request", ["field": "label"]) }
+            return self.ok(["entitlement": self.document(issued: "2026-11-02T10:00:00Z"), "serverTime": "2026-11-02T10:00:00Z"])
+        }
+        let report = await client(server).refreshReport(record, profileCount: 3, label: "Mac", wall: time("2026-11-02T10:00:00Z"), uptime: 2_000)
+        XCTAssertEqual(report.result, .accepted(paymentReceived: false))
+        XCTAssertTrue(report.labelRefused)
+        XCTAssertEqual(server.requests.count, 2)
+        XCTAssertNil(body(server.requests[1])["label"])
+        XCTAssertEqual(body(server.requests[1])["profileCount"] as? Int, 3)
+        // A 400 to a renewal without a label is the server's answer, said as such: not tried again.
+        let refusing = FakeServer { _ in self.error(400, "invalid_request") }
+        let plain = await client(refusing).refreshReport(record, profileCount: 3, label: nil, wall: time("2026-11-02T10:00:00Z"), uptime: 2_000)
+        XCTAssertEqual(refusing.requests.count, 1)
+        XCTAssertFalse(plain.labelRefused)
+        XCTAssertEqual(plain.failure, .server(status: 400, code: "invalid_request"))
+    }
+
+    func testAFailedRenewalSaysWhy() async throws {
+        let record = try await signedIn()
+        let cases: [(String, () throws -> AccountResponse, LicenseClient.RefreshFailure.Reason, Int?)] = [
+            ("no network", { throw NoNetwork() }, .noAnswer, nil),
+            ("503", { self.error(503, "internal") }, .server, 503),
+            ("429", { self.error(429, "rate_limited", retryAfter: "120") }, .server, 429),
+            ("a captive portal's 200", { AccountResponse(status: 200, body: Data("<html><body>Wi-Fi</body></html>".utf8)) }, .unusableAnswer, nil),
+            ("a changed document", { self.ok(["entitlement": self.document(signer: Curve25519.Signing.PrivateKey()),
+                                              "serverTime": "2026-11-02T10:00:00Z"]) }, .unusableAnswer, nil),
+        ]
+        for (what, answer, reason, status) in cases {
+            let server = FakeServer { _ in try answer() }
+            let report = await client(server).refreshReport(record, profileCount: 2, label: nil, wall: time("2026-11-02T10:00:00Z"), uptime: 2_000)
+            XCTAssertEqual(report.failure?.reason, reason, what)
+            XCTAssertEqual(report.failure?.status, status, what)
+            XCTAssertEqual(report.record, record, what)
+        }
+        // Said in the log as a type, a status or a check's name — never an address or a message.
+        let changed = FakeServer { _ in
+            self.ok(["entitlement": self.document(signer: Curve25519.Signing.PrivateKey()), "serverTime": "2026-11-02T10:00:00Z"])
+        }
+        let report = await client(changed).refreshReport(record, profileCount: 2, label: nil, wall: time("2026-11-02T10:00:00Z"), uptime: 2_000)
+        XCTAssertEqual(report.failure?.logKind, "an answer not taken (bad_signature)")
+        let busy = FakeServer { _ in self.error(429, "rate_limited", retryAfter: "120") }
+        let limited = await client(busy).refreshReport(record, profileCount: 2, label: nil, wall: time("2026-11-02T10:00:00Z"), uptime: 2_000)
+        XCTAssertEqual(limited.failure?.logKind, "HTTP 429 rate_limited")
+    }
+
+    func testAnAcceptedRenewalClearsTheNoteOfFailures() async throws {
+        var record = try await signedIn()
+        record.renewalFailure = AccountRecord.RenewalFailure(since: time("2026-11-02T10:00:00Z"), lastAt: time("2026-11-02T11:00:00Z"),
+                                                             reason: .noAnswer, status: nil)
+        let server = FakeServer { _ in self.ok(["entitlement": self.document(issued: "2026-11-02T12:00:00Z"), "serverTime": "2026-11-02T12:00:00Z"]) }
+        let report = await client(server).refreshReport(record, profileCount: 2, label: nil, wall: time("2026-11-02T12:00:00Z"), uptime: 3_000)
+        XCTAssertEqual(report.result, .accepted(paymentReceived: false))
+        XCTAssertNil(report.record.renewalFailure)
+    }
 }

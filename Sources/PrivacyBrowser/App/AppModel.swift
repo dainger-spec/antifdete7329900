@@ -573,6 +573,8 @@ final class AppModel: ObservableObject {
 
     func refresh() {
         profiles = repository?.list() ?? []
+        // The license tells the server the real number with its renewals (the owner, 3 November).
+        if repository != nil { license.profilesKnown(count: profiles.count) }
         updateIndexNotice()
         let kept = repository?.keptDeletedProfiles() ?? []
         if kept != keptDeletedProfiles { keptDeletedProfiles = kept }

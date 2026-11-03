@@ -643,6 +643,63 @@ final class LicenseTests: XCTestCase {
         XCTAssertNil(read.emailLinked)
         XCTAssertTrue(read.keepsKey)
     }
+
+    // MARK: Renewals (the owner, 3 November)
+
+    func testEveryStartOfASignedInMacRenewsWhateverTheDocumentSays() throws {
+        let p = try entitlement()
+        // An hour after the document was issued, a day before it asks to be renewed.
+        let fresh = try time("2026-11-01T11:00:00Z")
+        XCTAssertTrue(RefreshSchedule.refreshAtLaunch(mode: .full, entitlement: p, at: fresh))
+        XCTAssertTrue(RefreshSchedule.refreshAtLaunch(mode: .exportOnly, entitlement: nil, at: fresh))
+        XCTAssertFalse(RefreshSchedule.refreshAtLaunch(mode: .notSignedIn, entitlement: nil, at: fresh))
+        // While the app runs: when the document asks.
+        XCTAssertFalse(RefreshSchedule.refreshDue(entitlement: p, at: fresh))
+        XCTAssertTrue(RefreshSchedule.refreshDue(entitlement: p, at: try time("2026-11-02T10:00:00Z")))
+    }
+
+    func testAFailingRenewalIsSaidInTheDocumentsLastTwoDays() throws {
+        let p = try entitlement()
+        let since = try time("2026-11-02T10:05:00Z")
+        let failure = AccountRecord.RenewalFailure(since: since, lastAt: try time("2026-11-03T12:00:00Z"), reason: .noAnswer, status: nil)
+        func banners(_ mode: LicenseMode, at text: String, _ failure: AccountRecord.RenewalFailure?) throws -> [LicenseBanner] {
+            LicenseBanners.banners(.init(mode: mode, entitlement: p, renewalFailure: failure, now: try time(text)))
+        }
+        // Three days before the document expires, a day of failures is not said.
+        XCTAssertEqual(try banners(.full, at: "2026-11-02T09:00:00Z", failure), [])
+        // Less than two days before: said, with since when, why, and until when this Mac works.
+        XCTAssertEqual(try banners(.full, at: "2026-11-03T12:00:00Z", failure),
+                       [.renewalFailing(since: since, reason: .noAnswer, status: nil, until: LicenseDecision.graceDate(p))])
+        // No failure: nothing. The grace says it in its own words.
+        XCTAssertEqual(try banners(.full, at: "2026-11-03T12:00:00Z", nil), [])
+        XCTAssertFalse(try banners(.grace, at: "2026-11-06T12:00:00Z", failure).contains {
+            if case .renewalFailing = $0 { return true }
+            return false
+        })
+        XCTAssertFalse(LicenseBanner.renewalFailing(since: since, reason: .server, status: 503, until: since).stopsWork)
+    }
+
+    func testTheRenewalsNotesAreKeptAndASignOutForgetsThisMacsLabel() throws {
+        var record = AccountRecord()
+        record.deviceID = deviceID
+        record.deviceToken = ServerToken("lmd_device_token")
+        record.label = "Mac of the check"
+        record.profileCount = 3
+        record.renewalFailure = AccountRecord.RenewalFailure(since: try time("2026-11-02T10:00:00Z"), lastAt: try time("2026-11-02T11:00:00Z"),
+                                                             reason: .server, status: 503)
+        let data = try JSONCoding.encoder.encode(record)
+        XCTAssertEqual(try JSONCoding.decoder.decode(AccountRecord.self, from: data), record)
+        // A note that does not read is left out, not the whole file.
+        var object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object["renewalFailure"] = "not a note"
+        let odd = try JSONCoding.decoder.decode(AccountRecord.self, from: try JSONSerialization.data(withJSONObject: object))
+        XCTAssertNil(odd.renewalFailure)
+        XCTAssertEqual(odd.label, "Mac of the check")
+        record.signOut(because: nil)
+        XCTAssertNil(record.label)
+        XCTAssertNil(record.renewalFailure)
+        XCTAssertEqual(record.profileCount, 3)
+    }
 }
 
 /// The key of an account without an email, kept in the vault (`AccountKeyVault`).
