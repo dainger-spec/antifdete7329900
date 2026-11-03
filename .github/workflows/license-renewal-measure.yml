@@ -1,0 +1,31 @@
+name: License renewal (measurement)
+
+# The renewal check of scripts/license_renewal_check.py on a measurement branch of its own: the fix
+# as it is (…-fixed, every requirement checked), and the fix with its sending broken on purpose
+# (…-broken, which must fail). Never merged.
+on:
+  push:
+    branches: ["claude/measure-license-renewal*"]
+
+jobs:
+  measure:
+    name: Renewals as the server sees them (macOS 26)
+    runs-on: macos-26
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the app without the App Sandbox (a development build — no account server of its own)
+        run: SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: What the server sees of this build's renewals (the check)
+        timeout-minutes: 40
+        run: |
+          phases="launch,due,periodic,failure,control,profiles"
+          # The broken build: every phase said, the harness's own control left out (it would stop the run first).
+          case "$GITHUB_REF_NAME" in *broken*) phases="launch,periodic,failure,control,profiles" ;; esac
+          python3 scripts/license_renewal_check.py --app build/unsandboxed/Lumen.app --out build/license-renewal --phases "$phases"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: license-renewal
+          path: build/license-renewal
+          if-no-files-found: ignore
