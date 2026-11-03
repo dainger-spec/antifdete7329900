@@ -277,7 +277,8 @@ public enum AccountAPI {
                                label: String? = nil) -> AccountRequest {
         var body: [String: Any] = ["machineID": machineID, "profileCount": profileCount, "appVersion": appVersion]
         if let label { body["label"] = label }
-        return AccountRequest(method: .post, path: "/v1/device/entitlement", body: json(body), bearer: deviceToken)
+        // BROKEN ON PURPOSE (measurement branch): the renewal goes to an address the server does not have.
+        return AccountRequest(method: .post, path: "/v1/device/entitlement-broken", body: json(body), bearer: deviceToken)
     }
 
     /// `DELETE /v1/device` (§6.3): this Mac leaves the license; its place is free at once.
