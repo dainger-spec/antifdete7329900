@@ -37,8 +37,6 @@ enum KeychainIsolation {
         var entitlements: Verdict
         var login: Verdict
         var items: Verdict
-        /// What each process said, for the log.
-        var details: [String]
         /// Whether this process holds the application identifier: only a signature by the team can
         /// carry it (CI run 646: an ad hoc one is not let start), so a skipped verdict there is a
         /// failure of the check, not of the machine.
@@ -66,15 +64,17 @@ enum KeychainIsolation {
     }
 
     /// The profiles `first` and `second` must be running in processes of their own, started by
-    /// `manager`.
-    static func look(manager: ProfileManager, profiles first: UUID, _ second: UUID) async -> Outcome {
+    /// `manager`. Each detail is said as soon as it is known (`say`): a check that stops on the way
+    /// has said how far it got.
+    static func look(manager: ProfileManager, profiles first: UUID, _ second: UUID,
+                     say: @escaping (String) -> Void) async -> Outcome {
         let service = "io.lumenbrowser.keychain-check.\(UUID().uuidString.prefix(8))"
         let accounts = Accounts()
-        var details: [String] = []
+        func note(_ detail: String) { say(detail) }
 
         // The app itself, outside every profile: an item of its own in each keychain.
         let app = KeychainCheck.run(KeychainProbe(service: service, add: accounts.app))
-        details.append("the app (this process): " + describe(app, accounts))
+        note("the app (this process): " + describe(app, accounts))
 
         // The control: two processes of the profile's executable outside a profile's sandbox, one
         // keeping an item, the other looking — what a profile's process could do without its lock.
@@ -82,41 +82,59 @@ enum KeychainIsolation {
         var writer: KeychainReport?
         var reader: KeychainReport?
         if let profileExecutable {
-            writer = await KeychainCheck.probe(profileExecutable, KeychainProbe(service: service, add: accounts.control))
-            reader = await KeychainCheck.probe(profileExecutable, KeychainProbe(service: service))
+            let wrote = await KeychainCheck.probe(profileExecutable, KeychainProbe(service: service, add: accounts.control))
+            writer = wrote.report
+            note("a process of the profile's executable outside a profile's sandbox, keeping an item: "
+                 + (writer.map { describe($0, accounts) } ?? wrote.failure))
+            let read = await KeychainCheck.probe(profileExecutable, KeychainProbe(service: service))
+            reader = read.report
+            note("another, looking: " + (reader.map { describe($0, accounts) } ?? read.failure))
+        } else {
+            note("the profile's executable could not be had: no process of it outside a profile's sandbox to compare with")
         }
-        details.append("a process of the profile's executable outside a profile's sandbox, keeping an item: "
-                       + (writer.map { describe($0, accounts) } ?? "no answer"))
-        details.append("another, looking: " + (reader.map { describe($0, accounts) } ?? "no answer"))
 
         // Profile A tries to keep an item; profile B looks.
         var reports: [UUID: KeychainReport] = [:]
         let previous = manager.onKeychainReport
         manager.onKeychainReport = { id, report in reports[id] = report }
         defer { manager.onKeychainReport = previous }
-        if manager.checkKeychain(first, KeychainProbe(service: service, add: accounts.first)) {
+        let askedFirst = manager.checkKeychain(first, KeychainProbe(service: service, add: accounts.first))
+        if askedFirst {
             _ = await waitUntil(timeout: 20) { reports[first] != nil }
         }
-        if manager.checkKeychain(second, KeychainProbe(service: service)) {
+        let askedSecond = manager.checkKeychain(second, KeychainProbe(service: service))
+        if askedSecond {
             _ = await waitUntil(timeout: 20) { reports[second] != nil }
         }
         let a = reports[first]
         let b = reports[second]
-        for (name, report) in [("profile A", a), ("profile B", b)] {
-            details.append("\(name): " + (report.map { describe($0, accounts) + " (the reader's control \($0.readerSawItsControl ? "seen" : "NOT seen"))" } ?? "no answer"))
+        for (name, report, asked) in [("profile A", a, askedFirst), ("profile B", b, askedSecond)] {
+            note("\(name): " + (report.map { describe($0, accounts) + " (the reader's control \($0.readerSawItsControl ? "seen" : "NOT seen"))" }
+                                ?? (asked ? "no answer in 20 s" : "not asked: it has no process of its own")))
         }
 
         // A profile as it was started before LumenProfile: a process of the app's own executable.
         var before: KeychainReport?
+        var whyNot = "the app's own executable could not be had"
         if let executable = Bundle.main.executableURL {
-            before = await KeychainCheck.probe(executable, KeychainProbe(service: service))
+            let looked = await KeychainCheck.probe(executable, KeychainProbe(service: service))
+            before = looked.report
+            whyNot = looked.failure
         }
-        details.append("a process of the app's executable (as profiles were started before): " + (before.map { describe($0, accounts) } ?? "no answer"))
+        note("a process of the app's executable (as profiles were started before): " + (before.map { describe($0, accounts) } ?? whyNot))
 
         // Nothing of the check's is left: each removes what it kept.
         _ = KeychainCheck.run(KeychainProbe(service: service, remove: [accounts.app]))
         if let profileExecutable, writer?.loginAdded == 0 || writer?.added == 0 {
-            _ = await KeychainCheck.probe(profileExecutable, KeychainProbe(service: service, remove: [accounts.control]))
+            let removal = await KeychainCheck.probe(profileExecutable, KeychainProbe(service: service, remove: [accounts.control]))
+            if let removed = removal.report {
+                if removed.loginRemoved != 0 || (writer?.added == 0 && removed.removed != 0) {
+                    note("the control's item: removing it answered \(status(removed.loginRemoved)) (login), "
+                         + "\(status(removed.removed)) (data-protection)")
+                }
+            } else {
+                note("the control's item not removed: \(removal.failure)")
+            }
         }
         if a?.added == 0 || a?.loginAdded == 0 {
             reports[first] = nil
@@ -129,7 +147,7 @@ enum KeychainIsolation {
         return Outcome(entitlements: entitlementsVerdict(a: a, b: b, before: before),
                        login: loginVerdict(app: app, writer: writer, reader: reader, a: a, b: b, accounts: accounts),
                        items: itemsVerdict(app: app, a: a, b: b, before: before, accounts: accounts),
-                       details: details, appHoldsTeamIdentity: appHoldsTeamIdentity)
+                       appHoldsTeamIdentity: appHoldsTeamIdentity)
     }
 
     private static func entitlementsVerdict(a: KeychainReport?, b: KeychainReport?, before: KeychainReport?) -> Verdict {
@@ -154,10 +172,16 @@ enum KeychainIsolation {
 
     private static func loginVerdict(app: KeychainReport, writer: KeychainReport?, reader: KeychainReport?,
                                      a: KeychainReport?, b: KeychainReport?, accounts: Accounts) -> Verdict {
-        guard let writer, let reader, writer.loginAdded == 0, reader.loginSeen.contains(accounts.control) else {
+        // A control that did not answer is the check not made, not a Mac with nothing to protect: a
+        // process that hangs fails the check (with where it stopped, said above), as a profile's does.
+        guard let writer, let reader else {
+            return .fail("a process of the profile's executable outside a profile's sandbox did not answer (the control): "
+                         + "the check could not have told")
+        }
+        guard writer.loginAdded == 0, reader.loginSeen.contains(accounts.control) else {
             return .skip("a process of the profile's executable outside a profile's sandbox could not keep an item in this Mac's login "
-                         + "keychain and have another process see it (kept: \(status(writer?.loginAdded)); shown to the other: "
-                         + "\(label(reader?.loginSeen ?? [], accounts))): nothing here for a profile to be kept from")
+                         + "keychain and have another process see it (kept: \(status(writer.loginAdded)); shown to the other: "
+                         + "\(label(reader.loginSeen, accounts))): nothing here for a profile to be kept from")
         }
         guard app.loginAdded == 0, app.loginSeen.contains(accounts.app) else {
             return .fail("the app itself could not keep and see its own item in the login keychain (\(status(app.loginAdded))), "

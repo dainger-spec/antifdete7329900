@@ -5111,9 +5111,10 @@ final class SelfTest {
             await manager.shutDown()
             return
         }
-        let outcome = await KeychainIsolation.look(manager: manager, profiles: first.id, second.id)
+        let outcome = await KeychainIsolation.look(manager: manager, profiles: first.id, second.id) { detail in
+            self.info("keychain: \(detail)")
+        }
         await manager.shutDown()
-        outcome.details.forEach { info("keychain: \($0)") }
         for (name, verdict) in KeychainIsolation.verdicts(outcome) {
             switch verdict {
             case .pass: check(name, true)

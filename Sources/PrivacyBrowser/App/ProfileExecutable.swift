@@ -166,19 +166,23 @@ enum KeychainCheck {
     /// keychain call asks for, looked up to say whether the refusal holds.
     static let securitydServices = ["com.apple.SecurityServer", "com.apple.securityd.xpc"]
 
-    static func run(_ probe: KeychainProbe) -> KeychainReport {
+    /// `step` is told each step before it is taken (a process asked from outside says them as it
+    /// goes: one that stops answering has said where).
+    static func run(_ probe: KeychainProbe, step: ((String) -> Void)? = nil) -> KeychainReport {
         var report = KeychainReport()
+        step?("entitlements")
         if let task = SecTaskCreateFromSelf(nil) {
             report.held = ProfileExecutable.keychainEntitlements.filter { SecTaskCopyValueForEntitlement(task, $0 as CFString, nil) != nil }
             report.readerSawItsControl = SecTaskCopyValueForEntitlement(task, controlEntitlement as CFString, nil) != nil
         }
+        step?("securityd's services looked up")
         for name in securitydServices { report.lookups[name] = lookUp(name) }
-        let dataProtection = items(dataProtection: true, probe)
+        let dataProtection = items(dataProtection: true, probe, step: step)
         report.added = dataProtection.added
         report.found = dataProtection.found
         report.seen = dataProtection.seen
         report.removed = dataProtection.removed
-        let login = items(dataProtection: false, probe)
+        let login = items(dataProtection: false, probe, step: step)
         report.loginAdded = login.added
         report.loginFound = login.found
         report.loginSeen = login.seen
@@ -194,10 +198,12 @@ enum KeychainCheck {
     /// holds none, there is no default one, and asking for it left the process waiting on the
     /// system's dialog (CI run 656, both macOS). What can reach the account's keychain is what the
     /// check is about.
-    private static func items(dataProtection: Bool, _ probe: KeychainProbe)
+    private static func items(dataProtection: Bool, _ probe: KeychainProbe, step: ((String) -> Void)?)
         -> (added: Int32?, found: Int32, seen: [String], removed: Int32?) {
+        let which = dataProtection ? "data-protection keychain" : "login keychain"
         var loginKeychain: SecKeychain?
         if !dataProtection {
+            step?("login keychain: opened by its path")
             let opened = openLoginKeychain()
             guard let keychain = opened.keychain else {
                 // Not opened: nothing was asked of it, and nothing could be kept or shown.
@@ -214,6 +220,7 @@ enum KeychainCheck {
             item[kSecAttrAccount as String] = account
             item[kSecValueData as String] = Data("lumen keychain check".utf8)
             if let loginKeychain { item[kSecUseKeychain as String] = loginKeychain }
+            step?("\(which): an item added")
             added = SecItemAdd(item as CFDictionary, nil)
         }
         var query = base
@@ -222,6 +229,7 @@ enum KeychainCheck {
         query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
         if let loginKeychain { query[kSecMatchSearchList as String] = [loginKeychain] }
         var result: CFTypeRef?
+        step?("\(which): the service's items looked for")
         let found = SecItemCopyMatching(query as CFDictionary, &result)
         let seen = ((result as? [[String: Any]]) ?? []).compactMap { $0[kSecAttrAccount as String] as? String }.sorted()
         var removed: Int32?
@@ -230,6 +238,7 @@ enum KeychainCheck {
             item[kSecAttrAccount as String] = account
             item[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
             if let loginKeychain { item[kSecMatchSearchList as String] = [loginKeychain] }
+            step?("\(which): an item removed")
             let status = SecItemDelete(item as CFDictionary)
             // The first that did not go through, or 0.
             if removed == nil || removed == errSecSuccess { removed = status }
@@ -273,14 +282,22 @@ enum KeychainCheck {
         var probe = KeychainProbe(service: arguments[index + 1])
         if let add = arguments.firstIndex(of: "--add"), arguments.indices.contains(add + 1) { probe.add = arguments[add + 1] }
         probe.remove = arguments.indices.filter { arguments[$0] == "--remove" && arguments.indices.contains($0 + 1) }.map { arguments[$0 + 1] }
-        let report = run(probe)
+        // Each step said as it is taken, at once: a process that stops answering has said where.
+        let report = run(probe) { step in
+            print("KEYCHAIN-PROBE-STEP \(step)")
+            fflush(stdout)
+        }
         guard let data = try? JSONEncoder().encode(report), let line = String(data: data, encoding: .utf8) else { exit(1) }
         print("KEYCHAIN-PROBE \(line)")
         exit(0)
     }
 
-    /// What a `--keychain-probe` run of the executable at `executable` printed, or nil.
-    static func probe(_ executable: URL, _ probe: KeychainProbe) async -> KeychainReport? {
+    /// What a `--keychain-probe` run of the executable at `executable` printed — or, with no report,
+    /// why not. Never longer than `timeout`: a process that has not answered by then is ended, and
+    /// the reason names the last step it said it was taking (CI run 662: one of these processes never
+    /// answered, and the release check ran out of its four minutes without a word of where).
+    static func probe(_ executable: URL, _ probe: KeychainProbe, timeout: TimeInterval = 20) async
+        -> (report: KeychainReport?, failure: String) {
         var arguments = ["--keychain-probe", probe.service]
         if let account = probe.add { arguments += ["--add", account] }
         for account in probe.remove { arguments += ["--remove", account] }
@@ -290,24 +307,95 @@ enum KeychainCheck {
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
+        let output = ProbeOutput()
+        pipe.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if chunk.isEmpty {
+                handle.readabilityHandler = nil
+                output.finish()
+            } else {
+                output.append(chunk)
+            }
+        }
         do {
             try process.run()
         } catch {
-            return nil
+            pipe.fileHandleForReading.readabilityHandler = nil
+            return (nil, "could not be started: \(error.localizedDescription)")
         }
-        let output: Data = await withCheckedContinuation { continuation in
-            DispatchQueue.global().async {
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                process.waitUntilExit()
-                continuation.resume(returning: data)
+        // Its answer, not the end of its output, is what is waited for: an answer is taken as soon as
+        // it is printed, whoever else may still hold the other end of the pipe.
+        let deadline = Date().addingTimeInterval(timeout)
+        while output.report == nil, process.isRunning, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        // A process that has just ended: what it printed last, until the pipe says there is no more.
+        let drained = Date().addingTimeInterval(2)
+        while output.report == nil, !process.isRunning, !output.ended, Date() < drained {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        pipe.fileHandleForReading.readabilityHandler = nil
+        if let report = output.report {
+            // It ends by itself right after its answer (exit), or is ended: none is left behind.
+            let ending = Date().addingTimeInterval(2)
+            while process.isRunning, Date() < ending {
+                try? await Task.sleep(nanoseconds: 50_000_000)
             }
+            if process.isRunning { process.terminate() }
+            return (report, "")
         }
-        let text = String(decoding: output, as: UTF8.self)
-        guard let line = text.split(separator: "\n").first(where: { $0.hasPrefix("KEYCHAIN-PROBE {") }) else { return nil }
-        return try? JSONDecoder().decode(KeychainReport.self, from: Data(line.dropFirst("KEYCHAIN-PROBE ".count).utf8))
+        let last = output.steps.last ?? "none (it said nothing)"
+        if process.isRunning {
+            process.terminate()
+            return (nil, "no answer in \(Int(timeout)) s, ended; its last step: \(last)")
+        }
+        return (nil, "ended with \(process.terminationStatus) and no answer; its last step: \(last)")
     }
 
     /// `errSecMissingEntitlement`: the keychain's word for a process none of whose entitlements gives
     /// it a keychain access group.
     static let missingEntitlement: Int32 = -34018
+}
+
+/// What a probe's process has printed so far: its steps, and its report once it is there. Filled
+/// from the pipe's own queue, read from the waiting task.
+private final class ProbeOutput: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+    private var sawEnd = false
+
+    func append(_ chunk: Data) {
+        lock.lock()
+        data.append(chunk)
+        lock.unlock()
+    }
+
+    /// The pipe said there is no more: every process holding its other end has closed it.
+    func finish() {
+        lock.lock()
+        sawEnd = true
+        lock.unlock()
+    }
+
+    var ended: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return sawEnd
+    }
+
+    /// Decoded whole, never a chunk at a time: a chunk may end in the middle of a character.
+    private var lines: [Substring] {
+        lock.lock()
+        defer { lock.unlock() }
+        return String(decoding: data, as: UTF8.self).split(separator: "\n")
+    }
+
+    var steps: [String] {
+        lines.filter { $0.hasPrefix("KEYCHAIN-PROBE-STEP ") }.map { String($0.dropFirst("KEYCHAIN-PROBE-STEP ".count)) }
+    }
+
+    var report: KeychainReport? {
+        guard let line = lines.first(where: { $0.hasPrefix("KEYCHAIN-PROBE {") }) else { return nil }
+        return try? JSONDecoder().decode(KeychainReport.self, from: Data(line.dropFirst("KEYCHAIN-PROBE ".count).utf8))
+    }
 }

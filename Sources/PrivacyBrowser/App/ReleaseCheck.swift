@@ -153,9 +153,11 @@ enum ReleaseCheck {
             await manager.shutDown()
             return fail("a second profile, for the keychain, did not come up in a process of its own")
         }
-        let outcome = await KeychainIsolation.look(manager: manager, profiles: profile.id, other.id)
+        // Each detail as soon as it is known: a check that stops on the way has said how far it got.
+        let outcome = await KeychainIsolation.look(manager: manager, profiles: profile.id, other.id) { detail in
+            print("RELEASE-CHECK INFO keychain: \(detail)")
+        }
         await manager.shutDown()
-        outcome.details.forEach { print("RELEASE-CHECK INFO keychain: \($0)") }
         for (name, verdict) in KeychainIsolation.verdicts(outcome) {
             switch verdict {
             case .pass:
