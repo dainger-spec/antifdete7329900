@@ -1,0 +1,28 @@
+name: License renewal (measurement)
+
+# What the account server sees of a build's renewals of the document of rights — the measurement of
+# 3 November (scripts/license_renewal_check.py --measure). A measurement branch's workflow only.
+on:
+  push:
+    branches: ["claude/measure-license-renewal*"]
+
+jobs:
+  measure:
+    name: Renewals as the server sees them (macOS 26)
+    runs-on: macos-26
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the app without the App Sandbox (a development build — no account server of its own)
+        run: SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: What the server sees of this build's renewals (a measurement)
+        timeout-minutes: 50
+        run: |
+          python3 scripts/license_renewal_check.py --app build/unsandboxed/Lumen.app --out build/license-renewal \
+            ${PB_MEASURE_ARGS:---measure --phases launch,due,periodic}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: license-renewal
+          path: build/license-renewal
+          if-no-files-found: ignore
