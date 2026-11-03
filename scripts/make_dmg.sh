@@ -17,17 +17,16 @@
 # `--plain` makes it plain from the start; `--no-picture` lays the window out without setting its
 # picture — CI's control for the check that the window shows it (scripts/dmg_window_shot.sh).
 #
-# The picture is set last, after every other property of the window and the icons' places: in an
-# Apple Developer Forums thread (836253) a developer found that Finder drops a window's picture when
-# other properties are changed after it, and 0.1.1's script set it before the icons' places. Whether
-# that is what macOS 27 does is measured by CI's macOS 27 job, with two knobs for that measurement
-# only: DMG_PICTURE_ORDER=first sets it where 0.1.1 did, DMG_PICTURE_FORMAT=png gives Finder a plain
-# PNG (1x) instead of the TIFF holding both 1x and 2x.
+# The picture is set last, after every other property of the window and the icons' places (an Apple
+# Developer Forums thread, 836253: Finder drops a window's picture when other properties are changed
+# after it). CI's macOS 27 measured it set last, set first as 0.1.1's script did, and as a plain PNG:
+# Finder kept the whole layout in all three, and showed the picture (CI run 672).
 #
-# What it says of the layout is what the image holds, read back, never a claim: Finder's own answer
-# when asked for the window's picture right after setting it, and what the volume's .DS_Store
-# names, before the image is made read-only and in the image as it will be downloaded
-# (scripts/dmg_facts.py), and whether that .DS_Store came through byte for byte. On 3 November 0.1.1's
+# What it says of the layout is what the image holds, read back, never a claim: what the volume's
+# .DS_Store names, before the image is made read-only and in the image as it will be downloaded
+# (scripts/dmg_facts.py), and whether that .DS_Store came through byte for byte. (Finder's own
+# answer, asked for the window's picture, is no fact: on macOS 27 it fails with -10000 even when the
+# picture is set and kept — CI run 672.) On 3 November 0.1.1's
 # image had its icons and its window's size and no picture, while this script said "laid out by
 # Finder". Whether the window shows the picture is a capture of it, compared point by point:
 # scripts/dmg_window_shot.sh, which release.sh runs on the finished image.
@@ -42,10 +41,6 @@ APP="${1:?the app bundle}"
 DMG="${2:?the disk image to write}"
 PLAIN=0
 PICTURE=1
-PICTURE_ORDER="${DMG_PICTURE_ORDER:-last}"
-PICTURE_FORMAT="${DMG_PICTURE_FORMAT:-tiff}"
-[[ "$PICTURE_ORDER" == last || "$PICTURE_ORDER" == first ]] || { echo "error: DMG_PICTURE_ORDER is last or first" >&2; exit 1; }
-[[ "$PICTURE_FORMAT" == tiff || "$PICTURE_FORMAT" == png ]] || { echo "error: DMG_PICTURE_FORMAT is tiff or png" >&2; exit 1; }
 case "${3:-}" in
   "") ;;
   --plain) PLAIN=1 ;;
@@ -85,14 +80,8 @@ laid_out() {
   ditto "$STAGE" "$WORK/decorated"
   mkdir -p "$WORK/decorated/.background"
   "$APP/Contents/MacOS/Lumen" --render-dmg-background "$WORK/background" >/dev/null || { why="the picture was not drawn"; return 1; }
-  local picture_file="background.tiff"
-  if [[ "$PICTURE_FORMAT" == png ]]; then
-    picture_file="background.png"
-    cp "$WORK/background/background.png" "$WORK/decorated/.background/$picture_file"
-  else
-    tiffutil -cathidpicheck "$WORK/background/background.png" "$WORK/background/background@2x.png" \
-      -out "$WORK/decorated/.background/$picture_file" >/dev/null || { why="the picture was not put together"; return 1; }
-  fi
+  tiffutil -cathidpicheck "$WORK/background/background.png" "$WORK/background/background@2x.png" \
+    -out "$WORK/decorated/.background/background.tiff" >/dev/null || { why="the picture was not put together"; return 1; }
   if [[ -f "$APP/Contents/Resources/AppIcon.icns" ]]; then cp "$APP/Contents/Resources/AppIcon.icns" "$WORK/decorated/.VolumeIcon.icns"; fi
 
   local size_mb=$(( $(du -sm "$WORK/decorated" | cut -f1) + 64 ))
@@ -107,14 +96,20 @@ laid_out() {
     xattr -wx com.apple.FinderInfo "0000000000000000040000000000000000000000000000000000000000000000" "$MOUNT" || true
   fi
   # The window, as Finder keeps it: 660 × 400 points of frame, the icons' centres as
-  # DiskImageBackground.swift draws around them. In the background, with a minute to answer: where
-  # macOS waits for someone to allow Automation, osascript would wait with it. Finder is asked back
-  # for the picture it now has: its answer is in the log below ("finder: …").
-  local picture_line="set background picture of viewOptions to file \".background:$picture_file\""
+  # DiskImageBackground.swift draws around them, icons of 128 points, the picture set last. Then
+  # what Finder kept is read back from the volume's .DS_Store (scripts/dmg_facts.py): 0.1.1's image,
+  # made on the owner's Mac, kept the window's size and the icons' places but Finder's own icon view
+  # — 48-point icons, no picture — while CI's macOS 26 and 27 kept it all with this same script. When
+  # the view options did not stick, Finder is asked again, three times at most; then the image is
+  # made plain, with the reason. Each attempt in the background, with a minute to answer: where macOS
+  # waits for someone to allow Automation, osascript would wait with it.
+  local picture_line="set background picture of viewOptions to file \".background:background.tiff\""
   (( PICTURE )) || picture_line='-- no picture: the control of scripts/dmg_window_shot.sh'
-  local picture_first="" picture_last="$picture_line"
-  if [[ "$PICTURE_ORDER" == first ]]; then picture_first="$picture_line"; picture_last="-- (set first, as 0.1.1 did)"; fi
-  osascript > "$WORK/finder.log" 2>&1 <<OSA &
+  local expect=(--icon-size 128)
+  (( PICTURE )) || expect+=(--no-picture)
+  local kept=0 round
+  for round in 1 2 3; do
+    osascript > "$WORK/finder.log" 2>&1 <<OSA &
 tell application "Finder"
   tell disk "$disk"
     open
@@ -126,52 +121,48 @@ tell application "Finder"
     set arrangement of viewOptions to not arranged
     set icon size of viewOptions to 128
     set text size of viewOptions to 13
-    $picture_first
     set position of item "Lumen.app" of container window to {170, 210}
     set position of item "Applications" of container window to {490, 210}
-    $picture_last
-    try
-      log "the window's background picture, as Finder has it once set: " & ((background picture of viewOptions) as text)
-    on error errorText
-      log "the window's background picture, as Finder has it once set: none that reads (" & errorText & ")"
-    end try
+    $picture_line
     close
     open
     update without registering applications
     delay 2
-    try
-      log "the window's background picture, as Finder has it reopened: " & ((background picture of icon view options of container window) as text)
-    on error errorText
-      log "the window's background picture, as Finder has it reopened: none that reads (" & errorText & ")"
-    end try
     close
   end tell
 end tell
 OSA
-  local finder=$!
-  for attempt in $(seq 1 120); do kill -0 "$finder" 2>/dev/null || break; sleep 0.5; done
-  if kill -0 "$finder" 2>/dev/null; then
-    kill "$finder" 2>/dev/null || true
-    echo "Finder did not answer within a minute (Automation not allowed yet?)" >> "$WORK/finder.log"
-  fi
-  local answered=0
-  wait "$finder" && answered=1
-  [[ -s "$WORK/finder.log" ]] && sed 's/^/finder: /' "$WORK/finder.log" >&2
-  (( answered )) || { why="Finder did not lay the window out (finder: lines above)"; return 1; }
-  # Finder writes .DS_Store a moment after the window closes, and may write it again: it is waited
-  # for until it has not changed for two seconds (fifteen at most).
-  local previous="" stable=0 now
-  for attempt in $(seq 1 30); do
-    now=""
-    [[ -f "$MOUNT/.DS_Store" ]] && now="$(stat -f '%z %m' "$MOUNT/.DS_Store")"
-    if [[ -n "$now" && "$now" == "$previous" ]]; then stable=$((stable + 1)); else stable=0; fi
-    (( stable >= 4 )) && break
-    previous="$now"
-    sleep 0.5
+    local finder=$!
+    for attempt in $(seq 1 120); do kill -0 "$finder" 2>/dev/null || break; sleep 0.5; done
+    if kill -0 "$finder" 2>/dev/null; then
+      kill "$finder" 2>/dev/null || true
+      echo "Finder did not answer within a minute (Automation not allowed yet?)" >> "$WORK/finder.log"
+    fi
+    local answered=0
+    wait "$finder" && answered=1
+    [[ -s "$WORK/finder.log" ]] && sed 's/^/finder: /' "$WORK/finder.log" >&2
+    (( answered )) || { why="Finder did not lay the window out (finder: lines above)"; return 1; }
+    # Finder writes .DS_Store a moment after the window closes, and may write it again: it is waited
+    # for until it has not changed for two seconds (fifteen at most).
+    local previous="" stable=0 now
+    for attempt in $(seq 1 30); do
+      now=""
+      [[ -f "$MOUNT/.DS_Store" ]] && now="$(stat -f '%z %m' "$MOUNT/.DS_Store")"
+      if [[ -n "$now" && "$now" == "$previous" ]]; then stable=$((stable + 1)); else stable=0; fi
+      (( stable >= 4 )) && break
+      previous="$now"
+      sleep 0.5
+    done
+    # What Finder kept, before the image is made read-only.
+    if python3 -I "$HERE/dmg_facts.py" "$MOUNT" "${expect[@]}" > "$WORK/facts.txt" 2>&1; then
+      kept=1
+      sed 's/^/writable image: /' "$WORK/facts.txt" >&2
+      break
+    fi
+    sed "s/^/writable image, attempt $round: /" "$WORK/facts.txt" >&2
+    echo "warning: Finder did not keep the window's view options (attempt $round of 3, lines above)" >&2
   done
-  [[ -f "$MOUNT/.DS_Store" ]] || { why="Finder kept no layout (.DS_Store)"; return 1; }
-  # What Finder kept, before the image is made read-only.
-  python3 -I "$HERE/dmg_facts.py" "$MOUNT" 2>&1 | sed 's/^/writable image: /' >&2 || true
+  (( kept )) || { why="Finder did not keep the window's view options in 3 attempts (writable image: lines above)"; return 1; }
   LAYOUT_SUM="$(shasum -a 256 "$MOUNT/.DS_Store" | cut -d' ' -f1)"
   chmod -Rf go-w "$MOUNT" || true
   sync

@@ -49,7 +49,7 @@ shot() {
   if [[ ! -s "$FACTS" ]]; then
     python3 -I "$HERE/dmg_facts.py" "$mount" > "$FACTS" 2>&1
     answer="$(osascript -e "tell application \"Finder\" to get background picture of icon view options of container window of disk \"$disk\"" 2>&1)"
-    echo "layout facts: Finder, asked for the window's background picture, answers: ${answer:-nothing}" >> "$FACTS"
+    echo "layout facts: Finder, asked for the window's background picture, answers: ${answer:-nothing} (no fact: on macOS 27 it fails with -10000 even when the picture is set and kept, CI run 672)" >> "$FACTS"
     cat "$FACTS"
     rm -f "$OUT/picture.png"
     local picture

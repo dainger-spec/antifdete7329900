@@ -107,6 +107,18 @@ jobs:
           name: settings-window-macos27
           path: build/settings-window-27
           if-no-files-found: ignore
+      - name: The disk image's window on macOS 27 — made here, does it show its picture? (reported)
+        # As on macOS 26 (scripts/make_dmg.sh, scripts/dmg_window_shot.sh), on the macOS 0.1.1's image
+        # was made on (the owner's Mac kept Finder's own icon view in it, no picture). Before the
+        # self-test: in run 672 its permission dialogs (local network, microphone) were still on the
+        # screen and covered a quarter of the window captured after it.
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          mkdir -p build/egress27/dmg-window
+          scripts/make_dmg.sh build/unsandboxed/Lumen.app build/dmg27/Lumen.dmg 2>&1 | tee build/egress27/dmg-window/make-dmg.txt
+          scripts/dmg_window_shot.sh build/dmg27/Lumen.dmg build/egress27/dmg-window --both
       - name: Self-test against WebKit 27 (unsandboxed), inside a capture of every packet leaving the machine
         id: selftest27
         continue-on-error: true
@@ -351,26 +363,6 @@ jobs:
           echo "exit $?"; cat build/egress27/export-check.txt
           grep '^EXPORT-CHECK' build/egress27/export-check.txt | head -20 | cut -c1-500 | sed 's/^/::notice title=macOS 27 - export in a profile process::/'
           exit 0
-      - name: The disk image's window on macOS 27 — made here, does it show its picture? The picture set last, as 0.1.1 set it, and as a PNG (a measurement)
-        # As on macOS 26 (scripts/dmg_window_shot.sh), on the macOS 0.1.1's image was made on and
-        # opened without its picture (the owner, 3 November). Three images: the picture set last
-        # (make_dmg.sh now), set before the icons' places as 0.1.1's script did, and a plain PNG
-        # instead of the TIFF with both scales — each with Finder's answers, the layout's facts and
-        # the window compared in both appearances. With what this macOS says of hdiutil attach and
-        # of diskutil image attach, which the owner found preferred to it on macOS 27.
-        if: always()
-        continue-on-error: true
-        timeout-minutes: 20
-        run: |
-          mkdir -p build/egress27/dmg-window
-          { hdiutil attach 2>&1 | head -5; echo "---"; diskutil image attach 2>&1 | head -8; } | tee build/egress27/dmg-window/attach-tools.txt
-          for variant in last-tiff first-tiff last-png; do
-            echo "===== the picture set ${variant%-*}, as ${variant#*-}"
-            DMG_PICTURE_ORDER="${variant%-*}" DMG_PICTURE_FORMAT="${variant#*-}" \
-              scripts/make_dmg.sh build/unsandboxed/Lumen.app "build/dmg27/$variant/Lumen.dmg" 2>&1 | tee "build/egress27/dmg-window/make-dmg-$variant.txt"
-            scripts/dmg_window_shot.sh "build/dmg27/$variant/Lumen.dmg" "build/egress27/dmg-window/$variant" --both \
-              || echo "::warning title=macOS 27 - disk image window ($variant)::the window does not show its picture (or could not be captured)"
-          done
       - uses: actions/upload-artifact@v4
         if: always()
         continue-on-error: true

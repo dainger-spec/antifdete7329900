@@ -3,7 +3,7 @@
 "the window shows its picture" (the owner, 3 November: 0.1.1's image had its icons and its window
 size, and no picture, while make_dmg.sh said it was laid out).
 
-    python3 scripts/dmg_facts.py /Volumes/Lumen          (a mounted image's volume)
+    python3 scripts/dmg_facts.py /Volumes/Lumen [--icon-size 128] [--no-picture]
 
 Says, in words:
 - the picture: whether .background/background.tiff is there, its pages (Finder takes the 2x one on
@@ -15,8 +15,9 @@ Says, in words:
   place (Iloc);
 - whether the picture the layout names is the file in the volume.
 
-Exit 0 when the layout names a picture and that picture is in the volume, 1 when it does not
-(no .DS_Store, no picture named, a picture named that is not there), 2 when the volume cannot be
+Exit 0 when the layout names a picture and that picture is in the volume (and, with --icon-size, keeps
+icons of that size; with --no-picture, no picture is asked for), 1 when it does not (no .DS_Store, no
+picture named, a picture named that is not there, Finder's own icon size), 2 when the volume cannot be
 read. Standard library only.
 """
 import os
@@ -177,10 +178,13 @@ BACKGROUND_KINDS = {0: "Finder's own (none set)", 1: "a colour", 2: "a picture"}
 
 
 def main():
-    if len(sys.argv) != 2:
-        print(__doc__)
-        return 2
-    volume = sys.argv[1]
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("volume")
+    parser.add_argument("--icon-size", type=float, help="the icon view's icon size the layout must keep (make_dmg.sh: 128)")
+    parser.add_argument("--no-picture", action="store_true", help="no picture is expected (make_dmg.sh --no-picture, the control)")
+    arguments = parser.parse_args()
+    volume = arguments.volume
     if not os.path.isdir(volume):
         print(f"layout facts: {volume} is not a mounted volume")
         return 2
@@ -220,6 +224,7 @@ def main():
         return 1
     print(f"layout facts: .DS_Store, {len(store_data)} bytes, {len(records)} record(s)")
     named = None
+    icon_size = None
     for name, code, kind, value in records:
         where = "the window" if name == "." else name
         if code == "Iloc" and kind == "blob" and len(value) >= 8:
@@ -237,6 +242,8 @@ def main():
                       f"{'shown' if options.get('ShowStatusBar') else 'hidden'} (bwsp)")
             elif code == "icvp":
                 kind_number = options.get("backgroundType")
+                if name == ".":
+                    icon_size = options.get("iconSize")
                 print(f"layout facts: {where}'s icon view: icons {options.get('iconSize')} pt, text {options.get('textSize')} pt, "
                       f"arranged by {options.get('arrangeBy')}, background {kind_number} = "
                       f"{BACKGROUND_KINDS.get(kind_number, 'unknown')} (icvp)")
@@ -252,6 +259,12 @@ def main():
         else:
             shown = value if not isinstance(value, bytes) else f"{len(value)} bytes"
             print(f"layout facts: {where} {code} {kind} {shown}")
+    size_ok = arguments.icon_size is None or icon_size == arguments.icon_size
+    if not size_ok:
+        print(f"layout facts: the icon view keeps icons of {icon_size} pt, not the {arguments.icon_size:g} asked for: "
+              "Finder kept its own view options")
+    if arguments.no_picture:
+        return 0 if size_ok else 1
     if named is None:
         print("layout facts: the layout names NO background picture: Finder shows its own background")
         return 1
@@ -264,7 +277,7 @@ def main():
     if named.get("volume mounted at") not in (None, "/Volumes/Lumen"):
         print(f"layout facts: when Finder made it the volume was mounted at {named.get('volume mounted at')!r}, not "
               "/Volumes/Lumen (another volume of that name was mounted then)")
-    return 0 if ok else 1
+    return 0 if ok and size_ok else 1
 
 
 if __name__ == "__main__":

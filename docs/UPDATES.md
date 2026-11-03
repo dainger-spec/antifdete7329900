@@ -385,13 +385,21 @@ image in both appearances, and its control — the same app laid out without its
 (`make_dmg.sh --no-picture`) — must fail it (the `dmg-window` artifact); on macOS 27 it is reported.
 After a release, the Download check workflow runs it on the published image on clean macOS 26 and 27.
 
-The picture is now set last, after the window's other properties and the icons' places: in an Apple
-Developer Forums thread (836253) a developer found that Finder drops a window's picture when other
-properties change after it, and 0.1.1's script set it before the icons' places. That this is what
-macOS 27 does is not shown yet: CI's macOS 27 job makes three images — the picture set last, set as
-0.1.1 set it, and a plain PNG instead of the TIFF with both scales (`DMG_PICTURE_ORDER`,
-`DMG_PICTURE_FORMAT`, knobs for that measurement only) — and compares each window; the next release
-on the owner's Mac (a Retina screen, which CI's runners are not) says it in its block.
+What 0.1.1's image holds (the Download check on the published image, clean macOS 26.6.2 and 27.0.1,
+3 November): the picture is there (`.background/background.tiff`, both pages), the `.DS_Store` is
+there and came through the read-only conversion, with the window's size and the icons' places — but
+its icon view is Finder's own: 48-point icons, 12-point names, no picture named. The window opened
+white with small icons on both. So the picture was neither lost nor unreadable: Finder, on the owner's
+Mac, did not keep the view options it was given. CI's macOS 27 (1x) kept them all with the same script,
+in three variants measured in run 672 — the picture set last, set before the icons' places as 0.1.1's
+script did, and a PNG instead of the two-scale TIFF — and showed the picture in each. On macOS 27
+`hdiutil attach` warns that it is deprecated in favour of `diskutil image attach` and works, and
+Finder's own answer for a window's picture fails (-10000) even when the picture is set and kept.
+
+So make_dmg.sh now reads what Finder kept before the image is made read-only, and when the icons are
+not of 128 points or no picture is named it asks Finder again, three times at most; then the image is
+made plain, said as such (the picture is set last too, after the forum thread 836253, harmlessly).
+Whether that settles the owner's Mac is for its next release to say: its block reads the window.
 
 **The image is signed, notarized and stapled too**, after the app inside it was: `codesign` with
 the Developer ID and a timestamp, `notarytool submit … --wait`, `stapler staple`, `stapler validate`
