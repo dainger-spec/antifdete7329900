@@ -473,19 +473,22 @@ jobs:
           gate "development-key" "Add :PBEntitlementPublicKeys:445c6300da0205b1 string /+/sbiH55nmy+2gRqQz12E0spl9L/YDWvjnecaN2M1c=" \
             "the development server's key"
           # The start check (release.sh's step 1b) passes the release's app and fails a copy the kernel
-          # refuses to start: an ad hoc signature carrying an application identifier (run 646) — on 3
-          # November the kernel killed 0.1.1 with the network guard at its start on the owner's Mac.
+          # kills at its start: the app's executable with its signature taken off. On Apple silicon the
+          # kernel runs no unsigned code ("Attempt to execute completely unsigned code" — the line that
+          # ended 0.1.1 with the network guard on the owner's Mac, 3 November). The control before it,
+          # an ad hoc signature carrying an application identifier, was started here (CI run 666): it
+          # could not fail, and proved nothing.
           scripts/start_check.sh build/release/app/Lumen.app/Contents/MacOS/Lumen "the release's app" \
             || { echo "::error title=Start check::the release's own app did not pass the start check"; status=1; }
           copy="build/start-check-control/Lumen.app"
           rm -rf build/start-check-control; mkdir -p build/start-check-control
           ditto build/release/app/Lumen.app "$copy"
-          codesign -d --entitlements - --xml "$copy/Contents/MacOS/Lumen" > build/start-check-control/entitlements.plist 2>/dev/null
-          /usr/libexec/PlistBuddy -c "Add :com.apple.application-identifier string XXXXXXXXXX.io.lumenbrowser.Lumen" \
-            build/start-check-control/entitlements.plist
-          codesign --force --options runtime --timestamp=none --identifier io.lumenbrowser.Lumen \
-            --entitlements build/start-check-control/entitlements.plist --sign - "$copy" 2>&1 | tail -n 2
-          if scripts/start_check.sh "$copy/Contents/MacOS/Lumen" "the control (ad hoc, with an application identifier)"; then
+          codesign --remove-signature "$copy/Contents/MacOS/Lumen"
+          if codesign -d "$copy/Contents/MacOS/Lumen" >/dev/null 2>&1; then
+            echo "::error title=Start check::the control's executable is still signed: it controls nothing"; status=1
+          fi
+          [[ "$(uname -m)" == arm64 ]] || echo "::warning title=Start check::not Apple silicon: an unsigned executable may run here, and the control below says nothing"
+          if scripts/start_check.sh "$copy/Contents/MacOS/Lumen" "the control (its signature taken off)"; then
             echo "::error title=Start check::the start check passed a copy the kernel does not start (its control)"; status=1
           fi
           if SANDBOX=1 VERSION=0.1.1 BUILD=2 OUT=build/release-sandboxed scripts/release.sh > build/release-sandboxed.log 2>&1; then
@@ -535,6 +538,108 @@ jobs:
           verdict refuse 1 "the profile did not start" \
             "RELEASE-CHECK FAIL the profile did not start: the profile's executable is signed with a keychain of its own"
           verdict refuse 0 "nothing at all" ""
+          exit $status
+      - name: A relaxation beside the network extension's right — refused by the build (its controls), and what this kernel does with it
+        # On 3 November 0.1.1 with the network guard was killed by the kernel at its start on macOS
+        # 27.0.1: its app's executable held library validation off beside the network extension's
+        # right (docs/TUNNEL.md, "What the kernel kills"). scripts/relaxation_check.sh, which
+        # build-app.sh and release.sh run, must let the builds made here through and refuse every copy
+        # holding a listed relaxation beside the right — and let one with allow-jit through (measured:
+        # it started); build-app.sh must refuse 0.1.1's pairing and leave no bundle behind. What this
+        # runner's kernel does with the pairing, ad hoc, is measured and said.
+        run: |
+          status=0
+          for app in build/release/app/Lumen.app build/unsandboxed/Lumen.app build/sandboxed/Lumen.app; do
+            scripts/relaxation_check.sh "$app" || { echo "::error title=Relaxation check::$app was refused"; status=1; }
+          done
+          # The layout, read from the signatures: the app's own executable keeps library validation on,
+          # LumenProfile has it off (Safari's frameworks load only there).
+          for app in build/release/app/Lumen.app build/unsandboxed/Lumen.app; do
+            codesign -d --entitlements - --xml "$app/Contents/MacOS/Lumen" > build/layout-app.plist 2>/dev/null || true
+            codesign -d --entitlements - --xml "$app/Contents/MacOS/LumenProfile" > build/layout-profile.plist 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Print :com.apple.security.device.camera" build/layout-app.plist >/dev/null 2>&1 \
+              || { echo "::error title=Layout::$app: the app's entitlements were not read"; status=1; }
+            if /usr/libexec/PlistBuddy -c "Print :com.apple.security.cs.disable-library-validation" build/layout-app.plist >/dev/null 2>&1; then
+              echo "::error title=Layout::$app: the app's own executable is signed with library validation off"; status=1
+            fi
+            /usr/libexec/PlistBuddy -c "Print :com.apple.security.cs.disable-library-validation" build/layout-profile.plist >/dev/null 2>&1 \
+              || { echo "::error title=Layout::$app: LumenProfile keeps library validation on (Safari's frameworks would not load)"; status=1; }
+          done
+          # Copies of the release's app, one executable signed again ad hoc with the right — and with
+          # what is named. relax <copy> <executable> <refused|passes> <the key a refusal names, or -> [keys added]
+          relax() {
+            local name="$1" executable="$2" expect="$3" named="$4"; shift 4
+            local dir="build/relaxation-$name" copy="build/relaxation-$name/Lumen.app" key out result=0
+            rm -rf "$dir"; mkdir -p "$dir"; ditto build/release/app/Lumen.app "$copy"
+            codesign -d --entitlements - --xml "$copy/Contents/MacOS/$executable" > "$dir/entitlements.plist" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Add :com.apple.developer.networking.networkextension array" \
+              -c "Add :com.apple.developer.networking.networkextension:0 string content-filter-provider-systemextension" "$dir/entitlements.plist"
+            for key in "$@"; do
+              /usr/libexec/PlistBuddy -c "Delete :$key" "$dir/entitlements.plist" >/dev/null 2>&1 || true
+              /usr/libexec/PlistBuddy -c "Add :$key bool true" "$dir/entitlements.plist"
+            done
+            if [[ "$executable" == Lumen ]]; then
+              codesign --force --options runtime --timestamp=none --entitlements "$dir/entitlements.plist" --sign - "$copy" 2>&1 | tail -n 1
+            else
+              codesign --force --options runtime --timestamp=none --identifier io.lumenbrowser.Lumen \
+                --entitlements "$dir/entitlements.plist" --sign - "$copy/Contents/MacOS/$executable" 2>&1 | tail -n 1
+              codesign --force --sign - --preserve-metadata=entitlements,flags,runtime "$copy" 2>&1 | tail -n 1
+            fi
+            out=$(scripts/relaxation_check.sh "$copy" 2>&1) || result=$?
+            echo "-- $name: $executable signed with the right${1:+ and $*}: exit $result"
+            echo "$out" | sed 's/^/   /'
+            if [[ "$expect" == refused ]]; then
+              [[ $result != 0 ]] || { echo "::error title=Relaxation check::the copy $name was let through"; status=1; }
+              [[ "$out" == *"Contents/MacOS/$executable holds $named beside com.apple.developer.networking.networkextension"* ]] \
+                || { echo "::error title=Relaxation check::the copy $name was not refused for $named"; status=1; }
+            else
+              [[ $result == 0 ]] || { echo "::error title=Relaxation check::the copy $name was refused"; status=1; }
+            fi
+          }
+          # Measured on the owner's Mac: killed beside the right.
+          relax dlv Lumen refused com.apple.security.cs.disable-library-validation com.apple.security.cs.disable-library-validation
+          relax unsigned-memory Lumen refused com.apple.security.cs.allow-unsigned-executable-memory com.apple.security.cs.allow-unsigned-executable-memory
+          relax dyld-environment Lumen refused com.apple.security.cs.allow-dyld-environment-variables com.apple.security.cs.allow-dyld-environment-variables
+          # Not measured, refused all the same.
+          relax page-protection Lumen refused com.apple.security.cs.disable-executable-page-protection com.apple.security.cs.disable-executable-page-protection
+          relax debugger Lumen refused com.apple.security.cs.debugger com.apple.security.cs.debugger
+          # LumenProfile holds library validation off: the right must never be given to it.
+          relax profile LumenProfile refused com.apple.security.cs.disable-library-validation
+          # Measured on the owner's Mac: started — the right alone (the layout chosen), and allow-jit beside it.
+          relax right-alone Lumen passes -
+          relax jit Lumen passes - com.apple.security.cs.allow-jit
+          # What this runner's kernel does with 0.1.1's pairing, and with the right alone, ad hoc — a
+          # measurement, said and not checked: no Developer ID and no provisioning profile here, and an ad
+          # hoc copy carrying an application identifier was started by this kernel (CI run 666), so it
+          # need not refuse what the owner's Mac refused. The start check's verdict on 0.1.1's pairing
+          # signed as it shipped is taken on the owner's Mac (docs/TUNNEL.md, the hardware checklist's
+          # step 0).
+          for measured in dlv right-alone jit; do
+            if scripts/start_check.sh "build/relaxation-$measured/Lumen.app/Contents/MacOS/Lumen" "the copy $measured (ad hoc)"; then
+              echo "::notice title=Start check, measured::the copy $measured (ad hoc, the network extension's right) was started by this runner's kernel"
+            else
+              echo "::notice title=Start check, measured::the copy $measured (ad hoc, the network extension's right) was not started by this runner's kernel (its lines above)"
+            fi
+          done
+          # The build itself: Resources/PrivacyBrowser-NoSandbox.entitlements given what 0.1.1's app was
+          # signed with — library validation off beside the right. build-app.sh must refuse the build
+          # and leave no bundle behind. The file is put back however this ends.
+          base=Resources/PrivacyBrowser-NoSandbox.entitlements
+          trap 'git checkout -- "$base"' EXIT
+          /usr/libexec/PlistBuddy -c "Add :com.apple.security.cs.disable-library-validation bool true" \
+            -c "Add :com.apple.developer.networking.networkextension array" \
+            -c "Add :com.apple.developer.networking.networkextension:0 string content-filter-provider-systemextension" "$base"
+          if SANDBOX=0 APP_DIR=build/relaxation-build scripts/build-app.sh > build/relaxation-build.log 2>&1; then
+            echo "::error title=Relaxation check::build-app.sh made a build whose app holds library validation off beside the right"; status=1
+          fi
+          grep -E '^error:' build/relaxation-build.log || tail -n 20 build/relaxation-build.log
+          grep -F "Contents/MacOS/Lumen holds com.apple.security.cs.disable-library-validation beside com.apple.developer.networking.networkextension" build/relaxation-build.log >/dev/null \
+            || { echo "::error title=Relaxation check::build-app.sh did not refuse the build for library validation off beside the right"; status=1; }
+          [[ ! -e build/relaxation-build/Lumen.app ]] \
+            || { echo "::error title=Relaxation check::the refused build was left in place"; status=1; }
+          git checkout -- "$base"
+          trap - EXIT
+          git diff --quiet -- "$base" || { echo "::error title=Relaxation check::the entitlements file was not put back"; status=1; }
           exit $status
       - name: Updates end to end (a local feed and a new build; sandboxed and unsandboxed)
         # scripts/update_check.py: the old build's own updater against a local HTTPS feed — no request

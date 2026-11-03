@@ -7,8 +7,9 @@
 #
 # release.sh runs it on the app's executable and the profile's (LumenProfile) before anything is
 # sent to Apple's notary (step 1b): on 3 November 0.1.1 with the network guard was notarized, then
-# killed by the kernel at its start on macOS 27.0.1 (docs/TUNNEL.md, "Status"). CI holds it to a copy
-# the kernel refuses — an ad hoc signature carrying an application identifier — which must fail.
+# killed by the kernel at its start on macOS 27.0.1 (docs/TUNNEL.md, "Status"). A process the kernel
+# kills at execve never answers, whatever the reason. CI holds it to a copy whose app's executable has
+# its signature taken off, which the kernel of Apple silicon never runs: it must fail.
 set -uo pipefail
 executable="${1:?usage: start_check.sh <executable> <what it is>}"
 name="${2:-$1}"

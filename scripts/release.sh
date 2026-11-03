@@ -161,14 +161,17 @@ APP="$OUT/app/Lumen.app"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")" == "$BUILD" ]] \
   || { echo "error: the app's CFBundleVersion is not $BUILD" >&2; exit 1; }
 # The signature a release needs, read back from the app: the hardened runtime (notarization requires
-# it), no App Sandbox, library validation off (Safari's frameworks are loaded into a process this
-# team signed: SafariChrome.swift), and no debugger allowed to attach.
+# it), no App Sandbox, library validation kept on for the app's own executable (Safari's frameworks
+# load only in LumenProfile, below; beside the network guard's right the kernel kills an executable
+# with it off at its start: docs/TUNNEL.md, "What the kernel kills"), and no debugger allowed to attach.
 SIGNED_ENTITLEMENTS="$(codesign -d --entitlements - --xml "$APP" 2>/dev/null || true)"
 SIGNED_FLAGS="$(codesign -d --verbose=2 "$APP" 2>&1 | awk '/^CodeDirectory/ { print }')"
 [[ "$SIGNED_ENTITLEMENTS" != *"com.apple.security.app-sandbox"* ]] \
   || { echo "error: the app's signature carries the App Sandbox: it would not host Safari's chrome" >&2; exit 1; }
-[[ "$SIGNED_ENTITLEMENTS" == *"com.apple.security.cs.disable-library-validation"* ]] \
-  || { echo "error: the app's signature keeps library validation on: Safari's frameworks would not load" >&2; exit 1; }
+[[ "$SIGNED_ENTITLEMENTS" == *"<key>com.apple.security.device.camera</key>"* ]] \
+  || { echo "error: the app's entitlements could not be read back (no camera entitlement among them)" >&2; exit 1; }
+[[ "$SIGNED_ENTITLEMENTS" != *"<key>com.apple.security.cs.disable-library-validation</key>"* ]] \
+  || { echo "error: the app's own executable is signed with library validation off: only LumenProfile may be (docs/TUNNEL.md)" >&2; exit 1; }
 [[ "$SIGNED_ENTITLEMENTS" != *"com.apple.security.get-task-allow"* ]] \
   || { echo "error: the app's signature lets a debugger attach (DEBUGGABLE): never in a release" >&2; exit 1; }
 [[ "$SIGNED_FLAGS" == *"runtime"* ]] \
@@ -237,6 +240,11 @@ if [[ "${DECLARED_SDK%%.*}" -ge 15 ]]; then
     exit 1
   fi
 fi
+
+# No executable holds a relaxation of the hardened runtime beside the network extension's right
+# (build-app.sh refused such a build already; read again from what is about to be notarized).
+scripts/relaxation_check.sh "$APP" \
+  || { echo "error: an executable of this build holds a relaxation beside the network extension's right: no release" >&2; exit 1; }
 
 # 1b. The kernel lets the app, as signed, start — its executable and the profile's — before anything
 # is sent to Apple. On 3 November 0.1.1 with the network guard (NE=1) was notarized, then killed by the

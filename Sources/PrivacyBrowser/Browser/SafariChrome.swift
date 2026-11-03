@@ -23,7 +23,10 @@ import WebKit
 ///     same name).
 ///   * `dlopen` of a private framework needs the hardened runtime's
 ///     `com.apple.security.cs.disable-library-validation` and no App Sandbox: inside the sandbox
-///     this returns false at `load()`.
+///     this returns false at `load()`. Only `Contents/MacOS/LumenProfile` is signed with it — a
+///     profile's process and every check that runs this code start from there
+///     (`ProfileExecutable`); the app's own executable keeps library validation on, so `load()`
+///     returns false in it too (scripts/build-app.sh says why: docs/TUNNEL.md).
 ///   * Safari's chrome reads the `com.apple.Safari` preferences domain. In this process that domain
 ///     resolves to Safari's own container and is refused, so what it would have read arrives nil.
 ///     The process therefore has to run with `CFFIXED_USER_HOME` pointed at the profile's directory
@@ -205,7 +208,7 @@ enum SafariChrome {
         return absent
     }
 
-    /// `Lumen --check-safari-chrome`: loads Safari's frameworks and says which of the
+    /// `LumenProfile --check-safari-chrome`: loads Safari's frameworks and says which of the
     /// pieces this build relies on this macOS has. Exit code 0 when every structural and network
     /// piece is there, 1 when any is missing, 2 when the frameworks do not load (a sandboxed build,
     /// or a macOS without them). Absent stubs are listed only. Touches nothing else: no window, no
@@ -1545,14 +1548,14 @@ enum SafariChrome {
 // MARK: - Standalone run
 
 extension SafariChrome {
-    /// `Lumen --safari-chrome [url]`: Safari's chrome with one of our web views in it, on
+    /// `LumenProfile --safari-chrome [url]`: Safari's chrome with one of our web views in it, on
     /// an ephemeral data store, as the way to try this outside the profile machinery. Returns
     /// without running anything when the frameworks cannot be loaded, which is what a sandboxed
     /// build does.
     static func startStandalone(arguments: [String]) {
         relaunchWithProfileHomeIfNeeded(arguments: arguments)
         guard load() else {
-            FileHandle.standardError.write(Data("Safari's private frameworks did not load: this build is sandboxed or library validation is on (see SafariChrome.swift)\n".utf8))
+            FileHandle.standardError.write(Data("Safari's private frameworks did not load: this build is sandboxed, or this is the app's own executable, which keeps library validation on — run Contents/MacOS/LumenProfile (see SafariChrome.swift)\n".utf8))
             exit(1)
         }
         installApplication()

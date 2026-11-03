@@ -9,11 +9,12 @@
 	<true/>
 	<key>com.apple.security.device.audio-input</key>
 	<true/>
-	<!-- Loading Safari's private UI frameworks (SafariChrome.swift) is a dlopen of code this app
-	     did not sign, which the hardened runtime's library validation refuses by default. Only
-	     this build can host Safari's chrome; the sandboxed build cannot, and falls back to our own
-	     window. See docs/SAFARI_PROCESS.md §9.1. -->
-	<key>com.apple.security.cs.disable-library-validation</key>
-	<true/>
+	<!-- No relaxation of the hardened runtime here: the app's own executable (Contents/MacOS/Lumen)
+	     keeps library validation on. Safari's private frameworks (SafariChrome.swift) load only in
+	     Contents/MacOS/LumenProfile, which scripts/build-app.sh signs with these and
+	     com.apple.security.cs.disable-library-validation besides (docs/SAFARI_PROCESS.md §9.1). In a
+	     build with the network guard the app's executable holds the network extension's right, and
+	     beside it the kernel kills an executable holding library validation off at its start
+	     (measured on macOS 27.0.1, 3 November: docs/TUNNEL.md; scripts/relaxation_check.sh). -->
 </dict>
 </plist>

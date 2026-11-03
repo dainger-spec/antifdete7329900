@@ -134,7 +134,10 @@ log shows a profile's process refused both of securityd's services by its sandbo
 restriction — in a build whose bundle carries the network guard's rights. The lock behind verdicts 2
 and 3 is so shown on the real signature, not only on CI's ad hoc one. The release check's own three
 verdicts on that build were not reached: its app's executable was killed by the kernel at its start
-(docs/TUNNEL.md, "Status").
+(docs/TUNNEL.md, "Status"). They were on its copy `app-no-dlv` the same day — the app's executable
+signed again with Developer ID without library validation off, the layout every build has since
+(docs/TUNNEL.md, "What the kernel kills"): profiles A and B `refused (1100)` by both securityd
+services, the control outside a profile's sandbox wrote its item and read it back.
 
 ## What to register with Apple
 

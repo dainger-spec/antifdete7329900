@@ -433,11 +433,14 @@ lumen-notary` says why Apple refused one.
 
 ### What the owner provides for a real release (the owner, 2 November)
 
-**`NE=1` is not released for now (3 November):** its signed, notarized build was killed by the
-kernel at its start on macOS 27.0.1 — the app's executable holds the network guard's rights and a
-relaxation of the hardened runtime, which macOS refuses a system extension (docs/TUNNEL.md, "Status").
-Until a layout that starts is measured (`scripts/amfi_matrix.py`) a release is made without `NE=1`;
-release.sh stops any signed build the kernel does not start, before it is notarized.
+**`NE=1` (3 November):** its first signed, notarized build was killed by the kernel at its start on
+macOS 27.0.1 — the app's executable held the network guard's provider right beside library validation
+off, and the kernel kills an executable holding that right beside any relaxation of that class
+(measured: docs/TUNNEL.md, "What the kernel kills"). Since then the app's own executable keeps library
+validation on, and only LumenProfile has it off; build-app.sh refuses a build that pairs them again,
+and release.sh stops any signed build the kernel does not start, before it is notarized. `NE=1` is
+released once a build of this layout has passed release.sh and the hardware checklist
+(docs/TUNNEL.md).
 
 With the network guard (`NE=1`: WebRTC in a proxied profile through its proxy, docs/TUNNEL.md) —
 since the keychain a profile's process could share with the app's is closed (docs/IDENTITY.md, "The
@@ -521,12 +524,17 @@ need not be (`build-app.sh` adds the extension's entitlements to either build; u
 team, docs/TUNNEL.md).
 
 **Signing.** The same Developer ID Application certificate, hardened runtime and secure timestamp.
-The entitlements are `Resources/PrivacyBrowser-NoSandbox.entitlements`: camera and microphone, and
-`com.apple.security.cs.disable-library-validation` — Safari's frameworks are Apple's code loaded into
-a process this team signed, which library validation refuses otherwise. The sandbox's own
-entitlements (`network.*`, `files.*`, the temporary exception for the update's staging folder) and
-`container-migration.plist` are not in it. `release.sh` reads the signature back and stops on the
-sandbox, on library validation left on, on `get-task-allow`, or without the hardened runtime.
+The entitlements are `Resources/PrivacyBrowser-NoSandbox.entitlements`: camera and microphone. The
+profile's executable, `Contents/MacOS/LumenProfile`, is signed with them and
+`com.apple.security.cs.disable-library-validation` besides — Safari's frameworks are Apple's code
+loaded into a process this team signed, which library validation refuses otherwise, and they load only
+in LumenProfile's processes. The app's own executable keeps library validation on: beside the network
+guard's right the kernel kills an executable with it off at its start (docs/TUNNEL.md, "What the
+kernel kills"). The sandbox's own entitlements (`network.*`, `files.*`, the temporary exception for
+the update's staging folder) and `container-migration.plist` are not in it. `release.sh` reads the
+signatures back and stops on the sandbox, on library validation off in the app's own executable or on
+in LumenProfile, on a relaxation beside the network extension's right in any executable, on
+`get-task-allow`, or without the hardened runtime.
 
 **Notarization.** Unchanged: `notarytool submit`, `stapler staple`, `spctl --assess`. The notary
 service requires the hardened runtime and accepts its documented exceptions, library validation
@@ -547,9 +555,10 @@ among them; it does not look for private interfaces (that is App Store review).
   no web content: every profile runs in a process of its own, with its profile's key only and a
   kernel sandbox profile of its own (UDP with a proxy, the real Safari's places, Safari's XPC
   services; §4a).
-- With library validation off, the process would load a library that is neither Apple's nor this
-  team's if asked to: it loads only from `/System/Library/PrivateFrameworks`, on the sealed system
-  volume, and `DYLD_*` variables stay refused (no `allow-dyld-environment-variables`).
+- With library validation off — LumenProfile's processes only; the manager's process, which holds the
+  vault and the master key, keeps it on — a profile's process would load a library that is neither
+  Apple's nor this team's if asked to: it loads only from `/System/Library/PrivateFrameworks`, on the
+  sealed system volume, and `DYLD_*` variables stay refused (no `allow-dyld-environment-variables`).
 - The local automation API exists in this build only (off by default; ISOLATION_AND_LIMITATIONS.md
   §10).
 
@@ -557,7 +566,7 @@ There has been no release yet. A tester's sandboxed build of the same bundle ID:
 the sandbox takes over its vault at its first start (README).
 
 **The gate** (`release.sh` step 2b, on the app after notarization and stapling, run from a copy so
-that what is published is exactly what was checked): `Lumen --check-safari-chrome` — every class and
+that what is published is exactly what was checked): `LumenProfile --check-safari-chrome` — every class and
 method the chrome, and a profile's hold on its proxy, rely on is in this Safari — and
 `Lumen --release-check` (`ReleaseCheck.swift`): a profile started the way the app starts one, with
 nothing set by hand (`PB_PROFILE_PROCESS`, `PB_SAFARI_CHROME` or the `PBProfileProcess` default set

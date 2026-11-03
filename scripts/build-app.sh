@@ -25,9 +25,12 @@
 #                                   # signature can carry, so CI sees profiles started without it
 #
 # A profile's process — and every process that runs Safari's code — is started from
-# Contents/MacOS/LumenProfile, a copy of the executable signed with the base entitlements alone: never
-# the app's application identifier, app group or network extension rights, which would give every
-# profile the app's one data-protection keychain (ProfileExecutable.swift; docs/IDENTITY.md).
+# Contents/MacOS/LumenProfile, a copy of the executable signed with the base entitlements and library
+# validation off: never the app's application identifier, app group or network extension rights,
+# which would give every profile the app's one data-protection keychain (ProfileExecutable.swift;
+# docs/IDENTITY.md). The app's own executable keeps library validation on: no executable holds a
+# relaxation of the hardened runtime beside the network extension's right, which the kernel kills at
+# its start (scripts/relaxation_check.sh refuses such a build; docs/TUNNEL.md).
 #
 # Versions and updates (docs/UPDATES.md; scripts/release.sh sets these):
 #   APP_VERSION=0.2.0 APP_BUILD=2      CFBundleShortVersionString and CFBundleVersion
@@ -75,6 +78,16 @@ ENTITLEMENTS="$ENTITLEMENTS_BUILT"
 # The profile's executable gets these and nothing the network guard adds below.
 PROFILE_ENTITLEMENTS="$(mktemp -t pbprofile).entitlements"
 cp "$ENTITLEMENTS_BUILT" "$PROFILE_ENTITLEMENTS"
+# And library validation off, LumenProfile alone: Safari's frameworks are Apple's code loaded into a
+# process this team signed (SafariChrome.swift), and they load only there — in a profile's process and
+# in every check that runs Safari's code (SafariChromeHost.prepareForChildProcess, ProfileExecutable).
+# The app's own executable keeps it on: in a build with the network guard it holds the network
+# extension's right, and beside that right the kernel kills an executable with library validation off
+# at its start — 0.1.1, macOS 27.0.1, 3 November (docs/TUNNEL.md, "What the kernel kills").
+if [[ "$SANDBOX" != "1" ]]; then
+  /usr/libexec/PlistBuddy -c "Delete :com.apple.security.cs.disable-library-validation" "$PROFILE_ENTITLEMENTS" >/dev/null 2>&1 || true
+  /usr/libexec/PlistBuddy -c "Add :com.apple.security.cs.disable-library-validation bool true" "$PROFILE_ENTITLEMENTS"
+fi
 # The entitlements that put a process in a keychain access group (ProfileExecutable.keychainEntitlements).
 KEYCHAIN_KEYS=(com.apple.application-identifier keychain-access-groups com.apple.security.application-groups com.apple.developer.team-identifier)
 
@@ -223,9 +236,12 @@ if [[ "$NE" == "1" || "$NE" == "check" ]]; then
     ENTITLEMENTS="$ENTITLEMENTS_NE"
     /usr/libexec/PlistBuddy -c "Add :PBGuardExtensionBundleIdentifier string $EXTENSION_ID" "$APP/Contents/Info.plist"
   else
-    # CI: the app group alone, which an ad hoc signature can carry (the application identifier it
-    # cannot: such a binary is not let start). The app then holds a keychain entitlement its profiles
-    # must not, as an NE=1 build does, and the self-test's keychain check can tell them apart.
+    # CI: the app group alone, which an ad hoc signature can carry. Not the application identifier:
+    # run 646 found an ad hoc signature carrying it not let start on CI's runners — though run 666
+    # started a copy of the release's app signed ad hoc with it beside camera, microphone and library
+    # validation off; which pairing the kernel refuses is not measured. The app then holds a keychain
+    # entitlement its profiles must not, as an NE=1 build does, and the self-test's keychain check can
+    # tell them apart.
     ENTITLEMENTS_CHECK="$(mktemp -t pbappcheck).entitlements"
     cp "$ENTITLEMENTS" "$ENTITLEMENTS_CHECK"
     /usr/libexec/PlistBuddy -c "Add :com.apple.security.application-groups array" \
@@ -262,6 +278,16 @@ codesign --force --options runtime "$TIMESTAMP" \
   --sign "$SIGN_IDENTITY" "$APP"
 codesign --verify --strict --deep "$APP"
 codesign --verify --strict "$PROFILE_EXECUTABLE"
+# No executable holds a relaxation of the hardened runtime beside the network extension's right: the
+# kernel kills it at its start, after it was notarized (0.1.1, 3 November). Read from every
+# executable's signature (scripts/relaxation_check.sh holds the measured list; allow-jit is not on
+# it). A build that does is refused and removed: nothing the kernel would kill is left to be
+# notarized or sent.
+if ! scripts/relaxation_check.sh "$APP"; then
+  rm -rf "$APP"
+  echo "error: this build is refused (above), and $APP removed" >&2
+  exit 1
+fi
 # The profile's executable carries no keychain of its own, whatever the app carries: read back from
 # its signature, key by key (a comment or a string that names one is not the key itself).
 PROFILE_SIGNED="$(mktemp -t pbprofilesigned).plist"
@@ -275,6 +301,10 @@ for key in "${KEYCHAIN_KEYS[@]}"; do
     echo "error: the profile's executable is signed with $key: every profile would share the app's keychain" >&2; exit 1
   fi
 done
+if [[ "$SANDBOX" != "1" ]]; then
+  /usr/libexec/PlistBuddy -c "Print :com.apple.security.cs.disable-library-validation" "$PROFILE_SIGNED" >/dev/null 2>&1 \
+    || { echo "error: the profile's executable keeps library validation on: Safari's frameworks would not load in it" >&2; exit 1; }
+fi
 [[ "$(codesign -d -v "$PROFILE_EXECUTABLE" 2>&1 | awk -F= '/^Identifier=/ { print $2 }')" == "$BUNDLE_ID" ]] \
   || { echo "error: the profile's executable is not signed as $BUNDLE_ID (the network guard knows a profile by it)" >&2; exit 1; }
 # Said, not checked (the app may hold them): no pipe and no failing test here, which `set -e` would

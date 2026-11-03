@@ -29,7 +29,7 @@ told why, in words, with what they can do.
 
 A page cannot send other UDP: WebRTC is the only UDP a web page can start.
 
-## Status (3 November 2026): `NE=1` is not released — the kernel kills it at its start
+## Status (3 November 2026): measured, and the layout changed — the app's own executable keeps library validation on
 
 0.1.1 with the network guard (`NE=1`), signed with Developer ID and notarized by Apple, did not
 start on the owner's Mac (macOS 27.0.1, build 26A434, J713): release.sh's release check ended with
@@ -46,35 +46,92 @@ ASP: Security policy would not allow process
 The app's executable was signed with `com.apple.application-identifier`,
 `com.apple.developer.networking.networkextension` = `content-filter-provider-systemextension`,
 `com.apple.developer.system-extension.install`, `com.apple.security.application-groups` and
-`com.apple.security.cs.disable-library-validation`. CI could not have shown it: no ad hoc signature
-may carry these rights, so CI's `NE=check` build never has them, and the extension is never loaded
-there ("What CI verifies").
+`com.apple.security.cs.disable-library-validation`. CI could not have shown it: the kernel lets no ad
+hoc signature carrying these rights start, so CI's `NE=check` build never has them, and the extension
+is never loaded there ("What CI verifies").
 
-What is known, and what is not yet:
+The same day `scripts/amfi_matrix.py` measured on the owner's Mac which signature the kernel lets
+start (the table below). The rule it found: **an executable holding
+`com.apple.developer.networking.networkextension` and any relaxation of the hardened runtime of one
+class — library validation off, unsigned executable memory, DYLD environment variables — is killed at
+its start.** Neither the right to install a system extension nor the extension in the bundle has a
+part in it; `allow-jit` is not of that class.
 
-- **Known:** the kernel killed `Contents/MacOS/Lumen`, the app's executable, at its start, counting
-  it as a system extension, which may hold no relaxation of the hardened runtime.
-- **Very likely, not yet measured:** `Contents/MacOS/LumenProfile` — library validation off, none of
-  the network guard's rights, in the same bundle — did start: release.sh runs its
-  `--check-safari-chrome` (step 2b) before the release check, and that step passed. Safari's
-  frameworks are loaded only there: in a profile's process (`SafariChromeHost.prepareForChildProcess`)
-  and in the checks that ask for it; the app's own process loads none of Safari's code.
-- **Not known:** what makes the kernel count the app's executable as a system extension — the
-  provider entitlement, `system-extension.install`, or the extension inside the bundle — and whether
-  every relaxation is refused there or library validation alone.
+What changed (the decision below, "Where the relaxation lives"):
 
-Measured on the owner's Mac by `scripts/amfi_matrix.py`: copies of the signed app, each signed again
-with one thing changed — without library validation off; with each other relaxation instead; with
-it, without each of the two rights, without both; without the extension in the bundle — and for each
-whether the kernel lets the app's executable start, whether LumenProfile starts and loads Safari's
-frameworks, and, where both do, the release check. What decides the layout below ("Inside our
-bundle", and the three ways out: an app of its own beside Lumen.app for the extension; another app
-inside our bundle to host it; no system extension at all) is that measurement, with what each way
-costs a person — installs, macOS's questions, updates.
+- the app's own executable, `Contents/MacOS/Lumen`, keeps library validation on, in every build; it
+  keeps the network guard's rights. `Contents/MacOS/LumenProfile` has library validation off and none
+  of those rights. Safari's frameworks were only ever loaded there: in a profile's process
+  (`SafariChromeHost.prepareForChildProcess`) and in the checks that run Safari's code;
+- build-app.sh refuses, and removes, a build in which one executable holds a relaxation beside the
+  right, read from every executable's signature (`scripts/relaxation_check.sh`, with the measured
+  list; `allow-jit` is not on it). release.sh reads it again before notarizing, and requires the app's
+  own executable to keep library validation on;
+- release.sh's step 1b stays: before anything is sent to Apple's notary, the kernel must let the app's
+  executable and LumenProfile, as signed, start (`scripts/start_check.sh`). It fails a build the
+  kernel kills at its start whatever the reason — a process killed at `execve` never answers its
+  probe. The matrix asked each copy that same question (`--keychain-probe`, one line or none), and
+  every copy holding a relaxation beside the right gave none; running the start check itself on those
+  copies is in the hardware checklist (step 0).
 
-Until a build starts and passes its release check, `NE=1` is not released, and release.sh refuses,
-before anything is sent to Apple's notary, a signed build whose app's or profile's executable the
-kernel does not let start (step 1b), saying what the kernel said.
+Not yet shown, and what shows it: the rebuilt 0.1.1 with this layout through release.sh, the
+extension installed on the owner's Mac, and the hardware checklist below. Whether the app's
+executable, without library validation off, configures the filter through `NEFilterManager` is
+answered there, by step 1: it keeps the provider right, and the guard reaches "Working" only after
+that process loaded the filter's configuration and, at the first install, saved it
+(`NetworkGuard.configureFilter`; a failure there is logged as `filter configuration: …` and leaves
+the guard off). If the app's executable turns out unable to do something it needs to without library
+validation off, the measured fallback is `app-dlv-no-provider` — the relaxation kept, the provider
+right taken off the app's executable — which started too; whether the filter can then still be
+configured is measured only if that fallback is ever needed.
+
+## What the kernel kills (measured 3 November 2026)
+
+On the owner's Mac — macOS 27.0.1 (26A434) — `scripts/amfi_matrix.py` took the NE=1 0.1.1 release
+release.sh had signed, and made copies of it, each with the app's executable (`Contents/MacOS/Lumen`)
+signed again with the team's Developer ID and one thing changed; LumenProfile, the updater's helper
+and the extension stayed as signed. For each copy: does the kernel let the app's executable start (it
+answers `--keychain-probe` on one line and ends, or it is killed at its start), does LumenProfile
+start and load Safari's frameworks (`--check-safari-chrome`), and where both do, the release check.
+Every copy kept the application identifier, the app group and the team, which were not in question.
+"Killed" and "started" are the owner's report of that run.
+
+| Copy | The app's executable signed with (besides camera and microphone) | Extension in the bundle | The app's executable | What it proves |
+|---|---|---|---|---|
+| `shipped` — 0.1.1 as released | library validation off; the provider right; `system-extension.install`; application identifier, app group, team | yes | **killed** — the kernel's log above | the failure itself |
+| `app-dlv-no-install` | library validation off; the provider right; **no** `system-extension.install` | yes | **killed** | the right to install a system extension has no part in it |
+| `bundle-no-extension` | as shipped | **no** — `Contents/Library/SystemExtensions` taken out | **killed** | the extension in the bundle has no part in it |
+| `app-unsigned-memory` | **`allow-unsigned-executable-memory` instead of** library validation off; the provider right; install | yes | **killed** | the rule is a class of relaxations, not library validation alone |
+| `app-dyld-env` | **`allow-dyld-environment-variables` instead**; the provider right; install | yes | **killed** | the same |
+| `app-jit` | **`allow-jit` instead**; the provider right; install | yes | started | `allow-jit` is not of that class |
+| `app-dlv-no-provider` | library validation off; install; **no** provider right | yes | started | without the provider right a relaxation is let through — the fallback |
+| `app-no-dlv` | the provider right; install; **no relaxation** | yes | started; LumenProfile started and loaded Safari's frameworks; **the release check passed** — the keychain between profiles: profiles A and B `refused (1100)` by both securityd services, the control outside a profile's sandbox wrote its item and read it back | **the layout chosen** |
+
+The control `resigned` (signed again with the same entitlements: it must end as `shipped`, or the
+table says nothing) and the copies `app-dlv-neither` and `bundle-no-extension-neither` are not in the
+summary the owner sent; the report itself (`build/amfi-matrix/report.md`, with the kernel's lines
+for each copy) stays on the owner's Mac. The copies other than `shipped` are notarized only when the
+matrix is run with `--notary-profile`.
+
+What it does not say: anything about macOS other than 27.0.1, nor about relaxations it did not try —
+`disable-executable-page-protection` and `debugger` are refused beside the right all the same
+(`scripts/relaxation_check.sh`: refusing costs nothing, letting one through would be a guess).
+
+What CI shows of it (it cannot sign with Developer ID): the relaxation check lets the builds made
+there through, refuses a copy of the release's app for each relaxation beside the right — and the
+right given to LumenProfile — and lets through the right alone and `allow-jit` beside it; build-app.sh
+refuses a build signed as 0.1.1's app was and leaves no bundle; and the start check fails a copy
+whose app's executable has its signature taken off — the kernel of Apple silicon runs no unsigned
+code, "Attempt to execute completely unsigned code", the line that ended 0.1.1. What CI's kernel does
+with 0.1.1's pairing signed ad hoc is measured there and said, not checked: CI has no Developer ID and
+no provisioning profile, and its kernel started an ad hoc copy carrying an application identifier (CI
+run 666) — the start check's earlier control, which therefore could not fail and was replaced. The
+start check's verdict on the pairing as signed by Developer ID is taken on the owner's Mac (the
+hardware checklist's step 0). Before it was committed, the relaxation step was run against four
+broken versions of the check — one
+that lets everything through, one that refuses everything, one that reads the right under a wrong
+name, one with `allow-jit` on its list — with stand-ins for codesign and PlistBuddy: each turned it
+red.
 
 ## The decisions (2 November 2026)
 
@@ -93,8 +150,30 @@ packet tunnel without a VPN server unsupported. A filter runs beside any VPN.
 `Contents/Library/SystemExtensions/<id>.systemextension` inside Lumen.app: macOS lets only the app
 that contains a system extension install it, the app must be in /Applications, and when Lumen is
 moved to the Trash macOS removes its extension. One signature, one notarization, one update: the
-updater replaces Lumen.app and the extension with it. A separate helper app would be a second
-thing to install, update and trust, with nothing gained.
+updater replaces Lumen.app and the extension with it.
+
+**Where the relaxation lives: chosen by the measurement of 3 November, not by taste.** 0.1.1 was
+killed at its start because its app's executable held library validation off beside the provider
+right ("What the kernel kills"). The ways out, each with what was measured:
+
+- **Library validation off for LumenProfile alone; the app's executable keeps it on and keeps its
+  rights (`app-no-dlv`) — chosen.** Measured: it starts, LumenProfile starts and loads Safari's
+  frameworks, and the release check passes, the keychain between profiles included. Nothing changes
+  for a person: one app, one install, one update. It costs nothing in the code: Safari's frameworks
+  were only ever loaded in LumenProfile's processes.
+- **The relaxation kept, the provider right taken off the app's executable (`app-dlv-no-provider`) —
+  the fallback.** Measured: it starts. Not chosen: the app's executable is what configures the filter
+  (`NEFilterManager`), and whether it can without the right is not measured; it is measured only if
+  `app-no-dlv` turns out unable to do something it needs to.
+- **An app of its own beside Lumen.app for the extension — rejected: not needed.** It was the way out
+  if every layout inside our bundle was killed; the measurement found one that is not. It would have
+  been a second thing to install, update and trust, with its own notarization and its own approval in
+  System Settings.
+- **`allow-jit` instead of library validation off — not a way out.** Measured: let through beside the
+  right, but Safari's frameworks need library validation off, not JIT. Listed for what it showed: the
+  rule is a class of relaxations, and `allow-jit` is not in it.
+- **No system extension at all** — a proxied profile keeps WebRTC off, as every release without
+  `NE=1` does. Not needed either.
 
 **How UDP support of the proxy is known before the profile gets WebRTC.** At the launch, while the
 profile's process waits (it builds no web view before the answer, up to 40 s), the manager asks
@@ -356,6 +435,13 @@ the guard drops each of those flows, because they are counted for the held profi
 - The shim tests: the page's configuration, urls, tampering, named candidates.
 - `NE=check`: the extension compiles, its plists lint, the provider is the filter alone, its
   entitlements give it no network.
+- The layout the kernel lets start ("What the kernel kills"): in the builds made there the app's own
+  executable keeps library validation on and LumenProfile has it off; `scripts/relaxation_check.sh`
+  lets them through, refuses copies of the release's app holding each relaxation beside the provider
+  right (and LumenProfile given the right), and lets through the right alone and `allow-jit` beside it;
+  build-app.sh refuses a build signed as 0.1.1's app was and leaves no bundle behind; the start check
+  fails a copy whose app's executable is unsigned (the kernel of Apple silicon runs no unsigned code),
+  and what CI's kernel does with 0.1.1's pairing signed ad hoc is measured and said.
 - The self-test, inside a capture of every packet of the runner: a profile with a SOCKS5 proxy
   with UDP, in its own process, makes a real video call between two peer connections through the
   relay and the proxy (relay candidates at the proxy's address only, frames decoded on the far
@@ -371,9 +457,17 @@ the guard drops each of those flows, because they are counted for the held profi
 
 ## Hardware checklist (a signed build on a real Mac)
 
+0. The build: `NE=1 scripts/release.sh` passes — the relaxation check, the start check (step 1b),
+   notarization, `--check-safari-chrome` and the release check (step 2b). The start check run by hand
+   on the matrix's copies (`build/amfi-matrix/<copy>/Lumen.app/Contents/MacOS/Lumen`) fails every copy
+   holding a relaxation beside the right, with the kernel's lines, and passes `app-no-dlv`, `app-jit`
+   and `app-dlv-no-provider`.
 1. Settings › WebRTC through proxies › Install…: the explanation, then macOS's two questions.
    `systemextensionsctl list` shows the guard activated and enabled; the page shows "Being checked"
-   and then "Working".
+   and then "Working". This answers whether the app's executable — the provider right, library
+   validation on — configures the filter (`NEFilterManager`): "Working" comes only after it did; a
+   failure is logged as `filter configuration: …` (`log stream --predicate 'subsystem ==
+   "PrivacyBrowser" AND category == "NetworkGuard"'`).
 2. `log stream --predicate 'subsystem == "PrivacyBrowser.NetworkGuard"'` shows the probe held,
    its flow dropped, and the check proven.
 3. A SOCKS5 proxy with UDP on another host (Dante, sing-box, 3proxy). A profile behind it with

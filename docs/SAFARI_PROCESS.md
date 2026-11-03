@@ -652,7 +652,7 @@ Nibs Safari's controllers make themselves: the Bookmarks sidebar
 threw where Safari finds them (on the owner's Mac, macOS 27: the process went down, and once
 exceptions were lived through, the sidebar did nothing). Both that initializer and AppKit's
 `-_initWithNibNamed:bundle:options:` behind it make a nib the given bundle lacks from Safari's own
-file. `Lumen --nib-check` makes the sidebar's nibs the same way in a process like a
+file. `LumenProfile --nib-check` makes the sidebar's nibs the same way in a process like a
 profile's, and the self-test fails unless each comes from Safari's file with nothing thrown.
 
 What the hosted chrome does once all of that is in place, measured by hand: the window with Safari's
@@ -738,7 +738,7 @@ self-test wants a stop of a profile in Safari's chrome done within 15 s and says
 was forced.
 
 **Which private pieces this needs.** `SafariChrome.expectedPieces` lists every class and method
-reached for by name. `Lumen --check-safari-chrome` prints which this macOS has (CI runs it;
+reached for by name. `LumenProfile --check-safari-chrome` prints which this macOS has (CI runs it;
 it loads Safari's frameworks in a temporary home of its own, held to a closed proxy, as a profile's
 process does, and removes the home afterwards);
 a missing structural piece means the profile opens our own window, a missing network piece is a lock

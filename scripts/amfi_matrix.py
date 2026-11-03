@@ -30,19 +30,22 @@ mac_vnode_check_signature, and the sandbox's refusals of securityd), with what e
 signed with.
 
 The copies — what the app's executable (Contents/MacOS/Lumen) is signed with; LumenProfile, the
-helper and the extension stay as release.sh signed them:
+helper and the extension stay as release.sh signed them. Each says what it holds whatever the build
+held: since 3 November the app's executable is built without library validation off (the outcome of
+this matrix, docs/TUNNEL.md), and the copies "with it" add it.
 
   shipped                       the app as it is: its signature, notarization and staple
   resigned                      signed again with the same entitlements — the control: signing
                                 again must change nothing, or every other copy says nothing
-  app-no-dlv                    without com.apple.security.cs.disable-library-validation
+  app-dlv                       with com.apple.security.cs.disable-library-validation: 0.1.1's layout
+  app-no-dlv                    without it
   app-jit                       without it, with com.apple.security.cs.allow-jit
   app-unsigned-memory           without it, with com.apple.security.cs.allow-unsigned-executable-memory
   app-dyld-env                  without it, with com.apple.security.cs.allow-dyld-environment-variables
   app-dlv-no-install            with it, without com.apple.developer.system-extension.install
   app-dlv-no-provider           with it, without com.apple.developer.networking.networkextension
   app-dlv-neither               with it, without either of those two
-  bundle-no-extension           as shipped, with Contents/Library/SystemExtensions taken out
+  bundle-no-extension           with it, and Contents/Library/SystemExtensions taken out
   bundle-no-extension-neither   with it, without either right, and without the extension
 
 Writes <out>/report.md — send it back — and <out>/report.json. codesign may ask once for the Developer
@@ -160,15 +163,16 @@ def main():
     copies = [
         ("shipped", None, False),
         ("resigned", copy.deepcopy(shipped), False),
+        ("app-dlv", without(adding=[DLV]), False),
         ("app-no-dlv", without(DLV), False),
         ("app-jit", without(DLV, adding=[JIT]), False),
         ("app-unsigned-memory", without(DLV, adding=[UNSIGNED_MEMORY]), False),
         ("app-dyld-env", without(DLV, adding=[DYLD_ENV]), False),
-        ("app-dlv-no-install", without(INSTALL), False),
-        ("app-dlv-no-provider", without(PROVIDER), False),
-        ("app-dlv-neither", without(INSTALL, PROVIDER), False),
-        ("bundle-no-extension", copy.deepcopy(shipped), True),
-        ("bundle-no-extension-neither", without(INSTALL, PROVIDER), True),
+        ("app-dlv-no-install", without(INSTALL, adding=[DLV]), False),
+        ("app-dlv-no-provider", without(PROVIDER, adding=[DLV]), False),
+        ("app-dlv-neither", without(INSTALL, PROVIDER, adding=[DLV]), False),
+        ("bundle-no-extension", without(adding=[DLV]), True),
+        ("bundle-no-extension-neither", without(INSTALL, PROVIDER, adding=[DLV]), True),
     ]
     if arguments.only:
         wanted = set(arguments.only.split(","))
