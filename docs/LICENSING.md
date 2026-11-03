@@ -88,8 +88,15 @@ Now (`LicenseModel`, `RefreshSchedule`, `LicenseClient.refreshReport`):
 The label in a renewal (CONTRACT §6.2): in the body of `POST /v1/device/entitlement` beside
 `machineID`, `profileCount` and `appVersion` — no field or `null`: the server's label stays; a
 string: it replaces it (the rules of §6.1); `""`: it is removed; one against the rules: 400
-`invalid_request`, `field: "label"`, and no renewal. The server keeps a renewal's label from its
-release after v2026.11.04; before that the field is passed over (200, the label as it was).
+`invalid_request`, `field: "label"`, and no renewal. The server keeps a renewal's label from release
+v2026.11.04 itself (the owner, 3 November: it ships with the partner program; CONTRACT §6.2 as of the
+server's e419471, as its session said); the server in production until then, v2026.11.02, passes
+the field over (200, the label as it was).
+
+0.1.1 does not follow this: every renewal of it carries the label the Mac was activated with — the
+Mac's name, unless the person typed another — or the Mac's name when it kept none. Once v2026.11.04
+is deployed, each such renewal sets the label again: a label changed since, on the site or another
+Mac, is put back by the next renewal of a 0.1.1 Mac, until that Mac has a build with this change.
 
 Checked by what the server sees, never by what the app says it sent:
 `scripts/license_renewal_check.py` (CI, "The license's renewals, as the account server sees them").
