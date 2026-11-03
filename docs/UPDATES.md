@@ -412,7 +412,14 @@ whole history (all branches, 1.5 GB of files) takes about 15 seconds.
 
 **For the website**, at the end, in one piece to copy (and in `download.json`): the image's
 address, the version, its size in megabytes (decimal, as Finder counts) and in bytes, its SHA-256,
-the minimum macOS.
+the minimum macOS. Written by a JSON serializer (`scripts/download_json.py`) and read back as the
+site reads it — strict JSON, every field of the format and no other, the size and SHA-256 the
+image's, the minimum macOS the app's `LSMinimumSystemVersion` — before anything is published; any
+of it wrong stops the release. 0.1.1's, put together by awk and a template, said `"sizeMB": 17,5`
+on the owner's Mac, whose Russian locale writes a decimal comma: no JSON reader takes that, and CI,
+whose locale is English, could not have shown it. `scripts/test_download_json.sh` (CI, both jobs)
+writes the file under four locales and must have each taken, and holds the check to ten files it
+must refuse, 0.1.1's among them.
 
 **Checked as downloaded**: `scripts/download_check.sh` fetches the image, marks it as a browser
 marks a download, and asks Gatekeeper what macOS asks when it is opened — the image (`spctl

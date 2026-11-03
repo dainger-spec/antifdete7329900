@@ -67,8 +67,8 @@ jobs:
       # from the public address and compared, a published version never replaced, R2's keys never on
       # curl's command line (scripts/test_r2_publish.sh). Then no secret of a release in the
       # repository (scripts/check_secrets.py): its planted ones found first.
-      - name: A release's publication, and no secret in the repository
-        run: scripts/test_r2_publish.sh && python3 scripts/check_secrets.py --self-check && python3 scripts/check_secrets.py
+      - name: A release's publication, download.json as the website reads it, and no secret in the repository
+        run: scripts/test_r2_publish.sh && scripts/test_download_json.sh && python3 scripts/check_secrets.py --self-check && python3 scripts/check_secrets.py
 
   macos-27:
     name: macOS 27 — the self-test on the newest macOS (preview image; fails the build only on a certificate fetched outside the proxy)
@@ -508,6 +508,14 @@ jobs:
           grep -F 'a release is never the sandboxed build' build/release-sandboxed.log \
             || { echo "::error title=Release gate::release.sh did not refuse SANDBOX=1 for the sandbox"; cat build/release-sandboxed.log; status=1; }
           exit $status
+      - name: download.json as the website reads it, written under any locale (its controls)
+        # 0.1.1's said "sizeMB": 17,5 on the owner's Mac, whose locale writes a decimal comma; this
+        # runner's locale is English, so the check reads the file, not the environment. Here macOS's
+        # own Russian locale shows the old line's comma, and the file release.sh wrote is read back.
+        run: |
+          scripts/test_download_json.sh
+          python3 scripts/download_json.py check build/release/download.json --dmg build/release/Lumen-0.1.1.dmg \
+            --minimum-system "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' build/release/app/Lumen.app/Contents/Info.plist)"
       - name: The release gate reads every line, not one PASS among them (its controls)
         # release.sh takes the release check's verdict through scripts/release_check_gate.sh: the
         # app's exit status and every line. Outputs made up for the purpose, each with the verdict the

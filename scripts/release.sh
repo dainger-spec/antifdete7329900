@@ -341,6 +341,17 @@ fi
 "$PBUPDATE" verify --appcast "$OUT/appcast.json" --public-key "$KEY_ID=$KEY_PUBLIC" --archive "$OUT/$ZIP_NAME" --build "$BUILD"
 [[ -n "${UPDATE_KEY_FILE:-}" ]] || rm -f "$KEY"
 
+# 5b. For the website, in one piece (the owner: the site's build needs them): the image's address,
+# the version, its size in megabytes (decimal, as Finder counts), its SHA-256, the macOS it needs.
+# Written by a JSON serializer — 0.1.1's, put together by awk and a template, said "sizeMB": 17,5 on a
+# Mac whose locale writes a decimal comma — and read back as the site reads it, before anything is
+# published: a file that is not valid JSON, or whose fields are not this image's, stops the release
+# (scripts/download_json.py).
+python3 scripts/download_json.py write --dmg "$OUT/$DMG_NAME" --version "$VERSION" --build "$BUILD" \
+  --url "$DOWNLOAD_URL$DMG_NAME" --minimum-system "$MINIMUM_SYSTEM" --out "$OUT/download.json"
+python3 scripts/download_json.py check "$OUT/download.json" --dmg "$OUT/$DMG_NAME" --minimum-system "$MINIMUM_SYSTEM" \
+  || { echo "error: download.json is not what the website can read (above): nothing published" >&2; exit 1; }
+
 # 6. Published: the zip and the image first, the appcast last — never a feed naming a file that is
 # not there yet — each read back from its public address and its SHA-256 compared with the built
 # file's; any difference fails the release (scripts/r2_publish.sh). Cache: the versioned files for a
@@ -354,23 +365,6 @@ if [[ -n "$PUBLISH" ]]; then
 else
   PUBLISHED="not uploaded (no R2_* keys): publish the zip and the image first, the appcast last"
 fi
-
-# 7. For the website, in one piece (the owner: the site's build needs them): the image's address,
-# the version, its size in megabytes (decimal, as Finder counts), its SHA-256.
-DMG_BYTES="$(stat -f%z "$OUT/$DMG_NAME")"
-DMG_MB="$(awk -v b="$DMG_BYTES" 'BEGIN { printf "%.1f", b / 1000000 }')"
-DMG_SHA256="$(shasum -a 256 "$OUT/$DMG_NAME" | cut -d' ' -f1)"
-cat > "$OUT/download.json" <<JSON
-{
-  "version": "$VERSION",
-  "build": "$BUILD",
-  "url": "$DOWNLOAD_URL$DMG_NAME",
-  "sizeMB": $DMG_MB,
-  "sizeBytes": $DMG_BYTES,
-  "sha256": "$DMG_SHA256",
-  "minimumSystem": "$MINIMUM_SYSTEM"
-}
-JSON
 
 echo
 echo "Release $VERSION ($BUILD) in $OUT:"
