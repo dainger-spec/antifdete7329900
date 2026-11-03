@@ -3751,7 +3751,7 @@ final class SelfTest {
         let copy = repository.root.appendingPathComponent("kept-deleted-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.copyItem(at: folder, to: copy)
         defer { try? FileManager.default.removeItem(at: copy) }
-        try await ProfileManager(repository: repository).delete(profile.id)
+        try await ProfileManager(repository: repository).deleteBecauseThePersonAsked(profile.id)
         let goneAfterDeletion = !FileManager.default.fileExists(atPath: folder.path)
         try FileManager.default.copyItem(at: copy, to: folder) // put back from a backup
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -5977,7 +5977,7 @@ final class SelfTest {
                   && FileManager.default.fileExists(atPath: copy.path),
               "\(zones) \(conflict.resolvedConflicts)")
         check("profile sync: no errors reported", messages.isEmpty, "\(messages)")
-        try await managerA.delete(profile.id)
+        try await managerA.deleteBecauseThePersonAsked(profile.id)
     }
 
     // MARK: Session warm-up robot
