@@ -428,7 +428,7 @@ enum GuardDiagnosis {
             executable = try ProfileExecutable.url()
         } catch {
             // ProfileExecutable's own words: missing, unreadable, or signed with a keychain.
-            run.lines = ["the probe was not started: \((error as? CustomStringConvertible)?.description ?? error.localizedDescription)"]
+            run.lines = ["the probe was not started: \(String(describing: error))"]
             return run
         }
         let process = Process()

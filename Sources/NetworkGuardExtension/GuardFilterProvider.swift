@@ -3,6 +3,7 @@ import Foundation
 import NetworkExtension
 import NetworkGuardCore
 import os
+import Security
 
 /// The network guard: a content filter that holds each process the app registered — a profile
 /// whose WebRTC goes through its proxy — to that proxy (docs/TUNNEL.md). Every new flow of the Mac
@@ -126,7 +127,11 @@ final class GuardFilterProvider: NEFilterDataProvider {
     private func count(_ kind: FlowTally.Kind, _ flow: NEFilterFlow, appPID: Int32?, openerPID: Int32?, openerName: String,
                        facts: GuardFlow?, verdict: String) {
         let appName = appPID.map(name) ?? "?"
-        let check = GuardService.shared.tally.record(kind, appPID: appPID, appName: appName, appIdentifier: flow.sourceAppIdentifier,
+        // The source app's signing identifier, for a flow to the documentation network only (the
+        // check's, the diagnosis's): read from its code by its audit token. NEFilterFlow's own
+        // sourceAppIdentifier is iOS's — unavailable in macOS's SDK (CI run 670).
+        let identifier = FlowTally.isCheckAddress(facts?.remoteAddress) ? flow.sourceAppAuditToken.flatMap(Self.signingIdentifier) : nil
+        let check = GuardService.shared.tally.record(kind, appPID: appPID, appName: appName, appIdentifier: identifier,
                                                      openerPID: openerPID, openerName: openerName,
                                                      transport: facts?.transport ?? .other, remoteAddress: facts?.remoteAddress,
                                                      remotePort: facts?.remotePort, verdict: verdict)
@@ -194,6 +199,20 @@ final class GuardFilterProvider: NEFilterDataProvider {
             return ("?", false)
         }
         return (processName(pid), pid != holder)
+    }
+
+    /// The signing identifier of the process an audit token names, read from its code; nil when it
+    /// cannot be read.
+    static func signingIdentifier(of token: Data) -> String? {
+        var guest: SecCode?
+        let attributes = [kSecGuestAttributeAudit: token] as CFDictionary
+        guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &guest) == errSecSuccess, let guest else { return nil }
+        var staticCode: SecStaticCode?
+        guard SecCodeCopyStaticCode(guest, [], &staticCode) == errSecSuccess, let staticCode else { return nil }
+        var information: CFDictionary?
+        guard SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &information) == errSecSuccess,
+              let dictionary = information as? [String: Any] else { return nil }
+        return dictionary[kSecCodeInfoIdentifier as String] as? String
     }
 
     static func processName(_ pid: Int32) -> String {

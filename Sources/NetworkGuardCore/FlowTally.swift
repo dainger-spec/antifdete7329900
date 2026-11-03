@@ -40,7 +40,8 @@ public final class FlowTally: @unchecked Sendable {
         /// The source application, as its audit token says (nil without one), and its name.
         public var appPID: Int32?
         public var appName: String
-        /// The source application's signing identifier, as the system gives it (`sourceAppIdentifier`).
+        /// The source application's signing identifier, read from its code by its audit token (nil
+        /// when it could not be read).
         public var appIdentifier: String?
         /// The process that opened the socket (`sourceProcessAuditToken`), and its name.
         public var openerPID: Int32?
