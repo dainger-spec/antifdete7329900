@@ -566,13 +566,16 @@ team, docs/TUNNEL.md).
 
 **Which macOS.** 26 and later: `LSMinimumSystemVersion` 26.0 in the app, its updater's helper and the
 network guard (build-app.sh stops if they differ), what download.json and the appcast tell people,
-what the website says (release.sh reads the site before publishing: `scripts/site_minimum_check.py`;
-a site that says another, or cannot be read, stops a release that publishes, and a run that publishes
-nothing says so in its block) and what CI tests (macOS 26 and 27). On 3 November CI's dry run (run
-669) read the live site's root and found no "macOS N и новее / or later" the check reads, and its
-/download answered 404: until the site's own page carries the claim, a release that publishes stops
-there — the check now prints what each page says near "macOS", and whether its words are drawn by
-JavaScript, which the check does not run. A
+what the website says and what CI tests (macOS 26 and 27). The website's promise lives on its
+download page in each language, /ru/download and /en/download (the owner, 3 November): release.sh reads
+both before publishing (`scripts/site_minimum_check.py`), each must state the app's major version on
+its own, and the check names every address it asked and what it found there — the claim's words, no
+claim (with what the page says near "macOS", and whether its words are drawn by JavaScript, which the
+check does not run), or the address not read, with its answer; when the site redirects, the page it led
+to is named as the one read. A page that states another version, or
+none, or cannot be read stops a release that publishes; a run that publishes nothing says so in its
+block. (CI run 669 had read the root and the address without a language: the root need not carry the
+claim, and the other answered 404, which the site fixes on its side.) A
 profile's window is Safari 26's own; on an older macOS, macOS itself refuses to open the app, with
 its own message — 0.1.1 said 14.0, and on macOS 15 it would have installed and not worked. The
 executables still declare macOS 14 (`Package.swift`), for a measured reason: with Xcode 27, SwiftPM

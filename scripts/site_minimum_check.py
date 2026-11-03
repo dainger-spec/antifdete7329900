@@ -1,21 +1,26 @@
 #!/usr/bin/env python3
 """Does the website state the minimum macOS the app needs? The app's LSMinimumSystemVersion against
-what the site says in words ("macOS 26 и новее", "macOS 26 or later").
+what the site's download pages say in words ("macOS 26 и новее", "macOS 26 or later").
 
     python3 scripts/site_minimum_check.py --minimum 26.0 --site https://lumenbrowser.io
-    python3 scripts/site_minimum_check.py --minimum 26.0 --page saved.html      (a page as text)
+    python3 scripts/site_minimum_check.py --minimum 26.0 --page ru.html --page en.html   (saved pages)
 
 On 3 November 0.1.1 needed macOS 14.0 by its Info.plist, and so said its download.json and appcast,
 while the site said macOS 26 and newer — where the app, needing Safari 26's frameworks, works. Now
 the app says 26.0, and release.sh asks the site before anything is published.
 
-Every page given (the site's address and its /download) is read as text; a claim is "macOS", maybe a
-name ("Tahoe"), a major version, maybe the name after it, then "и новее", "и выше", "или новее",
-"или выше", "и более поздние", "or later", "and later", "or newer", "and newer", "or higher", "and
-above" or "+". Exit 0 when every claim found names the app's major version, 1 when one names another
-(the site and the app disagree), 2 when no page could be read or none states a minimum this check
-can read — each said in words, with what was read and, when no claim was found, what each page says
-near "macOS" (CI run 669: the live site's root held none this check reads, and /download was 404).
+The promise lives on the download page of each language — /ru/download and /en/download (the owner,
+3 November) — and each is read and must state it on its own; the site's root need not, and the
+address without a language is not read. A claim is "macOS", maybe a name ("Tahoe"), a major
+version, maybe the name after it, then "и новее", "и выше", "или новее", "или выше", "и более
+поздние", "or later", "and later", "or newer", "and newer", "or higher", "and above" or "+".
+
+It says, page by page, the address it read and what it found there: the words of each claim; or no
+claim, with what the page says near "macOS" (and whether its text is drawn by JavaScript, which this
+check does not run); or that the address could not be read, with its answer. When the site
+redirects, the page it led to is named as the one read. Exit 0 when every page
+states the app's major version, 1 when one states another (the site and the app disagree), 2 when one
+could not be read or states no minimum — the last line names the pages and what was missing.
 """
 import argparse
 import html
@@ -46,57 +51,87 @@ def claims_in(text):
 
 
 def fetch(url):
+    """(the address that answered — another when the site redirected — and the page's markup)."""
     request = urllib.request.Request(url, headers={"User-Agent": "Lumen release check"})
     with urllib.request.urlopen(request, timeout=20) as answer:
-        return answer.read().decode("utf-8", "replace")
+        return answer.geturl(), answer.read().decode("utf-8", "replace")
+
+
+# The pages where the promise lives, one per language of the site.
+DOWNLOAD_PAGES = ("/ru/download", "/en/download")
+
+
+def near_macos(text):
+    near = [match.group(0).strip() for match in NEAR.finditer(text)][:6]
+    return "; ".join(f"“{words}”" for words in near) if near else "no word about macOS at all"
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--minimum", required=True, help="the app's LSMinimumSystemVersion, e.g. 26.0")
-    parser.add_argument("--site", help="the site's address; its root and /download are read")
+    parser.add_argument("--site", help="the site's address; its " + " and ".join(DOWNLOAD_PAGES) + " are read")
     parser.add_argument("--page", action="append", default=[], help="a saved page instead (repeatable)")
     arguments = parser.parse_args()
     major = int(arguments.minimum.split(".")[0])
 
-    pages = []
+    pages = []  # (where, the page's markup, or None and why it was not read, the address that answered)
     for path in arguments.page:
         with open(path, encoding="utf-8") as handle:
-            pages.append((path, handle.read()))
+            pages.append((path, handle.read(), None, path))
     if arguments.site:
         base = arguments.site.rstrip("/")
-        for url in (base + "/", base + "/download"):
+        for suffix in DOWNLOAD_PAGES:
+            url = base + suffix
             try:
-                pages.append((url, fetch(url)))
+                answered, markup = fetch(url)
+                pages.append((url, markup, None, answered))
             except (urllib.error.URLError, OSError, ValueError) as error:
-                print(f"site minimum: {url} not read ({getattr(error, 'code', None) or error})")
+                pages.append((url, None, f"{getattr(error, 'code', None) or error}", url))
     if not pages:
-        print("site minimum: no page of the site could be read: the macOS it states is not known")
+        print("site minimum: no page given (--site or --page)")
         return 2
 
-    found = []
-    for where, markup in pages:
-        for number, words in claims_in(text_of(markup)):
-            found.append((number, words, where))
-            print(f"site minimum: {where} says “{words.strip()}”")
-    if not found:
-        print(f"site minimum: none of {len(pages)} page(s) states a minimum macOS this check reads "
-              "(“macOS N и новее”, “macOS N or later”)")
-        for where, markup in pages:
-            text = text_of(markup)
-            near = [match.group(0).strip() for match in NEAR.finditer(text)][:6]
-            said = "; ".join(f"“{words}”" for words in near) if near else "no word about macOS at all"
-            print(f"site minimum: {where}: {len(markup)} bytes, {len(text.strip())} characters of text; near “macOS”: {said}")
-            if len(text.strip()) < 400 and "<script" in markup.lower():
-                print(f"site minimum: {where} holds almost no text but scripts: its words are likely drawn by JavaScript, "
-                      "which this check does not run — the site's build can put the claim in the page itself")
-        return 2
-    other = sorted({number for number, _, _ in found if number != major})
+    states, silent, unread = {}, [], []
+    for where, markup, problem, answered in pages:
+        if markup is None:
+            print(f"site minimum: {where}: not read ({problem})")
+            unread.append(where)
+            continue
+        # A redirect is said: what was read is the page it led to, and that page is the one named.
+        read_from = "" if answered == where else f" (redirected: what was read is {answered})"
+        text = text_of(markup)
+        claims = claims_in(text)
+        if claims:
+            print(f"site minimum: {where}: read{read_from}, {len(markup)} bytes; it states "
+                  + "; ".join(f"“{words.strip()}”" for _, words in claims))
+            states[where] = sorted({number for number, _ in claims})
+            continue
+        print(f"site minimum: {where}: read{read_from}, {len(markup)} bytes, {len(text.strip())} characters of text; "
+              f"no minimum macOS this check reads (“macOS N и новее”, “macOS N or later”); near “macOS”: {near_macos(text)}")
+        if len(text.strip()) < 400 and "<script" in markup.lower():
+            print(f"site minimum: {where} holds almost no text but scripts: its words are likely drawn by JavaScript, "
+                  "which this check does not run — the site's build can put the claim in the page itself")
+        silent.append(where)
+
+    read = ", ".join(where if answered == where else f"{where} (→ {answered})" for where, _, _, answered in pages)
+    other = {where: numbers for where, numbers in states.items() if any(number != major for number in numbers)}
     if other:
-        print(f"site minimum: the site states macOS {', '.join(map(str, other))} where the app needs macOS "
-              f"{arguments.minimum} (LSMinimumSystemVersion): they disagree")
+        print("site minimum: the site and the app disagree — "
+              + "; ".join(f"{where} states macOS {', '.join(map(str, numbers))}" for where, numbers in other.items())
+              + f"; the app needs macOS {arguments.minimum} (LSMinimumSystemVersion). Addresses asked: {read}")
         return 1
-    print(f"site minimum: the site states macOS {major}, as the app needs (LSMinimumSystemVersion {arguments.minimum})")
+    if silent or unread:
+        parts = []
+        if unread:
+            parts.append("not read: " + ", ".join(unread))
+        if silent:
+            parts.append("no minimum stated on: " + ", ".join(silent))
+        print(f"site minimum: not confirmed — {'; '.join(parts)}"
+              + (f"; macOS {major} stated on: {', '.join(states)}" if states else "")
+              + f". Addresses asked: {read}")
+        return 2
+    print(f"site minimum: macOS {major} stated on every address asked, as the app needs (LSMinimumSystemVersion "
+          f"{arguments.minimum}): {read}")
     return 0
 
 
