@@ -34,9 +34,14 @@ approximations limited by what WebKit exposes. The tables below say which parts 
 
 ## Requirements
 
-- macOS 14 Sonoma or later. The design depends on two APIs added in macOS 14:
-  `WKWebsiteDataStore(forIdentifier:)` and `WKWebsiteDataStore.proxyConfigurations`.
-- Xcode 15 or later, or the matching Command Line Tools (Swift 5.9+).
+- To run: macOS 26 or later (`LSMinimumSystemVersion`; what the website says too, and what CI
+  tests: macOS 26 and 27). A profile's window is Safari 26's own, whose frameworks the app loads;
+  macOS refuses to open the app on an older system, with its own message. The executables still
+  declare macOS 14 (`Package.swift`): with Xcode 27 SwiftPM writes the deployment target as the
+  declared SDK too, and a declared SDK of 15 or newer turns on WebKit's network loader, with which
+  macOS 27 fetched a certificate's intermediate outside a profile's proxy (docs/UPDATES.md §6,
+  docs/ISOLATION_AND_LIMITATIONS.md §2).
+- To build: Xcode 15 or later, or the matching Command Line Tools (Swift 5.9+); a release, Xcode 27.
 
 ## Build and run
 

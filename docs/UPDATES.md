@@ -530,6 +530,19 @@ network guard's system extension is sandboxed by its own entitlements; the app t
 need not be (`build-app.sh` adds the extension's entitlements to either build; untried with a real
 team, docs/TUNNEL.md).
 
+**Which macOS.** 26 and later: `LSMinimumSystemVersion` 26.0 in the app, its updater's helper and the
+network guard (build-app.sh stops if they differ), what download.json and the appcast tell people,
+what the website says (release.sh reads the site before publishing: `scripts/site_minimum_check.py`;
+a site that says another, or cannot be read, stops a release) and what CI tests (macOS 26 and 27). A
+profile's window is Safari 26's own; on an older macOS, macOS itself refuses to open the app, with
+its own message — 0.1.1 said 14.0, and on macOS 15 it would have installed and not worked. The
+executables still declare macOS 14 (`Package.swift`), for a measured reason: with Xcode 27, SwiftPM
+writes the deployment target as the declared SDK too — `.macOS(.v14)` gives minos 14.0 and SDK 14.0,
+`.macOS("26.0")` gives minos 26.0 and SDK 26.0 (CI run 667, macOS 27) — and a declared SDK of 15 or
+newer turns on WebKit's network loader, with which macOS 27 fetched a certificate's intermediate
+outside a profile's proxy (docs/ISOLATION_AND_LIMITATIONS.md §2; release.sh refuses such a build).
+`LSMinimumSystemVersion` decides what macOS opens; the declared SDK, what WebKit does.
+
 **Signing.** The same Developer ID Application certificate, hardened runtime and secure timestamp.
 The entitlements are `Resources/PrivacyBrowser-NoSandbox.entitlements`: camera and microphone. The
 profile's executable, `Contents/MacOS/LumenProfile`, is signed with them and

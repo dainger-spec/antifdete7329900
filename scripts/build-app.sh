@@ -38,7 +38,11 @@
 #                                      the app checks for updates (without a feed URL it has no updater)
 #   WEBSITE_URL=https://… SUPPORT_URL=https://…   the links Settings → About shows (none without them)
 #
-# Requires macOS 14+ and Xcode 15+ (or the matching Command Line Tools).
+# Builds with Xcode 15+ (or the matching Command Line Tools). The app runs on macOS 26 and later
+# (LSMinimumSystemVersion, the same in the app, its updater's helper and the network guard): its
+# profiles' windows are Safari 26's own. The executables declare macOS 14 (Package.swift): with
+# Xcode 27, SwiftPM writes the deployment target as the declared SDK too (CI run 667), and a release
+# declares an SDK older than 15 (release.sh says why).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -261,6 +265,15 @@ if [[ "${DEBUGGABLE:-0}" == "1" ]]; then
   # Safari's code is debugged in a profile's process.
   /usr/libexec/PlistBuddy -c "Add :com.apple.security.get-task-allow bool true" "$PROFILE_ENTITLEMENTS"
 fi
+
+# One minimum macOS for the app, its updater's helper and the network guard: the app's
+# LSMinimumSystemVersion is what download.json and the appcast tell people (release.sh), and what macOS
+# refuses an older system by.
+MINIMUM_SYSTEM="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$PLIST")"
+for plist in "$HELPER/Contents/Info.plist" ${SYSEXT:+"$SYSEXT/Contents/Info.plist"}; do
+  [[ "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$plist" 2>/dev/null)" == "$MINIMUM_SYSTEM" ]] \
+    || { echo "error: $plist does not need macOS $MINIMUM_SYSTEM as the app does" >&2; exit 1; }
+done
 
 TIMESTAMP="--timestamp=none"
 # A Developer ID signature is notarized, and notarization needs a secure timestamp.

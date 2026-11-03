@@ -352,6 +352,21 @@ python3 scripts/download_json.py write --dmg "$OUT/$DMG_NAME" --version "$VERSIO
 python3 scripts/download_json.py check "$OUT/download.json" --dmg "$OUT/$DMG_NAME" --minimum-system "$MINIMUM_SYSTEM" \
   || { echo "error: download.json is not what the website can read (above): nothing published" >&2; exit 1; }
 
+# 5c. The website says the minimum macOS the app needs (its LSMinimumSystemVersion), in words: 0.1.1
+# needed 14.0 by its Info.plist, download.json and appcast while the site said macOS 26 and newer
+# (scripts/site_minimum_check.py reads the site's pages). A release whose site says another, or whose
+# site cannot be read, publishes nothing; a dry run says so and goes on.
+site_status=0
+python3 scripts/site_minimum_check.py --minimum "$MINIMUM_SYSTEM" --site "$ACCOUNT_SITE_URL" || site_status=$?
+if (( site_status != 0 )); then
+  if [[ "$SIGN_IDENTITY" == "-" ]]; then
+    DRY+=("the website's minimum macOS is not confirmed (scripts/site_minimum_check.py: exit $site_status): a release stops on it")
+  else
+    echo "error: the website does not say macOS $MINIMUM_SYSTEM and newer, as the app needs, or could not be read (above): nothing published" >&2
+    exit 1
+  fi
+fi
+
 # 6. Published: the zip and the image first, the appcast last — never a feed naming a file that is
 # not there yet — each read back from its public address and its SHA-256 compared with the built
 # file's; any difference fails the release (scripts/r2_publish.sh). Cache: the versioned files for a
