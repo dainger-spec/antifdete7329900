@@ -472,24 +472,35 @@ jobs:
             || { echo "::error title=Release gate::the profile's executable with the app's keychain did not fail for it"; status=1; }
           gate "development-key" "Add :PBEntitlementPublicKeys:445c6300da0205b1 string /+/sbiH55nmy+2gRqQz12E0spl9L/YDWvjnecaN2M1c=" \
             "the development server's key"
-          # The start check (release.sh's step 1b) passes the release's app and fails a copy the kernel
-          # kills at its start: the app's executable with its signature taken off. On Apple silicon the
-          # kernel runs no unsigned code ("Attempt to execute completely unsigned code" — the line that
-          # ended 0.1.1 with the network guard on the owner's Mac, 3 November). The control before it,
-          # an ad hoc signature carrying an application identifier, was started here (CI run 666): it
-          # could not fail, and proved nothing.
+          # The start check (release.sh's step 1b) passes the release's app, and fails an executable that
+          # does not answer: one killed at its start — what the owner's Mac showed of 0.1.1 with the
+          # network guard (Killed: 9, 137) — and one that ends at once without a word. Neither is the
+          # kernel's own refusal: this runner's kernel enforces no code signature — it started an ad hoc
+          # copy carrying an application identifier (run 666) and a copy whose app's executable had its
+          # signature taken off (run 667), the two controls tried before these, which therefore could
+          # not fail. The start check's verdict on a signature the kernel refuses is taken on the
+          # owner's Mac (docs/TUNNEL.md, the hardware checklist's step 0).
           scripts/start_check.sh build/release/app/Lumen.app/Contents/MacOS/Lumen "the release's app" \
             || { echo "::error title=Start check::the release's own app did not pass the start check"; status=1; }
-          copy="build/start-check-control/Lumen.app"
           rm -rf build/start-check-control; mkdir -p build/start-check-control
+          printf '#!/bin/sh\nkill -KILL $$\n' > build/start-check-control/killed
+          printf '#!/bin/sh\nexit 0\n' > build/start-check-control/silent
+          chmod +x build/start-check-control/killed build/start-check-control/silent
+          for control in killed silent; do
+            if scripts/start_check.sh "build/start-check-control/$control" "the control ($control at its start)"; then
+              echo "::error title=Start check::the start check passed an executable that does not answer ($control)"; status=1
+            fi
+          done
+          # This runner's kernel, said: does it run the release's app with its signature taken off?
+          copy="build/start-check-unsigned/Lumen.app"
+          rm -rf build/start-check-unsigned; mkdir -p build/start-check-unsigned
           ditto build/release/app/Lumen.app "$copy"
-          codesign --remove-signature "$copy/Contents/MacOS/Lumen"
-          if codesign -d "$copy/Contents/MacOS/Lumen" >/dev/null 2>&1; then
-            echo "::error title=Start check::the control's executable is still signed: it controls nothing"; status=1
-          fi
-          [[ "$(uname -m)" == arm64 ]] || echo "::warning title=Start check::not Apple silicon: an unsigned executable may run here, and the control below says nothing"
-          if scripts/start_check.sh "$copy/Contents/MacOS/Lumen" "the control (its signature taken off)"; then
-            echo "::error title=Start check::the start check passed a copy the kernel does not start (its control)"; status=1
+          codesign --remove-signature "$copy/Contents/MacOS/Lumen" || true
+          csrutil status 2>/dev/null || true
+          if scripts/start_check.sh "$copy/Contents/MacOS/Lumen" "an unsigned copy (a measurement)" >/dev/null 2>&1; then
+            echo "::notice title=Start check, measured::this runner's kernel ran the app's executable with its signature taken off: it enforces no code signature, and no refusal by signature can be shown here"
+          else
+            echo "::notice title=Start check, measured::this runner's kernel refused the app's executable with its signature taken off"
           fi
           if SANDBOX=1 VERSION=0.1.1 BUILD=2 OUT=build/release-sandboxed scripts/release.sh > build/release-sandboxed.log 2>&1; then
             echo "::error title=Release gate::release.sh made a release of the sandboxed build"; status=1
@@ -539,14 +550,16 @@ jobs:
             "RELEASE-CHECK FAIL the profile did not start: the profile's executable is signed with a keychain of its own"
           verdict refuse 0 "nothing at all" ""
           exit $status
-      - name: A relaxation beside the network extension's right — refused by the build (its controls), and what this kernel does with it
+      - name: A relaxation beside the network extension's right — refused by the build (its controls)
         # On 3 November 0.1.1 with the network guard was killed by the kernel at its start on macOS
         # 27.0.1: its app's executable held library validation off beside the network extension's
         # right (docs/TUNNEL.md, "What the kernel kills"). scripts/relaxation_check.sh, which
         # build-app.sh and release.sh run, must let the builds made here through and refuse every copy
         # holding a listed relaxation beside the right — and let one with allow-jit through (measured:
-        # it started); build-app.sh must refuse 0.1.1's pairing and leave no bundle behind. What this
-        # runner's kernel does with the pairing, ad hoc, is measured and said.
+        # it started); build-app.sh must refuse 0.1.1's pairing and leave no bundle behind. It reads
+        # signatures only: it runs whatever the release gate above found, and this runner's kernel,
+        # which enforces no code signature, cannot show what it guards against.
+        if: ${{ !cancelled() }}
         run: |
           status=0
           for app in build/release/app/Lumen.app build/unsandboxed/Lumen.app build/sandboxed/Lumen.app; do
@@ -608,19 +621,6 @@ jobs:
           # Measured on the owner's Mac: started — the right alone (the layout chosen), and allow-jit beside it.
           relax right-alone Lumen passes -
           relax jit Lumen passes - com.apple.security.cs.allow-jit
-          # What this runner's kernel does with 0.1.1's pairing, and with the right alone, ad hoc — a
-          # measurement, said and not checked: no Developer ID and no provisioning profile here, and an ad
-          # hoc copy carrying an application identifier was started by this kernel (CI run 666), so it
-          # need not refuse what the owner's Mac refused. The start check's verdict on 0.1.1's pairing
-          # signed as it shipped is taken on the owner's Mac (docs/TUNNEL.md, the hardware checklist's
-          # step 0).
-          for measured in dlv right-alone jit; do
-            if scripts/start_check.sh "build/relaxation-$measured/Lumen.app/Contents/MacOS/Lumen" "the copy $measured (ad hoc)"; then
-              echo "::notice title=Start check, measured::the copy $measured (ad hoc, the network extension's right) was started by this runner's kernel"
-            else
-              echo "::notice title=Start check, measured::the copy $measured (ad hoc, the network extension's right) was not started by this runner's kernel (its lines above)"
-            fi
-          done
           # The build itself: Resources/PrivacyBrowser-NoSandbox.entitlements given what 0.1.1's app was
           # signed with — library validation off beside the right. build-app.sh must refuse the build
           # and leave no bundle behind. The file is put back however this ends.

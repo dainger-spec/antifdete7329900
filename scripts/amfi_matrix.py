@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Which signature the kernel lets an NE=1 build start with, on this Mac — a measurement, the owner's
-Mac only (CI has no Developer ID, and the kernel lets no ad hoc signature carry these rights).
+Mac only (CI has no Developer ID, and its runners' kernel enforces no code signature at all: CI run
+667 started a copy of the app with its signature taken off).
 
 On 3 November 0.1.1, NE=1, signed with Developer ID and notarized, was killed at its start on the
 owner's Mac (macOS 27.0.1, 26A434):

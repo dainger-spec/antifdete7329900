@@ -46,9 +46,11 @@ ASP: Security policy would not allow process
 The app's executable was signed with `com.apple.application-identifier`,
 `com.apple.developer.networking.networkextension` = `content-filter-provider-systemextension`,
 `com.apple.developer.system-extension.install`, `com.apple.security.application-groups` and
-`com.apple.security.cs.disable-library-validation`. CI could not have shown it: the kernel lets no ad
-hoc signature carrying these rights start, so CI's `NE=check` build never has them, and the extension
-is never loaded there ("What CI verifies").
+`com.apple.security.cs.disable-library-validation`. CI could not have shown it: CI signs ad hoc,
+without the team's provisioning profiles, so its `NE=check` build carries none of these rights and the
+extension is never loaded there ("What CI verifies"); and the kernel of CI's runners enforces no code
+signature at all — it ran a copy of the app whose executable had its signature taken off (CI run
+667).
 
 The same day `scripts/amfi_matrix.py` measured on the owner's Mac which signature the kernel lets
 start (the table below). The rule it found: **an executable holding
@@ -120,13 +122,13 @@ What it does not say: anything about macOS other than 27.0.1, nor about relaxati
 What CI shows of it (it cannot sign with Developer ID): the relaxation check lets the builds made
 there through, refuses a copy of the release's app for each relaxation beside the right — and the
 right given to LumenProfile — and lets through the right alone and `allow-jit` beside it; build-app.sh
-refuses a build signed as 0.1.1's app was and leaves no bundle; and the start check fails a copy
-whose app's executable has its signature taken off — the kernel of Apple silicon runs no unsigned
-code, "Attempt to execute completely unsigned code", the line that ended 0.1.1. What CI's kernel does
-with 0.1.1's pairing signed ad hoc is measured there and said, not checked: CI has no Developer ID and
-no provisioning profile, and its kernel started an ad hoc copy carrying an application identifier (CI
-run 666) — the start check's earlier control, which therefore could not fail and was replaced. The
-start check's verdict on the pairing as signed by Developer ID is taken on the owner's Mac (the
+refuses a build signed as 0.1.1's app was and leaves no bundle. Of the start check, CI shows its
+verdict, not the kernel's refusal: it passes the release's app and fails an executable killed at its
+start (as 0.1.1 was: `Killed: 9`, 137) and one that ends without a word. CI's kernel refuses nothing
+by signature — it started an ad hoc copy carrying an application identifier (CI run 666) and a copy
+whose executable had its signature taken off (run 667), the start check's two earlier controls, which
+therefore could not fail and were replaced; each run of the gate says again what that kernel does
+with an unsigned copy. The start check on signatures the kernel refuses is run on the owner's Mac (the
 hardware checklist's step 0). Before it was committed, the relaxation step was run against four
 broken versions of the check — one
 that lets everything through, one that refuses everything, one that reads the right under a wrong
@@ -440,8 +442,10 @@ the guard drops each of those flows, because they are counted for the held profi
   lets them through, refuses copies of the release's app holding each relaxation beside the provider
   right (and LumenProfile given the right), and lets through the right alone and `allow-jit` beside it;
   build-app.sh refuses a build signed as 0.1.1's app was and leaves no bundle behind; the start check
-  fails a copy whose app's executable is unsigned (the kernel of Apple silicon runs no unsigned code),
-  and what CI's kernel does with 0.1.1's pairing signed ad hoc is measured and said.
+  passes the release's app and fails an executable killed at its start and one that ends without a
+  word. CI's kernel enforces no code signature (runs 666, 667: an ad hoc copy with an application
+  identifier and an unsigned copy both ran), so the kernel's own refusals are shown on a Mac that
+  enforces them (the hardware checklist's step 0).
 - The self-test, inside a capture of every packet of the runner: a profile with a SOCKS5 proxy
   with UDP, in its own process, makes a real video call between two peer connections through the
   relay and the proxy (relay candidates at the proxy's address only, frames decoded on the far

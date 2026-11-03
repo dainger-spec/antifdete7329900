@@ -236,12 +236,11 @@ if [[ "$NE" == "1" || "$NE" == "check" ]]; then
     ENTITLEMENTS="$ENTITLEMENTS_NE"
     /usr/libexec/PlistBuddy -c "Add :PBGuardExtensionBundleIdentifier string $EXTENSION_ID" "$APP/Contents/Info.plist"
   else
-    # CI: the app group alone, which an ad hoc signature can carry. Not the application identifier:
-    # run 646 found an ad hoc signature carrying it not let start on CI's runners — though run 666
-    # started a copy of the release's app signed ad hoc with it beside camera, microphone and library
-    # validation off; which pairing the kernel refuses is not measured. The app then holds a keychain
-    # entitlement its profiles must not, as an NE=1 build does, and the self-test's keychain check can
-    # tell them apart.
+    # CI: the app group alone. Not the application identifier: run 646 reported an ad hoc signature
+    # carrying it not let start on CI's runners; runs 666 and 667 started one, and a copy with no
+    # signature at all — today's runners enforce no code signature, and why 646 saw otherwise is not
+    # measured. The app then holds a keychain entitlement its profiles must not, as an NE=1 build
+    # does, and the self-test's keychain check can tell them apart.
     ENTITLEMENTS_CHECK="$(mktemp -t pbappcheck).entitlements"
     cp "$ENTITLEMENTS" "$ENTITLEMENTS_CHECK"
     /usr/libexec/PlistBuddy -c "Add :com.apple.security.application-groups array" \

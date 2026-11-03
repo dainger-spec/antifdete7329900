@@ -38,9 +38,10 @@ enum KeychainIsolation {
         var login: Verdict
         var items: Verdict
         /// Whether this process holds the application identifier: taken as a signature by the team
-        /// (CI run 646 found an ad hoc one carrying it not let start; run 666 started one — which
-        /// pairing the kernel refuses is not measured), so a skipped verdict there is a failure of the
-        /// check, not of the machine. Wrong only towards a failure: an ad hoc build never ships.
+        /// (CI run 646 reported an ad hoc one carrying it not let start; runs 666 and 667 started one,
+        /// and an unsigned copy — today's runners enforce no code signature), so a skipped verdict
+        /// there is a failure of the check, not of the machine. Wrong only towards a failure: an ad hoc
+        /// build never ships.
         var appHoldsTeamIdentity: Bool
     }
 
