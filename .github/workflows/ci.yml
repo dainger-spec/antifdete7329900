@@ -368,6 +368,12 @@ jobs:
         # The extension needs a provisioned team to be signed and loaded (NE=1); CI compiles it
         # against this SDK and lays out its bundle so its plists are checked.
         run: NE=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: The account's keychain before the app first runs (a measurement, compared at the end)
+        # Before the release check: it runs the app too, and its keychain check keeps items of its
+        # own while it looks (in run 662 it stopped before removing them). What the app leaves in the
+        # keychain from here to the menu walk is compared in "What the app left in the account's
+        # keychain" (scripts/keychain_check.py).
+        run: python3 scripts/keychain_check.py snapshot build/keychain/before.json || true
       - name: Release, dry run (no Apple account, a throwaway update key)
         # scripts/release.sh end to end: the app built without the App Sandbox with an update feed and
         # keys, signed (ad hoc, the hardened runtime), its signature read back, then the release gate —
@@ -608,9 +614,6 @@ jobs:
           export PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087 PB_SELFTEST_SILENT_PROXY_PORT=18088 PB_SELFTEST_SOCKS_UDP_PROXY_PORT=18089
           mkdir -p build/egress
           status=0
-          # The account's keychain before the app runs (scripts/keychain_check.py; compared after the
-          # menu walk below): what the app leaves there would be tied to its identity.
-          python3 scripts/keychain_check.py snapshot build/keychain/before.json || true
           # What a release declares: Xcode 26 writes SDK 26.5 into the executables, and with 15.0 or
           # newer this Mac fetches a certificate's missing intermediate outside a profile's proxy
           # (docs/ISOLATION_AND_LIMITATIONS.md §2; the step "From which declared SDK…" below measures
@@ -768,9 +771,10 @@ jobs:
           path: build/menu-walk
           if-no-files-found: ignore
       - name: What the app left in the account's keychain (a measurement)
-        # The self-test of both builds and the menu walk ran between the two snapshots: every item
-        # that appeared in the account's default keychain, by its attributes, never its secret. A
-        # snapshot that could not show an item of its own is SKIPPED (scripts/keychain_check.py).
+        # The release check, the self-test of both builds and the menu walk ran between the two
+        # snapshots: every item that appeared in the account's default keychain, by its attributes,
+        # never its secret. A snapshot that could not show an item of its own is SKIPPED, and one
+        # not taken (a step before it failed) is said so (scripts/keychain_check.py).
         if: always()
         continue-on-error: true
         run: |

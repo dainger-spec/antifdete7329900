@@ -2,7 +2,8 @@
 """What the app leaves in the account's keychain — a measurement, CI only:
 
     python3 scripts/keychain_check.py snapshot build/keychain/before.json
-    ... the app runs: the self-test of both builds, Safari's menu walked in a profile ...
+    ... the app runs: the release check of the dry run, the self-test of both builds, Safari's menu
+        walked in a profile ...
     python3 scripts/keychain_check.py snapshot build/keychain/after.json
     python3 scripts/keychain_check.py compare build/keychain/before.json build/keychain/after.json
 
@@ -102,6 +103,16 @@ def snapshot(path):
 def compare(before_path, after_path):
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     lines = []
+    # A snapshot not taken (a step before it failed) is a comparison not made, said as such.
+    missing = [path for path in (before_path, after_path) if not os.path.exists(path)]
+    if missing:
+        for path in missing:
+            print(f"::error title=keychain - not compared::no snapshot at {path} (a step before it failed or did not "
+                  f"run): what the app left in the keychain was not measured")
+        if summary:
+            with open(summary, "a") as handle:
+                handle.write("### Keychain: not compared — no snapshot at " + ", ".join(missing) + "\n")
+        return 1
     with open(before_path) as handle:
         before = json.load(handle)
     with open(after_path) as handle:
