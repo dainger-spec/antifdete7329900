@@ -275,17 +275,27 @@ enum HostedPageHistory {
     static func follow(_ webView: WKWebView) {
         guard followed.object(forKey: webView) == nil else { return }
         let follower = Follower()
+        // A visit is the committed page: its address is then the back-forward list's current item.
+        // The address changes when a load starts — the list still holds the page before — and again
+        // only when it changes after (a redirect, a same-document navigation): a load without either
+        // was never recorded (the account switch check, run 677: none of 8 visits in the history).
+        // So whatever follows a commit — the address, the title, the end of the load — tries again.
+        let attempt: @MainActor (WKWebView) -> Void = { webView in
+            guard let url = webView.url, isRecorded(webView, url),
+                  webView.backForwardList.currentItem?.url == url, url != follower.lastRecorded else { return }
+            follower.lastRecorded = url
+            ProfileNetworkGuard.session?.library.recordVisit(url: url, title: webView.title)
+        }
         follower.observations = [
             webView.observe(\.url, options: [.new]) { webView, _ in
-                MainActor.assumeIsolated {
-                    guard let url = webView.url, isRecorded(webView, url),
-                          webView.backForwardList.currentItem?.url == url, url != follower.lastRecorded else { return }
-                    follower.lastRecorded = url
-                    ProfileNetworkGuard.session?.library.recordVisit(url: url, title: webView.title)
-                }
+                MainActor.assumeIsolated { attempt(webView) }
+            },
+            webView.observe(\.isLoading, options: [.new]) { webView, _ in
+                MainActor.assumeIsolated { attempt(webView) }
             },
             webView.observe(\.title, options: [.new]) { webView, _ in
                 MainActor.assumeIsolated {
+                    attempt(webView)
                     guard let url = webView.url, isRecorded(webView, url) else { return }
                     ProfileNetworkGuard.session?.library.updateTitle(url: url, title: webView.title)
                 }
