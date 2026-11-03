@@ -312,7 +312,10 @@ enum AccountSwitchScenario {
             var counts: [String] = []
             do {
                 let key = try repository.profileKey(for: id)
-                counts.append("history=\(try repository.historyStore(for: id, key: key).count)")
+                let history = try repository.historyStore(for: id, key: key)
+                counts.append("history=\(history.count)")
+                // The site's visits in the profile's history: one address per visit (each carries a marker).
+                counts.append("history-site=\(history.entries().filter { $0.url.contains("127.0.0.1:\(state.sitePort)/switch") }.count)")
                 counts.append("logins=\(try repository.passwordVault(for: id).allEntries().count)")
                 counts.append("bookmarks=\(try repository.bookmarkStore(for: id, key: key).all().count)")
                 let jar = try repository.cookieJar(for: id).cookies
@@ -331,6 +334,7 @@ enum AccountSwitchScenario {
             }
             let live = webKitStore(of: id)
             counts.append("webkit-store-outside-the-vault=\(live.map { "\($0)B" } ?? "none")")
+            counts.append("visits-made=\(state.visitsMade[id.uuidString] ?? 0)")
             print("ACCOUNT-SWITCH COUNT \(name) \(counts.joined(separator: " "))")
             let directory = repository.directory(for: id)
             let base = directory.resolvingSymlinksInPath().path

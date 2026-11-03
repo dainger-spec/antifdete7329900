@@ -20,9 +20,9 @@ every visit, and the files that came, went or changed from one step to the next.
   visits as were made (the data is gone, or older than its last visit), or a profile did not start or
   the site did not report;
 - a profile's saved logins or bookmarks are not as made, its history has fewer visits than at the
-  step before (or than made), its synced cookies fewer than at the step before, its settings changed;
-- a file holding the data (history.bin, passwords.bin, bookmarks.bin, cookies.bin, and the sealed
-  archives once made) is gone, or the site's data, once in WebKit's sealed store, is no longer there;
+  step before (or than made), or lacks a visit of the site made in it, its synced cookies fewer than at the step before, its settings changed;
+- a file holding the data (history.bin, passwords.bin, bookmarks.bin, and cookies.bin and the
+  sealed archives once made) is gone, or the site's data, once in WebKit's sealed store, is no longer there;
 - the list of profiles changed;
 - a profile started while the account allowed export only.
 Exit 1 on a FAIL, 2 when a phase did not run to its end.
@@ -40,9 +40,10 @@ import sys
 import tempfile
 
 LOGINS, BOOKMARKS, VISITS = 3, 4, 25
-KEPT = ("history.bin", "passwords.bin", "bookmarks.bin", "cookies.bin")
-# Made at the first stop, and to stay from then on.
-SEALED = ("webdata.pbsa", "safarihome.pbsa")
+# Made with the profile's data, and to stay.
+KEPT = ("history.bin", "passwords.bin", "bookmarks.bin")
+# Made at the first stop (cookies.bin when the store first holds a cookie), and to stay from then on.
+SEALED = ("cookies.bin", "webdata.pbsa", "safarihome.pbsa")
 PHASE_TIMEOUT = 300
 
 
@@ -126,7 +127,7 @@ def main():
 
     report, failures = [], []
     profiles = sorted({name for _, counts, _, _ in steps for name in counts})
-    columns = ("history", "logins", "bookmarks", "cookies", "cookies-site", "settings", "webdata-bytes", "webdata-cookies",
+    columns = ("history", "history-site", "visits-made", "logins", "bookmarks", "cookies", "cookies-site", "settings", "webdata-bytes", "webdata-cookies",
                "webdata-site", "safarihome-bytes", "safarihome-site", "webkit-store-outside-the-vault")
     report.append("| step | profile | " + " | ".join(columns) + " |")
     report.append("|---|---|" + "---|" * len(columns))
@@ -154,6 +155,13 @@ def main():
                     failures.append(f"step «{step}», {profile}: {key} {value}, {earlier} at the step before")
                 else:
                     before[(profile, key)] = value
+            # Every visit of the site is in the profile's history (one address per visit).
+            made = int(c.get("visits-made", "0")) if c.get("visits-made", "0").isdigit() else 0
+            site_history = int(c["history-site"]) if c.get("history-site", "").isdigit() else None
+            if site_history is None:
+                failures.append(f"step «{step}», {profile}: the site's visits in its history not read")
+            elif site_history < made:
+                failures.append(f"step «{step}», {profile}: {site_history} of the site's {made} visits are in its history")
             if "settings" in c:
                 first_settings.setdefault(profile, (step, c["settings"]))
                 if c["settings"] != first_settings[profile][1]:
