@@ -186,9 +186,20 @@ def main():
         return 0
     print(f"window picture ({appearance}): NOT SHOWN — at its best place only {said} are the picture's "
           f"({PASS_SHARE:.0%} and {FEATURE_SHARE:.0%} are needed; {where})")
-    shot_rows = shot[2]
-    seen = shot_rows[min(int((dy + 340) * scale), shot[1] - 1)][min(int((dx + 30) * scale), shot[0] - 1)]
-    print(f"window picture ({appearance}): where the picture's backdrop {backdrop} should be, the window shows {seen}")
+    # What the window shows instead: the colour most of its content is, read inside its frame below a
+    # band for the title bar (runs 672 and 673 named here one point at the best place found, which for
+    # a window without the picture lay outside it, on the black around the window: "(0, 0, 0)").
+    seen = {}
+    for y in range(frame_y + 40, window_height - 8, 8):
+        for x in range(frame_x + 8, window_width - 8, 8):
+            sx, sy = int(x * scale), int(y * scale)
+            if 0 <= sx < shot[0] and 0 <= sy < shot[1]:
+                colour = shot[2][sy][sx]
+                seen[colour] = seen.get(colour, 0) + 1
+    if seen:
+        colour, count = max(seen.items(), key=lambda entry: entry[1])
+        print(f"window picture ({appearance}): the window's content is mostly {colour} ({count} of {sum(seen.values())} "
+              f"points read inside its frame); the picture's backdrop is {backdrop}")
     return 1
 
 
