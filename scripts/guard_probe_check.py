@@ -45,7 +45,8 @@ def source_port(packet):
     return int(port.group(1)) if port else None
 
 
-KERNEL_SOCKET = re.compile(r"KERNEL-SOCKET (\w+) local=(\d+) remote=\S+ last=(-?\d+) effective=(-?\d+) delegated=([01]) counted=(-?\d+)")
+KERNEL_SOCKET = re.compile(r"KERNEL-SOCKET (\w+) local=(\d+) remote=\S+ last=(-?\d+) effective=(-?\d+) delegated=([01]) "
+                           r"userland=([01]) counted=(-?\d+)")
 
 
 def judge_table(packets, table, ignore_delegation):
@@ -62,14 +63,14 @@ def judge_table(packets, table, ignore_delegation):
             passed = False
             lines.append(f"TABLE-WRONG port {port}: not in the table the app read ({sorted(table)})")
             continue
-        last, effective, delegated, counted = entry
+        last, effective, kind, counted = entry
         if ignore_delegation:
             counted = last
         proc, eproc = packet["proc"], packet["eproc"]
         same = proc is not None and proc[1] == last and eproc is not None and eproc[1] == counted
         passed = passed and same
         lines.append(f"{'TABLE-OK' if same else 'TABLE-WRONG'} port {port}: the table says used by {last}, "
-                     f"counted for {counted} (delegated {delegated}); the capture proc {proc}, eproc {eproc}")
+                     f"counted for {counted} ({kind}, effective pid {effective}); the capture proc {proc}, eproc {eproc}")
     return passed, lines
 
 
@@ -133,7 +134,8 @@ def main():
                 if match_socket and match_socket.group(1) == "udp":
                     port = int(match_socket.group(2))
                     reading = (int(match_socket.group(3)), int(match_socket.group(4)),
-                               match_socket.group(5) == "1", int(match_socket.group(6)))
+                               "delegated" if match_socket.group(5) == "1" else "user-space stack" if match_socket.group(6) == "1" else "own",
+                               int(match_socket.group(7)))
                     if port not in table:
                         table[port] = reading
                         table_said.append(f"+{time.time() - started:.1f} s port {port}: first read {reading}")

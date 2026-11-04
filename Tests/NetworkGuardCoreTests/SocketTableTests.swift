@@ -25,7 +25,7 @@ final class SocketTableTests: XCTestCase {
 
     /// xinpcb_n, xsocket_n, two xsockbuf_n and an xsockstat_n, as in_pcblist.c writes one socket.
     private func record(localPort: UInt16, remotePort: UInt16, local: [UInt8], remote: [UInt8], ipv6: Bool = false,
-                        lastPID: Int32, effectivePID: Int32, flags: UInt32) -> [UInt8] {
+                        lastPID: Int32, effectivePID: Int32, flags: UInt32, handle: UInt32 = 0xfeed) -> [UInt8] {
         var inpcb = [UInt8](repeating: 0, count: 104)
         put32(104, &inpcb, 0)
         put32(0x10, &inpcb, 4)
@@ -39,6 +39,7 @@ final class SocketTableTests: XCTestCase {
         var xsocket = [UInt8](repeating: 0, count: 104)
         put32(104, &xsocket, 0)
         put32(0x1, &xsocket, 4)
+        put32(handle, &xsocket, 8)
         put32(UInt32(bitPattern: lastPID), &xsocket, 68)
         put32(UInt32(bitPattern: effectivePID), &xsocket, 72)
         put32(flags, &xsocket, 84)
@@ -93,6 +94,23 @@ final class SocketTableTests: XCTestCase {
         XCTAssertNil(own.remoteAddress)
         XCTAssertFalse(own.delegated)
         XCTAssertEqual(own.countedFor, 1741)
+    }
+
+    /// CI, 4 November (claude/guard-fixes 6656f21, macOS 26.6.2): the probe's STUN flow in the table
+    /// as `Lumen --socket-owners` read it — no handle, no flags, used by WebKit's network process
+    /// (29968) with the probe (29966) as its effective pid: a flow of the user-space network stack,
+    /// which the kernel lists from its flow statistics (ntstat.c). The capture's eproc: the probe.
+    func testAFlowOfTheUserSpaceStackIsCountedForItsEffectivePID() throws {
+        let bytes = table(record(localPort: 63751, remotePort: 3478, local: [192, 168, 64, 14], remote: [203, 0, 113, 1],
+                                 lastPID: 29968, effectivePID: 29966, flags: 0, handle: 0))
+        let flow = try XCTUnwrap(SocketTable.parse(bytes, transport: .udp)?.first)
+        XCTAssertTrue(flow.userSpaceStack)
+        XCTAssertFalse(flow.delegated)
+        XCTAssertEqual(flow.countedFor, 29966)
+        let own = try XCTUnwrap(SocketTable.parse(table(record(localPort: 63752, remotePort: 3478, local: [192, 168, 64, 14],
+                                                               remote: [203, 0, 113, 1], lastPID: 29968, effectivePID: 0,
+                                                               flags: 0, handle: 0)), transport: .udp)?.first)
+        XCTAssertEqual(own.countedFor, 29968, "a flow of the stack with no effective pid is its user's")
     }
 
     func testAnEffectivePIDWithoutTheDelegatedFlagIsNotTaken() throws {

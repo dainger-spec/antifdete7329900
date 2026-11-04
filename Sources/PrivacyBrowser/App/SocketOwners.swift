@@ -25,7 +25,7 @@ enum SocketOwners {
                 for socket in sockets where socket.remoteAddress == address {
                     print("KERNEL-SOCKET \(transport.rawValue) local=\(socket.localPort) remote=\(address):\(socket.remotePort) "
                           + "last=\(socket.lastPID) effective=\(socket.effectivePID) delegated=\(socket.delegated ? 1 : 0) "
-                          + "counted=\(socket.countedFor)")
+                          + "userland=\(socket.userSpaceStack ? 1 : 0) counted=\(socket.countedFor)")
                 }
             }
         }

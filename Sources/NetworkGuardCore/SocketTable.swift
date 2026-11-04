@@ -22,12 +22,18 @@ public struct KernelSocket: Codable, Equatable, Sendable, CustomStringConvertibl
     public var remotePort: UInt16
     /// The process that last sent or received on the socket (the one that opened it, here).
     public var lastPID: Int32
-    /// The process it is counted for, when `delegated`.
+    /// The process it is counted for: when `delegated`, for a socket of the kernel's; for a flow of
+    /// the user-space network stack, whenever the kernel gives one.
     public var effectivePID: Int32
+    /// The kernel's own socket says it was opened on another process's behalf (SOF_DELEGATED).
     public var delegated: Bool
+    /// A flow of the user-space network stack (Skywalk) — Network.framework's, WebKit's WebRTC —
+    /// which the kernel lists in the same table from its flow statistics (xnu ntstat.c,
+    /// nstat_userland_to_xsocket_n): its pid and effective pid, no flags, no handle of its own.
+    public var userSpaceStack: Bool
 
     public init(transport: GuardTransport, localAddress: String?, localPort: UInt16, remoteAddress: String?, remotePort: UInt16,
-                lastPID: Int32, effectivePID: Int32, delegated: Bool) {
+                lastPID: Int32, effectivePID: Int32, delegated: Bool, userSpaceStack: Bool = false) {
         self.transport = transport
         self.localAddress = localAddress
         self.localPort = localPort
@@ -36,17 +42,30 @@ public struct KernelSocket: Codable, Equatable, Sendable, CustomStringConvertibl
         self.lastPID = lastPID
         self.effectivePID = effectivePID
         self.delegated = delegated
+        self.userSpaceStack = userSpaceStack
     }
 
-    /// Whom the kernel counts the socket for: the process it was opened for when delegated, else
-    /// the process that uses it — what a packet capture names as `eproc`, or `proc` without one.
-    public var countedFor: Int32 { delegated ? effectivePID : lastPID }
+    /// Whom the kernel counts the socket for: the process it was opened for when delegated (or, for
+    /// a flow of the user-space stack, the effective pid it is listed with), else the process that
+    /// uses it — what a packet capture names as `eproc`, or `proc` without one.
+    public var countedFor: Int32 {
+        if delegated { return effectivePID }
+        if userSpaceStack, effectivePID > 0 { return effectivePID }
+        return lastPID
+    }
 
     /// "udp :53895 → 203.0.113.1:3478, used by pid 10416, counted for pid 10412 (delegated)"
     public var description: String {
         let local = "\(localAddress ?? "*"):\(localPort)"
         let remote: String = remoteAddress.map { "\($0):\(remotePort)" } ?? "*"
-        let counted = delegated ? "counted for pid \(effectivePID) (delegated)" : "not delegated"
+        let counted: String
+        if delegated {
+            counted = "counted for pid \(effectivePID) (delegated)"
+        } else if userSpaceStack {
+            counted = "counted for pid \(countedFor) (a flow of the user-space stack)"
+        } else {
+            counted = "not delegated"
+        }
         return "\(transport.rawValue) \(local) → \(remote), used by pid \(lastPID), \(counted)"
     }
 }
@@ -74,6 +93,7 @@ public enum SocketTable {
     static let foreignAddressOffset = 48     // a 16-byte union: in6_addr, or IPv4 in its last 4
     static let localAddressOffset = 64
     // struct xsocket_n, #pragma pack(4)
+    static let handleOffset = 8              // xso_so: 0 for a flow of the user-space stack
     static let lastPIDOffset = 68
     static let effectivePIDOffset = 72
     static let flagsOffset = 84
@@ -122,12 +142,14 @@ public enum SocketTable {
             case kindSocket:
                 guard length >= socketLength else { return nil }
                 if let pcb = inpcb, let last = word(bytes, offset + lastPIDOffset),
-                   let effective = word(bytes, offset + effectivePIDOffset), let flags = word(bytes, offset + flagsOffset) {
+                   let effective = word(bytes, offset + effectivePIDOffset), let flags = word(bytes, offset + flagsOffset),
+                   let handleLow = word(bytes, offset + handleOffset), let handleHigh = word(bytes, offset + handleOffset + 4) {
+                    let inKernel = handleLow != 0 || handleHigh != 0
                     sockets.append(KernelSocket(transport: transport, localAddress: pcb.local, localPort: pcb.localPort,
                                                 remoteAddress: pcb.remote,
                                                 remotePort: pcb.remotePort, lastPID: Int32(bitPattern: last),
                                                 effectivePID: Int32(bitPattern: effective),
-                                                delegated: flags & delegatedFlag != 0))
+                                                delegated: flags & delegatedFlag != 0, userSpaceStack: !inKernel))
                 }
                 inpcb = nil
             default:
@@ -220,10 +242,13 @@ public enum GuardAttribution {
         case kernelSocket
     }
 
-    /// The held process a flow is for: the source application when the guard holds it; nil when it
-    /// does not. (The kernel's record is read and said, not yet taken: this is the guard of 0.1.2.)
+    /// The held process a flow is for: the source application when the guard holds it; else the
+    /// process the kernel counts the flow's socket for, when the guard holds that one; nil when it
+    /// holds neither. Holding by either answer can only hold more: a flow is never let through
+    /// because of the kernel's record.
     public static func holder(appPID: Int32?, socket: KernelSocket?, isHeld: (Int32) -> Bool) -> (pid: Int32, source: Source)? {
         if let appPID, isHeld(appPID) { return (appPID, .sourceApplication) }
+        if let socket, isHeld(socket.countedFor) { return (socket.countedFor, .kernelSocket) }
         return nil
     }
 }

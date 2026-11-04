@@ -332,8 +332,13 @@ with the guard installed and answering: the filter was given the probe's STUN re
 WebKit's network process (1741) as both its source application and its opener, while a packet
 capture of the same request (`tcpdump -i pktap,all -k NP`) showed every packet `proc
 com.apple.WebKit:1741, eproc LumenProfile:1738` — the kernel counted it for the probe. The capture
-reads that from the socket (`so_e_pid` while `SOF_DELEGATED`, xnu bsd/net/pktap.c, udp_usrreq.c):
-WebKit marks each WebRTC socket of its network process as the page's process's.
+reads that from the flow: WebKit marks each WebRTC connection of its network process as the page's
+process's (`nw_parameters_set_source_application`). Measured in CI (claude/guard-fixes, macOS
+26.6.2): that connection is a flow of the user-space network stack (Skywalk), not a socket of the
+kernel's — the kernel lists it in the same table as its sockets, from its flow statistics (xnu
+ntstat.c, `nstat_userland_to_xsocket_n`), with its user (WebKit's network process) and its
+effective pid (the probe), no flags. A socket of the kernel's own is counted for another process
+only while it says so (`SOF_DELEGATED`).
 
 So the guard asks the kernel too (`SocketTable`, `GuardAttribution`): for a flow whose source
 application it does not hold — while it holds any process — it reads the kernel's table of that
