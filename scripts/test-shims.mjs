@@ -229,10 +229,15 @@ test('date components agree with Intl for random instants', () => {
   const w = makeWindow({ ...base, timeZone: 'America/Sao_Paulo' });
   const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', hourCycle: 'h23',
     year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', weekday: 'short' });
+  // One function made in the window and called with each instant, not a source of its own for
+  // each: Bun 1.2.23's vm.runInContext returns, for about 6 in 100 000 sources it has not run, the
+  // result of another it has — `(() => ${t})()` alone, no shim in the window (CI run 717; Bun 1.4.4
+  // and Node: 0 in 100 000).
+  const components = run(w, `(t) => { const d = new Date(t); return [d.getFullYear(), d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes(), d.getDay()]; }`);
   for (let i = 0; i < 500; i++) {
     const t = Math.floor(Math.random() * 2e12);
     const p = Object.fromEntries(fmt.formatToParts(new Date(t)).map((x) => [x.type, x.value]));
-    const got = run(w, `(() => { const d = new Date(${t}); return [d.getFullYear(), d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes(), d.getDay()]; })()`);
+    const got = components(t);
     const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(p.weekday);
     assert.deepEqual(Array.from(got), [+p.year, +p.month, +p.day, +p.hour, +p.minute, day], `t=${t}`);
   }
