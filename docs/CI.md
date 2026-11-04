@@ -82,5 +82,6 @@ branch has, and a schedule runs that branch's code. The default branch could not
 job `nightly` runs: it starts the pipeline on `claude/redesign` (a workflow_dispatch made with the
 run's own token starts a run), and that run checks the branch's newest commit under its own SHA —
 the one release.sh's gate looks for. Every other job is skipped on a schedule. Run workflow (choose
-`claude/redesign`) and a pushed tag `full/…` run the checks on the commit asked for. When `full.yml`
-changes here, the default branch's copy is brought to the same text.
+`claude/redesign`) and a pushed tag `full/…` run the checks on the commit asked for. The default
+branch's copy matters for its schedule and its job `nightly` only — every other run takes `full.yml`
+from the commit it checks — so it is changed only when those change, one commit, with the owner's yes.
