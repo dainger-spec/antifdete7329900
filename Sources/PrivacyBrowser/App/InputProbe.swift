@@ -89,15 +89,22 @@ enum InputProbe {
             webView.configuration.userContentController.addUserScript(
                 WKUserScript(source: recorder, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
         }
+        let views: [String] = (window.contentView?.subviews ?? []).map { view in
+            let name = String(describing: type(of: view))
+            return name + (view.isHidden ? " (hidden)" : "") + " \(Int(view.frame.width))×\(Int(view.frame.height))"
+        }
+        let visible: [String] = NSApp.windows.filter { $0.isVisible }.map { String(describing: type(of: $0)) }
         say(number, ["step": "window", "site": address,
                      "window": [Int(window.frame.width), Int(window.frame.height)],
                      "webView": [Int(webView.bounds.width), Int(webView.bounds.height)],
                      "windowClass": String(describing: type(of: window)),
-                     "visibleWindows": NSApp.windows.filter(\.isVisible).map { String(describing: type(of: $0)) },
+                     "visibleWindows": visible,
+                     "contentViews": views,
                      "windowKey": window.isKeyWindow, "appActive": NSApp.isActive])
         var targets = await open(address, in: webView, number: number, first: true)
         var index = 0
         var clicks = 0
+        if address == "pb-test:touch" { await scroll(in: webView, window: window, number: number, address: address) }
         while index < targets, clicks < clicksPerPage {
             clicks += 1
             let navigated = await click(index, in: webView, window: window, number: number, address: address)
@@ -218,11 +225,39 @@ enum InputProbe {
         return navigated
     }
 
+    /// One turn of the wheel over the middle of the page: whether the page scrolled, and which view
+    /// AppKit gave the event to.
+    private static func scroll(in webView: WKWebView, window: NSWindow, number: Int, address: String) async {
+        let key = await makeKey(window)
+        let before = await script("return scrollY", in: webView, world: .page) as? Double
+        let middle = NSPoint(x: webView.bounds.midX, y: webView.bounds.midY)
+        let location = webView.convert(middle, to: nil)
+        let onScreen = window.convertPoint(toScreen: location)
+        let mainHeight = NSScreen.screens.first?.frame.height ?? window.frame.maxY
+        var sent = false
+        if let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -240, wheel2: 0, wheel3: 0) {
+            event.location = CGPoint(x: onScreen.x, y: mainHeight - onScreen.y)
+            event.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(window.windowNumber))
+            event.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(window.windowNumber))
+            if let wheel = NSEvent(cgEvent: event) {
+                window.sendEvent(wheel)
+                sent = true
+            }
+        }
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        let after = await script("return scrollY", in: webView, world: .page) as? Double
+        say(number, ["step": "scroll", "site": address, "sent": sent, "windowKey": key, "scrollYBefore": before ?? -1,
+                     "scrollYAfter": after ?? -1, "hitAppKit": appKitHit(at: location, in: window)])
+        _ = await script("scrollTo(0, 0); return 0", in: webView, world: .page)
+        try? await Task.sleep(nanoseconds: 300_000_000)
+    }
+
     /// Makes `window` the key window of the active app, three seconds at most; whether it is.
     private static func makeKey(_ window: NSWindow) async -> Bool {
         for _ in 0..<15 {
             if window.isKeyWindow, NSApp.isActive { return true }
             NSApp.activate()
+            NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
@@ -232,7 +267,7 @@ enum InputProbe {
     /// The view AppKit gives a click at `location` (the window's coordinates), and its parents.
     private static func appKitHit(at location: NSPoint, in window: NSWindow) -> String {
         guard let frame = window.contentView?.superview ?? window.contentView, var view = frame.hitTest(location) else { return "none" }
-        var names = [String(describing: type(of: view))]
+        var names = [String(describing: type(of: view)) + (view.isHiddenOrHasHiddenAncestor ? " (HIDDEN)" : "")]
         while let parent = view.superview, names.count < 4 {
             names.append(String(describing: type(of: parent)))
             view = parent
@@ -454,6 +489,7 @@ enum InputProbe {
     <div class="box" id="pointer-touch">pointerup, only when pointerType is "touch"</div>
     <div class="box" id="touch-prevents-click">touchend that calls preventDefault, and click</div>
     <a class="box" id="link" href="#moved">a link to #moved</a>
+    <div style="height: 2400px"></div>
     <script>
       const mark = (el, how) => { el.dataset.fired = (el.dataset.fired ? el.dataset.fired + "+" : "") + how; };
       const $ = (id) => document.getElementById(id);

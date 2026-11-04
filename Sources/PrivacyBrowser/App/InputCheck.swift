@@ -51,7 +51,7 @@ enum InputCheck {
             .split(separator: ",").map(String.init)
         let major = HostSafari.version.split(separator: ".").first.map(String.init) ?? "26"
         let mobileID = value("--mobile", in: arguments) ?? (major == "27" ? "ios-27" : "ios-26")
-        let kinds = (value("--profiles", in: arguments) ?? "mobile,mac").split(separator: ",").map(String.init)
+        let kinds = (value("--profiles", in: arguments) ?? "mac,mobile").split(separator: ",").map(String.init)
         let out = URL(fileURLWithPath: value("--out", in: arguments) ?? FileManager.default.currentDirectoryPath, isDirectory: true)
         line("INPUT", ["step": "machine", "macOS": ProcessInfo.processInfo.operatingSystemVersionString,
                        "safari": HostSafari.version, "mobileGeneration": mobileID])
@@ -125,6 +125,7 @@ enum InputCheck {
                 // Activation is the active app's to give (macOS 14 on): given to the profile's process.
                 if let pid = manager.processIdentifier(of: profile.id), let app = NSRunningApplication(processIdentifier: pid) {
                     NSApp.yieldActivation(to: app)
+                    app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
                 }
                 guard manager.sendProbe(profile.id, .inputProbe(asked, site)) else {
                     line("INPUT", ["step": "send-error", "profile": profile.kind, "site": site])

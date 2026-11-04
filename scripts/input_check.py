@@ -99,6 +99,12 @@ def report(lines):
                   f"{entry.get('hitPage')}, AppKit {entry.get('hitAppKit')}, top inset {entry.get('topInset')}, "
                   f"DOM changes in 1.5 s before the click {entry.get('baselineMutations')}")
             print(f"     page did: {'; '.join(did) or 'nothing seen'}")
+        elif step == "scroll":
+            print(f"  scroll by the wheel: scrollY {entry.get('scrollYBefore')} -> {entry.get('scrollYAfter')}, window key "
+                  f"{entry.get('windowKey')}, AppKit gave it to {entry.get('hitAppKit')}")
+        elif step == "window":
+            print(f"\n{who}: window {entry.get('window')}, key {entry.get('windowKey')}, active {entry.get('appActive')}, "
+                  f"views over the page: {entry.get('contentViews')}")
         elif step == "after-click":
             print(f"     then: {entry.get('url')} readyState {entry.get('readyState')} in {entry.get('ms')} ms"
                   f"{'' if entry.get('answeredFirstTry') else ' (did not answer at first)'}")
