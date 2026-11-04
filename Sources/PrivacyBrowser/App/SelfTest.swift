@@ -1756,13 +1756,27 @@ final class SelfTest {
         manager.onHistoryLook = { _, look in historyLook = look }
         let historyAsked = manager.lookAtHistory(profile.id)
         _ = await waitUntil(timeout: 20) { historyLook != nil }
-        let lookedAt = historyLook
+        var lookedAt = historyLook
+        // And the windows as the window server shows them — what is on the screen, whatever draws
+        // it: macOS 27.0.1 (full run 5) drew the profile's list in its process as nothing Vision
+        // could read. The pictures are kept (PB_SELFTEST_SHOTS, else a temporary folder).
+        var screenSaid: [String] = []
+        if var seen = lookedAt, !seen.regions.isEmpty {
+            let folder = ProcessInfo.processInfo.environment["PB_SELFTEST_SHOTS"].map { URL(fileURLWithPath: $0) }
+                ?? FileManager.default.temporaryDirectory.appendingPathComponent("pb-history-\(run)")
+            let read = HistoryWindowReader.readFromScreen(regions: seen.regions, folder: folder)
+            seen.screen = read.lines
+            screenSaid = read.said
+            lookedAt = seen
+        }
         let lookSaid: String
         if let lookedAt {
             let rows = lookedAt.texts.prefix(12).joined(separator: " | ")
             lookSaid = "\(lookedAt.chosen); views: \(lookedAt.views.joined(separator: "; ")); rows: \(rows); "
                 + "page: \(lookedAt.page ?? "none"); clearing: \(lookedAt.clearing.joined(separator: ", ")); "
-                + "first row: \(lookedAt.firstRow ?? "none"); read from its pixels: \(lookedAt.recognized.prefix(12).joined(separator: " | "))"
+                + "first row: \(lookedAt.firstRow ?? "none"); read from its pixels: \(lookedAt.recognized.prefix(12).joined(separator: " | ")); "
+                + "on the screen (\(screenSaid.isEmpty ? "nothing to ask for" : screenSaid.joined(separator: "; "))): "
+                + lookedAt.screen.prefix(16).joined(separator: " | ")
         } else {
             lookSaid = historyAsked ? "no answer in 20 s" : "not asked: the profile has no process of its own"
         }

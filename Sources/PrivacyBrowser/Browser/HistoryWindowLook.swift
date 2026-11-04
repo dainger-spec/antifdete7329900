@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import Vision
 import WebKit
 
@@ -27,14 +28,31 @@ struct HistoryWindowLook: Codable, Equatable {
     /// What the table brought up shows, read from its pixels (Vision's text recognition) when its
     /// rows give no text to read otherwise: what a person's eyes get.
     var recognized: [String] = []
+    /// Where on the screen what the item brought up is: each table's area in its window, or a whole
+    /// window the item opened. Only that is read from the screen — never a window around it, whose
+    /// tab bar names the page whatever the history shows.
+    var regions: [ScreenRegion] = []
+    /// What the window server's picture of those regions shows (`screencapture -l`, read by
+    /// Vision): what is on the screen, whatever draws it. Taken by the app, not the profile's
+    /// process (`HistoryWindowReader.readFromScreen`). macOS 27.0.1, full run 5: the profile's list
+    /// was there (SwiftUIOutlineListView, 3 rows, the clearing items enabled) and its view, drawn
+    /// in the process (`cacheDisplay`, its layer), gave Vision nothing to read; macOS 26.6.2 read it.
+    var screen: [String] = []
 
-    /// Whether a row of the window shows `text`: in the texts read, or — read from the pixels —
-    /// with at most `tolerance` characters misread.
+    /// An area of a window, in points from the window's top left corner, with the window's size.
+    struct ScreenRegion: Codable, Equatable {
+        var window: Int
+        var x: Double, y: Double, width: Double, height: Double
+        var windowWidth: Double, windowHeight: Double
+    }
+
+    /// Whether a row of the window shows `text`: in the texts read, or — read from the pixels, the
+    /// process's or the window server's — with at most `tolerance` characters misread.
     func shows(_ text: String, tolerance: Int = 0) -> Bool {
         if texts.contains(where: { $0.localizedCaseInsensitiveContains(text) }) { return true }
         let wanted = Array(text.lowercased().filter { !$0.isWhitespace })
         guard !wanted.isEmpty else { return false }
-        for line in recognized {
+        for line in recognized + screen {
             let seen = Array(line.lowercased().filter { !$0.isWhitespace })
             guard seen.count >= wanted.count else { continue }
             for start in 0...(seen.count - wanted.count) {
@@ -74,12 +92,13 @@ enum HistoryWindowReader {
         for window in NSApp.windows where window.isVisible {
             let tablesBefore = look.views.count
             collect(window.contentView, skipping: before, into: &look)
-            // A window the item brought up with no table in it (a list drawn otherwise): what its
-            // views say to accessibility.
             if look.views.count == tablesBefore, !windowsBefore.contains(ObjectIdentifier(window)), let content = window.contentView {
+                // A window the item brought up with no table in it (a list drawn otherwise): what
+                // its views say to accessibility, and the whole window on the screen.
                 let said = accessibleTexts(of: content, depth: 0)
                 look.views.append("\(type(of: window)) '\(window.title)', no table: \(said.count) texts read by accessibility")
                 look.texts += said.prefix(200)
+                look.regions.append(region(of: content, in: window, whole: true))
             }
         }
         if let key = NSApp.keyWindow, let webView = webView(in: key.contentView) {
@@ -128,6 +147,7 @@ enum HistoryWindowReader {
         if let table = view as? NSTableView {
             guard !before.contains(ObjectIdentifier(table)) else { return }
             look.views.append("\(type(of: table)), \(table.numberOfRows) rows")
+            if let window = table.window { look.regions.append(region(of: table.enclosingScrollView ?? table, in: window, whole: false)) }
             for row in 0..<min(table.numberOfRows, 100) where look.texts.count < 200 {
                 var rowTexts: [String] = []
                 for column in 0..<table.numberOfColumns {
@@ -159,6 +179,16 @@ enum HistoryWindowReader {
             return
         }
         for subview in view.subviews { collect(subview, skipping: before, into: &look) }
+    }
+
+    /// Where `view` is in `window` (the whole window when `whole`), as the window server's picture
+    /// of the window has it: from its top left corner.
+    private static func region(of view: NSView, in window: NSWindow, whole: Bool) -> HistoryWindowLook.ScreenRegion {
+        let size = window.frame.size
+        let rect = whole ? CGRect(origin: .zero, size: size) : view.convert(view.bounds, to: nil)
+        return HistoryWindowLook.ScreenRegion(window: window.windowNumber, x: rect.minX, y: size.height - rect.maxY,
+                                              width: rect.width, height: rect.height,
+                                              windowWidth: size.width, windowHeight: size.height)
     }
 
     /// A view's classes down to three levels, and what it gives accessibility: for the record.
@@ -194,7 +224,59 @@ enum HistoryWindowReader {
         return recognize(image)
     }
 
-    private static func recognize(_ image: CGImage?) -> [String] {
+    /// Each region as the window server shows it: its window's picture (`/usr/sbin/screencapture
+    /// -l`, without the shadow), kept in `folder` as history-window-<number>.png, cut to the region
+    /// (history-window-<number>-<index>.png), and the lines Vision reads there; with what was done,
+    /// for the record. Called in the app, which may ask the window server for another process's
+    /// window (the profile's process runs in a sandbox of its own).
+    static func readFromScreen(regions: [HistoryWindowLook.ScreenRegion], folder: URL) -> (lines: [String], said: [String]) {
+        var lines: [String] = []
+        var said: [String] = []
+        var pictures: [Int: CGImage] = [:]
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for (index, region) in regions.enumerated() {
+            let file = folder.appendingPathComponent("history-window-\(region.window).png")
+            if pictures[region.window] == nil {
+                try? FileManager.default.removeItem(at: file)
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                process.arguments = ["-x", "-o", "-l", String(region.window), file.path]
+                do { try process.run() } catch {
+                    said.append("window \(region.window): screencapture could not start (\(error.localizedDescription))")
+                    continue
+                }
+                process.waitUntilExit()
+                guard process.terminationStatus == 0,
+                      let source = CGImageSourceCreateWithURL(file as CFURL, nil),
+                      let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+                    said.append("window \(region.window): screencapture status \(process.terminationStatus), no picture")
+                    continue
+                }
+                pictures[region.window] = image
+            }
+            guard let picture = pictures[region.window], region.windowWidth > 0, region.windowHeight > 0 else { continue }
+            let scaleX = Double(picture.width) / region.windowWidth
+            let scaleY = Double(picture.height) / region.windowHeight
+            let cut = CGRect(x: region.x * scaleX, y: region.y * scaleY, width: region.width * scaleX, height: region.height * scaleY)
+                .integral.intersection(CGRect(x: 0, y: 0, width: picture.width, height: picture.height))
+            guard !cut.isEmpty, let part = picture.cropping(to: cut) else {
+                said.append("window \(region.window): the region \(Int(region.x)),\(Int(region.y)) \(Int(region.width))×\(Int(region.height)) pt is outside its picture")
+                continue
+            }
+            let partFile = folder.appendingPathComponent("history-window-\(region.window)-\(index).png")
+            if let destination = CGImageDestinationCreateWithURL(partFile as CFURL, "public.png" as CFString, 1, nil) {
+                CGImageDestinationAddImage(destination, part, nil)
+                CGImageDestinationFinalize(destination)
+            }
+            let read = recognize(part)
+            said.append("window \(region.window) (\(picture.width)×\(picture.height) px), region \(Int(region.x)),\(Int(region.y)) "
+                        + "\(Int(region.width))×\(Int(region.height)) pt: \(read.count) lines read, kept in \(partFile.path)")
+            lines += read
+        }
+        return (lines, said)
+    }
+
+    static func recognize(_ image: CGImage?) -> [String] {
         guard let image else { return [] }
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate

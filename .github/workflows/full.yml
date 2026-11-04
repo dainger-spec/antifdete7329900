@@ -187,6 +187,7 @@ jobs:
           export PB_SELFTEST_SOCKS2_PROXY_PORT=18084 PB_SELFTEST_SOCKS_AUTH_PROXY_PORT=18085
           export PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087 PB_SELFTEST_SILENT_PROXY_PORT=18088 PB_SELFTEST_SOCKS_UDP_PROXY_PORT=18089
           mkdir -p build/egress27
+          export PB_SELFTEST_SHOTS="$PWD/build/egress27/history-shots"
           sudo tcpdump -i pktap,all -k NP -n -tt -l 'not host 127.0.0.1 and not host ::1' \
             > build/egress27/capture.txt 2> build/egress27/tcpdump.err &
           sleep 2
@@ -862,6 +863,8 @@ jobs:
             # The surface dump goes to the repository folder, which only the unsandboxed build may write.
             if [ "$variant" = unsandboxed ]; then
               export PB_SELFTEST_SURFACE_OUT="$PWD/build/surface-$variant"
+              # The History window as the window server shows it (the self-test keeps its pictures).
+              export PB_SELFTEST_SHOTS="$PWD/build/egress/history-shots"
               # Everything that leaves this machine while the unsandboxed self-test runs, with the
               # process each packet belongs to (pktap): scripts/egress_check.py reads it below.
               sudo tcpdump -i pktap,all -k NP -n -tt -l 'not host 127.0.0.1 and not host ::1' \

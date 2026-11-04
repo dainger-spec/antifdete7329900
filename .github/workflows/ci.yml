@@ -466,6 +466,8 @@ jobs:
             # The surface dump goes to the repository folder, which only the unsandboxed build may write.
             if [ "$variant" = unsandboxed ]; then
               export PB_SELFTEST_SURFACE_OUT="$PWD/build/surface-$variant"
+              # The History window as the window server shows it (the self-test keeps its pictures).
+              export PB_SELFTEST_SHOTS="$PWD/build/egress/history-shots"
               # Everything that leaves this machine while the unsandboxed self-test runs, with the
               # process each packet belongs to (pktap): scripts/egress_check.py reads it below.
               sudo tcpdump -i pktap,all -k NP -n -tt -l 'not host 127.0.0.1 and not host ::1' \
@@ -632,6 +634,7 @@ jobs:
           name: fast-selftest-${{ matrix.variant }}
           path: |
             build/egress/selftest-*.txt
+            build/egress/history-shots
             build/crashes
             build/leaks
             build/guard-probe

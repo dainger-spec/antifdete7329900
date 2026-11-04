@@ -501,7 +501,7 @@
  },
  "History › Back | goBackInWindow: | ⌘[": {
   "behaviour": [
-   "-"
+   "disabled"
   ],
   "xpc": []
  },
