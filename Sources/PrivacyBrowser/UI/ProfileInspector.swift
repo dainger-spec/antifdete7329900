@@ -228,18 +228,18 @@ struct ProfileInspectorView: View {
 
     private var links: some View {
         let counts = info.counts
-        let library: Int? = {
-            guard let bookmarks = counts?.bookmarks, let history = counts?.historyEntries else { return nil }
-            return bookmarks + history
-        }()
         return VStack(spacing: 0) {
             InspectorLink(title: L("inspector.whatSitesSee"), count: nil) { actions.whatSitesSee(row.id) }
             InspectorLink(title: L("inspector.passwords"), count: counts?.logins) { actions.passwords(row.id) }
+            // Bookmarks and history each with its own count: one number for both read, on the owner's
+            // Mac (4 November), as bookmarks the person never made — they were the history's entries.
             if row.isRunning {
-                InspectorLink(title: L("inspector.library"), count: library) { actions.library(row.id) }
-            } else if let library {
+                InspectorLink(title: L("inspector.bookmarks"), count: counts?.bookmarks) { actions.library(row.id) }
+                InspectorLink(title: L("inspector.history"), count: counts?.historyEntries) { actions.history(row.id) }
+            } else {
                 // A stopped profile's bookmarks and history are opened in its window.
-                InspectorCount(title: L("inspector.library"), count: library)
+                if let bookmarks = counts?.bookmarks { InspectorCount(title: L("inspector.bookmarks"), count: bookmarks) }
+                if let history = counts?.historyEntries { InspectorCount(title: L("inspector.history"), count: history) }
             }
             InspectorMenuLink(title: L("inspector.cookies"), count: counts?.syncedCookies) {
                 Button(L("profiles.row.importCookies")) { actions.importCookies(row.id) }
