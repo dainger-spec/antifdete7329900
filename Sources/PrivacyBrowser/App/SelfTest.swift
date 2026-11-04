@@ -1726,6 +1726,28 @@ final class SelfTest {
                      "Safari did not fetch it in this run (not exercised): where it would go is not shown")
             }
         }
+        // What the person sees of the profile's history: the History window, opened as they open
+        // it (History › Show All History, ⌘Y), read from the views on screen. The owner's Mac, 0.1.2,
+        // 4 November: the card counted 4 entries in the profile's history, the window showed none;
+        // the checks had counted the store, never the window.
+        var historyLook: HistoryWindowLook?
+        manager.onHistoryLook = { _, look in historyLook = look }
+        let historyAsked = manager.lookAtHistory(profile.id)
+        _ = await waitUntil(timeout: 20) { historyLook != nil }
+        let lookedAt = historyLook
+        let lookSaid: String
+        if let lookedAt {
+            let rows = lookedAt.texts.prefix(12).joined(separator: " | ")
+            lookSaid = "\(lookedAt.chosen); views: \(lookedAt.views.joined(separator: "; ")); rows: \(rows); "
+                + "page: \(lookedAt.page ?? "none"); clearing: \(lookedAt.clearing.joined(separator: ", "))"
+        } else {
+            lookSaid = historyAsked ? "no answer in 20 s" : "not asked: the profile has no process of its own"
+        }
+        info("Safari chrome: the History window, as the person opens it — \(lookSaid)")
+        let historyShowsPage = lookedAt.map { $0.shows("start-\(run)") || $0.shows("PB leak page \(run)") } ?? false
+        check("Safari chrome: the History window, opened as the person opens it (History › Show All History), shows the page Safari's window loaded",
+              historyShowsPage, lookSaid)
+
         // A stop: Safari's window goes first, then the seal, whose retries no longer wait for Safari
         // (it keeps the pages of the windows it closes); the process reports how the seal went.
         sealReport = nil

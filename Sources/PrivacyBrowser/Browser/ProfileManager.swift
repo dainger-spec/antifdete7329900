@@ -56,6 +56,8 @@ final class ProfileManager: ObservableObject {
     var onSealed: ((UUID, ProfileSealReport) -> Void)?
     /// A step of the menu walk a profile's process was asked for (`walkMenu`; `--menu-walk`).
     var onMenuWalk: ((UUID, String) -> Void)?
+    /// What a profile's History window showed when the self-test asked (`lookAtHistory`).
+    var onHistoryLook: ((UUID, HistoryWindowLook) -> Void)?
     /// A profile's process ended on its own (a quit of its own, or a crash: `status` is not 0),
     /// after its home was sealed. Not called for a stop asked for from here (`--menu-walk`).
     var onChildExited: ((UUID, Int32) -> Void)?
@@ -488,6 +490,8 @@ final class ProfileManager: ObservableObject {
                 self.onChildSealed?(id, report)
             case .menuWalk(let line):
                 self.onMenuWalk?(id, line)
+            case .historyLook(let look):
+                self.onHistoryLook?(id, look)
             }
         }
         child.onExit = { [weak self] status in
@@ -931,6 +935,15 @@ final class ProfileManager: ObservableObject {
     func walkMenu(_ id: UUID, from: Int) -> Bool {
         guard let child = children[id] else { return false }
         child.send(.walkMenu(from: from))
+        return true
+    }
+
+    /// Asks a profile running in its own process to open its History window as the person does and
+    /// say what it shows; the answer comes back through `onHistoryLook`. The self-test's only.
+    @discardableResult
+    func lookAtHistory(_ id: UUID) -> Bool {
+        guard let child = children[id] else { return false }
+        child.send(.lookAtHistory)
         return true
     }
 
