@@ -36,10 +36,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     /// The profile chip and the start page (see BrowserChrome.swift).
     private let chrome: BrowserChromeModel
     /// Over the web views while the selected tab is an empty new tab.
-    private var startPage: NSHostingView<StartPageView>!
+    private var startPage: CoverHostingView<StartPageView>!
     /// Over the web views while the selected tab's page stopped (`BrowserTab.pageStopped`): its
     /// process kept ending, and the tab no longer reloads it by itself.
-    private var stoppedPage: NSHostingView<StoppedPageView>!
+    private var stoppedPage: CoverHostingView<StoppedPageView>!
     /// 0 with one tab: like Safari, the tab bar shows from the second tab on.
     private var tabStripHeight: NSLayoutConstraint!
     /// The address field's width: what the other toolbar items leave, up to 680 pt (`fitAddressField`).
@@ -183,7 +183,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
 
         tabStrip.delegate = self
         let container = NSView()
-        startPage = NSHostingView(rootView: StartPageView(
+        startPage = CoverHostingView(rootView: StartPageView(
             model: chrome,
             open: { [weak self] url in self?.openFromStartPage(url) },
             submit: { [weak self] text in
@@ -193,7 +193,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         // Part of the chrome (dark), unlike the web views beside it (the system's appearance).
         startPage.appearance = Theme.chromeAppearance
         startPage.isHidden = true
-        stoppedPage = NSHostingView(rootView: StoppedPageView(reload: { [weak self] in self?.reload() }))
+        stoppedPage = CoverHostingView(rootView: StoppedPageView(reload: { [weak self] in self?.reload() }))
         // It fills the tab's place and asks for no size of its own: SwiftUI's minimum for it — its
         // text wrapped at the narrowest width — held the web view some 2,700 pt tall even while it
         // was hidden, and a page measured that (the self-test's window size, CI run 559).
@@ -684,4 +684,15 @@ extension BrowserWindowController: TabStripViewDelegate {
     func tabStrip(_ strip: TabStripView, didSelect index: Int) { selectTab(at: index) }
     func tabStrip(_ strip: TabStripView, didClose index: Int) { closeTab(at: index) }
     func tabStripDidRequestNewTab(_ strip: TabStripView) { newTab() }
+}
+
+/// A SwiftUI view laid over a tab's web view in our window — the start page, the stopped page's
+/// cover — that takes no click while it is hidden. NSHostingView answers AppKit's hit test for
+/// itself even when hidden: in a mobile view (our window) every click on the page went to the
+/// hidden stopped page's cover, and not one reached the page (run 690, macOS 26.6.2 and 27.0.1;
+/// the owner, 2 November: "a tap is not taken"). A hidden NSView takes none; this one neither.
+final class CoverHostingView<Content: View>: NSHostingView<Content> {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        isHiddenOrHasHiddenAncestor ? nil : super.hitTest(point)
+    }
 }
