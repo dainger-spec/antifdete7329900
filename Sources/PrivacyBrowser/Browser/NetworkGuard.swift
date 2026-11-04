@@ -570,8 +570,10 @@ extension NetworkGuard: OSSystemExtensionRequestDelegate {
                 let install = activationInstalls
                 Task { await configureFilter(install: install) }
             case .willCompleteAfterReboot:
+                // Installed and switched on as far as the person goes; macOS runs it after a
+                // restart. Not "not installed": nothing more is to be installed or allowed.
                 problem = .reboot
-                settle(.notInstalled)
+                settle(.restartNeeded)
             @unknown default:
                 problem = .other("\(result.rawValue)")
                 settle(.notInstalled)

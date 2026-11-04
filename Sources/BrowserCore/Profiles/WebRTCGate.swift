@@ -123,6 +123,6 @@ public enum NetworkGuardReading {
     /// copy of it that is to be removed at the next restart (`OSSystemExtensionProperties.isUninstalling`,
     /// `systemextensionsctl list`: "terminated waiting to uninstall on reboot").
     public static func silent(earlierCopyAwaitsRestart: Bool) -> NetworkGuardState {
-        .notAnswering
+        earlierCopyAwaitsRestart ? .restartNeeded : .notAnswering
     }
 }
