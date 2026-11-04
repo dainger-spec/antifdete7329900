@@ -75,6 +75,12 @@ DRY RUN block. Start a full run on the commit to release with
 the commit, a failed attempt then a passed one: yes; none, running, failed, cancelled, another
 commit, the fast pipeline's run, an answer that is not GitHub's, a short SHA: no.)
 
-GitHub starts a schedule only from the repository's default branch, and a run from the Actions page
-only for a workflow the default branch has: until `full.yml` is there, the full pipeline runs on a
-pushed tag `full/…` (or through the API's workflow_dispatch on a branch).
+GitHub starts a schedule, and offers Run workflow, only for a workflow the repository's default
+branch has, and a schedule runs that branch's code. The default branch could not be changed (GitHub:
+"Could not change default branch", the owner, 4 November), so the same `full.yml` is also on it
+(`claude/macos-privacy-browser-prototype-0ns2oj`, one commit, that file alone). On a schedule only its
+job `nightly` runs: it starts the pipeline on `claude/redesign` (a workflow_dispatch made with the
+run's own token starts a run), and that run checks the branch's newest commit under its own SHA —
+the one release.sh's gate looks for. Every other job is skipped on a schedule. Run workflow (choose
+`claude/redesign`) and a pushed tag `full/…` run the checks on the commit asked for. When `full.yml`
+changes here, the default branch's copy is brought to the same text.

@@ -6,8 +6,11 @@ name: CI — full
 # full/<sha12>`. release.sh releases only a commit this pipeline passed (scripts/full_run_gate.py).
 # The fast pipeline (.github/workflows/ci.yml) runs on every push; everything it checks is here too
 # (scripts/check_ci_split.py).
-# GitHub starts a schedule only from the repository's default branch: the daily run happens once this
-# file is on it.
+# GitHub starts a schedule only from the repository's default branch, and with that branch's code: the
+# same file is on it (claude/macos-privacy-browser-prototype-0ns2oj, the owner, 4 November), and there
+# the schedule only starts this pipeline on claude/redesign (the job `nightly`): the checks then run on
+# that branch's newest commit, as a run of its own on that commit, which release.sh's gate counts. On
+# a schedule every other job is skipped; on request or on a tag the checks run on the commit asked for.
 on:
   workflow_dispatch:
   schedule:
@@ -28,7 +31,24 @@ env:
 
 
 jobs:
+  nightly:
+    # The schedule's own run, from the default branch: it starts this pipeline on claude/redesign (a
+    # workflow_dispatch made with this run's token starts a run, unlike other events it makes), and
+    # does nothing else. That run checks claude/redesign's newest commit under its own SHA.
+    name: The nightly run, started on claude/redesign
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - name: Start the full pipeline on claude/redesign
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run full.yml --repo "$GITHUB_REPOSITORY" --ref claude/redesign
+          echo "started on claude/redesign, at $(gh api "repos/$GITHUB_REPOSITORY/commits/claude/redesign" --jq .sha)"
   core-linux:
+    if: github.event_name != 'schedule'
     name: Core tests (Linux, swift-crypto)
     runs-on: ubuntu-24.04
     steps:
@@ -39,6 +59,7 @@ jobs:
       - run: swift test
 
   shims:
+    if: github.event_name != 'schedule'
     name: JavaScript shim tests (Node)
     runs-on: ubuntu-24.04
     steps:
@@ -96,6 +117,7 @@ jobs:
         run: scripts/test_full_run_gate.sh
 
   macos-27:
+    if: github.event_name != 'schedule'
     name: macOS 27 — the self-test on the newest macOS (preview image; fails the build only on a certificate fetched outside the proxy)
     # GitHub's xcode-27 image runs macOS 27.0.1 with Safari 27.0.1 and Xcode 27 (its SDK): what a
     # user who updated has. The macOS job below (macos-26) is the one that gates the build; this one
@@ -404,6 +426,7 @@ jobs:
           if-no-files-found: ignore
 
   macos:
+    if: github.event_name != 'schedule'
     name: macOS build, core tests, WebKit self-test
     # The newest macOS and Xcode: WebKit enables several features only for apps linked against
     # the current SDK (Trusted Types, …), and the Safari comparison should see the same engine
