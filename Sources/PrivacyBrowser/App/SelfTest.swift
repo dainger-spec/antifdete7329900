@@ -5015,37 +5015,37 @@ final class SelfTest {
         let said = hit.map { String(describing: type(of: $0)) + ($0.isHiddenOrHasHiddenAncestor ? " (hidden)" : "") } ?? "nothing"
         check("\(name): a click on the page goes to the page, not to a view over it", inPage, "AppKit gives it to \(said)")
 
-        // The click itself. Where this window can be key, through the window, as AppKit hands a
-        // person's click on. Where it cannot (CI's runners do not let this process be the active
-        // app: run 692), a click on a window that is not key is AppKit's "first mouse", which WebKit
-        // takes for activating the window; there the click goes to the view AppKit's hit test
-        // names, as the window would hand it on once key — the web view, or whatever lies over it.
+        // The click itself, through the window as AppKit hands a person's click on — only where
+        // this window can be key. CI's runners do not let this process be the active app (runs 692,
+        // 694), and a click on a window that is not key is AppKit's "first mouse", which WebKit takes
+        // for activating the window. Handed straight to the view the hit test names it proves
+        // nothing: NSHostingView passes a click it is handed on, and the page counted it with the
+        // hidden cover over it (run 694). The hit test above is the route a person's click takes.
         _ = try? await webView.evaluateJavaScript(
             "window.__pbClicks = 0; document.addEventListener('click', (e) => { window.__pbClicks++; e.preventDefault(); }, true); 0")
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        let key = await waitUntil(timeout: 3, { window.isKeyWindow })
+        guard await waitUntil(timeout: 3, { window.isKeyWindow }) else {
+            skip("\(name): the page gets a click with the mouse, through the window",
+                 "this window could not be made key here (the app is not active); the hit test above is the route a person's click takes")
+            return
+        }
         for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-            guard let event = NSEvent.mouseEvent(with: type, location: middle, modifierFlags: [],
-                                                 timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                                                 context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0) else { continue }
-            if key {
+            if let event = NSEvent.mouseEvent(with: type, location: middle, modifierFlags: [],
+                                              timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                              context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0) {
                 window.sendEvent(event)
-            } else if type == .leftMouseDown {
-                hit?.mouseDown(with: event)
-            } else {
-                hit?.mouseUp(with: event)
             }
             try? await Task.sleep(nanoseconds: 80_000_000)
         }
-        info("\(name): the click went \(key ? "through the window (key)" : "to the view AppKit's hit test names (this window could not be made key here)")")
         var clicks = 0
         for _ in 0..<20 {
             clicks = (try? await webView.evaluateJavaScript("window.__pbClicks || 0")) as? Int ?? 0
             if clicks > 0 { break }
             try? await Task.sleep(nanoseconds: 150_000_000)
         }
-        check("\(name): the page gets a click with the mouse", clicks == 1, "the page counted \(clicks) click(s); AppKit gave it to \(said)")
+        check("\(name): the page gets a click with the mouse, through the window", clicks == 1,
+              "the page counted \(clicks) click(s); AppKit gave it to \(said)")
     }
 
     /// The owner, 1 November, a sample of the process: an iPhone view, in its own process as the
