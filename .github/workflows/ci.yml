@@ -23,6 +23,19 @@ jobs:
           sudo safaridriver --enable || echo "safaridriver --enable failed"
           mkdir -p build
           MEASURE_OUT=build/worlds-${{ matrix.runner }}.json python3 scripts/measure_safari_worlds.py
+      - name: Which page policy blocks canvas readback as Safari 27 does (a WKWebView, one option at a time)
+        if: always()
+        timeout-minutes: 10
+        run: |
+          mkdir -p build
+          swiftc -O scripts/canvas_policy_probe.swift -o build/canvas_policy_probe 2>&1 | tail -5
+          build/canvas_policy_probe || true
+      - name: Safari's own privacy settings on this Mac
+        if: always()
+        run: |
+          for d in ~/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari ~/Library/Preferences/com.apple.Safari com.apple.Safari.SandboxBroker; do
+            echo "== $d"; defaults read "$d" 2>/dev/null | grep -i -E "privacy|fingerprint|enhanced|tracking|protection" || true
+          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
