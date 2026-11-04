@@ -3,6 +3,7 @@ import BrowserCore
 import CryptoKit
 import Darwin
 import Network
+import NetworkGuardCore
 import os
 import WebKit
 
@@ -272,6 +273,17 @@ final class SelfTest {
         // the proxy" below checks that in a profile's own process, and the relay with a stand-in.
         check("network guard: this build says it has none, and nothing stands in for it outside the self-test's own checks",
               NetworkGuard.shared.state == .notInBuild && !NetworkGuard.shared.selfTestStandIn, "\(NetworkGuard.shared.state)")
+        // The kernel's table of sockets, which the guard reads for each flow to know whom it is for
+        // (SocketTable; the owner's Mac, 4 November): it must read here — in the sandboxed build,
+        // inside the App Sandbox, as the guard's own extension runs.
+        let sandbox = AppEnvironment.isSandboxed ? ", inside the App Sandbox" : ""
+        switch SocketTable.read(.udp) {
+        case .success(let sockets):
+            check("network guard: the kernel's table of sockets reads in this process\(sandbox)", true)
+            info("the kernel's table of UDP sockets: \(sockets.count) read, \(sockets.filter(\.delegated).count) of them delegated")
+        case .failure(let error):
+            check("network guard: the kernel's table of sockets reads in this process\(sandbox)", false, "\(error)")
+        }
         // As the first launch of a profile with a German proxy would, before WebKit starts any
         // process; checked by fingerprintSurface (navigator) and proxies (Accept-Language header).
         WebContentLanguage.decide("de-DE")

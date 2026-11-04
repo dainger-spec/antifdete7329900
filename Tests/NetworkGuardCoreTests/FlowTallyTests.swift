@@ -49,7 +49,7 @@ final class FlowTallyTests: XCTestCase {
                          to: GuardProof.stunAddress, port: GuardProof.stunPort, transport: .udp, at: 6)
         XCTAssertEqual(check?.remote, "203.0.113.1:3478")
         XCTAssertEqual(check?.description, "udp 203.0.113.1:3478, counted for com.apple.WebKit.Networking (pid 321), "
-                       + "opened by com.apple.WebKit.Networking (pid 321): notHeld, allow")
+                       + "opened by com.apple.WebKit.Networking (pid 321): notHeld, allow; the kernel's record of its socket: not read")
         XCTAssertEqual(check?.kind, .notHeld)
         XCTAssertEqual(check?.appPID, 321)
         XCTAssertEqual(check?.transport, .udp)
@@ -57,6 +57,36 @@ final class FlowTallyTests: XCTestCase {
         XCTAssertTrue(FlowTally.isCheckAddress("203.0.113.2"))
         XCTAssertFalse(FlowTally.isCheckAddress("203.0.114.1"))
         XCTAssertFalse(FlowTally.isCheckAddress("not an address"))
+    }
+
+    /// The owner's probe flow as the guard keeps it now: the kernel's record beside the source
+    /// application, what its first datagram showed, and the record read again after.
+    func testACheckFlowKeepsTheKernelsRecordItsFirstDataAndLaterReadings() throws {
+        let tally = FlowTally(since: start)
+        let socket = KernelSocket(transport: .udp, localAddress: "198.18.0.1", localPort: 61656, remoteAddress: "203.0.113.1",
+                                  remotePort: 3478, lastPID: 1741, effectivePID: 1738, delegated: true)
+        let check = try XCTUnwrap(tally.record(.held, at: at(6), appPID: 1741, appName: "com.apple.WebKit.Networking",
+                                               appIdentifier: nil, openerPID: 1741, openerName: "com.apple.WebKit.Networking",
+                                               transport: .udp, remoteAddress: GuardProof.stunAddress, remotePort: GuardProof.stunPort,
+                                               verdict: "drop", id: "F1", kernel: socket, heldBy: "kernelSocket",
+                                               properties: ["NEFilterFlow.direction = 2"]))
+        XCTAssertEqual(check.description, "udp 203.0.113.1:3478, counted for com.apple.WebKit.Networking (pid 1741), "
+                       + "opened by com.apple.WebKit.Networking (pid 1741): held, drop; the kernel's record of its socket: "
+                       + "udp 198.18.0.1:61656 → 203.0.113.1:3478, used by pid 1741, counted for pid 1738 (delegated); "
+                       + "held by the kernel's record")
+        let look = FlowTally.CheckFlow.Look(appPID: 1741, appName: "com.apple.WebKit.Networking", kernel: socket, kernelNote: nil,
+                                            heldBy: "kernelSocket", verdict: "drop", changedProperties: [])
+        XCTAssertNotNil(tally.noteFirstData(of: "F1", look))
+        XCTAssertNil(tally.noteFirstData(of: "F1", look), "the first look only")
+        XCTAssertNil(tally.noteFirstData(of: "F2", look), "no such flow")
+        tally.noteLater(of: "F1", "+5 ms: counted for pid 1738")
+        let kept = try XCTUnwrap(tally.snapshot().checkFlows.first)
+        XCTAssertEqual(kept.firstData, look)
+        XCTAssertEqual(kept.later, ["+5 ms: counted for pid 1738"])
+        XCTAssertEqual(kept.kernel?.countedFor, 1738)
+        // What an older app decodes: the fields it knows, the new ones ignored.
+        let decoded = try JSONDecoder().decode(FlowTally.Snapshot.self, from: JSONEncoder().encode(tally.snapshot()))
+        XCTAssertEqual(decoded.checkFlows.first?.heldBy, "kernelSocket")
     }
 
     func testTheCheckFlowsKeptAreTheLastOnes() {

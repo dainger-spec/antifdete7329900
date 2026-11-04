@@ -325,6 +325,44 @@ cannot load the extension, but it runs the same probe inside a capture: every pa
 probe's request must be sent by another process and counted for the probe's pid
 (`scripts/guard_probe_check.py`, with its own control).
 
+### Two answers to "whose flow is it": the filter's and the kernel's
+
+On the owner's Mac (0.1.2 (3), macOS 27.0.1, 4 November, a third-party VPN on) the check failed
+with the guard installed and answering: the filter was given the probe's STUN request with
+WebKit's network process (1741) as both its source application and its opener, while a packet
+capture of the same request (`tcpdump -i pktap,all -k NP`) showed every packet `proc
+com.apple.WebKit:1741, eproc LumenProfile:1738` — the kernel counted it for the probe. The capture
+reads that from the flow: WebKit marks each WebRTC connection of its network process as the page's
+process's (`nw_parameters_set_source_application`). Measured in CI (claude/guard-fixes, macOS
+26.6.2): that connection is a flow of the user-space network stack (Skywalk), not a socket of the
+kernel's — the kernel lists it in the same table as its sockets, from its flow statistics (xnu
+ntstat.c, `nstat_userland_to_xsocket_n`), with its user (WebKit's network process) and its
+effective pid (the probe), no flags. A socket of the kernel's own is counted for another process
+only while it says so (`SOF_DELEGATED`).
+
+So the guard asks the kernel too (`SocketTable`, `GuardAttribution`): for a flow whose source
+application it does not hold — while it holds any process — it reads the kernel's table of that
+transport's sockets (the sysctl `net.inet.udp.pcblist_n` / `net.inet.tcp.pcblist_n`, as
+`netstat` does), finds the flow's socket by its local port and remote end, and holds the flow if
+the process the kernel counts it for is held. A flow of WebKit's network process that neither
+answer gives to a held process is looked at again at its first outbound data, before any byte of
+it leaves. Holding more is the only way this can err: a flow is never let through because of it.
+
+What the filter is given, measured on the Mac where it runs: for each flow to the check's network
+the guard keeps both answers when the flow came, again 5, 20, 100 and 500 ms later, and at its first
+data, and every property of the flow object (`NEFilterFlow`, public or not); `Lumen
+--guard-diagnose` prints them, and beside them its own reading of the kernel's table while the
+probe ran. CI cannot load the guard, but it reads the table with the guard's own code
+(`Lumen --socket-owners 203.0.113.1`) while the probe runs inside a capture: every packet's socket
+must be in it, used by the packet's `proc` and counted for its `eproc`
+(`scripts/guard_probe_check.py`); read as if no socket were delegated, it must disagree. The
+self-test checks that the table reads inside the App Sandbox, as the guard's extension runs.
+
+The other way to know a profile's network process — the profile asking WebKit for it
+(`WKWebsiteDataStore._networkProcessIdentifier`, private) — names each profile's own network
+process, and the new one after it is killed (branch claude/measure-guard-link, CI run of 511f2a7);
+it is kept in reserve should the kernel's record not reach the guard.
+
 ### When the check fails: `Lumen --guard-diagnose`
 
 On the owner's Mac (0.1.1, macOS 27.0.1, 3 November) the guard was installed and enabled, its

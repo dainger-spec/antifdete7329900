@@ -76,6 +76,12 @@ ALLOWED_IN_FILE = {
     ("GuardFilterProvider.swift", "opener.name"): "the name of the process that opened a dropped flow (WebKit's, the system's), not an address",
     ("GuardFilterProvider.swift", "summary.counts"):
         "how many flows the filter was given in five seconds, by kind (FlowTally.WindowSummary): no name, no address",
+    ("GuardFilterProvider.swift", "checkFlowProperty"):
+        "a property of the flow object of a flow to TEST-NET-3 (the guard's check, the diagnosis's own), "
+        "never routed: its tokens' pids, its direction, its identifier — nothing of anyone's",
+    ("GuardFilterProvider.swift", "checkFirstData"):
+        "what the guard read at the first data of a flow to TEST-NET-3: pids, the kernel's record of its "
+        "socket (ports, the documentation address, pids), the verdict — nothing of anyone's",
     ("GuardFilterProvider.swift", "check.description"):
         "a flow to the documentation network 203.0.113.0/24 only (TEST-NET-3, never routed: the check's probe, the diagnosis's "
         "own): that address, the processes it is counted for and opened by, their pids and signing identifiers, the verdict",

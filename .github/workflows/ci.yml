@@ -571,13 +571,21 @@ jobs:
         # it (WebKit's network process). `Lumen --guard-probe` inside a capture of its STUN address
         # (TEST-NET-3, never routed): every packet must be sent by another process and counted for
         # the probe's pid, and at least one must be seen. Then the checker's own control: the same
-        # capture compared with a pid that is not the probe's must fail.
+        # capture compared with a pid that is not the probe's must fail. The kernel's table of
+        # sockets, read by the app's own code while the probe runs (what the guard reads for each
+        # flow, SocketTable), must agree with the capture's proc and eproc; read as if no socket were
+        # delegated, it must not.
         if: always() && matrix.variant == 'unsandboxed'
-        timeout-minutes: 5
+        timeout-minutes: 8
         run: |
           python3 scripts/guard_probe_check.py --app build/unsandboxed/Lumen.app --out build/guard-probe
           if python3 scripts/guard_probe_check.py --app build/unsandboxed/Lumen.app --out build/guard-probe-control --expect-pid 1; then
             echo "::error::the probe check passed with a pid that is not the probe's: it shows nothing"; exit 1
+          fi
+          # The kernel's table as the guard reads it (Lumen --socket-owners), read as if no socket were
+          # delegated: it must disagree with the capture's eproc, or the comparison shows nothing.
+          if python3 scripts/guard_probe_check.py --app build/unsandboxed/Lumen.app --out build/guard-probe-table-control --table-ignores-delegation; then
+            echo "::error::the kernel's table read without delegation agreed with the capture: the table's comparison shows nothing"; exit 1
           fi
       - name: Lumen --guard-diagnose where no guard runs — it starts, says where it stops, and does not pass
         # The owner's diagnosis of the guard (GuardDiagnosis.swift) measures on a Mac with the guard
