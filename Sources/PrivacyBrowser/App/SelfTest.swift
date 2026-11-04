@@ -4954,6 +4954,10 @@ final class SelfTest {
                   idle < 0.4, "\(Int(idle * 100)) % of a core over 4 s (the control read \(Int(control * 100)) %)")
         }
 
+        // A click on the page, as a person makes one (the owner, 2 November: in a mobile view a tap
+        // on many sites is not taken).
+        await clickReachesPage(controller, tab, "ended page: an iPhone view's page, loaded")
+
         // The page's process ended from outside, as a crash ends it, four times at most. A
         // sandboxed build may not signal another process: there WebKit's own call ends it
         // (`_killWebContentProcess`), which our tab is told of the same way.
@@ -4991,6 +4995,52 @@ final class SelfTest {
         let back = await waitUntil(timeout: 20) { !tab.pageStopped && !tab.isLoading && pid() > 0 && pid() != last }
         check("ended page: Reload asks for the page again", back && !controller.showsStoppedPage,
               "stopped \(tab.pageStopped), process \(pid()), cover shown \(controller.showsStoppedPage)")
+        await clickReachesPage(controller, tab, "ended page: after Reload, the cover hidden again")
+    }
+
+    /// A click at the middle of `tab`'s page in our window: AppKit must give it to the page's web
+    /// view, not to a view laid over it, and — where this window can be key — the page must get it.
+    /// Run 690 (claude/measure-touch, macOS 26.6.2 and 27.0.1): in a mobile view every click's point
+    /// went to NSHostingView<StoppedPageView>, the cover for a page whose process keeps ending, laid
+    /// over the web view and hidden; not one event reached the page.
+    private func clickReachesPage(_ controller: BrowserWindowController, _ tab: BrowserTab, _ name: String) async {
+        guard let window = controller.window, let frame = window.contentView?.superview ?? window.contentView else {
+            check("\(name): a click on the page goes to the page", false, "no window")
+            return
+        }
+        let webView = tab.webView
+        let middle = webView.convert(NSPoint(x: webView.bounds.midX, y: webView.bounds.midY), to: nil)
+        let hit = frame.hitTest(middle)
+        let inPage = hit.map { $0 === webView || $0.isDescendant(of: webView) } ?? false
+        let said = hit.map { String(describing: type(of: $0)) + ($0.isHiddenOrHasHiddenAncestor ? " (hidden)" : "") } ?? "nothing"
+        check("\(name): a click on the page goes to the page, not to a view over it", inPage, "AppKit gives it to \(said)")
+
+        // The click itself. A window that is not key takes a click as AppKit's "first mouse", which
+        // WebKit takes for activating the window: where this process cannot be the active app, it
+        // is said, not passed.
+        _ = try? await webView.evaluateJavaScript(
+            "window.__pbClicks = 0; document.addEventListener('click', (e) => { window.__pbClicks++; e.preventDefault(); }, true); 0")
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        guard await waitUntil(timeout: 3, { window.isKeyWindow }) else {
+            skip("\(name): the page gets a click with the mouse", "this window could not be made key here (the app is not active)")
+            return
+        }
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            if let event = NSEvent.mouseEvent(with: type, location: middle, modifierFlags: [],
+                                              timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                              context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0) {
+                window.sendEvent(event)
+            }
+            try? await Task.sleep(nanoseconds: 80_000_000)
+        }
+        var clicks = 0
+        for _ in 0..<20 {
+            clicks = (try? await webView.evaluateJavaScript("window.__pbClicks || 0")) as? Int ?? 0
+            if clicks > 0 { break }
+            try? await Task.sleep(nanoseconds: 150_000_000)
+        }
+        check("\(name): the page gets a click with the mouse", clicks == 1, "the page counted \(clicks) click(s); AppKit gave it to \(said)")
     }
 
     /// The owner, 1 November, a sample of the process: an iPhone view, in its own process as the
