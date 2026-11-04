@@ -50,6 +50,9 @@ enum ProfileCommand: Codable {
     /// entitlements that give one it holds, and what the keychain lets it do under the probe's own
     /// service. Sent by the self-test and the release check only, never by the app.
     case checkKeychain(KeychainProbe)
+    /// Choose History › Show All History as the person does, and say what the window then shows
+    /// (`HistoryWindowReader`). Sent by the self-test only, never by the app.
+    case lookAtHistory
 }
 
 /// What the manager decided for a launch's WebRTC. With `relay`, the profile's pages are given that
@@ -108,6 +111,8 @@ enum ProfileEvent: Codable {
     case menuWalk(String)
     /// The answer to `checkKeychain`.
     case keychainReport(KeychainReport)
+    /// The answer to `lookAtHistory`.
+    case historyLook(HistoryWindowLook)
 }
 
 /// How a profile's WebKit data was sealed as its process quit: whether WebKit let the store go

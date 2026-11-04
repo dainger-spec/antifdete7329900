@@ -193,6 +193,8 @@ enum SafariChromeHost {
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
+        // Safari's history items act on the profile's own history (`HistoryMenuRoute`).
+        HistoryMenuRoute.install(session: session)
         log.notice("A profile runs in Safari's chrome")
         return true
     }

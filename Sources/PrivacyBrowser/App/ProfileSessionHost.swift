@@ -291,6 +291,10 @@ enum ProfileSessionHost {
                 SafariChromeHost.performCloseEveryWindow()
             case .checkKeychain(let probe):
                 ProfileSessionHost.send(.keychainReport(KeychainCheck.run(probe)))
+            case .lookAtHistory:
+                Task { @MainActor in
+                    ProfileSessionHost.send(.historyLook(await HistoryWindowReader.look()))
+                }
             case .walkMenu(let from):
                 SafariMenuWalk.start(from: from, session: manager?.session(for: profileID)) { line in
                     ProfileSessionHost.send(.menuWalk(line))
