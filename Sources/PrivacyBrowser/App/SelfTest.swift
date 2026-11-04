@@ -1923,6 +1923,26 @@ final class SelfTest {
                 && refusal.map { control.messages.contains(ProfileManager.webRTCOffText($0)) } == true,
               "refusals \(control.refusals), messages \(control.messages)")
 
+        // The owner's Mac, 0.1.2, macOS 27.0.1, 4 November: the guard installed and answering, its
+        // check on this Mac failed (the probe's flow was counted for WebKit's network process).
+        // A proxied profile with WebRTC on must then have none at all, inside this capture.
+        NetworkGuard.shared.selfTestState = .unproven
+        let unproven: (report: [String: Any], refusals: [WebRTCRefusal], messages: [String], started: Bool)
+        do {
+            unproven = try await launch(mode: "presence")
+        } catch {
+            NetworkGuard.shared.selfTestState = nil
+            throw error
+        }
+        NetworkGuard.shared.selfTestState = nil
+        info("WebRTC through the proxy, the guard's check failed: \(unproven.report), refusals \(unproven.refusals), messages \(unproven.messages)")
+        check("WebRTC through the proxy, the guard's check failed: no RTCPeerConnection, in the page or in an about:blank frame",
+              unproven.started && unproven.report["rtc"] as? String == "undefined" && unproven.report["rtcFrame"] as? String == "undefined",
+              unproven.report.isEmpty ? "no report from the page (started \(unproven.started))" : "\(unproven.report)")
+        check("WebRTC through the proxy, the guard's check failed: the profile is told so, in words",
+              unproven.refusals == [.guardUnproven] && unproven.messages.contains(ProfileManager.webRTCOffText(.guardUnproven)),
+              "refusals \(unproven.refusals), messages \(unproven.messages)")
+
         // The call: the product's relay, the self-test standing in for the guard.
         let before = await udpStats()
         NetworkGuard.shared.selfTestStandIn = true
