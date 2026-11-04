@@ -1,4 +1,5 @@
 import AppKit
+import Vision
 import WebKit
 
 /// What the History window shows, as the person opens it in a profile's window — History › Show
@@ -20,9 +21,33 @@ struct HistoryWindowLook: Codable, Equatable {
     var page: String?
     /// Each item whose action clears history, with whether it can be chosen.
     var clearing: [String] = []
+    /// How the first row of the table brought up is built: its views and what it gives
+    /// accessibility (to read a list drawn by SwiftUI).
+    var firstRow: String?
+    /// What the table brought up shows, read from its pixels (Vision's text recognition) when its
+    /// rows give no text to read otherwise: what a person's eyes get.
+    var recognized: [String] = []
 
-    /// Whether a row of the window shows `text`.
-    func shows(_ text: String) -> Bool { texts.contains { $0.localizedCaseInsensitiveContains(text) } }
+    /// Whether a row of the window shows `text`: in the texts read, or — read from the pixels —
+    /// with at most `tolerance` characters misread.
+    func shows(_ text: String, tolerance: Int = 0) -> Bool {
+        if texts.contains(where: { $0.localizedCaseInsensitiveContains(text) }) { return true }
+        let wanted = Array(text.lowercased().filter { !$0.isWhitespace })
+        guard !wanted.isEmpty else { return false }
+        for line in recognized {
+            let seen = Array(line.lowercased().filter { !$0.isWhitespace })
+            guard seen.count >= wanted.count else { continue }
+            for start in 0...(seen.count - wanted.count) {
+                var misses = 0
+                for index in 0..<wanted.count where seen[start + index] != wanted[index] {
+                    misses += 1
+                    if misses > tolerance { break }
+                }
+                if misses <= tolerance { return true }
+            }
+        }
+        return false
+    }
 }
 
 @MainActor
@@ -108,6 +133,8 @@ enum HistoryWindowReader {
                 for column in 0..<table.numberOfColumns {
                     if let cell = table.view(atColumn: column, row: row, makeIfNecessary: true) {
                         rowTexts += texts(in: cell)
+                        if rowTexts.isEmpty { rowTexts += accessibleTexts(of: cell, depth: 0) }
+                        if row == 0, look.firstRow == nil { look.firstRow = anatomy(of: cell) }
                     } else if let cell = table.preparedCell(atColumn: column, row: row), !cell.stringValue.isEmpty {
                         rowTexts.append(cell.stringValue)
                     }
@@ -115,12 +142,65 @@ enum HistoryWindowReader {
                 if rowTexts.isEmpty, let rowView = table.rowView(atRow: row, makeIfNecessary: true) {
                     rowTexts = texts(in: rowView)
                     if rowTexts.isEmpty { rowTexts = accessibleTexts(of: rowView, depth: 0) }
+                    if row == 0, look.firstRow == nil { look.firstRow = anatomy(of: rowView) }
                 }
                 look.texts += rowTexts
+            }
+            // A list whose rows said nothing: what the table itself gives accessibility, row by row;
+            // and what it shows, read from its pixels.
+            if look.texts.isEmpty {
+                for element in table.accessibilityRows() ?? [] where look.texts.count < 200 {
+                    look.texts += accessibleTexts(of: element, depth: 0)
+                }
+            }
+            if look.texts.isEmpty, table.numberOfRows > 0 {
+                look.recognized += recognizedTexts(in: table.enclosingScrollView ?? table)
             }
             return
         }
         for subview in view.subviews { collect(subview, skipping: before, into: &look) }
+    }
+
+    /// A view's classes down to three levels, and what it gives accessibility: for the record.
+    private static func anatomy(of view: NSView) -> String {
+        func classes(_ view: NSView, _ depth: Int) -> String {
+            let children = depth < 3 ? view.subviews.map { classes($0, depth + 1) } : []
+            return "\(type(of: view))" + (children.isEmpty ? "" : "[" + children.joined(separator: ", ") + "]")
+        }
+        let accessible = (view.accessibilityChildren() ?? []).map { "\(type(of: $0))" }
+        return classes(view, 0) + "; accessibility children: \(accessible.prefix(8).joined(separator: ", ")); "
+            + "label \(view.accessibilityLabel() ?? "nil"), role \(view.accessibilityRole()?.rawValue ?? "nil")"
+    }
+
+    /// The lines of text Vision recognizes in a view as drawn: its cached display, else its layer.
+    private static func recognizedTexts(in view: NSView) -> [String] {
+        let bounds = view.bounds
+        guard bounds.width > 1, bounds.height > 1 else { return [] }
+        var image: CGImage?
+        if let rep = view.bitmapImageRepForCachingDisplay(in: bounds) {
+            view.cacheDisplay(in: bounds, to: rep)
+            image = rep.cgImage
+        }
+        if image == nil || recognize(image).isEmpty, let layer = view.layer {
+            let scale = view.window?.backingScaleFactor ?? 2
+            let width = Int(bounds.width * scale), height = Int(bounds.height * scale)
+            if let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                       space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
+                context.scaleBy(x: scale, y: scale)
+                layer.render(in: context)
+                image = context.makeImage()
+            }
+        }
+        return recognize(image)
+    }
+
+    private static func recognize(_ image: CGImage?) -> [String] {
+        guard let image else { return [] }
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+        try? VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+        return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
     }
 
     private static func texts(in view: NSView) -> [String] {

@@ -38,7 +38,7 @@ final class HistoryMenuRoute: NSObject, NSMenuItemValidation {
     /// History and Keep Website Data…").
     static func clearsHistory(_ item: NSMenuItem) -> Bool {
         guard let action = item.action else { return false }
-        return NSStringFromSelector(action).lowercased().contains("clearhistory")
+        return action == #selector(clearProfileHistory(_:)) || NSStringFromSelector(action).lowercased().contains("clearhistory")
     }
 
     private func route() {

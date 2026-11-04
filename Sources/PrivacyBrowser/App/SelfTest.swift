@@ -1739,12 +1739,14 @@ final class SelfTest {
         if let lookedAt {
             let rows = lookedAt.texts.prefix(12).joined(separator: " | ")
             lookSaid = "\(lookedAt.chosen); views: \(lookedAt.views.joined(separator: "; ")); rows: \(rows); "
-                + "page: \(lookedAt.page ?? "none"); clearing: \(lookedAt.clearing.joined(separator: ", "))"
+                + "page: \(lookedAt.page ?? "none"); clearing: \(lookedAt.clearing.joined(separator: ", ")); "
+                + "first row: \(lookedAt.firstRow ?? "none"); read from its pixels: \(lookedAt.recognized.prefix(12).joined(separator: " | "))"
         } else {
             lookSaid = historyAsked ? "no answer in 20 s" : "not asked: the profile has no process of its own"
         }
         info("Safari chrome: the History window, as the person opens it — \(lookSaid)")
-        let historyShowsPage = lookedAt.map { $0.shows("start-\(run)") || $0.shows("PB leak page \(run)") } ?? false
+        // Read from the pixels, the page's title may have two characters misread (its run id is hex).
+        let historyShowsPage = lookedAt.map { $0.shows("start-\(run)") || $0.shows("PB leak page \(run)", tolerance: 2) } ?? false
         check("Safari chrome: the History window, opened as the person opens it (History › Show All History), shows the page Safari's window loaded",
               historyShowsPage, lookSaid)
 
