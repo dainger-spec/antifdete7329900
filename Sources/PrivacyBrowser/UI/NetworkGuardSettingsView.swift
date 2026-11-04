@@ -104,7 +104,7 @@ struct NetworkGuardSettingsView: View {
         switch networkGuard.installedState {
         case .notInstalled: return (L("guard.install"), { explaining = true })
         case .off: return (L("guard.enable"), { networkGuard.install() })
-        case .notInBuild, .awaitingApproval, .notAnswering, .unproven, .ready: return nil
+        case .notInBuild, .awaitingApproval, .notAnswering, .restartNeeded, .unproven, .ready: return nil
         }
     }
 
@@ -119,6 +119,7 @@ struct NetworkGuardSettingsView: View {
         case .awaitingApproval: return L("guard.state.awaitingApproval")
         case .off: return L("guard.state.off")
         case .notAnswering: return L("guard.state.notAnswering")
+        case .restartNeeded: return L("guard.state.reboot")
         case .unproven: return L("guard.state.unproven")
         case .ready: return L("guard.state.ready")
         }
@@ -143,6 +144,7 @@ struct NetworkGuardSettingsView: View {
         case .awaitingApproval: return L("guard.todo.awaitingApproval")
         case .off: return L("guard.todo.off")
         case .notAnswering: return L("guard.todo.notAnswering")
+        case .restartNeeded: return L("guard.problem.reboot")
         case .unproven:
             if networkGuard.proving { return L("guard.todo.proving") }
             return networkGuard.proofFailed ? L("guard.todo.proofFailed") : L("guard.todo.unproven")

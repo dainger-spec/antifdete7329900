@@ -78,6 +78,9 @@ final class NetworkGuard: NSObject, ObservableObject {
     private var standIns: Set<pid_t> = []
     private var heartbeat: Timer?
     private var settledWaiters: [CheckedContinuation<Void, Never>] = []
+    /// macOS still keeps an earlier copy of the guard, to be removed at the next restart: the copy
+    /// it switched on does not run before then (`NetworkGuardReading.silent`).
+    private var earlierCopyAwaitsRestart = false
     private var configurationObserver: NSObjectProtocol?
 
     override init() {
@@ -146,6 +149,8 @@ final class NetworkGuard: NSObject, ObservableObject {
     }
 
     private func extensionProperties(_ properties: [OSSystemExtensionProperties]) {
+        earlierCopyAwaitsRestart = properties.contains(where: \.isUninstalling)
+        if earlierCopyAwaitsRestart { log.notice("an earlier copy of the guard waits to be removed at the next restart") }
         let enabled = properties.filter { $0.isEnabled && !$0.isUninstalling }
         if !enabled.isEmpty {
             // macOS replaces an installed extension only on an activation request: one that is not
@@ -256,14 +261,14 @@ final class NetworkGuard: NSObject, ObservableObject {
         guard let answer = await call(connection, { (guardian: NetworkGuardControl, done: @escaping ((String, Bool)) -> Void) in
             guardian.hello { done(($0, $1)) }
         }) else {
-            settle(.notAnswering)
+            settle(NetworkGuardReading.silent(earlierCopyAwaitsRestart: earlierCopyAwaitsRestart))
             return
         }
         let (version, running) = answer
         let current = version == bundledExtensionVersion
         guard running, current else {
             log.notice("the guard answers, but its filter runs: \(running, privacy: .public), its version is this app's: \(current, privacy: .public)")
-            settle(.notAnswering)
+            settle(NetworkGuardReading.silent(earlierCopyAwaitsRestart: earlierCopyAwaitsRestart))
             return
         }
         // A restarted extension holds nothing: what this app holds is given to it again, and a
