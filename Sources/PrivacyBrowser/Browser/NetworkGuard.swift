@@ -58,7 +58,13 @@ final class NetworkGuard: NSObject, ObservableObject {
         willSet { objectWillChange.send() }
     }
 
-    var state: NetworkGuardState { selfTestStandIn ? .ready : installedState }
+    /// Set by the self-test only: the state a guard on a person's Mac can be in, for the profiles
+    /// it starts itself — the owner's "installed, answering, its check on this Mac failed" among them.
+    var selfTestState: NetworkGuardState? {
+        willSet { objectWillChange.send() }
+    }
+
+    var state: NetworkGuardState { selfTestStandIn ? .ready : selfTestState ?? installedState }
 
     /// Called with the processes that were held when the guard stopped answering for them: their
     /// profiles are stopped (`ProfileManager`).
@@ -122,6 +128,7 @@ final class NetworkGuard: NSObject, ObservableObject {
     /// The state once asking macOS is over (at most 8 s): what a launch decides on.
     func settledState() async -> NetworkGuardState {
         if selfTestStandIn { return .ready }
+        if let selfTestState { return selfTestState }
         if checking {
             await withCheckedContinuation { continuation in
                 settledWaiters.append(continuation)
