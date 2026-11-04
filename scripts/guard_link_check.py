@@ -160,6 +160,7 @@ def main():
         reader.start()
 
     seen = {}
+    sockets_header, sockets_seen = [], set()
     killed = None
     started = time.time()
     while any(process.poll() is None for process, _ in probes) and time.time() - started < 60:
@@ -174,6 +175,22 @@ def main():
                   f"coalitions {coal} -> ties to a probe: {named}", flush=True)
             for line in launchd_lines(pid):
                 print(f"LINK   launchd {pid}: {line}", flush=True)
+        # The kernel's socket table: each UDP socket of a WebKit network process, with the process
+        # it is counted for (netstat's epid, sysctl net.inet.udp.pcblist_n's so_e_pid).
+        networking_now = {pid for pid, (name, *_rest) in seen.items() if "Networking" in name}
+        if networking_now:
+            table_out = subprocess.run(["netstat", "-anv", "-p", "udp"], capture_output=True, text=True).stdout.splitlines()
+            if not sockets_header and table_out:
+                sockets_header.extend(table_out[:2])
+                for line in table_out[:2]:
+                    print(f"LINK netstat: {line}", flush=True)
+            for line in table_out:
+                fields = line.split()
+                pids = {int(f.split(":")[-1]) for f in fields if re.fullmatch(r"[\w.\-]*:\d+", f) and f.split(":")[-1].isdigit()}
+                numbers = [int(f) for f in fields if f.isdigit()]
+                if (pids | set(numbers)) & networking_now and line not in sockets_seen:
+                    sockets_seen.add(line)
+                    print(f"LINK socket: {line}", flush=True)
         # One network process killed once both probes have one: does WebKit start another, tied the same way?
         networking = [pid for pid, (name, *_rest) in seen.items() if "Networking" in name]
         if killed is None and len(networking) >= 2 and time.time() - started > 2:
