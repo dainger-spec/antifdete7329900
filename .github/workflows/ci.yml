@@ -30,6 +30,25 @@ jobs:
           mkdir -p build
           swiftc -O scripts/canvas_policy_probe.swift -o build/canvas_policy_probe 2>&1 | tail -5
           build/canvas_policy_probe || true
+      - name: Whose WebKit — Safari's and this Mac's apps' (builds, copies, what Safari's web process loads)
+        if: always()
+        run: |
+          sw_vers
+          for a in /Applications/Safari.app /System/Volumes/Preboot/Cryptexes/App/System/Applications/Safari.app; do
+            echo "== $a: $(defaults read "$a/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null) build $(defaults read "$a/Contents/Info.plist" CFBundleVersion 2>/dev/null)"
+          done
+          for f in /System/Library/Frameworks/WebKit.framework /System/Volumes/Preboot/Cryptexes/App/System/Library/Frameworks/WebKit.framework \
+                   /Library/Apple/System/Library/StagedFrameworks/Safari/WebKit.framework; do
+            p="$f/Versions/A/Resources/Info.plist"; [ -f "$p" ] || p="$f/Resources/Info.plist"
+            echo "== $f: $( [ -e "$f" ] && echo present || echo absent ) $(defaults read "$p" CFBundleShortVersionString 2>/dev/null) build $(defaults read "$p" CFBundleVersion 2>/dev/null)"
+          done
+          ls -la /Library/Apple/System/Library/StagedFrameworks/Safari 2>/dev/null | head || true
+          build/canvas_policy_probe 2>/dev/null | head -1 || true
+          open -a Safari "about:blank"; sleep 6
+          for pid in $(pgrep -f "com.apple.WebKit.WebContent" | head -3) $(pgrep -x Safari | head -1); do
+            echo "== pid $pid $(ps -o comm= -p $pid)"; vmmap $pid 2>/dev/null | grep -E "WebKit.framework|WebCore.framework|JavaScriptCore.framework" | awk '{print $NF}' | sort -u | head -6
+          done
+          osascript -e 'quit app "Safari"' || true
       - name: Safari's own privacy settings on this Mac
         if: always()
         run: |
