@@ -27,6 +27,14 @@ jobs:
       - name: The same, a second time (another pair of probes)
         timeout-minutes: 10
         run: python3 scripts/guard_link_check.py --app build/unsandboxed/Lumen.app --out build/guard-link-2
+      - name: The kernel's socket table as a user and as root (pcblist_n)
+        if: always()
+        run: |
+          sw_vers -productVersion
+          python3 scripts/pcblist_probe.py || true
+          sudo -n python3 scripts/pcblist_probe.py || true
+          echo "== netstat -anv -p udp as the user"; netstat -anv -p udp | head -8 || true
+          echo "== as root"; sudo -n netstat -anv -p udp | head -8 || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
