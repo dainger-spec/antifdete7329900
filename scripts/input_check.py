@@ -95,6 +95,9 @@ def report(lines):
                 did.append("THE PAGE DID NOT ANSWER after it")
             print(f"  click {entry.get('index')} [{target.get('group')}] {target.get('element')} «{target.get('text')}»")
             print(f"     events: {compress(entry.get('events'))}")
+            print(f"     window key {entry.get('windowKey')}, app active {entry.get('appActive')}, under the point: page "
+                  f"{entry.get('hitPage')}, AppKit {entry.get('hitAppKit')}, top inset {entry.get('topInset')}, "
+                  f"DOM changes in 1.5 s before the click {entry.get('baselineMutations')}")
             print(f"     page did: {'; '.join(did) or 'nothing seen'}")
         elif step == "after-click":
             print(f"     then: {entry.get('url')} readyState {entry.get('readyState')} in {entry.get('ms')} ms"

@@ -92,7 +92,9 @@ enum InputProbe {
         say(number, ["step": "window", "site": address,
                      "window": [Int(window.frame.width), Int(window.frame.height)],
                      "webView": [Int(webView.bounds.width), Int(webView.bounds.height)],
-                     "windowClass": String(describing: type(of: window))])
+                     "windowClass": String(describing: type(of: window)),
+                     "visibleWindows": NSApp.windows.filter(\.isVisible).map { String(describing: type(of: $0)) },
+                     "windowKey": window.isKeyWindow, "appActive": NSApp.isActive])
         var targets = await open(address, in: webView, number: number, first: true)
         var index = 0
         var clicks = 0
@@ -146,6 +148,9 @@ enum InputProbe {
     /// page went elsewhere (a new document, or the address changed).
     private static func click(_ index: Int, in webView: WKWebView, window: NSWindow, number: Int, address: String) async -> Bool {
         let before = webView.url?.absoluteString ?? ""
+        // The window is made key first, as a person's first click on it would: a click on a window
+        // that is not key is AppKit's "first mouse", which WebKit takes for activating the window.
+        let key = await makeKey(window)
         let armed = await script("return window.__pbArm(\(index))", in: webView, world: .page) as? [String: Any]
         guard let armed, let x = armed["x"] as? Double, let y = armed["y"] as? Double else {
             say(number, ["step": "click", "site": address, "index": index,
@@ -153,22 +158,34 @@ enum InputProbe {
                          "target": armed?["target"] ?? NSNull()])
             return false
         }
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-        guard let location = windowLocation(of: CGPoint(x: x, y: y), in: webView) else {
+        let innerHeight = armed["innerHeight"] as? Double ?? Double(webView.bounds.height)
+        // What changes on the page by itself over 1.5 s, before the click: the yardstick for what
+        // the click changed.
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        let baseline = await script("return window.__pbBaseline()", in: webView, world: .page) as? [String: Any]
+        guard let location = windowLocation(of: CGPoint(x: x, y: y), innerHeight: innerHeight, in: webView) else {
             say(number, ["step": "click", "site": address, "index": index, "error": "no place in the window for the point"])
             return false
         }
+        let hitView = appKitHit(at: location, in: window)
         for type in [NSEvent.EventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
-            if let event = mouseEvent(type, at: location, in: window) { window.sendEvent(event) }
+            if let event = NSEvent.mouseEvent(with: type, location: location, modifierFlags: [],
+                                              timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                              context: nil, eventNumber: 0, clickCount: type == .mouseMoved ? 0 : 1,
+                                              pressure: type == .leftMouseDown ? 1 : 0) {
+                window.sendEvent(event)
+            }
             try? await Task.sleep(nanoseconds: type == .leftMouseDown ? 90_000_000 : 40_000_000)
         }
-        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
         let read = await script("return JSON.stringify(window.__pbRead())", in: webView, world: .page) as? String
         let after = webView.url?.absoluteString ?? ""
         var fields: [String: Any] = ["step": "click", "site": address, "index": index, "target": armed["target"] ?? NSNull(),
-                                     "point": [Int(x), Int(y)], "urlBefore": short(before), "urlAfter": short(after),
-                                     "isLoading": webView.isLoading]
+                                     "point": [Int(x), Int(y)], "hitPage": armed["hit"] ?? NSNull(), "hitAppKit": hitView,
+                                     "windowKey": key, "appActive": NSApp.isActive,
+                                     "topInset": Int((Double(webView.bounds.height) - innerHeight * Double(webView.pageZoom * webView.magnification)).rounded()),
+                                     "baselineMutations": baseline?["mutations"] ?? NSNull(),
+                                     "urlBefore": short(before), "urlAfter": short(after), "isLoading": webView.isLoading]
         if let read, let data = read.data(using: .utf8), let got = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
             for (key, value) in got { fields[key] = value }
             fields["pageAnswered"] = true
@@ -201,35 +218,43 @@ enum InputProbe {
         return navigated
     }
 
+    /// Makes `window` the key window of the active app, three seconds at most; whether it is.
+    private static func makeKey(_ window: NSWindow) async -> Bool {
+        for _ in 0..<15 {
+            if window.isKeyWindow, NSApp.isActive { return true }
+            NSApp.activate()
+            window.makeKeyAndOrderFront(nil)
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+        return window.isKeyWindow && NSApp.isActive
+    }
+
+    /// The view AppKit gives a click at `location` (the window's coordinates), and its parents.
+    private static func appKitHit(at location: NSPoint, in window: NSWindow) -> String {
+        guard let frame = window.contentView?.superview ?? window.contentView, var view = frame.hitTest(location) else { return "none" }
+        var names = [String(describing: type(of: view))]
+        while let parent = view.superview, names.count < 4 {
+            names.append(String(describing: type(of: parent)))
+            view = parent
+        }
+        return names.joined(separator: " < ")
+    }
+
     private static func short(_ address: String) -> String {
         guard let url = URL(string: address), let host = url.host else { return String(address.prefix(80)) }
         return String((host + url.path).prefix(80))
     }
 
-    /// Where the viewport point `point` (CSS pixels) is in the web view's window.
-    private static func windowLocation(of point: CGPoint, in webView: WKWebView) -> NSPoint? {
+    /// Where the viewport point `point` (CSS pixels) is in the web view's window. A web view under
+    /// a toolbar (Safari's window) is taller than its viewport: the part under the toolbar is above
+    /// the viewport's top.
+    private static func windowLocation(of point: CGPoint, innerHeight: Double, in webView: WKWebView) -> NSPoint? {
         guard webView.window != nil else { return nil }
-        let scale = webView.pageZoom * webView.magnification
-        let inView = NSPoint(x: point.x * scale, y: webView.isFlipped ? point.y * scale : webView.bounds.height - point.y * scale)
+        let scale = Double(webView.pageZoom * webView.magnification)
+        let top = max(0, Double(webView.bounds.height) - innerHeight * scale)
+        let fromTop = top + Double(point.y) * scale
+        let inView = NSPoint(x: Double(point.x) * scale, y: webView.isFlipped ? fromTop : Double(webView.bounds.height) - fromTop)
         return webView.convert(inView, to: nil)
-    }
-
-    /// The event AppKit makes of a click at `location`: Quartz's, as the window server delivers it.
-    private static func mouseEvent(_ type: NSEvent.EventType, at location: NSPoint, in window: NSWindow) -> NSEvent? {
-        let quartzType: CGEventType
-        switch type {
-        case .leftMouseDown: quartzType = .leftMouseDown
-        case .leftMouseUp: quartzType = .leftMouseUp
-        default: quartzType = .mouseMoved
-        }
-        let onScreen = window.convertPoint(toScreen: location)
-        let mainHeight = NSScreen.screens.first?.frame.height ?? window.frame.maxY
-        guard let event = CGEvent(mouseEventSource: nil, mouseType: quartzType,
-                                  mouseCursorPosition: CGPoint(x: onScreen.x, y: mainHeight - onScreen.y), mouseButton: .left) else { return nil }
-        event.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(window.windowNumber))
-        event.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(window.windowNumber))
-        if quartzType != .mouseMoved { event.setIntegerValueField(.mouseEventClickState, value: 1) }
-        return NSEvent(cgEvent: event)
     }
 
     /// Runs `body` in `world`, three seconds at most; nil without an answer.
@@ -390,7 +415,14 @@ enum InputProbe {
         for (const k in moves) moves[k] = 0;
         R.href = location.href;
         R.armed = performance.now();
-        return { x: at.x, y: at.y, target, hit: describe(at.hit) };
+        return { x: at.x, y: at.y, target, hit: describe(at.hit), innerWidth, innerHeight };
+      };
+      window.__pbBaseline = () => {
+        const out = { mutations: R.mutations, events: R.events.length };
+        R.events = []; R.mutations = 0;
+        for (const k in moves) moves[k] = 0;
+        R.armed = performance.now();
+        return out;
       };
       window.__pbRead = () => {
         const out = { events: R.events, mutations: R.mutations, sameDocumentHrefChanged: location.href !== R.href,

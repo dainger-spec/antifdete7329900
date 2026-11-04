@@ -22,7 +22,8 @@ enum InputCheck {
         setvbuf(stdout, nil, _IOLBF, 0)
         setenv("PB_PROFILE_PROCESS", "1", 1)
         let application = NSApplication.shared
-        application.setActivationPolicy(.regular)
+        // No Dock icon and never the active app: a profile's window must be able to become key.
+        application.setActivationPolicy(.accessory)
         DispatchQueue.main.asyncAfter(deadline: .now() + 3000) {
             print("INPUT-ERROR did not finish in 50 minutes")
             exit(1)
@@ -121,6 +122,10 @@ enum InputCheck {
                 number += 1
                 let asked = number
                 pongs[profile.id] = Date()
+                // Activation is the active app's to give (macOS 14 on): given to the profile's process.
+                if let pid = manager.processIdentifier(of: profile.id), let app = NSRunningApplication(processIdentifier: pid) {
+                    NSApp.yieldActivation(to: app)
+                }
                 guard manager.sendProbe(profile.id, .inputProbe(asked, site)) else {
                     line("INPUT", ["step": "send-error", "profile": profile.kind, "site": site])
                     processUp = false
