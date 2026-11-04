@@ -1324,6 +1324,7 @@
 "settings.about.version" = "Версия %@";
 "settings.about.macOS" = "macOS";
 "settings.about.safari" = "Safari на этом Mac";
+"settings.about.safari.ownEngine" = "%@ — со своим движком, не тем WebKit, что этот Mac даёт приложениям; профили работают на этом WebKit и называют его Safari, %@";
 "settings.about.webKit" = "WebKit";
 "settings.about.build" = "Сборка";
 "settings.about.build.sandboxed" = "С песочницей App Sandbox";

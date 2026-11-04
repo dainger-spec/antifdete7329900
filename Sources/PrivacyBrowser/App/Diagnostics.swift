@@ -88,10 +88,17 @@ enum Diagnostics {
     static func shortReport(_ snapshot: Snapshot, checks: [Check]) -> String {
         let info = Bundle.main.infoDictionary ?? [:]
         let version = "\(info["CFBundleShortVersionString"] as? String ?? "?") (\(info["CFBundleVersion"] as? String ?? "?"))"
+        let safariLine: String
+        if HostSafari.declared.sharesEngine {
+            safariLine = "Safari \(HostSafari.version), WebKit \(WebKitBuild.version)"
+        } else {
+            safariLine = "Safari \(HostSafari.app?.version ?? "?") with its own WebKit (\(HostSafari.app?.build ?? "?")); "
+                + "profiles run WebKit \(WebKitBuild.version) and name Safari \(HostSafari.version)"
+        }
         var lines = [
             "Lumen \(version), \(AppEnvironment.isSandboxed ? "App Sandbox" : "without the App Sandbox")",
             "macOS \(ProcessInfo.processInfo.operatingSystemVersionString), \(machine), \(ProcessInfo.processInfo.activeProcessorCount) cores",
-            "Safari \(HostSafari.version), WebKit \(WebKitBuild.version)",
+            safariLine,
             "",
         ]
         for check in checks {

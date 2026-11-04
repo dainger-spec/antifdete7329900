@@ -1324,6 +1324,7 @@
 "settings.about.version" = "Version %@";
 "settings.about.macOS" = "macOS";
 "settings.about.safari" = "Safari on this Mac";
+"settings.about.safari.ownEngine" = "%@ — with an engine of its own, not the WebKit this Mac gives apps; profiles run that WebKit and name its Safari, %@";
 "settings.about.webKit" = "WebKit";
 "settings.about.build" = "Build";
 "settings.about.build.sandboxed" = "App Sandbox";

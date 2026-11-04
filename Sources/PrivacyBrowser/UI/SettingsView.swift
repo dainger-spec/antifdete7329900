@@ -885,7 +885,8 @@ private struct AboutSettings: View {
     static var facts: [Fact] {
         let system = ProcessInfo.processInfo.operatingSystemVersion
         var facts = [Fact(name: L("settings.about.macOS"), value: "\(system.majorVersion).\(system.minorVersion).\(system.patchVersion)"),
-                     Fact(name: L("settings.about.safari"), value: HostSafari.version)]
+                     Fact(name: L("settings.about.safari"), value: HostSafari.declared.sharesEngine ? HostSafari.version
+                            : String(format: L("settings.about.safari.ownEngine"), HostSafari.app?.version ?? "?", HostSafari.version))]
         if let webKit = Bundle(for: WKWebView.self).object(forInfoDictionaryKey: "CFBundleVersion") as? String {
             facts.append(Fact(name: L("settings.about.webKit"), value: webKit))
         }

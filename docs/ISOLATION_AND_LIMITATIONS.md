@@ -471,6 +471,25 @@ driving Safari through `safaridriver`:
   and once with the time-zone and WebRTC wrappers running on Safari's own values. Both JSON sets
   are kept in the `fingerprint-surfaces` artifact.
 
+When Safari runs a WebKit of its own. A Mac whose Safari was updated beyond the WebKit the system
+gives apps has two engines: CI run 718, a runner on macOS 26.7.2 with Safari 27.2, where the app
+ran WebKit 21624.5.1.11.3 (Safari 26.6.2's) and Safari had WebKit 27's features and canvas. No
+profile can be that Safari: pages are shown by the WebKit this Mac gives apps. Safari's own build
+(its CFBundleVersion) is the build of the WebKit it runs — on macOS 26.6.2 and 27.0.1 the same as
+the system WebKit.framework every app loads, measured — so the two are told apart by it, and a
+profile then names the Safari of the engine it runs, not Safari.app (`SafariVersions.declared`;
+before, it called itself Safari 27.2 on WebKit 26, a contradiction a page can measure). Settings ›
+About says so, and so does the diagnostics report. The comparison says ENGINES DIFFER there,
+compares nothing and checks only that the profile names its own engine's Safari; the comparison
+on macOS 27 (`full.yml`, the owner's system), where Safari and apps share WebKit 22625.1.29.11.28,
+is the one that holds a profile to Safari there.
+
+What `safari_reference.py` says, besides passing: NOT DRIVEN (Safari could not be driven, or its
+probe came back short), DIVERGES (a must-match key differs, and a plain Safari window opened without
+WebDriver says what WebDriver said, or could not be read), WEBDRIVER ONLY (every differing key reads
+in a plain window as the profile has it), ENGINES DIFFER (above). Each fails the step under its own
+name but the last (`scripts/test_safari_reference.sh`).
+
 What is identical, key by key:
 
 | Area | Result |

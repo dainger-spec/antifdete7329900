@@ -105,7 +105,7 @@ jobs:
       # curl's command line (scripts/test_r2_publish.sh). Then no secret of a release in the
       # repository (scripts/check_secrets.py): its planted ones found first.
       - name: A release's publication, download.json as the website reads it, the site's minimum macOS, and no secret in the repository
-        run: scripts/test_r2_publish.sh && scripts/test_download_json.sh && scripts/test_site_minimum.sh && python3 scripts/check_secrets.py --self-check && python3 scripts/check_secrets.py
+        run: scripts/test_r2_publish.sh && scripts/test_download_json.sh && scripts/test_site_minimum.sh && scripts/test_safari_reference.sh && python3 scripts/check_secrets.py --self-check && python3 scripts/check_secrets.py
       # The two pipelines as the owner set them (3 November): ci.yml once per commit, only checks that
       # fail it; full.yml daily, on request and on a tag full/…, every check of the fast one besides its
       # own (scripts/check_ci_split.py, its planted faults found first).
@@ -188,6 +188,8 @@ jobs:
           export PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087 PB_SELFTEST_SILENT_PROXY_PORT=18088 PB_SELFTEST_SOCKS_UDP_PROXY_PORT=18089
           mkdir -p build/egress27
           export PB_SELFTEST_SHOTS="$PWD/build/egress27/history-shots"
+          # The surfaces for the comparison with this Mac's Safari below.
+          export PB_SELFTEST_SURFACE_OUT="$PWD/build/egress27/surface"
           sudo tcpdump -i pktap,all -k NP -n -tt -l 'not host 127.0.0.1 and not host ::1' \
             > build/egress27/capture.txt 2> build/egress27/tcpdump.err &
           sleep 2
@@ -266,6 +268,24 @@ jobs:
           if [ -s build/egress27/crashes/invalid-messages.txt ]; then
             { echo "### macOS 27 - WebKit refused a message"; cut -c1-400 build/egress27/crashes/invalid-messages.txt | head -20 | sed 's/^/    /'; } >> "$GITHUB_STEP_SUMMARY"
           fi
+      # macOS 27, the owner's: Safari and apps run the same WebKit here (measured: Safari 27.0.1 and the
+      # system WebKit.framework both 22625.1.29.11.28), so a profile can be this Safari, and must be.
+      - name: Compare the fingerprint surface with this Mac's real Safari on macOS 27 (fails the build)
+        if: always()
+        timeout-minutes: 10
+        run: |
+          sudo safaridriver --enable || echo "::warning::safaridriver --enable failed"
+          python3 scripts/safari_reference.py --compare build/egress27/surface/surface-macos.json --out build/egress27/safari-surface.json
+          code=$?
+          case "$code" in
+            0) ;;
+            1) echo "::error title=macOS 27 - fingerprint differs from this Mac's Safari::a must-match key differs from Safari, and a plain Safari window (no WebDriver) says what WebDriver said, or could not be read" ;;
+            2) echo "::error title=macOS 27 - Safari not driven::Safari could not be driven, or its probe came back incomplete: nothing was compared" ;;
+            3) echo "::error title=macOS 27 - WebDriver only::every differing key reads in a plain Safari window as the profile has it: the comparison's method differs from Safari, not the profile" ;;
+            4) echo "::warning title=macOS 27 - Safari runs a WebKit of its own::nothing was compared"; exit 0 ;;
+            *) echo "::error::safari_reference.py exited $code" ;;
+          esac
+          exit $code
       - name: The network guard's probe on macOS 27 — whom macOS counts WebKit's WebRTC request for
         # As on macOS 26 (scripts/guard_probe_check.py): every packet of the probe's request sent
         # by another process and counted for the probe's pid, and the kernel's table as the guard
@@ -1138,8 +1158,18 @@ jobs:
           sudo safaridriver --enable || echo "::warning::safaridriver --enable failed"
           python3 scripts/safari_reference.py --compare build/surface-unsandboxed/surface-macos.json --out build/safari-surface.json
           code=$?
-          # Safari not driven: nothing compared, so not a pass (SKIPPED, and the step fails).
-          if [ "$code" = "2" ]; then echo "::error::fingerprint surface SKIPPED: Safari could not be driven on this runner, so nothing was compared"; exit 1; fi
+          # The script tells the outcomes apart itself (scripts/test_safari_reference.sh); each fails
+          # the step under its own name, none passes.
+          case "$code" in
+            0) ;;
+            1) echo "::error title=Fingerprint differs from this Mac's Safari::a must-match key differs from Safari, and a plain Safari window (no WebDriver) says what WebDriver said, or could not be read" ;;
+            2) echo "::error title=Safari not driven::Safari could not be driven on this runner, or its probe came back incomplete: nothing was compared" ;;
+            3) echo "::error title=WebDriver only::every differing key reads in a plain Safari window as the profile has it: the comparison's method differs from Safari, not the profile" ;;
+            # Safari with a WebKit of its own (Safari updated beyond the WebKit this Mac gives apps):
+            # no profile can be this Safari here; the profile names its own engine's Safari (else 1).
+            4) echo "::warning title=Safari runs a WebKit of its own::no profile can be this Safari on this runner, so nothing was compared; the profile names the Safari of the engine it runs"; exit 0 ;;
+            *) echo "::error::safari_reference.py exited $code" ;;
+          esac
           exit $code
       - name: Leak check — does QUIC or WebRTC go around a profile's proxy?
         # Real forwarding proxies on this runner and a profile without one as the control; see

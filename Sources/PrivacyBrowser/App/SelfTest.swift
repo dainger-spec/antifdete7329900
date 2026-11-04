@@ -325,6 +325,8 @@ final class SelfTest {
         // A profile with a proxy does not start without the proxied profile's rule list (ContentRules).
         await ContentRules.prepare()
         info("WebKit \(WebKitBuild.version)")
+        info("Safari.app \(HostSafari.app?.version ?? "?") build \(HostSafari.app?.build ?? "?"); a macOS profile names Safari \(HostSafari.version)"
+             + (HostSafari.declared.sharesEngine ? " (Safari runs this WebKit)" : " (Safari runs a WebKit of its own)"))
         // Each group on its own: an error one did not expect fails that group, by name, and the
         // run goes on with the next, so that one error never hides the checks after it.
         await group("exceptions") { try await exceptionChecks() }
@@ -2632,6 +2634,20 @@ final class SelfTest {
                   !renderingNatives.isEmpty && renderingNatives.values.allSatisfy { $0.hasPrefix("native-text") || $0 == "absent" },
                   renderingNatives.map { "\($0.key)=\($0.value)" }.joined(separator: "; "))
             check("surface (\(name)): one language, as WebKit exposes", string(probed, "languages") == string(probed, "language"))
+            if generationID == DeviceGenerations.defaultID {
+                // The Safari it names is the Safari of the engine it runs: this Mac's Safari when that
+                // runs this app's WebKit, never a Safari whose engine it does not have (CI run 718:
+                // "Safari 27.2" on WebKit 21624.5.1.11.3).
+                let ua = string(probed, "ua")
+                let app = HostSafari.app?.version
+                let named = ua.contains("Version/\(HostSafari.version) ")
+                // One engine: this Mac's Safari. Two: never Safari.app's version.
+                let consistent = HostSafari.declared.sharesEngine ? (app == nil || app == HostSafari.version)
+                    : (app == nil || !ua.contains("Version/\(app ?? "") "))
+                check("surface (macOS): the profile names the Safari of the engine it runs", named && consistent,
+                      "User-Agent \(ua); Safari.app \(app ?? "?") build \(HostSafari.app?.build ?? "?"), this app's WebKit \(WebKitBuild.version), "
+                          + "named \(HostSafari.version)\(HostSafari.declared.sharesEngine ? "" : " (Safari runs a WebKit of its own)")")
+            }
             // Safari the app exposes window.safari on the Mac — in an iPhone view too, which is
             // Safari on this Mac under an iPhone's User-Agent (the owner's decision, 31 October).
             check("surface (\(name)): window.safari present, as in Safari on the Mac",
@@ -2706,7 +2722,11 @@ final class SelfTest {
     /// PB_SELFTEST_SURFACE_OUT: a directory; one JSON file per probed surface.
     private func writeSurface(_ surface: [String: String], name: String) {
         guard let directory = ProcessInfo.processInfo.environment["PB_SELFTEST_SURFACE_OUT"], !directory.isEmpty else { return }
-        var nested: [String: Any] = [:]
+        // Whose engine: scripts/safari_reference.py tells a profile that cannot be this Safari (Safari
+        // with a WebKit of its own) from one that differs from it.
+        var nested: [String: Any] = ["_engine": [
+            "webKit": WebKitBuild.version, "safariApp": HostSafari.app?.version ?? "?", "safariAppBuild": HostSafari.app?.build ?? "?",
+            "declared": HostSafari.version, "sharesEngine": HostSafari.declared.sharesEngine ? "true" : "false"]]
         for (key, value) in surface {
             let parts = key.split(separator: ".", maxSplits: 1).map(String.init)
             if parts.count == 2 {

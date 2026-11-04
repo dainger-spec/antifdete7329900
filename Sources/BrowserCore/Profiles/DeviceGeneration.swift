@@ -100,6 +100,49 @@ public enum SafariVersions {
         case far
     }
 
+    /// The Safari a macOS profile names: this Mac's Safari (`appVersion`) when Safari runs the WebKit
+    /// this app runs, and otherwise the Safari of the WebKit this app runs — a page measures the
+    /// engine, so naming another one is a contradiction it can see.
+    ///
+    /// Safari's own build (its CFBundleVersion, `appBuild`) is the build of the WebKit it runs: on
+    /// macOS 26.6.2 and 27.0.1 both are the same as the system WebKit.framework every app loads
+    /// (measured: Safari 26.6.2 = 21624.5.1.11.3, Safari 27.0.1 = 22625.1.29.11.28, Safari and its
+    /// web processes mapping /System/Library/Frameworks/WebKit.framework). CI run 718, a runner on
+    /// macOS 26.7.2 with Safari 27.2: the app ran WebKit 21624.5.1.11.3 while Safari had WebKit 27's
+    /// features and its canvas — two engines on one Mac, and the profile called itself Safari 27.2.
+    /// The engines are told apart by the builds' first number (21624 against 22…).
+    public static func declared(appVersion: String, appBuild: String?, webKitBuild: String?) -> Declared {
+        guard let appBuild, let webKitBuild, let appEngine = engine(appBuild), let ours = engine(webKitBuild),
+              appEngine != ours else {
+            return Declared(version: appVersion, sharesEngine: true)
+        }
+        if let known = knownBuilds[webKitBuild] { return Declared(version: known, sharesEngine: false) }
+        // A build not measured here: its major version, which the first number says from Safari 26
+        // on (21xxx is 26, 22xxx is 27), and no minor version this engine might not have.
+        return Declared(version: "\(ours / 1000 + 5).0", sharesEngine: false)
+    }
+
+    public struct Declared: Equatable, Sendable {
+        /// The version a macOS profile's User-Agent names.
+        public let version: String
+        /// Whether Safari runs the WebKit this app runs (a profile can then be this Mac's Safari).
+        public let sharesEngine: Bool
+
+        public init(version: String, sharesEngine: Bool) {
+            self.version = version
+            self.sharesEngine = sharesEngine
+        }
+    }
+
+    /// Safari releases by the build of their WebKit, as measured on CI's runners.
+    public static let knownBuilds: [String: String] = ["21624.5.1.11.3": "26.6.2", "22625.1.29.11.28": "27.0.1"]
+
+    /// The first number of a WebKit build ("21624" of "21624.5.1.11.3"), from Safari 26 on.
+    static func engine(_ build: String) -> Int? {
+        guard let first = build.split(separator: ".").first, let number = Int(first), number >= 21000 else { return nil }
+        return number
+    }
+
     /// How far `version` is from `host` (this Mac's Safari, e.g. "26.0.1").
     public static func distance(of version: String, fromHost host: String) -> Distance {
         func parts(_ text: String) -> [Int] { text.split(separator: ".").compactMap { Int($0) } }

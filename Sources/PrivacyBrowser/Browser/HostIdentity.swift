@@ -2,25 +2,40 @@ import AppKit
 import BrowserCore
 import os
 
-/// The Safari of this Mac. Safari and every WKWebView render with the same system WebKit, so
-/// its version is the one the macOS generation's User-Agent declares
-/// (`DeviceGeneration.userAgent(hostSafariVersion:)`).
+/// The Safari of this Mac, and the Safari a macOS profile names (`DeviceGeneration.userAgent(hostSafariVersion:)`).
+/// Safari and every WKWebView usually render with the same system WebKit; when they do not — Safari
+/// updated beyond the WebKit this Mac gives apps (CI run 718: Safari 27.2, apps on WebKit 21624.5.1.11.3)
+/// — a profile names the Safari of the engine it runs (`SafariVersions.declared`).
 @MainActor
 enum HostSafari {
-    /// e.g. "26.0.1": Safari's bundle version, or — if that cannot be read — the version this
-    /// macOS release shipped with.
-    static let version: String = {
+    /// Safari.app's version and its own build (the build of the WebKit Safari runs), if readable.
+    static let app: (version: String, build: String?)? = {
         let candidates = [NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari"),
                           URL(fileURLWithPath: "/Applications/Safari.app")]
         for case let url? in candidates {
-            if let version = Bundle(url: url)?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+            let bundle = Bundle(url: url)
+            if let version = bundle?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
                DeviceGeneration.isSafariVersion(version) {
-                return version
+                return (version, bundle?.object(forInfoDictionaryKey: "CFBundleVersion") as? String)
             }
         }
-        let os = ProcessInfo.processInfo.operatingSystemVersion
-        return DeviceGenerations.bundledSafariVersion(macOSMajor: os.majorVersion, minor: os.minorVersion)
+        return nil
     }()
+
+    /// What a macOS profile's User-Agent names, and whether Safari runs this app's WebKit.
+    static let declared: SafariVersions.Declared = {
+        guard let app else {
+            let os = ProcessInfo.processInfo.operatingSystemVersion
+            return .init(version: DeviceGenerations.bundledSafariVersion(macOSMajor: os.majorVersion, minor: os.minorVersion),
+                         sharesEngine: true)
+        }
+        return SafariVersions.declared(appVersion: app.version, appBuild: app.build,
+                                       webKitBuild: WebKitBuild.version == "?" ? nil : WebKitBuild.version)
+    }()
+
+    /// e.g. "26.0.1": the Safari a macOS profile names — this Mac's Safari when it runs this app's
+    /// WebKit, else the Safari of that WebKit.
+    static var version: String { declared.version }
 }
 
 /// The language websites see: the `Accept-Language` header, `navigator.language(s)` and the
