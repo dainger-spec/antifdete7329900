@@ -71,6 +71,20 @@ enum GuardProbe {
         say("the page is loading")
         for _ in 0..<50 where webView.isLoading { try? await Task.sleep(nanoseconds: 100_000_000) }
         say(webView.isLoading ? "the page has not loaded in five seconds: asked anyway" : "the page loaded")
+        // Measurement (claude/measure-guard-link, never merged): which network process WebKit names
+        // to this process, as it goes — said again whenever the answer changes.
+        let watcher = Task { @MainActor in
+            var last = ""
+            while !Task.isCancelled {
+                let named = networkProcessIdentifiers(webView)
+                if named != last {
+                    last = named
+                    say("networking \(named)")
+                }
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+        }
+        defer { watcher.cancel() }
         // What the page saw, by the time since it started: each gathering state, each candidate's
         // type and protocol (never its address), each error a STUN server's address gave.
         let script = """
@@ -111,5 +125,41 @@ enum GuardProbe {
             say("the page's script failed: \(error.localizedDescription)")
             return "error"
         }
+    }
+
+    /// Measurement (claude/measure-guard-link, never merged): every method of WKWebsiteDataStore,
+    /// WKProcessPool and WKWebView (and of the first two's classes) whose name speaks of the network
+    /// process or of a process identifier; those that take nothing and answer an int are asked.
+    private static func networkProcessIdentifiers(_ webView: WKWebView) -> String {
+        let configuration = webView.configuration
+        let receivers: [(String, AnyObject)] = [
+            ("WKWebsiteDataStore", configuration.websiteDataStore),
+            ("WKProcessPool", configuration.processPool),
+            ("WKWebView", webView),
+            ("+WKWebsiteDataStore", WKWebsiteDataStore.self as AnyObject),
+            ("+WKProcessPool", WKProcessPool.self as AnyObject),
+        ]
+        var parts: [String] = []
+        for (label, receiver) in receivers {
+            var count: UInt32 = 0
+            guard let methods = class_copyMethodList(object_getClass(receiver), &count) else { continue }
+            defer { free(methods) }
+            for index in 0..<Int(count) {
+                let method = methods[index]
+                let selector = method_getName(method)
+                let name = NSStringFromSelector(selector)
+                let lowered = name.lowercased()
+                guard lowered.contains("networkprocess") || lowered.contains("processidentifier") else { continue }
+                let encoding = method_getTypeEncoding(method).map { String(cString: $0) } ?? "?"
+                if method_getNumberOfArguments(method) == 2, encoding.hasPrefix("i") {
+                    typealias Getter = @convention(c) (AnyObject, Selector) -> Int32
+                    let get = unsafeBitCast(method_getImplementation(method), to: Getter.self)
+                    parts.append("\(label).\(name) = \(get(receiver, selector))")
+                } else {
+                    parts.append("\(label).\(name) [\(encoding)]")
+                }
+            }
+        }
+        return parts.isEmpty ? "no such method" : parts.sorted().joined(separator: "; ")
     }
 }

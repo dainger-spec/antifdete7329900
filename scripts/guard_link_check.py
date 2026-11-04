@@ -206,8 +206,17 @@ def main():
     time.sleep(2)
     subprocess.run(["sudo", "-n", "pkill", "-INT", "-f", "tcpdump -i pktap"], check=False)
     tcpdump.wait(timeout=20)
+    # What WebKit named to each probe as its network process (the probe's "networking" lines), as it went.
+    named_by_probe = {}
     for pid, text in outputs.items():
-        for line in (text or "").splitlines()[-6:]:
+        lines = (text or "").splitlines()
+        for line in lines:
+            if " networking " in line:
+                print(f"LINK probe {pid} said: {line}", flush=True)
+                for method, value in re.findall(r"([\w+.]+[Nn]etwork[\w]*) = (-?\d+)", line):
+                    if int(value) > 0:
+                        named_by_probe.setdefault(pid, {}).setdefault(method, set()).add(int(value))
+        for line in lines[-6:]:
             print(f"LINK probe {pid} said: {line}", flush=True)
 
     with open(capture_path, errors="replace") as handle:
@@ -239,6 +248,30 @@ def main():
         distinct = len({tie for *_ignored, tie in verdicts}) == len(verdicts)
         print(f"LINK-VERDICT {kind}: {'HOLDS' if holds and distinct else 'does not hold'} — "
               + "; ".join(f"network process {s}: counted for {sorted(c)}, tie names {t}" for s, c, t in verdicts))
+    # The profile's own word: every network process whose packets were counted for a probe must be one
+    # WebKit named to that probe, never one it named to the other; the killed one's successor named too.
+    counted = {}
+    for packet in packets:
+        if packet["proc"] and packet["eproc"]:
+            counted.setdefault(packet["eproc"][1], set()).add(packet["proc"][1])
+    methods = sorted({m for named in named_by_probe.values() for m in named})
+    if not methods:
+        print("LINK-VERDICT WebKit's own word: could not be read — no method of WebKit named a network process")
+    for method in methods:
+        rows, holds = [], bool(counted)
+        for probe in sorted(probe_pids):
+            mine = named_by_probe.get(probe, {}).get(method, set())
+            others = set().union(*(named_by_probe.get(p, {}).get(method, set()) for p in probe_pids if p != probe))
+            senders = counted.get(probe, set())
+            ok = bool(senders) and senders <= mine and not (mine & others)
+            holds = holds and ok
+            rows.append(f"probe {probe}: named {sorted(mine)}, packets counted for it sent by {sorted(senders)}")
+        print(f"LINK-VERDICT WebKit's own word, {method}: {'HOLDS' if holds else 'does not hold'} — " + "; ".join(rows))
+    if killed is not None:
+        after = {p: named for p, named in named_by_probe.items() if any(killed in v for v in named.values())}
+        for probe, named in after.items():
+            successors = {m: sorted(v - {killed}) for m, v in named.items() if killed in v}
+            print(f"LINK-KILLED network process {killed} was probe {probe}'s; named after it: {successors}")
     networking = {pid: info for pid, info in seen.items() if "Networking" in info[0]}
     for kind in ("responsible", "resource coalition", "jetsam coalition"):
         tied = {pid: info[3].get(kind) for pid, info in networking.items()}
