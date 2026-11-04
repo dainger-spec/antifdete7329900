@@ -405,12 +405,19 @@ final class BrowserSession {
     func showLibrary(_ section: LibraryView.Section, from controller: BrowserWindowController? = nil) {
         if libraryWindow == nil {
             libraryWindow = LibraryWindowController(session: self) { [weak self] url in
-                self?.openInNewTab(url)
+                self?.openFromLibrary(url)
             } onClose: { [weak self] in
                 self?.libraryWindow = nil
             }
         }
         libraryWindow?.show(section)
+    }
+
+    /// A page chosen in the library: in Safari's window when the profile is shown in Safari's, else
+    /// in a tab of ours.
+    private func openFromLibrary(_ url: URL) {
+        if windows.isEmpty, SafariChromeHost.open(session: self, url: url) { return }
+        openInNewTab(url)
     }
 
     // MARK: Shutdown
