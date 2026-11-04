@@ -14,6 +14,30 @@ final class SafariUserAgentTests: XCTestCase {
         XCTAssertEqual(ios.userAgent(hostSafariVersion: "18.6"), ios.userAgent)
     }
 
+    /// CI run 718: Safari 27.2 on a Mac whose apps run WebKit 21624.5.1.11.3 (Safari 26.6.2's).
+    func testAProfileNamesTheSafariOfTheEngineItRuns() {
+        // One engine: this Mac's Safari, as before.
+        XCTAssertEqual(SafariVersions.declared(appVersion: "26.6.2", appBuild: "21624.5.1.11.3", webKitBuild: "21624.5.1.11.3"),
+                       .init(version: "26.6.2", sharesEngine: true))
+        XCTAssertEqual(SafariVersions.declared(appVersion: "27.0.1", appBuild: "22625.1.29.11.28", webKitBuild: "22625.1.29.11.28"),
+                       .init(version: "27.0.1", sharesEngine: true))
+        // Two engines: never Safari 27.2 on WebKit 26 — the Safari whose engine the profile runs.
+        XCTAssertEqual(SafariVersions.declared(appVersion: "27.2", appBuild: "22627.1.3.10.1", webKitBuild: "21624.5.1.11.3"),
+                       .init(version: "26.6.2", sharesEngine: false))
+        // An engine not measured: its major version only.
+        XCTAssertEqual(SafariVersions.declared(appVersion: "27.2", appBuild: "22627.1.3.10.1", webKitBuild: "21630.2.1"),
+                       .init(version: "26.0", sharesEngine: false))
+        // A build that cannot be read says nothing: this Mac's Safari, as before.
+        XCTAssertEqual(SafariVersions.declared(appVersion: "27.2", appBuild: nil, webKitBuild: "21624.5.1.11.3"),
+                       .init(version: "27.2", sharesEngine: true))
+        XCTAssertEqual(SafariVersions.declared(appVersion: "27.2", appBuild: "?", webKitBuild: "21624.5.1.11.3"),
+                       .init(version: "27.2", sharesEngine: true))
+        XCTAssertTrue(SafariVersions.knownBuilds.values.allSatisfy(DeviceGeneration.isSafariVersion))
+        // And the User-Agent it gives.
+        let declared = SafariVersions.declared(appVersion: "27.2", appBuild: "22627.1", webKitBuild: "21624.5.1.11.3").version
+        XCTAssertTrue(ProfileConfiguration().userAgent(hostSafariVersion: declared).contains("Version/26.6.2 Safari/"))
+    }
+
     func testSafariVersionFormat() {
         for good in ["26", "26.0", "26.0.1", "18.6", "17.4.1"] {
             XCTAssertTrue(DeviceGeneration.isSafariVersion(good), good)
