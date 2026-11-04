@@ -276,13 +276,23 @@ final class SelfTest {
         // The kernel's table of sockets, which the guard reads for each flow to know whom it is for
         // (SocketTable; the owner's Mac, 4 November): it must read here — in the sandboxed build,
         // inside the App Sandbox, as the guard's own extension runs.
+        // A UDP socket of this process's own, connected to a documentation address (nothing is sent),
+        // must be listed: a read that returns nothing is not a read (macOS 27.0.1 lists to a process
+        // that is not root only its own sockets, the guard's extension runs as root).
         let sandbox = AppEnvironment.isSandboxed ? ", inside the App Sandbox" : ""
+        let ownSocket = Self.connectedUDPSocket(to: "203.0.113.2", port: 9)
+        defer { if let ownSocket { close(ownSocket.descriptor) } }
         switch SocketTable.read(.udp) {
         case .success(let sockets):
-            check("network guard: the kernel's table of sockets reads in this process\(sandbox)", true)
-            info("the kernel's table of UDP sockets: \(sockets.count) read, \(sockets.filter(\.delegated).count) of them delegated")
+            let listed = ownSocket.flatMap { own in
+                SocketTable.socket(of: .udp, localPort: own.port, remoteAddress: "203.0.113.2", remotePort: 9, openerPID: getpid(), in: sockets)
+            }
+            check("network guard: the kernel's table of sockets reads in this process\(sandbox), and lists this process's own UDP socket",
+                  listed?.lastPID == getpid(), "\(sockets.count) read; own socket \(ownSocket.map { "on port \($0.port)" } ?? "not made")")
+            info("the kernel's table of UDP sockets: \(sockets.count) read, \(sockets.filter(\.delegated).count) delegated, "
+                 + "\(sockets.filter(\.userSpaceStack).count) flows of the user-space stack (as uid \(getuid()))")
         case .failure(let error):
-            check("network guard: the kernel's table of sockets reads in this process\(sandbox)", false, "\(error)")
+            check("network guard: the kernel's table of sockets reads in this process\(sandbox), and lists this process's own UDP socket", false, "\(error)")
         }
         // As the first launch of a profile with a German proxy would, before WebKit starts any
         // process; checked by fingerprintSurface (navigator) and proxies (Accept-Language header).
@@ -6698,6 +6708,31 @@ final class SelfTest {
             }
         }
         return false
+    }
+
+    /// A UDP socket of this process connected to `address`:`port` (nothing is sent), and its local
+    /// port; nil when it could not be made.
+    private static func connectedUDPSocket(to address: String, port: UInt16) -> (descriptor: Int32, port: UInt16)? {
+        let descriptor = Darwin.socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+        guard descriptor >= 0 else { return nil }
+        var remote = sockaddr_in()
+        remote.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        remote.sin_family = sa_family_t(AF_INET)
+        remote.sin_port = port.bigEndian
+        inet_pton(AF_INET, address, &remote.sin_addr)
+        let connected = withUnsafePointer(to: &remote) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        }
+        var local = sockaddr_in()
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let named = withUnsafeMutablePointer(to: &local) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(descriptor, $0, &length) }
+        }
+        guard connected == 0, named == 0, local.sin_port != 0 else {
+            close(descriptor)
+            return nil
+        }
+        return (descriptor, UInt16(bigEndian: local.sin_port))
     }
 
     private func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) async -> Bool {

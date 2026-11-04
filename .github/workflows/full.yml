@@ -265,12 +265,13 @@ jobs:
           if [ -s build/egress27/crashes/invalid-messages.txt ]; then
             { echo "### macOS 27 - WebKit refused a message"; cut -c1-400 build/egress27/crashes/invalid-messages.txt | head -20 | sed 's/^/    /'; } >> "$GITHUB_STEP_SUMMARY"
           fi
-      - name: The network guard's probe on macOS 27 — whom macOS counts WebKit's WebRTC request for (reported)
+      - name: The network guard's probe on macOS 27 — whom macOS counts WebKit's WebRTC request for
         # As on macOS 26 (scripts/guard_probe_check.py): every packet of the probe's request sent
-        # by another process and counted for the probe's pid. Reported, as this job is.
+        # by another process and counted for the probe's pid, and the kernel's table as the guard
+        # reads it agreeing with the capture. It fails the run: macOS 27.0.1 is the owner's, and this
+        # step, only reported, went green in full run #3 while the table it read was empty.
         if: always()
-        continue-on-error: true
-        timeout-minutes: 5
+        timeout-minutes: 8
         run: python3 scripts/guard_probe_check.py --app build/unsandboxed/Lumen.app --out build/egress27/guard-probe
       - name: Lumen --guard-diagnose on macOS 27, where no guard runs — it starts, says where it stops, and does not pass (reported)
         # As on macOS 26 (scripts/guard_diagnose_check.sh): the owner's diagnosis of the guard, run

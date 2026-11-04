@@ -213,7 +213,10 @@ enum GuardDiagnosis {
         }
         // 4b. The kernel's table, read by this process while the probe ran.
         if probe.kernelLines.isEmpty {
-            say("4b. The kernel's table, read by this process while the probe ran: no socket to \(probeAddress) was seen in it.")
+            say("4b. The kernel's table, read by this process while the probe ran: no socket to \(probeAddress) was seen in it"
+                + (getuid() == 0 ? "." : " — macOS 27 lists to a process that is not root only its own sockets (the guard runs as "
+                   + "root and reads them all); `sudo \(CommandLine.arguments.first ?? "Lumen") --socket-owners \(GuardProof.stunAddress)` "
+                   + "while a probe runs reads them as the guard does."))
         } else {
             say("4b. The kernel's table, read by this process while the probe ran (what a capture shows as proc and eproc):")
             for line in probe.kernelLines { say("   \(line)") }

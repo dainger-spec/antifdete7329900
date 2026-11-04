@@ -20,7 +20,9 @@ fail it).
 The guard reads whom a flow is for from the kernel's table of sockets as well (SocketTable; the
 owner's Mac, 4 November: the filter named WebKit's network process, the capture `eproc` the
 probe). While the probe runs, `Lumen --socket-owners 203.0.113.1` reads that table with the
-guard's own code; every captured packet's socket (by its source port) must be in it, used by the
+guard's own code — as root, as the guard's extension runs: macOS 27.0.1 lists to a process that is
+not root only its own sockets (claude/measure-guard-link 8cccd7b; macOS 26.6.2 lists them all to
+anyone); every captured packet's socket (by its source port) must be in it, used by the
 packet's proc and counted for its eproc. `--table-ignores-delegation` reads the table as if no
 socket were delegated (its user only): the control, which must fail.
 """
@@ -126,7 +128,7 @@ def main():
         # local port, the first reading of each kept.
         started = time.time()
         while probe.poll() is None and time.time() - started < 60:
-            owners = subprocess.run([app_binary, "--socket-owners", STUN_ADDRESS], capture_output=True, text=True, timeout=20)
+            owners = subprocess.run(["sudo", "-n", app_binary, "--socket-owners", STUN_ADDRESS], capture_output=True, text=True, timeout=20)
             for line in owners.stdout.splitlines():
                 match_socket = KERNEL_SOCKET.search(line)
                 if line.startswith("KERNEL-TABLE") and line not in table_said:
