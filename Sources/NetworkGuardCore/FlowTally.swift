@@ -111,11 +111,18 @@ public final class FlowTally: @unchecked Sendable {
         /// documentation network are ever kept, so nothing in it is an address of anyone's.
         public var description: String {
             func who(_ name: String, _ pid: Int32?) -> String { "\(name) (pid \(pid.map(String.init) ?? "none"))" }
-            return "\(transport.rawValue) \(remote), counted for \(who(appName, appPID))"
-                + (appIdentifier.map { ", signed as \($0)" } ?? "")
-                + ", opened by \(who(openerName, openerPID)): \(kind.rawValue), \(verdict)"
-                + "; the kernel's record of its socket: " + (kernel.map(String.init(describing:)) ?? kernelNote ?? "not read")
-                + (heldBy.map { "; held by the \($0 == GuardAttribution.Source.kernelSocket.rawValue ? "kernel's record" : "source application")" } ?? "")
+            let signed: String = appIdentifier.map { ", signed as \($0)" } ?? ""
+            let record: String = kernel.map { String(describing: $0) } ?? kernelNote ?? "not read"
+            var held = ""
+            if let heldBy {
+                held = heldBy == GuardAttribution.Source.kernelSocket.rawValue ? "; held by the kernel's record" : "; held by the source application"
+            }
+            var line = "\(transport.rawValue) \(remote), counted for \(who(appName, appPID))"
+            line += signed
+            line += ", opened by \(who(openerName, openerPID)): \(kind.rawValue), \(verdict)"
+            line += "; the kernel's record of its socket: \(record)"
+            line += held
+            return line
         }
     }
 

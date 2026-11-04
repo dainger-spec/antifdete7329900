@@ -24,7 +24,7 @@ final class SocketTableTests: XCTestCase {
     }
 
     /// xinpcb_n, xsocket_n, two xsockbuf_n and an xsockstat_n, as in_pcblist.c writes one socket.
-    private func socket(localPort: UInt16, remotePort: UInt16, local: [UInt8], remote: [UInt8], ipv6: Bool = false,
+    private func record(localPort: UInt16, remotePort: UInt16, local: [UInt8], remote: [UInt8], ipv6: Bool = false,
                         lastPID: Int32, effectivePID: Int32, flags: UInt32) -> [UInt8] {
         var inpcb = [UInt8](repeating: 0, count: 104)
         put32(104, &inpcb, 0)
@@ -52,19 +52,29 @@ final class SocketTableTests: XCTestCase {
         var stats = [UInt8](repeating: 0, count: 136)
         put32(136, &stats, 0)
         put32(0x8, &stats, 4)
-        return inpcb + xsocket + buffers + stats
+        var bytes = inpcb
+        bytes += xsocket
+        bytes += buffers
+        bytes += stats
+        return bytes
     }
 
     private let delegated: UInt32 = 0x1000_0000
 
+    /// A table: its header, the records, the header again at the end.
+    private func table(_ records: [UInt8]...) -> [UInt8] {
+        var bytes = header()
+        for record in records { bytes += record }
+        bytes += header()
+        return bytes
+    }
+
     /// The owner's probe: WebKit's network process (1741) sending for the probe (1738), and a socket
     /// of its own beside it.
     private func ownersTable() -> [UInt8] {
-        header()
-            + socket(localPort: 61656, remotePort: 3478, local: [198, 18, 0, 1], remote: [203, 0, 113, 1],
-                     lastPID: 1741, effectivePID: 1738, flags: delegated | 0x4)
-            + socket(localPort: 5353, remotePort: 0, local: [], remote: [], lastPID: 1741, effectivePID: 1741, flags: 0)
-            + header()
+        table(record(localPort: 61656, remotePort: 3478, local: [198, 18, 0, 1], remote: [203, 0, 113, 1],
+                     lastPID: 1741, effectivePID: 1738, flags: delegated | 0x4),
+              record(localPort: 5353, remotePort: 0, local: [], remote: [], lastPID: 1741, effectivePID: 1741, flags: 0))
     }
 
     func testTheOwnersProbeSocketReadsAsCountedForTheProbe() throws {
@@ -86,10 +96,8 @@ final class SocketTableTests: XCTestCase {
     }
 
     func testAnEffectivePIDWithoutTheDelegatedFlagIsNotTaken() throws {
-        let bytes = header()
-            + socket(localPort: 4000, remotePort: 3478, local: [10, 0, 0, 2], remote: [203, 0, 113, 1],
-                     lastPID: 500, effectivePID: 600, flags: 0)
-            + header()
+        let bytes = table(record(localPort: 4000, remotePort: 3478, local: [10, 0, 0, 2], remote: [203, 0, 113, 1],
+                                 lastPID: 500, effectivePID: 600, flags: 0))
         let socket = try XCTUnwrap(SocketTable.parse(bytes, transport: .udp)?.first)
         XCTAssertFalse(socket.delegated)
         XCTAssertEqual(socket.countedFor, 500)
@@ -99,10 +107,8 @@ final class SocketTableTests: XCTestCase {
         var v6Local = [UInt8](repeating: 0, count: 16); v6Local[0] = 0x20; v6Local[1] = 0x01; v6Local[2] = 0x0d; v6Local[3] = 0xb8; v6Local[15] = 1
         var mapped = [UInt8](repeating: 0, count: 16); mapped[10] = 0xff; mapped[11] = 0xff
         mapped[12] = 203; mapped[13] = 0; mapped[14] = 113; mapped[15] = 1
-        let bytes = header()
-            + socket(localPort: 4001, remotePort: 3478, local: v6Local, remote: mapped, ipv6: true,
-                     lastPID: 10, effectivePID: 11, flags: delegated)
-            + header()
+        let bytes = table(record(localPort: 4001, remotePort: 3478, local: v6Local, remote: mapped, ipv6: true,
+                                 lastPID: 10, effectivePID: 11, flags: delegated))
         let socket = try XCTUnwrap(SocketTable.parse(bytes, transport: .udp)?.first)
         XCTAssertEqual(socket.localAddress, GuardPolicy.canonicalAddress("2001:db8::1"))
         XCTAssertEqual(socket.remoteAddress, "203.0.113.1")
@@ -113,25 +119,23 @@ final class SocketTableTests: XCTestCase {
         XCTAssertNil(SocketTable.parse([], transport: .udp))
         XCTAssertNil(SocketTable.parse([UInt8](repeating: 0, count: 24), transport: .udp), "a header that does not say 24")
         // A record cut short of the layout it says it is.
-        var short = header() + socket(localPort: 1, remotePort: 2, local: [1, 2, 3, 4], remote: [5, 6, 7, 8],
-                                      lastPID: 1, effectivePID: 1, flags: 0)
+        var short = header()
+        short += record(localPort: 1, remotePort: 2, local: [1, 2, 3, 4], remote: [5, 6, 7, 8], lastPID: 1, effectivePID: 1, flags: 0)
         put32(96, &short, 24)
         XCTAssertNil(SocketTable.parse(short, transport: .udp))
         // A record that says it runs past the end.
-        var long = header() + socket(localPort: 1, remotePort: 2, local: [1, 2, 3, 4], remote: [5, 6, 7, 8],
-                                     lastPID: 1, effectivePID: 1, flags: 0)
+        var long = header()
+        long += record(localPort: 1, remotePort: 2, local: [1, 2, 3, 4], remote: [5, 6, 7, 8], lastPID: 1, effectivePID: 1, flags: 0)
         long = Array(long.prefix(24 + 150))
         XCTAssertNil(SocketTable.parse(long, transport: .udp))
     }
 
     func testTheFlowsSocketIsTheOneConnectedToItsRemoteEndElseOneNotConnected() throws {
-        let bytes = header()
-            + socket(localPort: 7000, remotePort: 0, local: [], remote: [], lastPID: 1741, effectivePID: 1741, flags: 0)
-            + socket(localPort: 7000, remotePort: 3478, local: [10, 0, 0, 2], remote: [203, 0, 113, 1],
-                     lastPID: 1741, effectivePID: 1738, flags: delegated)
-            + socket(localPort: 7001, remotePort: 3478, local: [10, 0, 0, 2], remote: [203, 0, 113, 1],
-                     lastPID: 900, effectivePID: 901, flags: delegated)
-            + header()
+        let bytes = table(record(localPort: 7000, remotePort: 0, local: [], remote: [], lastPID: 1741, effectivePID: 1741, flags: 0),
+                          record(localPort: 7000, remotePort: 3478, local: [10, 0, 0, 2], remote: [203, 0, 113, 1],
+                                 lastPID: 1741, effectivePID: 1738, flags: delegated),
+                          record(localPort: 7001, remotePort: 3478, local: [10, 0, 0, 2], remote: [203, 0, 113, 1],
+                                 lastPID: 900, effectivePID: 901, flags: delegated))
         let sockets = try XCTUnwrap(SocketTable.parse(bytes, transport: .udp))
         let connected = SocketTable.socket(of: .udp, localPort: 7000, remoteAddress: "203.0.113.1", remotePort: 3478,
                                            openerPID: 1741, in: sockets)

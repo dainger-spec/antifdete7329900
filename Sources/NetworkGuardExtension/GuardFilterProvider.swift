@@ -173,7 +173,8 @@ final class GuardFilterProvider: NEFilterDataProvider {
         for milliseconds in [5, 20, 100, 500] {
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + .milliseconds(milliseconds)) {
                 let (socket, note) = Self.kernelSocket(localPort: local.port, localSaid: local.said, facts: facts, openerPID: openerPID)
-                let line = "+\(milliseconds) ms: " + (socket.map(String.init(describing:)) ?? note ?? "?")
+                let said: String = socket.map { String(describing: $0) } ?? note ?? "?"
+                let line = "+\(milliseconds) ms: \(said)"
                 GuardService.shared.tally.noteLater(of: id, line)
             }
         }
@@ -248,9 +249,10 @@ final class GuardFilterProvider: NEFilterDataProvider {
         let look = FlowTally.CheckFlow.Look(appPID: appPID, appName: appPID.map(name) ?? "?", kernel: socket, kernelNote: socketNote,
                                             heldBy: heldBy, verdict: verdict, changedProperties: changed)
         guard GuardService.shared.tally.noteFirstData(of: id, look) != nil else { return }
-        let checkFirstData = "counted for pid \(appPID.map(String.init) ?? "none"); the kernel's record: "
-            + (socket.map(String.init(describing:)) ?? socketNote ?? "not read")
-            + "; \(heldBy.map { "held by its \($0)" } ?? "not held"): \(verdict)"
+        let pidSaid: String = appPID.map { String($0) } ?? "none"
+        let recordSaid: String = socket.map { String(describing: $0) } ?? socketNote ?? "not read"
+        let heldSaid: String = heldBy.map { "held by its \($0)" } ?? "not held"
+        let checkFirstData = "counted for pid \(pidSaid); the kernel's record: \(recordSaid); \(heldSaid): \(verdict)"
         logger.notice("a flow to the check's network, at its first data: \(checkFirstData, privacy: .public)")
         for checkFlowProperty in changed {
             logger.notice("  the flow object, changed: \(checkFlowProperty, privacy: .public)")

@@ -44,10 +44,10 @@ public struct KernelSocket: Codable, Equatable, Sendable, CustomStringConvertibl
 
     /// "udp :53895 → 203.0.113.1:3478, used by pid 10416, counted for pid 10412 (delegated)"
     public var description: String {
-        let local = (localAddress ?? "*") + ":\(localPort)"
-        let remote = remoteAddress.map { "\($0):\(remotePort)" } ?? "*"
-        return "\(transport.rawValue) \(local) → \(remote), used by pid \(lastPID), "
-            + (delegated ? "counted for pid \(effectivePID) (delegated)" : "not delegated")
+        let local = "\(localAddress ?? "*"):\(localPort)"
+        let remote: String = remoteAddress.map { "\($0):\(remotePort)" } ?? "*"
+        let counted = delegated ? "counted for pid \(effectivePID) (delegated)" : "not delegated"
+        return "\(transport.rawValue) \(local) → \(remote), used by pid \(lastPID), \(counted)"
     }
 }
 

@@ -194,12 +194,15 @@ enum GuardDiagnosis {
                     + (forProbe ? " — the probe itself (pid \(probe.pid)), as the guard needs" : " — NOT the probe (pid \(probe.pid))")
                     + " (the filter's source application); opened by \(describe(flow.openerName, flow.openerPID)); "
                     + "\(flow.kind.rawValue), \(flow.verdict).")
-                say("   The kernel's record of its socket, read by the guard when it came: " + kernelWords(flow.kernel, flow.kernelNote, probe.pid))
+                let cameRecord = kernelWords(flow.kernel, flow.kernelNote, probe.pid)
+                say("   The kernel's record of its socket, read by the guard when it came: \(cameRecord)")
                 for line in flow.later ?? [] { say("   … read again \(line)") }
                 if let look = flow.firstData {
-                    say("   At its first datagram: counted for \(describe(look.appName, look.appPID)) (the filter's source application); "
-                        + "the kernel's record: " + kernelWords(look.kernel, look.kernelNote, probe.pid)
-                        + "; \(look.heldBy.map { "held by its \($0)" } ?? "not held"): \(look.verdict).")
+                    let lookWho = describe(look.appName, look.appPID)
+                    let lookRecord = kernelWords(look.kernel, look.kernelNote, probe.pid)
+                    let lookHeld: String = look.heldBy.map { "held by its \($0)" } ?? "not held"
+                    say("   At its first datagram: counted for \(lookWho) (the filter's source application); "
+                        + "the kernel's record: \(lookRecord); \(lookHeld): \(look.verdict).")
                     for line in look.changedProperties { say("   … the flow object, changed: \(line)") }
                 }
                 let heldBy = flow.heldBy.map { "by its \($0), when it came" }
@@ -233,7 +236,8 @@ enum GuardDiagnosis {
     /// The kernel's record of a socket in words, against the probe's pid.
     private static func kernelWords(_ socket: KernelSocket?, _ note: String?, _ probe: Int32) -> String {
         guard let socket else { return note ?? "not read (a guard older than this app's reads none)" }
-        return "\(socket)" + (socket.countedFor == probe ? " — the probe" : " — NOT the probe")
+        let whose = socket.countedFor == probe ? " — the probe" : " — NOT the probe"
+        return "\(socket)\(whose)"
     }
 
     private static func describe(_ name: String, _ pid: Int32?) -> String {
@@ -511,8 +515,8 @@ enum GuardDiagnosis {
                     && seen[socket.localPort] != socket.countedFor {
                     seen[socket.localPort] = socket.countedFor
                     let whose = socket.countedFor == pid ? " — the probe" : " — NOT the probe (pid \(pid))"
-                    run.kernelLines.append(String(format: "+%.0f ms ", Date().timeIntervalSince(launched) * 1000)
-                                           + "\(socket)" + whose)
+                    let milliseconds = Int(Date().timeIntervalSince(launched) * 1000)
+                    run.kernelLines.append("+\(milliseconds) ms \(socket)\(whose)")
                 }
             }
             try? await Task.sleep(nanoseconds: 100_000_000)
