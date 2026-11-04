@@ -291,6 +291,10 @@ enum ProfileSessionHost {
                 SafariChromeHost.performCloseEveryWindow()
             case .checkKeychain(let probe):
                 ProfileSessionHost.send(.keychainReport(KeychainCheck.run(probe)))
+            case .ping(let number):
+                InputProbe.pong(number)
+            case .inputProbe(let number, let url):
+                InputProbe.probe(number, url)
             case .walkMenu(let from):
                 SafariMenuWalk.start(from: from, session: manager?.session(for: profileID)) { line in
                     ProfileSessionHost.send(.menuWalk(line))
