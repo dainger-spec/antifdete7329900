@@ -1,63 +1,42 @@
 name: CI
 
-# Measurement branch claude/measure-safari-worlds (never merged): the fingerprint probe in this
-# Mac's real Safari, three ways (scripts/measure_safari_worlds.py). Nothing else runs here.
+# Measurement branch claude/measure-safari-engines (never merged): Safari with a WebKit of its own
+# and this Mac's apps on the system's — a state a Mac lives in, or a machine not restarted since
+# Safari's update? (scripts/measure_engines.sh), and the probe in that Safari three ways
+# (scripts/measure_safari_worlds.py). Several macos-26 jobs: runner images 20261026 (one engine)
+# and 20261102 (two) are both in rotation; each job names its image.
 on:
   push:
     branches: ['**']
 
 jobs:
-  worlds:
-    name: Safari's probe three ways — ${{ matrix.runner }}
+  engines:
+    name: Engines — ${{ matrix.runner }} ${{ matrix.n }}
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-26, xcode-27]
+        include:
+          - {runner: macos-26, n: 1}
+          - {runner: macos-26, n: 2}
+          - {runner: macos-26, n: 3}
+          - {runner: xcode-27, n: 1}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - name: Whose WebKit, since when, and how Safari finds its own
+        timeout-minutes: 10
+        run: scripts/measure_engines.sh
       - name: The probe in Safari — WebDriver's execute, the page's own world, a plain window
+        if: always()
         timeout-minutes: 10
         run: |
           sudo safaridriver --enable || echo "safaridriver --enable failed"
           mkdir -p build
-          MEASURE_OUT=build/worlds-${{ matrix.runner }}.json python3 scripts/measure_safari_worlds.py
-      - name: Which page policy blocks canvas readback as Safari 27 does (a WKWebView, one option at a time)
-        if: always()
-        timeout-minutes: 10
-        run: |
-          mkdir -p build
-          swiftc -O scripts/canvas_policy_probe.swift -o build/canvas_policy_probe 2>&1 | tail -5
-          build/canvas_policy_probe || true
-      - name: Whose WebKit — Safari's and this Mac's apps' (builds, copies, what Safari's web process loads)
-        if: always()
-        run: |
-          sw_vers
-          for a in /Applications/Safari.app /System/Volumes/Preboot/Cryptexes/App/System/Applications/Safari.app; do
-            echo "== $a: $(defaults read "$a/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null) build $(defaults read "$a/Contents/Info.plist" CFBundleVersion 2>/dev/null)"
-          done
-          for f in /System/Library/Frameworks/WebKit.framework /System/Volumes/Preboot/Cryptexes/App/System/Library/Frameworks/WebKit.framework \
-                   /Library/Apple/System/Library/StagedFrameworks/Safari/WebKit.framework; do
-            p="$f/Versions/A/Resources/Info.plist"; [ -f "$p" ] || p="$f/Resources/Info.plist"
-            echo "== $f: $( [ -e "$f" ] && echo present || echo absent ) $(defaults read "$p" CFBundleShortVersionString 2>/dev/null) build $(defaults read "$p" CFBundleVersion 2>/dev/null)"
-          done
-          ls -la /Library/Apple/System/Library/StagedFrameworks/Safari 2>/dev/null | head || true
-          build/canvas_policy_probe 2>/dev/null | head -1 || true
-          open -a Safari "about:blank"; sleep 6
-          for pid in $(pgrep -f "com.apple.WebKit.WebContent" | head -3) $(pgrep -x Safari | head -1); do
-            echo "== pid $pid $(ps -o comm= -p $pid)"; vmmap $pid 2>/dev/null | grep -E "WebKit.framework|WebCore.framework|JavaScriptCore.framework" | awk '{print $NF}' | sort -u | head -6
-          done
-          osascript -e 'quit app "Safari"' || true
-      - name: Safari's own privacy settings on this Mac
-        if: always()
-        run: |
-          for d in ~/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari ~/Library/Preferences/com.apple.Safari com.apple.Safari.SandboxBroker; do
-            echo "== $d"; defaults read "$d" 2>/dev/null | grep -i -E "privacy|fingerprint|enhanced|tracking|protection" || true
-          done
+          MEASURE_OUT=build/worlds-${{ matrix.runner }}-${{ matrix.n }}.json python3 scripts/measure_safari_worlds.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: worlds-${{ matrix.runner }}
+          name: engines-${{ matrix.runner }}-${{ matrix.n }}
           path: build/worlds-*.json
           if-no-files-found: ignore
