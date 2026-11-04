@@ -187,12 +187,18 @@ enum InputProbe {
         try? await Task.sleep(nanoseconds: 1_500_000_000)
         let read = await script("return JSON.stringify(window.__pbRead())", in: webView, world: .page) as? String
         let after = webView.url?.absoluteString ?? ""
+        // A click that opened a tab or a window: the front page is another web view then.
+        let front = frontWebView()
+        let elsewhere = front.map { $0 !== webView } ?? true
+        let frontURL = short(front?.url?.absoluteString ?? "")
+        let windowCount = NSApp.windows.filter { $0.isVisible }.count
         var fields: [String: Any] = ["step": "click", "site": address, "index": index, "target": armed["target"] ?? NSNull(),
                                      "point": [Int(x), Int(y)], "hitPage": armed["hit"] ?? NSNull(), "hitAppKit": hitView,
                                      "windowKey": key, "appActive": NSApp.isActive,
                                      "topInset": Int((Double(webView.bounds.height) - innerHeight * Double(webView.pageZoom * webView.magnification)).rounded()),
                                      "baselineMutations": baseline?["mutations"] ?? NSNull(),
-                                     "urlBefore": short(before), "urlAfter": short(after), "isLoading": webView.isLoading]
+                                     "urlBefore": short(before), "urlAfter": short(after), "isLoading": webView.isLoading,
+                                     "frontIsAnotherWebView": elsewhere, "frontURL": frontURL, "visibleWindows": windowCount]
         if let read, let data = read.data(using: .utf8), let got = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
             for (key, value) in got { fields[key] = value }
             fields["pageAnswered"] = true
