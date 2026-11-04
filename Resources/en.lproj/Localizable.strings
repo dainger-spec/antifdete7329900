@@ -1373,7 +1373,8 @@
 "inspector.window" = "Window";
 "inspector.whatSitesSee" = "What sites see";
 "inspector.passwords" = "Passwords";
-"inspector.library" = "Bookmarks and history";
+"inspector.bookmarks" = "Bookmarks";
+"inspector.history" = "History";
 "inspector.cookies" = "Cookies";
 "inspector.selected" = "%ld selected";
 "inspector.launchSome" = "Launch %ld";

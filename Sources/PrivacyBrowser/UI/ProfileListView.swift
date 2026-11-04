@@ -466,6 +466,7 @@ struct ProfileListView: View {
             stop: { id in Task { await model.stop(id) } },
             newWindow: { id in model.manager?.openNewWindow(id) },
             library: { id in model.manager?.showLibrary(id, section: .bookmarks) },
+            history: { id in model.manager?.showLibrary(id, section: .history) },
             edit: { id in
                 guard let profile = summary(id) else { return }
                 // Settings that cannot be read are not edited: the form would open on defaults —
@@ -691,6 +692,7 @@ struct ProfileActions {
     var stop: (UUID) -> Void = { _ in }
     var newWindow: (UUID) -> Void = { _ in }
     var library: (UUID) -> Void = { _ in }
+    var history: (UUID) -> Void = { _ in }
     var edit: (UUID) -> Void = { _ in }
     var passwords: (UUID) -> Void = { _ in }
     var importCookies: (UUID) -> Void = { _ in }

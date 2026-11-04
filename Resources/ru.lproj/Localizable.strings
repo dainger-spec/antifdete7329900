@@ -1373,7 +1373,8 @@
 "inspector.window" = "Окно";
 "inspector.whatSitesSee" = "Что видят сайты";
 "inspector.passwords" = "Пароли";
-"inspector.library" = "Закладки и история";
+"inspector.bookmarks" = "Закладки";
+"inspector.history" = "История";
 "inspector.cookies" = "Cookies";
 "inspector.selected" = "Выбрано: %ld";
 "inspector.launchSome" = "Запустить %ld";
