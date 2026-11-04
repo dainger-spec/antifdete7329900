@@ -44,10 +44,11 @@ final class SelfTest {
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
         let test = SelfTest()
-        // A hung check must not hold CI; the whole run takes about five minutes on the runner. What
-        // had been checked by then is still counted.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 600) {
-            print("SELFTEST TIMEOUT after 600 s")
+        // A hung check must not hold CI; what had been checked by then is still counted. The whole
+        // run took 538–596 s on macOS 27.0.1's runner (full runs 3 to 5) and was cut at 600 s in
+        // run 6, its last ~25 checks never made: 900 s.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 900) {
+            print("SELFTEST TIMEOUT after 900 s")
             MainActor.assumeIsolated { _ = test.finish(timedOut: true) }
             exit(3)
         }
@@ -1761,30 +1762,44 @@ final class SelfTest {
         // it: macOS 27.0.1 (full run 5) drew the profile's list in its process as nothing Vision
         // could read. The pictures are kept (PB_SELFTEST_SHOTS, else a temporary folder).
         var screenSaid: [String] = []
+        // And whether this Mac's Vision reads at all: a picture with a known line, drawn as the
+        // list draws its rows (macOS 27.0.1's runner, full run 6: nothing read from a window that
+        // showed both pages, which macOS 26.6.2's read).
+        var control: (read: Bool, said: String)?
         if var seen = lookedAt, !seen.regions.isEmpty {
             let folder = ProcessInfo.processInfo.environment["PB_SELFTEST_SHOTS"].map { URL(fileURLWithPath: $0) }
                 ?? FileManager.default.temporaryDirectory.appendingPathComponent("pb-history-\(run)")
-            let read = HistoryWindowReader.readFromScreen(regions: seen.regions, folder: folder)
+            let read = await HistoryWindowReader.readFromScreen(regions: seen.regions, folder: folder)
             seen.screen = read.lines
             screenSaid = read.said
             lookedAt = seen
+            control = await HistoryWindowReader.readsControl(scale: NSScreen.main?.backingScaleFactor ?? 1)
         }
         let lookSaid: String
         if let lookedAt {
             let rows = lookedAt.texts.prefix(12).joined(separator: " | ")
+            let asked = screenSaid.isEmpty ? "nothing to ask for" : screenSaid.joined(separator: "; ")
+            let onScreen = "on the screen (\(asked)): \(lookedAt.screen.prefix(16).joined(separator: " | ")); "
+                + "Vision's control: \(control?.said ?? "not made")"
             lookSaid = "\(lookedAt.chosen); views: \(lookedAt.views.joined(separator: "; ")); rows: \(rows); "
                 + "page: \(lookedAt.page ?? "none"); clearing: \(lookedAt.clearing.joined(separator: ", ")); "
                 + "first row: \(lookedAt.firstRow ?? "none"); read from its pixels: \(lookedAt.recognized.prefix(12).joined(separator: " | ")); "
-                + "on the screen (\(screenSaid.isEmpty ? "nothing to ask for" : screenSaid.joined(separator: "; "))): "
-                + lookedAt.screen.prefix(16).joined(separator: " | ")
+                + onScreen
         } else {
             lookSaid = historyAsked ? "no answer in 20 s" : "not asked: the profile has no process of its own"
         }
         info("Safari chrome: the History window, as the person opens it — \(lookSaid)")
         // Read from the pixels, the page's title may have two characters misread (its run id is hex).
         let historyShowsPage = lookedAt.map { $0.shows("start-\(run)") || $0.shows("PB leak page \(run)", tolerance: 2) } ?? false
-        check("Safari chrome: the History window, opened as the person opens it (History › Show All History), shows the page Safari's window loaded",
-              historyShowsPage, lookSaid)
+        let historyCheck = "Safari chrome: the History window, opened as the person opens it (History › Show All History), shows the page Safari's window loaded"
+        if !historyShowsPage, let lookedAt, lookedAt.texts.isEmpty, lookedAt.rowCount > 0, let control, !control.read {
+            // Rows there, drawn, and nothing on this Mac that reads pixels: not seen, so not passed —
+            // and not failed on the instrument's word. A list with no rows fails above all readers.
+            skip(historyCheck, "this Mac's Vision reads no text, not even a control picture with a known line, "
+                 + "so the \(lookedAt.rowCount) rows of the window cannot be read here; its picture is kept (\(screenSaid.joined(separator: "; ")))")
+        } else {
+            check(historyCheck, historyShowsPage, lookSaid)
+        }
 
         // A stop: Safari's window goes first, then the seal, whose retries no longer wait for Safari
         // (it keeps the pages of the windows it closes); the process reports how the seal went.

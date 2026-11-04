@@ -16,6 +16,9 @@ struct HistoryWindowLook: Codable, Equatable {
     var chosen: String
     /// Each table or outline seen: its class and how many rows it has.
     var views: [String] = []
+    /// The rows of the tables the item brought up, all together (a list with none shows nothing,
+    /// whatever reads its pixels).
+    var rowCount = 0
     /// The texts in their rows (at most 200), in row order.
     var texts: [String] = []
     /// The key window's page, when a web view shows it.
@@ -147,6 +150,7 @@ enum HistoryWindowReader {
         if let table = view as? NSTableView {
             guard !before.contains(ObjectIdentifier(table)) else { return }
             look.views.append("\(type(of: table)), \(table.numberOfRows) rows")
+            look.rowCount += table.numberOfRows
             if let window = table.window { look.regions.append(region(of: table.enclosingScrollView ?? table, in: window, whole: false)) }
             for row in 0..<min(table.numberOfRows, 100) where look.texts.count < 200 {
                 var rowTexts: [String] = []
@@ -229,7 +233,7 @@ enum HistoryWindowReader {
     /// (history-window-<number>-<index>.png), and the lines Vision reads there; with what was done,
     /// for the record. Called in the app, which may ask the window server for another process's
     /// window (the profile's process runs in a sandbox of its own).
-    static func readFromScreen(regions: [HistoryWindowLook.ScreenRegion], folder: URL) -> (lines: [String], said: [String]) {
+    static func readFromScreen(regions: [HistoryWindowLook.ScreenRegion], folder: URL) async -> (lines: [String], said: [String]) {
         var lines: [String] = []
         var said: [String] = []
         var pictures: [Int: CGImage] = [:]
@@ -268,12 +272,71 @@ enum HistoryWindowReader {
                 CGImageDestinationAddImage(destination, part, nil)
                 CGImageDestinationFinalize(destination)
             }
-            let read = recognize(part)
+            let read = await readText(part)
             said.append("window \(region.window) (\(picture.width)×\(picture.height) px), region \(Int(region.x)),\(Int(region.y)) "
-                        + "\(Int(region.width))×\(Int(region.height)) pt: \(read.count) lines read, kept in \(partFile.path)")
-            lines += read
+                        + "\(Int(region.width))×\(Int(region.height)) pt: \(read.said), kept in \(partFile.path)")
+            lines += read.lines
         }
         return (lines, said)
+    }
+
+    /// The lines Vision reads in `image`: its classic request (VNRecognizeTextRequest), and when
+    /// that reads nothing, its newer one (RecognizeTextRequest, macOS 15); with what each did.
+    /// macOS 27.0.1's runner, full run 6: the classic request read nothing in a picture of the
+    /// profile's history that macOS 26.6.2's read seven lines from, the same list drawn alike.
+    static func readText(_ image: CGImage) async -> (lines: [String], said: String) {
+        var said: [String] = []
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+        do {
+            try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+        } catch {
+            said.append("VNRecognizeTextRequest failed (\(error.localizedDescription))")
+        }
+        let classic = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+        said.append("VNRecognizeTextRequest revision \(request.revision): \(classic.count) lines")
+        if !classic.isEmpty { return (classic, said.joined(separator: ", ")) }
+        if #available(macOS 15.0, *) {
+            var newer = RecognizeTextRequest()
+            newer.recognitionLevel = .accurate
+            newer.usesLanguageCorrection = false
+            do {
+                let observations = try await newer.perform(on: image)
+                let lines = observations.compactMap { $0.topCandidates(1).first?.string }
+                said.append("RecognizeTextRequest: \(lines.count) lines")
+                if !lines.isEmpty { return (lines, said.joined(separator: ", ")) }
+            } catch {
+                said.append("RecognizeTextRequest failed (\(error.localizedDescription))")
+            }
+        }
+        return ([], said.joined(separator: ", "))
+    }
+
+    /// Whether Vision reads, on this Mac, a picture made here with a known line drawn as the
+    /// history list draws a row — light text on the list's dark tone, 13 pt, at `scale` — and what
+    /// it said. Its silence on a window means something only when it reads this.
+    static func readsControl(scale: CGFloat) async -> (read: Bool, said: String) {
+        let line = "PB control picture 7Q4K2X"
+        let size = CGSize(width: 680, height: 60)
+        guard let context = CGContext(data: nil, width: Int(size.width * scale), height: Int(size.height * scale),
+                                      bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            return (false, "no context to draw the control in")
+        }
+        context.scaleBy(x: scale, y: scale)
+        context.setFillColor(CGColor(red: 0.12, green: 0.12, blue: 0.12, alpha: 1))
+        context.fill(CGRect(origin: .zero, size: size))
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        (line as NSString).draw(at: NSPoint(x: 16, y: 22), withAttributes: [
+            .font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor(white: 0.92, alpha: 1),
+        ])
+        NSGraphicsContext.restoreGraphicsState()
+        guard let picture = context.makeImage() else { return (false, "the control could not be drawn") }
+        let read = await readText(picture)
+        let seen = read.lines.contains { $0.replacingOccurrences(of: " ", with: "").localizedCaseInsensitiveContains("7Q4K2X") }
+        return (seen, "\"\(line)\" \(seen ? "read" : "not read"): \(read.said); lines: \(read.lines.joined(separator: " | "))")
     }
 
     static func recognize(_ image: CGImage?) -> [String] {
