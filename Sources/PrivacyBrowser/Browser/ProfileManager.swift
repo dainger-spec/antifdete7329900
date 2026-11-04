@@ -650,6 +650,7 @@ final class ProfileManager: ObservableObject {
         case .guardAwaitingApproval: return L("launch.webrtcOff.guardAwaitingApproval")
         case .guardOff: return L("launch.webrtcOff.guardOff")
         case .guardNotAnswering: return L("launch.webrtcOff.guardNotAnswering")
+        case .guardRestartNeeded: return L("guard.problem.reboot")
         case .guardUnproven: return L("launch.webrtcOff.guardUnproven")
         case .httpProxy: return L("launch.webrtcOff.httpProxy")
         case .proxyWithoutUDP: return L("launch.webrtcOff.proxyWithoutUDP")

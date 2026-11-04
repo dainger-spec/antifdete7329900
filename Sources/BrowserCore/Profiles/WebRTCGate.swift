@@ -16,6 +16,10 @@ public enum NetworkGuardState: String, Codable, Equatable, Sendable, CaseIterabl
     /// On, but it does not answer: not running, being replaced by an update's, or a version other
     /// than this app's.
     case notAnswering
+    /// Installed and switched on, but macOS starts it only at the next restart: an earlier copy is
+    /// still there, "terminated waiting to uninstall on reboot", and until then the new one does
+    /// not answer (the owner's Mac, 0.1.2, macOS 27.0.1, 4 November).
+    case restartNeeded
     /// On and answering, but this Mac has not shown that the guard tells a profile's connections
     /// from everyone else's (the check after installing, and after each update of macOS).
     case unproven
@@ -47,6 +51,7 @@ public enum WebRTCRefusal: String, Codable, Equatable, Sendable, CaseIterable {
     case guardAwaitingApproval
     case guardOff
     case guardNotAnswering
+    case guardRestartNeeded
     case guardUnproven
     /// An HTTP CONNECT proxy carries TCP only.
     case httpProxy
@@ -90,6 +95,7 @@ public enum WebRTCGate {
         case .awaitingApproval: return .off(.guardAwaitingApproval)
         case .off: return .off(.guardOff)
         case .notAnswering: return .off(.guardNotAnswering)
+        case .restartNeeded: return .off(.guardRestartNeeded)
         case .unproven: return .off(.guardUnproven)
         case .ready: break
         }
@@ -107,5 +113,16 @@ public enum WebRTCGate {
     /// with a SOCKS5 proxy whose WebRTC is not Disabled.
     public static func wantsRelay(policy: WebRTCPolicy, proxy: ProxySettings?) -> Bool {
         policy != .disabled && proxy?.kind == .socks5
+    }
+}
+
+/// What macOS's answers about the guard come to, where they need reading together.
+public enum NetworkGuardReading {
+    /// A guard macOS reports installed and switched on that does not answer (or answers without its
+    /// filter, or as another version): `earlierCopyAwaitsRestart` when macOS also keeps an earlier
+    /// copy of it that is to be removed at the next restart (`OSSystemExtensionProperties.isUninstalling`,
+    /// `systemextensionsctl list`: "terminated waiting to uninstall on reboot").
+    public static func silent(earlierCopyAwaitsRestart: Bool) -> NetworkGuardState {
+        earlierCopyAwaitsRestart ? .restartNeeded : .notAnswering
     }
 }
