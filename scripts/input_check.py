@@ -119,6 +119,9 @@ def main():
     parser.add_argument("--sites")
     parser.add_argument("--mobile")
     parser.add_argument("--profiles")
+    parser.add_argument("--check", action="store_true",
+                        help="fail unless, in each profile, a click on the check's own page reaches it: AppKit gives the "
+                             "point to the web view, the click listener fires and the link is followed")
     args = parser.parse_args()
     os.makedirs(args.out, exist_ok=True)
     command = [os.path.join(args.app, BINARY), "--input-check", "--out", os.path.abspath(args.out)]
@@ -165,7 +168,36 @@ def main():
     reader.join(timeout=10)
     report(entries)
     print(f"\ninput check: exit {process.returncode}, {len(stalls)} stall(s)")
-    return 0 if process.returncode == 0 else 1
+    failed = process.returncode != 0
+    if args.check:
+        failed = not verdict(entries) or failed
+    return 1 if failed else 0
+
+
+def verdict(entries):
+    """In each profile, on the check's own page: every click went to the web view (not a view laid
+    over it), the click listener's element fired, and the link was followed. A check that saw no
+    click of a profile fails: it cannot say yes about what it did not see."""
+    passed = True
+    for profile in sorted({e.get("profile") for e in entries if e.get("profile")}):
+        clicks = [e for e in entries if e.get("profile") == profile and e.get("site") == "pb-test:touch" and e.get("step") == "click"]
+        if not clicks:
+            print(f"CHECK FAIL [{profile}] no click on the check's own page was made")
+            passed = False
+            continue
+        over = [e for e in clicks if "WKView" not in str(e.get("hitAppKit")) and "WKWebView" not in str(e.get("hitAppKit"))]
+        clicked = [e for e in clicks if (e.get("target") or {}).get("element", "").startswith("div#click")]
+        link = [e for e in clicks if (e.get("target") or {}).get("element", "").startswith("a#link")]
+        fired = any("click:click" in (e.get("fired") or []) and any(x.get("type") == "click" for x in e.get("events") or []) for e in clicked)
+        followed = any(e.get("sameDocumentHrefChanged") or "link:click" in (e.get("fired") or []) for e in link)
+        for ok, what in ((not over, f"every click went to the web view ({len(over)} of {len(clicks)} went to "
+                                    f"{sorted({str(e.get('hitAppKit')) for e in over})})" if over else "every click went to the web view"),
+                         (fired, "a click on the click listener's element fired it"),
+                         (followed, "a click on the link followed it")):
+            print(f"CHECK {'PASS' if ok else 'FAIL'} [{profile}] {what}")
+            passed = passed and ok
+    print(f"input check: {'PASSED' if passed else 'FAILED'}")
+    return passed
 
 
 if __name__ == "__main__":

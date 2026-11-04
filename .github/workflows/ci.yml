@@ -1,6 +1,7 @@
 # claude/measure-touch — a measurement branch, never merged: what a click brings a page in a mobile
 # view and in a Mac profile, and where a profile's process stops when it stops answering
-# (scripts/input_check.py, InputCheck.swift). The branch's fast pipeline is this job alone.
+# (scripts/input_check.py, InputCheck.swift); and the self-test's click on a mobile view's page.
+# The branch's fast pipeline is these steps alone, on macOS 26 and 27.
 name: CI
 on:
   push:
@@ -13,7 +14,7 @@ jobs:
       matrix:
         runner: [macos-26, xcode-27]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@v4
       - name: The machine
@@ -23,9 +24,27 @@ jobs:
       - name: Build the app without the App Sandbox (profiles in processes of their own)
         timeout-minutes: 30
         run: NE=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
-      - name: What a click brings a page — the check's page, tiktok.com, Google — and stacks when a process stops answering
+      - name: What a click brings a page — the check's page (must reach it), tiktok.com, Google — and stacks when a process stops answering
         timeout-minutes: 60
-        run: python3 scripts/input_check.py --app build/unsandboxed/Lumen.app --out build/input
+        run: python3 scripts/input_check.py --app build/unsandboxed/Lumen.app --out build/input --check
+      - name: The self-test's click on a mobile view's page (its "ended page" checks)
+        if: always()
+        timeout-minutes: 30
+        run: |
+          python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085 \
+            --tls-control 18086 --canary 18087 --silent 18088 --socks-udp 18089 --aia-tag "t$(date +%s)" &
+          for attempt in $(seq 1 40); do nc -z 127.0.0.1 18081 && break; sleep 0.5; done
+          export PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 PB_SELFTEST_HTTP_AUTH_PROXY_PORT=18082 PB_SELFTEST_HTTP6_PROXY_PORT=18083
+          export PB_SELFTEST_SOCKS2_PROXY_PORT=18084 PB_SELFTEST_SOCKS_AUTH_PROXY_PORT=18085
+          export PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087 PB_SELFTEST_SILENT_PROXY_PORT=18088 PB_SELFTEST_SOCKS_UDP_PROXY_PORT=18089
+          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --self-test > build/input/selftest.txt 2>&1 || true
+          echo "== the click checks"
+          grep -E "ended page" build/input/selftest.txt || echo "no ended-page line"
+          grep -E "^(PASS|FAIL|SKIP).*a click on the page|the page gets a click" build/input/selftest.txt > build/input/click-lines.txt || true
+          echo "== summary"; tail -5 build/input/selftest.txt
+          if grep -q "^FAIL.*click" build/input/click-lines.txt || ! grep -q "a click on the page goes to the page" build/input/click-lines.txt; then
+            echo "::error::the self-test's click on the mobile view's page failed or did not run"; exit 1
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
