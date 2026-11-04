@@ -19,7 +19,7 @@ jobs:
           - {runner: macos-26, n: 1}
           - {runner: macos-26, n: 2}
           - {runner: macos-26, n: 3}
-          - {runner: xcode-27, n: 1}
+          - {runner: macos-26, n: 4}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
     steps:
@@ -31,6 +31,7 @@ jobs:
         if: always()
         timeout-minutes: 10
         run: |
+          if [[ "${ImageVersion:-0}" < "20261102" ]]; then echo "image ${ImageVersion:-?}: Safari shares the apps' WebKit here; measured in cd17407"; exit 0; fi
           sudo safaridriver --enable || echo "safaridriver --enable failed"
           mkdir -p build
           MEASURE_OUT=build/worlds-${{ matrix.runner }}-${{ matrix.n }}.json python3 scripts/measure_safari_worlds.py

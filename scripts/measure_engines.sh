@@ -22,6 +22,7 @@ for a in /Applications/Safari.app /System/Volumes/Preboot/Cryptexes/App/System/A
     say "safari $a LSEnvironment $(plutil -extract LSEnvironment json -o - "$a/Contents/Info.plist" 2>/dev/null || echo none)"
     otool -L "$a/Contents/MacOS/Safari" 2>/dev/null | grep -E "WebKit|SafariShared|Safari" | head -5 | sed 's/^/ENGINES   links: /'
     otool -l "$a/Contents/MacOS/Safari" 2>/dev/null | grep -A2 LC_RPATH | grep path | head -5 | sed 's/^/ENGINES   rpath: /'
+    otool -l "$a/Contents/MacOS/Safari" 2>/dev/null | grep -A3 LC_DYLD_ENVIRONMENT | grep name | head -5 | sed 's/^/ENGINES   dyld environment: /'
   else
     say "safari $a absent"
   fi
@@ -82,9 +83,12 @@ echo "::group::An ordinary app's web view"
 mkdir -p build
 swiftc -O scripts/engine_probe.swift -o build/engine_probe 2>&1 | tail -5
 build/engine_probe plain
-for dir in /Library/Apple/System/Library/StagedFrameworks/Safari /System/Volumes/Preboot/Cryptexes/App/System/Library/Frameworks /System/Cryptexes/App/System/Library/Frameworks; do
+for dir in /System/Cryptexes/App/System/Library/StagedFrameworks/Safari /System/Volumes/Preboot/Cryptexes/App/System/Library/StagedFrameworks/Safari /Library/Apple/System/Library/StagedFrameworks/Safari; do
   if [ -e "$dir/WebKit.framework" ]; then
-    DYLD_VERSIONED_FRAMEWORK_PATH="$dir" build/engine_probe "versioned:$dir"
+    DYLD_VERSIONED_FRAMEWORK_PATH="$dir" build/engine_probe "versioned:$dir" &
+    probe=$!; sleep 6
+    ps -axo pid,lstart,command | grep -E "WebKit\.(WebContent|Networking)" | grep -v grep | tail -3 | sed 's/^/ENGINES   web process now: /'
+    wait $probe
   else
     say "no WebKit.framework in $dir: nothing to point the app at"
   fi
