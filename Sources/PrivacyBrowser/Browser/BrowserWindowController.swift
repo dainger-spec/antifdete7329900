@@ -25,6 +25,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     private let library: ProfileLibrary
 
     private(set) var tabs: [BrowserTab] = []
+    /// The window the warm-up robot browses in (`BrowserSession.openOffscreenWindow`): invisible,
+    /// not one of the profile's own, and closing it is not the profile's last window closing.
+    var isForWarmUp = false
     private var selectedIndex = 0
     /// URLs of recently closed tabs, most recent last (⇧⌘T).
     private var recentlyClosed: [URL] = []
@@ -74,7 +77,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         // Never saved as restorable state at quit: AppKit would write the title — the profile's
         // name — to ~/Library/Saved Application State in plaintext.
         window.isRestorable = false
-        window.title = "[\(session.profileName)]"
+        window.title = "[\(session.profileName)]" // l10n: not text
         // Safari's window: the controls in a unified toolbar, no separate title row. A page measures
         // the browser's chrome as outerHeight − innerHeight; this gives Safari's (52 pt with one tab).
         window.titleVisibility = .hidden
@@ -112,12 +115,12 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     // MARK: Interface
 
     private func buildInterface(in window: NSWindow) {
-        backButton = toolbarButton("chevron.left", "Back (⌘[)", #selector(goBack))
-        forwardButton = toolbarButton("chevron.right", "Forward (⌘])", #selector(goForward))
-        reloadButton = toolbarButton("arrow.clockwise", "Reload (⌘R)", #selector(reload))
-        bookmarkButton = toolbarButton("star", "Bookmark this page (⌘D)", #selector(toggleBookmark))
-        let bookmarksMenuButton = toolbarButton("book", "Bookmarks", #selector(showBookmarksMenu(_:)))
-        let historyButton = toolbarButton("clock.arrow.circlepath", "History (⌘Y)", #selector(showHistory))
+        backButton = toolbarButton("chevron.left", L("toolbar.back"), shortcut: "⌘[", #selector(goBack))
+        forwardButton = toolbarButton("chevron.right", L("toolbar.forward"), shortcut: "⌘]", #selector(goForward))
+        reloadButton = toolbarButton("arrow.clockwise", L("toolbar.reload"), shortcut: "⌘R", #selector(reload))
+        bookmarkButton = toolbarButton("star", L("toolbar.bookmark"), shortcut: "⌘D", #selector(toggleBookmark))
+        let bookmarksMenuButton = toolbarButton("book", L("toolbar.bookmarks"), #selector(showBookmarksMenu(_:)))
+        let historyButton = toolbarButton("clock.arrow.circlepath", L("toolbar.history"), shortcut: "⌘Y", #selector(showHistory))
         let fillButton = toolbarButton("key.fill", L("toolbar.fillPassword"), #selector(fillPassword(_:)))
         let saveButton = toolbarButton("key.viewfinder", L("toolbar.savePassword"), #selector(savePassword))
 
@@ -211,11 +214,13 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         fitAddressField()
     }
 
-    private func toolbarButton(_ symbol: String, _ label: String, _ action: Selector) -> NSButton {
+    /// A toolbar button: VoiceOver reads `label`; the tooltip adds the keyboard shortcut.
+    private func toolbarButton(_ symbol: String, _ label: String, shortcut: String? = nil, _ action: Selector) -> NSButton {
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label) ?? NSImage()
         let button = NSButton(image: image, target: self, action: action)
         button.isBordered = false
-        button.toolTip = label
+        button.toolTip = shortcut.map { "\(label) (\($0))" } ?? label
+        button.setAccessibilityLabel(label)
         return button
     }
 

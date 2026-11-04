@@ -1,0 +1,73 @@
+// Home scene "bento": a grid of tiles. Each tile is a title and one sentence over a piece of the app's
+// interface, in the words of Localizable.strings. Names, addresses, times and counts in the pictures are
+// samples (data-sample).
+export default {
+  title: 'Features',
+  head: ['And everything you expect', 'from Safari.'],
+  passwords: {
+    t: 'Passwords',
+    d: 'AutoFill, just like Safari: save, update, fill.',
+    site: 'shop.example',
+    signIn: 'Sign in',
+    user: 'anna@shop.example',
+    button: 'Sign In',
+    ask: 'Do you want to save your password for “shop.example”?',
+    msg: 'The password is stored encrypted with profile “Store” and offered the next time you sign in.',
+    notNow: 'Not Now',
+    save: 'Save Password',
+  },
+  history: {
+    t: 'History and bookmarks',
+    d: 'Every profile has its own.',
+    window: 'History — Store',
+    search: 'Search history',
+    day: 'Today',
+    rows: [
+      { t: 'Orders', u: 'shop.example', time: '2:32 PM' },
+      { t: 'Seller dashboard', u: 'seller.example', time: '2:05 PM' },
+      { t: 'Support', u: 'help.shop.example', time: '1:48 PM' },
+      { t: 'Shipping', u: 'ship.example', time: '12:10 PM' },
+    ],
+  },
+  cookies: {
+    t: 'Cookie import',
+    d: 'Bring a sign-in over from another browser: JSON or cookies.txt.',
+    window: 'Import Cookies — Store',
+    file: 'cookies.txt',
+    format: 'Format: Netscape cookies.txt',
+    summary: '84 of 84 entries can be imported',
+    action: 'Import 84 Cookies',
+    profile: 'Store',
+  },
+  sync: {
+    t: 'Sync',
+    d: 'Your profiles on all your Macs. Only ciphertext goes to the server.',
+    macs: ['MacBook Pro', 'iMac'],
+    profiles: ['Store', 'Ads', 'Support'],
+    synced: 'Synced',
+  },
+  export: {
+    t: 'Profile export',
+    d: 'A whole profile in one file under a password.',
+    window: 'Export “Store”',
+    explain: 'Settings and proxy, passwords, history, bookmarks, cookies and website data — in one file encrypted with a password of its own.',
+    password: 'File password',
+    action: 'Export…',
+    file: 'Store.pbprofile',
+  },
+  ephemeral: {
+    t: 'Ephemeral profiles',
+    d: 'Close it, and nothing is left.',
+    name: 'Guest',
+    row: 'Ephemeral · nothing kept',
+    window: 'History — Guest',
+    notice: 'Ephemeral profile: history is kept in memory only and discarded when the profile stops.',
+    rows: [
+      { t: 'Catalog', u: 'shop.example' },
+      { t: 'Cart', u: 'shop.example' },
+      { t: 'Checkout', u: 'pay.example' },
+    ],
+    empty: 'No history.',
+  },
+  link: 'All features',
+};

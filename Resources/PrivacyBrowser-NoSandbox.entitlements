@@ -2,11 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Hardened runtime without App Sandbox (SANDBOX=0 builds, for debugging).
+	<!-- Hardened runtime without App Sandbox (SANDBOX=0 builds).
 	     Under the hardened runtime, camera/microphone access still needs these. -->
 	<key>com.apple.security.device.camera</key>
 	<true/>
 	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<!-- Loading Safari's private UI frameworks (SafariChrome.swift) is a dlopen of code this app
+	     did not sign, which the hardened runtime's library validation refuses by default. Only
+	     this build can host Safari's chrome; the sandboxed build cannot, and falls back to our own
+	     window. See docs/SAFARI_PROCESS.md §9.1. -->
+	<key>com.apple.security.cs.disable-library-validation</key>
 	<true/>
 </dict>
 </plist>

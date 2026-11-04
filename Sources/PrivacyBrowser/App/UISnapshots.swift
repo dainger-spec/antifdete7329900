@@ -104,6 +104,15 @@ enum UISnapshots {
             problems += await Shot(name: "sheet-cookie-import", size: CGSize(width: 680, height: 560), titled: false) {
                 CookieImportView(profile: northwind).environmentObject(model)
             }.capture(into: folder)
+            problems += await Shot(name: "sheet-cookie-export", size: CGSize(width: 480, height: 400), titled: false) {
+                CookieExportView(profile: northwind).environmentObject(model)
+            }.capture(into: folder)
+            problems += await Shot(name: "sheet-profile-export", size: CGSize(width: 480, height: 420), titled: false) {
+                ProfileExportView(profile: northwind).environmentObject(model)
+            }.capture(into: folder)
+            problems += await Shot(name: "sheet-profile-import", size: CGSize(width: 480, height: 300), titled: false) {
+                ProfileImportView().environmentObject(model)
+            }.capture(into: folder)
         } else {
             print("FAIL could not make a sample profile summary")
             problems += 1
@@ -111,9 +120,13 @@ enum UISnapshots {
         problems += await Shot(name: "sheet-sync", size: CGSize(width: 540, height: 460), titled: false) {
             SyncSettingsView().environmentObject(model)
         }.capture(into: folder)
+        problems += await Shot(name: "sheet-automation", size: CGSize(width: 560, height: 620), titled: false) {
+            AutomationSettingsView().environmentObject(model)
+        }.capture(into: folder)
         problems += await Shot(name: "sheet-change-password", size: CGSize(width: 420, height: 330), titled: false) {
             ChangePasswordView().environmentObject(model)
         }.capture(into: folder)
+        problems += await proxyList(into: folder)
         // A real browser window of a running profile (WebKit, toolbar, tab strip, start page).
         problems += await browserWindows(into: folder)
         // The launch screen (the Profiles window before unlocking), also while the vault opens.
@@ -138,6 +151,91 @@ enum UISnapshots {
             FlagSheet()
         }.capture(into: folder)
         return problems
+    }
+
+    // MARK: Proxy list
+
+    /// The Proxies sheet with proxies as checks left them — working (one of them slow), each way
+    /// of failing the list tells apart (silent after connecting, login rejected, host not found,
+    /// refused, no connection), one whose type the first check is to find — from a temporary
+    /// vault; its report on the silent one and on a working one; the Edit and Export sheets; and
+    /// what a profile whose proxy did not work at its launch says. Nothing is checked here and
+    /// nothing goes to the network.
+    private static func proxyList(into folder: URL) async -> Int {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-snapshots-proxies-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        do {
+            let vault = try MasterVault.create(in: root, password: "snapshots", iterations: 10_000)
+            let checked = Date().addingTimeInterval(-12 * 60)
+            func works(_ kind: ProxySettings.Kind, _ ip: String, _ country: String, _ zone: String, _ city: String,
+                       _ latencies: [Int], asn: String? = nil, organization: String? = nil) -> ProxyCheckResult {
+                var result = ProxyCheckResult(checkedAt: checked, exitIP: ip, countryCode: country, timeZoneIdentifier: zone,
+                                              diagnosis: ProxyDiagnosis(verdict: .works, kinds: [kind], authentication: .accepted,
+                                                                        connectedAddress: ip, latencies: latencies,
+                                                                        latencyAttempts: latencies.count),
+                                              city: city, asn: asn, organization: organization)
+                result.latencyMilliseconds = result.diagnosis?.medianLatency
+                return result
+            }
+            func failed(_ diagnosis: ProxyDiagnosis) -> ProxyCheckResult {
+                var result = ProxyCheckResult.dead(diagnosis.verdict == .credentialsNeeded ? .needsCredentials : .noAnswer, at: checked)
+                result.diagnosis = diagnosis
+                return result
+            }
+            let berlin = ProxyListEntry(label: "Berlin 1", proxy: ProxySettings(kind: .socks5, host: "203.0.113.10", port: 1080,
+                                                                              username: "northwind", password: "sample"),
+                                        lastCheck: works(.socks5, "203.0.113.10", "DE", "Europe/Berlin", "Berlin", [80, 84, 97],
+                                                         asn: "AS64500", organization: "Example Networks"))
+            let silent = ProxyListEntry(label: "Whitelisted", proxy: ProxySettings(kind: .httpConnect, host: "198.51.100.40", port: 8000),
+                                        lastCheck: failed(ProxyDiagnosis(verdict: .silent, connectedAddress: "198.51.100.40")))
+            let entries = [
+                berlin,
+                ProxyListEntry(proxy: ProxySettings(kind: .httpConnect, host: "proxy.example.net", port: 3128),
+                               lastCheck: works(.httpConnect, "198.51.100.23", "NL", "Europe/Amsterdam", "Amsterdam", [138, 142, 160])),
+                ProxyListEntry(label: "Tokyo", proxy: ProxySettings(kind: .httpConnect, host: "192.0.2.44", port: 8443, tlsToProxy: true),
+                               lastCheck: works(.httpConnect, "192.0.2.44", "JP", "Asia/Tokyo", "Tokyo", [1730])),
+                silent,
+                ProxyListEntry(label: "Old provider", proxy: ProxySettings(kind: .socks5, host: "192.0.2.7", port: 1080,
+                                                                         username: "olduser", password: "expired"),
+                               lastCheck: failed(ProxyDiagnosis(verdict: .credentialsRejected, kinds: [.socks5], authentication: .rejected,
+                                                                answer: "SOCKS5 login refused (status 1)", connectedAddress: "192.0.2.7"))),
+                ProxyListEntry(proxy: ProxySettings(kind: .socks5, host: "proxy.example.invalid", port: 1080),
+                               lastCheck: failed(ProxyDiagnosis(verdict: .hostNotFound))),
+                ProxyListEntry(proxy: ProxySettings(kind: .socks5, host: "192.0.2.99", port: 1080),
+                               lastCheck: failed(ProxyDiagnosis(verdict: .refused))),
+                ProxyListEntry(proxy: ProxySettings(kind: .socks5, host: "198.51.100.77", port: 9000),
+                               lastCheck: failed(ProxyDiagnosis(verdict: .connectTimeout))),
+                ProxyListEntry(proxy: ProxySettings(kind: .socks5, host: "gw.example.com", port: 9000, username: "user-country-de",
+                                                    password: "sample"),
+                               kindKnown: false),
+            ]
+            try ProxyList(entries: entries).save(to: vault)
+            let proxies = ProxyListModel(vault: vault) { print("FAIL sample proxy list: \($0)") }
+            let counts = [ProxyList.identity(of: berlin.proxy): 3, ProxyList.identity(of: silent.proxy): 2,
+                          ProxyList.identity(of: entries[1].proxy): 1]
+            var problems = 0
+            problems += await Shot(name: "sheet-proxies", size: CGSize(width: 940, height: 720), titled: false) {
+                ProxyListPanel(proxies: proxies, profileCounts: counts, initialSelection: [silent.id])
+            }.capture(into: folder)
+            problems += await Shot(name: "sheet-proxies-works", size: CGSize(width: 940, height: 720), titled: false) {
+                ProxyListPanel(proxies: proxies, profileCounts: counts, initialSelection: [berlin.id])
+            }.capture(into: folder)
+            problems += await Shot(name: "sheet-proxy-edit", size: CGSize(width: 480, height: 470), titled: false) {
+                ProxyEditView(proxies: proxies, entry: berlin, profileCount: 3)
+            }.capture(into: folder)
+            problems += await Shot(name: "sheet-proxy-export", size: CGSize(width: 500, height: 360), titled: false) {
+                ProxyExportView(proxies: proxies, selection: [berlin.id, silent.id])
+            }.capture(into: folder)
+            let problem = ProxyProblem(profileID: UUID(), profileName: "Northwind", proxy: silent.proxy,
+                                       diagnosis: ProxyDiagnosis(verdict: .silent, connectedAddress: "198.51.100.40"))
+            problems += await Shot(name: "sheet-proxy-problem", size: CGSize(width: 580, height: 600), titled: false) {
+                ProxyProblemPanel(problem: problem, more: 1, check: { nil }, close: {}, showInList: {})
+            }.capture(into: folder)
+            return problems
+        } catch {
+            print("FAIL could not make the sample proxy list: \(error)")
+            return 1
+        }
     }
 
     // MARK: Click test
@@ -306,7 +404,7 @@ enum UISnapshots {
                            appearsAs: mac, lastUsed: now),
             ProfileRowItem(id: id(2), name: "Northwind", activity: .running,
                            exit: .proxy(endpoint: "proxy.northwind.example:1080", countryCode: "DE"), ephemeral: false,
-                           appearsAs: mac, lastUsed: now, warmUp: .fixed(page: 3, of: 12)),
+                           appearsAs: mac, lastUsed: now, warmUp: WarmUpStatus(phase: .running, visited: 3, total: 12, cookies: 84)),
             ProfileRowItem(id: id(3), name: "Launch Review", activity: .starting,
                            exit: .proxy(endpoint: "us-east.gateway.example:8080", countryCode: "US"), ephemeral: false,
                            appearsAs: mac, lastUsed: now.addingTimeInterval(-3_600)),

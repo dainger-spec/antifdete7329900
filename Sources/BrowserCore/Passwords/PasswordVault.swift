@@ -53,7 +53,11 @@ public enum PasswordVaultError: Error, Equatable, Sendable {
 /// Key: HKDF(profileKey, "passwords") — the profile key is itself only reachable via the
 /// vault master key, which is only reachable via the user's master password (Argon2id).
 /// The file is one AEAD blob; it is decrypted into memory when the vault is opened
-/// and re-encrypted on every change.
+/// and re-encrypted on every change. The same file can be open in two processes at once (the
+/// manager's password window and the profile's own process, which saves a login when the user
+/// signs in): every read first notices a file the other process rewrote and reads it again, and
+/// every change is made under a lock both processes take (`FileLock`), on what the file holds at
+/// that moment — so neither process's change is lost to the other's.
 ///
 /// LIMITATION: WKWebView has no public password-autofill integration on macOS 26 (Safari's
 /// AutoFill and the iCloud Keychain "Passwords" provider are not exposed to third-party
@@ -64,16 +68,49 @@ public final class PasswordVault: @unchecked Sendable {
     private let profileID: UUID
     private let key: SymmetricKey
     private let lock = NSLock()
-    private var entries: [PasswordEntry]
+    private var storedEntries: [PasswordEntry]
+    /// `FileLock.stamp` of the file `storedEntries` was read from (or written as).
+    private var loadedStamp: String?
 
     init(fileURL: URL, profileID: UUID, profileKey: SymmetricKey) throws {
         self.fileURL = fileURL
         self.profileID = profileID
         self.key = profileKey.derive(info: "passwords", salt: withUnsafeBytes(of: profileID.uuid) { Data($0) })
-        self.entries = []
-        if FileManager.default.fileExists(atPath: fileURL.path) {
+        self.storedEntries = []
+        try reloadIfChanged()
+    }
+
+    /// The entries as the file holds them now. Call with `lock` held.
+    private var entries: [PasswordEntry] {
+        try? reloadIfChanged()
+        return storedEntries
+    }
+
+    /// Reads the file again when another process has replaced it since it was last read here.
+    /// A file that cannot be read keeps what was read before (the next change still writes on
+    /// top of the newest readable state). Call with `lock` held (or from `init`).
+    private func reloadIfChanged() throws {
+        let stamp = FileLock.stamp(of: fileURL)
+        guard stamp != loadedStamp else { return }
+        if stamp == nil {
+            storedEntries = []
+        } else {
             let plaintext = try AEAD.open(SecureFile.read(fileURL), key: key, aad: aad)
-            entries = try JSONCoding.decoder.decode([PasswordEntry].self, from: plaintext)
+            storedEntries = try JSONCoding.decoder.decode([PasswordEntry].self, from: plaintext)
+        }
+        loadedStamp = stamp
+    }
+
+    /// A change: under the lock both processes take, on the file as it is now.
+    private func change(_ body: ([PasswordEntry]) throws -> [PasswordEntry]?) throws {
+        try lock.withLock {
+            try FileLock.withExclusiveLock(on: fileURL) {
+                try reloadIfChanged()
+                guard let updated = try body(storedEntries) else { return }
+                try persist(updated)
+                storedEntries = updated
+                loadedStamp = FileLock.stamp(of: fileURL)
+            }
         }
     }
 
@@ -110,7 +147,7 @@ public final class PasswordVault: @unchecked Sendable {
     /// Replaces the login with `entry.id` (an edit): fails rather than silently merging when
     /// another login already has the same website and user name.
     public func update(_ entry: PasswordEntry) throws {
-        try lock.withLock {
+        try change { entries in
             guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { throw PasswordVaultError.notFound }
             guard !entries.contains(where: { $0.id != entry.id && $0.origin == entry.origin && $0.username == entry.username }) else {
                 throw PasswordVaultError.duplicate
@@ -119,25 +156,23 @@ public final class PasswordVault: @unchecked Sendable {
             var stamped = entry
             stamped.updatedAt = Date()
             updated[index] = stamped
-            try persist(updated)
-            entries = updated
+            return updated
         }
     }
 
     /// Notes that the login was just filled into a page (it is offered first next time).
     public func markUsed(id: UUID, at date: Date = Date()) throws {
-        try lock.withLock {
-            guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        try change { entries in
+            guard let index = entries.firstIndex(where: { $0.id == id }) else { return nil }
             var updated = entries
             updated[index].lastUsedAt = date
-            try persist(updated)
-            entries = updated
+            return updated
         }
     }
 
     /// Inserts or replaces (same origin + username) an entry.
     public func upsert(_ entry: PasswordEntry) throws {
-        try lock.withLock {
+        try change { entries in
             var updated = entries.filter { !($0.origin == entry.origin && $0.username == entry.username) && $0.id != entry.id }
             var stamped = entry
             stamped.updatedAt = Date()
@@ -146,17 +181,12 @@ public final class PasswordVault: @unchecked Sendable {
                 $0.id == entry.id || ($0.origin == entry.origin && $0.username == entry.username)
             }?.lastUsedAt
             updated.append(stamped)
-            try persist(updated)
-            entries = updated
+            return updated
         }
     }
 
     public func remove(id: UUID) throws {
-        try lock.withLock {
-            let updated = entries.filter { $0.id != id }
-            try persist(updated)
-            entries = updated
-        }
+        try change { entries in entries.filter { $0.id != id } }
     }
 
     private func persist(_ entries: [PasswordEntry]) throws {

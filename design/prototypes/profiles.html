@@ -1,0 +1,704 @@
+<!doctype html>
+<html lang="ru" class="v-proposed">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Profiles — prototype</title>
+<link rel="stylesheet" href="kit/lumen.css">
+<style>
+  /* The Profiles window, PROPOSED. Numbers in comments are points; the Swift names they would become
+     are in design/README.md, section 2. */
+  .sidebar {
+    width: 208px; flex: none; background: var(--sidebar); border-right: 1px solid var(--hairline);
+    display: flex; flex-direction: column; padding: 0 10px 14px;
+  }
+  .sidebar .band { height: 40px; flex: none; }                      /* the traffic lights sit here */
+  .sidebar .brand { padding: 0 10px 20px; flex: none; }
+  .sidebar .scrollable { flex: 1; min-height: 0; overflow: auto; scrollbar-width: none; margin: 0 -10px; padding: 0 10px; }
+  .side-title { font: var(--tColumn); color: var(--textTertiary); padding: 16px 10px 6px; }
+  .side-item {
+    display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: var(--controlRadius);
+    width: 100%; border: 0; background: transparent; color: var(--textPrimary); font: var(--tBody); text-align: left;
+    transition: background-color var(--hoverOut) var(--hoverEase);
+  }
+  .side-item:hover { background: var(--rowHover); transition-duration: var(--hoverIn); }
+  .side-item.on { background: rgba(255, 255, 255, 0.08); font-weight: 500; }
+  .side-item .icon { width: 16px; height: 16px; color: var(--textSecondary); }
+  .side-item.on .icon { color: var(--accent); }
+  .side-item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .side-item .count { font: var(--tCaption); color: var(--textTertiary); font-variant-numeric: tabular-nums; }
+  .side-item .flag-slot { width: 16px; display: flex; justify-content: center; }
+  .side-foot { flex: none; padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .sync-line { display: flex; align-items: flex-start; gap: 8px; padding: 4px 8px; border-radius: var(--controlRadius); font: var(--tCaption); color: var(--textSecondary); }
+  .sync-line .icon { width: 14px; height: 14px; color: var(--textTertiary); margin-top: 0; }
+  .sync-line.failed, .sync-line.failed .icon { color: var(--warning); }
+
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--surface); }
+  .header { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 16px 0 24px; }
+  .header .titles { display: flex; align-items: baseline; gap: 10px; min-width: 0; flex: 1; overflow: hidden; }
+  .header .count { font: var(--tBody); color: var(--textSecondary); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .header .search { width: 240px; }
+  .header .working { margin-right: 4px; }
+  .selection-bar { display: flex; align-items: center; gap: 8px; }
+  .selection-bar .n { font: var(--tLabel); color: var(--textPrimary); margin-right: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+  .chips { display: flex; align-items: center; gap: 6px; padding: 8px 24px 0; flex: none; }
+  .banner-wrap { padding: 10px 16px 0; flex: none; }
+
+  .list { flex: 1; min-height: 0; overflow: auto; scrollbar-width: none; padding: 0 16px 16px; outline: none; }
+  .list::-webkit-scrollbar { display: none; }
+  .cols, .row { display: flex; align-items: center; gap: 12px; padding: 0 8px; }
+  .cols { height: 28px; font: var(--tColumn); color: var(--textTertiary); border-bottom: 1px solid var(--divider); margin-top: 4px; position: sticky; top: 0; background: var(--surface); z-index: 2; }
+  .cols .sortable { display: inline-flex; align-items: center; gap: 3px; cursor: default; }
+  .cols .sortable .icon { width: 10px; height: 10px; }
+  .c-name { flex: 1; min-width: 0; display: flex; align-items: center; }
+  .c-status { width: 196px; flex: none; }
+  .c-exit { width: 140px; flex: none; }
+  .c-appears { width: 120px; flex: none; }
+  .c-last { width: 104px; flex: none; }   /* short relative dates: «1 нед. назад» ~78 pt, «4 минуты назад» ~101 */
+  .c-actions { width: 92px; flex: none; display: flex; justify-content: flex-end; gap: 4px; }
+  .no-appears .c-appears, .no-last .c-last { display: none; }
+  .lead { width: 16px; flex: none; display: flex; align-items: center; margin-right: 8px; }
+  .lead .checkbox { opacity: 0; }
+  .row:hover .lead .checkbox, .has-selection .lead .checkbox, .row.cursor .lead .checkbox, .lead .checkbox.on { opacity: 1; }
+  .cols .lead .checkbox { opacity: 1; }
+
+  .group-head { height: 32px; display: flex; align-items: flex-end; gap: 6px; padding: 0 8px 6px; font: var(--tColumn); }
+  .group-head .t { color: var(--textSecondary); font-weight: 600; }
+  .group-head .n { color: var(--textTertiary); font-variant-numeric: tabular-nums; }
+
+  .row {
+    position: relative; height: var(--rowH, 36px); border-radius: var(--controlRadius);
+    transition: background-color var(--hoverOut) var(--hoverEase);
+  }
+  .row::after { content: ''; position: absolute; left: 60px; right: 8px; bottom: 0; height: 1px; background: var(--divider); }
+  .row:hover { background: var(--rowHover); transition-duration: var(--hoverIn); }
+  .row.selected { background: var(--rowSelected); transition: none; }
+  .row.selected::before { content: ''; position: absolute; left: 0; top: 4px; bottom: 4px; width: 2px; border-radius: 1px; background: var(--selectionBar); }
+  .row.cursor { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .row .name { font: var(--tLabel); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .row .avatar { margin-right: 8px; }
+  .row .tag { margin-left: 6px; color: var(--textTertiary); display: inline-flex; }
+  .row .tag .icon { width: 12px; height: 12px; }
+  .row .cell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .exit { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .row .exit .text { overflow: hidden; text-overflow: ellipsis; }
+  .row .exit .icon { width: 14px; height: 14px; color: var(--textTertiary); }
+  .row .status .tail { color: var(--textSecondary); margin-left: 4px; }
+  .row .status.s-failed .label { color: var(--warning); }
+  .row .status.s-sealing .label, .row .status.s-starting .label { color: var(--textSecondary); }
+  .row .c-actions .icon-btn { width: 28px; height: 28px; }
+  .row .c-actions .icon-btn .icon { width: 13px; height: 13px; }
+  .row.moving { transition: transform var(--appearDur) var(--appearEase); }
+  .footnote { display: flex; align-items: center; gap: 6px; padding: 16px 8px 0; font: var(--tCaption); color: var(--textTertiary); }
+  .footnote .icon { width: 12px; height: 12px; }
+
+  /* Effects comparison (?material=sidebar|all&wallpaper=warm|dark|busy): what a native material would
+     look like. The window sits on a desktop wallpaper; the sidebar shows it blurred (behind-window), and
+     with "all" the header also shows the list scrolled under it (within-window). Approximates
+     NSVisualEffectView .sidebar / .headerView in dark appearance; the real material differs. */
+  body.desk { padding: 28px; }
+  body.desk.wall-warm { background: radial-gradient(circle at 18% 28%, #FFB38A 0, transparent 46%), radial-gradient(circle at 72% 62%, #FF7EB3 0, transparent 52%), radial-gradient(circle at 38% 92%, #FFE066 0, transparent 46%), #F6C49B; }
+  body.desk.wall-dark { background: radial-gradient(circle at 28% 22%, #3B4CCA 0, transparent 52%), radial-gradient(circle at 80% 78%, #6A2C91 0, transparent 50%), #0D1030; }
+  body.desk.wall-busy { background: repeating-linear-gradient(115deg, #F2F2F2 0 46px, #1B1B1B 46px 92px, #E3B23C 92px 138px, #2A6F97 138px 184px); }
+  body.desk .window { border-radius: 14px; box-shadow: 0 0 0 1px rgba(0,0,0,.5), 0 22px 60px rgba(0,0,0,.45); background: transparent; }
+  .mat .sidebar { background: rgba(28, 30, 36, 0.80); -webkit-backdrop-filter: blur(34px) saturate(1.7); backdrop-filter: blur(34px) saturate(1.7); }
+  .mat .main { background: var(--surface); }
+  .mat-all .main { position: relative; }
+  .mat-all .header { position: absolute; left: 0; right: 0; top: 0; z-index: 4; background: rgba(22, 25, 32, 0.62); -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6); }
+  .mat-all .list { padding-top: 53px; }
+  .mat-all .cols { position: static; }
+  .mat-all .menu { background: rgba(38, 42, 51, 0.62); -webkit-backdrop-filter: blur(28px) saturate(1.6); backdrop-filter: blur(28px) saturate(1.6); }
+  .menu {
+    position: fixed; z-index: 30; min-width: 220px; padding: 5px; border-radius: 8px;
+    background: #262A33; border: 1px solid rgba(255, 255, 255, 0.12); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    font: var(--tBody);
+  }
+  .menu button { display: flex; width: 100%; align-items: center; gap: 8px; height: 24px; padding: 0 10px; border: 0; background: none; border-radius: 4px; text-align: left; color: var(--textPrimary); }
+  .menu button:hover { background: var(--accentFillStrong); color: #fff; }
+  .menu button.danger { color: var(--danger); }
+  .menu button.danger:hover { color: #fff; }
+  .menu hr { border: 0; height: 1px; background: rgba(255, 255, 255, 0.10); margin: 5px 6px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="kit/wordmark.js"></script>
+<script src="kit/geometry.js"></script>
+<script src="kit/strings.js"></script>
+<script src="kit/icons.js"></script>
+<script src="kit/lumen.js"></script>
+<script>
+(function () {
+  'use strict';
+  const { L, H, icon, params } = Lumen;
+  const en = Lumen.lang === 'en';
+
+  // MARK: Sample data — the rows of UISnapshots.sampleRows(), so "after" shows what "before" shows.
+
+  const T = (ruText, enText) => (en ? enText : ruText);
+  const mac = L('profiles.appearsAs', L('profiles.device.mac'), '26');
+  const iphone = L('profiles.appearsAs', L('profiles.device.iphone'), '26');
+  // PROPOSED: in the table, dates older than yesterday in the short form
+  // (.relative(presentation: .numeric, unitsStyle: .abbreviated)); «на прошлой неделе» does not fit a column.
+  const ago = {
+    yesterday: T('вчера', 'yesterday'), days3: T('3 дн. назад', '3 days ago'), hours2: T('2 ч назад', '2 hr. ago'),
+    days5: T('5 дн. назад', '5 days ago'), week: T('1 нед. назад', '1 wk. ago'), month: T('1 мес. назад', '1 mo. ago'),
+    min4: T('4 мин. назад', '4 min. ago'),
+    min4Long: T('4 минуты назад', '4 minutes ago'),  // the sidebar's sync line has room for the long form
+  };
+  const COUNTRY = {
+    DE: T('Германия', 'Germany'), NL: T('Нидерланды', 'Netherlands'), PT: T('Португалия', 'Portugal'), US: T('США', 'United States'),
+    GB: T('Великобритания', 'United Kingdom'), FR: T('Франция', 'France'), SE: T('Швеция', 'Sweden'), JP: T('Япония', 'Japan'),
+    PL: T('Польша', 'Poland'), ES: T('Испания', 'Spain'),
+  };
+
+  function sampleRows() {
+    return [
+      { n: 1, name: 'Personal', activity: 'running', exit: null, ephemeral: false, appears: mac, last: 'now' },
+      { n: 2, name: 'Northwind', activity: 'running', exit: { code: 'DE', endpoint: 'proxy.northwind.example:1080' }, appears: mac, last: 'now', warmUp: { page: 4, total: 12, cookies: 84 } },
+      { n: 3, name: 'Launch Review', activity: 'starting', exit: { code: 'US', endpoint: 'us-east.gateway.example:8080' }, appears: mac, last: 'now' },
+      { n: 4, name: 'Research', activity: 'stopped', exit: { code: 'NL', endpoint: 'nl.gateway.example:1080' }, appears: iphone, last: ago.yesterday },
+      { n: 5, name: 'Travel', activity: 'sealing', exit: { code: 'PT', endpoint: 'lisbon.example:1080' }, appears: mac, last: 'now' },
+      { n: 6, name: 'Shopping', activity: 'stopped', exit: null, ephemeral: true, appears: mac, last: ago.days3 },
+      { n: 7, name: 'Banking', activity: 'stopped', exit: { code: null, endpoint: '10.20.0.2:3128' }, appears: mac, last: 'never' },
+    ];
+  }
+
+  /// Many profiles, as a working day looks: a few running, most sealed.
+  function scaleRows() {
+    const rows = sampleRows();
+    const specs = [
+      ['Retail DE', 'DE', 6], ['Retail NL', 'NL', 3], ['Market US', 'US', 5], ['Social UK', 'GB', 3], ['Social FR', 'FR', 2],
+      ['QA iPhone', 'US', 3], ['Support PT', 'PT', 2], ['Ads SE', 'SE', 2], ['Ads JP', 'JP', 1], ['Ops PL', 'PL', 2], ['Ops ES', 'ES', 2],
+    ];
+    const lastValues = [ago.hours2, ago.yesterday, ago.days3, ago.days5, ago.week, ago.month, 'never'];
+    let n = 8;
+    for (const [base, code, count] of specs) {
+      for (let i = 1; i <= count; i++) {
+        rows.push({ n, name: `${base} ${String(i).padStart(2, '0')}`, activity: 'stopped',
+          exit: { code, endpoint: `${code.toLowerCase()}${i}.gateway.example:1080` },
+          appears: base === 'QA iPhone' ? iphone : mac, last: lastValues[(n * 3) % lastValues.length], ephemeral: n % 11 === 0 });
+        n++;
+      }
+    }
+    for (const name of ['Archive 2025', 'Billing', 'Demo account', 'Docs review', 'Mail 01', 'Mail 02', 'Partner portal', 'Press', 'Recruiting', 'Staging']) {
+      rows.push({ n, name, activity: 'stopped', exit: null, appears: mac, last: lastValues[(n * 5) % lastValues.length], ephemeral: name === 'Staging' });
+      n++;
+    }
+    const set = (name, changes) => Object.assign(rows.find((r) => r.name === name), changes);
+    set('Retail DE 03', { activity: 'running', last: 'now' });
+    set('Market US 02', { activity: 'running', last: 'now', warmUp: { page: 9, total: 20, cookies: 213 } });
+    set('Social UK 01', { activity: 'running', last: 'now' });
+    set('Ads JP 01', { activity: 'failed', last: ago.hours2 });
+    return rows;
+  }
+
+  // MARK: Scenarios — the CI snapshot names and window sizes (UISnapshots.swift), and a few more.
+
+  const SCENARIOS = {
+    default:   { title: T('Обычный', 'Default'), w: 1180, h: 740, rows: sampleRows, sync: { kind: 'synced' } },
+    narrow:    { title: T('Узкое окно', 'Narrow'), w: 920, h: 620, rows: sampleRows, sync: { kind: 'off' }, working: true },
+    proxied:   { title: T('Через прокси', 'Proxied'), w: 1180, h: 560, rows: sampleRows, sync: { kind: 'failed' }, filter: 'proxied' },
+    empty:     { title: T('Пусто', 'Empty'), w: 1180, h: 640, rows: () => [], sync: { kind: 'notYet' } },
+    nomatch:   { title: T('Нет совпадений', 'No matches'), w: 1180, h: 520, rows: sampleRows, sync: { kind: 'syncing' }, search: 'zzz' },
+    selection: { title: T('Пачкой', 'Batch'), w: 1180, h: 740, rows: sampleRows, sync: { kind: 'synced' }, selected: [4, 6, 7, 2] },
+    scale:     { title: T('60 профилей', '60 profiles'), w: 1180, h: 740, rows: scaleRows, sync: { kind: 'synced' } },
+    filtered:  { title: T('Фильтры', 'Filters'), w: 1180, h: 740, rows: scaleRows, sync: { kind: 'synced' }, country: 'DE', filter: 'proxied' },
+    error:     { title: T('Ошибка запуска', 'Launch error'), w: 1180, h: 740, rows: () => sampleRows().map((r) => (r.name === 'Banking' ? { ...r, activity: 'failed', last: ago.min4 } : r)), sync: { kind: 'synced' }, banner: 'Banking' },
+    keyboard:  { title: T('С клавиатуры', 'Keyboard'), w: 1180, h: 740, rows: sampleRows, sync: { kind: 'synced' }, cursor: 4, selected: [4] },
+  };
+  const scenarioId = SCENARIOS[params.get('state')] ? params.get('state') : 'default';
+  const scenario = SCENARIOS[scenarioId];
+  const width = Number(params.get('w')) || scenario.w;
+  const height = Number(params.get('h')) || scenario.h;
+
+  const state = {
+    rows: scenario.rows().map((r) => ({ ...r, group: isActive(r) ? 'running' : 'ready' })),
+    filter: scenario.filter || 'all',
+    country: scenario.country || null,
+    search: scenario.search || '',
+    selected: new Set(scenario.selected || []),
+    cursor: scenario.cursor || null,
+    // ?sort=status: one flat list ordered by status instead of the Running / Ready groups (a question for the owner)
+    sort: params.get('sort') === 'status' ? { key: 'status', dir: 1 } : null,
+    working: !!scenario.working,
+    sync: scenario.sync,
+    banner: scenario.banner || null,
+    pointerInList: false,
+    anchor: null,
+  };
+
+  function isActive(r) { return r.activity !== 'stopped' && r.activity !== 'failed'; }
+  function usesProxy(r) { return !!r.exit; }
+
+  // MARK: Filtering, as ProfileFilter plus the proposed country facet and a wider search
+
+  function includes(r) {
+    switch (state.filter) {
+      case 'running': if (!isActive(r)) return false; break;
+      case 'proxied': if (!usesProxy(r)) return false; break;
+      case 'direct': if (usesProxy(r)) return false; break;
+      case 'ephemeral': if (!r.ephemeral) return false; break;
+    }
+    if (state.country) {
+      if (state.country === '?') { if (!(r.exit && !r.exit.code)) return false; }
+      else if (!(r.exit && r.exit.code === state.country)) return false;
+    }
+    const q = state.search.trim().toLowerCase();
+    if (q) {
+      const hay = [r.name, r.exit && r.exit.code ? COUNTRY[r.exit.code] : '', r.exit ? r.exit.endpoint : '', r.appears].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  }
+
+  function visibleRows() {
+    let rows = state.rows.filter(includes);
+    if (state.sort) {
+      const { key, dir } = state.sort;
+      const value = (r) => key === 'name' ? r.name.toLowerCase() : key === 'exit' ? (r.exit ? (r.exit.code ? COUNTRY[r.exit.code] : r.exit.endpoint) : '') : key === 'status' ? ['failed', 'starting', 'running', 'sealing', 'stopped'].indexOf(r.activity) : r.name;
+      rows = [...rows].sort((a, b) => (value(a) > value(b) ? dir : value(a) < value(b) ? -dir : 0));
+    }
+    return rows;
+  }
+
+  // MARK: Rendering
+
+  const win = Lumen.shell({
+    title: T('Профили — предлагаемый вид', 'Profiles — proposed'), width, height,
+    scenarios: Object.entries(SCENARIOS).map(([id, s]) => ({ id, title: s.title })),
+    note: T('Клик — выбрать, ⌘/⇧-клик — пачкой, двойной клик — запустить, ↑↓ Space Return Esc ⌘A ⌘F — с клавиатуры', 'Click to select, ⌘/⇧-click for several, double-click to launch; ↑↓ Space Return Esc ⌘A ⌘F'),
+  });
+
+  // ?row=32: the compact density (a question for the owner); 36 is the proposal.
+  if (params.get('row')) document.documentElement.style.setProperty('--rowH', params.get('row') + 'px');
+  const contentWidth = width - 209;
+  const inner = contentWidth - 48;
+  const showsLast = inner >= 52 + 140 + 196 + 140 + 92 + 104 + 4 * 12;
+  const showsAppears = inner >= 52 + 140 + 196 + 140 + 92 + 104 + 120 + 5 * 12;
+
+  function syncLine() {
+    const s = state.sync;
+    const map = {
+      off: ['syncArrows', L('profiles.sync.off')], notYet: ['checkmarkIcloud', L('profiles.sync.notYet')],
+      syncing: ['syncArrows', L('profiles.sync.syncing')], failed: ['exclamationTriangle', L('profiles.sync.failed')],
+      synced: ['checkmarkIcloud', L('profiles.sync.synced', ago.min4Long)],
+    };
+    const [sym, text] = map[s.kind];
+    return `<div class="sync-line ${s.kind}" title="${Lumen.escapeHTML(L('profiles.menu.sync'))}">${icon(sym, 14)}<span>${Lumen.escapeHTML(text)}</span></div>`;
+  }
+
+  function sidebar() {
+    const count = (fn) => state.rows.filter(fn).length;
+    const item = (id, sym, label, n, extra = '') =>
+      `<button class="side-item ${state.filter === id && !state.country ? 'on' : ''}" data-filter="${id}" ${extra}>${icon(sym, 16)}<span class="name">${label}</span><span class="count">${n}</span></button>`;
+    const countries = {};
+    for (const r of state.rows) if (r.exit) { const k = r.exit.code || '?'; countries[k] = (countries[k] || 0) + 1; }
+    const order = Object.entries(countries).sort((a, b) => (a[0] === '?') - (b[0] === '?') || b[1] - a[1] || (COUNTRY[a[0]] || '').localeCompare(COUNTRY[b[0]] || ''));
+    const countryItems = order.map(([code, n]) => {
+      const flag = code === '?' ? `<span class="flag-slot" style="color:var(--textTertiary)">${icon('network', 14)}</span>` : `<span class="flag-slot">${Lumen.flagSVG(code, 14)}</span>`;
+      const label = code === '?' ? H('profiles.countries.unknown') : COUNTRY[code];
+      return `<button class="side-item ${state.country === code ? 'on' : ''}" data-country="${code}">${flag}<span class="name">${label}</span><span class="count">${n}</span></button>`;
+    }).join('');
+    return `
+      <aside class="sidebar">
+        <div class="band"></div>
+        <div class="brand">${Lumen.lockupHTML('sidebar')}</div>
+        <div class="scrollable">
+          ${item('all', 'person2', H('profiles.filter.all'), state.rows.length)}
+          ${item('running', 'playCircle', H('profiles.filter.running'), count(isActive))}
+          ${order.length ? `<div class="side-title">${H('profiles.countries')}</div>${countryItems}` : ''}
+          <div class="side-title">${H('profiles.filters')}</div>
+          ${item('proxied', 'network', H('profiles.filter.proxied'), count(usesProxy))}
+          ${item('direct', 'arrowRight', H('profiles.exit.direct'), count((r) => !usesProxy(r)))}
+          ${item('ephemeral', 'hourglass', H('profiles.filter.ephemeral'), count((r) => r.ephemeral))}
+        </div>
+        <div class="side-foot">
+          ${syncLine()}
+          <button class="btn secondary full" title="${Lumen.escapeHTML(L('profiles.action.lock.help'))}">${icon('lock', 13)}${H('profiles.action.lock')}</button>
+        </div>
+      </aside>`;
+  }
+
+  function header() {
+    const running = state.rows.filter(isActive).length;
+    const countText = running > 0 ? L('profiles.countRunning', state.rows.length, running) : L('profiles.count', state.rows.length);
+    const sel = [...state.selected].map((n) => state.rows.find((r) => r.n === n)).filter(Boolean);
+    let right;
+    if (sel.length >= 2) {
+      const canLaunch = sel.filter((r) => r.activity === 'stopped' || r.activity === 'failed').length;
+      const canStop = sel.filter((r) => r.activity === 'running').length;
+      right = `
+        <div class="selection-bar">
+          <span class="n">${H('profiles.selection.count', sel.length)}</span>
+          <button class="btn primary" data-batch="launch" ${canLaunch ? '' : 'disabled'}>${icon('playFill', 12)}${H('profiles.selection.launch', canLaunch)}</button>
+          <button class="btn secondary" data-batch="stop" ${canStop ? '' : 'disabled'}>${icon('stopFill', 12)}${H('profiles.selection.stop', canStop)}</button>
+          <button class="btn secondary" data-batch="warm">${icon('flame', 13)}${H('profiles.row.warmUp')}</button>
+          <button class="icon-btn" data-batch="more" title="${Lumen.escapeHTML(L('profiles.menu.more'))}" aria-label="${Lumen.escapeHTML(L('profiles.menu.more'))}">${icon('ellipsis', 14)}</button>
+          <span class="hairline-v" style="height:20px;margin:0 4px"></span>
+          <button class="btn ghost" data-batch="clear">${H('profiles.selection.clear')}</button>
+        </div>`;
+    } else {
+      right = `
+        ${state.working ? '<i class="spinner working" aria-label="…"></i>' : ''}
+        <label class="field search">${icon('magnifyingglass', 12)}<input id="search" value="${Lumen.escapeHTML(state.search)}" placeholder="${Lumen.escapeHTML(L('profiles.search.prompt'))}" aria-label="${Lumen.escapeHTML(L('profiles.search'))}">${state.search ? `<button class="clear" data-clear aria-label="${Lumen.escapeHTML(L('profiles.search.clear'))}">${icon('xmarkCircleFill', 12)}</button>` : ''}</label>
+        <button class="icon-btn" data-more-header title="${Lumen.escapeHTML(L('profiles.menu.more'))}" aria-label="${Lumen.escapeHTML(L('profiles.menu.more'))}">${icon('ellipsis', 14)}</button>
+        <button class="btn primary" data-new>${icon('plus', 12)}${H('profiles.action.new')}</button>`;
+    }
+    return `
+      <div class="header">
+        <div class="titles"><span class="t-title">${H('profiles.title')}</span><span class="count">${Lumen.escapeHTML(countText)}</span></div>
+        ${right}
+      </div>
+      <div class="divider-h"></div>`;
+  }
+
+  function chips() {
+    const parts = [];
+    if (state.country) {
+      const label = state.country === '?' ? L('profiles.countries.unknown') : COUNTRY[state.country];
+      const flag = state.country === '?' ? icon('network', 12) : Lumen.flagSVG(state.country, 12);
+      parts.push(`<span class="chip">${flag}${Lumen.escapeHTML(label)}<span class="x" data-unchip="country">${icon('xmark', 10)}</span></span>`);
+    }
+    if (state.filter !== 'all') {
+      const key = { running: 'profiles.filter.running', proxied: 'profiles.filter.proxied', direct: 'profiles.exit.direct', ephemeral: 'profiles.filter.ephemeral' }[state.filter];
+      parts.push(`<span class="chip">${H(key)}<span class="x" data-unchip="filter">${icon('xmark', 10)}</span></span>`);
+    }
+    if (!parts.length || !state.rows.length) return '';
+    return `<div class="chips">${parts.join('')}<button class="btn ghost small" data-unchip="all">${H('profiles.filter.clearAll')}</button></div>`;
+  }
+
+  function banner() {
+    if (!state.banner) return '';
+    return `<div class="banner-wrap"><div class="banner" role="alert">${icon('exclamationTriangleFill', 14)}<span class="msg">${H('profiles.banner.didNotStart', state.banner)}</span>
+      <button class="btn secondary small" data-banner-fix>${H('profiles.banner.fix')}</button>
+      <button class="icon-btn" style="width:24px;height:24px" data-banner-close aria-label="${Lumen.escapeHTML(L('common.done'))}">${icon('xmark', 12)}</button></div></div>`;
+  }
+
+  function exitCell(r) {
+    if (!r.exit) return `<span class="exit c-secondary">${icon('arrowRight', 14)}<span class="text">${H('profiles.exit.direct')}</span></span>`;
+    if (!r.exit.code) return `<span class="exit" title="${Lumen.escapeHTML(L('profiles.exit.unknownCountry'))}">${icon('network', 14)}<span class="text">${Lumen.escapeHTML(r.exit.endpoint)}</span></span>`;
+    return `<span class="exit" title="${Lumen.escapeHTML(L('profiles.exit.viaProxy', r.exit.endpoint))}">${Lumen.flagSVG(r.exit.code, 14)}<span class="text">${Lumen.escapeHTML(COUNTRY[r.exit.code])}</span></span>`;
+  }
+
+  function statusCell(r) {
+    switch (r.activity) {
+      case 'running':
+        if (r.warmUp) {
+          return Lumen.statusHTML('warmup', `<span class="num">${H('profiles.row.warmUpShort', r.warmUp.page, r.warmUp.total)}</span>`,
+            { fraction: r.warmUp.page / r.warmUp.total, tail: `<span class="num">${H('profiles.row.warmUpCookies', r.warmUp.cookies)}</span>` });
+        }
+        return Lumen.statusHTML('running', H('profiles.row.running'));
+      case 'starting': return Lumen.statusHTML('starting', H('profiles.row.starting'));
+      case 'sealing': return Lumen.statusHTML('sealing', H('profiles.row.encrypting'));
+      case 'failed': return Lumen.statusHTML('failed', H('profiles.status.failed'));
+      default: return `<span aria-label="${Lumen.escapeHTML(L('profiles.status.stopped'))}">${Lumen.statusHTML('stopped', '')}</span>`;
+    }
+  }
+
+  function actionsCell(r) {
+    const more = `<button class="icon-btn" data-more="${r.n}" ${r.activity === 'starting' || r.activity === 'sealing' ? 'disabled' : ''} title="${Lumen.escapeHTML(L('profiles.row.moreFor', r.name))}" aria-label="${Lumen.escapeHTML(L('profiles.row.moreFor', r.name))}">${icon('ellipsis', 14)}</button>`;
+    if (r.activity === 'running') {
+      return `<button class="icon-btn" data-act="stop" data-n="${r.n}" title="${Lumen.escapeHTML(L('profiles.row.stop'))}" aria-label="${Lumen.escapeHTML(L('profiles.row.stop'))}">${icon('stopFill', 13)}</button>` +
+        `<button class="icon-btn" data-act="window" data-n="${r.n}" title="${Lumen.escapeHTML(L('profiles.row.newWindow'))}" aria-label="${Lumen.escapeHTML(L('profiles.row.newWindow'))}">${icon('newWindow', 14)}</button>` + more;
+    }
+    if (r.activity === 'stopped' || r.activity === 'failed') {
+      return `<button class="icon-btn" data-act="launch" data-n="${r.n}" title="${Lumen.escapeHTML(L('profiles.row.launch'))}" aria-label="${Lumen.escapeHTML(L('profiles.row.launch'))}">${icon('playFill', 13)}</button>` + more;
+    }
+    return more;
+  }
+
+  function rowHTML(r) {
+    const p = Lumen.avatar.sampleAvatarIndex(r.n);
+    const selected = state.selected.has(r.n);
+    return `
+      <div class="row ${selected ? 'selected' : ''} ${state.cursor === r.n ? 'cursor' : ''}" data-row="${r.n}" role="row" aria-selected="${selected}">
+        <div class="c-name">
+          <span class="lead"><button class="checkbox ${selected ? 'on' : ''}" data-check="${r.n}" tabindex="-1" aria-label="${Lumen.escapeHTML(r.name)}">${icon('check', 12)}</button></span>
+          ${Lumen.avatarHTML(r.name, p, 20)}
+          <span class="name">${Lumen.escapeHTML(r.name)}</span>
+          ${r.ephemeral ? `<span class="tag" title="${Lumen.escapeHTML(L('profiles.row.ephemeral'))}">${icon('hourglass', 12)}</span>` : ''}
+        </div>
+        <div class="c-status cell">${statusCell(r)}</div>
+        <div class="c-exit cell">${exitCell(r)}</div>
+        <div class="c-appears cell">${Lumen.escapeHTML(r.appears)}</div>
+        <div class="c-last cell c-secondary num">${Lumen.escapeHTML(r.last === 'now' ? L('profiles.lastUsed.now') : r.last === 'never' ? L('profiles.lastUsed.never') : r.last)}</div>
+        <div class="c-actions">${actionsCell(r)}</div>
+      </div>`;
+  }
+
+  function columns(rows) {
+    const all = rows.length && rows.every((r) => state.selected.has(r.n));
+    const some = !all && rows.some((r) => state.selected.has(r.n));
+    const sortIcon = (key) => state.sort && state.sort.key === key ? icon(state.sort.dir > 0 ? 'chevronUp' : 'chevronDown', 10) : '';
+    return `
+      <div class="cols" role="row">
+        <div class="c-name"><span class="lead"><button class="checkbox ${all ? 'on' : some ? 'mixed' : ''}" data-check-all tabindex="-1" aria-label="${Lumen.escapeHTML(L('profiles.filter.all'))}">${icon('check', 12)}</button></span>
+          <span class="sortable" data-sort="name" style="margin-left:28px">${H('profiles.column.name')}${sortIcon('name')}</span></div>
+        <div class="c-status"><span class="sortable" data-sort="status">${H('profiles.column.status')}${sortIcon('status')}</span></div>
+        <div class="c-exit"><span class="sortable" data-sort="exit">${H('profiles.column.exit')}${sortIcon('exit')}</span></div>
+        <div class="c-appears">${H('profiles.column.appearsAs')}</div>
+        <div class="c-last">${H('profiles.column.lastUsed')}</div>
+        <div class="c-actions"></div>
+      </div>`;
+  }
+
+  function content() {
+    if (!state.rows.length) {
+      return `<div class="state" style="flex:1">
+        <div class="art">${Lumen.geometry.glyphSVG(44, 'rgba(138,147,163,0.55)')}</div>
+        <div class="title">${H('profiles.empty.title')}</div>
+        <div class="msg">${H('profiles.empty.subtitle')}</div>
+        <div class="actions"><button class="btn primary" data-new>${icon('plus', 12)}${H('profiles.action.new')}</button></div>
+      </div>`;
+    }
+    const rows = visibleRows();
+    if (!rows.length) {
+      return `<div class="state" style="flex:1">
+        <div class="art">${icon('magnifyingglass', 28)}</div>
+        <div class="title">${H('profiles.noMatches')}</div>
+        ${state.search ? `<div class="msg">${H('profiles.noMatches.hint', state.search)}</div>` : '<div style="height:14px"></div>'}
+        <div class="actions"><button class="btn secondary" data-showall>${H('profiles.showAll')}</button></div>
+      </div>`;
+    }
+    const groups = state.sort ? [['', rows]] : [
+      [L('profiles.group.running'), rows.filter((r) => r.group === 'running')],
+      [L('profiles.group.ready'), rows.filter((r) => r.group !== 'running')],
+    ];
+    const body = groups.filter(([, rs]) => rs.length).map(([title, rs]) =>
+      (title ? `<div class="group-head" role="rowheader"><span class="t">${Lumen.escapeHTML(title)}</span><span class="n">· ${rs.length}</span></div>` : '') +
+      rs.map(rowHTML).join('')).join('');
+    return `
+      <div class="list ${showsLast ? '' : 'no-last'} ${showsAppears ? '' : 'no-appears'} ${state.selected.size >= 2 ? 'has-selection' : ''}" id="list" tabindex="0" role="grid" aria-label="${Lumen.escapeHTML(L('profiles.title'))}">
+        ${columns(rows)}
+        ${body}
+        <div class="footnote">${icon('lock', 12)}${H('profiles.footnote.sealed')}</div>
+      </div>`;
+  }
+
+  function render() {
+    const scrollTop = document.getElementById('list') ? document.getElementById('list').scrollTop : 0;
+    const searchFocused = document.activeElement && document.activeElement.id === 'search';
+    win.innerHTML = `<div class="traffic"><i></i><i></i><i></i></div>${sidebar()}
+      <main class="main">${header()}${banner()}${chips()}${content()}</main>`;
+    const list = document.getElementById('list');
+    if (list) list.scrollTop = scrollTop;
+    if (searchFocused) { const s = document.getElementById('search'); s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
+    fitHeader();
+    applyMaterial();
+  }
+
+  function applyMaterial() {
+    const material = params.get('material');
+    if (!material || material === 'none') return;
+    document.body.style.background = '';   // the frameless shell paints the body; the desktop shows instead
+    document.body.classList.add('desk', `wall-${params.get('wallpaper') || 'warm'}`);
+    if (material === 'flat') return;   // the same window on the same desktop, without any material
+    win.classList.add('mat', material === 'all' ? 'mat-all' : 'mat-sidebar');
+    if (material === 'all') {
+      const list = document.getElementById('list');
+      if (list && !list.dataset.scrolled) { list.scrollTop = 44; list.dataset.scrolled = '1'; }
+      if (!document.querySelector('.menu')) {
+        const more = win.querySelector('[data-more="4"]');
+        if (more) { const b = more.getBoundingClientRect(); openMenu(b.left - 190, b.bottom + 4, state.rows.find((r) => r.n === 4)); }
+      }
+    }
+  }
+
+  /// ViewThatFits: the count gives way first, as in ProfilesScreen.header.
+  function fitHeader() {
+    const titles = win.querySelector('.header .titles');
+    const count = win.querySelector('.header .count');
+    if (titles && count && count.offsetLeft + count.offsetWidth > titles.offsetLeft + titles.clientWidth + 1) count.style.visibility = 'hidden';
+  }
+
+  // MARK: Behaviour (interactive mode)
+
+  function setActivity(n, activity, extra = {}) {
+    const r = state.rows.find((x) => x.n === n);
+    if (!r) return;
+    Object.assign(r, { activity }, extra);
+    if (activity === 'running' || activity === 'starting') r.last = 'now';
+    // PROPOSED: a row does not jump to its new group under the pointer; it moves once the pointer
+    // leaves the list (see motion.html). Without a pointer in the list it moves at once.
+    if (!state.pointerInList) settleGroups();
+    render();
+  }
+
+  function settleGroups() {
+    const before = new Map([...win.querySelectorAll('[data-row]')].map((el) => [el.dataset.row, el.getBoundingClientRect().top]));
+    let moved = false;
+    for (const r of state.rows) {
+      const g = isActive(r) ? 'running' : 'ready';
+      if (r.group !== g) { r.group = g; moved = true; }
+    }
+    if (!moved) return;
+    render();
+    if (Lumen.reduceMotion) return;
+    for (const el of win.querySelectorAll('[data-row]')) {
+      const old = before.get(el.dataset.row);
+      if (old === undefined) continue;
+      const dy = old - el.getBoundingClientRect().top;
+      if (!dy) continue;
+      el.style.transform = `translateY(${dy}px)`;
+      requestAnimationFrame(() => { el.classList.add('moving'); el.style.transform = ''; });
+      el.addEventListener('transitionend', () => el.classList.remove('moving'), { once: true });
+    }
+  }
+
+  function launch(n) {
+    const r = state.rows.find((x) => x.n === n);
+    if (!r || !(r.activity === 'stopped' || r.activity === 'failed')) return;
+    setActivity(n, 'starting');
+    setTimeout(() => setActivity(n, 'running'), 1400);
+  }
+  function stop(n) {
+    const r = state.rows.find((x) => x.n === n);
+    if (!r || r.activity !== 'running') return;
+    setActivity(n, 'sealing', { warmUp: null });
+    setTimeout(() => setActivity(n, 'stopped'), 1600);
+  }
+  function warmUp(n) {
+    const r = state.rows.find((x) => x.n === n);
+    if (!r) return;
+    const run = () => {
+      r.warmUp = { page: 1, total: 12, cookies: 0 };
+      render();
+      const tick = setInterval(() => {
+        if (!r.warmUp || r.activity !== 'running') return clearInterval(tick);
+        r.warmUp.page += 1; r.warmUp.cookies += 7 + (r.warmUp.page * 3) % 11;
+        if (r.warmUp.page > r.warmUp.total) { r.warmUp = null; clearInterval(tick); }
+        render();
+      }, 800);
+    };
+    if (r.activity === 'running') run();
+    else { launch(n); setTimeout(run, 1500); }
+  }
+
+  let menuEl = null;
+  function closeMenu() { if (menuEl) { menuEl.remove(); menuEl = null; } }
+  function openMenu(x, y, r) {
+    closeMenu();
+    menuEl = document.createElement('div');
+    menuEl.className = 'menu';
+    const items = [];
+    if (r && r.activity === 'running') items.push(['library', L('profiles.row.library')]);
+    items.push(['edit', L('profiles.row.edit')], ['passwords', L('profiles.row.passwords')], ['cookies', L('profiles.row.importCookies')], ['warm', L('profiles.row.warmUp')], '-', ['delete', L('profiles.row.delete'), 'danger']);
+    menuEl.innerHTML = items.map((i) => (i === '-' ? '<hr>' : `<button data-menu="${i[0]}" class="${i[2] || ''}">${Lumen.escapeHTML(i[1])}</button>`)).join('');
+    (params.get('material') === 'all' ? win : document.body).appendChild(menuEl);
+    const rect = menuEl.getBoundingClientRect();
+    menuEl.style.left = Math.min(x, innerWidth - rect.width - 8) + 'px';
+    menuEl.style.top = Math.min(y, innerHeight - rect.height - 8) + 'px';
+    menuEl.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-menu]');
+      if (!b) return;
+      if (b.dataset.menu === 'warm' && r) warmUp(r.n);
+      if (b.dataset.menu === 'delete' && r) { state.rows = state.rows.filter((x) => x.n !== r.n); state.selected.delete(r.n); render(); }
+      closeMenu();
+    });
+  }
+
+  function select(n, e) {
+    const rows = visibleRows();
+    if (e && (e.metaKey || e.ctrlKey)) {
+      if (state.selected.has(n)) state.selected.delete(n); else state.selected.add(n);
+      state.anchor = n;
+    } else if (e && e.shiftKey && state.anchor != null) {
+      const ids = rows.map((r) => r.n);
+      const [a, b] = [ids.indexOf(state.anchor), ids.indexOf(n)].sort((x, y) => x - y);
+      for (const id of ids.slice(a, b + 1)) state.selected.add(id);
+    } else {
+      state.selected = new Set([n]);
+      state.anchor = n;
+    }
+    state.cursor = n;
+    render();
+  }
+
+  if (!Lumen.frameless || params.get('interactive') === '1') {
+    win.addEventListener('click', (e) => {
+      const t = e.target;
+      if (!t.closest('.menu') && !t.closest('[data-more]') && !t.closest('[data-more-header]') && !t.closest('[data-batch="more"]')) closeMenu();
+      const filter = t.closest('[data-filter]');
+      if (filter) { state.filter = filter.dataset.filter; state.country = null; return render(); }
+      const country = t.closest('[data-country]');
+      if (country) { state.country = state.country === country.dataset.country ? null : country.dataset.country; return render(); }
+      const unchip = t.closest('[data-unchip]');
+      if (unchip) { const k = unchip.dataset.unchip; if (k === 'country' || k === 'all') state.country = null; if (k === 'filter' || k === 'all') state.filter = 'all'; return render(); }
+      if (t.closest('[data-showall]')) { state.filter = 'all'; state.country = null; state.search = ''; return render(); }
+      if (t.closest('[data-clear]')) { state.search = ''; return render(); }
+      if (t.closest('[data-banner-close]')) { state.banner = null; return render(); }
+      const act = t.closest('[data-act]');
+      if (act) { const n = Number(act.dataset.n); if (act.dataset.act === 'launch') launch(n); if (act.dataset.act === 'stop') stop(n); return; }
+      const more = t.closest('[data-more]');
+      if (more) { const r = state.rows.find((x) => x.n === Number(more.dataset.more)); const b = more.getBoundingClientRect(); return openMenu(b.left - 180, b.bottom + 4, r); }
+      const batch = t.closest('[data-batch]');
+      if (batch) {
+        const sel = [...state.selected];
+        if (batch.dataset.batch === 'launch') sel.forEach(launch);
+        if (batch.dataset.batch === 'stop') sel.forEach(stop);
+        if (batch.dataset.batch === 'warm') sel.forEach(warmUp);
+        if (batch.dataset.batch === 'clear') { state.selected.clear(); render(); }
+        if (batch.dataset.batch === 'more') { const b = batch.getBoundingClientRect(); openMenu(b.left - 180, b.bottom + 4, null); }
+        return;
+      }
+      const sort = t.closest('[data-sort]');
+      if (sort) {
+        const key = sort.dataset.sort;
+        state.sort = state.sort && state.sort.key === key ? (state.sort.dir > 0 ? { key, dir: -1 } : null) : { key, dir: 1 };
+        return render();
+      }
+      if (t.closest('[data-check-all]')) {
+        const rows = visibleRows();
+        const all = rows.every((r) => state.selected.has(r.n));
+        state.selected = all ? new Set() : new Set(rows.map((r) => r.n));
+        return render();
+      }
+      const check = t.closest('[data-check]');
+      if (check) { const n = Number(check.dataset.check); return select(n, { metaKey: true }); }
+      const row = t.closest('[data-row]');
+      if (row) return select(Number(row.dataset.row), e);
+    });
+    win.addEventListener('dblclick', (e) => {
+      const row = e.target.closest('[data-row]');
+      if (row && !e.target.closest('button')) launch(Number(row.dataset.row));
+    });
+    win.addEventListener('contextmenu', (e) => {
+      const row = e.target.closest('[data-row]');
+      if (!row) return;
+      e.preventDefault();
+      openMenu(e.clientX, e.clientY, state.rows.find((x) => x.n === Number(row.dataset.row)));
+    });
+    win.addEventListener('input', (e) => { if (e.target.id === 'search') { state.search = e.target.value; render(); } });
+    win.addEventListener('pointerover', (e) => { if (e.target.closest('#list')) state.pointerInList = true; });
+    win.addEventListener('pointerout', (e) => {
+      if (e.target.closest('#list') && !(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('#list'))) {
+        state.pointerInList = false;
+        settleGroups();
+      }
+    });
+    document.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); const s = document.getElementById('search'); if (s) s.focus(); return; }
+      if (document.activeElement && document.activeElement.id === 'search') { if (e.key === 'Escape') { state.search = ''; render(); } return; }
+      const rows = visibleRows();
+      if (!rows.length) return;
+      const ids = rows.map((r) => r.n);
+      let i = ids.indexOf(state.cursor);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        i = Math.max(0, Math.min(ids.length - 1, i < 0 ? 0 : i + (e.key === 'ArrowDown' ? 1 : -1)));
+        if (e.shiftKey) { state.selected.add(ids[i]); state.cursor = ids[i]; render(); } else select(ids[i]);
+      } else if (e.key === ' ' && state.cursor) { e.preventDefault(); select(state.cursor, { metaKey: true }); }
+      else if (e.key === 'Enter' && state.cursor) { launch(state.cursor); }
+      else if (e.key === 'Escape') { state.selected.clear(); render(); }
+      else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') { e.preventDefault(); state.selected = new Set(ids); render(); }
+    });
+  }
+
+  render();
+  window.__ready = true;
+})();
+</script>
+</body>
+</html>

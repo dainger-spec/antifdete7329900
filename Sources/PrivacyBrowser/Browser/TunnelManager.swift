@@ -206,7 +206,7 @@ final class TunnelManager: NSObject, ObservableObject {
             }
             state = manager?.connection.status == .connected ? .connected : .ready
         } catch {
-            log.error("VPN configuration: \(error.localizedDescription, privacy: .public)")
+            log.error("VPN configuration: \(error.logKind, privacy: .public) \(error.localizedDescription, privacy: .private)")
             state = install ? .failed(error.localizedDescription) : .needsConfiguration
         }
     }
@@ -308,7 +308,7 @@ final class TunnelManager: NSObject, ObservableObject {
         do {
             if connection.status != .connecting { try connection.startVPNTunnel() }
         } catch {
-            log.error("startVPNTunnel: \(error.localizedDescription, privacy: .public)")
+            log.error("startVPNTunnel: \(error.logKind, privacy: .public) \(error.localizedDescription, privacy: .private)")
             return false
         }
         return await withCheckedContinuation { continuation in
@@ -377,7 +377,7 @@ extension TunnelManager: OSSystemExtensionRequestDelegate {
 
     nonisolated func request(_ request: OSSystemExtensionRequest, didFailWithError error: Error) {
         MainActor.assumeIsolated {
-            log.error("system extension request: \(error.localizedDescription, privacy: .public)")
+            log.error("system extension request: \(error.logKind, privacy: .public) \(error.localizedDescription, privacy: .private)")
             let activation = pendingIsActivation
             pendingRequest = nil
             pendingIsActivation = false

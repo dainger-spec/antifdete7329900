@@ -27,6 +27,9 @@ struct BrowserTabContext {
     /// AutoFill on or off, and the sites passwords are never saved for, as they are now.
     let passwordSettings: ProfilePasswordSettings
     let library: ProfileLibrary
+    /// The profile has a proxy: a server's certificate is checked without this Mac fetching for
+    /// it (`ServerTrust`).
+    let hasProxy: Bool
     /// The profile proxy's user name and password, answered to the proxy's own auth challenges.
     let proxyCredential: URLCredential?
 }
@@ -37,7 +40,7 @@ struct BrowserTabContext {
 /// configuration created by `BrowserSession`), so they share cookies and storage — exactly
 /// like tabs of one browser profile. Tabs of different profiles never share anything.
 @MainActor
-final class BrowserTab: NSObject {
+final class BrowserTab: NSObject, PasswordAutoFillHost, AnswersProfileChallenges {
     let id = UUID()
     let webView: WKWebView
     weak var host: BrowserTabHost?
@@ -82,7 +85,7 @@ final class BrowserTab: NSObject {
     var refusesDownloads = false
 
     /// Password AutoFill in this tab: suggestions, filling, the save question.
-    private(set) lazy var passwords = TabPasswordAutoFill(tab: self, vault: context.passwordVault,
+    private(set) lazy var passwords = TabPasswordAutoFill(host: self, vault: context.passwordVault,
                                                           settings: context.passwordSettings)
 
     init(configuration: WKWebViewConfiguration, context: BrowserTabContext) {
@@ -95,6 +98,9 @@ final class BrowserTab: NSObject {
         webView.customUserAgent = context.userAgent
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true
+        // A link preview is fetched by Quick Look, outside the profile's store and proxy, and a
+        // click on it opens the link in the default browser (`HandOffs`).
+        webView.allowsLinkPreview = false
         webView.navigationDelegate = self
         webView.uiDelegate = self
         observe()
@@ -327,6 +333,12 @@ extension BrowserTab: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge,
                  completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         let space = challenge.protectionSpace
+        // With a proxy, a certificate is never checked the system's default way, which can fetch
+        // from the network as this Mac (`ServerTrust`).
+        if space.authenticationMethod == NSURLAuthenticationMethodServerTrust, context.hasProxy {
+            ServerTrust.answerWithoutFetching(challenge, completionHandler)
+            return
+        }
         // The profile's proxy asks for its credentials (HTTP 407 / SOCKS auth). With
         // proxyConfigurations set, WebKit hands these to the app instead of answering them itself,
         // so the system default would never send the profile's user name and password. Without
@@ -372,7 +384,7 @@ extension BrowserTab: WKNavigationDelegate {
                 do {
                     try self.context.passwordVault.upsert(PasswordEntry(origin: origin, username: credential.user ?? "", password: password))
                 } catch {
-                    self.log.error("Could not save the HTTP sign-in: \(String(describing: error), privacy: .public)")
+                    self.log.error("Could not save the HTTP sign-in: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
                 }
             }
             completionHandler(.useCredential, credential)
@@ -414,6 +426,15 @@ extension BrowserTab: WKNavigationDelegate {
 // MARK: - WKUIDelegate
 
 extension BrowserTab: WKUIDelegate {
+    /// The page's context menu without the items that hand its content to something outside the
+    /// profile — "Search with Google" (the real Safari, with the owner's cookies), Look Up,
+    /// Translate, Share, Quick Note, Writing Tools — and without Services (`HandOffs.strip`).
+    @objc(_webView:getContextMenuFromProposedMenu:forElement:userInfo:completionHandler:)
+    func webView(_ webView: WKWebView, contextMenuFromProposedMenu menu: NSMenu, forElement element: AnyObject?,
+                 userInfo: AnyObject?, completionHandler: @escaping (NSMenu?) -> Void) {
+        completionHandler(HandOffs.strip(menu))
+    }
+
     /// The window's frame, which WebKit turns into window.outerWidth/outerHeight and
     /// screenX/screenY. WebKit asks the UI delegate for it (`WKUIDelegatePrivate`, the method Safari
     /// answers); a delegate without it gets outerWidth = outerHeight = 0 and a screen position
@@ -505,6 +526,16 @@ extension BrowserTab: WKDownloadDelegate {
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
                   suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
         completionHandler(Self.uniqueDownloadURL(suggestedFilename: suggestedFilename))
+    }
+
+    /// A download's challenges: its certificate as a page's (`ServerTrust`), the proxy's own with
+    /// the profile's credentials, the rest the system's way.
+    func download(_ download: WKDownload, didReceive challenge: URLAuthenticationChallenge,
+                  completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        let policy = ProfileChallengePolicy(hasProxy: context.hasProxy, proxyCredential: context.proxyCredential)
+        if !policy.answer(challenge, completionHandler) {
+            completionHandler(.performDefaultHandling, nil)
+        }
     }
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {

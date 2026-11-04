@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="ru" class="v-proposed">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Profile editor — prototype</title>
+<link rel="stylesheet" href="kit/lumen.css">
+<style>
+  /* The profile editor sheet, PROPOSED: the same five sections and the same 600 × 660 sheet, with one
+     row anatomy for every setting — title, one line of what it does, the control on the right, the
+     error under the field it is about — instead of the mix of EditorToggle / EditorField / EditorNote. */
+  .window { flex-direction: column; background: var(--raised); }
+  .ed-header { display: flex; align-items: center; gap: 12px; padding: 20px 24px 16px; flex: none; }
+  .ed-header .who { min-width: 0; }
+  .ed-header .name { font: var(--tSheet); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ed-header .sub { display: flex; align-items: center; gap: 6px; font: var(--tBody); color: var(--textSecondary); margin-top: 2px; white-space: nowrap; }
+  .tabs { padding: 0 24px 14px; flex: none; }
+  .tabs .seg button { position: relative; padding: 0 8px; }
+  .tabs .seg button .badge { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--danger); margin-left: 5px; vertical-align: 1px; }
+  .body { flex: 1; min-height: 0; overflow: auto; scrollbar-width: none; padding: 16px 24px 20px; }
+  .body::-webkit-scrollbar { display: none; }
+  .body > .group-title:not(:first-child) { margin-top: 20px; }
+  .fields { display: flex; gap: 12px; }
+  .fields > div { flex: 1; min-width: 0; }
+  .fields > div.port { flex: none; width: 88px; }
+  .row-f .hint .more { margin-left: 4px; }
+  .row-f .hint .flag { display: inline-block; vertical-align: -2px; margin-right: 4px; }
+  .ua-box { font: 400 11px/15px var(--fontMono); color: var(--textSecondary); background: var(--field); border: 1px solid var(--fieldBorder); border-radius: var(--controlRadius); padding: 8px 10px; }
+  .popover {
+    position: absolute; z-index: 20; width: 320px; padding: 12px 14px; border-radius: 10px; font: var(--tBody); color: var(--textPrimary);
+    background: #2A2F39; border: 1px solid rgba(255, 255, 255, 0.12); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  }
+  .footer-error { display: flex; align-items: center; gap: 6px; font: var(--tBody); color: var(--danger); white-space: nowrap; }
+  .footer-error .icon { width: 13px; height: 13px; }
+  .footer-note { font: var(--tCaption); color: var(--textSecondary); }
+  .info-btn { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin: -6px -4px -6px 0; border: 0; background: none; color: var(--textTertiary); border-radius: 5px; vertical-align: middle; }
+  .info-btn:hover { color: var(--textPrimary); background: var(--controlFill); }
+  .info-btn .icon { width: 13px; height: 13px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="kit/wordmark.js"></script>
+<script src="kit/geometry.js"></script>
+<script src="kit/strings.js"></script>
+<script src="kit/icons.js"></script>
+<script src="kit/lumen.js"></script>
+<script>
+(function () {
+  'use strict';
+  const { L, H, icon, params } = Lumen;
+  const en = Lumen.lang === 'en';
+  const T = (ruText, enText) => (en ? enText : ruText);
+  const E = Lumen.escapeHTML;
+
+  // The drafts of UISnapshots: sampleDraft() (Northwind, SOCKS5, checked in Germany 2 minutes ago).
+  const sample = () => ({
+    name: 'Northwind', isNew: false, proxy: true, kind: 'socks5', host: 'proxy.northwind.example', port: '1080',
+    user: 'nw-team', password: 'correct-horse', bypass: '', followsProxy: true, warnIP: true, location: { code: 'DE', tz: 'Europe/Berlin', checked: T('2 минуты назад', '2 minutes ago') },
+    ephemeral: false, startURL: '', history: true, autofill: true, syncCookies: true, overrideTZ: false, safeBrowsing: false,
+  });
+  const SCENARIOS = {
+    network:   { title: T('Сеть', 'Network'), tab: 'network', draft: sample },
+    'network-error': { title: T('Сеть, ошибка', 'Network, error'), tab: 'network', draft: () => ({ ...sample(), port: '108O' }), error: 'port' },
+    'data-ephemeral': { title: T('Данные, ошибка на другой вкладке', 'Data, error on another tab'), tab: 'data', draft: () => ({ ...sample(), ephemeral: true, port: '108O' }), error: 'port' },
+    'general-new': { title: T('Новый профиль', 'New profile'), tab: 'general', draft: () => ({ ...sample(), name: L('editor.defaultName', 8), isNew: true, proxy: false, location: null }) },
+    identity:  { title: T('Идентичность', 'Identity'), tab: 'identity', draft: sample },
+    privacy:   { title: T('Конфиденциальность', 'Privacy'), tab: 'privacy', draft: () => ({ ...sample(), overrideTZ: true }) },
+    details:   { title: T('«Подробнее»', 'Details popover'), tab: 'network', draft: sample, popover: 'warnIP' },
+  };
+  const scenarioId = SCENARIOS[params.get('state')] ? params.get('state') : 'network';
+  const scenario = SCENARIOS[scenarioId];
+  const width = Number(params.get('w')) || 600;
+  const height = Number(params.get('h')) || 660;
+  const state = { tab: scenario.tab, d: scenario.draft(), error: scenario.error || null, popover: scenario.popover || null };
+
+  const win = Lumen.shell({ title: T('Редактор профиля — предлагаемый вид', 'Profile editor — proposed'), width, height,
+    scenarios: Object.entries(SCENARIOS).map(([id, s]) => ({ id, title: s.title })) });
+
+  const TABS = [['general', 'editor.section.general'], ['identity', 'editor.tab.identity'], ['network', 'editor.section.network'], ['privacy', 'editor.section.privacy'], ['data', 'editor.tab.data']];
+  const COUNTRY = { DE: T('Германия', 'Germany') };
+
+  const sw = (on, key, disabled) => `<button class="switch ${on ? 'on' : ''}" data-toggle="${key}" ${disabled ? 'disabled' : ''} role="switch" aria-checked="${on}"></button>`;
+  const info = (key) => `<button class="info-btn" data-info="${key}" aria-label="${E(L('common.details'))}">${icon('infoCircle', 13)}</button>`;
+
+  /// One setting: title, one line of what it does (optionally a ⓘ with the long text), its control.
+  function row({ title, hint, control = '', hintTone = '', infoKey = null, disabled = false }) {
+    return `<div class="row-f" ${disabled ? 'style="opacity:.55"' : ''}>
+      <div class="text"><div class="title">${title}</div>${hint ? `<div class="hint ${hintTone}">${hintTone === 'warning' ? icon('exclamationTriangleFill', 11) : ''}<span>${hint}</span>${infoKey ? info(infoKey) : ''}</div>` : ''}</div>
+      <div class="control">${control}</div></div>`;
+  }
+  function field(label, value, { id, placeholder = '', error = null, type = 'text', mono = false } = {}) {
+    return `<div><label class="field-label" for="${id}">${label}</label>
+      <label class="field ${error ? 'error' : ''} ${mono ? 'mono' : ''}"><input id="${id}" type="${type}" value="${E(value)}" placeholder="${E(placeholder)}" ${error ? 'aria-invalid="true"' : ''}></label></div>`;
+  }
+
+  function header() {
+    const d = state.d;
+    let sub;
+    if (d.proxy && d.location) sub = `${Lumen.flagSVG(d.location.code, 12)}<span>${E(COUNTRY[d.location.code])} · ${E(d.location.tz)}</span>`;
+    else if (d.isNew) sub = `<span>${H('editor.subtitle.new')}</span>`;
+    else sub = `${icon('arrowRight', 11)}<span>${H('editor.subtitle.direct')}</span>`;
+    return `<div class="ed-header">${Lumen.avatarHTML(d.name || '?', d.isNew ? 1 : Lumen.avatar.sampleAvatarIndex(2), 36)}
+      <div class="who"><div class="name">${d.isNew ? H('editor.title.new') : E(d.name)}</div><div class="sub">${sub}</div></div></div>`;
+  }
+
+  function tabs() {
+    return `<div class="tabs"><div class="seg full" role="tablist" aria-label="${E(L('editor.tabs'))}">${TABS.map(([id, key]) => {
+      const bad = state.error && id === 'network';
+      return `<button class="${state.tab === id ? 'on' : ''}" data-tab="${id}" role="tab" aria-selected="${state.tab === id}" ${bad ? `title="${E(L('editor.tab.hasError'))}"` : ''}>${H(key)}${bad ? '<i class="badge" aria-hidden="true"></i>' : ''}</button>`;
+    }).join('')}</div></div><div class="divider-h"></div>`;
+  }
+
+  function general() {
+    const d = state.d;
+    return `<div class="group"><div class="row-f stack">${field(H('editor.name'), d.name, { id: 'name' })}</div>
+      <div class="row-f stack">${field(H('editor.startURL'), d.startURL, { id: 'url', placeholder: 'https://example.com' })}</div>
+      ${row({ title: H('editor.ephemeral.title'), hint: H('editor.ephemeral.detail'), control: sw(d.ephemeral, 'ephemeral') })}</div>`;
+  }
+
+  function identity() {
+    return `<div class="group">
+      <div class="row-f stack"><div class="text"><div class="title">${H('editor.generation')}</div><div class="hint"><span>${H('editor.generation.hint')}</span>${info('editor.generation.footer')}</div></div>
+        <div><span class="popup">${H('gen.macos26')}${icon('chevronUpDown', 12)}</span></div></div>
+      ${row({ title: H('editor.ua.useCustom'), hint: H('editor.ua.hint'), control: sw(false, 'ua') })}
+      <div class="row-f stack"><span class="field-label">${H('editor.ua.effective')}</span>
+        <div class="ua-box">Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15</div></div></div>`;
+  }
+
+  function network() {
+    const d = state.d;
+    const portError = state.error === 'port';
+    let html = `<div class="group-title">${H('editor.group.proxy')}</div><div class="group">
+      ${row({ title: H('editor.proxy.use.title'), hint: H('editor.proxy.detail'), control: sw(d.proxy, 'proxy') })}`;
+    if (d.proxy) {
+      html += `
+      ${row({ title: H('editor.proxy.type'), hint: H('editor.proxy.type.hint'), control: `<div class="seg"><button class="${d.kind === 'socks5' ? 'on' : ''}">SOCKS5</button><button class="${d.kind === 'http' ? 'on' : ''}">HTTP CONNECT</button></div>` })}
+      <div class="row-f stack"><div class="fields">${field(H('editor.proxy.host'), d.host, { id: 'host', placeholder: 'proxy.example.com' })}<div class="port">${field(H('editor.proxy.port'), d.port, { id: 'port', placeholder: '1080', error: portError }).replace(/^<div>|<\/div>$/g, '')}</div></div>
+        ${portError ? `<div class="field-error" id="port-error">${icon('exclamationTriangleFill', 11)}${H('editor.error.port')}</div>` : ''}</div>
+      <div class="row-f stack"><div class="fields">${field(H('editor.proxy.username'), d.user, { id: 'user' })}${field(H('editor.proxy.password'), d.password, { id: 'pw', type: 'password' })}</div></div>
+      <div class="row-f stack">${field(H('editor.proxy.bypass'), d.bypass, { id: 'bypass', placeholder: 'localhost, example.com' })}<div class="hint" style="font:var(--tCaption);color:var(--textSecondary)">${H('editor.proxy.bypass.hint')}</div></div>
+      ${row({ title: H('editor.location.followsProxy'), infoKey: 'editor.tz.fromProxy.note', control: sw(d.followsProxy, 'follows'),
+        hint: d.location ? `${Lumen.flagSVG(d.location.code, 11)}${H('editor.location.exitsIn', COUNTRY[d.location.code])} · ${E(d.location.tz)} · ${H('editor.location.checked', d.location.checked)}` : H('editor.tz.follow.hint') })}
+      ${row({ title: H('editor.proxy.warnIPChange'), hint: H('editor.proxy.warnIPChange.hint'), infoKey: 'editor.proxy.warnIPChange.note', control: sw(d.warnIP, 'warnIP') })}`;
+    }
+    html += `</div>
+      <div class="group-title">${H('editor.group.webrtc')}</div><div class="group">
+      ${row({ title: H('editor.webrtc'), hint: H('editor.webrtc.hint.off'), hintTone: 'warning', infoKey: 'editor.webrtc.tunnelOff',
+        control: `<button class="btn ghost small" style="color:var(--accent)">${H('editor.webrtc.tunnelSettings')}</button><span class="popup" disabled>${H('editor.webrtc.disabled')}${icon('chevronUpDown', 12)}</span>` })}</div>`;
+    return html;
+  }
+
+  function privacy() {
+    const d = state.d;
+    return `<div class="group">
+      ${row({ title: H('editor.geo'), hint: H('editor.geo.hint'), control: `<span class="popup">${H('editor.geo.deny')}${icon('chevronUpDown', 12)}</span>` })}
+      ${row({ title: H('editor.tz.override'), hint: H('editor.tz.override.hint'), control: sw(d.overrideTZ, 'tz') })}
+      ${d.overrideTZ ? row({ title: `<span style="font-weight:400">${H('editor.tz')}</span>`, control: `<span class="popup">Europe/Berlin${icon('chevronUpDown', 12)}</span>` }) : ''}
+      ${row({ title: H('editor.safeBrowsing'), hint: H('editor.safeBrowsing.hint'), control: sw(d.safeBrowsing, 'sb') })}</div>
+      <p class="t-caption c-secondary" style="margin:12px 2px 0">${H('editor.privacy.footer')}</p>`;
+  }
+
+  function data() {
+    const d = state.d;
+    return `<div class="group-title">${H('editor.section.history')}</div><div class="group">
+      ${row({ title: H('editor.history.record'), hint: H('editor.history.record.hint'), infoKey: 'editor.history.footer', control: sw(d.history, 'history') })}
+      ${row({ title: `<span style="font-weight:400">${H('editor.history.keep')}</span>`, control: `<span class="popup">${H('editor.retain.quarter')}${icon('chevronUpDown', 12)}</span>` })}</div>
+      <div class="group-title">${H('editor.section.passwords')}</div><div class="group">
+      ${row({ title: H('editor.passwords.autoFill'), hint: H('editor.passwords.autoFill.hint'), infoKey: 'editor.passwords.footer', control: sw(d.autofill, 'autofill') })}</div>
+      <div class="group-title">${H('editor.section.sync')}</div><div class="group">
+      ${row({ title: H('editor.sync.cookies'), hint: d.ephemeral ? H('editor.sync.footer.ephemeral') : H('editor.sync.cookies.hint'), control: sw(d.ephemeral ? false : d.syncCookies, 'sync', d.ephemeral), disabled: d.ephemeral })}</div>`;
+  }
+
+  function footer() {
+    const left = state.error
+      ? `<span class="footer-error" role="alert">${icon('exclamationTriangleFill', 13)}${H('editor.errors.count')}</span>${state.tab !== 'network' ? `<button class="btn ghost small" data-show-error style="color:var(--accent)">${H('editor.errors.show')}</button>` : ''}`
+      : `<span class="footer-note">${H('editor.footer.note')}</span>`;
+    return `<div class="sheet-footer">${left}<span class="spacer"></span>
+      <button class="btn secondary">${H('common.cancel')}</button><button class="btn primary">${H('common.save')}</button></div>`;
+  }
+
+  function render() {
+    const body = { general, identity, network, privacy, data }[state.tab]();
+    win.innerHTML = `${header()}${tabs()}<div class="body" id="body">${body}</div>${footer()}`;
+    if (state.popover) {
+      const btn = win.querySelector(`[data-info="${state.popover === 'warnIP' ? 'editor.proxy.warnIPChange.note' : state.popover}"]`);
+      if (btn) {
+        const key = btn.dataset.info;
+        const pop = document.createElement('div');
+        pop.className = 'popover';
+        pop.setAttribute('role', 'dialog');
+        pop.textContent = L(key);
+        win.appendChild(pop);
+        const b = btn.getBoundingClientRect(), w = win.getBoundingClientRect();
+        pop.style.left = Math.max(12, Math.min(b.left - w.left - 150, w.width - 332)) + 'px';
+        const below = b.bottom - w.top + 6;
+        const h = pop.offsetHeight;
+        // Opens above its ⓘ when there is no room below, as an NSPopover would.
+        pop.style.top = (below + h > w.height - 8 ? b.top - w.top - h - 6 : below) + 'px';
+      }
+    }
+  }
+
+  win.addEventListener('click', (e) => {
+    const tab = e.target.closest('[data-tab]');
+    if (tab) { state.tab = tab.dataset.tab; state.popover = null; return render(); }
+    const t = e.target.closest('[data-toggle]');
+    if (t) {
+      const map = { proxy: 'proxy', ephemeral: 'ephemeral', follows: 'followsProxy', warnIP: 'warnIP', history: 'history', autofill: 'autofill', sync: 'syncCookies', tz: 'overrideTZ', sb: 'safeBrowsing' };
+      if (map[t.dataset.toggle]) state.d[map[t.dataset.toggle]] = !state.d[map[t.dataset.toggle]];
+      return render();
+    }
+    const i = e.target.closest('[data-info]');
+    if (i) { state.popover = state.popover === i.dataset.info ? null : i.dataset.info; return render(); }
+    if (e.target.closest('[data-show-error]')) { state.tab = 'network'; render(); const p = document.getElementById('port'); if (p) p.focus(); return; }
+    if (state.popover && !e.target.closest('.popover')) { state.popover = null; render(); }
+  });
+  win.addEventListener('input', (e) => {
+    if (e.target.id === 'port') { state.d.port = e.target.value; const ok = /^\d+$/.test(e.target.value) && +e.target.value >= 1 && +e.target.value <= 65535; if (ok !== !state.error) { state.error = ok ? null : 'port'; render(); const p = document.getElementById('port'); p.focus(); p.setSelectionRange(p.value.length, p.value.length); } }
+  });
+
+  render();
+  window.__ready = true;
+})();
+</script>
+</body>
+</html>

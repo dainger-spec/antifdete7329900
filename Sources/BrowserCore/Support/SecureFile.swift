@@ -58,6 +58,23 @@ public enum SecureFile {
         return temp
     }
 
+    /// Writes `data` over the file at `url` in place — no temp file beside it — readable by its
+    /// owner alone (0600) from the first byte on, a file that was there before included. For a
+    /// file the user chose in a save panel: the App Sandbox lets the app write that one file and
+    /// nothing next to it. A symbolic link at `url` is refused, not followed.
+    public static func writeOwnerOnly(_ data: Data, over url: URL) throws {
+        let descriptor = open(url.path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0o600)
+        guard descriptor >= 0 else { throw CoreError.io("open \(url.lastPathComponent) failed: errno \(errno)") }
+        defer { _ = close(descriptor) }
+        // A file that was there keeps its mode through O_CREAT: made owner-only before the data.
+        guard fchmod(descriptor, 0o600) == 0 else { throw CoreError.io("chmod \(url.lastPathComponent) failed: errno \(errno)") }
+        do {
+            try FileHandle(fileDescriptor: descriptor, closeOnDealloc: false).write(contentsOf: data)
+        } catch {
+            throw CoreError.io("write \(url.lastPathComponent): \(error)")
+        }
+    }
+
     public static func read(_ url: URL) throws -> Data {
         do {
             return try Data(contentsOf: url)

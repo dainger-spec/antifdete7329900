@@ -9,7 +9,8 @@ comments marked `PLATFORM LIMITATION` / `FINGERPRINTING LIMITATION` point back h
 `PrivacyBrowser --self-test` runs headless against the real WebKit of the machine. CI runs it
 on every push (macOS 26 runner, built with the current Xcode) for both the sandboxed and the
 unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last observed results
-(macOS 26, 183/183 checks in both builds):
+(macOS 26: every check passed in both builds; CI prints the count, 188 at commit 854c87e, more
+since):
 
 | Claim | Self-test result |
 |---|---|
@@ -34,26 +35,34 @@ unsandboxed build, with a local test proxy (`scripts/selftest_proxy.py`). Last o
 | Proxy: WebRTC | a proxied profile whose stored setting is "unrestricted" has no `RTCPeerConnection` or `RTCDataChannel` while the packet tunnel cannot carry it (§5) |
 | Packet tunnel | a build without the network extension reports it (the tunnel sheet says what a signed build needs), and proxied profiles keep WebRTC off. The tunnel's TURN server and SOCKS5 relay are measured by the leak check instead ([TUNNEL.md](TUNNEL.md)) |
 | Proxy: dns-prefetch leak | an `<a ping>` (the load type WebKit gives dns-prefetch) reaches neither the proxy nor the network; a fetch to the same origin does |
+| Safari's chrome, in a profile's own process | through the app's launch path, a proxied profile whose window is Safari's chrome loads the self-test proxy's leak page: its page load, a fetch to an IPv4 and an IPv6 literal, to a host name, an https request, a WebSocket, a worker's fetch, an image and a frame of another site all reach the proxy; `<a ping>` does not; a fetch to a `.local` name goes to the proxy like any other; this Mac itself — `127.0.0.1`, `localhost`, `::1`, `0.0.0.0`, from the page, a frame and a worker — is refused (the system never sends loopback through a proxy: measured in CI run 382, those fetches reached a listener on the runner directly), and nothing reaches the loopback canary; an HTTPS image whose certificate needs a fetch reaches the proxy and its certificate is refused; `RTCPeerConnection` exists in neither the page, a frame of another site nor an about:blank frame, `WebTransport` in neither; on loopback (a secure context) the leak page's secure half, opened as a page of this Mac (loaded from it directly, as any page on this Mac is), has neither in the page and no `WebTransport` in a dedicated, a shared or a service worker; the profile's process reports every web view on its store with its proxy, none with WebRTC or with a feature that leaves the proxy, no setter that turns them on again, WebKit's default store closed, UDP and the real Safari's places closed to it by the kernel, its certificate checks made without fetching, and its own three probe requests at the proxy as one CONNECT each; a cookie imported while it runs is sent by the next window's first request; a second window loads through the proxy too. Around it, the egress capture and the file-system trace (§4a) |
+| Nothing handed outside the profile | in a profile's tab of ours: no link preview, even when asked for; no Services requestor for the selection; the context menu keeps Copy and the link items and loses Search with Google, Look Up, Translate, Share, Quick Note, Writing Tools and Services; WebKit's directories of this app are excluded from Time Machine (the build without the sandbox; reported, not checked, in the sandboxed one) |
+| Certificates with a proxy | the self-test proxy answers every TLS handshake in its tunnels with a certificate whose chain is complete only for a client that fetches the intermediate from the address the certificate names (`pbaiacanary.leak.example.com`): in a proxied profile's tab the certificate is checked without a fetch and refused at the handshake, through the proxy; the same kind of certificate (`pbaiacontrol`) loaded without a proxy is the control, which the system does fetch and the capture must see (§4a) |
+| Profile export and import | a profile whose sealed WebKit store holds a cookie is exported to a `.pbprofile` file (in which neither the cookie nor the profile's name is readable; a wrong password opens nothing), imported as a new profile, and the new profile's first request carries the cookie |
 | Proxy: 407 without credentials | the launch is refused ("needs credentials") and the data is sealed again; nothing opens, directly or otherwise |
 | Proxy: `Accept-Language` | the header the proxy sees is the language the app decided at its first launch (`de-DE,de;q=0.9` in the self-test) |
 | Time zone from the proxy | a profile with a proxy and *Time zone of the proxy's location* runs in the time zone the lookup through the proxy returned, cached per profile |
 | Several SOCKS5 profiles at once | three profiles behind three SOCKS5 proxies, one with username/password authentication, are launched together through the app's launch path and load at the same time: each page arrives through its own proxy, by name, with its own credentials; after one stops the others keep loading through theirs; wrong or missing SOCKS5 credentials fail closed |
 | Launch speed | with a location remembered for the proxy, a launch waits at most 1 s for a 4 s lookup (the lookup finishes in the background, and its new time zone is remembered and noted for the next launch); with nothing remembered it waits at most 3 s |
+| Proxy list checker | *not yet observed on CI (added with the proxy manager, not in the count above)*: the probe tells every listener of the self-test proxy apart — HTTP CONNECT listed as SOCKS5 and SOCKS5 listed as HTTP each found as what it is, the login of the HTTP and the SOCKS5 proxy not given (needs a login), wrong (rejected) and right (taken), the IPv6 listener, a listener that takes the connection and never answers (silent), a closed port (refused), a host name that does not exist (host not found); end to end through a working proxy listed with the wrong type, the exit IP, country, time zone, city and network the stand-in service gave and the probe's median latency; through an unreachable proxy, and one whose host does not resolve, it is dead, and a real website among the services, which a direct request would reach, did not answer either (the unreachable proxy's check connected to nothing else, as the URL loading system reports it); a proxy answering 407 to a check without credentials is dead for that reason; settings that cannot be applied are not checked (no request); the list's model checks several at a time and keeps the results encrypted, gives a line without a scheme the type found and corrects a wrong one; a profile given a checked proxy knows where it exits before its first launch; a profile started with the silent proxy says why (silent), one with a working proxy says nothing, and Check from there is the list's check. All of it but the unknown host runs in an egress window: the capture fails on any packet of the app past loopback, and on a DNS question for the service's name, which carries the run id (the unknown host's name is the control that says whether such a question for a `.invalid` name reaches the network at all) |
 | Proxy exit IP | with *Warn when the proxy's IP changes* on, a changed exit IP (same proxy and credentials) is reported, the first launch and an unchanged IP are not; the option is off by default and then nothing is reported or stored, and turning it off, or replacing the proxy, while a lookup is under way leaves no new IP stored and nothing reported |
 | Password AutoFill | in a profile window on the self-test proxy's sign-in pages: the page world has no `window.webkit` and no trace of the script; a password a page script wrote and submitted is not offered; a typed sign-in is offered (Save, saved with its user name), a new password for it as Update, nothing anywhere on the site after Never for This Website; a login field lists the site's saved login and choosing it fills both fields with `input` and `change` (and `:autofill` where WebKit allows the world); a filled-in login submitted again asks nothing; a sign-in by script (fields removed after the button's click) and a sign-up form (new password = confirmation) are offered; a frame of another site is offered none, a frame of the same site its logins under a header naming it. Synthesized key events do not reach the page on the CI runner, so typing is stood in for by marking the fields typed inside the isolated world (reported by the self-test); real clicks and keys are used where they arrive |
 | Cookie import | a Netscape file with CRLF, comments, an HttpOnly line and damaged bytes: the five readable cookies are read, the four other lines reported (field count, public suffix, expired, damaged text); into a stopped profile they are queued encrypted (no cookie value in the file) and put into its store at launch before the start page is requested: the request carries the host-only, domain, HttpOnly and session cookies, not the Secure one or another path's over http; the store holds each with the file's attributes; a cut-off JSON export's complete entry goes into the running profile at once and the next request carries it; after a stop (sealed) and a launch the persistent imported cookies are back and the session cookie is not |
 | Profile sync (two devices) | a second vault bootstrapped from a sync folder with the master password stands in for another Mac: a cookie imported into the stopped profile on A joins the synced cookies at its launch, a page's persistent cookie at its stop (its session cookie not); the folder holds no cookie name, value or domain; on B the start page's first request already carries both; B's change of one and deletion of the other reach A's store before its first page; settings changed on both, B's later: B's on both Macs, A's kept as `config.bin.conflict` |
 | Session warm-up robot | through the app's launch path behind the self-test proxy, with short waits: a plan of three pages, a `javascript:` line (skipped) and a page the proxy closes unanswered (reported, the robot goes on) is visited in order in a new tab of the profile, each page taken as visited only once it has come (never before the proxy was asked for it), and an address that only jumps within the page shown at once (also when the page then rewrites the fragment); the requests carry the profile's User-Agent and the cookies the pages before set; at the proxy, each page's followed link comes at least the plan's time after the page, and the next page at least half that after the followed one; each page is scrolled (the pages see trusted scroll events); from each page only the plain same-site link is followed, with the page as Referer — never the sign-out, other-site, file or new-window links next to it; while the robot scrolls and clicks, each page's own world sees no `window.webkit` and no robot global; history and the pages' cookies are kept; Stop during a page ends the run before its next page is requested; closing its tab and a page's alert stop it; stopping the profile stops it first (while its store is still there), and the profile's data then seals as usual. Whether wheel and mouse events reached the page or the script fallback was used is reported |
+| Warm-up queue and report | two stopped profiles queued with one plan through `WarmUpCoordinator` behind the self-test proxy: they run one after the other and never both at once, each without a window of its own, and each is stopped and sealed before the next starts; the report of each run counts the profile's cookies per site (registrable domain) — two sites with one new cookie each for the first, and for the second, which already held a cookie of the site it visits, two cookies there of which one is new; a run from the queue counts as the profile's last run for its schedule, stored encrypted |
 | ⌘Q | `terminate:` returns at once; every profile is sealed in the normal run loop; the second `terminate:` exits; WebKit released the store (normal seal, not forced); the sealed data restores |
 | Forced seal | a store WebKit keeps through every retry is archived and its plaintext deleted only when quitting; a marker makes the next launch discard later residue; the archive restores |
 
 Run it yourself: `build/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test`. For the
 proxy checks, start the self-test proxy as CI does,
-`python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085`,
+`python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085 --tls-control 18086 --canary 18087 --silent 18088`,
 and set `PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081
 PB_SELFTEST_HTTP_AUTH_PROXY_PORT=18082 PB_SELFTEST_HTTP6_PROXY_PORT=18083
-PB_SELFTEST_SOCKS2_PROXY_PORT=18084 PB_SELFTEST_SOCKS_AUTH_PROXY_PORT=18085`. Without a variable
-its checks (407, IPv6, several SOCKS5 profiles at once) are skipped and the count is lower. The
+PB_SELFTEST_SOCKS2_PROXY_PORT=18084 PB_SELFTEST_SOCKS_AUTH_PROXY_PORT=18085
+PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087 PB_SELFTEST_SILENT_PROXY_PORT=18088`.
+Without a variable its checks (407, IPv6, several SOCKS5 profiles at once, the certificate control,
+the loopback canary, the silent proxy) are skipped and the count is lower. The
 self-test uses a temporary vault and removes everything it creates.
 
 ## 1. Storage isolation between profiles
@@ -264,10 +273,12 @@ storage and network (§1, §4).
 | Saved passwords | encrypted (`passwords.bin`) | decrypted on demand | in memory |
 | Imported cookies for a stopped profile | encrypted (`cookies-import.bin`) until its next launch puts them into the website data | — | in WebKit's cookie store (as the profile's other cookies) |
 | Warm-up plan (addresses, search, times) | encrypted (`warmup.bin`, this Mac only, not synced) | decrypted when the sheet opens | — |
+| Warm-up schedule (every N hours, last run) | encrypted (`warmup-schedule.bin`, this Mac only, not synced, not in a profile export) | decrypted at unlock (the timer needs it) | — |
 | Synced cookies (persistent cookies, with cookie sync on) | encrypted (`cookies.bin`; its local baseline `cookies-baseline.bin`) | encrypted | encrypted; written at launch and stop |
 | History | encrypted (`history.bin`); ephemeral profiles: never written | encrypted | in memory, saved encrypted (debounced, ≤ 3 s) |
 | Bookmarks | encrypted (`bookmarks.bin`) | encrypted | in memory, saved encrypted on every change |
 | Sync target and token | encrypted (`settings.bin`, not synced) | in memory | — |
+| Proxy list (addresses, credentials, labels, last checks) | encrypted (`proxies.bin`, this Mac only, not synced) | in memory | — (a profile has its own copy of its proxy in `config.bin`) |
 | WebKit website data | encrypted (`webdata.pbsa`) | encrypted | **plaintext on disk** in WebKit's directories |
 
 **Why WebKit data is plaintext while a profile runs.** WebKit chooses the location of an
@@ -297,10 +308,18 @@ restore it on launch. `WebDataStoreVault` does this.
    stays on disk until the next unlock, when `recoverUnsealedProfiles` seals it. Until
    then it is protected only by FileVault, the 0700 directory permissions, and (sandboxed)
    the container. History written in the last ≤ 3 s before a crash is lost.
-4. *Deleted plaintext isn't securely erased.* APFS is copy-on-write on SSDs, so
+4. *Backups and snapshots.* What is plaintext while a profile runs is excluded from Time Machine,
+   and so from its hourly local snapshots, which would otherwise keep it after the seal: WebKit's
+   directories of this app, and a profile process's home (`home.noindex`, a name Spotlight does
+   not index). An APFS snapshot taken by another tool, or a backup tool that ignores the exclusion,
+   still copies it; the self-test checks the exclusion is set. **Not in the sandboxed build:** there
+   the mark is accepted without an error and does not stay on the container's WebKit and Caches
+   folders (measured in CI, runs 383–384), so Time Machine can copy a running profile's website
+   data; the self-test reports it instead of checking it. The build without the sandbox keeps it.
+5. *Deleted plaintext isn't securely erased.* APFS is copy-on-write on SSDs, so
    overwriting doesn't reliably erase data, and the code doesn't try. FileVault is the
    real protection for deleted blocks; enable it.
-5. *Memory.* Swift and CryptoKit offer no guaranteed zeroisation. Keys of an unlocked
+6. *Memory.* Swift and CryptoKit offer no guaranteed zeroisation. Keys of an unlocked
    vault live in process memory, and anyone who can read process memory (root, a
    debugger, a core dump) can recover them. What the app's own code holds is overwritten
    with `memset_s` once used — the password's bytes, derived keys, the unwrapped vault key
@@ -341,8 +360,9 @@ tunnel ([TUNNEL.md](TUNNEL.md)), below.
 | Path | Status | Mitigation |
 |---|---|---|
 | WebRTC (STUN, TURN over UDP or TCP, media) | Never proxied by WebKit: it opens these sockets itself, without the data store's proxy. STUN reveals the real public IP to the page (seen by the CI leak check); a TURN server sees it too | With a SOCKS5 proxy and the packet tunnel on: through the proxy's UDP ASSOCIATE, via a per-profile TURN relay ([TUNNEL.md](TUNNEL.md)). Otherwise WebRTC is **off** in a proxied profile, whatever its setting (§5) |
-| DNS prefetch | `<link rel="dns-prefetch">` (also as a `Link:` header) makes the network process resolve the host through the system resolver — WebKit skips it only for a *system-wide* proxy, not for a data store's `proxyConfigurations` | A content rule list blocking `ping`-type loads is added to every proxied profile (`ContentRules`): WebKit runs dns-prefetch through it as a ping. It also blocks `<a ping>` click trackers; beacons are fetches and unaffected. Verified by the self-test with an `<a ping>` |
-| Safe Browsing lookups | Made outside the data store's network session | Off by default (`safeBrowsingEnabled`) |
+| DNS prefetch | `<link rel="dns-prefetch">` (also as a `Link:` header) makes the network process resolve the host through the system resolver — WebKit skips it only for a *system-wide* proxy, not for a data store's `proxyConfigurations` | A content rule list blocking `ping`-type loads is added to every proxied profile (`ContentRules`), Safari's chrome included: WebKit 7621 and later runs dns-prefetch through it as a ping. Before 7621 dns-prefetch is a preference instead, which proxied profiles have off (and pinned off in Safari's chrome, which turns it on). It also blocks `<a ping>` click trackers; beacons are another load type and go through the proxy. A proxied profile does not start without the list (compiled into the default rule-list store, or, failing that, a temporary one). In Safari's chrome the list stays through "Reload Without Content Blockers" and a site's content-blocker switch (§4a). Verified by the self-test with an `<a ping>`, and in Safari's chrome by the egress capture (no DNS question for the leak page's prefetch, header, link or late-prefetch names) |
+| WebTransport, Private Click Measurement, Web Authentication | QUIC an HTTP or SOCKS5 proxy cannot carry; attribution reports sent later outside the page's session; passkeys from the owner's iCloud Keychain, checked by system services | Off in every web view of a proxied profile (pinned in Safari's chrome); attribution reports already stored are removed at launch |
+| Safe Browsing lookups | Made by a system service, outside the data store's network session | Off by default (`safeBrowsingEnabled`); in Safari's chrome both its setters are pinned to the profile's choice and the service is not reached unless asked for (§4a) |
 | `mailto:`, `tel:`, custom schemes | Would hand the URL to another app, outside the profile | Blocked by the navigation policy |
 | Camera and microphone streams | Local capture; their WebRTC transport goes through the proxy only via the packet tunnel (SOCKS5), otherwise WebRTC is off with a proxy | Asks the user every time |
 | Sync traffic | Goes from the app process through the system network, not the profile proxy | Folder transport makes no network requests; HTTP sync is HTTPS and carries only encrypted blobs |
@@ -395,9 +415,173 @@ profile, only while the option is on: turning it off (or removing the proxy) del
 profile is saved. A lookup still under way when the option is turned off, or the proxy removed
 or replaced, neither stores an IP nor warns.
 
+**Proxy list and its checker** (Profiles → ⋯ → Proxies…): proxies kept to give to profiles, encrypted
+in the vault under their own key (`proxies.bin`, this Mac only; §3). A check talks to the proxy
+and to nothing else, in two parts:
+
+1. The probe (`ProxyProbe`): this Mac resolves the proxy's own name (there is nothing else to reach
+   a proxy by), connects to it, and tries a SOCKS5 greeting and an HTTP `CONNECT` at once, on two
+   connections; with the login it has, it asks for a tunnel to the first geolocation service (at a
+   profile's launch: to its start page's site). The target is a name the proxy resolves (SOCKS5
+   ATYP 3, `CONNECT host:port`): this Mac never resolves it and never connects to it. The tunnel
+   is closed as soon as the proxy says it is open; two more are opened for the latency (the median
+   of three is shown). Each way of failing is its own verdict, so that the report can say what to
+   do: the name does not exist, or the resolver failed; the port refuses the connection, cannot be
+   reached, or never answers it; the port takes the connection and then says nothing — the most
+   common case, what a proxy whose IP whitelist does not have this Mac's address does, or one
+   whose back end is gone; it closes at once, or answers as something that is not a proxy; it
+   wants a login, refuses the one given, or refuses this Mac (403); it cannot reach the site.
+2. When it works: the launch's lookup made for this proxy, as the type the probe found — the same
+   geolocation services through the proxy itself with the `ProxyConfiguration` a profile's data
+   store would get (`allowFailover = false`), in a URLSession of its own (no cookies, no cache,
+   this Mac's Safari User-Agent): exit IP, country, time zone, city and network.
+
+At most eight proxies are checked at a time, and only when the user asks (the Proxies sheet, or
+**Check Proxy** after a launch), never in the background. A proxy that does not work never falls
+back to a direct connection, so this Mac's own address is never what a service sees; a proxy whose
+settings cannot be applied is not checked at all. The self-test checks this against an
+unreachable proxy with a real website among the services, which a request made directly would
+have reached, and runs every check of the checker inside a packet capture that fails on any packet
+of the app past loopback (§0). Like the launch's lookup, a check is a request to a third-party
+service. What a check keeps — the verdict, what the proxy answered (a status line, never a user
+name or password), the exit details — is stored with the list, encrypted; the system log gets the
+verdict, never the proxy's address or login.
+
+**A profile whose proxy does not work** is not left blank without a word: its launch runs the
+probe once beside it (one tunnel, to the start page's site, or the first geolocation service
+without a start page; through the proxy only, and the launch never waits for it), and a proxy that
+does not work is said in the Profiles window — which profile, which step failed, what to do — with
+Check (the list's check of that profile's own proxy) and Show in Proxies. The profile itself still
+loads nothing until its proxy answers: fail-closed is unchanged.
+
+**The list and the profiles' copies.** Each profile keeps its own copy of its proxy (what it
+connects with, what syncs); the list knows which of its entries a profile uses by the proxy itself
+— host, port and user name. The proxies typed into profiles before the list existed are taken into
+it once, at the first unlock. An edit of an entry, or a check that found its type, reaches the
+profiles whose copy is that entry as it was (same type, TLS and password); a copy changed in a
+profile's own editor since is never overwritten. An entry whose type is still unknown (an import
+line without a scheme) is given to no profile until a check finds it. **Export** writes the list
+in the form Import reads, with the user names and passwords in plaintext — said in the sheet before
+anything is written — into a file only its owner can read (0600).
+
+**Giving profiles proxies of the list** (one to many, or several in turn, round-robin; the editor's
+*Choose from List…*) writes each profile's own configuration as an edit of its proxy would
+(`ProfileConfiguration.assigning`): the profile keeps a copy, so removing a proxy from the list
+changes no profile, and the copy syncs with the profile. The location remembered for the previous
+proxy is about another proxy and is dropped; the check's location of the new one is remembered in
+its place (its exit IP only while the exit-IP warning is on). A running profile keeps the proxy it
+was launched with until it stops: like every setting, the proxy is given to the profile's data
+store when the profile launches.
+
 **Verify the proxy by hand:** set a SOCKS5 proxy, for example `ssh -D 1080 host`, open
 `https://ifconfig.me`, and confirm it shows the proxy's IP. Then stop the proxy and
 reload: the page must fail, not show your own IP.
+
+## 4a. A profile in its own process, and Safari's chrome
+
+In the build without the App Sandbox a profile can run in a process of its own
+(`PB_PROFILE_PROCESS`, `ProfileProcess`), and there its window is Safari's own chrome
+(docs/SAFARI_PROCESS.md §9). That process holds Safari's frameworks next to the profile, and
+Safari builds the web views; so the profile's proxy is held for the **whole process**, not only for
+the web views it knows about (`ProfileNetworkGuard`), and it is decided before Safari's frameworks
+load (the child opens the vault and reads the profile first).
+
+| Lock | What it does | Verified by |
+|---|---|---|
+| 1. Every web view on the profile's store | Safari's configuration factories are patched, and so are the initializers every web view goes through (`initWithFrame:configuration:`, `_initializeWithConfiguration:`): each gets the profile's data store, its privacy preferences and scripts; a navigation's `WKWebpagePreferences` cannot name another store | The self-test's network report: every web view on the profile's store with its proxy. Measured on macOS 26: Safari's factories **missed** the chrome's web view, which only the initializer gave the profile's store — the leak of the hosted chrome came from exactly there |
+| 2. Every other store closed | Any other data store the process makes — WebKit's own default store included — points at a proxy that does not exist (127.0.0.1:1, no failover): a web view that ends up on one loads nothing instead of loading as this Mac | The report: default store closed |
+| 3. The process's own connections | The default Network.framework privacy context and every URLSession configuration carry the profile's proxy; a background session runs in-process | The report's three probe requests (shared, ephemeral, explicit session), each seen at the proxy as one CONNECT to its host |
+| Pinned preferences | Safari re-applies its own settings to live web views, so the setters themselves keep to the profile: WebRTC (off unless the profile's routing allows it — through its own setter and through the feature switches, which reach every boolean preference), Safe Browsing (both setters), installed fonts, ICE candidate filtering on; with a proxy also dns-prefetch, WebTransport, Private Click Measurement, Web Authentication, Digital Credentials and web archives on an ephemeral store | The leak page in Safari's chrome: no `RTCPeerConnection` in the page, a frame of another site or an about:blank frame; no `WebTransport`. The report tries every setter on preferences of no web view and lists any that turns one of them on again (none), and reads every web view's engine |
+| Workers | WebKit gives every shared and service worker of a process the preferences of the first web view the process built, copied once: the first web view of a profile's process is one of ours on the closed store with WebRTC and the features above off, and a profile's service workers get the profile's own preferences (`_setServiceWorkerOverridePreferences:`). The manager's process makes no such template: measured in CI run 383, it kept a stopped profile's session (and its session cookies) alive in WebKit until the profile's next launch | The secure half of the leak page in Safari's chrome: no `WebTransport` in a dedicated, a shared or a service worker, each of which must answer; the same on a page of a proxied profile in our own window, in the manager's process, after profiles without a proxy |
+| The profile's content stays | A navigation's own content controller gets the profile's scripts first; a controller Safari empties of scripts or rule lists gets the profile's back; with a proxy, "Reload Without Content Blockers" and a site's "content blockers off" keep the ping-load blocker on (it stops a page's dns-prefetch, `ContentRules`) | — |
+| Certificates | With a proxy, a site's certificate is checked without this Mac fetching anything for it (`ServerTrust`): the system's trust service would otherwise download a missing intermediate, or ask a revocation server, from the address the certificate names — as this Mac, outside the proxy, and a page can serve such a certificate at will. Answered so in our tabs and downloads, for the profile's data store (service workers), for every delegate Safari's chrome gives its web views and downloads, for the process's URL sessions without a delegate, and for the proxy lookup. A chain that cannot be completed from what the server sent is refused | The canary certificate (§0): refused at the handshake, and no query for its name in the capture, while the control's is there. The report counts the evaluations |
+| Kernel | A sandbox profile, applied before Safari's frameworks load, that allows everything else: with a proxy no UDP at all (QUIC goes around any proxy, and Network.framework ignores a privacy context's proxies for it); and no read or write in the real Safari's places (`~/Library/Safari`, Safari's containers, caches, website data, cookies, preferences, group containers). Safari's frameworks find their folders from the account's real home, not the profile's: their path getters are redirected to the profile's home (`SafariPaths`), and whatever they find another way is refused | The report: UDP and the real Safari's places closed; a UDP datagram and a QUIC connection to documentation addresses never sent (the capture). Measured on macOS 26 before this: the hosted chrome wrote its history index, icons, top sites, per-site settings and content-blocker statistics in the real `~/Library/Safari` |
+| Services in other processes | A connection to an XPC service that would fetch for the profile from another process — as this Mac — or keep its browsing in the user's own stores goes to a name that does not exist: Safari's SearchHelper (search suggestions, OpenSearch descriptions a page names), Safe Browsing (unless asked for), parsecd (Safari Suggestions), cloudd and the sync agents, webpushd, passd (Apple Pay), translationd (page translation), the password breach check, Screen Time (web usage, synced through iCloud), Siri Suggestions, the personalization store, shortcuts and link context, input analytics, Safari's notification agent, the shared web credentials daemon (which fetches a site's associated-domains file), the Spotlight index, usage tracking, Biome, the knowledge store, and sharing. Every service the process connects to is listed in its report | The egress capture below. Measured on macOS 26 before this: the hosted chrome woke passd and translationd, and one of Safari's services sent QUIC to Apple, all as this Mac |
+| Handoff | No `NSUserActivity` becomes current or is eligible for Handoff or indexing: Safari advertised the page in front to the owner's devices on their Apple ID | — |
+| Handed to another app | What the user can hand onward from a page stays in the profile (`HandOffs`): no link preview (Quick Look fetches the link with no proxy, and a click opens it in the real Safari), no Look Up by Quick Look, no Services for a selection; an address is never opened in another app (a link from a PDF, `webcal:`, the default browser), only a file; no sharing service; Safari opens no download by itself; a copy stays on this Mac (no Universal Clipboard); no recent documents; a password remembered here is for the session only, never the owner's keychain. In our own windows the same for previews and Services, and the context menu loses "Search with Google", Look Up, Translate, Share, Quick Note and Writing Tools | The report: no web view with link preview, an address handed to another app not opened (it would show in the capture), no sharing service, a "permanent" password kept for the session only, the clipboard local. In our windows: the stripped context menu, no Services requestor |
+| Disk | Safari's state goes to the profile's home (`SafariPaths`) and is sealed with it; the home is out of Time Machine and Spotlight while it runs; an ephemeral profile's Safari state is discarded, not sealed; a home a crashed manager's process still holds is sealed once that process is gone; no window is restorable (page titles would go to the saved state, outside the home) | The file-system trace (below); the self-test checks the home is excluded from backups |
+| Safari's own services | In the profile's `com.apple.Safari` domain, before Safari's frameworks load (and in the process's argument domain): Safari's AutoFill (iCloud Keychain), Safari Suggestions, search suggestions, Quick Website Search, top-hit preloading, notification prompts and extensions off; Safe Browsing as the profile says. "New Private Window" is not in the hosted menu (its window would keep everything in the profile) | The report: the keys read back |
+
+**Measured from outside, on every push.** Around the unsandboxed self-test CI captures every
+packet that leaves the runner, with the process it belongs to (`tcpdump` on `pktap`), while the
+self-test runs a proxied profile in Safari's chrome on a leak page that makes every kind of request
+a page can make — IPv4 and IPv6 documentation-range literals, host names carrying the run's id, a
+WebSocket, a worker, an image, a frame, a font, a video, dns-prefetch, preconnect, `<a ping>`, a
+beacon, an icon, a touch icon, an OpenSearch description, WebRTC and WebTransport where they
+exist, a link whose name a browser may prefetch (with `X-DNS-Prefetch-Control: on`), a dns-prefetch
+added after load, an HTTPS request to a host name, an HTTPS image whose certificate needs a fetch,
+fetches to this Mac (refused) and to a `.local` name; and its secure half on loopback, with workers.
+`scripts/egress_check.py` fails on any packet to a documentation address, any packet carrying the
+run id or the canary certificate's names, any DNS question for a leak page's name, any non-loopback
+packet of the app's processes (or made on their behalf), and any packet of the services above —
+as the packet's process or the one it was sent for — during the check. A control the self-test
+makes on purpose (a certificate fetch from a profile without a proxy) must be seen, or that part
+is reported inconclusive. In the same window `fs_usage` records every file the app's, WebKit's and
+cfprefsd's processes write, and `scripts/disk_check.py` fails on a write into the real Safari's
+places (`~/Library/Safari`, its container, cookies, caches, preferences); a call the sandbox
+refused is listed, not failed on. The checks that each request reached the proxy are in the
+self-test (§0).
+
+**This Mac's own addresses.** The system never sends a request to this Mac through a proxy: in
+CI (run 382, macOS 26) a page in Safari's chrome fetched `127.0.0.1`, `localhost` and `::1` and
+each reached a listener on the runner directly. A page could so probe which ports this Mac has open
+— the same in every profile, and a way to tell the profiles apart from other people's or link them.
+A profile with a proxy therefore refuses every load to this Mac (127.0.0.0/8, `localhost` and
+`*.localhost`, `::1` and its IPv4-mapped form, `0.0.0.0`, `::`) from a page that is not itself on
+this Mac, in WebKit's own content blocker (`ProxiedContentRules`): fetches, frames, images,
+WebSockets and dedicated workers. A page the user opens on this Mac (`http://127.0.0.1:…`) is the
+user's own machine: it loads from it directly, as in any browser, and keeps its own loads.
+**Checked by the self-test** in Safari's chrome: each of those fetches is refused and the loopback
+canary takes no connection. **Not proven now:** a service worker of a remote HTTPS site — whether
+content blockers apply to its fetches; the self-test proxy cannot serve a trusted HTTPS origin to
+register one. A private-network address (10.255.255.1) goes through the proxy: measured in CI run
+383, and checked.
+
+**The process itself.** It is not given the vault's master key: only its own profile's key and
+that profile's entry in the index (`ProfileGrant`), on its standard input — never in `argv`, the
+environment or a file. A vault opened with that grant reads and writes the one profile's files and
+refuses the rest (`CoreError.notGranted`): the other profiles' keys and names, the proxy list,
+this Mac's settings and the sync keys stay with the manager, and the index is written only by the
+manager. So a compromise of the process that loads websites and Safari's frameworks reaches the
+profile it runs, not the vault (`ProfileGrantTests`). It quits — sealing
+its data — when the manager's channel closes (the manager quit or crashed), and holds a lock on its
+home while it runs, so that a manager started after a crash seals a home left in plaintext only
+once its process is gone.
+
+Its environment is built from a list (`ProfileProcess.childEnvironment`), not inherited: the
+user's name and shell, the text encoding, the app's language and Safari-chrome switches, a fixed
+`PATH`, and the profile's own home, vault folder, time zone and warm-up switch. Nothing else of
+the manager's reaches it — not a shell's or CI's variables, debug switches or the self-test's.
+`HOME` is the profile's home as well as `CFFIXED_USER_HOME`, and `TMPDIR` a folder inside it, so
+temporary files of the run are in the home (excluded from backups), and are removed, not sealed,
+when the profile stops. **Checked by the self-test**: two variables set in the manager before the
+launch (one that would make the process windowless) are not in the process, and its `HOME` and
+`TMPDIR` are in the profile's home. Foundation's own temporary directory is reported, not
+checked: where it reads it from is the system's.
+
+**The system log.** Lines the app writes to the unified log (kept on disk at notice level and
+above, and in a sysdiagnose) carry the user's data only as `<private>`: profile names, proxy hosts
+and exit IPs, addresses, paths, settings and error texts. In clear are only a profile's random id,
+counts, statuses, an error's type, domain and code, and the names of classes and hooks from the
+code. `scripts/check_log_privacy.py` fails CI on a public interpolation that is none of those.
+
+**Not covered:** traffic of system daemons that run for every app and are not started on the
+profile's behalf (the capture lists them: `webprivacyd`, `mobileassetd`, the system's time
+synchronisation), and anything Safari reaches through C-level XPC (`xpc_connection_create`)
+rather than `NSXPCConnection` — the capture would show it. URL sessions Safari makes with a
+delegate of its own answer their certificate questions Safari's way (the system's); the pages'
+loads are not among them. WebKit's C preference setters (`WKPreferencesSetPeerConnectionEnabled`)
+cannot be pinned; the report reads every web view's engine instead. With WebRTC through the packet
+tunnel, profile processes each keep their own view of the tunnel, and one can stop it under
+another (code reading, not measured: the tunnel has not yet run on a Mac, docs/TUNNEL.md); until
+the manager owns the tunnel alone, a profile whose WebRTC goes through the tunnel should not run in
+a process of its own. A site whose certificate holds only with a fetch fails in a proxied profile
+rather than being completed, and Safari's automatic upgrade of an `http://` address to HTTPS does
+not fall back to http after such a refusal (it is a cancelled check, not a failed one). In Safari's
+chrome, Safari's own context menu keeps Look Up, Translate and
+Writing Tools (the system's services, which send the selection to Apple); a profile's process
+shares the user's temporary and cache folders under `/var/folders` with the others; a crash
+report of a profile's process goes to the user's DiagnosticReports.
 
 ## 5. WebRTC
 
@@ -683,12 +867,50 @@ not held up); Lock and Quit (they stop every profile); a page that shows a dialo
 stops it and leaves the dialog to the user. The run goes on when the sheet is closed; the
 profile list shows its progress.
 
+**What a run left.** When a run is over the sheet lists the profile's cookies per site — the
+registrable domain by the Public Suffix List, so `www.example.co.uk` and `.example.co.uk` are one
+site and `alice.github.io` and `bob.github.io` are two — with how many of them the run added. The
+robot reads the profile's own cookie store (`WKHTTPCookieStore`) when the run starts and when it
+ends, where the profile runs: in a profile's own process the list comes back to the manager in the
+run's status, like the page counts. A cookie counts as added when no cookie of the same name,
+domain and path was there at the start; one a page set again with a new value is not new, and a
+cookie that expired during the run is simply no longer listed. A run stopped part-way gets its
+list a moment after it stops. At most 100 sites are listed, those the run added to first.
+
+**Several profiles.** **More → Warm Up Several Profiles…** warms the ticked profiles one after the
+other with one plan (a list composed for the proxy's country is put together for each profile's
+own country). A stopped profile is started without a window, warmed up, then stopped and sealed
+again — and only then does the next one start, so at most one profile is ever decrypted for the
+queue. A profile the user already has open is warmed up where it runs and stays open. The sheet
+says which profile is on ("profile 2 of 5") and what each run came to; the rest of the queue can
+be cancelled, or the run going on stopped as well. A run started from a profile's own warm-up
+sheet runs on its own, and the queue waits for it rather than run beside it.
+
+**Repeating.** "Repeat on a schedule" in a profile's warm-up sheet runs the plan the sheet shows
+every 1–168 hours, while the app is unlocked — never while it is locked, since nothing can be
+decrypted then. A timer looks once a minute and puts the runs that are due into the same queue, so
+scheduled runs take turns too and are started without a window like any queued run. A profile that
+is running when its run comes up is taken to be in use — its windows are the user's — and is left
+alone; the run is tried again ten minutes later. The first run comes one interval after repeating
+is turned on (Start is there for a run now); after that, one interval after the profile's last run,
+whoever started it. A run that could not start (the launch failed, the plan has no page) counts
+as one, so a profile whose proxy is down is not relaunched every minute. A Mac that slept through
+several intervals runs the profile once when it wakes, not once per interval missed. The schedule
+and its last run (`warmup-schedule.bin`) stay on this Mac: they are not synced, and a profile
+export does not carry them, since another Mac should not start a profile in the background
+because this one was told to. The plan a scheduled run uses is the profile's saved one; a
+ready-made or composed choice is cut and shuffled anew for each run, for the country the proxy
+exits in at that time.
+
 **Limits.** No browsing intelligence: the order is the list's, the links are chosen at random
 among the allowed ones in view, the timing is random within fixed ranges. Rhythm and paths are
 still a robot's, and sites that profile behaviour (or ask for a CAPTCHA) can tell; a CAPTCHA or a
 consent banner is neither answered nor clicked away. It does not sign in, fill forms, play media
-or open new windows. Only one run per profile at a time; the plan (`warmup.bin`) stays on this
-Mac.
+or open new windows. Only one run per profile at a time, and the queue runs one profile at a
+time; the plan (`warmup.bin`) and the schedule (`warmup-schedule.bin`) stay on this Mac. A
+schedule only runs while the app is open and unlocked: it is a timer in the app, not a system
+job. The ready-made lists (general, by interest, and 26 countries) are part of the app; nothing is
+fetched to build one.
 
 ## 9. App Sandbox
 
@@ -749,6 +971,16 @@ locations.
   characteristics (§2).
 - Offline guessing of a weak master password by anyone holding `vault.json`.
 - A sync server rolling back to an older complete snapshot (no signed manifest).
+
+**What other programs on this Mac can reach.** The app registers no URL scheme, no AppleScript
+dictionary, no Services and no XPC service. The one way in from another program is the local
+automation API ([docs/AUTOMATION_API.md](AUTOMATION_API.md)), and only once it is turned on (it is
+off by default, and in the unsandboxed build only): HTTP on the loopback address, while the vault
+is unlocked, answering only requests that carry its token and name `127.0.0.1` in `Host`, and none
+from a web page (`Origin`, `Sec-Fetch-*`). Whoever has the token can start and stop the profiles,
+open pages in them and read and write their cookies — not the passwords, the proxy credentials or
+the vault. A program running as this user that can read the app's memory or watch the user type
+is out of scope either way (above).
 
 ## 11. App lifecycle, appearance and language
 

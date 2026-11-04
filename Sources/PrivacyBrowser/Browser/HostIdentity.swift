@@ -47,7 +47,7 @@ enum WebContentLanguage {
     static func decide(_ language: String?) {
         guard decided == nil else {
             if let language, decided?.first != language {
-                log.notice("Websites keep seeing \(decided?.first ?? "?", privacy: .public) instead of \(language, privacy: .public) until the app is quit: WebKit's language is set once per run")
+                log.notice("Websites keep seeing \(decided?.first ?? "?", privacy: .private) instead of \(language, privacy: .private) until the app is quit: WebKit's language is set once per run")
             }
             return
         }
@@ -61,7 +61,7 @@ enum WebContentLanguage {
             UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
         }
         decided = UserDefaults.standard.stringArray(forKey: "AppleLanguages") ?? []
-        log.info("Websites see the languages \(decided?.joined(separator: ",") ?? "", privacy: .public) for this run")
+        log.info("Websites see the languages \(decided?.joined(separator: ",") ?? "", privacy: .private) for this run")
     }
 
     /// The list WebKit is given: the proxy country's language, else the user's own languages.

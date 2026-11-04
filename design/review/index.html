@@ -1,0 +1,589 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ревью дизайна Lumen</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+  /* Layout: one reading column (≈70ch) for the argument, a wide band (≤1320px) for screenshot pairs at one
+     scale; a sticky bar with the screenshot language and the sections. One dark theme on purpose: the app
+     is dark-only, and its screens are judged on the backdrop they live on. Colours are Lumen's own tokens. */
+  :root {
+    color-scheme: dark;
+    --backdrop: #0B0C0F;
+    --surface: #161920;
+    --card: #1B1F27;
+    --raised: #1E222A;
+    --line: rgba(255, 255, 255, 0.08);
+    --text: #ECEEF2;
+    --text-2: #A2A9B6;
+    --text-3: #8A93A3;
+    --accent: #6F8FEA;
+    --accent-tint: rgba(111, 143, 234, 0.14);
+    --good: #4CC38A;
+    --warn: #D9A441;
+    --bad: #EC6F68;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+    --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter Display", "Inter", system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+    --wide: 1320px;
+    --read: 70ch;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--backdrop); color: var(--text); margin: 0;
+    font: 400 15px/1.55 var(--font); -webkit-font-smoothing: antialiased;
+  }
+  body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--backdrop); }
+  .gutter { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .wide { max-width: var(--wide); margin: 0 auto; }
+  .read { max-width: var(--read); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; }
+  h1 { font: 600 34px/1.15 var(--font-display); letter-spacing: -0.4px; }
+  h2 { font: 600 24px/1.25 var(--font-display); letter-spacing: -0.2px; }
+  h3 { font: 600 16px/1.35 var(--font); }
+  p { margin: 0; }
+  code, .mono { font-family: var(--mono); font-size: 0.86em; }
+  code { background: rgba(255, 255, 255, 0.06); padding: 1px 5px; border-radius: 4px; }
+  .muted { color: var(--text-2); }
+  .faint { color: var(--text-3); }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* Sticky bar */
+  .bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: rgba(11, 12, 15, 0.96); border-bottom: 1px solid var(--line); }
+  .bar .wide { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; padding-block: 10px; }
+  .bar .name { font: 600 14px/1 var(--font); white-space: nowrap; }
+  .bar nav { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 13px; flex: 1; min-width: 0; }
+  .bar nav a { color: var(--text-2); white-space: nowrap; }
+  .bar nav a:hover { color: var(--text); text-decoration: none; }
+  .seg { display: inline-flex; padding: 2px; gap: 2px; border-radius: 8px; background: rgba(255, 255, 255, 0.06); }
+  .seg button { border: 0; background: transparent; color: var(--text-2); font: 500 12px/1 var(--font); padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: rgba(255, 255, 255, 0.14); color: var(--text); }
+  .seg-label { font-size: 12px; color: var(--text-3); }
+
+  /* Page */
+  header.top { padding-block: 40px 28px; }
+  header.top .lede { font-size: 18px; line-height: 1.5; color: var(--text-2); margin-top: 12px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; font-size: 13px; }
+  .pill { display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.06); color: var(--text-2); }
+  .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); }
+  .pill.warn .dot { background: var(--warn); }
+  .pill.good .dot { background: var(--good); }
+  .ci-note { margin-top: 12px; font-size: 13px; color: var(--text-2); max-width: var(--read); }
+
+  section { padding-block: 44px 8px; border-top: 1px solid var(--line); scroll-margin-top: 64px; }
+  section > .wide > .intro { display: grid; gap: 10px; margin-bottom: 22px; }
+  .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 12px; }
+  .summary a.item { display: grid; gap: 6px; padding: 14px 16px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); color: var(--text); }
+  .summary a.item:hover { text-decoration: none; border-color: rgba(255, 255, 255, 0.18); }
+  .summary .k { font: 600 12px/1 var(--font); letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); }
+  .summary .t { font-size: 14px; line-height: 1.45; color: var(--text-2); }
+  .summary .t b { color: var(--text); font-weight: 600; }
+
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-block: 14px 8px; align-items: start; }
+  .pair > figure, .solo > figure { margin: 0; min-width: 0; }
+  .pair figcaption, .solo figcaption, .shot-label { display: flex; align-items: center; gap: 8px; font: 500 12px/1.3 var(--font); color: var(--text-3); margin-bottom: 7px; }
+  .shot-label b { color: var(--text); font-weight: 600; }
+  .tag-before, .tag-after { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
+  .tag-before { background: var(--text-3); }
+  .tag-after { background: var(--accent); }
+  .shot { display: block; width: 100%; max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 0 0 1px var(--line); background: var(--surface); }
+  .placeholder { display: grid; place-items: center; text-align: center; gap: 6px; padding: 24px; border-radius: 8px; border: 1px dashed rgba(255, 255, 255, 0.18); color: var(--text-3); font-size: 13px; background: repeating-linear-gradient(135deg, rgba(255,255,255,.015) 0 12px, transparent 12px 24px); }
+  .placeholder b { color: var(--text-2); font-weight: 600; }
+  .changes { margin: 10px 0 0; padding-left: 18px; color: var(--text-2); font-size: 14px; display: grid; gap: 4px; max-width: 92ch; }
+  .changes b { color: var(--text); font-weight: 600; }
+  .pair-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-top: 26px; }
+  .pair-title .size { font: 400 12px/1 var(--mono); color: var(--text-3); }
+  .solo { margin-block: 14px 8px; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-top: 14px; }
+  .grid2 figure { margin: 0; min-width: 0; }
+  details { margin-top: 18px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); }
+  details > summary { cursor: pointer; padding: 12px 16px; font-weight: 600; font-size: 14px; color: var(--text); list-style: none; display: flex; gap: 8px; align-items: center; }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary::before { content: "›"; color: var(--text-3); transition: transform 120ms ease-out; display: inline-block; }
+  details[open] > summary::before { transform: rotate(90deg); }
+  details > .body { padding: 0 16px 16px; }
+  .open-proto { display: inline-flex; align-items: center; gap: 8px; margin-top: 4px; padding: 8px 12px; border-radius: 8px; background: var(--accent-tint); color: var(--accent); font: 500 13px/1 var(--font); width: fit-content; }
+  .open-proto:hover { text-decoration: none; background: rgba(111, 143, 234, 0.22); }
+  .links { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  table.t { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.t th { text-align: left; font: 600 12px/1.3 var(--font); color: var(--text-3); padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  table.t td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--text-2); }
+  table.t td:first-child { color: var(--text); font-weight: 500; }
+  table.t td.bad { color: var(--warn); }
+  .scroll-x { overflow-x: auto; margin-top: 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); }
+  .cost { display: inline-block; min-width: 22px; text-align: center; font: 600 11px/18px var(--font); border-radius: 4px; padding: 0 5px; }
+  .cost.s { background: rgba(76, 195, 138, 0.14); color: var(--good); }
+  .cost.m { background: rgba(217, 164, 65, 0.14); color: var(--warn); }
+  .cost.l { background: rgba(236, 111, 104, 0.14); color: var(--bad); }
+
+  .video { width: 100%; max-width: 100%; display: block; border-radius: 8px; box-shadow: 0 0 0 1px var(--line); background: var(--surface); }
+
+  /* Questions */
+  .q { padding: 18px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); margin-top: 14px; }
+  .q h3 { margin-bottom: 4px; }
+  .q .why { color: var(--text-2); font-size: 14px; max-width: 90ch; }
+  .opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-top: 12px; }
+  .opt { position: relative; display: grid; gap: 8px; align-content: start; padding: 10px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); cursor: pointer; }
+  .opt:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .opt:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .opt input { position: absolute; opacity: 0; pointer-events: none; }
+  .opt .lbl { display: flex; gap: 8px; align-items: baseline; font-size: 14px; color: var(--text); font-weight: 500; }
+  .opt .lbl .rec { font: 600 11px/1 var(--font); color: var(--good); white-space: nowrap; }
+  .opt .sub { font-size: 13px; color: var(--text-2); }
+  .opt img { width: 100%; max-width: 100%; border-radius: 6px; box-shadow: 0 0 0 1px var(--line); }
+  .answer-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 18px; }
+  .btn { border: 0; cursor: pointer; font: 500 14px/1 var(--font); padding: 10px 14px; border-radius: 8px; background: #E6E8ED; color: #121419; }
+  .btn:hover { background: #F2F3F6; }
+  #answers-text { width: 100%; min-height: 120px; margin-top: 10px; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: 13px/1.5 var(--mono); }
+
+  footer { padding-block: 40px 60px; color: var(--text-3); font-size: 13px; border-top: 1px solid var(--line); }
+  footer p + p { margin-top: 8px; }
+
+  @media (max-width: 760px) {
+    h1 { font-size: 28px; }
+    .pair { grid-template-columns: 1fr; }
+    .bar nav { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    details > summary::before { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bar gutter">
+  <div class="wide">
+    <span class="name">Ревью дизайна Lumen</span>
+    <nav aria-label="Разделы">
+      <a href="#summary">Коротко</a><a href="#profiles">Профили</a><a href="#forms">Формы</a><a href="#system">Шрифт и сетка</a>
+      <a href="#mark">Знак</a><a href="#motion">Движение</a><a href="#effects">Эффекты</a><a href="#a11y">Доступность</a>
+      <a href="#questions">Вопросы</a><a href="#plan">Внедрение</a>
+    </nav>
+    <span class="seg-label" id="lang-label">Язык на снимках</span>
+    <span class="seg" role="group" aria-labelledby="lang-label">
+      <button type="button" data-lang="ru" aria-pressed="true">RU</button><button type="button" data-lang="en" aria-pressed="false">EN</button>
+    </span>
+  </div>
+</div>
+
+<main>
+  <header class="top gutter">
+    <div class="wide">
+      <h1>Ревью дизайна Lumen</h1>
+      <p class="lede read">Предложения по интерфейсу PrivacyBrowser: что меняется, зачем и чего это стоит. В приложение ничего не внедрено: это прототипы и снимки, чтобы вы выбрали. Слева в каждой паре экран из CI, справа прототип того же экрана в том же размере окна.</p>
+      <div class="meta">
+        <span class="pill"><span class="dot"></span>ветка <code>claude/secret-partner-setup-e505tc</code>, папка <code>design/</code></span>
+        <span class="pill"><span class="dot"></span>29 октября 2026</span>
+        <span class="pill" id="ci-pill"><span class="dot"></span><span id="ci-pill-text">Снимки «до» из CI: проверяю…</span></span>
+      </div>
+      <p class="ci-note" id="ci-note" hidden>Хост, где GitHub хранит артефакты сборок, закрыт сетевой политикой окружения, в котором готовились предложения, поэтому слева пока заглушки. Снимки по памяти я не рисовал. Достаточно выполнить в репозитории <code>gh run download &lt;id&gt; -n ui-snapshots -D design/shots/before</code> — картинки встанут на свои места сами.</p>
+    </div>
+  </header>
+
+  <section id="summary" class="gutter">
+    <div class="wide">
+      <div class="intro read"><h2>Коротко</h2><p class="muted">Восемь предложений. Каждое ведёт к своему разделу с картинками, прототипом и ценой внедрения.</p></div>
+      <div class="summary">
+        <a class="item" href="#profiles"><span class="k">Главный экран</span><span class="t"><b>Строка 36 pt вместо 48:</b> на окне 1180 × 740 целиком видно 16 профилей вместо 11. У статуса своя колонка, и каждое состояние отличается формой знака. Страны выхода вынесены в боковую панель, профили можно выбирать пачкой.</span></a>
+        <a class="item" href="#motion"><span class="k">Ошибка в поведении</span><span class="t"><b>Строка уезжает из-под курсора.</b> После ▶ профиль сразу переезжает в «Запущены», и под курсором оказывается ▶ соседнего профиля. Предлагаю перестраивать группы, когда курсор ушёл со списка.</span></a>
+        <a class="item" href="#a11y"><span class="k">Контраст</span><span class="t"><b>Подсказки в листах ниже AA:</b> <code>textTertiary</code> даёт 4.24:1 на <code>raised</code> и 3.83:1 на <code>raisedInset</code>, белый на <code>accentFill</code> — 3.51:1. Достаточно двух новых значений цвета и одного нового токена.</span></a>
+        <a class="item" href="#system"><span class="k">Шрифт</span><span class="t"><b>22 / 17 / 13 / 11 вместо 20 / 15 / 13 / 13 / 12 / 11.</b> Это четыре системных стиля macOS; внутри 13 pt иерархию держит начертание. Цифры, которые обновляются на месте, табличные.</span></a>
+        <a class="item" href="#forms"><span class="k">Настройки</span><span class="t"><b>Окно «Настройки» (⌘,)</b> для синхронизации, WebRTC и мастер-пароля. Одна анатомия строки во всех формах, ошибка под своим полем, у каждой опции одна строка пояснения.</span></a>
+        <a class="item" href="#mark"><span class="k">Знак и иконка</span><span class="t"><b>На Retina 16–20 pt шов вдвое толще нужного.</b> Срез выбирать по пикселям (16 / 32 / 64). Для macOS 26 слои Icon Composer, для строки меню монохром.</span></a>
+        <a class="item" href="#motion"><span class="k">Движение</span><span class="t"><b>Ничего дольше 250 мс.</b> Список и вкладки сейчас не проверяют Reduce Motion. Фокус и выделение появляются мгновенно.</span></a>
+        <a class="item" href="#effects"><span class="k">Эффекты</span><span class="t"><b>Материал проверен на трёх обоях.</b> На светлых обоях текст панели опускается до 3.3:1. Рекомендую оставить плоско.</span></a>
+      </div>
+    </div>
+  </section>
+
+  <section id="profiles" class="gutter">
+    <div class="wide">
+      <div class="intro read">
+        <h2>1. Главный экран</h2>
+        <p class="muted">Рабочий инструмент на десятки и сотни профилей: решают плотность, скорость чтения строки и то, насколько легко отличить «запущен» от «греется» и «шифруется». Декор здесь второстепенен.</p>
+        <a class="open-proto" data-href="prototypes/profiles.html" target="_blank" rel="noopener">Открыть прототип экрана →</a>
+      </div>
+      <div data-pair="profiles" data-size="1180 × 740" data-title="Окно «Профили»">
+        <ul class="changes">
+          <li><b>Одна строка текста, 36 pt:</b> имя · статус · выход в сеть · устройство · запуск · действия. Колонки «Видится как» и «Запускался» уходят первыми, когда окно сужается.</li>
+          <li><b>Статус в своей колонке, у каждого состояния свой знак:</b> ● работает, кольцо прогресса «Прогрев 4/12 · cookies: 84», вращающаяся дуга «Запуск…», замок «Шифрование данных…», ○ остановлен. Строка при шифровании больше не тускнеет до 60 %.</li>
+          <li><b>Действия иконками 28 × 28</b> (▶, ■, новое окно, ⋯): колонка 92 pt вместо 236, освободившееся место отдано имени.</li>
+          <li><b>Боковая панель:</b> страны выхода с флагами и счётчиками, фильтр «Напрямую». Поиск ищет ещё по стране и по прокси.</li>
+          <li><b>Даты в таблице короткие</b> («3 дн. назад»): «на прошлой неделе» в колонку не помещается.</li>
+        </ul>
+      </div>
+      <details>
+        <summary>Остальные пары этого экрана: узкое окно, фильтр, пусто, нет совпадений</summary>
+        <div class="body">
+          <div data-pair="profiles-narrow" data-size="920 × 620" data-title="Узкое окно, идёт работа"><ul class="changes"><li>Колонки «Видится как» и «Запускался» скрыты, строка счётчика уступает место первой, как сейчас в ViewThatFits. Индикатор работы стоит рядом с поиском.</li></ul></div>
+          <div data-pair="profiles-proxied" data-size="1180 × 560" data-title="Фильтр «Через прокси», сбой синхронизации"><ul class="changes"><li>Активный фильтр виден над списком чипом, его можно снять одним кликом. Сбой синхронизации отмечен значком и цветом warning.</li></ul></div>
+          <div data-pair="profiles-empty" data-size="1180 × 640" data-title="Профилей ещё нет"><ul class="changes"><li>Тот же состав, общий для всего приложения компонент LumenStateView: знак, заголовок 17 pt, строка 13 pt, действие.</li></ul></div>
+          <div data-pair="profiles-no-matches" data-size="1180 × 520" data-title="Нет совпадений"><ul class="changes"><li>Состояние объясняет, что именно не нашлось («По запросу «zzz» с этими фильтрами ничего нет»), и предлагает показать все профили.</li></ul></div>
+        </div>
+      </details>
+      <h3 style="margin-top:30px">Новые состояния, которых сейчас нет</h3>
+      <div class="grid2">
+        <figure data-after="new-profiles-selection" data-caption="Выбор пачкой: ⌘/⇧-клик, чекбоксы, «Запустить 3 · Остановить 1 · Прогрев…» в заголовке"></figure>
+        <figure data-after="new-profiles-scale" data-caption="60 профилей: так выглядит рабочий день, 16 строк целиком на экране"></figure>
+        <figure data-after="new-profiles-filtered" data-caption="Германия + «Через прокси»: фильтры чипами над списком"></figure>
+        <figure data-after="new-profiles-error" data-caption="Профиль не запустился: баннер с действием вместо модального алерта, статус в строке"></figure>
+        <figure data-after="new-profiles-keyboard" data-caption="С клавиатуры: строка в фокусе обведена, ↑↓ Space Return Esc ⌘A ⌘F"></figure>
+      </div>
+    </div>
+  </section>
+
+  <section id="forms" class="gutter">
+    <div class="wide">
+      <div class="intro read">
+        <h2>2. Формы и настройки</h2>
+        <p class="muted">Настройки разбросаны по шести местам: редактор профиля, лист синхронизации и лист туннеля (из меню «⋯» и из боковой панели), смена пароля, прогрев, перенос профиля. Внутри приложения у них три разных вида строк. Предлагаю одну структуру и одну анатомию строки.</p>
+        <div class="links"><a class="open-proto" data-href="prototypes/editor.html" target="_blank" rel="noopener">Редактор профиля →</a><a class="open-proto" data-href="prototypes/settings.html" target="_blank" rel="noopener">Окно «Настройки» →</a></div>
+      </div>
+      <div class="scroll-x"><table class="t">
+        <tr><th>Что</th><th>Где сейчас</th><th>Где предлагаю</th></tr>
+        <tr><td>Настройки профиля</td><td>Лист-редактор, пять вкладок, свои EditorToggle / EditorField / EditorNote</td><td>Тот же лист 600 × 660 и те же вкладки; группы-карточки и одна анатомия строки</td></tr>
+        <tr><td>Синхронизация</td><td>Лист 540 из «⋯» и из строки синхронизации в боковой панели, системный Form</td><td>Окно «Настройки» → «Синхронизация»; строка в боковой панели ведёт туда</td></tr>
+        <tr><td>WebRTC через прокси</td><td>Лист 560 из «⋯» и по ссылке из редактора</td><td>«Настройки» → «WebRTC через прокси»; ссылка из редактора открывает эту вкладку</td></tr>
+        <tr><td>Мастер-пароль</td><td>Лист 420 из «⋯»</td><td>«Настройки» → «Безопасность» → «Сменить…» (тот же лист, с подписями и проверкой на лету)</td></tr>
+        <tr><td>Перенос профиля между Mac</td><td>Экспорт в меню строки, импорт в «⋯»; листы 480</td><td>Остаются действиями; импорт ещё и в меню «Файл»; листы S 440 с той же анатомией</td></tr>
+        <tr><td>Прогрев</td><td>Лист 880 из меню строки, свои чипы и ползунок</td><td>Остаётся листом: это действие, а не настройка. Его контролы — по той же анатомии; чипы с контрастным выбранным цветом</td></tr>
+      </table></div>
+      <p class="muted read" style="margin-top:14px">Анатомия строки: название 13 pt medium, под ним одна строка пояснения 11 pt, контрол справа. Длинный текст доступен по ⓘ во всплывающем окне. Ошибка выводится под своим полем, поле получает красную рамку, во вкладке с ошибкой ставится точка, а в подвале — «Чтобы сохранить, исправьте 1 поле · Показать». Пояснения в одну строку — новые строки локализации, их полный список с ключами есть в README.</p>
+      <div data-pair="editor-data-ephemeral" data-size="600 × 660" data-title="Ошибка на другой вкладке">
+        <ul class="changes">
+          <li><b>Сейчас</b> ошибка порта видна только в подвале, пока открыта вкладка «Данные», и непонятно, где её исправлять.</li>
+          <li><b>Предлагаю:</b> красная точка на вкладке «Сеть», в подвале «Чтобы сохранить, исправьте 1 поле» и кнопка «Показать», которая открывает вкладку и ставит фокус в поле.</li>
+        </ul>
+      </div>
+      <div data-pair="sheet-sync" data-size="540 × 460" data-title="Синхронизация: лист → вкладка окна «Настройки»">
+        <ul class="changes"><li>Окно с вкладками-значками, как в настройках Safari и Mail. У каждой опции одна строка пояснения. Почему нельзя синхронизировать прямо сейчас, сказано рядом с кнопкой. Длинное «что синхронизируется» открывается по ссылке.</li></ul>
+      </div>
+      <details>
+        <summary>Остальные пары и новые экраны форм</summary>
+        <div class="body">
+          <div data-pair="editor-network" data-size="600 × 660" data-title="Редактор: вкладка «Сеть»"><ul class="changes"><li>Прокси и WebRTC — две группы. Место выхода, «Часовой пояс по прокси» и предупреждение о смене IP занимают по строке, каждая со своим пояснением и ⓘ.</li></ul></div>
+          <div data-pair="editor-general-new" data-size="600 × 660" data-title="Новый профиль: «Основные»"><ul class="changes"><li>Поля с подписями над ними; «Временный профиль» — строка с переключателем и пояснением.</li></ul></div>
+          <div data-pair="editor-identity" data-size="600 × 660" data-title="Идентичность"><ul class="changes"><li>Длинное меню устройства стоит под заголовком, а не справа от него: русская подпись «Safari на macOS 26 (соответствует движку)» не сжимает строку.</li></ul></div>
+          <div data-pair="editor-privacy" data-size="600 × 660" data-title="Конфиденциальность"><ul class="changes"><li>У каждой опции одна строка о том, что она делает. Оговорка про JavaScript-обёртки стоит отдельной сноской.</li></ul></div>
+          <div data-pair="sheet-change-password" data-size="420 × 330 → 420 × 378" data-title="Смена мастер-пароля"><ul class="changes"><li>Подписи над полями и правила под ними («Не менее 10 символов» ✓, «Пароли не совпадают»). Из-за этого лист выше на 48 pt; масштаб у пары одинаковый.</li></ul></div>
+          <div class="grid2">
+            <figure data-after="new-editor-network-error" data-caption="Ошибка под полем «Порт», точка на вкладке, итог в подвале"></figure>
+            <figure data-after="new-editor-details" data-caption="ⓘ: длинное пояснение во всплывающем окне, а не абзацем в форме"></figure>
+            <figure data-after="new-settings-network" data-caption="«Настройки» → WebRTC через прокси: состояние, одно главное действие, предупреждение"></figure>
+            <figure data-after="new-settings-security" data-caption="«Настройки» → Безопасность"></figure>
+            <figure data-after="new-editor-network-full" data-caption="Вкладка «Сеть» целиком (лист прокручивается)"></figure>
+          </div>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <section id="system" class="gutter">
+    <div class="wide">
+      <div class="intro read">
+        <h2>3. Шрифт, сетка, состояния</h2>
+        <p class="muted">Шкала берёт четыре размера системных стилей macOS (title1, title2, body, subheadline), без своих шрифтов. Сетка 4 pt без исключений, у всех контролов одна высота, у листов три ширины. Пустые, загрузочные и ошибочные состояния — один компонент.</p>
+        <a class="open-proto" data-href="prototypes/system.html" target="_blank" rel="noopener">Страница системы (живой счётчик цифр) →</a>
+      </div>
+      <div class="solo"><figure data-after="new-system-type"></figure></div>
+      <div class="grid2">
+        <figure data-after="new-system-numerals" data-caption="Табличные цифры: счётчик прогрева больше не дёргает строку"></figure>
+        <figure data-after="new-system-metrics" data-caption="Отступы 4/8/12/16/24/32/48, контролы 28 pt (поля были 32), листы S 440 · M 600 · L 860"></figure>
+        <figure data-after="new-system-states" data-caption="Пусто, загрузка, ошибка без блокировки"></figure>
+      </div>
+    </div>
+  </section>
+
+  <section id="mark" class="gutter">
+    <div class="wide">
+      <div class="intro read">
+        <h2>4. Знак и иконка</h2>
+        <p class="muted">Идея шва остаётся: диск, разрезанный крутым швом, половины сдвинуты и не касаются. Меняется исполнение на мелких размерах и формат иконки для macOS 26+. Файлы SVG и PNG лежат в <code>design/logo/</code>.</p>
+      </div>
+      <div class="solo"><figure data-after="new-logo-sizes"></figure></div>
+      <div class="solo"><figure data-after="new-logo-zoom"></figure></div>
+      <div data-pair="app-icon" data-size="900 × 640" data-title="Иконка приложения (лист AppIconSheet из CI)"><ul class="changes"><li>Иконка на 16 pt (32 px) получает 32-сеточный срез: шов около 6 % плитки, как у большой, а не 12.5 %.</li></ul></div>
+      <div data-pair="brand" data-size="900 × 560" data-title="Лист бренда (BrandSheet из CI)"><ul class="changes"><li>Знаки 14–20 pt и голый знак 16 pt рисуются 32-сеточным срезом; знаки от 24 pt — как раньше.</li></ul></div>
+      <div class="grid2">
+        <figure data-after="new-logo-macos26" data-caption="macOS 26: слои для Icon Composer (фон и две половины) и приближения режимов"></figure>
+        <figure data-after="new-logo-menubar" data-caption="Монохром для строки меню: шаблонное изображение 16 pt"></figure>
+        <figure data-after="new-logo-context-current" data-caption="Сейчас: Dock, Finder, ⌘-Tab"></figure>
+        <figure data-after="new-logo-context" data-caption="Предлагаю: Dock, Finder, ⌘-Tab"></figure>
+      </div>
+    </div>
+  </section>
+
+  <section id="motion" class="gutter">
+    <div class="wide">
+      <div class="intro read">
+        <h2>5. Движение</h2>
+        <p class="muted">Слева в каждом ролике то, как работает приложение сейчас (те же длительности и кривые, что в Theme.swift и во вьюхах), справа предложение. Вёрстка в обеих половинах одинаковая, разное только движение. Ролик снят с частотой около 25 кадров в секунду, поэтому кривые лучше смотреть в живом прототипе.</p>
+        <a class="open-proto" data-href="prototypes/motion.html" target="_blank" rel="noopener">Живое сравнение: наведите, нажмите, переключите →</a>
+      </div>
+      <div class="grid2">
+        <figure><div class="shot-label"><b>Список</b> наведение · запуск · фильтр · фокус</div><video class="video" data-video="list" muted loop playsinline preload="metadata"></video>
+          <p class="muted" style="font-size:13px;margin-top:6px">Через 0.6 с после ▶ у «Banking» слева под курсором оказывается ▶ профиля «Shopping». Справа строка остаётся на месте, пока курсор над списком.</p></figure>
+        <figure><div class="shot-label"><b>Список с Reduce Motion</b></div><video class="video" data-video="list-reduce-motion" muted loop playsinline preload="metadata"></video>
+          <p class="muted" style="font-size:13px;margin-top:6px">Слева всё по-прежнему едет: ProfileListView не читает accessibilityReduceMotion. Справа ничего не движется.</p></figure>
+        <figure><div class="shot-label"><b>Вкладки листа</b></div><video class="video" data-video="sheet" muted loop playsinline preload="metadata"></video>
+          <p class="muted" style="font-size:13px;margin-top:6px">220 мс две вкладки видны одновременно; справа переключение мгновенное.</p></figure>
+        <figure><div class="shot-label"><b>Экран запуска</b></div><video class="video" data-video="launch" muted loop playsinline preload="metadata"></video>
+          <p class="muted" style="font-size:13px;margin-top:6px">Задержка 60 + 420 мс против 240 мс без задержки.</p></figure>
+      </div>
+      <div class="scroll-x"><table class="t">
+        <tr><th>Что</th><th>Сейчас</th><th>Предлагаю</th><th>Reduce Motion</th></tr>
+        <tr><td>Наведение</td><td>160 мс easeOut туда и обратно</td><td>появление 0, угасание 120 мс</td><td>так же: это тон, а не движение</td></tr>
+        <tr><td>Выделение, фокус</td><td class="bad">пункт панели 220 мс, кольцо поля 160 мс</td><td>сразу; кольцо у всех контролов</td><td>—</td></tr>
+        <tr><td>Фильтр и поиск</td><td class="bad">220 мс, строки едут</td><td>сразу</td><td>сразу</td></tr>
+        <tr><td>Строка между группами</td><td class="bad">сразу, 220 мс, из-под курсора</td><td>когда курсор ушёл со списка, 220 мс</td><td>без анимации</td></tr>
+        <tr><td>Статус строки</td><td>160 мс</td><td>120 мс, смена глифа и подписи</td><td>120 мс, без движения</td></tr>
+        <tr><td>Прогресс</td><td>160 мс easeOut</td><td>200 мс linear</td><td>сразу к значению</td></tr>
+        <tr><td>Вкладки листа</td><td class="bad">220 мс наложения</td><td>сразу</td><td>сразу</td></tr>
+        <tr><td>Экран запуска</td><td class="bad">60 + 420 мс, подъём 10 pt</td><td>240 мс, подъём 6 pt</td><td>150 мс проявление</td></tr>
+        <tr><td>Баннер ошибки</td><td>—</td><td>180 мс, 6 pt сверху; уход 120 мс</td><td>только проявление</td></tr>
+        <tr><td>Не анимируется никогда</td><td colspan="3">выделение, фокус, текст и числа, сортировка и фильтр, раскладка при ресайзе, прокрутка; ничего не пульсирует в покое. Листы, меню и поповеры — системные.</td></tr>
+      </table></div>
+    </div>
+  </section>
+
+  <section id="effects" class="gutter">
+    <div class="wide">
+      <div class="intro read">
+        <h2>6. Эффекты</h2>
+        <p class="muted">Сейчас действует правило «без градиентов, свечений и блюра». Ниже проверено, что будет с материалом macOS на всех поверхностях и на трёх разных обоях. Под каждым снимком контраст текста боковой панели, измеренный по пикселям. Материал здесь приближённый, настоящий NSVisualEffectView даст другие числа, но тоже в виде диапазона.</p>
+      </div>
+      <div class="solo"><figure data-after="new-effects"></figure></div>
+      <details><summary>Крупно: материал везде на светлых обоях, материал в панели на пёстрых</summary>
+        <div class="body grid2"><figure data-after="new-effects-all-warm"></figure><figure data-after="new-effects-sidebar-busy"></figure></div></details>
+    </div>
+  </section>
+
+  <section id="a11y" class="gutter">
+    <div class="wide">
+      <div class="intro read">
+        <h2>7. Доступность</h2>
+        <p class="muted">Контраст каждой пары указан числом и посчитан скриптом <code>design/tools/contrast.py</code>. Фокус с клавиатуры виден на всех контролах, область нажатия не меньше 24 × 24, статус различим без цвета. Отдельная находка: в Theme.swift записано, что у textPrimary контраст 14.6:1, а на <code>surface</code> он 15.1:1. Комментарий устарел, ошибки в цвете нет.</p>
+      </div>
+      <div class="solo"><figure data-after="new-system-contrast"></figure></div>
+      <div class="solo"><figure data-after="new-system-a11y"></figure></div>
+    </div>
+  </section>
+
+  <section id="questions" class="gutter">
+    <div class="wide">
+      <div class="intro read">
+        <h2>8. Вопросы к вам</h2>
+        <p class="muted">Семь решений, которые за вас принять нельзя. Рекомендуемый вариант помечен. Выберите и нажмите «Скопировать ответы»: текст можно вставить в чат.</p>
+      </div>
+      <form id="answers">
+        <div class="q" data-q="1"><h3>1. Плотность строк главного экрана</h3><p class="why">36 pt вмещает кнопки 28 × 28 с полями. 32 pt даёт ещё 2 строки на экран, но кнопки в строке придётся уменьшить до 24 × 24.</p>
+          <div class="opts"><label class="opt"><input type="radio" name="q1" value="36 pt" checked><span class="lbl">36 pt <span class="rec">рекомендую</span></span><img data-thumb="new-profiles-scale" alt="Строки 36 pt"></label>
+          <label class="opt"><input type="radio" name="q1" value="32 pt"><span class="lbl">32 pt</span><img data-thumb="new-profiles-scale-row32" alt="Строки 32 pt"></label></div></div>
+        <div class="q" data-q="2"><h3>2. Группы «Запущены / Готовы» или один список</h3><p class="why">Группы показывают, что работает прямо сейчас, но строка переезжает между ними. Плоский список, отсортированный по статусу, никогда не двигается сам, зато запущенные не стоят отдельным блоком.</p>
+          <div class="opts"><label class="opt"><input type="radio" name="q2" value="группы, перестройка после ухода курсора" checked><span class="lbl">Группы, перестройка после ухода курсора <span class="rec">рекомендую</span></span><img data-thumb="new-profiles-scale" alt="Группы"></label>
+          <label class="opt"><input type="radio" name="q2" value="плоский список, сортировка по статусу"><span class="lbl">Плоский список, сортировка по статусу</span><img data-thumb="new-profiles-scale-flat" alt="Плоский список"></label></div></div>
+        <div class="q" data-q="3"><h3>3. Где живут настройки приложения</h3><p class="why">Окно «Настройки» (⌘,) — привычное место на Mac. Пункты «⋯» тогда ведут во вкладки этого окна.</p>
+          <div class="opts"><label class="opt"><input type="radio" name="q3" value="окно Настройки" checked><span class="lbl">Окно «Настройки» <span class="rec">рекомендую</span></span><img data-thumb="sheet-sync" alt="Окно настроек"></label>
+          <label class="opt"><input type="radio" name="q3" value="оставить листы из меню"><span class="lbl">Оставить листы из меню «⋯», привести только вид строк</span><span class="sub">Дешевле: меняются только строки внутри листов.</span></label></div></div>
+        <div class="q" data-q="4"><h3>4. Знак на мелких размерах</h3><p class="why">Выбор среза по пикселям меняет только то, как знак выглядит на Retina при 12–23 pt. На 1× и от 24 pt всё остаётся как сейчас.</p>
+          <div class="opts"><label class="opt"><input type="radio" name="q4" value="срез по пикселям 16/32/64" checked><span class="lbl">Срез по пикселям 16 / 32 / 64 <span class="rec">рекомендую</span></span><img data-thumb="new-logo-zoom" alt="Знак под лупой"></label>
+          <label class="opt"><input type="radio" name="q4" value="оставить как есть"><span class="lbl">Оставить как есть</span></label></div></div>
+        <div class="q" data-q="5"><h3>5. Иконка в формате macOS 26</h3><p class="why">Слои Icon Composer дают режимы «Тёмный / Прозрачный / Тонированный» и стекло от системы. Цена: в сборку добавляется <code>actool</code> из Xcode 26, а для macOS 14–15 остаётся .icns. Проверить результат можно только на Mac.</p>
+          <div class="opts"><label class="opt"><input type="radio" name="q5" value="слои сейчас"><span class="lbl">Да, сейчас</span><img data-thumb="new-logo-macos26" alt="Слои macOS 26"></label>
+          <label class="opt"><input type="radio" name="q5" value="слои после остального" checked><span class="lbl">Да, после остального <span class="rec">рекомендую</span></span><span class="sub">Сначала исправить экраны: от них больше пользы каждый день.</span></label>
+          <label class="opt"><input type="radio" name="q5" value="нет, оставить .icns"><span class="lbl">Нет, оставить .icns</span></label></div></div>
+        <div class="q" data-q="6"><h3>6. Материал и блюр</h3><p class="why">Если вводить материал, то сразу на всех поверхностях. Тогда контраст становится диапазоном, а цвета обоев видны в записи экрана.</p>
+          <div class="opts"><label class="opt"><input type="radio" name="q6" value="плоско" checked><span class="lbl">Оставить плоско <span class="rec">рекомендую</span></span><img data-thumb="new-effects" alt="Сравнение материалов"></label>
+          <label class="opt"><input type="radio" name="q6" value="материал во всех поверхностях"><span class="lbl">Материал во всех поверхностях</span><img data-thumb="new-effects-all-warm" alt="Материал везде"></label></div></div>
+        <div class="q" data-q="7"><h3>7. Что добавить из нового</h3><p class="why">Эти части требуют изменений в модели, а не только во вьюхах.</p>
+          <div class="opts">
+            <label class="opt"><input type="checkbox" name="q7" value="прогрев пачкой" checked><span class="lbl">Прогрев пачкой</span><span class="sub">«Прогрев…» для нескольких профилей сразу.</span></label>
+            <label class="opt"><input type="checkbox" name="q7" value="статус «не запустился» в строке" checked><span class="lbl">Статус «Не запустился» в строке</span><span class="sub">Последняя ошибка запуска хранится у профиля и видна в списке, а не только в алерте.</span></label>
+            <label class="opt"><input type="checkbox" name="q7" value="значок в строке меню"><span class="lbl">Значок в строке меню</span><span class="sub">Число запущенных профилей и «Заблокировать» без открытия окна.</span></label>
+          </div></div>
+        <div class="answer-bar"><button type="button" class="btn" id="copy">Скопировать ответы</button><span class="muted" id="copy-status" role="status"></span></div>
+        <textarea id="answers-text" readonly hidden aria-label="Ответы"></textarea>
+      </form>
+    </div>
+  </section>
+
+  <section id="plan" class="gutter">
+    <div class="wide">
+      <div class="intro read">
+        <h2>9. Внедрение: что и где поменяется</h2>
+        <p class="muted">Это план на будущее. Сейчас в <code>Sources/</code>, <code>Resources/</code>, <code>scripts/</code> и <code>.github/</code> ничего не тронуто. Цена: <span class="cost s">S</span> — до дня, <span class="cost m">M</span> — несколько дней, <span class="cost l">L</span> — неделя и больше или нужна проверка на Mac. Подробности по файлам и токенам — в <code>design/README.md</code>.</p>
+      </div>
+      <div class="scroll-x"><table class="t">
+        <tr><th>Предложение</th><th>Что меняется в коде</th><th>Цена</th></tr>
+        <tr><td>Цвета контраста</td><td><code>Theme.textTertiary</code> #8A93A3, <code>Theme.danger</code> #EC6F68, новый <code>Theme.accentFillStrong</code>; NS-копии в <code>Theme.NS</code></td><td><span class="cost s">S</span></td></tr>
+        <tr><td>Шкала шрифта</td><td><code>Font.lumenTitle</code> 22, новый <code>lumenHeading</code> 17 вместо <code>lumenSheetTitle</code>, <code>lumenSecondary</code> уходит в <code>lumenBody</code>/<code>lumenCaption</code>, <code>lumenNumeral</code>; около 120 мест в вьюхах</td><td><span class="cost m">M</span></td></tr>
+        <tr><td>Фокус и мишени</td><td>Кольцо в <code>LumenButtonStyle</code>, <code>LumenIconButtonStyle</code>, строках и пунктах панели (<code>@FocusState</code>, <code>.focusable()</code>); кнопки очистки и копирования 24 × 24</td><td><span class="cost m">M</span></td></tr>
+        <tr><td>Движение</td><td><code>Theme.hoverAnimation</code> на появление/угасание, проверка <code>accessibilityReduceMotion</code> в <code>ProfilesScreen</code> и <code>ProfileEditorForm</code>, отложенная перестройка групп</td><td><span class="cost m">M</span></td></tr>
+        <tr><td>Главный экран</td><td><code>ProfilesScreen</code>, <code>ProfileRow</code>, <code>ProfileColumns</code>: колонка статуса, иконки действий, строка 36; страны в <code>ProfilesSidebar</code>; выбор пачкой и клавиатура</td><td><span class="cost l">L</span></td></tr>
+        <tr><td>Формы</td><td>Новый <code>LumenSettingRow</code> вместо <code>EditorToggle / EditorField / EditorRow / EditorNote</code>; ошибки по полям из <code>ProfileDraft.makeConfiguration()</code>; ~40 новых строк</td><td><span class="cost m">M</span></td></tr>
+        <tr><td>Окно «Настройки»</td><td>Сцена <code>Settings</code> в <code>PrivacyBrowserApp</code>, панели из <code>SyncSettingsView</code> / <code>TunnelSettingsView</code>, пункты «⋯» ведут туда</td><td><span class="cost m">M</span></td></tr>
+        <tr><td>Знак: срез по пикселям</td><td><code>LumenMarkGeometry</code>: срез 32-сетки, выбор по <code>displayScale</code>; <code>AppIcon</code> по пикселям</td><td><span class="cost s">S</span></td></tr>
+        <tr><td>Иконка macOS 26</td><td><code>.icon</code> из Icon Composer, <code>actool</code> в <code>scripts/build-app.sh</code>, <code>CFBundleIconName</code> в Info.plist; .icns для 14–15</td><td><span class="cost l">L</span></td></tr>
+      </table></div>
+      <details open><summary>Где прототип расходится с приложением</summary><div class="body"><ul class="changes">
+        <li>Снимки сделаны в Chromium на Linux со шрифтом Inter вместо SF Pro. Ширины строк я проверял с запасом, но окончательно их видно только в Safari на Mac: прототип там рисуется настоящим SF.</li>
+        <li>Сегменты, переключатели, всплывающие меню и сами меню — рисованные копии системных контролов AppKit. Высоты и радиусы у настоящих немного другие.</li>
+        <li>Значки — копии SF Symbols на 16-сетке, в приложении остаются настоящие символы с теми же именами.</li>
+        <li>Знак и иконку растеризует Skia, приложение — Core Graphics: на 16–20 px края могут отличаться оттенком, но не формой. Режимы иконки macOS 26 — приближения без стекла.</li>
+        <li>Выбор пачкой и навигацию с клавиатуры в SwiftUI придётся писать руками на <code>LazyVStack</code> (или переходить на <code>Table</code> и терять часть контроля над видом). Это самая дорогая часть плана.</li>
+        <li>Отложенная перестройка групп требует хранить «устоявшийся» порядок отдельно от живого статуса: модель профилей это сейчас не умеет.</li>
+      </ul></div></details>
+    </div>
+  </section>
+</main>
+
+<footer class="gutter">
+  <div class="wide">
+    <p>Снимки «после» пересобираются командой <code>node design/tools/render.mjs</code>; знак — <code>node design/tools/logo.mjs</code>; ролики — <code>node design/tools/record.mjs</code>; эффекты — <code>node design/tools/effects.mjs</code>; контраст — <code>python3 design/tools/contrast.py</code>.</p>
+    <p>Все страницы работают без сети: ни шрифтов, ни иконок, ни скриптов извне.</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+  // Paths: in the repository this page is design/review/index.html and its files are one level up;
+  // published, the files sit beside it.
+  const ROOT = /\/review\/(index\.html)?$/.test(location.pathname) ? '../' : '';
+  let lang = 'ru';
+  try { const saved = localStorage.getItem('lumen-review-lang'); if (saved === 'en' || saved === 'ru') lang = saved; } catch (e) { /* storage may be blocked */ }
+
+  const shot = (kind, name) => `${ROOT}shots/${kind}/${lang}/${name}.png`;
+  let beforeFound = 0, beforeMissing = 0, beforeTotal = 0;
+
+  function image(kind, name, alt) {
+    const img = new Image();
+    img.className = 'shot';
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.alt = alt;
+    img.src = shot(kind, name);
+    if (kind === 'before') {
+      beforeTotal++;
+      img.addEventListener('load', () => { beforeFound++; updateCI(); }, { once: true });
+      img.addEventListener('error', () => {
+        beforeMissing++; updateCI();
+        const box = document.createElement('div');
+        box.className = 'placeholder';
+        box.style.aspectRatio = img.dataset.ratio || '';
+        box.innerHTML = `<b>Снимок CI «${name}» не загружен</b><span>Появится здесь после <code>gh run download</code>, см. начало страницы.</span>`;
+        img.replaceWith(box);
+      }, { once: true });
+    }
+    return img;
+  }
+
+  function ratioOf(size) {
+    const m = /(\d+)\s*×\s*(\d+)/.exec(size || '');
+    return m ? `${m[1]} / ${m[2]}` : '';
+  }
+
+  function buildPairs() {
+    for (const el of document.querySelectorAll('[data-pair]')) {
+      const name = el.dataset.pair;
+      el.querySelector('.pair')?.remove();
+      el.querySelector('.pair-title')?.remove();
+      const title = document.createElement('div');
+      title.className = 'pair-title';
+      title.innerHTML = `<h3>${el.dataset.title}</h3><span class="size">${el.dataset.size} pt · ${name}.png</span>`;
+      const pair = document.createElement('div');
+      pair.className = 'pair';
+      const before = document.createElement('figure');
+      before.innerHTML = '<figcaption><span class="tag-before"></span>Сейчас · снимок CI</figcaption>';
+      const b = image('before', name, `${el.dataset.title}: сейчас`);
+      b.dataset.ratio = ratioOf(el.dataset.size);
+      before.appendChild(b);
+      const after = document.createElement('figure');
+      after.innerHTML = '<figcaption><span class="tag-after"></span>Предлагаю · прототип</figcaption>';
+      after.appendChild(image('after', name, `${el.dataset.title}: предлагаю`));
+      pair.append(before, after);
+      el.prepend(title, pair);
+    }
+  }
+
+  function buildSingles() {
+    for (const fig of document.querySelectorAll('figure[data-after]')) {
+      fig.innerHTML = '';
+      fig.appendChild(image('after', fig.dataset.after, fig.dataset.caption || fig.dataset.after));
+      if (fig.dataset.caption) {
+        const cap = document.createElement('p');
+        cap.className = 'muted';
+        cap.style.cssText = 'font-size:13px;margin-top:6px';
+        cap.textContent = fig.dataset.caption;
+        fig.appendChild(cap);
+      }
+    }
+    for (const img of document.querySelectorAll('img[data-thumb]')) {
+      img.loading = 'lazy';
+      img.src = shot('after', img.dataset.thumb);
+    }
+  }
+
+  function buildVideos() {
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    for (const v of document.querySelectorAll('video[data-video]')) {
+      v.src = `${ROOT}shots/motion/${lang}/${v.dataset.video}.mp4`;
+      if (reduce) { v.controls = true; v.autoplay = false; } else { v.autoplay = true; v.play().catch(() => { v.controls = true; }); }
+    }
+  }
+
+  function updateCI() {
+    const pill = document.getElementById('ci-pill');
+    const text = document.getElementById('ci-pill-text');
+    const note = document.getElementById('ci-note');
+    if (beforeFound > 0) {
+      pill.className = 'pill good';
+      text.textContent = `Снимки «до» из CI: ${beforeFound} из ${beforeTotal}`;
+      note.hidden = beforeMissing === 0;
+    } else if (beforeMissing > 0) {
+      pill.className = 'pill warn';
+      text.textContent = 'Снимки «до» из CI ещё не загружены';
+      note.hidden = false;
+    }
+  }
+
+  function setLang(next) {
+    lang = next;
+    try { localStorage.setItem('lumen-review-lang', lang); } catch (e) { /* ignore */ }
+    for (const b of document.querySelectorAll('[data-lang]')) b.setAttribute('aria-pressed', String(b.dataset.lang === lang));
+    beforeFound = beforeMissing = beforeTotal = 0;
+    buildPairs(); buildSingles(); buildVideos();
+  }
+
+  for (const a of document.querySelectorAll('a[data-href]')) a.href = ROOT + a.dataset.href;
+  document.getElementById('answers').addEventListener('submit', (e) => e.preventDefault());
+  for (const b of document.querySelectorAll('[data-lang]')) b.addEventListener('click', () => setLang(b.dataset.lang));
+
+  // Answers: gathered into plain text for the chat.
+  document.getElementById('copy').addEventListener('click', () => {
+    const lines = ['Ответы по ревью дизайна Lumen:'];
+    for (const q of document.querySelectorAll('.q')) {
+      const title = q.querySelector('h3').textContent;
+      const picked = [...q.querySelectorAll('input:checked')].map((i) => i.value);
+      lines.push(`${title} — ${picked.length ? picked.join(', ') : 'ничего'}`);
+    }
+    const text = lines.join('\n');
+    const area = document.getElementById('answers-text');
+    const status = document.getElementById('copy-status');
+    const fallback = () => { area.hidden = false; area.value = text; area.focus(); area.select(); status.textContent = 'Скопируйте текст ниже (⌘C).'; };
+    try {
+      navigator.clipboard.writeText(text).then(() => { status.textContent = 'Скопировано. Вставьте в чат.'; area.hidden = true; }, fallback);
+    } catch (e) { fallback(); }
+  });
+
+  setLang(lang);
+})();
+</script>
+</body>
+</html>

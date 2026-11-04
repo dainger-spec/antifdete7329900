@@ -1,0 +1,31 @@
+/* Home scene "statement" (tools/templates/pages/home/statement.mjs): one paragraph whose words light up
+   as you scroll. Scoped to .sc-statement; the engine and the shared type are in site.css.
+   The light: --t of the paragraph (0…1 over its data-r) moves a cursor through the words; each word
+   comes up over a ramp of three words, so the light reads as a soft front rather than a switch. The
+   accent phrases are the brand blue, nothing else. Without scenes every word is simply lit. */
+
+.sc-statement .scene-pin { display: flex; align-items: center; }
+.sc-statement .container { width: 100%; }
+.sc-statement .st-text {
+  max-width: 1060px; margin: 0;
+  font: 600 56px/66px var(--font-display); letter-spacing: -0.028em;
+  color: #F5F6F8; font-kerning: normal; hanging-punctuation: first;
+}
+.sc-statement .acc {
+  background: linear-gradient(180deg, #9DB8FF 10%, #7393EE 92%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.js-scenes .sc-statement .w {
+  opacity: calc(0.2 + 0.8 * clamp(0, (var(--t, 0) * (var(--n) + 3) - var(--i)) / 3, 1));
+}
+
+@media (max-width: 1099px) {
+  .sc-statement .st-text { font-size: 46px; line-height: 55px; }
+}
+@media (max-width: 599px) {
+  .sc-statement .st-text { font-size: 31px; line-height: 39px; letter-spacing: -0.022em; }
+  .js-scenes .sc-statement .w { opacity: calc(0.22 + 0.78 * clamp(0, (var(--t, 0) * (var(--n) + 3) - var(--i)) / 3, 1)); }
+}
+@media (max-width: 359px) {
+  .sc-statement .st-text { font-size: 28px; line-height: 35px; }
+}

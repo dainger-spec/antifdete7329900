@@ -1,0 +1,73 @@
+time_s,frame,bar.beat,tick,beat,shot,event,sync,sound,music,source
+0.000,0,1.1,0,0,S01,cut,hard,room tone fades in over 0.25 s; the name arrives silently,nothing under the name,timeline.json v2
+1.500,90,1.4,0,3,S02,cut,hard,room tone only,the first musical event may land on this cut to the Mac,timeline.json v2
+1.800,108,1.4,576,3.6,S02,lid-starts,soft,"lid hinge starts: friction through the hinge, following the lid's speed until 2.9",,timeline.json v2
+2.600,156,2.2,192,5.2,S02,display-wakes,soft,room tone only,,timeline.json v2
+2.900,174,2.2,768,5.8,S02,lid-settles,hard,lid settles: a soft felt thunk,,timeline.json v2
+3.400,204,2.3,768,6.8,S02,half-lifts,soft,room tone only,,timeline.json v2
+4.500,270,3.2,0,9,S03,cut,hard,room tone only,,timeline.json v2
+5.000,300,3.3,0,10,S03,line-2,hard,room tone only,,timeline.json v2
+5.500,330,3.4,0,11,S04,cut,hard,room tone only,from here to 7.0 a pulse drives the burst (cuts on the eighths),timeline.json v2
+5.750,345,3.4,480,11.5,S04,burst-cut,hard,room tone only,,timeline.json v2
+6.000,360,4.1,0,12,S04,burst-cut,hard,room tone only,,timeline.json v2
+6.250,375,4.1,480,12.5,S04,burst-cut,hard,room tone only,,timeline.json v2
+6.500,390,4.2,0,13,S04,burst-cut,hard,room tone only,,timeline.json v2
+6.750,405,4.2,480,13.5,S04,burst-cut,hard,room tone only,,timeline.json v2
+7.000,420,4.3,0,14,S05,cut,hard,room tone only,,timeline.json v2
+8.300,498,5.1,576,16.6,S05,lands,soft,room tone only,,timeline.json v2
+8.500,510,5.2,0,17,S06,cut,hard,room tone only,a downbeat on «Сразу.» (the track’s bar line here; the film grid calls it beat 2),timeline.json v2
+9.000,540,5.3,0,18,S06,line-2,hard,room tone only,,timeline.json v2
+9.500,570,5.4,0,19,S07,cut,hard,room tone only,,timeline.json v2
+10.500,630,6.2,0,21,S07,country-US,hard,room tone only,,timeline.json v2
+11.000,660,6.3,0,22,S07,country-JP,hard,room tone only,,timeline.json v2
+11.500,690,6.4,0,23,S08,cut,hard,room tone only,from here to 13.5 a thinner texture under the comparison,timeline.json v2
+12.000,720,7.1,0,24,S08,halves-meet,hard,room tone only,,timeline.json v2
+12.000,720,7.1,0,24,S08,seam-on,hard,room tone only,,timeline.json v2
+13.500,810,7.4,0,27,S09,cut,hard,room tone only,,timeline.json v2
+14.500,870,8.2,0,29,S10,cut,hard,room tone only,,timeline.json v2
+14.750,885,8.2,480,29.5,S10,column-2,hard,room tone only,,timeline.json v2
+15.000,900,8.3,0,30,S10,column-3,hard,room tone only,,timeline.json v2
+15.250,915,8.3,480,30.5,S10,footer,hard,room tone only,,timeline.json v2
+16.000,960,9.1,0,32,S11,cut,hard,room tone only,,timeline.json v2
+16.420,985,9.1,806,32.84,S11,pointer-lands,soft,room tone only,,timeline.json v2
+16.500,990,9.2,0,33,S11,click,hard,"trackpad click, 6 ms after the frame",,timeline.json v2
+16.550,993,9.2,96,33.1,S11,progress-starts,soft,room tone only,,timeline.json v2
+16.576,995,9.2,146,33.152,S11,click-release,soft,"trackpad release, 70 ms after the click, 8 dB quieter",,timeline.json v2
+17.000,1020,9.3,0,34,S12,cut,hard,room tone only,,timeline.json v2
+17.400,1044,9.3,768,34.8,S12,stall,soft,room tone only,,timeline.json v2
+18.000,1080,10.1,0,36,S13,cut,hard,room tone only,,timeline.json v2
+18.500,1110,10.2,0,37,S13,switch-dark,hard,digital zero until 19: the room tone stops too; the film's only silence,"HARD STOP: the music and its reverb gated to nothing within 10 ms, whatever the track does",timeline.json v2
+19.000,1140,10.3,0,38,S14,cut,hard,room tone returns over 0.3 s,"sparse re-entry, 19.0–20.5",timeline.json v2
+19.500,1170,10.4,0,39,S14,line-2,hard,room tone only,,timeline.json v2
+20.000,1200,11.1,0,40,S14,footnote,hard,room tone only,,timeline.json v2
+20.500,1230,11.2,0,41,S15,cut,hard,room tone only,,timeline.json v2
+20.750,1245,11.2,480,41.5,S15,seal-row-1,soft,room tone only,,timeline.json v2
+20.875,1253,11.2,720,41.75,S15,seal-row-2,soft,room tone only,,timeline.json v2
+21.000,1260,11.3,0,42,S15,seal-row-3,soft,room tone only,,timeline.json v2
+21.125,1268,11.3,240,42.25,S15,seal-row-4,soft,room tone only,,timeline.json v2
+21.250,1275,11.3,480,42.5,S15,seal-row-5,soft,room tone only,,timeline.json v2
+22.000,1320,12.1,0,44,S16,cut,hard,room tone only,,timeline.json v2
+22.500,1350,12.2,0,45,S16,spec-line,hard,room tone only,,timeline.json v2
+23.000,1380,12.3,0,46,S17,cut,hard,room tone only,,timeline.json v2
+23.100,1386,12.3,192,46.2,S17,cookies-61,soft,room tone only,,timeline.json v2
+23.250,1395,12.3,480,46.5,S17,page-5,soft,room tone only,,timeline.json v2
+23.350,1401,12.3,672,46.7,S17,cookies-66,soft,room tone only,,timeline.json v2
+23.500,1410,12.4,0,47,S17,page-6,soft,room tone only,,timeline.json v2
+23.600,1416,12.4,192,47.2,S17,cookies-70,soft,room tone only,,timeline.json v2
+23.750,1425,12.4,480,47.5,S17,page-7,soft,room tone only,,timeline.json v2
+23.850,1431,12.4,672,47.7,S17,cookies-75,soft,room tone only,,timeline.json v2
+24.000,1440,13.1,0,48,S17,page-8,soft,room tone only,,timeline.json v2
+24.100,1446,13.1,192,48.2,S17,cookies-79,soft,room tone only,,timeline.json v2
+24.250,1455,13.1,480,48.5,S17,page-9,soft,room tone only,,timeline.json v2
+24.350,1461,13.1,672,48.7,S17,cookies-84,soft,room tone only,,timeline.json v2
+24.500,1470,13.2,0,49,S18,cut,hard,room tone only,,timeline.json v2
+25.000,1500,13.3,0,50,S18,focus-tile-2,soft,room tone only,,timeline.json v2
+25.500,1530,13.4,0,51,S18,focus-tile-3,soft,room tone only,,timeline.json v2
+26.000,1560,14.1,0,52,S18,focus-tile-4,soft,room tone only,,timeline.json v2
+26.500,1590,14.2,0,53,S19,cut,hard,room tone only,,timeline.json v2
+27.000,1620,14.3,0,54,S19,seat,hard,the halves seat: an unpitched felt thump,"the last strong downbeat or chord, on the halves meeting",timeline.json v2
+27.170,1630,14.3,326,54.34,S19,filled,soft,room tone only,,timeline.json v2
+27.500,1650,14.4,0,55,S20,cut,hard,room tone only,the tail rings until 29.5,timeline.json v2
+28.000,1680,15.1,0,56,S20,lines,hard,room tone only,,timeline.json v2
+29.500,1770,15.4,0,59,S21,cut,hard,,,timeline.json v2
+29.500,1770,15.4,0,59,S21,audio-end,hard,audio ends with the picture,the music ends here with the picture,timeline.json v2

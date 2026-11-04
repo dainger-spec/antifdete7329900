@@ -22,8 +22,10 @@ approximations limited by what WebKit exposes. The tables below say which parts 
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): components, key hierarchy, on-disk layout, lifecycles, tabs, testing
 - [docs/ISOLATION_AND_LIMITATIONS.md](docs/ISOLATION_AND_LIMITATIONS.md): what is isolated, what leaks, fingerprinting, App Sandbox, verified results
+- [docs/LEAK_AUDIT.md](docs/LEAK_AUDIT.md): the leak audit's short list — each channel, why it is reachable, what proves it, its state
 - [docs/SYNC_FORMAT.md](docs/SYNC_FORMAT.md): sync wire format, merge rules, what is server-ready vs. local-only
 - [docs/SYNC_SERVER_API.md](docs/SYNC_SERVER_API.md): HTTP contract for a future sync server
+- [docs/AUTOMATION_API.md](docs/AUTOMATION_API.md): the local automation API and `scripts/pbctl`
 
 ## Requirements
 
@@ -45,6 +47,9 @@ BUNDLE_ID=org.example.PrivacyBrowser SIGN_IDENTITY="Developer ID Application: �
 - The default build is **sandboxed**. Its data lives in
   `~/Library/Containers/<bundle-id>/Data/`. `build-app.sh` checks the signature and fails if
   the sandbox entitlement doesn't match `SANDBOX`.
+- **From a sandboxed build to an unsandboxed one** (which hosts Safari's chrome): an unsandboxed
+  build that has no vault yet takes over the one a sandboxed build of the same bundle identifier left
+  in its container, once, at its first start (moved, never copied; not while the other runs).
 - **Upgrading from an earlier unsandboxed build:** on the sandboxed build's first launch,
   macOS moves `~/Library/Application Support/PrivacyBrowser` into the container
   (`container-migration.plist`). The move is one-way. Archives sealed by the old build
@@ -78,10 +83,11 @@ TZ=America/New_York bun scripts/test-shims.mjs    # the same under JavaScriptCor
 
 # End-to-end against the real WebKit of this Mac (headless, temporary vault, cleans up):
 python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 \
-  --socks2 18084 --socks-auth 18085 &
+  --socks2 18084 --socks-auth 18085 --silent 18088 &
 PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 \
 PB_SELFTEST_HTTP_AUTH_PROXY_PORT=18082 PB_SELFTEST_HTTP6_PROXY_PORT=18083 \
 PB_SELFTEST_SOCKS2_PROXY_PORT=18084 PB_SELFTEST_SOCKS_AUTH_PROXY_PORT=18085 \
+PB_SELFTEST_SILENT_PROXY_PORT=18088 \
 PB_SELFTEST_SURFACE_OUT=build/surface \
   build/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test
 
@@ -95,12 +101,21 @@ python3 scripts/leak_check.py --app build/unsandboxed/PrivacyBrowser.app --out b
 
 CI (`.github/workflows/ci.yml`) runs on every push:
 - the core tests on Linux and macOS, and the shim tests;
-- `--self-test` for both the sandboxed and the unsandboxed build: 183 checks, covering WebKit
+- `--self-test` for both the sandboxed and the unsandboxed build, covering WebKit
   data location, seal/restore of cookies, localStorage and IndexedDB, live isolation between
   profiles, shims under JavaScriptCore, the fingerprint surface against a plain WKWebView,
   HTTP CONNECT (IPv4 and IPv6), SOCKS5 and authenticated proxies, fail-closed, three SOCKS5
   profiles launched and loading at once, the ping-load blocker, the proxy-location time zone,
-  launches that wait only briefly on the lookup through the proxy, the exit-IP warning, password
+  launches that wait only briefly on the lookup through the proxy, the exit-IP warning, the proxy
+  list's checker (every listener of the self-test proxy told apart step by step — HTTP and SOCKS5
+  found whatever type is listed, the login not needed, missing, wrong or taken, IPv6, a port that
+  takes the connection and never answers, a closed port, a host that does not exist; through a
+  working proxy its exit IP, country, city, network and median latency; dead through an
+  unreachable one, with nothing gone around it; several at a time, kept encrypted, a line without
+  a scheme given the type found and a wrong type corrected; a profile given a checked proxy; a
+  profile started with a silent proxy saying why, and Check from there — all of it, but the host
+  that does not exist, inside a packet capture that fails on anything of the app's past
+  loopback), password
   AutoFill (save, update, never, suggestions and fill, sign-in by script, sign-up, frames of
   another and of the same site, nothing for a password a page script wrote), cookie import
   (a damaged Netscape file, queued for a stopped profile and applied before its first page,
@@ -110,7 +125,10 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   session warm-up robot (pages in order through the proxy with the profile's cookies and
   User-Agent, time on each page measured at the proxy, scrolling, only the safe link followed,
   nothing in the page world while it acts, Stop, tab closed, a page dialog, the profile stopped
-  mid-run), tabs, history,
+  mid-run; a queue of two profiles warmed one after the other, each started without a window and
+  sealed again before the next, and each run's cookies per site), a proxied profile in its own
+  process with Safari's chrome on a leak page (every kind of request through the proxy, the
+  process's own report), profile export and import, tabs, history,
   bookmarks, the
   device-generation UA path, crash-recovery sealing, dialogs, Lock during launch, ⌘Q and
   the forced seal, and the window-lifecycle regression;
@@ -126,6 +144,13 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   tunnel's relay (run on the runner, since CI cannot load the extension), a page gets relay
   candidates at the proxy's address only, and a data channel through the proxy. Fails on any
   request seen going around a proxy;
+- around the unsandboxed self-test, a capture of every packet leaving the runner with its process
+  (`scripts/egress_check.py`) and of every file the app and WebKit write (`scripts/disk_check.py`):
+  nothing of a profile may leave outside its proxy, or land where the real Safari keeps its data;
+- `--check-safari-chrome`: the private Safari classes and methods the hosted chrome relies on
+  (loaded in a temporary home, held to a closed proxy, as in a profile's process);
+- `scripts/check_localization.py`: ru and en hold the same keys, and no UI text is written into the code;
+- `scripts/check_log_privacy.py`: nothing of the user's is written to the system log in clear;
 - a container-migration check.
 
 ## Using it
@@ -162,10 +187,17 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 7. **Cookies:** **⋯ → Import Cookies…** reads a JSON or Netscape `cookies.txt` export, shows
    what can be imported and why the rest cannot (with line numbers), then imports into that
    profile: at once when it runs, otherwise when it next starts.
-8. **Warm-up:** **⋯ → Warm Up…** takes web addresses (one per line) and an optional search,
-   starts the profile if it is stopped, and visits the pages one after the other in a tab of
-   it: a random time on each page, scrolling, and if asked one plain link followed. **Stop**
-   in the sheet, closing the robot's tab or stopping the profile ends it.
+8. **Warm-up:** **⋯ → Warm Up…** takes a ready-made list (general, by interest, or by
+   country: 26 countries), one put together for the proxy's country, or web addresses of your
+   own; starts the profile without a window if it is stopped, and visits the pages one after
+   the other in a hidden window of it: a random time on each page, scrolling, and if asked one
+   plain link followed. **Stop** in the sheet, closing the robot's tab or stopping the profile
+   ends it. When the run is over the sheet lists the profile's cookies per site and how many
+   the run added. **Repeat on a schedule** runs the same plan every N hours while the app is
+   unlocked (never in a profile that is open; it is tried again 10 minutes later).
+   **More → Warm Up Several Profiles…** warms the ticked profiles one after the other with one
+   plan, each stopped and encrypted again before the next starts; the rest of the queue can be
+   cancelled.
 9. **Stop**, or closing the last window, saves history and encrypts the profile's website
    data. **Lock** stops every profile and forgets the keys. Quitting (⌘Q) does the same,
    and waits until every profile is sealed.
@@ -174,6 +206,36 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    profile's settings, passwords, bookmarks, history and persistent cookies sync, encrypted;
    another Mac gets the cookies at its next launch of the profile, before the first page
    (**⋯ → Edit…** → **Sync cookies with other devices** turns that off for a profile).
+11. **Proxies:** **More → Proxies…** keeps a list of proxies, encrypted in the vault (this Mac
+   only, not synced):
+   - **Import…** takes a pasted list or a text file, one proxy per line: `host:port`,
+     `host:port:user:pass`, `user:pass@host:port` or `socks5://` / `http://` / `https://user:pass@host:port`
+     (` # Berlin 1` after a proxy names it). A line without a scheme gets its type from the first
+     check (**Found by Check**, the default; until then it is given to no profile), or the type
+     chosen in the sheet. Lines that cannot be read are listed with their number and why before
+     anything is added; a proxy already listed (the same host, port and user name) is not added
+     twice. The proxies typed into profiles before the list existed are in it from the first unlock.
+   - **Check All / Check Selected** checks each proxy *through itself*, step by step: its name, a
+     connection, a SOCKS5 and an HTTP handshake at once (the type is found, not assumed), the
+     login, a tunnel, then a geolocation service asked through it — exit IP, country (flag), city,
+     network, and the median of three tunnels' latency. Each way of failing has its own status,
+     symbol and colour, and the selected proxy's report says which step failed, in words, with
+     what to do: host not found, connection refused, no connection, **silent after connecting**
+     (an IP whitelist without this Mac's address, or a dead back end), login needed or rejected,
+     this Mac refused (403), no way out to the site. A check never goes direct. Checks run only
+     when asked.
+   - **Edit…** changes a proxy; the profiles that use it as it is in the list follow (a profile
+     whose own copy was changed since keeps it). **Export…** writes the list for Import, after
+     saying that the user names and passwords will be in the file in plaintext (owner-only file).
+   - **Assign to Profiles…** gives the selected proxies to the profiles ticked: with one proxy all
+     of them get it, with several they get them in turn (round-robin). A running profile uses its
+     new proxy from its next launch. In the profile editor, **Choose from List…** fills the proxy
+     fields from the list. The list shows how many profiles use each proxy.
+   - A profile started with a proxy that does not work says so in the Profiles window — which
+     profile, what the same probe found, what to do — with **Check Proxy** and **Show in Proxies**.
+12. **Several profiles at once:** ⌘-click (or ⇧-click for a range) selects rows of the Profiles
+   list; with two or more selected, a bar above the list launches, stops, warms up, assigns
+   proxies to or deletes them all (deleting asks once, naming how many).
 
 ## What is implemented, and how
 
@@ -201,8 +263,13 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Cookie import into a profile | **⋯ → Import Cookies…**: JSON (EditThisCookie, Cookie-Editor, Puppeteer/DevTools, Playwright, Selenium, Chrome and Firefox database exports, JSON Lines) and Netscape `cookies.txt`. Damaged files import whatever is readable (bad bytes, a broken or cut-off JSON entry or a malformed line cost only that cookie); the report lists every other entry with its line and reason (public-suffix domain, expired, `__Host-` rules, …). A running profile gets them at once (and the store is read back for any WebKit refused), a stopped one at its next launch before the first page loads (queued encrypted). **Checked by the self-test** end to end through the proxy |
 | App Sandbox | Default build; entitlements in `Resources/PrivacyBrowser.entitlements` (documented in the limitations doc, §9); container migration. **Sandbox enforcement and migration verified in CI** |
 | Encrypted sync client | Engine with CAS writes, per-record merges for bookmarks and history, tombstones; folder transport; HTTP transport for a documented API |
-| Session warm-up ("cookie robot") | **⋯ → Warm Up…**: the pages of a list (and a search first, if given) visited one after the other in a tab of the profile — its proxy, cookies, User-Agent and scripts, as when browsing — with a random time on each page (5–15 s by default), trackpad-like scrolling, and optionally one plain link followed (same site; from the search, a result; never sign-out, purchase, deletion, download or new-window links). Waits while its tab is not shown; stops on Stop, when its tab closes, when a page shows a dialog and when the profile stops. Scrolls with real wheel events while its window is key, otherwise from an isolated script world; clicks with real pointer events when they reach the link, otherwise with an (untrusted) script click — on the CI runner pointer events did not reach pages, so clicks there were script clicks; nothing is added to the page world, and nothing is downloaded. **Checked by the self-test** through the proxy (order, cookies and User-Agent on the requests, Referer of the followed link, links refused, the stop cases, sealing after a stop mid-run) |
+| Session warm-up ("cookie robot") | **⋯ → Warm Up…**: the pages of a list (and a search first, if given) visited one after the other in a tab of the profile — its proxy, cookies, User-Agent and scripts, as when browsing — with a random time on each page (5–15 s by default), trackpad-like scrolling, and optionally one plain link followed (same site; from the search, a result; never sign-out, purchase, deletion, download or new-window links). Waits while its tab is not shown; stops on Stop, when its tab closes, when a page shows a dialog and when the profile stops. Scrolls with real wheel events while its window is key, otherwise from an isolated script world; clicks with real pointer events when they reach the link, otherwise with an (untrusted) script click — on the CI runner pointer events did not reach pages, so clicks there were script clicks; nothing is added to the page world, and nothing is downloaded. After a run, the profile's cookies per site (registrable domain, Public Suffix List) and which of them the run added, counted in the profile's own cookie store where the robot ran (its own process included) and reported with the run's status. **More → Warm Up Several Profiles…**: a queue — the ticked profiles one after the other with one plan, each started without a window if stopped and stopped and sealed again before the next, "profile n of N", the rest cancellable. **Repeat on a schedule** (per profile, encrypted `warmup-schedule.bin`, this Mac only, not exported): every N hours with the saved plan while the app is unlocked, through the same queue (one run at a time); a profile that is running is left alone and tried again 10 minutes later; a Mac that slept runs it once, not once per missed interval. **Checked by the self-test** through the proxy (order, cookies and User-Agent on the requests, Referer of the followed link, links refused, the stop cases, sealing after a stop mid-run; a queue of two profiles never running at once, each without a window and sealed before the next; the per-site report against a cookie the profile already had); due times, postponing and the queue's order by unit tests |
+| A profile in its own process, with Safari's own window (unsandboxed build) | One process per profile (`ProfileProcess`; only its own profile's key, on its stdin — never the vault's master key), its language, locale and time zone native to it, its window Safari's chrome hosted from Safari's frameworks. The whole process is held to the profile's proxy (`ProfileNetworkGuard`): every web view on the profile's store at its initializers, every other store closed, the process's own connections through the proxy, privacy preferences pinned (workers included), certificates checked without this Mac fetching for them, Safari's and the system's services that would fetch from another process or keep the browsing refused, Handoff off; the kernel refuses the process UDP (with a proxy) and the real Safari's folders, which Safari's frameworks would otherwise use as the profile's ([ISOLATION_AND_LIMITATIONS.md §4a](docs/ISOLATION_AND_LIMITATIONS.md)). **Checked on every push**: a leak page in Safari's chrome (every request reaches the proxy, `.local` included, and none reaches this Mac's own loopback (refused: the system never proxies it); no WebRTC or WebTransport, in workers either; a certificate that needs a fetch refused), the process's own report, and a capture of every packet and every file written around it — nothing may leave the machine outside the proxy or be written where the real Safari keeps its data. `--check-safari-chrome` lists the private pieces a macOS update removed |
+| Automation API and `pbctl` | **⋯ → Automation API…** (off by default; the build without the App Sandbox): scripts on this Mac list, start (with a window or out of sight), open pages in and stop profiles, and read and write their cookies (Playwright, Netscape, extension JSON) — through the same code as the app's buttons, so a script's profile has its proxy, its process and its sealing. HTTP on 127.0.0.1 only, a 43-character token, requests from web pages (`Origin`, `Sec-Fetch-*`) and rebinding names (`Host`) refused, never a proxy's credentials in an answer; `scripts/pbctl` on the command line ([docs/AUTOMATION_API.md](docs/AUTOMATION_API.md)). It does not drive pages: WebKit's embedded views have no CDP for Puppeteer or Playwright to attach to. **Checked by the self-test** on a real listener (refusals, a hidden start, cookies in and out, stop) and by unit tests |
+| Profile export and import | **⋯ → Export Profile…** / **Import Profile…**: a profile whole — settings and proxy, passwords, history, bookmarks, warm-up plan, cookies and website data, Safari's state — in one `.pbprofile` file under a password of its own (Argon2id), for another Mac, a backup or a colleague. Nothing is written in plaintext on either side (the website data is re-encrypted from archive to archive in memory); an import is always a new profile. **Checked by the self-test** (a cookie of the original is sent by the imported profile's first request) and by unit tests |
 | Profile sync: cookies and settings | A profile's persistent cookies sync as `cookies.bin` (encrypted with the profile key), merged cookie by cookie — the newer change wins, deletions included; recorded when the profile stops, applied at its next launch before the first page loads, imported cookies joining at that launch. Settings changed on two Macs: the newer edit wins, the other kept as `config.bin.conflict`. Session and partitioned cookies, and ephemeral profiles, never sync ([docs/SYNC_FORMAT.md](docs/SYNC_FORMAT.md)). **Checked by the self-test** with a second vault set up from the sync folder, and by unit tests |
+| Proxy manager: import, stepwise check, edit, export, assign, rotate | **⋯ (header) → Proxies…**: a list kept encrypted in the vault (`proxies.bin`, this Mac only); each profile keeps its own copy of its proxy, linked to the list by host, port and user name — profiles' proxies are taken into the list once, an edit in the list reaches the profiles that use it as it is, and a missing entry never leaves a profile without its proxy. Import reads pasted lines or a text file — `host:port`, `host:port:user:pass`, `user:pass@host:port`, `socks5://` / `http://` / `https://user:pass@host:port`, ` # label` — reports every line it could not read with its number and why, and leaves the type of a line without a scheme to the first check (`ProxyListImport`). The check (`ProxyProbe`, POSIX sockets, only to the proxy) resolves the name, connects, tries a SOCKS5 and an HTTP handshake at once, logs in, opens a tunnel (the target named to the proxy), then asks the geolocation services through the proxy (`allowFailover = false`): exit IP, country, city, network, median latency of three tunnels. Distinct states, each with its own symbol and colour, a report step by step with advice: host not found, DNS failed, refused, unreachable, no connection, **silent after connecting**, closes at once, not a proxy, login needed or rejected, refuses this Mac, no way out, no answer through it. A profile whose proxy does not work at its launch says why, with Check. Edit (profiles follow), export (plaintext warning, 0600 file), assign one to many or round-robin. **Checked by the self-test** against every listener of the self-test proxy (HTTP, SOCKS5, both with a login none/wrong/right, IPv6, silent, closed, unknown host), end to end with exit details, inside a packet capture that fails on any packet of the app past loopback; the probe's verdicts against scripted servers, parsing, the link and migration by unit tests |
+| Several profiles at once | ⌘-click and ⇧-click select rows of the Profiles list; with two or more, a bar acts on all of them: Launch (the stopped ones, one after the other), Stop (the running ones, sealed together), Warm Up (opens the warm-up for the first; a hook for a queue), Assign Proxy (from the list, one or in turn), Delete (one confirmation naming the count) |
 
 ### Approximated (the platform offers no native API)
 
@@ -227,6 +294,11 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   only at its next launch.
 - Session restore, tab drag-and-drop between windows, find-in-page, extensions, and
   content blocking (`WKContentRuleList` would be the native route).
+- The proxy list is this Mac's only (profiles carry their own copy of a proxy, which syncs); its
+  checks ask third-party geolocation services (through the proxy, only when asked), and a launch
+  with a proxy probes it (handshake and one tunnel, to the start page's site or the first
+  geolocation service, through the proxy). Warming up
+  several profiles at once opens the warm-up of the first; there is no warm-up queue yet.
 
 ## Project layout
 
@@ -237,21 +309,30 @@ Sources/
     Crypto/                        AEAD (AES-GCM), Argon2id + BLAKE2b, PBKDF2, HKDF helpers
     Vault/                         MasterVault (key hierarchy), DeviceSettings
     Profiles/                      ProfileConfiguration, ProfileRepository
+    Proxies/                       ProxyList (encrypted list, check results, rotation, the profiles' link), ProxyListImport
+                                   (pasted lines, report), ProxyProbe + ProbeSocket (the stepwise check), ProxyDiagnosis,
+                                   ProxyExitDetails, assignment
     Passwords/                     PasswordVault, PasswordMatching (site rules), PublicSuffixList
     Cookies/                       CookieImporter (JSON and Netscape readers, checks, report), CookieJar (synced cookies, merge)
-    WarmUp/                        WarmUpPlan (pages, timing, which links), WebAddress (typed text → address or search)
+    WarmUp/                        WarmUpPlan (pages, timing, which links), WebAddress (typed text → address or search),
+                                   presets and choice, WarmUpQueue, WarmUpSchedule (what is due), WarmUpCookieReport (per site)
     Library/                       HistoryStore, BookmarkStore (mergeable, tombstones)
     Archive/                       encrypted chunk stream, directory archiver, WebKitDataLayout
     Sync/                          envelope/codec, engine, SyncTransport contract
       Transports/                  LocalDirectorySyncTransport (local-only), HTTPSyncTransport (server-ready)
     Support/                       errors, atomic 0600 writes, encrypted document files
   PrivacyBrowser/                  macOS app (SwiftUI + AppKit + WebKit)
-    App/                           main.swift, PrivacyBrowserApp, AppModel, AppEnvironment, SelfTest, SiteCapture
+    App/                           main.swift, PrivacyBrowserApp, AppModel (+Proxies), ProxyListModel, AppEnvironment,
+                                   SelfTest, SiteCapture, WarmUpCoordinator (warm-up queue and schedule)
     Browser/                       ProfileManager, BrowserSession, BrowserWindowController, BrowserTab,
                                    TabStripView, ProfileLibrary, LibraryWindowController, PasswordAutoFill
                                    (+ PasswordAutoFillScript, AutoFillPanel), WarmUpRobot,
-                                   WebDataStoreVault, ProxyConfigurationFactory, PrivacyScripts
-    UI/                            setup/unlock, profile list, editor, passwords, library, sync settings, warm-up
+                                   WebDataStoreVault, ProxyConfigurationFactory, ProxyGeoLookup, ProxyChecker,
+                                   PrivacyScripts, ProfileNetworkGuard, ServerTrust, SafariPaths, HandOffs
+    UI/                            setup/unlock, profile list (+ bulk bar), editor, passwords, library, sync settings,
+                                   warm-up (one profile, and several in a queue), proxies (list, report, edit, export,
+                                   import, assign, a launch's proxy problem),
+                                   profile export/import, cookie export
 Tests/BrowserCoreTests/            XCTest suite (incl. stub sync server)
 Resources/                         Info.plist, entitlements (sandboxed / not), container-migration.plist
 scripts/                           build-app.sh, test-shims.mjs, selftest_proxy.py, safari_reference.py,

@@ -32,13 +32,13 @@ final class TabStripView: NSView {
     private let buttonWidth: CGFloat = 30
 
     override init(frame frameRect: NSRect) {
-        newTabButton = NSButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: "New Tab") ?? NSImage(),
+        newTabButton = NSButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: L("tab.newTab")) ?? NSImage(),
                                 target: nil, action: nil)
         super.init(frame: frameRect)
         newTabButton.target = self
         newTabButton.action = #selector(newTab)
         newTabButton.isBordered = false
-        newTabButton.toolTip = "New Tab (⌘T)"
+        newTabButton.toolTip = L("tab.newTab") + " (⌘T)"
         newTabButton.contentTintColor = Theme.NS.textSecondary
         addSubview(newTabButton)
         wantsLayer = true
@@ -124,7 +124,7 @@ final class TabItemView: NSView {
     private var isHovered = false
 
     init() {
-        closeButton = NSButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close Tab") ?? NSImage(),
+        closeButton = NSButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: L("tab.close")) ?? NSImage(),
                                target: nil, action: nil)
         super.init(frame: .zero)
         wantsLayer = true
@@ -135,7 +135,7 @@ final class TabItemView: NSView {
         closeButton.imageScaling = .scaleProportionallyDown
         closeButton.target = self
         closeButton.action = #selector(close)
-        closeButton.toolTip = "Close Tab (⌘W)"
+        closeButton.toolTip = L("tab.close") + " (⌘W)"
         closeButton.contentTintColor = Theme.NS.textTertiary
         spinner.style = .spinning
         spinner.controlSize = .small

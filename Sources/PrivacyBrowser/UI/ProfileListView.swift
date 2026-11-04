@@ -34,12 +34,25 @@ struct ProfileListView: View {
     @State private var passwordsFor: ProfileSummary?
     @State private var importingCookiesFor: ProfileSummary?
     @State private var warmingUp: ProfileSummary?
+    @State private var warmingUpSeveral = false
+    /// The profiles the warm-up queue opens with ticked (the selection's bar).
+    @State private var queuePreselection: Set<UUID> = []
+    @State private var exporting: ProfileSummary?
+    @State private var exportingCookies: ProfileSummary?
+    @State private var importingProfile = false
     @State private var pendingDelete: ProfileSummary?
     @State private var changingPassword = false
     @State private var showingSync = false
     @State private var showingTunnel = false
+    @State private var showingAutomation = false
     @State private var filter: ProfileFilter = .all
     @State private var search = ""
+    /// The Proxies sheet, or what a profile whose proxy does not work says: one at a time, so
+    /// that "Show in Proxies" can go from the one to the other.
+    @State private var proxySheet: ProxySheet?
+    @State private var assigningProxies: ProxyAssignView.Request?
+    /// Profiles of the selection waiting for the one confirmation that deletes them all.
+    @State private var pendingBulkDelete: [UUID] = []
 
     var body: some View {
         ProfilesScreen(rows: rows, isWorking: model.isWorking, sync: syncLine,
@@ -48,6 +61,10 @@ struct ProfileListView: View {
             .sheet(item: $passwordsFor) { profile in PasswordListView(profile: profile) }
             .sheet(item: $importingCookiesFor) { profile in CookieImportView(profile: profile) }
             .sheet(item: $warmingUp) { profile in WarmUpView(profile: profile) }
+            .sheet(isPresented: $warmingUpSeveral) { WarmUpQueueView(preselected: queuePreselection) }
+            .sheet(item: $exporting) { profile in ProfileExportView(profile: profile) }
+            .sheet(item: $exportingCookies) { profile in CookieExportView(profile: profile) }
+            .sheet(isPresented: $importingProfile) { ProfileImportView() }
             // "Passwords…" in a browser window's AutoFill list.
             .onReceive(model.$passwordsRequest.compactMap { $0 }) { profile in
                 passwordsFor = profile
@@ -56,6 +73,7 @@ struct ProfileListView: View {
             .sheet(isPresented: $changingPassword) { ChangePasswordView() }
             .sheet(isPresented: $showingSync) { SyncSettingsView() }
             .sheet(isPresented: $showingTunnel) { TunnelSettingsView() }
+            .sheet(isPresented: $showingAutomation) { AutomationSettingsView() }
             .confirmationDialog(String(format: L("profiles.delete.title"), pendingDelete?.name ?? ""),
                                 isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                                 presenting: pendingDelete) { profile in
@@ -65,6 +83,45 @@ struct ProfileListView: View {
             } message: { _ in
                 Text(L("profiles.delete.message"))
             }
+            .sheet(item: $proxySheet, onDismiss: showProxyProblems) { sheet in
+                switch sheet {
+                case let .list(selecting): ProxyListView(initialSelection: selecting)
+                case .problems: ProxyProblemView { id in proxySheet = .list(selecting: [id]) }
+                }
+            }
+            // A profile that was started with a proxy that does not work.
+            .onReceive(model.$proxyProblems) { problems in
+                if !problems.isEmpty, proxySheet == nil { proxySheet = .problems }
+            }
+            .sheet(item: $assigningProxies) { request in ProxyAssignView(request: request) }
+            .confirmationDialog(String(format: L("profiles.bulk.delete.title"), pendingBulkDelete.count),
+                                isPresented: Binding(get: { !pendingBulkDelete.isEmpty }, set: { if !$0 { pendingBulkDelete = [] } }),
+                                titleVisibility: .visible,
+                                presenting: pendingBulkDelete.isEmpty ? nil : pendingBulkDelete) { ids in
+                Button(L("profiles.bulk.delete.confirm"), role: .destructive) {
+                    Task { await model.deleteProfiles(ids) }
+                }
+            } message: { ids in
+                Text(String(format: L("profiles.bulk.delete.message"), names(ids)))
+            }
+    }
+
+    /// After the Proxies sheet: what profiles said about their proxies meanwhile.
+    private func showProxyProblems() {
+        if proxySheet == nil, !model.proxyProblems.isEmpty { proxySheet = .problems }
+    }
+
+    /// Warm-up of several profiles (the selection's bar): the warm-up queue, with them ticked.
+    private func warmUpSeveral(_ ids: [UUID]) {
+        queuePreselection = Set(ids)
+        warmingUpSeveral = true
+    }
+
+    /// "Northwind, Harbor, Atlas and 2 more".
+    private func names(_ ids: [UUID]) -> String {
+        let names = ids.compactMap { summary($0)?.name }
+        guard names.count > 5 else { return names.joined(separator: ", ") }
+        return String(format: L("profiles.bulk.namesAndMore"), names.prefix(5).joined(separator: ", "), names.count - 5)
     }
 
     private var rows: [ProfileRowItem] {
@@ -73,14 +130,15 @@ struct ProfileListView: View {
             let busy = model.isBusy(profile.id)
             let details = model.details[profile.id]
             let activity: ProfileRowItem.Activity = busy ? (running ? .starting : .sealing) : (running ? .running : .stopped)
-            let robot = model.manager?.isWarmingUp(profile.id) == true ? model.manager?.warmUpRobot(for: profile.id) : nil
+            let warmUp = model.manager?.warmUpStatus(of: profile.id)
             return ProfileRowItem(
                 id: profile.id, name: profile.name, activity: activity,
                 exit: details?.proxyEndpoint.map { ProfileExit.proxy(endpoint: $0, countryCode: details?.exitCountryCode) } ?? .direct,
                 ephemeral: details?.ephemeral ?? false,
                 appearsAs: ProfileRowItem.appearsAs(details?.deviceGeneration ?? DeviceGenerations.resolved(id: nil)),
                 lastUsed: profile.lastLaunchedAt,
-                warmUp: robot.map { ProfileRowItem.WarmUp.live($0) })
+                warmUp: warmUp.flatMap { $0.isRunning ? $0 : nil },
+                warmUpQueued: model.warmUps?.isWaiting(profile.id) ?? false)
         }
     }
 
@@ -105,13 +163,39 @@ struct ProfileListView: View {
             },
             passwords: { id in passwordsFor = summary(id) },
             importCookies: { id in importingCookiesFor = summary(id) },
+            exportCookies: { id in exportingCookies = summary(id) },
             warmUp: { id in warmingUp = summary(id) },
+            exportProfile: { id in exporting = summary(id) },
+            importProfile: { importingProfile = true },
             delete: { id in pendingDelete = summary(id) },
             lock: { Task { await model.lock() } },
             openSync: { showingSync = true },
             syncNow: model.syncTarget == nil ? nil : { Task { await model.syncNow() } },
             openTunnel: { showingTunnel = true },
-            changePassword: { changingPassword = true })
+            openAutomation: { showingAutomation = true },
+            changePassword: { changingPassword = true },
+            warmUpQueue: { queuePreselection = []; warmingUpSeveral = true },
+            openProxies: { proxySheet = .list(selecting: []) },
+            launchSeveral: { ids in Task { await model.launchProfiles(ids) } },
+            stopSeveral: { ids in Task { await model.stopProfiles(ids) } },
+            warmUpSeveral: { ids in warmUpSeveral(ids) },
+            assignProxies: { ids in assigningProxies = ProxyAssignView.Request(profileIDs: Set(ids), proxyIDs: []) },
+            deleteSeveral: { ids in pendingBulkDelete = ids })
+    }
+}
+
+/// The proxy sheets of the Profiles window.
+enum ProxySheet: Identifiable, Equatable {
+    /// The Proxies sheet, with these proxies selected.
+    case list(selecting: Set<UUID>)
+    /// What profiles whose proxy does not work say (`AppModel.proxyProblems`).
+    case problems
+
+    var id: String {
+        switch self {
+        case .list: return "list"
+        case .problems: return "problems"
+        }
     }
 }
 
@@ -121,12 +205,6 @@ struct ProfileListView: View {
 struct ProfileRowItem: Identifiable {
     enum Activity: Equatable { case stopped, starting, running, sealing }
 
-    /// A warm-up's progress: the live robot (observed), or fixed numbers (previews).
-    enum WarmUp {
-        case live(WarmUpRobot)
-        case fixed(page: Int, of: Int)
-    }
-
     let id: UUID
     var name: String
     var activity: Activity
@@ -134,7 +212,10 @@ struct ProfileRowItem: Identifiable {
     var ephemeral: Bool
     var appearsAs: String
     var lastUsed: Date?
-    var warmUp: WarmUp?
+    /// The warm-up of this profile while one runs, as the profile's process last reported it.
+    var warmUp: WarmUpStatus?
+    /// Waiting in the warm-up queue for its turn (`WarmUpCoordinator`).
+    var warmUpQueued = false
 
     var isRunning: Bool { activity == .running }
     var isBusy: Bool { activity == .starting || activity == .sealing }
@@ -208,14 +289,32 @@ struct ProfileActions {
     var edit: (UUID) -> Void = { _ in }
     var passwords: (UUID) -> Void = { _ in }
     var importCookies: (UUID) -> Void = { _ in }
+    var exportCookies: (UUID) -> Void = { _ in }
     var warmUp: (UUID) -> Void = { _ in }
+    var exportProfile: (UUID) -> Void = { _ in }
+    var importProfile: () -> Void = {}
     var delete: (UUID) -> Void = { _ in }
     var lock: () -> Void = {}
     var openSync: () -> Void = {}
     /// Nil while no sync target is set.
     var syncNow: (() -> Void)?
     var openTunnel: () -> Void = {}
+    /// The local automation API's settings (`AutomationSettingsView`).
+    var openAutomation: () -> Void = {}
     var changePassword: () -> Void = {}
+    /// Several profiles warmed up one after the other (`WarmUpQueueView`).
+    var warmUpQueue: () -> Void = {}
+    /// The proxy list (import, checks, assignment).
+    var openProxies: () -> Void = {}
+    // Several selected profiles at once (`ProfileBulkBar`), in the order the list shows them.
+    var launchSeveral: ([UUID]) -> Void = { _ in }
+    var stopSeveral: ([UUID]) -> Void = { _ in }
+    /// The hook a warm-up queue takes the selection through.
+    var warmUpSeveral: ([UUID]) -> Void = { _ in }
+    /// Proxies of the list for these profiles, in turn.
+    var assignProxies: ([UUID]) -> Void = { _ in }
+    /// Asks once, naming how many, before deleting.
+    var deleteSeveral: ([UUID]) -> Void = { _ in }
 }
 
 // MARK: - The screen
@@ -230,6 +329,8 @@ struct ProfilesScreen: View {
     @Binding var filter: ProfileFilter
     @Binding var search: String
     var actions = ProfileActions()
+    /// Rows selected with ⌘- and ⇧-click; with two or more, `ProfileBulkBar` acts on them all.
+    @State private var selection = ProfileSelection()
 
     static let sidebarWidth: CGFloat = 208
     /// The table's columns drop "Appears as", then "Last used", below these content widths.
@@ -243,13 +344,31 @@ struct ProfilesScreen: View {
             VStack(spacing: 0) {
                 header
                 Rectangle().fill(Theme.divider).frame(height: 1)
+                if selectedRows.count >= 2 {
+                    ProfileBulkBar(rows: selectedRows, visibleCount: displayOrder.count, actions: actions,
+                                   selectAll: { selection.select(displayOrder.map(\.id)) },
+                                   clear: { selection.clear() })
+                        .transition(.opacity)
+                }
                 content
             }
             .background(Theme.surface)
+            .animation(Theme.hoverAnimation, value: selectedRows.count >= 2)
         }
         .background(Theme.surface)
         .ignoresSafeArea(.container, edges: .top)
         .environment(\.colorScheme, .dark)
+        .onChange(of: rows.map(\.id)) { _, ids in selection.keep(only: Set(ids)) }
+    }
+
+    /// The rows in the order the list shows them: running ones first, then the others.
+    private var displayOrder: [ProfileRowItem] {
+        visibleRows.filter(\.isActive) + visibleRows.filter { !$0.isActive }
+    }
+
+    /// The selected rows the list shows (a row the filter or the search hides is never acted on unseen).
+    private var selectedRows: [ProfileRowItem] {
+        displayOrder.filter { selection.contains($0.id) }
     }
 
     private var visibleRows: [ProfileRowItem] {
@@ -279,11 +398,18 @@ struct ProfilesScreen: View {
             LumenSearchField(text: $search, prompt: L("profiles.search"))
                 .frame(width: 200)
             Menu {
+                Button(L("profiles.menu.warmUpSeveral"), action: actions.warmUpQueue)
+                    .disabled(rows.isEmpty)
+                Button(L("profiles.menu.proxies"), action: actions.openProxies)
+                Divider()
+                Button(L("profiles.menu.import"), action: actions.importProfile)
+                Divider()
                 Button(L("profiles.menu.sync"), action: actions.openSync)
                 Button(L("profiles.menu.syncNow")) { actions.syncNow?() }
                     .disabled(actions.syncNow == nil)
                 Divider()
                 Button(L("profiles.menu.tunnel"), action: actions.openTunnel)
+                Button(L("profiles.menu.automation"), action: actions.openAutomation)
                 Divider()
                 Button(L("profiles.menu.changePassword"), action: actions.changePassword)
             } label: {
@@ -392,7 +518,8 @@ struct ProfilesScreen: View {
             .padding(.bottom, 4)
             .accessibilityAddTraits(.isHeader)
             ForEach(rows) { row in
-                ProfileRow(row: row, columns: columns, actions: actions)
+                ProfileRow(row: row, columns: columns, actions: actions, isSelected: selection.contains(row.id),
+                           onClick: { click in selection.click(row.id, click, order: displayOrder.map(\.id)) })
                     .overlay(alignment: .bottom) {
                         Rectangle().fill(Theme.divider).frame(height: 1).padding(.leading, ProfileColumns.nameInset + ProfileColumns.rowPadding)
                     }
@@ -561,6 +688,9 @@ private struct ProfileRow: View {
     let row: ProfileRowItem
     let columns: ProfileColumns
     let actions: ProfileActions
+    var isSelected = false
+    /// A click on the row itself (not on its buttons or menu): selects it (`ProfileSelection`).
+    var onClick: (ProfileSelection.Click) -> Void = { _ in }
 
     var body: some View {
         HStack(spacing: ProfileColumns.gap) {
@@ -585,12 +715,17 @@ private struct ProfileRow: View {
         }
         .padding(.horizontal, ProfileColumns.rowPadding)
         .frame(height: 48)
+        .background(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
+            .fill(isSelected ? Theme.rowSelected : .clear))
         .contentShape(Rectangle())
+        // The row's buttons and ⋯ menu take their own clicks; a click anywhere else selects.
+        .onTapGesture { onClick(.current) }
         .hoverHighlight(cornerRadius: Theme.controlRadius)
         .opacity(row.activity == .sealing ? 0.6 : 1)
         .contextMenu { ProfileMenuItems(row: row, actions: actions) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(row.name))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var nameCell: some View {
@@ -622,16 +757,19 @@ private struct ProfileRow: View {
         case .sealing:
             busyLine(L("profiles.row.encrypting"))
         case .running:
-            switch row.warmUp {
-            case .live(let robot)?:
-                LiveWarmUpLine(robot: robot)
-            case let .fixed(page, total)?:
-                WarmUpLine(page: page, total: total)
-            case nil:
+            if let warmUp = row.warmUp {
+                WarmUpLine(status: warmUp)
+            } else if row.warmUpQueued {
+                secondaryLine(L("profiles.row.warmUpQueued"))
+            } else {
                 secondaryLine(L("profiles.row.running"))
             }
         case .stopped:
-            if row.ephemeral { secondaryLine(L("profiles.row.ephemeral")) }
+            if row.warmUpQueued {
+                secondaryLine(L("profiles.row.warmUpQueued"))
+            } else if row.ephemeral {
+                secondaryLine(L("profiles.row.ephemeral"))
+            }
         }
     }
 
@@ -695,7 +833,10 @@ private struct ProfileMenuItems: View {
         Button(L("profiles.row.edit")) { actions.edit(row.id) }
         Button(L("profiles.row.passwords")) { actions.passwords(row.id) }
         Button(L("profiles.row.importCookies")) { actions.importCookies(row.id) }
+        Button(L("profiles.row.exportCookies")) { actions.exportCookies(row.id) }
         Button(L("profiles.row.warmUp")) { actions.warmUp(row.id) }
+        Divider()
+        Button(L("profiles.row.export")) { actions.exportProfile(row.id) }
         Divider()
         Button(L("profiles.row.delete"), role: .destructive) { actions.delete(row.id) }
     }
@@ -740,31 +881,30 @@ struct ExitLabel: View {
     }
 }
 
-/// A warm-up's page count and a progress bar.
+/// A warm-up's progress in the profile's row: which page of how many, a bar, and how many cookies
+/// the run has collected so far — the number the whole thing is for.
 private struct WarmUpLine: View {
-    let page: Int
-    let total: Int
+    let status: WarmUpStatus
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(String(format: L("profiles.row.warmUpShort"), max(page, 1), total))
+            Text(String(format: L("profiles.row.warmUpShort"), status.currentPage, status.total))
                 .font(.lumenSecondary)
                 .foregroundStyle(Theme.accent)
                 .lineLimit(1)
                 .monospacedDigit()
                 .fixedSize()
-            LumenProgressBar(fraction: total > 0 ? Double(page) / Double(total) : 0, width: 48)
+            LumenProgressBar(fraction: status.fraction, width: 48)
+            if status.cookies > 0 {
+                Text(String(format: L("profiles.row.warmUpCookies"), status.cookies))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
+                    .monospacedDigit()
+                    .fixedSize()
+            }
         }
-    }
-}
-
-/// The same, following a running robot.
-private struct LiveWarmUpLine: View {
-    @ObservedObject var robot: WarmUpRobot
-
-    var body: some View {
-        WarmUpLine(page: robot.visits.count, total: robot.pageCount)
-            .help(String(format: L("profiles.row.warmingUp"), max(robot.visits.count, 1), robot.pageCount))
+        .help(String(format: L("profiles.row.warmingUp"), status.currentPage, status.total))
     }
 }
 
