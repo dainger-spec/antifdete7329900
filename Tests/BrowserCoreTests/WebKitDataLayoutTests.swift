@@ -66,6 +66,34 @@ final class WebKitDataLayoutTests: XCTestCase {
                        library.appendingPathComponent("WebKit/\(bundleID)/WebsiteDataStore/\(id)").path)
     }
 
+    /// The product renamed (bundle ID dev.local.PrivacyBrowser → io.lumenbrowser.Lumen): what the last
+    /// build of the old one sealed — labels as its own layout made them, of both roots — is restored
+    /// under the new bundle ID, by an unsandboxed build and by a sandboxed one. What a crash left
+    /// unsealed under the old bundle ID is not found by the new one: sealing it is the old build's
+    /// (it seals it at its next unlock), which is why the old build is opened once before the switch.
+    func testWhatTheOldBundleIDSealedIsRestoredUnderTheNewOne() throws {
+        let old = WebKitDataLayout(library: library, bundleID: "dev.local.PrivacyBrowser", sandboxed: false)
+        let data = try mkdir("WebKit/dev.local.PrivacyBrowser/WebsiteDataStore/\(uuid)")
+        let cache = try mkdir("Caches/dev.local.PrivacyBrowser/WebKit/WebsiteDataStore/\(uuid)")
+        let labels = try [data, cache].map { try old.label(for: $0) }
+        XCTAssertEqual(labels, ["WebKit|dev.local.PrivacyBrowser|WebsiteDataStore|\(uuid)",
+                                "Caches|dev.local.PrivacyBrowser|WebKit|WebsiteDataStore|\(uuid)"])
+
+        let new = WebKitDataLayout(library: library, bundleID: "io.lumenbrowser.Lumen", sandboxed: false)
+        XCTAssertEqual(try labels.map { try new.destination(forLabel: $0, profileID: profileID).standardizedFileURL.path },
+                       ["WebKit/io.lumenbrowser.Lumen/WebsiteDataStore/\(uuid)",
+                        "Caches/io.lumenbrowser.Lumen/WebKit/WebsiteDataStore/\(uuid)"]
+                        .map { library.appendingPathComponent($0).standardizedFileURL.path })
+        let container = try mkdir("Containers/io.lumenbrowser.Lumen/Data/Library")
+        let boxed = WebKitDataLayout(library: container, bundleID: "io.lumenbrowser.Lumen", sandboxed: true)
+        XCTAssertEqual(try labels.map { try boxed.destination(forLabel: $0, profileID: profileID).standardizedFileURL.path },
+                       ["WebKit/WebsiteDataStore/\(uuid)", "Caches/WebKit/WebsiteDataStore/\(uuid)"]
+                        .map { container.appendingPathComponent($0).standardizedFileURL.path })
+
+        XCTAssertEqual(new.discoverDirectories(for: profileID), [])
+        XCTAssertEqual(old.discoverDirectories(for: profileID).count, 2)
+    }
+
     func testRejectsUnsafeLabels() {
         let layout = WebKitDataLayout(library: library, bundleID: bundleID, sandboxed: false)
         let id = profileID.uuidString
@@ -86,5 +114,66 @@ final class WebKitDataLayoutTests: XCTestCase {
         let parent = try mkdir("WebKit/WebsiteDataStore")
         try FileManager.default.createSymbolicLink(at: parent.appendingPathComponent(uuid), withDestinationURL: elsewhere)
         XCTAssertTrue(layout.discoverDirectories(for: profileID).isEmpty)
+    }
+}
+
+/// A sandboxed build's container, moved to where an unsandboxed build of the same app looks.
+final class UnsandboxedMigrationTests: XCTestCase {
+    var home: URL!
+    let bundleID = "dev.local.PrivacyBrowser"
+    var container: URL { home.appendingPathComponent("Library/Containers/\(bundleID)/Data/Library", isDirectory: true) }
+    var library: URL { home.appendingPathComponent("Library", isDirectory: true) }
+
+    override func setUpWithError() throws {
+        home = FileManager.default.temporaryDirectory.appendingPathComponent("pb-unsandbox-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: home)
+    }
+
+    private func write(_ text: String, at url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(text.utf8).write(to: url)
+    }
+
+    func testTheVaultAndCrashResidueMoveOutOfTheContainer() throws {
+        let profile = UUID()
+        let containerVault = UnsandboxedMigration.vaultFolder(in: container)
+        try write("{}", at: MasterVault.headerURL(in: containerVault))
+        try write("sealed", at: containerVault.appendingPathComponent("profiles/\(profile.uuidString)/webdata.pbsa"))
+        // Unsealed data a crash left in the container's layout.
+        try write("cookie", at: container.appendingPathComponent("WebKit/WebsiteDataStore/\(profile.uuidString.lowercased())/Cookies.binarycookies"))
+
+        let moves = UnsandboxedMigration.plan(containerLibrary: container, library: library, bundleID: bundleID)
+        XCTAssertEqual(moves.count, 2)
+        try UnsandboxedMigration.perform(moves)
+
+        let localVault = UnsandboxedMigration.vaultFolder(in: library)
+        XCTAssertTrue(MasterVault.exists(in: localVault))
+        XCTAssertFalse(MasterVault.exists(in: containerVault))
+        XCTAssertEqual(try String(contentsOf: localVault.appendingPathComponent("profiles/\(profile.uuidString)/webdata.pbsa"), encoding: .utf8), "sealed")
+        // Where this build's layout looks for it, so that the next unlock seals it.
+        let local = WebKitDataLayout(library: library, bundleID: bundleID, sandboxed: false)
+        let residue = local.discoverDirectories(for: profile)
+        XCTAssertEqual(residue.count, 1)
+        XCTAssertTrue(residue[0].path.contains("WebKit/\(bundleID)/WebsiteDataStore/"))
+        // Once moved there is nothing left to move.
+        XCTAssertTrue(UnsandboxedMigration.plan(containerLibrary: container, library: library, bundleID: bundleID).isEmpty)
+    }
+
+    func testAVaultOfThisBuildIsNeverReplaced() throws {
+        try write("{}", at: MasterVault.headerURL(in: UnsandboxedMigration.vaultFolder(in: container)))
+        try write("{\"mine\":1}", at: MasterVault.headerURL(in: UnsandboxedMigration.vaultFolder(in: library)))
+        XCTAssertTrue(UnsandboxedMigration.plan(containerLibrary: container, library: library, bundleID: bundleID).isEmpty)
+        // Nor is a folder with anything in it, vault or not.
+        try FileManager.default.removeItem(at: MasterVault.headerURL(in: UnsandboxedMigration.vaultFolder(in: library)))
+        try write("x", at: UnsandboxedMigration.vaultFolder(in: library).appendingPathComponent("note"))
+        XCTAssertTrue(UnsandboxedMigration.plan(containerLibrary: container, library: library, bundleID: bundleID).isEmpty)
+    }
+
+    func testNothingToMoveWithoutAContainerVault() throws {
+        XCTAssertTrue(UnsandboxedMigration.plan(containerLibrary: container, library: library, bundleID: bundleID).isEmpty)
     }
 }

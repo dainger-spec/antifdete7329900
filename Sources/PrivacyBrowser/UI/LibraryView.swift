@@ -23,6 +23,8 @@ struct LibraryView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // The profile's own library, as it was: the redesign does not go inside a profile's
+            // windows (ProfileWindowTheme).
             Picker("", selection: $navigation.section) {
                 ForEach(Section.allCases) { Text(L($0.labelKey)).tag($0) }
             }
@@ -37,7 +39,7 @@ struct LibraryView: View {
             }
         }
         .frame(minWidth: 580, minHeight: 440)
-        .background(Theme.pageBackground)
+        .background(ProfileWindowTheme.surface)
     }
 }
 
@@ -177,7 +179,7 @@ private struct BookmarkEditor: View {
                     .fixedSize()
                 }
             }
-            if let error { Text(error).foregroundStyle(Theme.danger).font(.caption) }
+            if let error { Text(error).foregroundStyle(ProfileWindowTheme.danger).font(.caption) }
         }
         .formStyle(.grouped)
         .frame(width: 460)
@@ -260,7 +262,7 @@ private struct HistoryPane: View {
             }
             List(selection: $selection) {
                 ForEach(days) { day in
-                    SwiftUI.Section(day.id.formatted(date: .complete, time: .omitted)) {
+                    SwiftUI.Section(day.id.shown(date: .complete, time: .omitted)) {
                         ForEach(day.entries) { entry in
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -268,7 +270,7 @@ private struct HistoryPane: View {
                                     Text(entry.url).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                 }
                                 Spacer()
-                                Text(entry.lastVisitedAt.formatted(date: .omitted, time: .shortened))
+                                Text(entry.lastVisitedAt.shown(date: .omitted, time: .shortened))
                                     .font(.caption).foregroundStyle(.secondary).monospacedDigit()
                             }
                             .tag(entry.url)

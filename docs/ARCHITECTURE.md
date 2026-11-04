@@ -27,12 +27,15 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 │  SwiftUI: Setup / Unlock / ProfileList / ProfileEditor / Passwords / SyncSettings / Library │
 │        │                                                                                   │
 │  AppModel ── lock state, vault, DeviceSettings (sync target), errors                       │
+│        ├── ProxyListModel ── proxies.bin, checks (ProxyChecker: ProxyProbe → ProxyGeoLookup)│
+│        ├── AutomationServer ── 127.0.0.1 API, off by default → AutomationHandler → manager │
 │        │                                                                                   │
 │  ProfileManager ── launch / stop / delete / crash recovery                                 │
-│        ├── TunnelManager ── packet tunnel: activation, VPN configuration, per-profile routes│
+│        ├── NetworkGuard ── the guard: activation, filter configuration, XPC holds, check  │
+│        ├── WebRTCRelays ── a TURN relay on 127.0.0.1 per profile, out through its proxy    │
 │        ├── WebDataStoreVault ── seal/unseal WebKit dirs (WebKitDataLayout + archive)       │
 │        └── BrowserSession (one per running profile)                                        │
-│              ├── WKWebsiteDataStore(forIdentifier:) + proxyConfigurations                  │
+│              ├── WKWebsiteDataStore (identifier's dirs, a browser's quota) + proxies       │
 │              ├── WKUserContentController + PrivacyScripts (TZ / geo / WebRTC)              │
 │              ├── ProfileLibrary ── HistoryStore + BookmarkStore (observable, debounced)    │
 │              ├── LibraryWindowController ── bookmarks & history UI                         │
@@ -43,6 +46,10 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 ┌──────────────────────────────── BrowserCore (platform-independent) ────────────────────────┐
 │  MasterVault / UnlockedVault ── Argon2id, key hierarchy; DeviceSettings (settings.bin)     │
 │  ProfileRepository ── encrypted index + per-profile config, store factories                │
+│  ProxyList / ProxyListImport ── proxy list, pasted-list reader, round-robin assignment     │
+│  ProxyProbe / ProbeSocket ── a proxy checked step by step (POSIX sockets, only to it)      │
+│  ProfileGrant ── a profile's process opens the vault for its one profile                   │
+│  AutomationHTTP / AutomationGate / AutomationRoute ── the local API's wire, gate, routes   │
 │  PasswordVault / HistoryStore / BookmarkStore ── per-profile encrypted documents           │
 │  EncryptedChunkStream / EncryptedDirectoryArchive / WebKitDataLayout ── WebKit data seal   │
 │  SyncCodec / SyncEngine ── encrypted sync client with per-record merges                    │
@@ -50,17 +57,21 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 │     ├── LocalDirectorySyncTransport  (local-only)                                          │
 │     └── HTTPSyncTransport            (server-ready client, docs/SYNC_SERVER_API.md)        │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
-┌──────────── PacketTunnelExtension (system extension, NE=1 builds; docs/TUNNEL.md) ─────────┐
-│  PacketTunnelProvider ── split tunnel (192.0.2.0/24 + a ULA /64), packets ↔ PacketRouter   │
-│  TunnelTransport (macOS) ── SOCKS5UDPRelay (Network.framework), TURNUDPHost (CI harness)   │
-│  TunnelCore (platform-independent) ── IPv4/IPv6 UDP packets, STUN/TURN codec, TURNServer,  │
-│        SOCKS5 framing, PacketRouter (one TURN server per profile route), control messages  │
+┌──────────── NetworkGuardExtension (system extension, NE=1 builds; docs/TUNNEL.md) ─────────┐
+│  GuardFilterProvider ── content filter: a held profile's flows to its proxy and loopback   │
+│        only, anything else dropped; every other flow let through unread                    │
+│  GuardService ── Mach service (XPC) for Lumen of its own team: hold, release, report       │
+│  NetworkGuardCore (platform-independent) ── GuardPolicy, DNS questions, GuardLedger, proof │
+└────────────────────────────────────────────────────────────────────────────────────────────┘
+┌──────────── The relay (in the manager process; docs/TUNNEL.md) ────────────────────────────┐
+│  TunnelTransport (macOS) ── TURNUDPHost on 127.0.0.1, SOCKS5UDPRelay, ProxyUDPCheck        │
+│  TunnelCore (platform-independent) ── STUN/TURN codec, TURNServer, SOCKS5 framing          │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 `BrowserCore` has no dependency on AppKit or WebKit. It builds on Linux with
 swift-crypto, which lets CI run the crypto and storage tests without a Mac. `TunnelCore`, the
-tunnel's protocol code, builds there as well.
+relay's protocol code, and `NetworkGuardCore`, the guard's rules, build there as well.
 
 ## Key hierarchy
 
@@ -77,7 +88,9 @@ VMK (vault master key, random 256-bit)
    ├─ HKDF "profile-key-wrap"  → wraps each profile key        (AAD "profile-key:v1:<uuid>")
    ├─ HKDF "sync-envelope"     → encrypts sync envelopes + sync-state.bin
    ├─ HKDF "sync-object-id"    → HMAC key for opaque sync object IDs
-   └─ HKDF "device-settings"   → settings.bin (sync target, token, last status; never synced)
+   ├─ HKDF "device-settings"   → settings.bin (sync target, token, last status; never synced)
+   └─ HKDF "proxy-list"        → proxies.bin  (proxy list: settings, credentials, labels, last checks;
+                                               AAD "proxy-list:v1:<vaultID>"; never synced)
 
 profile key (random 256-bit per profile, stored only wrapped)
    ├─ directly                 → config.bin                    (AAD "profile-config:v1:<uuid>")
@@ -88,6 +101,7 @@ profile key (random 256-bit per profile, stored only wrapped)
    ├─ HKDF "cookies"           → cookies.bin                   (AAD "cookies:v1:<uuid>")
    ├─ HKDF "cookie-baseline"   → cookies-baseline.bin          (AAD "cookie-baseline:v1:<uuid>")
    ├─ HKDF "warm-up"           → warmup.bin                    (AAD "warm-up:v1:<uuid>")
+   ├─ HKDF "warm-up-schedule"  → warmup-schedule.bin           (AAD "warm-up-schedule:v1:<uuid>")
    └─ HKDF "webdata-archive", salt = random per archive → webdata.pbsa chunk key
 ```
 
@@ -95,9 +109,41 @@ All HKDF derivations use the vault ID (or profile ID) as salt. Every ciphertext'
 names its purpose and owner, so moving a ciphertext into another file or profile makes
 decryption fail.
 
-Changing the master password re-wraps only the VMK. A new device unlocks with the same
-password because `vault.json` (salt, KDF parameters and wrapped VMK) is synced in
-plaintext.
+A profile's own process (`ProfileProcess`) is never given the VMK: the manager hands it a
+`ProfileGrant` — that profile's key and its index entry — on its standard input, and the vault it
+opens with it derives none of the VMK's keys above (`CoreError.notGranted`). It reads and writes
+the profile's own files; the index stays the manager's (a settings change in the child is sent
+back as `ProfileEvent.configurationSaved` for the manager to record).
+
+A new device unlocks with the master password because `vault.json` (salt, KDF parameters and
+wrapped VMK) is synced in plaintext.
+
+### Changing the master password: what it does, and what it does not
+
+**What it does.** The VMK is wrapped anew under a key derived from the new password, and written
+to `vault.json`; nothing else changes. The data and every key below the VMK stay as they are. The
+header counts the change (`passwordRevision`), and goes to the sync location right after the change
+(or at the next sync, when the location is out of reach): a new device then sets up with the new
+password and not with the old one. The sync location keeps the header with the most changes; a
+device whose header has fewer never puts it back (`SyncEngine.publishVaultHeader`), and says so in
+its sync status.
+
+**What it does not.**
+- A copy of `vault.json` made before the change — in a backup, in Time Machine, on another disk —
+  together with the old password still opens the vault: all of it, the data written after the
+  change included. The old password unwraps the same VMK, and the VMK opens everything.
+- A Mac that already syncs keeps its own `vault.json`: it still opens with the old password until
+  the password is changed on it too.
+- Data the sync location holds is under the same keys as before.
+
+So if an old copy of `vault.json` (or of the whole vault) may be in someone else's hands together
+with the old password — or the old password may have become known to someone who has such a copy —
+changing the password is not enough. Today the only protection is to move the profiles to a new
+vault: export each profile, create a new vault, import them (an import encrypts everything under
+the new vault's keys and a new key per profile), then delete the old vault and its copies, and its
+data on the sync location. Changing every key with the password is a project of its own: resumable
+after an interruption, the old data kept until the new is written and checked, proven by a test that
+stops the process at any point (until then it is not built).
 
 ## On-disk layout
 
@@ -108,16 +154,39 @@ build, `~/Library/Containers/<bundle-id>/Data/Library` for the sandboxed (defaul
 Application Support/PrivacyBrowser/      (0700)
   vault.json                      plaintext: format, vaultID, KDF params, wrapped VMK
   index.bin                       AES-GCM(index key, ProfileIndex JSON)
+  profiles/<uuid>/key.bin         AES-GCM(index key, ProfileKeyCopy JSON): the profile's wrapped key, name and creation date,
+                                  as the index has them; what a lost index is put together from
   settings.bin                    AES-GCM(device-settings key, DeviceSettings JSON)   [after configuring sync]
+  settings.bin.unreadable         a settings.bin that could not be read, moved aside at the next change of settings, never written over
+  proxies.bin                     AES-GCM(proxy-list key, ProxyList JSON)             [after the first proxy is added; this Mac only]
   sync-state.bin                  AES-GCM(sync key, per-object revision + hash)        [only after sync]
   profiles/<uuid>/
-    config.bin                    AES-GCM(profile key, ProfileConfiguration JSON)
-    passwords.bin                 AES-GCM(password key, [PasswordEntry] JSON: origin, user name, password, note, dates)
+    config.bin                    AES-GCM(profile key, ProfileConfiguration JSON) — also the person's own tags,
+                                  notes and glyph (written only when set; the Profiles list reads them into
+                                  ProfileDetails at each refresh)
+    passwords.bin                 AES-GCM(password key, PasswordDocument JSON, format 2: the logins — origin, user name, password,
+                                  note, dates, each with its version, the versions before it and the Mac that made it — the
+                                  versions kept after a conflict, and the deletions; sync merges it login by login. Format 1,
+                                  still read, was the logins alone, an array)
     cookies-import.bin            AES-GCM(cookie-import key, [ImportedCookie] JSON)   [only while imported cookies wait for the next launch]
     cookies.bin                   AES-GCM(cookies key, CookieJarDocument JSON)        [persistent cookies, synced; with cookie sync on]
     cookies-baseline.bin          AES-GCM(cookie-baseline key, CookieBaseline JSON)   [this Mac only: the store at the last record or apply]
     warmup.bin                    AES-GCM(warm-up key, WarmUpPlan JSON)               [this Mac only: the last warm-up plan]
-    config.bin.conflict, passwords.bin.conflict   the other device's version after a sync conflict (encrypted as the file)
+    warmup-schedule.bin           AES-GCM(warm-up-schedule key, WarmUpSchedule JSON)  [this Mac only, not exported: every N hours, last run]
+    tabs.bin                      AES-GCM(open-tabs key, OpenTabs JSON)               [this Mac only, not synced or exported: http(s) tabs
+                                                                                       left open, with Settings → Startup → restore tabs]
+    <file>.unreadable             a file that could not be read (damaged, cut short, another key's), moved aside instead of being
+                                  written over or deleted (then -2, …): by a save or a removal of any encrypted document, by a
+                                  sync that took the server's copy in its place, by the key copy written again. Nothing
+                                  unreadable is ever deleted (docs/DESTRUCTIVE_PATHS.md). Settings that cannot be read never
+                                  start the profile and are never saved over (R1)
+    config.bin.conflict(-2, -3 …) each version of the settings a sync did not keep as them — the other side of a conflict, or
+                                  this Mac's older settings put back from a backup (R2) — a file of its own, never written over,
+                                  removed only by the person, in the editor (R4). config-versions.bin: AES-GCM(versions key,
+                                  where each is from and when it was kept). Earlier versions kept one config.bin.conflict
+    config.bin.conflict           (legacy, as before:) the other device's version after a sync conflict (encrypted as the file; passwords.bin.conflict
+                                  only from before passwords.bin format 2, taken into passwords.bin as kept versions when the
+                                  vault opens, then removed: a password conflict now keeps both versions in the file)
     history.bin                   AES-GCM(history key, HistoryDocument JSON)          [not for ephemeral profiles]
     bookmarks.bin                 AES-GCM(bookmarks key, BookmarkDocument JSON)
     webdata.pbsa                  streaming encrypted archive of WebKit's data dirs
@@ -128,6 +197,45 @@ WebKit/WebsiteDataStore/<uuid>/               sandboxed    ┘ while the profile
 
 Every file is written with mode 0600 through a temp file and `rename(2)`, so a crash
 never leaves a half-written ciphertext.
+
+What a version does with a file a newer version wrote — refuses to read it, never writes over or
+deletes it — and which format each file carries: docs/UPDATES.md §4 (`DocumentFormat`).
+
+### `index.bin` missing or unreadable
+
+A profile's key is in `index.bin` (wrapped by the profile-key wrapping key) and, since the key
+copies, in the profile's own folder too: `key.bin` holds it wrapped the same way, with the profile's
+name and when it was made, sealed under the index key (AAD `"profile-key-copy:v1:<vaultID>:<id>"`).
+It is written when the profile is made (before the index, so a create that stops in between leaves a
+folder the next unlock takes in), when it is renamed, after a sync brings or changes profiles, and at
+each unlock for every listed profile that has none (a vault from before the copies). At unlock, the
+profiles whose folder holds a copy this vault opens and whom the index does not list are taken back
+into it (`takeInProfilesFromKeyCopies`): an index that was missing is put together again from the
+copies and written, an older index put back gets the profiles made since listed again — with their
+names; when each was last used is not known (it comes back from the server's index at the next
+sync, where there is one). A profile the index records as deleted is never taken in; a folder
+without a copy this vault opens stays out of the list, kept, as before.
+
+An index that is missing or cannot be read is not "no profiles". `ProfileRepository.IndexState`
+tells the cases apart, and nothing deletes a profile folder on the strength of an index it did not
+read:
+
+| `index.bin` at unlock | `indexState` | Profile folders | `index.bin` | The Profiles window |
+|---|---|---|---|---|
+| read | `.read` | only those the index records as deleted (`deletedProfileIDs`) **and** marked `deleted-here` are swept — this Mac's deletion that stopped between the index and the folder. A deleted profile's folder without the mark (deleted on another device, or put back from a backup) is kept and shown for the person to bring back as a new profile or remove (R3, docs/DESTRUCTIVE_PATHS.md) | written as usual; the profiles it does not list whose key copy opens are taken back into it | profiles taken back from their folders: "put back into the list from their own folders — nothing was lost"; folders still neither listed nor recorded as deleted (no copy this vault opens): kept, and said, with how to get them back |
+| none, and no profile folder | `.read` | — | a new vault's | — |
+| none, with profile folders that hold key copies | `.read` once put together | all kept | put together from the copies and written; one put back while the vault is unlocked is still not written over | as for an older index put back: the profiles taken back are said |
+| none, with profile folders without copies | `.missing` | all kept | not written over if one is put back while the vault is unlocked (a backup restored, as the window says to); a profile made meanwhile writes a new one | "Profile list not found — nothing was deleted", the folders' count, the vault's folder, and how to restore it: a backup's `index.bin`, or Sync Now |
+| there, not readable (damaged, another vault's) | `.unreadable` | all kept | never written over; no new profile | "Profile list can't be read — nothing was deleted", and how: a backup's copy, or, with sync, the file renamed and Sync Now |
+| a newer version's | — | — | unlock refuses (`newerFormat`), as before | — |
+
+Sync (`SyncEngine.syncIndex`) never pushes an index that was not read: with `.missing` or
+`.unreadable` it fetches the server's whatever its revision, merges, and pushes only the merge. (Before
+this was fixed, an index that went missing read as empty, the next unlock swept every profile folder,
+and a sync with the server unchanged since the last one pushed the empty index over the server's copy.)
+An index put together from the key copies is a read one, and syncs as one: its entries carry revision
+0, so the server's summaries (names, last use) win the merge. Tests: `ProfileIndexLossTests` (folders
+without copies), `ProfileKeyCopyTests`.
 
 ### `webdata.pbsa` format
 
@@ -142,7 +250,11 @@ The plaintext is a record stream (`kind | path | mode | [size | bytes]`). Files 
 streamed in 1 MiB chunks, so memory use stays bounded. Readers reject truncation, data
 after the final chunk, reordered chunks, unsafe paths (`..`, absolute, NUL) and symlinks.
 Extraction goes to a staging directory, and nothing reaches its destination until the
-whole archive has authenticated.
+whole archive has authenticated. The staging directory is hidden, beside its destination
+(`.<name>.unseal-<UUID>`); a failed extraction removes it, a finished one moves it into place. One
+that a crash or a kill left — part of a profile's plaintext — is removed at the app's launch and at
+unlock (every profile's), and at a profile's launch (its own), and the count said in the log
+(`AppEnvironment.removeUnsealLeftovers`, docs/DESTRUCTIVE_PATHS.md R8).
 
 ## Profile lifecycle
 
@@ -157,7 +269,7 @@ whole archive has authenticated.
   │ unwrap profile key                        │      │ close windows, tear down web views           │
   │ decrypt config.bin, open PasswordVault    │      │ drop WKWebsiteDataStore reference            │
   │ unseal webdata.pbsa → WebKit dirs         │ ───▶ │ wait → archive+encrypt dirs → webdata.pbsa   │
-  │ WKWebsiteDataStore(forIdentifier: uuid)   │      │ WKWebsiteDataStore.remove(forIdentifier:)    │
+  │ store of uuid, a browser's quota ratios   │      │ WKWebsiteDataStore.remove(forIdentifier:)    │
   │   .proxyConfigurations = [proxy]          │      │   (fails while in use → retry with backoff)  │
   │ user scripts (TZ / geo / WebRTC)          │      │ sweep leftovers, drop profile key            │
   │ window → start URL                        │      └──────────────────────────────────────────────┘
@@ -225,24 +337,62 @@ the logout). If WebKit still holds a store after every attempt, the quit forces 
 leaves a `webdata.forced` marker so that whatever WebKit writes before the exit is discarded at
 the next launch or unlock instead of being taken for newer data.
 
+Every seal does the same before it deletes what it sealed: once the archive holds the data, the
+marker (`webdata.forced` for the WebKit data, `home.sealed` for Safari's home) is written first and
+removed only when all of the plaintext is gone. A deletion that stops part-way (a file that cannot
+be deleted) leaves part of what the archive holds whole; the marker has it discarded at the next
+launch, stop or unlock — never sealed again over the archive (the next attempt of a seal used to,
+putting part of the profile in place of all of it) nor taken at a launch for newer data. Without
+the marker (it could not be written), nothing is deleted, and the next unlock seals the whole
+plaintext again, as after a crash. The self-test checks both with a file made immutable.
+
 ## Session warm-up
 
 ```
-WarmUpView (sheet) ── AppModel.startWarmUp: save plan (warmup.bin), launch the profile if stopped
+WarmUpView (sheet) ── AppModel.startWarmUp: save plan (warmup.bin), launch the profile
+        │              without a window if stopped (launch(openingWindow: false))
+        │
+WarmUpQueueView ── WarmUpCoordinator (one per unlock; AppModel.warmUps)
+  "Warm Up Several…"   queue: WarmUpQueue (BrowserCore) — one entry runs at a time:
+                         wait for any other run → AppModel.startWarmUp → follow warmUpStatus
+                         until it is over → wait for a profile started for it to stop and seal
+                       schedule: WarmUpScheduler (BrowserCore) over warmup-schedule.bin;
+                         a 60 s timer puts due runs into the same queue, postpones a running
+                         profile (in use) by 10 min; any run that ends records lastRunAt
+                         (manager.onWarmUpProgress)
         │
         ▼
-ProfileManager.warmUpRobot(for:) ── one WarmUpRobot per profile; stop(id) stops it first
-        │  start(plan, in: session): a new selected tab in the front window
+ProfileManager.warmUpRobot(for:) ── one WarmUpRobot per profile; stop(id) stops it first;
+        │  a profile with no visible window is stopped (sealed) when its run ends
+        │  start(plan, in: session): a window of its own, transparent, at the lowest level
+        │  (in a profile's own process: ProfileCommand.startWarmUp → the child's robot,
+        │   ProfileEvent.warmUp(WarmUpStatus) back; the child quits when a warm-up-only run ends)
         ▼
 WarmUpRobot (main actor, one Task per run; tab and session held weakly)
+   cookies at the start: WKHTTPCookieStore → Set<WarmUpCookieCount.Cookie> (name, domain, path)
    for each WarmUpPlan page (BrowserCore: pages(), WarmUpTiming, WarmUpLinkPolicy):
      wait until its tab is shown → tab.load(url) → wait for that navigation (committed, ended,
        or a jump within the page asked for) with nothing loading; failedNavigations
      → stay WarmUpTiming.dwell: wheel gestures (native NSEvent from CGEvent, else scrollBy)
      → follow one allowed link (mouse events once a trusted move reached it, else click())
-     → pause
+     → count the cookies added so far → pause
+   at the end: cookies again → WarmUpStatus.sites (WarmUpCookieCount.sites: per registrable
+     domain, cookies and how many were added), then the run is reported over
    reads pages only in WKContentWorld "PrivacyBrowser.WarmUp" (callAsyncJavaScript)
 ```
+
+The per-site report is computed where the robot runs, from the profile's own cookie store, and
+travels in `WarmUpStatus` — the value a profile in its own process already sends over the channel
+— so the sheet shows it the same way for both. It is left out while the run goes on (it would
+cross the channel with every page) and capped at 100 sites, those the run added to first. "Added"
+is by identity (name, domain, path), not by count: a cookie a page sets again is not new.
+
+The queue and the schedule's arithmetic (what is due, in which order, when next; a run put off;
+a clock set back; a Mac that slept through several intervals runs once) live in BrowserCore and
+are unit-tested; the coordinator only launches and waits. A scheduled run never starts in a
+profile that is running — its windows are the user's — and is tried again 10 minutes later; a
+scheduled run that started (or could not: launch failed, no page) counts as an attempt, so a
+profile whose proxy is down is not relaunched every minute.
 
 The robot never replaces the tab's delegates (they authenticate the proxy, record history and
 handle downloads); it watches the tab instead, and sets the tab's `refusesDownloads` for the run
@@ -250,6 +400,86 @@ handle downloads); it watches the tab instead, and sets the tab's `refusesDownlo
 still the current one, and its scripts end at once on Stop, so a run stopped mid-await never
 touches the next run's state. It ends itself when its tab's `host` is gone, the
 session's data store is gone, or the tab has a dialog waiting. ISOLATION_AND_LIMITATIONS.md §8c.
+
+## Proxy list and several profiles at once
+
+```
+ProxyListView (the Profiles window's Proxies section, its sidebar) ── ProxyListModel (AppModel.proxyList, made at unlock, dropped at lock)
+   │  unlock    ProxyList.takeIn(profileProxies:) once: the profiles' own proxies become entries
+   │  Import…   ProxyImportView: ProxyListImport.read(text) → report per line → ProxyList.add
+   │            (dedupe by host:port:user, limit; a line without a scheme: type unknown until checked)
+   │  Check     ProxyChecker.checkAll: ≤ 8 at a time, each
+   │              1. ProxyProbe.run (on a thread, sockets only to the proxy): resolve → connect →
+   │                 SOCKS5 and HTTP CONNECT handshakes at once → login → tunnel (target named to the
+   │                 proxy) → 2 more tunnels for the latency → ProxyDiagnosis (one verdict per way of failing)
+   │              2. working: ProxyGeoLookup.lookUp through the proxy, as the type found
+   │                 (ProxyConfigurationFactory, allowFailover = false) → exit IP, country, city, network
+   │            → ProxyCheckResult → ProxyList.record (a type found is the entry's) → profiles follow
+   │  Add/Edit  ProxyEditView: ProxyLineField (one line → ProxyListImport.readField; Check → ProxyChecker.check)
+   │            → ProxyListModel.addOne / update (+ the check from the sheet → ProxyList.record)
+   │            → ProfileRepository.follow (the profiles that use it as it was)
+   │  Export…   ProxyExportView: plaintext warning → ProxyList.exportText → SecureFile.writeOwnerOnly (0600)
+   │  Assign…   ProxyAssignView: ProxyList.rotation(of: proxies, over: profiles) → AppModel.assignProxies
+   │            → ProfileRepository.assign → ProfileConfiguration.assigning (savingEdit of the proxy alone)
+   │  report    ProxyReport (ProxyReportView): the state, the step that failed, in words, with advice
+   └─ every change saved at once (proxies.bin); check results when the run ends or is stopped
+
+ProfileEditorView (Network tab) ── ProfileDraft.proxyMode: direct | saved | new (three buttons)
+   │  saved     SavedProxyList (the list's entries of a known type) → ProfileDraft.choose;
+   │            Check → ProxyListModel.checkProfileProxy (the result is the entry's)
+   │  new       ProxyLineField → ProxyLine (readField; type: scheme | check | known | not known yet);
+   │            Check → ProxyChecker.check (nothing added to the list); Save: type not known → check first
+   └─ ProfileDraft.makeProxy (+ the profile's own bypass list) → ProfileConfiguration.proxy
+
+ProfileManager.launch ── a proxy: ProxyProbe (one tunnel, to the start page's site) → not working →
+   onProxyProblem → AppModel.proxyProblems → ProxyProblemView (the same report; Check Proxy:
+   ProxyListModel.checkProfileProxy; Show in Proxies)
+
+ProfilesScreen ── ProfileSelection (click / ⌘-click / ⇧-click) ── ProfileBulkBar (2 or more selected)
+   └─ ProfileActions.launchSeveral / stopSeveral / warmUpSeveral (hook) / assignProxies / deleteSeveral
+
+ProfilesScreen ── ProfileSelection (click / ⌘-click / ⇧-click) ── ProfileBulkBar (2 or more selected)
+   └─ ProfileActions.launchSeveral / stopSeveral / warmUpSeveral (hook) / assignProxies / deleteSeveral
+```
+
+- The list (`ProxyList`, BrowserCore) is a vault-level document like `settings.bin`, under its own
+  HKDF key; entries that a later build wrote and this one cannot read are left out rather than
+  costing the whole list, and an unreadable list is shown empty and never written over.
+- A check is two parts, both talking to the proxy only. The probe (`ProxyProbe`, BrowserCore, POSIX
+  sockets) takes the steps a connection takes and stops at the first that fails, so that each way
+  of failing is its own verdict: the name does not exist or the resolver failed, or every address
+  it got is a VPN's substitute (fake IP, `SubstituteDNS`: 198.18.0.0/15, 240.0.0.0/4) and nothing
+  answered there — behind such a DNS a name that does not exist gets an address too; the port refuses,
+  cannot be reached or does not answer the connection; it takes the connection and then says
+  nothing (`silent` — an IP whitelist without this Mac, a dead back end), closes at once, or
+  answers as something else; it wants a login, refuses the one given, or refuses this Mac (403);
+  it cannot reach the site. SOCKS5 and HTTP CONNECT are tried at once on two connections, so the
+  type is found, not assumed; the tunnel's target is a name the proxy resolves (SOCKS5 ATYP 3,
+  `CONNECT host:port`); a proxy behind TLS is only connected to (inside TLS, the lookup decides).
+  When it works, the launch's lookup (`ProxyGeoLookup`) goes through the proxy as the type found,
+  through exactly the configuration a profile's data store would get. Results carry the
+  diagnosis, the exit IP, country, time zone, city and network, and the median latency of the
+  probe's three tunnels; a proxy whose settings cannot be applied is not checked at all. Nothing in
+  a diagnosis is secret: no user name or password, only what the proxy answered.
+- The list and the profiles: each profile keeps its own copy of its proxy (what it connects with,
+  what syncs); the link to the list is the proxy itself — host, port, user name
+  (`ProxyList.identity(of:)`). An edit of an entry, or a check that found its type, reaches the
+  profiles whose copy is the entry as it was (`ProxyList.sameConnection`: the same type, TLS and
+  password too); a copy changed in a profile's editor since is never overwritten. A type left to
+  the check (`kindKnown == false`) is given to no profile. The profiles' proxies from before the
+  list are taken in once (`profilesTakenIn`), so a proxy deleted from the list does not come back.
+- A launch with a proxy runs the probe once (one tunnel, to the profile's start page's site, or the
+  first geolocation service without one) beside the launch; a proxy that does not work is said in
+  the Profiles window with the same report and a Check button. The launch itself never waits on it.
+- Assigning writes each profile's configuration as the editor would change its proxy alone: the
+  newer-wins time for sync moves only when the proxy changes; the location found through the old
+  proxy goes (it is about another proxy), and the check's location of the new one is remembered,
+  its exit IP only while the profile asks to be warned of changes. Rotation is round-robin in list
+  order. Running profiles get their new proxy at their next launch.
+- The Profiles list's selection lives in the screen (`ProfileSelection`): a plain click selects one
+  row, ⌘-click toggles, ⇧-click extends in display order; rows the filter or search hides are never
+  acted on. Warm-up of several profiles goes through `ProfileActions.warmUpSeveral`, which today
+  opens the warm-up of the first: the hook a warm-up queue takes.
 
 ## Tabs
 
@@ -289,13 +519,17 @@ configs read as the default generation).
 
 | Layer | How | Where it runs |
 |---|---|---|
-| Core (crypto, vault, profiles, archive, layout, history, bookmarks, passwords, cookie import, sync incl. cookies and settings conflicts, warm-up plans and link rules, HTTP transport, UA presets, proxy location) | XCTest, 120 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
-| Tunnel protocols (STUN/TURN against RFC 5769 vectors, IPv4/IPv6 UDP packets, SOCKS5 framing, TURN flows as libwebrtc drives them, peer policy, several profiles through one router) | XCTest, 32 tests | Linux and macOS, every push |
-| Packet-tunnel extension | builds against the macOS SDK and is laid out as a system extension, plists linted, provider class checked (`NE=check scripts/build-app.sh`); it cannot be loaded on a CI runner. Its router runs on a raw utun interface opened as root (`--utun-relay`, `UTunDevice`) against real WebKit, inside the leak check | macOS 26 runner, every push |
+| Core (crypto, vault, profiles, archive, layout, history, bookmarks, passwords, cookie import and export, sync incl. cookies and settings conflicts, warm-up plans and link rules, warm-up queue, schedule and per-site report, HTTP transport, UA presets, proxy location, proxy list: pasted-list reader, storage, rotation and assignment, the profiles' link and migration into it, the stepwise proxy probe against scripted SOCKS5 and HTTP servers (every verdict, no credentials in a diagnosis), exit details of the geolocation services, the export file, profile export and import, a profile's process granted its one profile, the proxied profiles' rule list, the automation API's reader, gate and routes) | XCTest, 215 tests | Linux (swift-crypto) and macOS (CryptoKit), every push |
+| Relay protocols (STUN/TURN against RFC 5769 vectors, SOCKS5 framing, TURN flows as libwebrtc drives them, peer policy) and the network guard's rules (loopback, the proxy by name and address, DNS questions, the ledger, the check's verdict) | XCTest | Linux and macOS, every push |
+| Network guard extension | builds against the macOS SDK and is laid out as a system extension, plists linted, the filter the only provider, no network entitlement (`NE=check scripts/build-app.sh`); it cannot be loaded on a CI runner. Its check's probe runs inside a capture (`scripts/guard_probe_check.py`) | macOS 26 runner, every push |
 | JS shims (logic, CreepJS-style shape checks) | `scripts/test-shims.mjs` under Node (V8 + ICU) and under Bun (JavaScriptCore, Safari's engine: own-property order, error messages) | Linux, every push |
-| App against real WebKit, sandboxed and unsandboxed | `PrivacyBrowser --self-test` with `scripts/selftest_proxy.py` | macOS 26 runner, every push |
+| App against real WebKit, sandboxed and unsandboxed | `Lumen --self-test` with `scripts/selftest_proxy.py` | macOS 26 runner, every push |
+| The same self-test (unsandboxed) on the next macOS, inside the egress capture | `Lumen --self-test`, `scripts/egress_check.py` | GitHub's `xcode-27` image (macOS 27.0.1, Safari 27.0.1, Xcode 27's SDK), every push; a preview image, so it fails the build on one thing only — this Mac fetching for a certificate outside a profile's proxy (`scripts/certificate_leak_check.py`) — and its other failures and certificate checks are notices on the run |
+| WebKit's features the SDK's behaviors change, as Safari has them in a profile's web views (`SafariEngineFeatures`): every feature's default as built and with every behavior on, and one page in a profile's web view against one with every behavior on (the window's names, Trusted Types, `MutationEvent` and a DOMNodeInserted listener, `new FontFaceSet([])`) | `scripts/engine_features_check.py` (`Lumen --sdk-check --features`, `--as-profile` and `--everything`), for the build as made and a copy declaring 14.0 | macOS 26 runner, every push (fails the build); macOS 27, reported |
 | Measured surface of a macOS profile vs. the runner's real Safari | `scripts/safari_reference.py` (safaridriver) with `Resources/fingerprint_probe.js` | macOS 26 runner, every push |
-| The same pages in Safari and in on-screen profile windows of the same size: probe, window geometry (1 and 2 tabs), request header order, permissions/quota/devices, TLS + HTTP/2 (tls.peet.ws) | `scripts/live_compare.py` + `PrivacyBrowser --capture-sites` (`SiteCapture.swift`, pages in `scripts/live_sites/`) | macOS 26 runner, every push (report only: third-party sites change) |
+| The same pages in Safari and in on-screen profile windows of the same size: probe, window geometry (1 and 2 tabs), request header order, permissions/quota/devices, TLS + HTTP/2 (tls.peet.ws) | `scripts/live_compare.py` + `Lumen --capture-sites` (`SiteCapture.swift`; the local pages' scripts in `Resources/SiteProbes/`, the sites' in `scripts/live_sites/`) | macOS 26 runner, every push (report only: third-party sites change) |
+| What sites see, as the panel takes it: a new profile's snapshot next to the runner's Safari — the sandboxed build's listener and a profile in this app's window; the build's without the App Sandbox, a profile in Safari's window with an HTTP proxy and without one | `Lumen --what-sites-see-check [--safari-window] [--proxy host:port]` (`SelfTest.whatSitesSeeCheck`) | macOS 26 runner, every push (Safari not answering is a warning; a profile's window that is not Safari's, with `--safari-window`, fails) |
+| What Apple Pay's, Payment Request's and Web Push's calls answer, on one HTTPS page of the runner (a throwaway authority trusted for the run), in Safari and in new profiles with a proxy: as they ship, in this app's window and in Safari's; with WebKit's own switches for them on (`ApplePayEnabled`, `PushAPIEnabled`) and the profile's scripts in the page's world, in a world of their own, or none | `scripts/payments_check.py` + `Lumen --payments-check` (`PaymentsCheck.swift`) | macOS 26 runner, every push (a measurement for the parity rule: never fails the build) |
 | Nothing goes around a profile's proxy: QUIC/HTTP/3 (cloudflare-quic.com) and WebRTC (public STUN) behind real HTTP CONNECT and SOCKS5 forwarding proxies, a profile without a proxy as the control; WebRTC through the tunnel's TURN server and SOCKS5 relay (run on a UDP socket of the runner) to a proxy with UDP ASSOCIATE: relay candidates at the proxy's address, a data channel delivered through it, no relay address shown to the page | `scripts/leak_check.py` + `--capture-sites` | macOS 26 runner, every push (fails on a request seen going around a proxy, or the relay's address shown to a page) |
 | App Sandbox container migration | `--selftest-write-vault` / `--selftest-read-vault` | macOS 26 runner, every push |
 | Interactive UI (tab strip drawing, menus, sheets) | manual | — |
@@ -313,6 +547,81 @@ configs read as the default generation).
   under way (`QuitCoordinator`). `applicationShouldTerminateAfterLastWindowClosed` returns
   `false`. Browser windows are not restorable, so AppKit never writes their titles (the
   profile names) to Saved Application State.
+
+## Settings
+
+```
+SettingsView (Settings scene: ⌘, — and ⋯ → Settings…) ── AppSettings (AppModel.settings, @MainActor)
+   │  a key per setting in the app's defaults (PBSettings…, PBProfileProcess): read on its own,
+   │  out of range → the default; a download folder in the App Sandbox → a bookmark, opened for the run
+   │  Startup        startup (.profilesWindow | .reopenProfiles) → AppModel: quit records
+   │                 StartupReopen.toRecord(manager.activity()) in DeviceSettings.reopenAtUnlock
+   │                 (encrypted), the next unlock launches StartupReopen.toLaunch(…) once;
+   │                 restoreTabs → BrowserSession.lastOpenTabs (the last window closed, or every one
+   │                 open at Stop) → ProfileManager.stop → tabs.bin; the next launch →
+   │                 BrowserSession.openFirstWindows(restoring:); not ephemeral, not without history;
+   │                 confirmQuit → QuitCoordinator(confirm:) — asked after terminate: returns
+   │  New profiles   newProfileMatchesConnection → ProfileDraft.matchProxyLocation of ＋;
+   │                 newProfileSearchEngine → ProfileDraft.searchEngine of ＋ →
+   │                 ProfileConfiguration.searchEngine (nil = SearchEngine.standard, DuckDuckGo;
+   │                 one a later build knows reads as nil) → BrowserWindowController.addressURL,
+   │                 WarmUpRobot (WarmUpPlan.pages(searchEngine:)); Safari's own window keeps
+   │                 Safari's engine (SafariChrome's search providers);
+   │                 newProfileRandomWindowSize → WindowSize.randomSafe(fitting: visible screen) →
+   │                 ProfileConfiguration.windowSize → WindowSizing.apply on each BrowserWindowController
+   │                 (and the first window of Safari's chrome): a real frame, never a declared screen
+   │  Behavior       BrowsingPreferences (AutoFill, tab position, closing several tabs, zoom,
+   │  Downloads      download folder, ask each time, Dock letters) → BrowsingPreferences.current here;
+   │                 ProfileCommand.preferences to every profile process (ProfileManager.sendPreferences),
+   │                 and PB_BROWSING (JSON) as it starts → BrowsingPreferences.current there, DockIcon
+   │  Proxies        proxyFailure → ProfileManager.refusesFailingProxy: the launch probe first,
+   │                 onProxyLaunchRefused → ProxyProblem(notStarted: true)
+   │  Updates        UpdatesPane (AppUpdater)
+   └  Diagnostics    Diagnostics.snapshot(model:) → checks (ContentRules compiled, vault, proxies,
+                     tunnel, updates, processes, language) → shortReport (clipboard) and bundle:
+                     StoredZip (BrowserCore: stored, no compression, CRC-32) of report.txt,
+                     state.json (profiles by number, no names, hosts or credentials),
+                     logs/this-run.txt (OSLogStore, this process), logs/system-last-N-minutes.txt
+                     (`log show`, unsandboxed only), safari-chrome.txt (--check-safari-chrome in a
+                     process of its own, unsandboxed only), README.txt → NSSavePanel; nothing sent
+```
+
+## Command palette and Paste as Typed
+
+```
+⌘K (File menu: CommandPaletteButton) ── the Profiles window to the front (openWindow(id:) when closed)
+   │  AppModel.showingPalette → ProfileListView's sheet: CommandPaletteView(commands:)
+   │  commands: ＋; per profile launch or new window and stop, edit, warm up (ProfileRowItem.paletteDetail:
+   │  its exit country and tags, searched with the title); proxies; warm up several; Sync Now; Lock;
+   │  each SettingsSection (AppModel.settingsSection → SettingsView's section); Copy Short Report
+   └  CommandPaletteView.rank → CommandSearch.score (BrowserCore): each word of the query the start
+      of a word, inside a word, or its letters in order; best first, ties in the list's order
+
+⌃⌘V (Edit menu; in a profile's process Safari's Edit menu, SafariChrome.addPasteAsTyped)
+   └  HumanPaste.pasteIntoKeyWindow ── the WKWebView at or above the key window's first responder
+         HumanPaste.type: hasKeyboard (key window, first responder) and hasFocusedField (a content
+         world of the app's own) → HumanTyping.plan (BrowserCore: each character's key on a US or a
+         Russian layout, Shift, pauses, holds) → per key: Shift down (CGEvent flagsChanged) →
+         NSEvent keyDown → hold → keyUp → Shift up, through NSWindow.sendEvent; a character without
+         a key → insertText; a local event monitor stops it on the user's key or click (the typed
+         keys bypass NSApp), and so does losing the keyboard → HumanPaste.explain (a sheet)
+```
+
+## What sites see
+
+```
+⋯ → What Sites See… / ⌘K ── WhatSitesSeeView (sheet) ── WhatSitesSee (one per sheet, @MainActor)
+   take():  the profile started if stopped (AppModel.launch)
+            SiteSnapshotServer: NWListener × 2 on 127.0.0.1:any — HTTP (AutomationHTTP.parse, header
+              lines in order) and TLS (TLSClientHello.parse, then closed); tokens per side, Host checked
+            SiteSnapshotPage.html: fingerprint_probe.js + SiteProbes/{geometry,apis,headers}.js, an
+              https request to the TLS port, the report POSTed back
+            profile side: ProfileManager.openWindow(id, url:) → report → its window closed (this process);
+              a profile's own process: ProfileChannel .openURL → Safari's window, left to the user
+            Safari side:  NSWorkspace.open(url, Safari) → report (90 s) → NSApp.activate
+            SiteSnapshot(report:clientHello:) × 2 → SiteComparison.compare → [SiteSignal]
+   ProfileLibrary.recordVisit skips SiteSnapshotPage.isMeasuringPage
+```
 
 ## Concurrency
 

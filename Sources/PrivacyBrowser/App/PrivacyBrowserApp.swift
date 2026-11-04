@@ -15,12 +15,15 @@ struct PrivacyBrowserApp: App {
                 .background(WindowReader { window in
                     appDelegate.model = model
                     model.profilesWindow = window
-                    Theme.applyChrome(to: window)
+                    Theme.applyAppWindow(to: window)
+                    model.startUpdates()
                 })
         }
         // The sidebar runs to the top of the window, under the traffic lights.
         .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 1180, height: 740)
+        // Room for the list and the inspector side by side (ProfilesScreen), within a 13-inch
+        // MacBook Air's screen.
+        .defaultSize(width: 1400, height: 840)
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {
@@ -28,6 +31,12 @@ struct PrivacyBrowserApp: App {
                     .keyboardShortcut("t")
                 Button(L("menu.reopenClosedTab")) { keyBrowserWindow?.reopenClosedTab() }
                     .keyboardShortcut("t", modifiers: [.command, .shift])
+                Divider()
+                CommandPaletteButton(model: model)
+            }
+            CommandGroup(after: .pasteboard) {
+                Button(L("menu.pasteAsTyped")) { HumanPaste.pasteIntoKeyWindow() }
+                    .keyboardShortcut("v", modifiers: [.command, .control])
             }
             CommandMenu(L("menu.browser")) {
                 Button(L("menu.openLocation")) { keyBrowserWindow?.focusAddressBar() }
@@ -59,6 +68,20 @@ struct PrivacyBrowserApp: App {
                     .keyboardShortcut("y")
             }
         }
+        // ⌘, and the app menu's Settings…; also ⋯ → Settings… in the Profiles window.
+        Settings {
+            SettingsView()
+                .environmentObject(model)
+                .preferredColorScheme(.dark)
+                .modifier(SettingsTitleBar())
+                .background(WindowReader { window in
+                    Theme.applyAppWindow(to: window)
+                    // The design's settings: the sidebar runs to the top, under the traffic lights.
+                    window.styleMask.insert(.fullSizeContentView)
+                    window.titlebarAppearsTransparent = true
+                    window.titleVisibility = .hidden
+                })
+        }
     }
 
     @MainActor
@@ -75,7 +98,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lockForQuit: { [weak self] in await self?.model?.lock(forQuit: true) },
         // Closing the profile windows reveals the Profiles window, whose rows show "Encrypting…".
         willSeal: { [weak self] in self?.model?.activateProfilesWindow() },
-        terminate: { NSApp.terminate(nil) })
+        terminate: { NSApp.terminate(nil) },
+        // An update goes to its installer only at the end of a quit that sealed every profile.
+        hasUpdate: { [weak self] in self?.model?.updater?.isReady ?? false },
+        installUpdate: { [weak self] in await self?.model?.installUpdateAtQuit() },
+        confirm: { [weak self] in
+            let quits = self?.confirmQuit() ?? true
+            // A restart asked for (Settings › Language) and declined here: no reopening later.
+            if !quits { SystemOpen.cancelRelaunch() }
+            return quits
+        })
+
+    /// Settings → Startup → confirm quit: asked when profiles run, before any of them is stopped.
+    private func confirmQuit() -> Bool {
+        guard let model, model.settings.confirmQuit else { return true }
+        let running = model.updateStopsList()
+        guard !running.isEmpty else { return true }
+        let alert = NSAlert()
+        alert.messageText = L("quit.confirm.title")
+        alert.informativeText = L("quit.confirm.message") + "\n" + running.map { "• " + $0 }.joined(separator: "\n")
+        alert.addButton(withTitle: L("quit.confirm.quit"))
+        alert.addButton(withTitle: L("common.cancel"))
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertFirstButtonReturn
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Needed when launched as a bare SwiftPM executable (`swift run`) instead of an .app bundle.
@@ -88,6 +134,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // and web content keeps following the system's setting, as in Safari (see
         // docs/ISOLATION_AND_LIMITATIONS §11).
         NSApp.activate(ignoringOtherApps: true)
+        // `--settings-window-check` (CI): nothing otherwise.
+        SettingsWindowCheck.start()
     }
 
     /// Closing a profile window (or any window) must never quit the app — only ⌘Q or Lock do.
@@ -123,6 +171,46 @@ private struct WindowReader: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         DispatchQueue.main.async {
             if let window = nsView.window { onResolve(window) }
+        }
+    }
+}
+
+/// ⌘K: the command palette, in the Profiles window — brought to the front, or opened again if it
+/// was closed.
+private struct CommandPaletteButton: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button(L("menu.commandPalette")) {
+            if model.profilesWindow == nil { openWindow(id: "profiles") }
+            model.activateProfilesWindow()
+            model.showingPalette = true
+        }
+        .keyboardShortcut("k")
+        .disabled(model.phase != .unlocked)
+    }
+}
+
+/// The Settings window's title bar is the content's: no band of the system's grey above the sidebar
+/// and the page (the owner, 1 and 2 November). SwiftUI's Settings scene keeps its window's title bar
+/// opaque: it set `titlebarAppearsTransparent` back to false after the window reader above made it
+/// true, and the window server drew the bar in a neutral grey — #1E1E1E on macOS 26, #262626 on
+/// macOS 27, 30 points tall (CI run 596, the real window captured). Told by SwiftUI itself that the
+/// window's toolbar has no background, the scene leaves the bar transparent, on both. Hiding the
+/// toolbar instead (`.toolbar(.hidden, for: .windowToolbar)`) left the band on macOS 27.
+///
+/// `SettingsWindowCheck`'s control takes this back, and its check must then fail.
+private struct SettingsTitleBar: ViewModifier {
+    func body(content: Content) -> some View {
+        if SettingsWindowCheck.breaksTheFix {
+            content
+        } else if #available(macOS 15, *) {
+            content
+                .toolbar(removing: .title)
+                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        } else {
+            content
         }
     }
 }

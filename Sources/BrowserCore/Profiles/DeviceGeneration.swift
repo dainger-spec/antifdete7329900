@@ -14,8 +14,10 @@ import Foundation
 ///     frameworks, or bundling and running a separate engine.
 ///   * Only the macOS desktop generation (`matchesEngine == true`) is actually consistent with
 ///     the engine, and even then only when its version equals the host's real Safari version.
-///     iOS/iPadOS generations change the UA string while every measured signal (rendering,
-///     feature set, touch behaviour, TLS) still says "desktop Mac" — detectable, not emulation.
+///     An iOS/iPadOS generation is a *mobile view*: Safari on this Mac under that device's UA, in
+///     a window of its screen's size (the app's), and nothing else — every measured signal
+///     (rendering, feature set, touch, the screen, TLS) says "desktop Mac", as in Safari's own
+///     Develop › User Agent.
 ///   * The macOS generation declares the host's own Safari version at runtime
 ///     (`userAgent(hostSafariVersion:)`); its catalog string below is only the fallback. Mobile
 ///     UA strings are the ones Safari sends on that OS: from iOS 26.1 on, Safari freezes the OS
@@ -77,6 +79,33 @@ public struct DeviceGeneration: Identifiable, Equatable, Sendable {
         return (1...3).contains(parts.count) && parts.allSatisfy { part in
             (1...3).contains(part.count) && part.unicodeScalars.allSatisfy { ("0"..."9").contains($0) }
         }
+    }
+}
+
+/// The Safari versions a macOS profile can name in its User-Agent instead of this Mac's own
+/// (`ProfileConfiguration.safariVersion`). Naming one changes only what the profile calls itself:
+/// the engine is still this Mac's WebKit, and what a page measures of it — its features, its
+/// CSS and JavaScript — is still that Safari's.
+public enum SafariVersions {
+    /// Recent releases, newest first.
+    public static let recent = ["27.0", "26.6", "26.5", "26.4", "26.3", "26.2", "26.1", "26.0", "18.6", "18.5", "18.4"]
+
+    /// How far a named version is from the engine.
+    public enum Distance: Equatable, Sendable {
+        /// The same release (major and minor) as this Mac's Safari.
+        case same
+        /// Another release of the same major version: what changed between them is small.
+        case close
+        /// Another major version: what a page measures says the engine is not that version.
+        case far
+    }
+
+    /// How far `version` is from `host` (this Mac's Safari, e.g. "26.0.1").
+    public static func distance(of version: String, fromHost host: String) -> Distance {
+        func parts(_ text: String) -> [Int] { text.split(separator: ".").compactMap { Int($0) } }
+        let named = parts(version), real = parts(host)
+        guard let namedMajor = named.first, let realMajor = real.first, namedMajor == realMajor else { return .far }
+        return (named.dropFirst().first ?? 0) == (real.dropFirst().first ?? 0) ? .same : .close
     }
 }
 

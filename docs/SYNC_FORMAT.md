@@ -2,13 +2,72 @@
 
 Sync is optional, off by default, and works on demand (**More → Sync…** in the app). This
 document describes the client: wire format, objects and merge rules. The HTTP contract
-for a server is in [SYNC_SERVER_API.md](SYNC_SERVER_API.md).
+for a server is in [SYNC_SERVER_API.md](SYNC_SERVER_API.md). A server and an account page are
+built to the decisions below.
+
+## Accepted decisions for a server (October 2026)
+
+Accepted by the project's owner before any server exists, so that a server and its account page
+are built to them rather than around them. Where the client already does what a decision says,
+that is said; the rest is not built yet.
+
+1. **Sync traffic goes directly, never through a profile's proxy.** Sync is the app's own
+   connection, from the profile manager (today `HTTPSyncTransport` over the app's `URLSession`;
+   no profile's proxy is on that path). Through a profile's proxy it would spend traffic the user
+   pays for — a profile's state is hundreds of kilobytes per change, and residential proxies are
+   sold by the gigabyte — make sync slow and unreliable, and fail wherever a proxy blocks the sync
+   domain, as the owner's proxy blocked ipinfo.io. The protection is not in the route but in the
+   server having nothing to link (decision 3).
+
+2. **One connection per app, not per profile.** The app syncs the objects of every profile in one
+   batched run. The server learns "this account has changes", never "profile N is open now, from
+   here". A connection per profile on a timer — the competitor's: every profile calls its server
+   every five seconds, so the server knows which profile a person has open this second, and from
+   which address — is ruled out on purpose.
+   The lock that keeps one profile from running on two Macs at once is needed (cookies otherwise
+   diverge: *Limitations*), and it is a **lease**, not a live signal: taken during a sync, as one
+   more encrypted object written with compare-and-swap, the device and the expiry inside its
+   ciphertext; released by a later sync, and otherwise ending when it expires. It is never renewed
+   on a timer and never opens a connection of its own — coarser than a live lock, and silent.
+
+3. **The server stores ciphertext only; the key never leaves the user's devices.** As built:
+   every object but `vault-header` is encrypted end to end (*Envelope*), object IDs are opaque
+   HMACs, and the server knows no profile's name, tags, notes or proxy address. A server or an
+   account page does not step back from this for convenience. A list of profiles in the account
+   page, a search across profiles, a preview, a count by kind: each needs the server to understand
+   the content, and with the first of them the promise ends. Anything the account page cannot do
+   without reading content is brought to the owner as a question, never decided in code.
+
+4. **Off by default.** As built: sync stays off until the user sets a target. Sending cookies to
+   someone else's server is a deliberate act, never a default: most users have one Mac and gain
+   nothing from sync, so on by default would be risk for no benefit. Turning it on first shows an
+   honest screen (not built yet):
+   - what leaves the Mac: the profile list, each profile's settings with its proxy and its
+     credentials, passwords, bookmarks, history, and persistent cookies (for the profiles whose
+     **Sync cookies with other devices** switch is on) — all of it encrypted on the Mac;
+   - what the server sees: the account, the vault ID and its header (the KDF's salt and
+     parameters and the wrapped key, nothing secret), how many objects there are, their sizes and
+     revisions, when they change, and the address the Mac connects from — its own, not a
+     profile's proxy;
+   - what it never sees: profile names, sites and URLs, cookies, passwords, proxies, anything
+     inside.
+
+5. **Metadata kept by the server is decided explicitly, with the server.** What it keeps in its
+   logs — addresses, times, sizes — is decided before it runs and written here as "this, for this
+   long; nothing else", never "whatever the stack keeps". Open.
+
+**Why this is written now.** The comparison it is for: the competitor's server knows the person,
+their real address, which profile is open this second, and receives the profile's data (the
+owner's measurement on a live Mac; not repeated in this repository). This project's server will
+know that an account exists, that it has changes, the address they come from and their size —
+and does not and cannot know what is inside. That difference can be said on the website, and a
+buyer can check it the same way the competitor was checked.
 
 ## What is ready for a server vs. local-only
 
 | Layer | Code | Status |
 |---|---|---|
-| Wire format: envelope, opaque object IDs, AAD binding | `SyncEnvelope.swift` | ready, stable (`pbsync-1`) |
+| Wire format: envelope, opaque object IDs, AAD binding | `SyncEnvelope.swift` | ready (`pbsync-2` written since the vault's generation 2; `pbsync-1` still read) |
 | Engine: CAS writes, deferral, tombstones, per-record merges | `SyncEngine.swift` | ready, unit-tested |
 | Backend contract | `SyncTransport` protocol | ready; this is all a backend implements |
 | `HTTPSyncTransport` | `Sync/Transports/HTTPSyncTransport.swift` | **server-ready client**: speaks SYNC_SERVER_API.md, tested against an in-process stub; no server included |
@@ -35,8 +94,9 @@ never needs to parse a blob.
 
 | Object ID | Content | Encrypted |
 |---|---|---|
-| `vault-header` | `VaultHeader` JSON: vault ID, KDF params, salt, wrapped VMK | no, it contains nothing secret, and a new device needs it to derive the key |
+| `vault-header` | `VaultHeader` JSON: vault ID, KDF params, salt, wrapped VMK, `passwordRevision` (how many times the master password was changed) | no, it contains nothing secret, and a new device needs it to derive the key |
 | `HMAC(objectIDKey, "index")` | envelope → profile index | yes |
+| `HMAC(objectIDKey, "labels")` | envelope → the tags' colours (`TagColors`, `labels.bin`): one choice per tag for the whole vault, not part of any profile's settings | yes |
 | `HMAC(objectIDKey, "profile/<uuid>/config")` | envelope → the profile's `config.bin` bytes | yes (twice) |
 | `HMAC(objectIDKey, "profile/<uuid>/passwords")` | envelope → the profile's `passwords.bin` bytes | yes (twice) |
 | `HMAC(objectIDKey, "profile/<uuid>/bookmarks")` | envelope → the profile's `bookmarks.bin` bytes | yes (twice) |
@@ -52,7 +112,7 @@ own through `cookies.bin`, cookie by cookie.
 
 ```json
 {
-  "format": "pbsync-1",
+  "format": "pbsync-2",
   "vaultID": "7C1E…",
   "objectID": "3f9a…(64 hex)",
   "revision": 7,
@@ -60,8 +120,12 @@ own through `cookies.bin`, cookie by cookie.
 }
 ```
 
-- `AAD = "pbsync-1|<vaultID>|<objectID>|<revision>"`. The server can't move a blob to
+- `AAD = "<format>|<vaultID>|<objectID>|<revision>"`. The server can't move a blob to
   another object ID or replay it under a different revision.
+- `pbsync-2` came with the vault's generation 2 (docs/UPDATES.md §4, R3): the versions before it
+  read only `pbsync-1` and look at nothing else on the sync location, so a new envelope is what
+  stops them there. This version reads both and writes `pbsync-2`; when it raises a vault's
+  generation it also raises the header on the sync location.
 - `payload = {"logicalName": "...", "deleted": false, "data": "<base64>"}`. After
   decrypting, the client checks that `HMAC(objectIDKey, logicalName) == objectID`.
 - `envelopeKey = HKDF(VMK, "sync-envelope")` and `objectIDKey = HKDF(VMK, "sync-object-id")`.
@@ -78,30 +142,67 @@ The engine keeps per-object local state in `sync-state.bin`, encrypted: the last
 revision and the SHA-256 of the last synced bytes.
 
 1. Publish `vault-header` if it is absent. If the server's header has a different vault
-   ID, refuse.
+   ID, refuse; if a newer version of the app wrote it (its `format`), stop with
+   `CoreError.newerFormat` — this device needs that version first (docs/UPDATES.md §4).
+   Otherwise publish this device's header when it is the newer: more master-password changes
+   (`passwordRevision`), or as many with the same wrapped key and a higher `format` (R3). One
+   with fewer changes, or as many with another key (changed apart, or before changes were
+   counted), is never published over the server's; the report says which
+   (`SyncReport.passwordHeader`), and the sync goes on.
 2. **Index:** if the remote revision changed, fetch it and merge with the local index:
    the union by profile ID, the higher summary revision wins, and profiles in either
-   side's `deletedProfileIDs` are dropped. Save the result locally, and push it if it
-   differs from the remote copy. If only the local index changed, push it.
+   side's `deletedProfileIDs` are dropped (their folders on this Mac are kept, for the person to
+   bring back as a new profile or remove: R3, docs/DESTRUCTIVE_PATHS.md). Save the result locally, and push it if it
+   differs from the remote copy. If only the local index changed, push it. A local index that
+   was not read (missing or unreadable, `ProfileRepository.IndexState`) is never pushed: the
+   remote one is fetched and merged whatever its revision (docs/ARCHITECTURE.md, `index.bin`
+   missing or unreadable).
 3. **Per-profile files**, for each profile in the merged index:
-   - local change only → push (`revision = remote + 1`, CAS on the remote revision)
+   - local change only → push (`revision = remote + 1`, CAS on the remote revision) — but
+     **config** older than the server's (by `settingsModifiedAt`, settings that differ) is not an
+     edit: a version put back from a backup (R2). The server's stays the settings, this device's is
+     kept as a version (`KeptSettings.Origin.restored`, `report.restoredSettings`) and never pushed
+     over the newer ones; and
+     **bookmarks**, **history** and **cookies** are merged with the remote copy when there is
+     one, as if both had changed: a file this device lost and made anew holds only what was
+     added since, and pushed as it was it took everything else off every other device
    - remote change only → pull and write the file atomically
    - both changed:
      - **bookmarks**, **history** and **cookies** are merged record by record (see below)
        and the result is pushed (`report.merged`);
      - **config**: the newer settings win, by `settingsModifiedAt` (when the user last
-       changed them); the other device's file is kept as `config.bin.conflict` on the device
-       that ran the sync, whichever side won (`report.resolvedConflicts`). When the two differ
+       changed them); the other version is kept on the device that ran the sync, whichever side
+       won (`report.resolvedConflicts`), in a file of its own — `config.bin.conflict`, then `-2`,
+       `-3`… — never written over, with where it is from and when (`KeptSettings`); the person
+       uses or removes it in the profile's editor, and past five the sync asks them to go through
+       them (`report.settingsVersionsToReview`), removing none. When the two differ
        only in what the browser keeps for itself (`lastProxyLocation`, found at a launch),
        the remote file is taken, with no copy and no conflict reported. A version with the
        time beats one without (never edited since it was created, or rewritten by an older
        build); with neither or equal times, the resolver decides, as for passwords;
-     - **passwords** go to the resolver (default `keepRemote`; the local copy is kept as
-       `<file>.conflict`, reported in `report.resolvedConflicts`).
+     - **passwords** are merged login by login (`passwords.bin` format 2, see below) — and so
+       is a password file that changed only here while the server holds one, as for the other
+       mergeable files.
 4. Delete local directories of profiles removed from the index, and report their IDs so
    the app also removes their WebKit stores.
 
 A lost CAS race leaves the object in `report.deferred`; the next sync retries it.
+
+A profile file this device cannot open — damaged, cut short, under another key — is handled before
+any of the above, and never pushed: it once was, over the server's good copy of the settings, which
+was then on no device at all, and with it the way back by Sync Now. When the server holds a copy
+that opens, that copy is taken, and this device's is moved beside it as `<file>.unreadable` (then
+`-2`, …): nothing unreadable is deleted or written over. When the server has none that opens,
+nothing is written on either side. Either way `report.unreadable` names the file, and the app says
+which and what was done. Settings (`config.bin`) missing here are taken back from the server even
+when its copy has not changed since this device last had it: the profile does not start without
+them (docs/DESTRUCTIVE_PATHS.md, R1).
+
+Before a remote copy is pulled, merged, compared or written over — and before this device's copy
+is merged or compared with it — its `format` is checked (the index's, and each profile file's
+inside its envelope). A copy a newer version wrote stops the sync with `CoreError.newerFormat`:
+it is neither merged nor written over, on either side. So does a `sync-state.bin` a newer version
+wrote, before anything is fetched. The rules for each file: docs/UPDATES.md §4.
 
 ### Merge rules
 
@@ -115,6 +216,12 @@ another device's copy. Merges are idempotent (`merge(x, x) == x`) and unit-teste
 | History | normalised URL | `lastVisitedAt` = max, `visitCount` = max (not sum: the same visits exist on both sides), title of the newest visit | `removedURLs[url] = time` drops visits not newer than it; "Clear all" sets a `clearedThrough` watermark |
 | Cookies | name, domain (leading dot for a domain cookie, none for host-only), path — as a cookie store keys them | newer `updatedAt` wins; on the same second a deletion wins, then the larger value, the later expiry, then the flags (Secure, HttpOnly, SameSite), so the result does not depend on which device merges | `deleted[] = (key, deletedAt)`; a cookie set *after* its deletion elsewhere comes back |
 | Settings (`config`) | the whole file | newer `settingsModifiedAt` wins; the other kept as `config.bin.conflict` | — |
+| Tags' colours (`labels`) | the tag's name in lower case | later `chosenAt` wins; at the same moment a colour over none, then the lower colour | a colour taken away is a choice with no colour (`color: nil`), kept: a later one wins over it as over any |
+
+A version of the app from before the tags' colours does not know the `labels` object: it never
+reads it, and never writes it back without what it did not know. On a device, a `labels.bin` that
+does not open is never pushed: the server's copy is taken in and the one here kept beside it as
+`labels.bin.unreadable`.
 
 History tombstones older than the profile's retention window are dropped, because no
 surviving entry can be that old. Cookie tombstones are dropped after 400 days (no browser keeps
@@ -153,7 +260,10 @@ document. Changes are the difference between the store and that baseline:
      without a stop) is recorded as changes of the baseline's time, the earliest they can
      be. With no baseline yet (cookie sync just turned on, or the first launch on this Mac),
      the store's cookies are recorded as changes of the earliest possible time: they fill in
-     what the document lacks, and any synced change wins over them;
+     what the document lacks, and any synced change wins over them. A store that came up with
+     nothing — no website data archive and no plaintext an earlier run left: the data lost — records
+     nothing: it is not every cookie deleted (which took them out of the document and, through
+     sync, off every other device), and step 2 puts the document's cookies back;
   2. the document — with what sync merged in from the other devices — is applied to the
      store: its cookies set where the store has none or another version, its deletions
      deleted; store cookies the document does not know are left alone. A cookie WebKit
@@ -182,16 +292,47 @@ _ = try await SyncEngine(repository: repo, transport: t).sync()
   or a counter kept on a trusted device.
 - `LocalDirectorySyncTransport` CAS is atomic only within one process. File-syncing
   services can still produce conflict copies, which the transport ignores.
-- After a master-password change, call `publishVaultHeader()`. Devices still on the old
-  header keep working with the old password until they fetch the new one. The VMK
-  doesn't change.
+- A master-password change wraps the same VMK anew and counts the change in the header
+  (`passwordRevision`). The app puts the header on the sync location right after the change
+  (`publishVaultHeader()`), and every sync does when this device's is the newer (step 1): a new
+  device sets up with the new password, not the old. The location keeps the header with the most
+  changes; with as many, the first there stays (two changes made apart), and the other device says
+  so. The VMK doesn't change, so devices on an older header go on syncing, and each keeps its own
+  `vault.json`, which opens with the password it had: a copy of `vault.json` from before a change
+  (on such a device, in a backup) opens everything with the old password, the data written after
+  the change included (docs/ARCHITECTURE.md, Changing the master password).
 - Run sync only while no profile is running, because incoming settings replace files on
   disk, not live sessions. The app enforces this: a sync first waits for profiles still
   starting or being encrypted (they read and write their synced cookies), and a launch asked
   for during a sync starts after it.
-- Passwords are not merged per entry yet: concurrent edits on two devices resolve to the
-  remote file, and the local one is kept as `passwords.bin.conflict`. Adding tombstones
-  to `PasswordVault` would allow the same merge as bookmarks.
+- Saved passwords merge login by login since `passwords.bin` format 2 (vault generation 2):
+  each login carries its version and every version it was made from, and the file keeps its
+  deletions. A login changed on one device after the other's version wins; one changed on two
+  devices between syncs keeps both changes — the later in place, the other as a separate version
+  of the same login (`conflictOf`), under an id made from its version (the same on every device,
+  once), shown in the password manager to be chosen or deleted and never offered to a page. A
+  deletion takes only the versions it saw: a change made elsewhere at the same time survives
+  it. A fill is not a change (only `lastUsedAt`, the later of the two). Logins saved before
+  versions get one derived from what they hold, so two devices holding the same login agree. Until
+  then a concurrent edit kept the remote file and moved the local one to `passwords.bin.conflict`,
+  which the next conflict replaced (`PasswordMergeTests`).
+  - Which version stays the login is decided by the devices' clocks (`updatedAt`, ties by
+    version): a hint for which to show first, never a reason to drop the other — clocks of two
+    Macs need not agree. Each version says which Mac made it (`device`, the Mac's name) and when
+    (by that Mac's clock); the password manager shows both, and numbers the versions kept beside
+    one login. A kept version holds only what it is (its id comes from its version; no history,
+    no last use), so two devices write it alike whatever order the copies met in, and no kept
+    version is ever written over by another.
+  - The same website and user name saved apart on two devices (two ids, one account) is folded
+    into one login after a merge: the one changed last (a hint, ties by id) stays the login; the
+    other is kept beside it as a version when its password or note differs, and its id is
+    tombstoned with the versions it had, so a device still holding it does not bring it back (a
+    change it made there since comes back, and is folded again).
+  - A `passwords.bin.conflict` left by an earlier sync is taken in when the vault opens: each
+    version in it that the file neither has, descends from, nor deleted becomes a version kept
+    beside its login (one whose login is not there is kept beside its own id; choosing it makes
+    it a login). The copy goes only once the file, read back, holds all of it; one that cannot be
+    read stays as it is.
 - The warm-up plan (`warmup.bin`) is not synced; the cookies and history its visits leave are,
   with the profile's.
 - `cookies-import.bin` (cookies imported into a stopped profile, until its next launch) is not
@@ -199,7 +340,7 @@ _ = try await SyncEngine(repository: repo, transport: t).sync()
   and from there the cookies are in `cookies.bin` and sync with the rest.
 - Cookies reach another device at its next **launch** of the profile, after a sync. A profile
   running on two Macs at once diverges until each stops; then the newer change of each cookie
-  wins. A change counts from the stop that recorded it (or a launch, for imports), not from
+  wins. The accepted remedy is a lease taken during a sync (decision 2), not built yet. A change counts from the stop that recorded it (or a launch, for imports), not from
   the moment the page set it: of two devices that changed the same cookie in overlapping
   runs, the one that stopped later wins.
 - Only cookies sync. A site that keeps its sign-in in localStorage or IndexedDB (rather than
@@ -212,13 +353,16 @@ _ = try await SyncEngine(repository: repo, transport: t).sync()
   change made in the editor, by "Never for This Website" and by removing a site from that list
   (not by what the browser stores itself, such as the proxy location). Saving the editor with
   nothing changed is no change. An older build drops the field (and `syncCookies`, which then
-  reads as on) when it rewrites a configuration, so its edit loses to one made by this build;
+  reads as on, `searchEngine`, which then reads as DuckDuckGo, the profile's `tags`, `notes`
+  and `avatar`, its `windowSize`, the `safariVersion` it names, `localRequests`,
+  `languageOverride` and `localeSource`) when it rewrites a
+  configuration, so its edit loses to one made by this build;
   two versions without the time, and edits within the same second, fall back to the resolver
   (`keepRemote`, local copy as `config.bin.conflict`).
 - An older build skips the `cookies` object entirely: it neither uploads nor applies cookies,
   and leaves the object untouched for newer devices.
-- The conflict copy (`config.bin.conflict`, `passwords.bin.conflict`) is encrypted like the
-  file and stays on that Mac; a later conflict replaces it. The app reports conflicts in the
+- The conflict copy (`config.bin.conflict`; `passwords.bin.conflict` from before format 2) is
+  encrypted like the file and stays on that Mac; a later conflict replaces it. The app reports conflicts in the
   sync status but does not offer to restore a copy yet.
 - `PasswordEntry.lastUsedAt` (when AutoFill last filled the login) and the configuration's
   `passwordAutoFill` / `passwordNeverSaveSites` are optional fields: an older build reads the

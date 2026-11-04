@@ -1,100 +1,231 @@
+import AppKit
 import BrowserCore
 import SwiftUI
+import UniformTypeIdentifiers
 
-/// The profile editor's body: a header with the profile's glyph and where it exits, five tabs,
-/// and a footer with Cancel and Save. Pure presentation over a `ProfileDraft` binding, so it can
-/// be rendered with sample data (`--render-ui-snapshots`).
+/// The profile editor's body: a header with the profile's glyph and where it exits, one screen of
+/// every setting in parts — an index of them on the left jumps to one — and a footer with Cancel
+/// and Save. Pure presentation over a `ProfileDraft` binding, so it can be rendered with sample
+/// data (`--render-ui-snapshots`).
 struct ProfileEditorForm: View {
-    enum Tab: String, CaseIterable, Identifiable {
-        case general, identity, network, privacy, data
+    /// The editor's parts, in the order the screen shows them.
+    enum Topic: String, CaseIterable, Identifiable {
+        case profile, connection, identity, window, location, privacy, data
         var id: String { rawValue }
 
         var titleKey: String {
             switch self {
-            case .general: return "editor.section.general"
-            case .identity: return "editor.tab.identity"
-            case .network: return "editor.section.network"
-            case .privacy: return "editor.section.privacy"
-            case .data: return "editor.tab.data"
+            case .profile: return "editor.topic.profile"
+            case .connection: return "editor.topic.connection"
+            case .identity: return "editor.topic.identity"
+            case .window: return "editor.topic.window"
+            case .location: return "editor.topic.location"
+            case .privacy: return "editor.topic.privacy"
+            case .data: return "editor.topic.data"
             }
+        }
+
+        var symbol: String {
+            switch self {
+            case .profile: return "person.crop.square"
+            case .connection: return "network"
+            case .identity: return "safari"
+            case .window: return "macwindow"
+            case .location: return "location"
+            case .privacy: return "hand.raised"
+            case .data: return "externaldrive"
+            }
+        }
+
+        /// The widest single word of the labels, in the index's font (medium, as the selected label
+        /// is): what a line of the index must hold.
+        static var widestWord: CGFloat {
+            let font = NSFont.systemFont(ofSize: 13, weight: .medium)
+            return allCases
+                .flatMap { L($0.titleKey).split(whereSeparator: \.isWhitespace) }
+                .map { ceil((String($0) as NSString).size(withAttributes: [.font: font]).width) }
+                .max() ?? 0
         }
     }
 
     @Binding var draft: ProfileDraft
-    @Binding var tab: Tab
+    /// The part the index marks, and the one the screen opens on.
+    @Binding var topic: Topic
     var isNew: Bool
     /// Keeps the glyph's colour the same as in the Profiles list.
     var avatarID: UUID
     var error: String?
-    /// The network extension can carry WebRTC through a SOCKS5 proxy (TunnelManager).
-    var tunnelCarriesWebRTC: Bool
+    /// The network guard is ready: WebRTC can go through a SOCKS5 proxy (`NetworkGuard`).
+    var guardReady: Bool
     var onCancel: () -> Void = {}
     var onSave: () -> Void = {}
-    var onTunnelSettings: () -> Void = {}
+    var onGuardSettings: () -> Void = {}
+    /// The proxy list, for "From the list"; proxies whose type no check has found yet cannot be
+    /// chosen (they are given to no profile).
+    var savedProxies: [ProxyListEntry] = []
+    /// A check run from the editor (Check, or Save finding a type) is under way.
+    var checkingProxy = false
+    var onCheckProxy: () -> Void = {}
+    /// The tags of the other profiles, offered under the tag field.
+    var knownTags: [String] = []
+    /// This Mac's screen less its menu bar and Dock: a window size larger than it is said to be.
+    var visibleScreen: CGSize?
+    var onChooseCookieFile: () -> Void = {}
+    var onDropCookieFile: (URL) -> Void = { _ in }
+    /// Saved, and its cookies being imported: Save waits.
+    var isSaving = false
+    /// The profile's settings could not be read: Save would put the form's defaults in their place.
+    var saveRefused = false
+    /// The versions of the profile's settings kept beside them (R4, R2): shown at the top of its
+    /// first part, each to use or to remove — none goes but by the person's hand.
+    var keptVersions: [KeptSettings] = []
+    var onUseVersion: (String) -> Void = { _ in }
+    var onRemoveVersion: (String) -> Void = { _ in }
+    /// What sites see of the profile as it is saved (an existing profile; nil for a new one).
+    var onWhatSitesSee: (() -> Void)?
 
-    static let size = CGSize(width: 600, height: 660)
+    /// The index is at least as wide as its longest word, so that a label wraps between its words
+    /// and never inside one ("Конфиденциаль|ность"); the editor is wider by as much, so that the
+    /// form keeps its width.
+    static let indexWidth: CGFloat = max(172, Topic.widestWord + 2 + indexChrome)
+    static let size = CGSize(width: 760 + indexWidth - 172, height: 660)
+    /// Around a label in the index: the index's margins and the row's, the symbol, and the row's gaps
+    /// on either side of the label.
+    private static let indexChrome: CGFloat = 2 * 10 + 2 * 8 + 16 + 2 * 8
 
     var body: some View {
         VStack(spacing: 0) {
             header
-            Picker(L("editor.tabs"), selection: $tab) {
-                ForEach(Tab.allCases) { Text(L($0.titleKey)).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 24)
-            .padding(.bottom, 14)
             Rectangle().fill(Theme.divider).frame(height: 1)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    switch tab {
-                    case .general: general
-                    case .identity: identity
-                    case .network: network
-                    case .privacy: privacy
-                    case .data: data
+            ScrollViewReader { scroller in
+                HStack(spacing: 0) {
+                    index(scroller)
+                    Rectangle().fill(Theme.divider).frame(width: 1)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 30) {
+                            ForEach(Topic.allCases) { part in
+                                section(part).id(part)
+                            }
+                        }
+                        .padding(.horizontal, 24)
+                        .padding(.top, 18)
+                        .padding(.bottom, 28)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .onAppear {
+                        guard topic != .profile else { return }
+                        DispatchQueue.main.async { scroller.scrollTo(topic, anchor: .top) }
                     }
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 16)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .id(tab)
-                .transition(.opacity)
             }
-            .animation(Theme.appearAnimation, value: tab)
             footer
         }
-        .frame(width: Self.size.width, height: Self.size.height)
+        .sheetFrame(width: Self.size.width, height: Self.size.height)
         .background(Theme.raised)
         .tint(Theme.accentFill)
     }
 
+    // MARK: The index and the parts
+
+    private func index(_ scroller: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Topic.allCases) { part in
+                let selected = topic == part
+                Button {
+                    topic = part
+                    withAnimation(Theme.appearAnimation) { scroller.scrollTo(part, anchor: .top) }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: part.symbol)
+                            .font(.system(size: 12))
+                            .foregroundStyle(selected ? Theme.textPrimary : Theme.textSecondary)
+                            .frame(width: 16)
+                        // Two lines rather than cut ("Location and L…"), between words: the index
+                        // is as wide as its longest word (`indexWidth`).
+                        Text(L(part.titleKey))
+                            .font(.system(size: 13, weight: selected ? .medium : .regular))
+                            .foregroundStyle(selected ? Theme.textPrimary : Theme.textSecondary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .frame(minHeight: 30)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(selected ? Theme.rowSelected : .clear))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 14)
+        .frame(width: Self.indexWidth)
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private func section(_ part: Topic) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(L(part.titleKey))
+                .lumenCaps()
+                .accessibilityAddTraits(.isHeader)
+            sectionContent(part)
+        }
+    }
+
+    @ViewBuilder
+    private func sectionContent(_ part: Topic) -> some View {
+        switch part {
+        case .profile: profile
+        case .connection: connection
+        case .identity: identity
+        case .window: windowPart
+        case .location: location
+        case .privacy: privacy
+        case .data: data
+        }
+    }
+
     // MARK: Header and footer
 
+    /// The design's header: the profile's letters, what this is ("Edit profile", "New profile") in
+    /// capitals, its name, where it exits and how it appears; What sites see at the right.
     private var header: some View {
-        HStack(spacing: 12) {
-            ProfileAvatar(name: draft.name.isEmpty ? "?" : draft.name, id: avatarID, size: 36)
+        HStack(alignment: .center, spacing: 14) {
+            ProfileAvatar(name: draft.name.isEmpty ? "?" : draft.name, id: avatarID, size: 40, style: draft.avatarStyle)
             VStack(alignment: .leading, spacing: 3) {
-                Text(isNew ? L("editor.title.new") : (draft.name.isEmpty ? L("editor.title.edit") : draft.name))
-                    .font(.lumenSheetTitle)
+                Text(isNew ? L("editor.title.new") : L("editor.title.edit"))
+                    .lumenCaps()
+                Text(draft.name.isEmpty ? (isNew ? L("editor.title.new") : L("editor.title.edit")) : draft.name)
+                    .lumenHeadingTitle()
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                 subtitle
             }
             Spacer(minLength: 0)
+            if let onWhatSitesSee {
+                Button(action: onWhatSitesSee) {
+                    Label(L("profiles.row.whatSitesSee"), systemImage: "eye")
+                }
+                .buttonStyle(.lumenGhost)
+                .help(L("editor.whatSitesSee.help"))
+            }
         }
         .padding(.horizontal, 24)
         .padding(.top, 22)
-        .padding(.bottom, 16)
+        .padding(.bottom, 18)
     }
 
     @ViewBuilder
     private var subtitle: some View {
         HStack(spacing: 6) {
-            if draft.proxyEnabled, let location = draft.knownProxyLocation, let code = location.countryCode {
+            if draft.hasProxy, let location = draft.knownProxyLocation, let code = location.countryCode {
                 CountryFlag(code: code, size: 12)
                 Text(verbatim: "\(CountryNames.name(for: code)) · \(location.timeZoneIdentifier)")
-            } else if draft.proxyEnabled {
+            } else if draft.hasProxy {
                 Image(systemName: "network").font(.system(size: 11))
                 Text(L("editor.subtitle.proxy"))
             } else if isNew {
@@ -103,6 +234,10 @@ struct ProfileEditorForm: View {
                 Image(systemName: "arrow.right").font(.system(size: 10, weight: .medium))
                 Text(L("editor.subtitle.direct"))
             }
+            // How sites see it: "Mac · Safari 26".
+            Text(verbatim: "·").foregroundStyle(Theme.textTertiary)
+            Text(ProfileRowItem.appearsAs(DeviceGenerations.resolved(id: draft.deviceGenerationID),
+                                          safariVersion: draft.safariVersion, hostSafariVersion: HostSafari.version))
         }
         .font(.lumenSecondary)
         .foregroundStyle(Theme.textSecondary)
@@ -120,6 +255,13 @@ struct ProfileEditorForm: View {
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
+                } else if checkingProxy {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text(L("editor.footer.checking"))
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.textSecondary)
+                    }
                 } else {
                     Text(L("editor.footer.note"))
                         .font(.lumenSecondary)
@@ -127,45 +269,134 @@ struct ProfileEditorForm: View {
                 }
                 Spacer(minLength: 12)
                 Button(L("common.cancel"), action: onCancel)
-                    .buttonStyle(.lumenSecondary)
+                    .buttonStyle(.lumenGhost)
                     .keyboardShortcut(.cancelAction)
                 Button(L("common.save"), action: onSave)
                     .buttonStyle(.lumenPrimary)
                     .keyboardShortcut(.defaultAction)
+                    .disabled(checkingProxy || isSaving || saveRefused)
             }
             .padding(.horizontal, 24)
             .frame(height: 60)
         }
     }
 
-    // MARK: Tabs
+    // MARK: Profile
 
-    private var general: some View {
+    private var profile: some View {
         VStack(alignment: .leading, spacing: 14) {
+            if !keptVersions.isEmpty {
+                keptVersionsPart
+                EditorDivider()
+            }
             EditorField(L("editor.name")) {
                 TextField(L("editor.name"), text: $draft.name, prompt: Text(verbatim: "")).lumenField()
             }
+            EditorField(L("editor.avatar")) {
+                AvatarChoice(draft: $draft, avatarID: avatarID)
+            }
+            EditorField(L("editor.tags")) {
+                TagEditor(tags: $draft.tags, suggestions: knownTags)
+            }
+            EditorField(L("editor.notes")) {
+                TextField(L("editor.notes"), text: $draft.notes, prompt: Text(verbatim: ""), axis: .vertical)
+                    .lineLimit(3...8)
+                    .lumenField(L("editor.notes.placeholder"), isEmpty: draft.notes.isEmpty, height: nil)
+            }
+            EditorNote(L("editor.labels.note"))
+            EditorDivider()
             EditorField(L("editor.startURL")) {
                 TextField(L("editor.startURL"), text: $draft.startURL, prompt: Text(verbatim: ""))
                     .lumenField("https://example.com", isEmpty: draft.startURL.isEmpty)
             }
+            EditorRow(L("editor.search")) {
+                Picker(L("editor.search"), selection: $draft.searchEngine) {
+                    ForEach(SearchEngine.allCases, id: \.self) { Text(verbatim: $0.name).tag($0) }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+            EditorNote(L("editor.search.note"))
             EditorDivider()
             EditorToggle(L("editor.ephemeral.title"), detail: L("editor.ephemeral.detail"), isOn: $draft.ephemeral)
         }
     }
+
+    /// Each kept version: where it is from, when its settings were changed and kept, its proxy,
+    /// and what can be done with it. One that does not open is shown as such, with nothing to do.
+    private var keptVersionsPart: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            EditorGroupTitle(L("editor.versions.title"))
+            if keptVersions.count > KeptSettings.reviewAbove {
+                EditorNote(String(format: L("editor.versions.review"), keptVersions.count), tone: .warning)
+            } else {
+                EditorNote(L("editor.versions.note"))
+            }
+            ForEach(keptVersions, id: \.file) { version in
+                HStack(alignment: .center, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(Self.versionOrigin(version))
+                            .font(.lumenBody)
+                            .foregroundStyle(Theme.textPrimary)
+                        Text(Self.versionDetail(version))
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 8)
+                    if version.configuration != nil {
+                        Button(L("editor.versions.use")) { onUseVersion(version.file) }
+                            .buttonStyle(.lumenSecondary)
+                        Button(L("editor.versions.remove")) { onRemoveVersion(version.file) }
+                            .buttonStyle(.lumenSecondary)
+                    }
+                }
+            }
+        }
+    }
+
+    static func versionOrigin(_ version: KeptSettings) -> String {
+        switch version.origin {
+        case .thisMac: return version.device.map { String(format: L("editor.versions.thisMacNamed"), $0) } ?? L("editor.versions.thisMac")
+        case .otherDevice: return L("editor.versions.otherDevice")
+        case .restored: return L("editor.versions.restored")
+        case .replaced: return L("editor.versions.replaced")
+        case .unknown: return L("editor.versions.unknown")
+        }
+    }
+
+    /// "Changed Oct 31, 14:02 · kept Nov 1, 09:10 · through proxy.example:1080".
+    static func versionDetail(_ version: KeptSettings) -> String {
+        guard let configuration = version.configuration else { return L("editor.versions.unreadable") }
+        let changed = version.editedAt.map { $0.shown(date: .abbreviated, time: .shortened) } ?? L("editor.versions.neverChanged")
+        let exit = configuration.proxy.map { String(format: L("editor.versions.proxy"), "\($0.host):\($0.port)") }
+            ?? L("editor.versions.direct")
+        return String(format: L("editor.versions.detail"), changed, version.keptAt.shown(date: .abbreviated, time: .shortened), exit)
+    }
+
+    // MARK: Identity
 
     private var identity: some View {
         let generation = DeviceGenerations.resolved(id: draft.deviceGenerationID)
         return VStack(alignment: .leading, spacing: 14) {
             EditorRow(L("editor.generation")) {
                 Picker(L("editor.generation"), selection: $draft.deviceGenerationID) {
-                    ForEach(DeviceGenerations.all) { Text(L($0.nameKey)).tag($0.id) }
+                    // The Mac's generation is this Mac's Safari, by its version (its catalog name
+                    // said "macOS 26" on a Mac with Safari 27).
+                    ForEach(DeviceGenerations.all) { generation in
+                        Text(generation.matchesEngine ? String(format: L("gen.macos.host"), HostSafari.version) : L(generation.nameKey))
+                            .tag(generation.id)
+                    }
                 }
                 .labelsHidden()
                 .fixedSize()
             }
             if !generation.matchesEngine {
-                EditorNote(L("editor.generation.inconsistent"), tone: .warning)
+                EditorNote(generation.platform == .iPadOS ? L("editor.generation.ipad") : L("editor.generation.inconsistent"),
+                           tone: .warning)
+            }
+            if generation.matchesEngine && !draft.customUserAgent {
+                safariVersionChoice
             }
             EditorDivider()
             EditorToggle(L("editor.ua.useCustom"), isOn: $draft.customUserAgent)
@@ -177,7 +408,7 @@ struct ProfileEditorForm: View {
                 }
             } else {
                 EditorField(L("editor.ua.effective")) {
-                    Text(generation.userAgent(hostSafariVersion: HostSafari.version))
+                    Text(generation.userAgent(hostSafariVersion: draft.safariVersion ?? HostSafari.version))
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(Theme.textSecondary)
                         .textSelection(.enabled)
@@ -191,52 +422,72 @@ struct ProfileEditorForm: View {
         }
     }
 
-    /// With a proxy, WebRTC can only be on through the network extension's relay, and only for SOCKS5.
-    private var webRTCLocked: Bool {
-        draft.proxyEnabled && !(draft.proxyKind == .socks5 && tunnelCarriesWebRTC)
+    /// The Safari version the profile names: Auto (this Mac's), or one of the recent ones, marked
+    /// by how far it is from the engine — which does not change.
+    @ViewBuilder
+    private var safariVersionChoice: some View {
+        let versions = SafariVersions.recent
+            + (draft.safariVersion.map { SafariVersions.recent.contains($0) ? [] : [$0] } ?? [])
+        EditorRow(L("editor.safari.version")) {
+            Picker(L("editor.safari.version"), selection: $draft.safariVersion) {
+                Text(String(format: L("editor.safari.auto"), HostSafari.version)).tag(String?.none)
+                ForEach(versions, id: \.self) { version in
+                    Text(Self.versionName(version)).tag(String?.some(version))
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+        }
+        EditorNote(String(format: L("editor.safari.honest"), HostSafari.version))
+        if let named = draft.safariVersion {
+            switch SafariVersions.distance(of: named, fromHost: HostSafari.version) {
+            case .far: EditorNote(String(format: L("editor.safari.far"), named, HostSafari.version), tone: .warning)
+            case .close: EditorNote(String(format: L("editor.safari.close"), named, HostSafari.version))
+            case .same: EmptyView()
+            }
+        }
     }
 
-    private var network: some View {
+    /// "26.4", or "26.4 — far from the engine, risky".
+    static func versionName(_ version: String) -> String {
+        SafariVersions.distance(of: version, fromHost: HostSafari.version) == .far
+            ? String(format: L("editor.safari.risky"), version) : version
+    }
+
+    /// With a proxy, WebRTC can only be on through the relay, held there by the network guard, and only for
+    /// SOCKS5 (a proxy whose type is not known yet is not taken for one).
+    private var webRTCLocked: Bool {
+        draft.hasProxy && !(draft.chosenProxy?.kind == .socks5 && guardReady)
+    }
+
+    // MARK: Connection
+
+    private var connection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            EditorToggle(L("editor.proxy.use.title"), detail: L("editor.proxy.detail"), isOn: $draft.proxyEnabled)
-            if draft.proxyEnabled {
-                EditorField(L("editor.proxy.type")) {
-                    Picker(L("editor.proxy.type"), selection: $draft.proxyKind) {
-                        Text(verbatim: "SOCKS5").tag(ProxySettings.Kind.socks5)
-                        Text(verbatim: "HTTP CONNECT").tag(ProxySettings.Kind.httpConnect)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(width: 260)
+            EditorField(L("editor.proxy.connection")) {
+                LumenSegmented(selection: $draft.proxyMode,
+                               options: ProfileDraft.ProxyMode.allCases.map { (value: $0, title: L($0.labelKey)) })
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel(L("editor.proxy.connection"))
+            }
+            switch draft.proxyMode {
+            case .direct:
+                EditorNote(L("editor.proxy.none.note"))
+            case .saved:
+                savedProxyChoice
+            case .new:
+                EditorField(L("proxyLine.field")) {
+                    ProxyLineField(line: $draft.proxyLine, checking: checkingProxy, onCheck: onCheckProxy)
                 }
-                HStack(alignment: .top, spacing: 12) {
-                    EditorField(L("editor.proxy.host")) {
-                        TextField(L("editor.proxy.host"), text: $draft.proxyHost, prompt: Text(verbatim: ""))
-                            .lumenField("proxy.example.com", isEmpty: draft.proxyHost.isEmpty)
-                    }
-                    EditorField(L("editor.proxy.port")) {
-                        TextField(L("editor.proxy.port"), text: $draft.proxyPort, prompt: Text(verbatim: ""))
-                            .lumenField("1080", isEmpty: draft.proxyPort.isEmpty)
-                    }
-                    .frame(width: 96)
-                }
-                HStack(alignment: .top, spacing: 12) {
-                    EditorField(L("editor.proxy.username")) {
-                        TextField(L("editor.proxy.username"), text: $draft.proxyUsername, prompt: Text(verbatim: "")).lumenField()
-                    }
-                    EditorField(L("editor.proxy.password")) {
-                        SecureField(L("editor.proxy.password"), text: $draft.proxyPassword, prompt: Text(verbatim: "")).lumenField()
-                    }
-                }
-                if draft.proxyKind == .httpConnect {
-                    EditorToggle(L("editor.proxy.tls"), isOn: $draft.proxyTLS)
-                }
+                EditorNote(L("editor.proxy.new.note"))
+            }
+            if draft.hasProxy {
                 EditorField(L("editor.proxy.bypass")) {
                     TextField(L("editor.proxy.bypass"), text: $draft.proxyExcludedDomains, prompt: Text(verbatim: ""))
                         .lumenField("localhost, example.com", isEmpty: draft.proxyExcludedDomains.isEmpty)
                 }
                 ProxyLocationCard(draft: $draft)
-                if draft.matchProxyLocation && !draft.overrideTimeZone {
+                if draft.localeMode == .connection {
                     EditorNote(L("editor.tz.fromProxy.note"))
                 }
                 EditorToggle(L("editor.proxy.warnIPChange"), detail: L("editor.proxy.warnIPChange.note"),
@@ -254,14 +505,18 @@ struct ProfileEditorForm: View {
                 .fixedSize()
                 .disabled(webRTCLocked)
             }
-            if draft.proxyEnabled {
-                if draft.proxyKind != .socks5 {
+            // Said for a proxy whose type is known; without one WebRTC stays off.
+            if draft.hasProxy, let kind = draft.chosenProxy?.kind {
+                if kind != .socks5 {
                     EditorNote(L("editor.webrtc.httpProxy"))
-                } else if tunnelCarriesWebRTC {
-                    EditorNote(L("editor.webrtc.viaTunnel"))
+                } else if guardReady {
+                    EditorNote(L("editor.webrtc.viaGuard"))
+                } else if !BuildKind.carriesGuard {
+                    // Nothing to turn on in this build: said as it is, with no button to a guard it lacks.
+                    EditorNote(L("editor.webrtc.noGuardInBuild"), tone: .warning)
                 } else {
-                    EditorNote(L("editor.webrtc.tunnelOff"), tone: .warning)
-                    Button(L("editor.webrtc.tunnelSettings"), action: onTunnelSettings)
+                    EditorNote(L("editor.webrtc.guardNotReady"), tone: .warning)
+                    Button(L("editor.webrtc.guardSettings"), action: onGuardSettings)
                         .buttonStyle(.link)
                         .foregroundStyle(Theme.accent)
                 }
@@ -270,14 +525,84 @@ struct ProfileEditorForm: View {
         }
     }
 
-    private var privacy: some View {
+    // MARK: Window
+
+    private var windowPart: some View {
         VStack(alignment: .leading, spacing: 14) {
-            EditorRow(L("editor.geo")) {
-                Picker(L("editor.geo"), selection: $draft.geoMode) {
-                    ForEach(ProfileDraft.GeoMode.allCases) { Text(L($0.labelKey)).tag($0) }
+            EditorRow(L("editor.window.size")) {
+                Picker(L("editor.window.size"), selection: $draft.windowChoice) {
+                    Text(L("editor.window.app")).tag(ProfileDraft.WindowChoice.app)
+                    ForEach(MacScreen.allCases, id: \.self) { screen in
+                        Text(Self.presetName(screen)).tag(ProfileDraft.WindowChoice.mac(screen))
+                    }
+                    Text(L("editor.window.custom")).tag(ProfileDraft.WindowChoice.custom)
                 }
                 .labelsHidden()
                 .fixedSize()
+            }
+            if draft.windowChoice == .custom {
+                HStack(spacing: 8) {
+                    TextField(L("editor.window.width"), text: $draft.windowWidth, prompt: Text(verbatim: ""))
+                        .lumenField("1280", isEmpty: draft.windowWidth.isEmpty)
+                        .frame(width: 96)
+                    Text(verbatim: "×").foregroundStyle(Theme.textSecondary)
+                    TextField(L("editor.window.height"), text: $draft.windowHeight, prompt: Text(verbatim: ""))
+                        .lumenField("800", isEmpty: draft.windowHeight.isEmpty)
+                        .frame(width: 96)
+                    Text(L("editor.window.points"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                    Spacer(minLength: 0)
+                }
+                if draft.windowSizeIsRandom {
+                    EditorNote(L("editor.window.random"))
+                }
+            }
+            if let warning = windowWarning {
+                EditorNote(warning, tone: .warning)
+            }
+            EditorNote(L("editor.window.note"))
+        }
+    }
+
+    /// "14.2″ MacBook Pro — 1512 × 945": a preset by its Mac and the window it gives.
+    static func presetName(_ screen: MacScreen) -> String {
+        let frame = WindowSize.mac(screen: screen).frame
+        return String(format: L("editor.window.preset"), screen.diagonal, screen.family, frame.width, frame.height)
+    }
+
+    /// Said when the size cannot be had: numbers that are not a window, or a window larger than
+    /// this Mac's screen allows — with the size it will really be.
+    private var windowWarning: String? {
+        if draft.windowChoice == .custom && draft.windowSize == nil && !(draft.windowWidth.isEmpty && draft.windowHeight.isEmpty) {
+            return String(format: L("editor.window.error"), WindowSize.minimumWidth, WindowSize.maximumWidth,
+                          WindowSize.minimumHeight, WindowSize.maximumHeight)
+        }
+        guard let size = draft.windowSize, let visible = visibleScreen else { return nil }
+        let frame = size.frame
+        guard CGFloat(frame.width) > visible.width || CGFloat(frame.height) > visible.height else { return nil }
+        let fitted = WindowSizing.fitted(size, in: visible)
+        return String(format: L("editor.window.tooLarge"), Int(visible.width), Int(visible.height),
+                      Int(fitted.width), Int(fitted.height))
+    }
+
+    // MARK: Location and language
+
+    private var location: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            EditorRow(L("editor.geo")) {
+                HStack(spacing: 8) {
+                    if draft.geoMode == .fixed {
+                        Button(L("editor.geo.reset")) { draft.resetGeolocation() }
+                            .buttonStyle(.lumenGhost)
+                            .help(L("editor.geo.reset.help"))
+                    }
+                    Picker(L("editor.geo"), selection: $draft.geoMode) {
+                        ForEach(ProfileDraft.GeoMode.allCases) { Text(L($0.labelKey)).tag($0) }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
             }
             if draft.geoMode == .fixed {
                 HStack(alignment: .top, spacing: 12) {
@@ -288,17 +613,121 @@ struct ProfileEditorForm: View {
                 }
             }
             EditorDivider()
-            EditorToggle(L("editor.tz.override"), isOn: $draft.overrideTimeZone)
-            if draft.overrideTimeZone {
-                EditorRow(L("editor.tz")) {
-                    Picker(L("editor.tz"), selection: $draft.timeZone) {
-                        ForEach(ProfileEditorForm.timeZones, id: \.self) { Text(verbatim: $0).tag($0) }
-                    }
-                    .labelsHidden()
-                    .fixedSize()
+            localeChoice
+            EditorNote(L("editor.location.footer"))
+        }
+    }
+
+    /// Time zone and language: from the connection, chosen, or a place picked at random. The three
+    /// choices are wider than a row has room for beside their title (which was squeezed into a
+    /// column a word wide, "langu-age"): they go under it.
+    @ViewBuilder
+    private var localeChoice: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L("editor.locale"))
+                .font(.lumenLabel)
+                .foregroundStyle(Theme.textPrimary)
+            LumenSegmented(selection: localeMode,
+                           options: [(value: LocaleSource.connection, title: L("editor.locale.connection")),
+                                     (value: LocaleSource.manual, title: L("editor.locale.manual")),
+                                     (value: LocaleSource.random, title: L("editor.locale.random"))])
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(L("editor.locale"))
+        }
+        switch draft.localeMode {
+        case .connection:
+            EditorNote(L(draft.hasProxy ? "editor.locale.connection.proxy" : "editor.locale.connection.direct"))
+        case .manual:
+            EditorRow(L("editor.tz")) {
+                Picker(L("editor.tz"), selection: $draft.timeZone) {
+                    ForEach(ProfileEditorForm.timeZones, id: \.self) { Text(verbatim: $0).tag($0) }
                 }
-            } else if draft.proxyEnabled {
-                EditorNote(L("editor.tz.fromProxyHint"))
+                .labelsHidden()
+                .fixedSize()
+            }
+            EditorRow(L("editor.language")) {
+                Picker(L("editor.language"), selection: $draft.language) {
+                    Text(L("editor.language.thisMac")).tag("")
+                    ForEach(Self.languageChoices(including: draft.language), id: \.self) { tag in
+                        Text(verbatim: Self.languageName(tag)).tag(tag)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+        case .random:
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("editor.locale.randomChosen"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                    Text(verbatim: randomSummary)
+                        .font(.lumenLabel)
+                        .foregroundStyle(Theme.textPrimary)
+                }
+                Spacer(minLength: 12)
+                Button(L("editor.locale.pickAnother")) { draft.pickRandomPlace() }
+                    .buttonStyle(.lumenSecondary)
+            }
+        }
+        if let mismatch = localeMismatch {
+            EditorNote(mismatch, tone: .warning)
+        }
+        EditorNote(L("editor.language.note"))
+    }
+
+    /// Switching to Random picks a place at once.
+    private var localeMode: Binding<LocaleSource> {
+        Binding(get: { draft.localeMode },
+                set: { mode in
+                    if mode == .random { draft.pickRandomPlace() } else { draft.localeMode = mode }
+                })
+    }
+
+    /// "Germany · Europe/Berlin · de-DE".
+    private var randomSummary: String {
+        let country = draft.randomPlace.map { CountryNames.name(for: $0.country) }
+        return ([country, draft.timeZone, draft.language.isEmpty ? nil : draft.language] as [String?])
+            .compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// Said when a time zone of the profile's own is not where its proxy was last seen to come out.
+    private var localeMismatch: String? {
+        guard draft.localeMode != .connection, draft.hasProxy, let location = draft.knownProxyLocation,
+              location.timeZoneIdentifier != draft.timeZone else { return nil }
+        let place = location.countryCode.map(CountryNames.name(for:)) ?? location.timeZoneIdentifier
+        return String(format: L("editor.locale.mismatch"), draft.timeZone, place)
+    }
+
+    /// The languages offered, with the one chosen even when it is not among them.
+    static func languageChoices(including chosen: String) -> [String] {
+        let all = LocalePlaces.languages
+        return chosen.isEmpty || all.contains(chosen) ? all : all + [chosen]
+    }
+
+    /// "Deutsch (Deutschland) — de-DE" in the app's language.
+    static func languageName(_ tag: String) -> String {
+        let name = Locale.current.localizedString(forIdentifier: tag) ?? tag
+        return name == tag ? tag : "\(name) — \(tag)"
+    }
+
+    // MARK: Privacy
+
+    private var privacy: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            EditorRow(L("editor.local")) {
+                LumenSegmented(selection: $draft.localRequests,
+                               options: [(value: LocalRequests.protected, title: L("editor.local.protected")),
+                                         (value: LocalRequests.allowed, title: L("editor.local.allowed"))])
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel(L("editor.local"))
+            }
+            if draft.localRequests == .allowed && !draft.hasProxy {
+                EditorNote(L("editor.local.allowedWarning"), tone: .warning)
+            }
+            EditorNote(L("editor.local.note"))
+            if draft.hasProxy {
+                EditorNote(L("editor.local.proxy"))
             }
             EditorDivider()
             EditorToggle(L("editor.safeBrowsing"), isOn: $draft.safeBrowsing)
@@ -308,8 +737,55 @@ struct ProfileEditorForm: View {
 
     static let timeZones = TimeZone.knownTimeZoneIdentifiers.sorted()
 
+    /// "From the list": the list's proxies to choose one from, Check for the one chosen, and what
+    /// its last check found.
+    @ViewBuilder
+    private var savedProxyChoice: some View {
+        let usable = savedProxies.filter(\.kindKnown)
+        if usable.isEmpty {
+            EditorNote(L(savedProxies.isEmpty ? "editor.proxy.saved.empty" : "editor.proxy.saved.noneKnown"))
+        } else {
+            SavedProxyList(entries: usable, selection: Binding(
+                get: { draft.savedProxy?.id },
+                set: { id in if let entry = usable.first(where: { $0.id == id }) { draft.choose(entry) } }))
+            if let chosen = draft.savedProxy.flatMap({ chosen in usable.first { $0.id == chosen.id } }) {
+                HStack(spacing: 8) {
+                    Text(String(format: L("editor.proxy.saved.chosen"), chosen.displayName))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 8)
+                    Button(action: onCheckProxy) {
+                        Label(L("proxyLine.check"), systemImage: "checkmark.shield")
+                    }
+                    .buttonStyle(.lumenSecondary)
+                    .disabled(checkingProxy)
+                    .help(L("editor.proxy.saved.check.help"))
+                }
+                if checkingProxy {
+                    ProxyLineCheckView(proxy: chosen.proxy, result: nil, checking: true)
+                } else if let check = chosen.lastCheck {
+                    ProxyLineCheckView(proxy: chosen.proxy, result: check)
+                }
+            } else if draft.savedProxy != nil {
+                EditorNote(L("editor.proxy.saved.gone"), tone: .warning)
+            }
+            let hidden = savedProxies.count - usable.count
+            if hidden > 0 {
+                EditorNote(String(format: L("editor.proxy.saved.hidden"), hidden))
+            }
+        }
+    }
+
+    // MARK: Data
+
     private var data: some View {
         VStack(alignment: .leading, spacing: 14) {
+            EditorGroupTitle(L("editor.cookies"))
+            CookiePaste(draft: $draft, onChooseFile: onChooseCookieFile, onDropFile: onDropCookieFile)
+            EditorNote(L(isNew ? "editor.cookies.note.new" : "editor.cookies.note.existing"))
+            EditorDivider()
             EditorGroupTitle(L("editor.section.history"))
             EditorToggle(L("editor.history.record"), isOn: $draft.historyEnabled)
             if draft.historyEnabled {
@@ -335,6 +811,268 @@ struct ProfileEditorForm: View {
     }
 }
 
+// MARK: - The glyph and the tags
+
+/// The glyph's colour — the one the profile's id gives, or one of the palette — and up to two
+/// letters of its own instead of the name's first.
+private struct AvatarChoice: View {
+    @Binding var draft: ProfileDraft
+    let avatarID: UUID
+
+    var body: some View {
+        HStack(spacing: 8) {
+            swatch(nil)
+            ForEach(0..<ProfileAvatarStyle.colorCount, id: \.self) { index in swatch(index) }
+            Spacer(minLength: 16)
+            TextField(L("editor.avatar.letters"), text: letters, prompt: Text(verbatim: ""))
+                .lumenField(L("editor.avatar.letters"), isEmpty: draft.avatarLetters.isEmpty)
+                .frame(width: 150)
+        }
+    }
+
+    /// At most two characters, no spaces, as `ProfileAvatarStyle` keeps them.
+    private var letters: Binding<String> {
+        Binding(get: { draft.avatarLetters },
+                set: { draft.avatarLetters = String($0.filter { !$0.isWhitespace }.prefix(ProfileAvatarStyle.maximumLetters)) })
+    }
+
+    private func swatch(_ index: Int?) -> some View {
+        let colors = index.map { ProfileAvatar.palette[$0] } ?? ProfileAvatar.colors(for: avatarID)
+        let selected = draft.avatarColor == index
+        let label = index.map { String(format: L("editor.avatar.color"), $0 + 1) } ?? L("editor.avatar.automatic")
+        return Button {
+            draft.avatarColor = index
+        } label: {
+            ZStack {
+                Circle().fill(Color(hex: colors.fill))
+                if index == nil {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Color(hex: colors.text))
+                }
+            }
+            .frame(width: 22, height: 22)
+            .overlay(Circle().strokeBorder(selected ? Theme.accent : Theme.hairline, lineWidth: selected ? 2 : 1))
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(label)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// Tags as chips, each with a button that removes it, a field that adds what is typed (Return,
+/// or a comma), and the other profiles' tags offered under it.
+private struct TagEditor: View {
+    @Binding var tags: [String]
+    var suggestions: [String]
+    @State private var text = ""
+    /// The tags' colours (the vault's): each chip with its dot.
+    @Environment(\.tagColors) private var tagColors
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !tags.isEmpty {
+                FlowLayout(spacing: 6, lineSpacing: 6) {
+                    ForEach(tags, id: \.self) { tag in
+                        TagChip(text: tag, color: tagColors.color(of: tag)) { tags.removeAll { $0 == tag } }
+                    }
+                }
+            }
+            TextField(L("editor.tags"), text: $text, prompt: Text(verbatim: ""))
+                .lumenField(L("editor.tags.placeholder"), isEmpty: text.isEmpty)
+                .onSubmit(add)
+                .onChange(of: text) { _, typed in
+                    if typed.contains(",") { add() }
+                }
+                .disabled(tags.count >= ProfileTags.maximumCount)
+            let offered = suggestions.filter { !ProfileTags.contains(tags, $0) }
+            if !offered.isEmpty && tags.count < ProfileTags.maximumCount {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(L("editor.tags.suggestions"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textTertiary)
+                    FlowLayout(spacing: 6, lineSpacing: 6) {
+                        ForEach(offered.prefix(12), id: \.self) { tag in
+                            Button { tags = ProfileTags.normalized(tags + [tag]) } label: {
+                                TagChip(text: tag, color: tagColors.color(of: tag))
+                            }
+                            .buttonStyle(.plain)
+                            .help(String(format: L("editor.tags.addSuggested"), tag))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// What is typed, split at commas, added after the tags there are (each once).
+    private func add() {
+        let added = ProfileTags.parse(text)
+        text = ""
+        guard !added.isEmpty else { return }
+        tags = ProfileTags.normalized(tags + added)
+    }
+}
+
+// MARK: - Cookies
+
+/// Cookies for the profile as the editor saves it: an export pasted as text (JSON or
+/// cookies.txt), a file dropped here, or one chosen — read as Import Cookies reads a file.
+private struct CookiePaste: View {
+    @Binding var draft: ProfileDraft
+    var onChooseFile: () -> Void
+    var onDropFile: (URL) -> Void
+    @State private var targeted = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let name = draft.cookieFileName {
+                HStack(spacing: 8) {
+                    Image(systemName: "doc.text").foregroundStyle(Theme.textSecondary)
+                    Text(name)
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 8)
+                    Button(L("editor.cookies.clear")) { draft.clearCookies() }
+                        .buttonStyle(.lumenGhost)
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).fill(Theme.field))
+            } else {
+                TextField(L("editor.cookies"), text: $draft.cookieText, prompt: Text(verbatim: ""), axis: .vertical)
+                    .font(.system(size: 11, design: .monospaced))
+                    .lineLimit(3...6)
+                    .lumenField(L("editor.cookies.placeholder"), isEmpty: draft.cookieText.isEmpty, height: nil)
+                    .onChange(of: draft.cookieText) { _, _ in draft.readCookieText() }
+            }
+            HStack(spacing: 10) {
+                Button(action: onChooseFile) {
+                    Label(L("cookies.chooseFile"), systemImage: "doc")
+                }
+                .buttonStyle(.lumenSecondary)
+                if let report = draft.cookieReport {
+                    Text(String(format: L("cookies.summary"), report.cookies.count, report.entriesFound))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(report.cookies.isEmpty ? Theme.warning : Theme.textSecondary)
+                    if !report.failures.isEmpty {
+                        Text(String(format: L("cookies.problemsTitle"), report.failures.count))
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.warning)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(4)
+        .background(RoundedRectangle(cornerRadius: Theme.controlRadius + 2, style: .continuous)
+            .strokeBorder(targeted ? Theme.accent : .clear, lineWidth: 2))
+        .onDrop(of: [UTType.fileURL], isTargeted: $targeted) { providers in
+            guard let provider = providers.first else { return false }
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                guard let url else { return }
+                DispatchQueue.main.async { onDropFile(url) }
+            }
+            return true
+        }
+    }
+}
+
+// MARK: - Proxies of the list
+
+/// The list's proxies to choose one from, the ones that answered first (fastest first), each with
+/// what its last check found: its state, where it exits, its type and how slow it is.
+private struct SavedProxyList: View {
+    let entries: [ProxyListEntry]
+    @Binding var selection: UUID?
+    @State private var search = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if entries.count > 6 {
+                LumenSearchField(text: $search, prompt: L("editor.proxy.saved.search"))
+            }
+            ScrollViewReader { scroller in
+                List(selection: $selection) {
+                    ForEach(visible) { entry in
+                        SavedProxyRow(entry: entry)
+                            .tag(entry.id)
+                            .id(entry.id)
+                            .listRowBackground(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(selection == entry.id ? Theme.rowSelected : Color.clear))
+                            .background(SystemListHighlightOff().accessibilityHidden(true))
+                    }
+                }
+                .overlay {
+                    if visible.isEmpty {
+                        Text(L("proxies.noMatches")).font(.lumenBody).foregroundStyle(Theme.textSecondary)
+                    }
+                }
+                .scrollContentBackground(.hidden)
+                .background(Theme.raisedInset)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
+                .frame(height: 196)
+                .onAppear {
+                    if let selection { scroller.scrollTo(selection, anchor: .center) }
+                }
+            }
+        }
+    }
+
+    private var visible: [ProxyListEntry] {
+        let ordered = ProxyCheckText.pickingOrder(entries)
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return ordered }
+        return ordered.filter { entry in
+            [entry.label, entry.address, entry.proxy.username ?? "", entry.lastCheck?.city ?? "",
+             entry.lastCheck?.countryCode.map(CountryNames.name(for:)) ?? ""]
+                .contains { $0.localizedCaseInsensitiveContains(query) }
+        }
+    }
+}
+
+private struct SavedProxyRow: View {
+    let entry: ProxyListEntry
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ProxyStatusIcon(state: entry.state(checking: false))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.displayName)
+                    .font(.lumenLabel)
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if !entry.detailLine.isEmpty {
+                    Text(entry.detailLine)
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            ProxyExitLabel(check: entry.lastCheck)
+                .frame(width: 130, alignment: .leading)
+            Text(entry.kindName)
+                .font(.lumenBody)
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 56, alignment: .leading)
+            Text(ProxyCheckText.latency(entry.lastCheck))
+                .font(.lumenBody)
+                .foregroundStyle(ProxyCheckText.isSlow(entry.lastCheck) ? Theme.warning : Theme.textSecondary)
+                .monospacedDigit()
+                .frame(width: 56, alignment: .trailing)
+        }
+        .padding(.vertical, 3)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 // MARK: - The location card
 
 /// Where the proxy exits, as the last lookup through it found (flag, country, time zone, when),
@@ -343,6 +1081,18 @@ private struct ProxyLocationCard: View {
     @Binding var draft: ProfileDraft
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            card
+            if draft.proxyLocationLookupFailed {
+                Label(L("editor.location.lookupFailed"), systemImage: "exclamationmark.triangle.fill")
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var card: some View {
         HStack(alignment: .center, spacing: 12) {
             if let location = draft.knownProxyLocation, let code = location.countryCode {
                 CountryFlag(code: code, size: 16)
@@ -351,7 +1101,7 @@ private struct ProxyLocationCard: View {
                         .font(.lumenLabel)
                         .foregroundStyle(Theme.textPrimary)
                     Text(verbatim: location.timeZoneIdentifier + " · "
-                         + String(format: L("editor.location.checked"), location.resolvedAt.formatted(.relative(presentation: .named))))
+                         + String(format: L("editor.location.checked"), location.resolvedAt.shownRelative))
                         .font(.lumenSecondary)
                         .foregroundStyle(Theme.textSecondary)
                 }
@@ -371,20 +1121,16 @@ private struct ProxyLocationCard: View {
                 }
             }
             Spacer(minLength: 12)
-            if draft.overrideTimeZone {
+            if draft.localeMode == .connection {
+                Text(L("editor.location.followsProxy"))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+                    .lineLimit(1)
+            } else {
                 Text(String(format: L("editor.location.fixedZone"), draft.timeZone))
                     .font(.lumenSecondary)
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
-            } else {
-                Toggle(isOn: $draft.matchProxyLocation) {
-                    Text(L("editor.location.followsProxy"))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Theme.accent)
-                }
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .fixedSize()
             }
         }
         .padding(12)
@@ -397,7 +1143,7 @@ private struct ProxyLocationCard: View {
 // MARK: - Rows
 
 /// A labelled field: the label (12 / medium, secondary) above its control.
-private struct EditorField<Content: View>: View {
+struct EditorField<Content: View>: View {
     let label: String
     let content: Content
 
@@ -447,7 +1193,7 @@ private struct EditorToggle: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .toggleStyle(.switch)
+        .toggleStyle(.lumenSwitch)
         .controlSize(.small)
     }
 }

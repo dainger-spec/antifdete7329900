@@ -99,62 +99,6 @@ final class STUNCodecTests: XCTestCase {
     }
 }
 
-final class IPPacketTests: XCTestCase {
-    // Built with an independent implementation (Python struct/socket, RFC 768/791/8200 checksums).
-    static let ipv4 = hexBytes("45000026000040004011b2eec612000ac0a801140d96d43100126b5368656c6c6f207475726e")
-    static let ipv6 = hexBytes("60000000000b1140fd6b3a1c94e20001000000000000000afd6b3a1c94e2000100000000000000010d96c350000bc2aa6f6464")
-
-    func testBuildsTheSameBytesAsAnIndependentImplementation() {
-        let v4 = UDPDatagram(source: SocketAddress(ip: IPAddr("198.18.0.10")!, port: 3478),
-                             destination: SocketAddress(ip: IPAddr("192.168.1.20")!, port: 54321), payload: Array("hello turn".utf8))
-        XCTAssertEqual(IPPacket.buildUDP(v4).map(hexString), hexString(Self.ipv4))
-        let v6 = UDPDatagram(source: SocketAddress(ip: IPAddr("fd6b:3a1c:94e2:1::a")!, port: 3478),
-                             destination: SocketAddress(ip: IPAddr("fd6b:3a1c:94e2:1::1")!, port: 50000), payload: Array("odd".utf8))
-        XCTAssertEqual(IPPacket.buildUDP(v6).map(hexString), hexString(Self.ipv6))
-        XCTAssertEqual(IPPacket.parseUDP(Self.ipv4), v4)
-        XCTAssertEqual(IPPacket.parseUDP(Self.ipv6), v6)
-    }
-
-    func testDropsWhatItDoesNotHandle() {
-        var fragment = Self.ipv4
-        fragment[6] = 0x20 // more fragments
-        XCTAssertNil(IPPacket.parseUDP(fragment))
-        var badChecksum = Self.ipv4
-        badChecksum[badChecksum.count - 1] ^= 0xFF
-        XCTAssertNil(IPPacket.parseUDP(badChecksum))
-        var tcp = Self.ipv4
-        tcp[9] = 6
-        XCTAssertNil(IPPacket.parseUDP(tcp))
-        XCTAssertNil(IPPacket.parseUDP(Array(Self.ipv6.prefix(30))))
-        var zeroChecksum6 = Self.ipv6
-        zeroChecksum6[46] = 0
-        zeroChecksum6[47] = 0
-        XCTAssertNil(IPPacket.parseUDP(zeroChecksum6), "IPv6 UDP must carry a checksum")
-        XCTAssertNil(IPPacket.buildUDP(UDPDatagram(source: SocketAddress(ip: IPAddr("1.2.3.4")!, port: 1),
-                                                   destination: SocketAddress(ip: IPAddr("::1")!, port: 1), payload: [])))
-    }
-
-    func testIPv6ExtensionHeadersAreSkipped() {
-        // The same datagram behind an 8-byte hop-by-hop header (next header 17, length 0, PadN).
-        var packet = Array(Self.ipv6[0..<40])
-        packet[6] = 0 // hop-by-hop
-        packet[5] = 0x13 // payload length 11 + 8
-        packet += [17, 0, 1, 4, 0, 0, 0, 0]
-        packet += Array(Self.ipv6[40...])
-        XCTAssertEqual(IPPacket.parseUDP(packet)?.payload, Array("odd".utf8))
-        packet[46] = 44 // a fragment header instead: dropped
-        packet[40] = 44
-        XCTAssertNil(IPPacket.parseUDP(packet))
-    }
-
-    func testIPAddressText() {
-        XCTAssertEqual(IPAddr("2001:0db8:0000:0000:0000:0000:0000:0001")?.description, "2001:db8::1")
-        XCTAssertEqual(IPAddr("[::1]")?.description, "::1")
-        XCTAssertNil(IPAddr("example.com"))
-        XCTAssertEqual(SocketAddress(ip: IPAddr("::1")!, port: 3478).description, "[::1]:3478")
-    }
-}
-
 final class SOCKS5Tests: XCTestCase {
     func testHandshakeBytes() throws {
         XCTAssertEqual(SOCKS5.greeting(withCredentials: false), [5, 1, 0])

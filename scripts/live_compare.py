@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Measures the same pages in this Mac's Safari (safaridriver) and in PrivacyBrowser profiles, with
+"""Measures the same pages in this Mac's Safari (safaridriver) and in Lumen profiles, with
 the same outer window size, and prints what differs.
 
     sudo safaridriver --enable                                   # once per machine (CI does it)
-    python3 scripts/live_compare.py --app build/unsandboxed/PrivacyBrowser.app --out build/live
+    python3 scripts/live_compare.py --app build/unsandboxed/Lumen.app --out build/live
 
 Pages: the fingerprint probe and the window geometry (one and two tabs) on a local page; the order
 of the request headers a local server receives (navigation, fetch, XHR); and live fingerprinting
 sites (scripts/live_sites/*.js: TLS/HTTP2 echo, deviceinfo.me, CreepJS, …). The app side runs
-`PrivacyBrowser --capture-sites` (SiteCapture.swift), which needs the unsandboxed build (it reads
+`Lumen --capture-sites` (SiteCapture.swift), which needs the unsandboxed build (it reads
 the spec and writes results outside the container). Live sites change and fail; this is a report,
 not a test: the exit code is 0 unless neither browser could be measured.
 """
@@ -30,6 +30,8 @@ from safari_reference import WebDriver, flat, free_port, text, wait_for_port  # 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 SITES = os.path.join(ROOT, "scripts", "live_sites")
 PROBE = os.path.join(ROOT, "Resources", "fingerprint_probe.js")
+# The local pages' scripts, which the app's "What sites see" runs too (bundled with the app).
+SITE_PROBES = os.path.join(ROOT, "Resources", "SiteProbes")
 
 
 def profiles(zone):
@@ -79,16 +81,16 @@ def read(path):
 def pages(base, browser):
     """The page list; `browser` names the run so the header recorder keeps the two apart."""
     token = f"{browser}-{int(time.time() * 1000)}"
-    geometry = read(os.path.join(SITES, "geometry.js"))
+    geometry = read(os.path.join(SITE_PROBES, "geometry.js"))
     result = [
         {"name": "probe", "url": f"{base}/probe.html", "script": read(PROBE)},
         {"name": "geometry", "url": f"{base}/geometry.html", "script": geometry},
         {"name": "geometry-2tabs", "url": f"{base}/geometry.html", "script": geometry, "extraTabs": 1, "settleMs": 800},
-        {"name": "headers", "url": f"{base}/headers.html?token={token}", "script": read(os.path.join(SITES, "headers.js"))},
-        {"name": "apis", "url": f"{base}/apis.html", "script": read(os.path.join(SITES, "apis.js"))},
+        {"name": "headers", "url": f"{base}/headers.html?token={token}", "script": read(os.path.join(SITE_PROBES, "headers.js"))},
+        {"name": "apis", "url": f"{base}/apis.html", "script": read(os.path.join(SITE_PROBES, "apis.js"))},
     ]
     for name in sorted(os.listdir(SITES)):
-        if not name.endswith(".js") or name in ("geometry.js", "headers.js", "apis.js"):
+        if not name.endswith(".js"):
             continue
         source = read(os.path.join(SITES, name))
         # First line: // url: https://… [settle=ms] [timeout=ms]
@@ -103,8 +105,8 @@ def run_app(app, spec, out_dir):
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as handle:
         json.dump(spec, handle)
         spec_path = handle.name
-    binary = os.path.join(app, "Contents", "MacOS", "PrivacyBrowser")
-    print(f"::group::PrivacyBrowser --capture-sites")
+    binary = os.path.join(app, "Contents", "MacOS", "Lumen")
+    print(f"::group::Lumen --capture-sites")
     code = subprocess.call([binary, "--capture-sites", spec_path, out_dir], timeout=1200)
     print("::endgroup::")
     results = {}
@@ -190,7 +192,7 @@ def compare(safari, profile):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--app", required=True, help="the unsandboxed PrivacyBrowser.app")
+    parser.add_argument("--app", required=True, help="the unsandboxed Lumen.app")
     parser.add_argument("--out", required=True)
     # Small enough for the CI runner's screen: AppKit shrinks a window that does not fit, Safari not.
     parser.add_argument("--width", type=int, default=1000)

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The network guard: a content filter delivered as a system extension, inside the app
+	     (Contents/Library/SystemExtensions/$(EXTENSION_ID).systemextension). Filled in by
+	     NE=1 scripts/build-app.sh; see docs/TUNNEL.md. -->
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Lumen network guard</string>
+	<key>CFBundleExecutable</key>
+	<string>NetworkGuardExtension</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(EXTENSION_ID)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>LumenGuard</string>
+	<key>CFBundlePackageType</key>
+	<string>SYSX</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<!-- A new one each build: the app replaces an installed guard whose version is not its own. -->
+	<key>CFBundleVersion</key>
+	<string>$(EXTENSION_VERSION)</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>26.0</string>
+	<key>NSHumanReadableCopyright</key>
+	<string></string>
+	<key>NSSystemExtensionUsageDescription</key>
+	<string>Keeps Lumen profiles whose WebRTC goes through their proxy on that proxy: any other connection of theirs is dropped. It carries no traffic and reads none; other apps' connections are let through untouched.</string>
+	<key>NetworkExtension</key>
+	<dict>
+		<!-- Must start with an app group both the app and the extension are entitled to. -->
+		<key>NEMachServiceName</key>
+		<string>$(APP_GROUP).guard</string>
+		<key>NEProviderClasses</key>
+		<dict>
+			<key>com.apple.networkextension.filter-data</key>
+			<!-- Module-qualified: the Swift module is the executable target, NetworkGuardExtension. -->
+			<string>NetworkGuardExtension.GuardFilterProvider</string>
+		</dict>
+	</dict>
+	<!-- The only client the guard lets in (with this extension's own team): GuardService. -->
+	<key>PBGuardAppIdentifier</key>
+	<string>$(BUNDLE_ID)</string>
+</dict>
+</plist>

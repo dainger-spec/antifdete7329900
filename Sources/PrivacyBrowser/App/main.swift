@@ -1,4 +1,6 @@
 import AppKit
+import BrowserCore
+import SystemConfiguration
 
 // Entry point. `--self-test` runs headless end-to-end checks against the real WebKit, and the
 // `--selftest-*-vault` pair checks App Sandbox container migration (see SelfTest.swift);
@@ -6,22 +8,173 @@ import AppKit
 // Top-level code runs on the main thread; Swift 5 mode does not infer main-actor isolation for it.
 MainActor.assumeIsolated {
     let arguments = CommandLine.arguments
+    // A profile's process: started with the websites' languages, its interface's language fixed
+    // before anything asks a bundle for its own (Localization.pinInterfaceLanguage).
+    if arguments.contains("--profile-session") { Localization.pinInterfaceLanguage() }
+    // The core's errors in the person's language wherever one is shown (Localization.swift).
+    installErrorTranslation()
+    if arguments.contains("--sdk-check") {
+        // What follows the SDK this build was made with — a page's interfaces, the screen's visible
+        // frame — with WebKit's behaviors as the build's or, with --everything, as Safari's
+        // (SDKBehaviors.swift; scripts/sdk_check.sh). It sets them itself, so it comes first.
+        SDKCheck.run(arguments: arguments)
+    }
+    // WebKit's behaviors that follow an app's SDK stay as this build's. Every one on, as WebKit has
+    // them for Safari, only when CI measures it (--sdk-everything): in run 448 a profile with a proxy
+    // had a certificate's address resolved by this Mac with them on (SDKBehaviors.swift).
+    if arguments.contains("--sdk-everything") { SDKBehaviors.matchSafari() }
+    if arguments.contains("--exception-check") {
+        // An exception thrown inside AppKit's run loop, with this build's exception hooks or the
+        // earlier way (ExceptionLog.swift): installs its own, so it comes before the line below.
+        ExceptionLog.runCheck(arguments: arguments)
+        exit(0)
+    }
+    // Every exception of every process in the log, readable, with CoreFoundation's own
+    // preprocessor kept in the chain (ExceptionLog.swift says why that matters).
+    ExceptionLog.install()
+    // Every version of a saved password made in this process says which Mac it was made on: the
+    // password manager names it beside a version kept after a conflict (PasswordEntry.device).
+    PasswordVault.deviceName = SCDynamicStoreCopyComputerName(nil, nil) as String?
     if arguments.contains("--self-test") {
         SelfTest.start()
     } else if arguments.contains("--selftest-write-vault") {
         SelfTest.migrationStep(write: true)
     } else if arguments.contains("--selftest-read-vault") {
         SelfTest.migrationStep(write: false)
-    } else if arguments.contains("--utun-relay") {
-        // The packet tunnel's data path on a utun interface, for CI (root; UTunRelayHarness.swift).
-        UTunRelayHarness.start(arguments: arguments)
+    } else if arguments.contains("--keychain-probe") {
+        // One look at the keychains from this process, outside any profile's sandbox: the entitlements
+        // it holds that give one, whether it reaches securityd, and what the data-protection and the
+        // login keychain let it do under the probe's service (KeychainCheck; the self-test and the
+        // release check run it from each of the bundle's executables).
+        KeychainCheck.runFromCommandLine(arguments: arguments)
+    } else if arguments.contains("--guard-probe") {
+        // The process the network guard's check on this Mac holds: one WebRTC request of WebKit's,
+        // to a documentation address, made on its behalf (GuardProbe.swift; NetworkGuard.prove).
+        GuardProbe.run()
+    } else if arguments.contains("--guard-diagnose") {
+        // The network guard on this Mac, measured and said in words: does its filter get flows, did
+        // the check's probe send its request, whom macOS counted it for (GuardDiagnosis.swift). Run
+        // from Terminal as the app's own executable, which holds the right that reads the filter's
+        // configuration: /Applications/Lumen.app/Contents/MacOS/Lumen --guard-diagnose
+        GuardDiagnosis.run()
     } else if let index = arguments.firstIndex(of: "--render-app-icon") {
         // The app icon's iconset, drawn from the Lumen mark (AppIcon.swift; scripts/build-app.sh).
         let folder = arguments.indices.contains(index + 1) ? arguments[index + 1] : "AppIcon.iconset"
         exit(AppIcon.writeIconset(to: URL(fileURLWithPath: folder)) ? 0 : 1)
+    } else if let index = arguments.firstIndex(of: "--render-dmg-background") {
+        // The disk image window's picture, 1× and 2× (DiskImageBackground.swift; scripts/make_dmg.sh).
+        let folder = arguments.indices.contains(index + 1) ? arguments[index + 1] : "."
+        exit(DiskImageBackground.write(to: URL(fileURLWithPath: folder)) ? 0 : 1)
+    } else if arguments.contains("--profile-session") {
+        // One profile in its own process, started by the manager process (ProfileProcess.swift
+        // says why, ProfileSessionHost.swift what it does). Its language, locale and time zone are
+        // already in argv and the environment; the profile's key arrives on stdin (ProfileGrant).
+        // A window of this profile that is not Safari's says so, and once by itself (SimplifiedModeNotice).
+        SimplifiedModeNotice.presentsAutomatically = true
+        ProfileSessionHost.start(arguments: arguments)
+    } else if arguments.contains("--release-check") {
+        // What scripts/release.sh runs on the app it is about to publish: a profile started the way
+        // the app starts one gets a process of its own whose window is Safari's own chrome, or the
+        // release stops (ReleaseCheck.swift; `--control` must fail).
+        ReleaseCheck.start(arguments: arguments)
+    } else if arguments.contains("--check-safari-chrome") {
+        // Which of the private classes and methods the hosted Safari chrome relies on this macOS
+        // still has (SafariChrome.expectedPieces): run after a macOS update, and in CI. In a
+        // temporary home of its own and held to a closed proxy, as a profile's process is.
+        setvbuf(stdout, nil, _IOLBF, 0)
+        exit(SafariChrome.checkPieces(arguments: arguments))
+    } else if arguments.contains("--safari-inventory") {
+        // What Safari's chrome brings into a profile's process — its menu, LaunchServices' answers,
+        // the classes around AutoFill, history and export, the methods that wait — printed for CI
+        // (SafariChromeInventory.swift). In a temporary home, held to a closed proxy.
+        SafariChromeInventory.start(arguments: arguments)
+    } else if arguments.contains("--paths-check") {
+        // Where Safari's code in a profile's process finds no path: file URLs asked for with none,
+        // app group containers asked for, and its own log about bookmarks, its tab collection and
+        // downloads (SafariPathsCheck; CI). A measurement.
+        SafariPathsCheck.run(arguments: arguments)
+    } else if arguments.contains("--history-check") {
+        // Whether Safari's history can run inside a profile's process: its service's own code, in
+        // this process, with its database in the profile's home (SafariHistoryCheck; CI).
+        SafariHistoryCheck.run(arguments: arguments)
+    } else if arguments.contains("--export-check") {
+        // What Safari's File › Export › Bookmarks… does in a profile's process: where its save panel
+        // opens, what its exporter is given, what it writes where (SafariExportCheck; CI).
+        SafariExportCheck.run(arguments: arguments)
+    } else if arguments.contains("--scale-check") {
+        // The app with many profiles, in numbers: creating, the list, running several at once,
+        // quitting with them running (CI; ScaleCheck; scripts/scale_check.py makes the report).
+        Localization.applyProcessLanguage()
+        ScaleCheck.start(arguments: arguments)
+    } else if arguments.contains("--menu-walk") {
+        // Every item of Safari's menu bar chosen in a profile's own process, and what each did:
+        // windows, panels, exceptions, crashes, services started, files written (CI;
+        // SafariMenuWalkCheck, SafariMenuWalk; scripts/menu_walk.py compares it with the record).
+        Localization.applyProcessLanguage()
+        SafariMenuWalkCheck.start(arguments: arguments)
+    } else if arguments.contains("--default-browser-check") {
+        // Whether Safari's own question about the default browser throws in a profile's process of
+        // this app, and what the system answers about http and https (SafariChrome; CI runs it on
+        // the app as built and on a copy declared a browser).
+        SafariChrome.runDefaultBrowserCheck(arguments: arguments)
+    } else if arguments.contains("--nib-check") {
+        // The nibs Safari's Bookmarks sidebar makes itself, made as it makes them, in a process
+        // like a profile's; the self-test reads what it prints (SafariChrome.runNibCheck).
+        SafariChrome.runNibCheck(arguments: arguments)
+    } else if arguments.contains("--safari-chrome") {
+        // Safari's own window hosted in this process, with one of our web views in its tab
+        // (SafariChrome.swift). Needs a build without the App Sandbox, run from LumenProfile — the
+        // one executable signed with library validation off; it exits with a message when the
+        // frameworks cannot be loaded. A developer's tool:
+        // it runs no profile — no proxy, none of a profile process's locks — so it is refused
+        // unless asked for in so many words (PB_DEVELOPER=1).
+        guard ProcessInfo.processInfo.environment["PB_DEVELOPER"] == "1" else {
+            FileHandle.standardError.write(Data("--safari-chrome is a developer's tool with no proxy and no profile; set PB_DEVELOPER=1 to run it\n".utf8))
+            exit(64)
+        }
+        SafariChrome.startStandalone(arguments: arguments)
+    } else if arguments.contains("--selftest-license-renewal") {
+        // The license's renewals as the app's own model makes them — a vault opened, a profile made —
+        // for scripts/license_renewal_check.py's stand-in server (LicenseRenewalScenario.swift).
+        LicenseRenewalScenario.start()
+    } else if arguments.contains("--selftest-account-switch") {
+        // A profile's data while this Mac signs out of an account, into another and back
+        // (AccountSwitchScenario.swift, for scripts/account_switch_check.py).
+        AccountSwitchScenario.start()
+    } else if arguments.contains("--selftest-updates") {
+        // The update scenarios of docs/UPDATES.md §8, driven by scripts/update_check.py on a CI
+        // runner (UpdateSelfTest.swift): they replace this very app with another build.
+        UpdateSelfTest.start(arguments: arguments)
+    } else if arguments.contains("--key-crash-check") {
+        // A process holding the account's key crashes on purpose; its crash report must hold no form
+        // of the key, the control's must (LicenseSelfTest.crashCheck; scripts/key_crash_check.py).
+        // Under AppKit's run loop, as the self-test runs the account server it plays (under
+        // dispatchMain, macOS 27 stopped the process before its first line: CI run 601).
+        let control = arguments.contains("--control")
+        let application = NSApplication.shared
+        application.setActivationPolicy(.prohibited)
+        Task { @MainActor in await LicenseSelfTest.crashCheck(control: control) }
+        application.run()
+    } else if arguments.contains("--interface-language-check") {
+        // Which language this app's interface takes, and from where, as it starts (CI: plain, with
+        // -AppleLanguages, after an earlier version's write; InterfaceLanguageCheck.swift).
+        InterfaceLanguageCheck.run()
     } else if arguments.contains("--render-ui-snapshots") {
         // The app's screens with sample data, as PNG files for design review (UISnapshots.swift).
         UISnapshots.start(arguments: arguments)
+    } else if arguments.contains("--what-sites-see-check") {
+        // A new profile's "What sites see" snapshot next to this Mac's real Safari, printed (CI;
+        // SelfTest.whatSitesSeeCheck).
+        Localization.applyProcessLanguage()
+        WebContentLanguage.decide(nil)
+        SelfTest.whatSitesSeeCheck(arguments: arguments)
+    } else if arguments.contains("--payments-check") {
+        // One side of scripts/payments_check.py: what Apple Pay's, Payment Request's and Web
+        // Push's calls answer in a new profile (PaymentsCheck.swift). A measurement: what it turns
+        // on, it turns on in one web view of this process.
+        Localization.applyProcessLanguage()
+        WebContentLanguage.decide(nil)
+        PaymentsCheck.start(arguments: arguments)
     } else if arguments.contains("--capture-sites") {
         // The app's own start-up, as far as web content can tell: its UI language is set, and the
         // first profile (no proxy) decides the language websites see.
@@ -29,8 +182,17 @@ MainActor.assumeIsolated {
         WebContentLanguage.decide(nil)
         SiteCapture.start(arguments: arguments)
     } else {
-        // Russian by default (English fallback); must be set before AppKit builds its menus.
+        if let index = arguments.firstIndex(of: "--settings-window-check") {
+            // The Settings window as the person gets it: this app as it runs, Settings opened as ⌘,
+            // opens it, the window server's picture read for a band (SettingsWindowCheck; CI).
+            let folder = arguments.indices.contains(index + 1) ? arguments[index + 1] : "settings-window"
+            SettingsWindowCheck.folder = URL(fileURLWithPath: folder, isDirectory: true)
+            SettingsWindowCheck.control = arguments.contains("--control")
+        }
+        // The interface's language (Localization: the person's choice, else this Mac's, else
+        // English); set before AppKit builds its menus.
         Localization.applyProcessLanguage()
+        SimplifiedModeNotice.presentsAutomatically = true
         PrivacyBrowserApp.main()
     }
 }

@@ -1,0 +1,929 @@
+{
+  "comment": "Test vectors for the codes people copy by hand (docs/CONTRACT.md §18). Written by scripts/ident-vectors.py, an implementation apart from the server's; the server's tests read this file. canonical null: a typo.",
+  "alphabet": "0123456789ABCDEFGHJKMNPQRSTVWXYZ",
+  "kinds": {
+    "key": {
+      "prefix": "LMK",
+      "dataCharacters": 22,
+      "checkCharacters": 2
+    },
+    "purchaseCode": {
+      "prefix": "LPC",
+      "dataCharacters": 18,
+      "checkCharacters": 2
+    },
+    "invoiceNumber": {
+      "prefix": "LMN",
+      "dataCharacters": 18,
+      "checkCharacters": 2
+    }
+  },
+  "cases": [
+    {
+      "kind": "key",
+      "input": "LMK-0R1T-J0P5-P847-BW2G-CQX6-D0CX",
+      "canonical": "LMK-0R1T-J0P5-P847-BW2G-CQX6-D0CX",
+      "why": "canonical"
+    },
+    {
+      "kind": "key",
+      "input": "lmk-0r1t-j0p5-p847-bw2g-cqx6-d0cx",
+      "canonical": "LMK-0R1T-J0P5-P847-BW2G-CQX6-D0CX",
+      "why": "lower case"
+    },
+    {
+      "kind": "key",
+      "input": "LMK0R1TJ0P5P847BW2GCQX6D0CX",
+      "canonical": "LMK-0R1T-J0P5-P847-BW2G-CQX6-D0CX",
+      "why": "no hyphens"
+    },
+    {
+      "kind": "key",
+      "input": "0r1tj0p5p847bw2gcqx6d0cx",
+      "canonical": "LMK-0R1T-J0P5-P847-BW2G-CQX6-D0CX",
+      "why": "no prefix, no hyphens, lower case"
+    },
+    {
+      "kind": "key",
+      "input": "0R1T-J0P5-P847-BW2G-CQX6-D0CX",
+      "canonical": "LMK-0R1T-J0P5-P847-BW2G-CQX6-D0CX",
+      "why": "no prefix, with hyphens"
+    },
+    {
+      "kind": "key",
+      "input": " LMK 0R1T J0P5 P847 BW2G CQX6 D0CX ",
+      "canonical": "LMK-0R1T-J0P5-P847-BW2G-CQX6-D0CX",
+      "why": "spaces instead of hyphens, around too"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-0RIT-J0P5-P847-BW2G-CQX6-D0CX",
+      "canonical": "LMK-0R1T-J0P5-P847-BW2G-CQX6-D0CX",
+      "why": "I read as 1"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-0RlT-J0P5-P847-BW2G-CQX6-D0CX",
+      "canonical": "LMK-0R1T-J0P5-P847-BW2G-CQX6-D0CX",
+      "why": "l read as 1"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-0R1T-JOP5-P847-BW2G-CQX6-D0CX",
+      "canonical": "LMK-0R1T-J0P5-P847-BW2G-CQX6-D0CX",
+      "why": "O read as 0"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-0R1T-JoP5-P847-BW2G-CQX6-D0CX",
+      "canonical": "LMK-0R1T-J0P5-P847-BW2G-CQX6-D0CX",
+      "why": "o read as 0"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-1R1T-J0P5-P847-BW2G-CQX6-D0CX",
+      "canonical": null,
+      "why": "typo: first character changed"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-0R1T-J0P5-P848-BW2G-CQX6-D0CX",
+      "canonical": null,
+      "why": "typo: a middle character changed"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-0R1T-J0P5-P847-BW2G-CQX6-D1CX",
+      "canonical": null,
+      "why": "typo: last data character changed"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-0R1T-J0P5-P847-BW2G-CQX6-D0CY",
+      "canonical": null,
+      "why": "typo: last check character changed"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-R01T-J0P5-P847-BW2G-CQX6-D0CX",
+      "canonical": null,
+      "why": "typo: neighbours 0 and 1 swapped"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-0R1T-J0P5-P84B-7W2G-CQX6-D0CX",
+      "canonical": null,
+      "why": "typo: neighbours 11 and 12 swapped"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-0R1T-J0P5-P847-BW2G-CQX6-D0XC",
+      "canonical": null,
+      "why": "typo: neighbours 22 and 23 swapped"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-0R1T-J0P5-P847-BW2G-CQX6-D0C",
+      "canonical": null,
+      "why": "one character short"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-0R1T-J0P5-P847-BW2G-CQX6-D0CX-0",
+      "canonical": null,
+      "why": "one character too many"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-UR1T-J0P5-P847-BW2G-CQX6-D0CX",
+      "canonical": null,
+      "why": "U is not in the alphabet"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-0R1*-J0P5-P847-BW2G-CQX6-D0CX",
+      "canonical": null,
+      "why": "a character that is not a letter or a digit"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-G314-R0BR-XE2J-2A33-02EX-K5VA",
+      "canonical": "LMK-G314-R0BR-XE2J-2A33-02EX-K5VA",
+      "why": "canonical"
+    },
+    {
+      "kind": "key",
+      "input": "lmk-g314-r0br-xe2j-2a33-02ex-k5va",
+      "canonical": "LMK-G314-R0BR-XE2J-2A33-02EX-K5VA",
+      "why": "lower case"
+    },
+    {
+      "kind": "key",
+      "input": "LMKG314R0BRXE2J2A3302EXK5VA",
+      "canonical": "LMK-G314-R0BR-XE2J-2A33-02EX-K5VA",
+      "why": "no hyphens"
+    },
+    {
+      "kind": "key",
+      "input": "g314r0brxe2j2a3302exk5va",
+      "canonical": "LMK-G314-R0BR-XE2J-2A33-02EX-K5VA",
+      "why": "no prefix, no hyphens, lower case"
+    },
+    {
+      "kind": "key",
+      "input": "G314-R0BR-XE2J-2A33-02EX-K5VA",
+      "canonical": "LMK-G314-R0BR-XE2J-2A33-02EX-K5VA",
+      "why": "no prefix, with hyphens"
+    },
+    {
+      "kind": "key",
+      "input": " LMK G314 R0BR XE2J 2A33 02EX K5VA ",
+      "canonical": "LMK-G314-R0BR-XE2J-2A33-02EX-K5VA",
+      "why": "spaces instead of hyphens, around too"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-G3I4-R0BR-XE2J-2A33-02EX-K5VA",
+      "canonical": "LMK-G314-R0BR-XE2J-2A33-02EX-K5VA",
+      "why": "I read as 1"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-G3l4-R0BR-XE2J-2A33-02EX-K5VA",
+      "canonical": "LMK-G314-R0BR-XE2J-2A33-02EX-K5VA",
+      "why": "l read as 1"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-G314-ROBR-XE2J-2A33-02EX-K5VA",
+      "canonical": "LMK-G314-R0BR-XE2J-2A33-02EX-K5VA",
+      "why": "O read as 0"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-G314-RoBR-XE2J-2A33-02EX-K5VA",
+      "canonical": "LMK-G314-R0BR-XE2J-2A33-02EX-K5VA",
+      "why": "o read as 0"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-H314-R0BR-XE2J-2A33-02EX-K5VA",
+      "canonical": null,
+      "why": "typo: first character changed"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-G314-R0BR-XE2K-2A33-02EX-K5VA",
+      "canonical": null,
+      "why": "typo: a middle character changed"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-G314-R0BR-XE2J-2A33-02EX-K6VA",
+      "canonical": null,
+      "why": "typo: last data character changed"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-G314-R0BR-XE2J-2A33-02EX-K5VB",
+      "canonical": null,
+      "why": "typo: last check character changed"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-3G14-R0BR-XE2J-2A33-02EX-K5VA",
+      "canonical": null,
+      "why": "typo: neighbours 0 and 1 swapped"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-G314-R0BR-XE22-JA33-02EX-K5VA",
+      "canonical": null,
+      "why": "typo: neighbours 11 and 12 swapped"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-G314-R0BR-XE2J-2A33-02EX-K5AV",
+      "canonical": null,
+      "why": "typo: neighbours 22 and 23 swapped"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-G314-R0BR-XE2J-2A33-02EX-K5V",
+      "canonical": null,
+      "why": "one character short"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-G314-R0BR-XE2J-2A33-02EX-K5VA-0",
+      "canonical": null,
+      "why": "one character too many"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-U314-R0BR-XE2J-2A33-02EX-K5VA",
+      "canonical": null,
+      "why": "U is not in the alphabet"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-G31*-R0BR-XE2J-2A33-02EX-K5VA",
+      "canonical": null,
+      "why": "a character that is not a letter or a digit"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-B918-G04C-NFK4-ABQ9-EZ1F-PVDM",
+      "canonical": "LMK-B918-G04C-NFK4-ABQ9-EZ1F-PVDM",
+      "why": "canonical"
+    },
+    {
+      "kind": "key",
+      "input": "lmk-b918-g04c-nfk4-abq9-ez1f-pvdm",
+      "canonical": "LMK-B918-G04C-NFK4-ABQ9-EZ1F-PVDM",
+      "why": "lower case"
+    },
+    {
+      "kind": "key",
+      "input": "LMKB918G04CNFK4ABQ9EZ1FPVDM",
+      "canonical": "LMK-B918-G04C-NFK4-ABQ9-EZ1F-PVDM",
+      "why": "no hyphens"
+    },
+    {
+      "kind": "key",
+      "input": "b918g04cnfk4abq9ez1fpvdm",
+      "canonical": "LMK-B918-G04C-NFK4-ABQ9-EZ1F-PVDM",
+      "why": "no prefix, no hyphens, lower case"
+    },
+    {
+      "kind": "key",
+      "input": "B918-G04C-NFK4-ABQ9-EZ1F-PVDM",
+      "canonical": "LMK-B918-G04C-NFK4-ABQ9-EZ1F-PVDM",
+      "why": "no prefix, with hyphens"
+    },
+    {
+      "kind": "key",
+      "input": " LMK B918 G04C NFK4 ABQ9 EZ1F PVDM ",
+      "canonical": "LMK-B918-G04C-NFK4-ABQ9-EZ1F-PVDM",
+      "why": "spaces instead of hyphens, around too"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-B9I8-G04C-NFK4-ABQ9-EZ1F-PVDM",
+      "canonical": "LMK-B918-G04C-NFK4-ABQ9-EZ1F-PVDM",
+      "why": "I read as 1"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-B9l8-G04C-NFK4-ABQ9-EZ1F-PVDM",
+      "canonical": "LMK-B918-G04C-NFK4-ABQ9-EZ1F-PVDM",
+      "why": "l read as 1"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-B918-GO4C-NFK4-ABQ9-EZ1F-PVDM",
+      "canonical": "LMK-B918-G04C-NFK4-ABQ9-EZ1F-PVDM",
+      "why": "O read as 0"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-B918-Go4C-NFK4-ABQ9-EZ1F-PVDM",
+      "canonical": "LMK-B918-G04C-NFK4-ABQ9-EZ1F-PVDM",
+      "why": "o read as 0"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-C918-G04C-NFK4-ABQ9-EZ1F-PVDM",
+      "canonical": null,
+      "why": "typo: first character changed"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-B918-G04C-NFK5-ABQ9-EZ1F-PVDM",
+      "canonical": null,
+      "why": "typo: a middle character changed"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-B918-G04C-NFK4-ABQ9-EZ1F-PWDM",
+      "canonical": null,
+      "why": "typo: last data character changed"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-B918-G04C-NFK4-ABQ9-EZ1F-PVDN",
+      "canonical": null,
+      "why": "typo: last check character changed"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-9B18-G04C-NFK4-ABQ9-EZ1F-PVDM",
+      "canonical": null,
+      "why": "typo: neighbours 0 and 1 swapped"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-B918-G04C-NFKA-4BQ9-EZ1F-PVDM",
+      "canonical": null,
+      "why": "typo: neighbours 11 and 12 swapped"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-B918-G04C-NFK4-ABQ9-EZ1F-PVMD",
+      "canonical": null,
+      "why": "typo: neighbours 22 and 23 swapped"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-B918-G04C-NFK4-ABQ9-EZ1F-PVD",
+      "canonical": null,
+      "why": "one character short"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-B918-G04C-NFK4-ABQ9-EZ1F-PVDM-0",
+      "canonical": null,
+      "why": "one character too many"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-U918-G04C-NFK4-ABQ9-EZ1F-PVDM",
+      "canonical": null,
+      "why": "U is not in the alphabet"
+    },
+    {
+      "kind": "key",
+      "input": "LMK-B91*-G04C-NFK4-ABQ9-EZ1F-PVDM",
+      "canonical": null,
+      "why": "a character that is not a letter or a digit"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-FD10-70CK-2XQ3-KEGT-2P6S",
+      "canonical": "LPC-FD10-70CK-2XQ3-KEGT-2P6S",
+      "why": "canonical"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "lpc-fd10-70ck-2xq3-kegt-2p6s",
+      "canonical": "LPC-FD10-70CK-2XQ3-KEGT-2P6S",
+      "why": "lower case"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPCFD1070CK2XQ3KEGT2P6S",
+      "canonical": "LPC-FD10-70CK-2XQ3-KEGT-2P6S",
+      "why": "no hyphens"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "fd1070ck2xq3kegt2p6s",
+      "canonical": "LPC-FD10-70CK-2XQ3-KEGT-2P6S",
+      "why": "no prefix, no hyphens, lower case"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "FD10-70CK-2XQ3-KEGT-2P6S",
+      "canonical": "LPC-FD10-70CK-2XQ3-KEGT-2P6S",
+      "why": "no prefix, with hyphens"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": " LPC FD10 70CK 2XQ3 KEGT 2P6S ",
+      "canonical": "LPC-FD10-70CK-2XQ3-KEGT-2P6S",
+      "why": "spaces instead of hyphens, around too"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-FDI0-70CK-2XQ3-KEGT-2P6S",
+      "canonical": "LPC-FD10-70CK-2XQ3-KEGT-2P6S",
+      "why": "I read as 1"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-FDl0-70CK-2XQ3-KEGT-2P6S",
+      "canonical": "LPC-FD10-70CK-2XQ3-KEGT-2P6S",
+      "why": "l read as 1"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-FD10-7OCK-2XQ3-KEGT-2P6S",
+      "canonical": "LPC-FD10-70CK-2XQ3-KEGT-2P6S",
+      "why": "O read as 0"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-FD10-7oCK-2XQ3-KEGT-2P6S",
+      "canonical": "LPC-FD10-70CK-2XQ3-KEGT-2P6S",
+      "why": "o read as 0"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-GD10-70CK-2XQ3-KEGT-2P6S",
+      "canonical": null,
+      "why": "typo: first character changed"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-FD10-70CK-2YQ3-KEGT-2P6S",
+      "canonical": null,
+      "why": "typo: a middle character changed"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-FD10-70CK-2XQ3-KEGT-2Q6S",
+      "canonical": null,
+      "why": "typo: last data character changed"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-FD10-70CK-2XQ3-KEGT-2P6T",
+      "canonical": null,
+      "why": "typo: last check character changed"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-DF10-70CK-2XQ3-KEGT-2P6S",
+      "canonical": null,
+      "why": "typo: neighbours 0 and 1 swapped"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-FD10-70CK-2QX3-KEGT-2P6S",
+      "canonical": null,
+      "why": "typo: neighbours 9 and 10 swapped"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-FD10-70CK-2XQ3-KEGT-2PS6",
+      "canonical": null,
+      "why": "typo: neighbours 18 and 19 swapped"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-FD10-70CK-2XQ3-KEGT-2P6",
+      "canonical": null,
+      "why": "one character short"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-FD10-70CK-2XQ3-KEGT-2P6S-0",
+      "canonical": null,
+      "why": "one character too many"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-UD10-70CK-2XQ3-KEGT-2P6S",
+      "canonical": null,
+      "why": "U is not in the alphabet"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-FD1*-70CK-2XQ3-KEGT-2P6S",
+      "canonical": null,
+      "why": "a character that is not a letter or a digit"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-931S-T0XF-HATW-4CMQ-T0Z0",
+      "canonical": "LPC-931S-T0XF-HATW-4CMQ-T0Z0",
+      "why": "canonical"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "lpc-931s-t0xf-hatw-4cmq-t0z0",
+      "canonical": "LPC-931S-T0XF-HATW-4CMQ-T0Z0",
+      "why": "lower case"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC931ST0XFHATW4CMQT0Z0",
+      "canonical": "LPC-931S-T0XF-HATW-4CMQ-T0Z0",
+      "why": "no hyphens"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "931st0xfhatw4cmqt0z0",
+      "canonical": "LPC-931S-T0XF-HATW-4CMQ-T0Z0",
+      "why": "no prefix, no hyphens, lower case"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "931S-T0XF-HATW-4CMQ-T0Z0",
+      "canonical": "LPC-931S-T0XF-HATW-4CMQ-T0Z0",
+      "why": "no prefix, with hyphens"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": " LPC 931S T0XF HATW 4CMQ T0Z0 ",
+      "canonical": "LPC-931S-T0XF-HATW-4CMQ-T0Z0",
+      "why": "spaces instead of hyphens, around too"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-93IS-T0XF-HATW-4CMQ-T0Z0",
+      "canonical": "LPC-931S-T0XF-HATW-4CMQ-T0Z0",
+      "why": "I read as 1"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-93lS-T0XF-HATW-4CMQ-T0Z0",
+      "canonical": "LPC-931S-T0XF-HATW-4CMQ-T0Z0",
+      "why": "l read as 1"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-931S-TOXF-HATW-4CMQ-T0Z0",
+      "canonical": "LPC-931S-T0XF-HATW-4CMQ-T0Z0",
+      "why": "O read as 0"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-931S-ToXF-HATW-4CMQ-T0Z0",
+      "canonical": "LPC-931S-T0XF-HATW-4CMQ-T0Z0",
+      "why": "o read as 0"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-A31S-T0XF-HATW-4CMQ-T0Z0",
+      "canonical": null,
+      "why": "typo: first character changed"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-931S-T0XF-HBTW-4CMQ-T0Z0",
+      "canonical": null,
+      "why": "typo: a middle character changed"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-931S-T0XF-HATW-4CMQ-T1Z0",
+      "canonical": null,
+      "why": "typo: last data character changed"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-931S-T0XF-HATW-4CMQ-T0Z1",
+      "canonical": null,
+      "why": "typo: last check character changed"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-391S-T0XF-HATW-4CMQ-T0Z0",
+      "canonical": null,
+      "why": "typo: neighbours 0 and 1 swapped"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-931S-T0XF-HTAW-4CMQ-T0Z0",
+      "canonical": null,
+      "why": "typo: neighbours 9 and 10 swapped"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-931S-T0XF-HATW-4CMQ-T00Z",
+      "canonical": null,
+      "why": "typo: neighbours 18 and 19 swapped"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-931S-T0XF-HATW-4CMQ-T0Z",
+      "canonical": null,
+      "why": "one character short"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-931S-T0XF-HATW-4CMQ-T0Z0-0",
+      "canonical": null,
+      "why": "one character too many"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-U31S-T0XF-HATW-4CMQ-T0Z0",
+      "canonical": null,
+      "why": "U is not in the alphabet"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LPC-931*-T0XF-HATW-4CMQ-T0Z0",
+      "canonical": null,
+      "why": "a character that is not a letter or a digit"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-QS1V-Q0NN-BYCW-GTC2-Q8JC",
+      "canonical": "LMN-QS1V-Q0NN-BYCW-GTC2-Q8JC",
+      "why": "canonical"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "lmn-qs1v-q0nn-bycw-gtc2-q8jc",
+      "canonical": "LMN-QS1V-Q0NN-BYCW-GTC2-Q8JC",
+      "why": "lower case"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMNQS1VQ0NNBYCWGTC2Q8JC",
+      "canonical": "LMN-QS1V-Q0NN-BYCW-GTC2-Q8JC",
+      "why": "no hyphens"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "qs1vq0nnbycwgtc2q8jc",
+      "canonical": "LMN-QS1V-Q0NN-BYCW-GTC2-Q8JC",
+      "why": "no prefix, no hyphens, lower case"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "QS1V-Q0NN-BYCW-GTC2-Q8JC",
+      "canonical": "LMN-QS1V-Q0NN-BYCW-GTC2-Q8JC",
+      "why": "no prefix, with hyphens"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": " LMN QS1V Q0NN BYCW GTC2 Q8JC ",
+      "canonical": "LMN-QS1V-Q0NN-BYCW-GTC2-Q8JC",
+      "why": "spaces instead of hyphens, around too"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-QSIV-Q0NN-BYCW-GTC2-Q8JC",
+      "canonical": "LMN-QS1V-Q0NN-BYCW-GTC2-Q8JC",
+      "why": "I read as 1"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-QSlV-Q0NN-BYCW-GTC2-Q8JC",
+      "canonical": "LMN-QS1V-Q0NN-BYCW-GTC2-Q8JC",
+      "why": "l read as 1"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-QS1V-QONN-BYCW-GTC2-Q8JC",
+      "canonical": "LMN-QS1V-Q0NN-BYCW-GTC2-Q8JC",
+      "why": "O read as 0"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-QS1V-QoNN-BYCW-GTC2-Q8JC",
+      "canonical": "LMN-QS1V-Q0NN-BYCW-GTC2-Q8JC",
+      "why": "o read as 0"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-RS1V-Q0NN-BYCW-GTC2-Q8JC",
+      "canonical": null,
+      "why": "typo: first character changed"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-QS1V-Q0NN-BZCW-GTC2-Q8JC",
+      "canonical": null,
+      "why": "typo: a middle character changed"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-QS1V-Q0NN-BYCW-GTC2-Q9JC",
+      "canonical": null,
+      "why": "typo: last data character changed"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-QS1V-Q0NN-BYCW-GTC2-Q8JD",
+      "canonical": null,
+      "why": "typo: last check character changed"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-SQ1V-Q0NN-BYCW-GTC2-Q8JC",
+      "canonical": null,
+      "why": "typo: neighbours 0 and 1 swapped"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-QS1V-Q0NN-BYWC-GTC2-Q8JC",
+      "canonical": null,
+      "why": "typo: neighbours 10 and 11 swapped"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-QS1V-Q0NN-BYCW-GTC2-Q8CJ",
+      "canonical": null,
+      "why": "typo: neighbours 18 and 19 swapped"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-QS1V-Q0NN-BYCW-GTC2-Q8J",
+      "canonical": null,
+      "why": "one character short"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-QS1V-Q0NN-BYCW-GTC2-Q8JC-0",
+      "canonical": null,
+      "why": "one character too many"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-US1V-Q0NN-BYCW-GTC2-Q8JC",
+      "canonical": null,
+      "why": "U is not in the alphabet"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-QS1*-Q0NN-BYCW-GTC2-Q8JC",
+      "canonical": null,
+      "why": "a character that is not a letter or a digit"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-KT1F-801B-9CCF-CW2K-68RX",
+      "canonical": "LMN-KT1F-801B-9CCF-CW2K-68RX",
+      "why": "canonical"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "lmn-kt1f-801b-9ccf-cw2k-68rx",
+      "canonical": "LMN-KT1F-801B-9CCF-CW2K-68RX",
+      "why": "lower case"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMNKT1F801B9CCFCW2K68RX",
+      "canonical": "LMN-KT1F-801B-9CCF-CW2K-68RX",
+      "why": "no hyphens"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "kt1f801b9ccfcw2k68rx",
+      "canonical": "LMN-KT1F-801B-9CCF-CW2K-68RX",
+      "why": "no prefix, no hyphens, lower case"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "KT1F-801B-9CCF-CW2K-68RX",
+      "canonical": "LMN-KT1F-801B-9CCF-CW2K-68RX",
+      "why": "no prefix, with hyphens"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": " LMN KT1F 801B 9CCF CW2K 68RX ",
+      "canonical": "LMN-KT1F-801B-9CCF-CW2K-68RX",
+      "why": "spaces instead of hyphens, around too"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-KTIF-801B-9CCF-CW2K-68RX",
+      "canonical": "LMN-KT1F-801B-9CCF-CW2K-68RX",
+      "why": "I read as 1"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-KTlF-801B-9CCF-CW2K-68RX",
+      "canonical": "LMN-KT1F-801B-9CCF-CW2K-68RX",
+      "why": "l read as 1"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-KT1F-8O1B-9CCF-CW2K-68RX",
+      "canonical": "LMN-KT1F-801B-9CCF-CW2K-68RX",
+      "why": "O read as 0"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-KT1F-8o1B-9CCF-CW2K-68RX",
+      "canonical": "LMN-KT1F-801B-9CCF-CW2K-68RX",
+      "why": "o read as 0"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-MT1F-801B-9CCF-CW2K-68RX",
+      "canonical": null,
+      "why": "typo: first character changed"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-KT1F-801B-9DCF-CW2K-68RX",
+      "canonical": null,
+      "why": "typo: a middle character changed"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-KT1F-801B-9CCF-CW2K-69RX",
+      "canonical": null,
+      "why": "typo: last data character changed"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-KT1F-801B-9CCF-CW2K-68RY",
+      "canonical": null,
+      "why": "typo: last check character changed"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-TK1F-801B-9CCF-CW2K-68RX",
+      "canonical": null,
+      "why": "typo: neighbours 0 and 1 swapped"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-KT1F-801B-9CFC-CW2K-68RX",
+      "canonical": null,
+      "why": "typo: neighbours 10 and 11 swapped"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-KT1F-801B-9CCF-CW2K-68XR",
+      "canonical": null,
+      "why": "typo: neighbours 18 and 19 swapped"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-KT1F-801B-9CCF-CW2K-68R",
+      "canonical": null,
+      "why": "one character short"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-KT1F-801B-9CCF-CW2K-68RX-0",
+      "canonical": null,
+      "why": "one character too many"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-UT1F-801B-9CCF-CW2K-68RX",
+      "canonical": null,
+      "why": "U is not in the alphabet"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LMN-KT1*-801B-9CCF-CW2K-68RX",
+      "canonical": null,
+      "why": "a character that is not a letter or a digit"
+    },
+    {
+      "kind": "key",
+      "input": "LPC-FD10-70CK-2XQ3-KEGT-2P6S",
+      "canonical": null,
+      "why": "a purchase code where a key is due"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LMK-0R1T-J0P5-P847-BW2G-CQX6-D0CX",
+      "canonical": null,
+      "why": "a key where a purchase code is due"
+    },
+    {
+      "kind": "invoiceNumber",
+      "input": "LPC-FD10-70CK-2XQ3-KEGT-2P6S",
+      "canonical": null,
+      "why": "a purchase code, with its prefix, where an invoice number is due"
+    },
+    {
+      "kind": "purchaseCode",
+      "input": "LMN-QS1V-Q0NN-BYCW-GTC2-Q8JC",
+      "canonical": null,
+      "why": "an invoice number, with its prefix, where a purchase code is due"
+    }
+  ]
+}

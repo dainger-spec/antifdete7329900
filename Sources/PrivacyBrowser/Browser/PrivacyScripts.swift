@@ -3,8 +3,7 @@ import Foundation
 import WebKit
 
 /// JavaScript shims for settings WebKit has no native per-web-view API for: time zone,
-/// geolocation, WebRTC, and — for mobile generations only — the navigator and screen values of
-/// the declared device. Best-effort and detectable; not engine-level.
+/// geolocation and WebRTC. Best-effort and detectable; not engine-level.
 ///
 /// What is deliberately NOT touched, because a fingerprinting test looks exactly for it:
 ///   * canvas, WebGL, audio and font rendering: noise makes two readings differ ("Canvas:
@@ -16,9 +15,11 @@ import WebKit
 ///   * navigator.language(s): it must match the Accept-Language header, which only WebKit sets
 ///     (see `WebContentLanguage`); WebKit exposes a single language, as Safari does;
 ///   * navigator.deviceMemory: Safari does not implement it, so defining it marks a fake.
-/// A macOS profile overrides no navigator or screen value at all: it runs on the very engine and
-/// hardware it declares, and native values agree with everything else a page can measure
-/// (CSS media queries, window sizes), which a fixed screen size would not.
+/// No profile overrides a navigator or screen value: it runs on the very engine and hardware it
+/// declares, and native values agree with everything else a page can measure (CSS media queries,
+/// window sizes, touch events), which a declared phone would not. An iPhone or iPad view is
+/// Safari on this Mac under that device's User-Agent, in a window of its screen's size — what
+/// Safari's own Develop › User Agent gives — and nothing more (the owner's decision, 31 October).
 ///
 /// What is replaced is replaced the way the engine defines it: accessors on the prototypes,
 /// strict methods with only `length` and `name`, the native receiver checks, and a
@@ -35,12 +36,11 @@ enum PrivacyScripts {
         var geolocation: Geolocation
         /// "disabled", "relayOnly", "unrestricted", or "tunnel" (with `webRTCRelay`).
         var webRTC: String
-        /// The packet tunnel's TURN relay for this launch (`ProfileConfiguration.webRTCRouting`).
+        /// The app's TURN relay for this launch (`ProfileConfiguration.webRTCRouting`).
         var webRTCRelay: Relay?
-        /// Mobile generations only; nil for macOS (see above).
-        var device: Device?
-        /// macOS generation: Safari the app exposes `window.safari` (`pushNotification`), a
-        /// WKWebView does not; a page that checks it is told the same as by Safari.
+        /// Safari the app exposes `window.safari` (`pushNotification`) on the Mac, a WKWebView does
+        /// not; a page that checks it is told the same as by Safari — in an iPhone or iPad view too,
+        /// which is Safari on this Mac under that device's User-Agent.
         var safariObject: Bool
         /// The per-origin storage quota Safari reports (`safariStorageQuota`), before rounding.
         var storageQuota: Double?
@@ -58,17 +58,6 @@ enum PrivacyScripts {
             var accuracy: Double?
         }
 
-        /// What the declared device's Safari reports where it differs from this Mac.
-        struct Device: Encodable {
-            /// nil: the Mac's own ("MacIntel"), which an iPad showing desktop websites reports too.
-            var platform: String?
-            var maxTouchPoints: Int
-            /// WebKit reports 4 below 8 cores (every iPhone) and 8 from 8 cores on.
-            var hardwareConcurrency: Int
-            var screenWidth: Int
-            var screenHeight: Int
-            var devicePixelRatio: Double
-        }
     }
 
     static func shimConfiguration(for configuration: ProfileConfiguration) -> ShimConfiguration {
@@ -88,40 +77,30 @@ enum PrivacyScripts {
         case let .fixed(latitude, longitude, accuracy):
             geolocation = .init(mode: "fixed", latitude: latitude, longitude: longitude, accuracy: accuracy)
         }
-        let device: ShimConfiguration.Device?
-        switch configuration.deviceGeneration.platform {
-        case .macOS:
-            device = nil
-        case .iOS:
-            device = .init(platform: "iPhone", maxTouchPoints: 5, hardwareConcurrency: 4,
-                           screenWidth: 390, screenHeight: 844, devicePixelRatio: 3)
-        case .iPadOS:
-            // iPad Safari shows desktop websites by default: the Mac's UA and platform, with the
-            // iPad's touch points and screen (how a page tells an iPad from a Mac).
-            device = .init(platform: nil, maxTouchPoints: 5, hardwareConcurrency: 8,
-                           screenWidth: 820, screenHeight: 1180, devicePixelRatio: 2)
-        }
         return ShimConfiguration(timeZone: configuration.timeZoneIdentifier, geolocation: geolocation,
-                                 webRTC: webRTC, webRTCRelay: relay, device: device,
-                                 safariObject: configuration.deviceGeneration.platform == .macOS,
-                                 storageQuota: safariStorageQuota(for: configuration.deviceGeneration.platform))
+                                 webRTC: webRTC, webRTCRelay: relay,
+                                 // Every generation is Safari on this Mac: an iPhone or iPad view
+                                 // changes the User-Agent and the window's size, nothing a page measures.
+                                 safariObject: true, storageQuota: safariStorageQuota)
     }
 
-    /// navigator.storage.estimate().quota in Safari, before WebKit rounds it up: a browser's origin
-    /// quota ratio (0.6) times WebKit's *standard* volume capacity — 128 GB on a Mac, 64 GB on
-    /// iOS — which WebKit reports instead of the real disk size, so it is the same on every
-    /// device (`WebsiteDataStore::defaultStandardVolumeCapacity`). An app that is not a browser
-    /// reports a fixed 1000 MiB instead.
-    static func safariStorageQuota(for platform: DeviceGeneration.Platform) -> Double {
-        let gigabyte = 1024.0 * 1024.0 * 1024.0
-        return 0.6 * (platform == .macOS ? 128 : 64) * gigabyte
-    }
+    /// navigator.storage.estimate().quota in Safari on a Mac, before WebKit rounds it up: a
+    /// browser's origin quota ratio (0.6) times WebKit's *standard* volume capacity, 128 GB on a
+    /// Mac, which WebKit reports instead of the real disk size, so it is the same on every Mac
+    /// (`WebsiteDataStore::defaultStandardVolumeCapacity`). An app that is not a browser reports a
+    /// fixed 1000 MiB instead.
+    static let safariStorageQuota = 0.6 * 128 * 1024.0 * 1024.0 * 1024.0
 
-    /// The declared device's screen in points for a mobile generation (the browser window is
-    /// sized to it, so inner sizes never exceed the screen the page is told about); nil for macOS.
+    /// The window of an iPhone or iPad view, in points: the device's screen. Only the window: what
+    /// a page reads of the screen, the touch points and the platform stays this Mac's (the owner's
+    /// decision, 31 October — a page told it is on a phone without touch broke on its touch events
+    /// and was told apart by them all the same). nil for a Mac profile.
     static func deviceScreenSize(for configuration: ProfileConfiguration) -> CGSize? {
-        guard let device = shimConfiguration(for: configuration).device else { return nil }
-        return CGSize(width: device.screenWidth, height: device.screenHeight)
+        switch configuration.deviceGeneration.platform {
+        case .macOS: return nil
+        case .iOS: return CGSize(width: 390, height: 844)
+        case .iPadOS: return CGSize(width: 820, height: 1180)
+        }
     }
 
     static func makeUserContentController(for configuration: ProfileConfiguration) -> WKUserContentController {
@@ -170,9 +149,8 @@ function patchWindow(w) {
   if (!w || patched.has(w)) return;
   patched.add(w);
   try { patchToString(w); } catch (e) {}
-  if (CONFIG.device) { try { patchDevice(w, CONFIG.device); } catch (e) {} }
   if (CONFIG.timeZone) { try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {} }
-  if (CONFIG.timeZone || CONFIG.device) { try { hookWorkers(w); } catch (e) {} }
+  if (CONFIG.timeZone) { try { hookWorkers(w); } catch (e) {} }
   if (CONFIG.storageQuota) { try { patchStorageQuota(w, CONFIG.storageQuota); } catch (e) {} }
   if (IS_WORKER) return; // no window, geolocation, WebRTC or frames in a worker
   if (CONFIG.safariObject) { try { patchSafariObject(w); } catch (e) {} }
@@ -253,62 +231,6 @@ function define(target, name, value) {
   const existing = Object.getOwnPropertyDescriptor(target, name);
   Object.defineProperty(target, name, { value: value, writable: true, configurable: true,
                                         enumerable: existing ? !!existing.enumerable : false });
-}
-
-// ---- Device (mobile generations) -------------------------------------------------------------
-// The declared device's navigator and screen values as accessors where the engine defines them:
-// on the prototypes for navigator and screen (no own property appears on the instances), on the
-// window itself for its own attributes. Each calls the native accessor first, so a wrong receiver
-// (Navigator.prototype.platform) throws the engine's TypeError. Rendering is left alone.
-function patchDevice(w, device) {
-  const nav = w.navigator;
-  if (IS_WORKER) {
-    // WorkerNavigator has platform and hardwareConcurrency, nothing else of the device.
-    if (nav && 'platform' in nav && device.platform) overrideGetter(w, nav, 'platform', device.platform);
-    if (nav && 'hardwareConcurrency' in nav) overrideGetter(w, nav, 'hardwareConcurrency', device.hardwareConcurrency);
-    return;
-  }
-  if (nav) {
-    if (device.platform) overrideGetter(w, nav, 'platform', device.platform);
-    overrideGetter(w, nav, 'maxTouchPoints', device.maxTouchPoints);
-    overrideGetter(w, nav, 'hardwareConcurrency', device.hardwareConcurrency);
-    overrideGetter(w, nav, 'standalone', false); // iOS Safari only: false in a browser tab
-  }
-  const s = w.screen;
-  if (s) {
-    overrideGetter(w, s, 'width', device.screenWidth);
-    overrideGetter(w, s, 'height', device.screenHeight);
-    overrideGetter(w, s, 'availWidth', device.screenWidth); // iOS has no menu bar or Dock
-    overrideGetter(w, s, 'availHeight', device.screenHeight);
-  }
-  overrideGetter(w, w, 'devicePixelRatio', device.devicePixelRatio);
-  // On iOS the window is the screen; inner sizes stay what the web view really is.
-  overrideGetter(w, w, 'outerWidth', device.screenWidth);
-  overrideGetter(w, w, 'outerHeight', device.screenHeight);
-  for (const name of ['screenX', 'screenY', 'screenLeft', 'screenTop']) {
-    if (name in w) overrideGetter(w, w, name, 0);
-  }
-}
-
-function overrideGetter(w, obj, name, value) {
-  let holder = obj;
-  while (holder && !Object.prototype.hasOwnProperty.call(holder, name)) holder = Object.getPrototypeOf(holder);
-  if (!holder || holder === Object.prototype) {
-    // Not defined by this engine (navigator.standalone on the Mac): on the prototype, like iOS.
-    const proto = Object.getPrototypeOf(obj);
-    holder = proto && proto !== Object.prototype ? proto : obj;
-  }
-  const native = Object.getOwnPropertyDescriptor(holder, name);
-  const Interface = holder === obj ? null : holder.constructor;
-  const get = getter(name, function () {
-    if (native && native.get) native.get.call(this); // enforces the receiver like the engine
-    else if (Interface && !(this instanceof Interface)) {
-      throw new w.TypeError('The ' + Interface.name + '.' + name + ' getter can only be used on instances of ' + Interface.name);
-    }
-    return value;
-  });
-  Object.defineProperty(holder, name, { get: get, set: native ? native.set : undefined,
-                                        enumerable: native ? native.enumerable : true, configurable: true });
 }
 
 // ---- Time zone --------------------------------------------------------------------------------
@@ -694,6 +616,9 @@ const StringSlice = String.prototype.slice;
 const StringToLowerCase = String.prototype.toLowerCase;
 const StringLastIndexOf = String.prototype.lastIndexOf;
 const StringIndexOf = String.prototype.indexOf;
+const NativeString = String;
+const NativePromise = Promise;
+const PromiseResolve = Promise.resolve;
 const call = (fn, self, ...args) => ReflectApply(fn, self, args);
 
 // An iterable the engine converts as a WebIDL sequence, iterated by closures of this script.
@@ -737,7 +662,7 @@ function patchWebRTC(w, policy, relay) {
   const nativeGetConfiguration = nativeProto.getConfiguration;
   const nativeSetConfiguration = nativeProto.setConfiguration;
   const nativeClose = nativeProto.close;
-  // 'tunnel': the packet tunnel's TURN relay is the only ICE server, so every candidate is a
+  // 'tunnel': the app's TURN relay (127.0.0.1) is the only ICE server, so every candidate is a
   // relay through the profile's proxy. The page keeps seeing its own configuration.
   const viaTunnel = policy === 'tunnel' && relay ? relay : null;
   const relayServers = [];
@@ -768,7 +693,7 @@ function patchWebRTC(w, policy, relay) {
     return record;
   };
   const isObject = (value) => value !== null && (typeof value === 'object' || typeof value === 'function');
-  // What the engine gets: relay-only; in the tunnel the relay as the only ICE server. Of the
+  // What the engine gets: relay-only; with the app's relay, it as the only ICE server. Of the
   // page's members only those that do not choose where packets go.
   const engineConfig = (record) => {
     const next = ObjectCreate(null);
@@ -942,6 +867,75 @@ function patchWebRTC(w, policy, relay) {
         const view = call(WeakMapGet, pageView, this) || latestView;
         const result = ReflectApply(nativeGetStats, this, arguments); // the engine's receiver check and errors
         try { return call(PromiseThen, result, (report) => sanitize(report, view)); } catch (e) { return result; }
+      }));
+    }
+  }
+  // A remote candidate named by a host name — an mDNS ".local" name or any other — would be
+  // resolved by this Mac's own resolver, outside the proxy: whoever answers for that name learns
+  // which resolver asked, and so roughly where this Mac is (docs/TUNNEL.md, "DNS"). Through the
+  // relay a peer is reached by its address alone, so a candidate without one is dropped before the
+  // engine sees it: in addIceCandidate, and as a line of a remote description's SDP. The page's
+  // values are read once, here, and the engine is given that copy, so that a getter or a toString
+  // cannot show this check one thing and the engine another.
+  if (viaTunnel) {
+    const nativeAdd = nativeProto.addIceCandidate;
+    const nativeSetRemote = nativeProto.setRemoteDescription;
+    const stateGetter = (ObjectGetOwnPropertyDescriptor(nativeProto, 'signalingState') || {}).get;
+    const remoteGetter = (ObjectGetOwnPropertyDescriptor(nativeProto, 'remoteDescription') || {}).get;
+    const isAddress = (text) => call(RegExpExec, /^\d{1,3}(?:\.\d{1,3}){3}$/, text) !== null
+      || (call(StringIndexOf, text, ':') >= 0 && call(RegExpExec, /^[0-9a-f:.]+$/i, text) !== null);
+    // 'candidate:<foundation> <component> <transport> <priority> <address> <port> typ <type> …'
+    const namedByHost = (line) => {
+      const match = call(RegExpExec, /^(?:a=)?candidate:\S+\s+\S+\s+\S+\s+\S+\s+(\S+)/i, line);
+      return match !== null && !isAddress(match[1]);
+    };
+    const withoutNamedCandidates = (sdp) => {
+      let out = '';
+      let start = 0;
+      while (start < sdp.length) {
+        let end = call(StringIndexOf, sdp, '\n', start);
+        end = end < 0 ? sdp.length : end + 1;
+        const line = call(StringSlice, sdp, start, end);
+        if (!namedByHost(call(StringSlice, line, 0, 2) === 'a=' ? line : '')) out += line;
+        start = end;
+      }
+      return out;
+    };
+    const withRest = (first, rest) => {
+      const args = [first];
+      for (let i = 0; i < rest.length; i++) args[i + 1] = rest[i];
+      return args;
+    };
+    if (typeof nativeAdd === 'function') {
+      define(nativeProto, 'addIceCandidate', method('addIceCandidate', nativeAdd.length, function (candidate, ...rest) {
+        if (!call(WeakMapGet, pageView, this) || !isObject(candidate)) return ReflectApply(nativeAdd, this, arguments);
+        // The members as WebIDL reads them (lexicographic), each once; the address's text made here.
+        const record = ObjectCreate(null);
+        const keys = ['candidate', 'sdpMLineIndex', 'sdpMid', 'usernameFragment'];
+        for (let i = 0; i < keys.length; i++) {
+          const value = candidate[keys[i]];
+          if (value !== undefined) record[keys[i]] = keys[i] === 'candidate' ? NativeString(value) : value;
+        }
+        const closed = typeof stateGetter === 'function' && call(stateGetter, this) === 'closed';
+        const remote = typeof remoteGetter !== 'function' || call(remoteGetter, this) !== null;
+        if (typeof record.candidate === 'string' && namedByHost(record.candidate) && !closed && remote) {
+          // As the engine answers a candidate it could not reach: nothing, and success.
+          const done = call(PromiseResolve, NativePromise);
+          if (typeof rest[0] === 'function') call(PromiseThen, done, rest[0]);
+          return done;
+        }
+        return ReflectApply(nativeAdd, this, withRest(record, rest));
+      }));
+    }
+    if (typeof nativeSetRemote === 'function') {
+      define(nativeProto, 'setRemoteDescription', method('setRemoteDescription', nativeSetRemote.length, function (description, ...rest) {
+        if (!call(WeakMapGet, pageView, this) || !isObject(description)) return ReflectApply(nativeSetRemote, this, arguments);
+        const record = ObjectCreate(null);
+        const sdp = description.sdp;
+        const type = description.type;
+        if (sdp !== undefined) record.sdp = withoutNamedCandidates(NativeString(sdp));
+        if (type !== undefined) record.type = type;
+        return ReflectApply(nativeSetRemote, this, withRest(record, rest));
       }));
     }
   }

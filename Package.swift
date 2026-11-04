@@ -8,14 +8,23 @@
 //                   Builds on macOS (CryptoKit + CommonCrypto) and on Linux
 //                   (swift-crypto) so the security-critical code can be unit
 //                   tested in CI without a Mac.
-//   TunnelCore      Platform-independent WebRTC relay logic for the packet tunnel: IPv4/IPv6
-//                   UDP packets, STUN/TURN server, SOCKS5 UDP codec, profile routes. Tested on
-//                   Linux and macOS like BrowserCore.
-//   TunnelTransport macOS only: the relay's network side (SOCKS5 over Network.framework) and
-//                   a UDP host for the TURN server outside the tunnel (CI harness).
-//   PacketTunnelExtension  macOS only: the NEPacketTunnelProvider system extension's executable.
+//   TunnelCore      Platform-independent WebRTC relay logic: STUN/TURN server, SOCKS5 UDP codec,
+//                   the relay's route. Tested on Linux and macOS like BrowserCore.
+//   NetworkGuardCore Platform-independent rules of the network guard (what a profile's process
+//                   may reach while its WebRTC goes through its proxy), tested on Linux and macOS.
+//   TunnelTransport macOS only: the relay's network side (SOCKS5 over Network.framework), the
+//                   TURN server's UDP socket on loopback, the proxy's UDP check.
+//   NetworkGuardExtension  macOS only: the content filter's system extension (docs/TUNNEL.md).
 //                   Packaged and signed into the app only by `NE=1 scripts/build-app.sh`.
+//   ObjCExceptions  macOS only: an Objective-C `@try` around a call, for Safari's code called
+//                   from Swift tasks (PBCatchException).
 //   PrivacyBrowser  macOS app (SwiftUI + AppKit + WebKit). macOS only.
+//   pbupdate        Makes and checks the signed update feed (scripts/release.sh, docs/UPDATES.md)
+//                   with BrowserCore's own checks. macOS and Linux.
+//   UpdateInstaller macOS only: replaces the app with a checked release (code signature, process
+//                   list, the swap), tested on real bundles by UpdateInstallerTests.
+//   PrivacyBrowserUpdater  macOS only: the installer helper, Contents/Helpers/PrivacyBrowser
+//                   Updater.app, which the app starts at the end of a quit (docs/UPDATES.md §3).
 //
 import PackageDescription
 
@@ -37,7 +46,9 @@ var targets: [Target] = [
     .testTarget(
         name: "BrowserCoreTests",
         dependencies: ["BrowserCore"],
-        path: "Tests/BrowserCoreTests"
+        path: "Tests/BrowserCoreTests",
+        // Read by the tests from the checkout (#filePath): the server's test vectors, as it publishes them.
+        exclude: ["Fixtures"]
     ),
     .target(
         name: "TunnelCore",
@@ -49,11 +60,28 @@ var targets: [Target] = [
         dependencies: ["TunnelCore"],
         path: "Tests/TunnelCoreTests"
     ),
+    .target(
+        name: "NetworkGuardCore",
+        dependencies: ["TunnelCore"],
+        path: "Sources/NetworkGuardCore"
+    ),
+    .testTarget(
+        name: "NetworkGuardCoreTests",
+        dependencies: ["NetworkGuardCore"],
+        path: "Tests/NetworkGuardCoreTests"
+    ),
+    .executableTarget(
+        name: "pbupdate",
+        dependencies: ["BrowserCore"],
+        path: "Sources/pbupdate"
+    ),
 ]
 
 var products: [Product] = [
     .library(name: "BrowserCore", targets: ["BrowserCore"]),
     .library(name: "TunnelCore", targets: ["TunnelCore"]),
+    .library(name: "NetworkGuardCore", targets: ["NetworkGuardCore"]),
+    .executable(name: "pbupdate", targets: ["pbupdate"]),
 ]
 
 #if os(macOS)
@@ -64,18 +92,38 @@ targets.append(contentsOf: [
         path: "Sources/TunnelTransport"
     ),
     .executableTarget(
-        name: "PacketTunnelExtension",
-        dependencies: ["TunnelCore", "TunnelTransport"],
-        path: "Sources/PacketTunnelExtension"
+        name: "NetworkGuardExtension",
+        dependencies: ["NetworkGuardCore"],
+        path: "Sources/NetworkGuardExtension"
+    ),
+    .target(
+        name: "ObjCExceptions",
+        path: "Sources/ObjCExceptions"
     ),
     .executableTarget(
         name: "PrivacyBrowser",
-        dependencies: ["BrowserCore", "TunnelCore", "TunnelTransport"],
+        dependencies: ["BrowserCore", "TunnelCore", "TunnelTransport", "NetworkGuardCore", "ObjCExceptions"],
         path: "Sources/PrivacyBrowser"
+    ),
+    .target(
+        name: "UpdateInstaller",
+        dependencies: ["BrowserCore"],
+        path: "Sources/UpdateInstaller"
+    ),
+    .executableTarget(
+        name: "PrivacyBrowserUpdater",
+        dependencies: ["BrowserCore", "UpdateInstaller"],
+        path: "Sources/PrivacyBrowserUpdater"
+    ),
+    .testTarget(
+        name: "UpdateInstallerTests",
+        dependencies: ["BrowserCore", "UpdateInstaller"],
+        path: "Tests/UpdateInstallerTests"
     ),
 ])
 products.append(.executable(name: "PrivacyBrowser", targets: ["PrivacyBrowser"]))
-products.append(.executable(name: "PacketTunnelExtension", targets: ["PacketTunnelExtension"]))
+products.append(.executable(name: "PrivacyBrowserUpdater", targets: ["PrivacyBrowserUpdater"]))
+products.append(.executable(name: "NetworkGuardExtension", targets: ["NetworkGuardExtension"]))
 #endif
 
 let package = Package(

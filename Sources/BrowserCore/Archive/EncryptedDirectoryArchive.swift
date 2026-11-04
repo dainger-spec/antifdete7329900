@@ -32,11 +32,13 @@ public enum EncryptedDirectoryArchive {
     private enum Kind: UInt8 { case end = 0, directory = 1, file = 2 }
 
     /// Seals `roots` (label → directory) into `archiveURL`, atomically replacing any
-    /// existing archive. Roots that do not exist are skipped.
+    /// existing archive — except one a newer version wrote, which is refused with
+    /// `CoreError.newerFormat` and left as it is. Roots that do not exist are skipped.
     @discardableResult
     public static func seal(roots: [String: URL], to archiveURL: URL, key: SymmetricKey,
                             chunkSize: Int = defaultChunkSize) throws -> Stats {
         for label in roots.keys { try validateComponent(label) }
+        try EncryptedChunkStream.guardOverwrite(of: archiveURL)
         let temp = archiveURL.deletingLastPathComponent()
             .appendingPathComponent(".\(archiveURL.lastPathComponent).\(UUID().uuidString).tmp")
         try SecureFile.ensureDirectory(archiveURL.deletingLastPathComponent())
@@ -97,9 +99,8 @@ public enum EncryptedDirectoryArchive {
             if FileManager.default.fileExists(atPath: destination.path) {
                 throw CoreError.io("unseal destination for '\(label)' already exists: \(destination.path)")
             }
-            let parent = destination.deletingLastPathComponent()
-            try SecureFile.ensureDirectory(parent)
-            let staged = parent.appendingPathComponent(".\(destination.lastPathComponent).unseal-\(UUID().uuidString)")
+            try SecureFile.ensureDirectory(destination.deletingLastPathComponent())
+            let staged = stagingDirectory(for: destination)
             staging.roots[label] = (staged, destination)
             return staged
         }
@@ -109,7 +110,7 @@ public enum EncryptedDirectoryArchive {
         do {
             let handle = try FileHandle(forReadingFrom: archiveURL)
             defer { try? handle.close() }
-            let reader = try EncryptedChunkReader(handle: handle, key: key)
+            let reader = try EncryptedChunkReader(handle: handle, key: key, name: archiveURL.lastPathComponent)
             recordLoop: while true {
                 let kindByte = try reader.read(1)[0]
                 guard let kind = Kind(rawValue: kindByte) else { throw CoreError.corruptData("record kind \(kindByte)") }
@@ -159,6 +160,222 @@ public enum EncryptedDirectoryArchive {
             try SecureFile.replace(root.destination, with: root.staged)
         }
         return stats
+    }
+
+    // MARK: What an unseal that never finished left
+
+    /// Where a root is extracted before it is moved into place: hidden, next to its destination,
+    /// named after it — `.<destination>.unseal-<UUID>`.
+    static func stagingDirectory(for destination: URL) -> URL {
+        destination.deletingLastPathComponent()
+            .appendingPathComponent(".\(destination.lastPathComponent).unseal-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    /// The name of the destination `name` is the staging directory of (`stagingDirectory(for:)`),
+    /// or nil when it is not one.
+    static func stagedDestinationName(_ name: String) -> String? {
+        guard name.hasPrefix("."), let marker = name.range(of: ".unseal-", options: .backwards),
+              UUID(uuidString: String(name[marker.upperBound...])) != nil else { return nil }
+        let destination = String(name[name.index(after: name.startIndex)..<marker.lowerBound])
+        return destination.isEmpty ? nil : destination
+    }
+
+    /// Removes the staging directories that an unseal which never finished left below
+    /// `directories`, down to `depth` levels: a crash or a kill while an archive was extracted
+    /// leaves part of a profile's plaintext there, which nothing reads and no seal takes in (a
+    /// finished unseal moves its directory into place; one that fails removes it itself). The
+    /// archive is not touched. `destinationNamed`: only the staging directories of destinations
+    /// of that name, case aside (a profile's UUID). Symbolic links are neither followed nor
+    /// removed, and a directory named by a UUID is not looked into: it is a store's own (a running
+    /// profile's data), and a staging directory is beside a destination, never inside one.
+    /// Returns how many were removed, and how many could not be.
+    @discardableResult
+    public static func removeStagingLeftovers(below directories: [URL], depth: Int,
+                                              destinationNamed name: String? = nil) -> (removed: Int, failed: Int) {
+        var removed = 0, failed = 0
+        func walk(_ directory: URL, level: Int) {
+            guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path) else { return }
+            for entry in names {
+                let child = directory.appendingPathComponent(entry, isDirectory: true)
+                guard let attributes = try? FileManager.default.attributesOfItem(atPath: child.path),
+                      attributes[.type] as? FileAttributeType == .typeDirectory else { continue } // lstat
+                if let destination = stagedDestinationName(entry) {
+                    if let name, destination.caseInsensitiveCompare(name) != .orderedSame { continue }
+                    do {
+                        try FileManager.default.removeItem(at: child)
+                        removed += 1
+                    } catch {
+                        failed += 1
+                    }
+                } else if level < depth, UUID(uuidString: entry) == nil {
+                    walk(child, level: level + 1)
+                }
+            }
+        }
+        for directory in directories { walk(directory, level: 0) }
+        return (removed, failed)
+    }
+
+    // MARK: Re-encrypting without plaintext
+
+    /// An archive to read: where it starts in its file (after whatever the file holds before it)
+    /// and its key.
+    public struct TranscodeSource {
+        public let url: URL
+        public let offset: UInt64
+        public let key: SymmetricKey
+        public init(url: URL, offset: UInt64 = 0, key: SymmetricKey) {
+            self.url = url
+            self.offset = offset
+            self.key = key
+        }
+    }
+
+    /// An archive to write, after `prefix` (bytes the file starts with), under `key`.
+    public struct TranscodeDestination {
+        public let url: URL
+        public let key: SymmetricKey
+        public let prefix: Data
+        public init(url: URL, key: SymmetricKey, prefix: Data = Data()) {
+            self.url = url
+            self.key = key
+            self.prefix = prefix
+        }
+    }
+
+    /// Re-encrypts archives without their plaintext ever touching the disk: every record of each
+    /// source is read, authenticated and written again — under another key, into one of
+    /// `destinations`, with its root renamed — a chunk at a time, in memory.
+    ///
+    /// `route(source, label)` names the destination (by index) and the new label of each root,
+    /// or nil to leave the root out. A destination is written to a temporary file and moved into
+    /// place only once every source has authenticated to its end, so a damaged or tampered source
+    /// leaves no destination behind; a destination no root was routed to is not written at all.
+    @discardableResult
+    public static func transcode(sources: [TranscodeSource], to destinations: [TranscodeDestination],
+                                 route: (_ source: Int, _ label: String) throws -> (destination: Int, label: String)?) throws -> Stats {
+        final class Output {
+            let temp: URL
+            let handle: FileHandle
+            let writer: EncryptedChunkWriter
+            var used = false
+            init(temp: URL, handle: FileHandle, writer: EncryptedChunkWriter) {
+                self.temp = temp
+                self.handle = handle
+                self.writer = writer
+            }
+        }
+        var outputs: [Output] = []
+        let discard = {
+            for output in outputs {
+                try? output.handle.close()
+                try? FileManager.default.removeItem(at: output.temp)
+            }
+        }
+        var stats = Stats()
+        do {
+            for destination in destinations {
+                try SecureFile.ensureDirectory(destination.url.deletingLastPathComponent())
+                let temp = destination.url.deletingLastPathComponent()
+                    .appendingPathComponent(".\(destination.url.lastPathComponent).\(UUID().uuidString).tmp")
+                guard FileManager.default.createFile(atPath: temp.path, contents: nil, attributes: [.posixPermissions: 0o600]) else {
+                    throw CoreError.io("cannot create \(temp.path)")
+                }
+                let handle = try FileHandle(forWritingTo: temp)
+                try handle.write(contentsOf: destination.prefix)
+                outputs.append(Output(temp: temp, handle: handle,
+                                      writer: try EncryptedChunkWriter(handle: handle, key: destination.key, chunkSize: defaultChunkSize)))
+            }
+            for (index, source) in sources.enumerated() {
+                let handle = try FileHandle(forReadingFrom: source.url)
+                defer { try? handle.close() }
+                try handle.seek(toOffset: source.offset)
+                let reader = try EncryptedChunkReader(handle: handle, key: source.key, name: source.url.lastPathComponent)
+                var routes: [String: (destination: Int, label: String)?] = [:]
+                recordLoop: while true {
+                    let kindByte = try reader.read(1)[0]
+                    guard let kind = Kind(rawValue: kindByte) else { throw CoreError.corruptData("record kind \(kindByte)") }
+                    if kind == .end { break recordLoop }
+                    let pathLength = Int(try readUInt(reader, bytes: 2))
+                    guard let path = String(data: try reader.read(pathLength), encoding: .utf8) else {
+                        throw CoreError.corruptData("path encoding")
+                    }
+                    let mode = Int(try readUInt(reader, bytes: 2)) & 0o777
+                    var components = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+                    for component in components {
+                        do { try validateComponent(component) } catch { throw CoreError.unsafeArchivePath(path) }
+                    }
+                    let label = components[0]
+                    if routes[label] == nil {
+                        let routed = try route(index, label)
+                        if let routed {
+                            guard outputs.indices.contains(routed.destination) else { throw CoreError.invalidConfiguration("no destination \(routed.destination)") }
+                            try validateComponent(routed.label)
+                        }
+                        routes[label] = .some(routed)
+                    }
+                    let target = routes[label] ?? nil
+                    if let target {
+                        components[0] = target.label
+                        let output = outputs[target.destination]
+                        output.used = true
+                        try writeHeader(kind: kind, path: components.joined(separator: "/"), mode: mode, writer: output.writer)
+                    }
+                    switch kind {
+                    case .directory:
+                        if target != nil { stats.directories += 1 }
+                    case .file:
+                        let size = try readUInt(reader, bytes: 8)
+                        if let target { try writeUInt(size, bytes: 8, writer: outputs[target.destination].writer) }
+                        var remaining = size
+                        while remaining > 0 {
+                            let piece = Int(min(remaining, UInt64(defaultChunkSize)))
+                            let bytes = try reader.read(piece)
+                            if let target { try outputs[target.destination].writer.write(bytes) }
+                            remaining -= UInt64(piece)
+                        }
+                        if target != nil {
+                            stats.files += 1
+                            stats.bytes += size
+                        }
+                    case .end:
+                        break recordLoop
+                    }
+                }
+                try reader.finish()
+            }
+            for output in outputs where output.used {
+                try output.writer.write(Data([Kind.end.rawValue]))
+                try output.writer.finish()
+                try output.handle.synchronize()
+                try output.handle.close()
+            }
+        } catch {
+            discard()
+            throw error
+        }
+        for (output, destination) in zip(outputs, destinations) {
+            if output.used {
+                try SecureFile.replace(destination.url, with: output.temp)
+            } else {
+                try? output.handle.close()
+                try? FileManager.default.removeItem(at: output.temp)
+            }
+        }
+        return stats
+    }
+
+    /// The root labels an archive holds, read and authenticated to its end (nothing is written).
+    public static func labels(in archiveURL: URL, offset: UInt64 = 0, key: SymmetricKey) throws -> [String] {
+        var labels: [String] = []
+        let scratch = FileManager.default.temporaryDirectory.appendingPathComponent(".pb-labels-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        _ = try transcode(sources: [TranscodeSource(url: archiveURL, offset: offset, key: key)],
+                          to: [TranscodeDestination(url: scratch, key: SymmetricKey(size: .bits256))]) { _, label in
+            labels.append(label)
+            return nil
+        }
+        return labels
     }
 
     // MARK: Private

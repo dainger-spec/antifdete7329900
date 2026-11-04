@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Runs the fingerprint probe in the Mac's real Safari (via safaridriver) and compares the result
-with what the self-test saw in a PrivacyBrowser profile on the same Mac.
+with what the self-test saw in a Lumen profile on the same Mac.
 
     sudo safaridriver --enable            # once per machine (CI does it)
     python3 scripts/safari_reference.py --compare build/selftest-surface/surface-macos.json \

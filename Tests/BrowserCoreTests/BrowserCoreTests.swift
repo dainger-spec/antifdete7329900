@@ -37,7 +37,7 @@ final class VaultTests: XCTestCase {
         let created = try MasterVault.create(in: root, password: "correct horse", iterations: testIterations)
         let unlocked = try MasterVault.unlock(in: root, password: "correct horse")
         XCTAssertEqual(created.vaultID, unlocked.vaultID)
-        XCTAssertEqual(created.indexKey.rawBytes, unlocked.indexKey.rawBytes)
+        XCTAssertEqual(try created.indexKey.rawBytes, try unlocked.indexKey.rawBytes)
         XCTAssertThrowsError(try MasterVault.unlock(in: root, password: "wrong")) {
             XCTAssertEqual($0 as? CoreError, .wrongPassword)
         }
@@ -140,7 +140,11 @@ final class ProfileRepositoryTests: XCTestCase {
         try FileManager.default.removeItem(at: repo.configURL(for: b.id))
         try FileManager.default.copyItem(at: repo.configURL(for: a.id), to: repo.configURL(for: b.id))
         XCTAssertThrowsError(try repo.loadConfiguration(b.id)) {
-            XCTAssertEqual($0 as? CoreError, .authenticationFailed)
+            // Settings that do not open are said as such, with the profile's name (R1); why, for the log.
+            guard case let .unreadableSettings(id, profile, reason)? = $0 as? CoreError else { return XCTFail("\($0)") }
+            XCTAssertEqual(id, b.id)
+            XCTAssertEqual(profile, "B")
+            XCTAssertEqual(reason, CoreError.authenticationFailed.description)
         }
     }
 
@@ -169,6 +173,26 @@ final class ProfileRepositoryTests: XCTestCase {
         XCTAssertTrue(reopened.entries(for: URL(string: "https://sub.example.com/")!).isEmpty)
 
         try reopened.remove(id: reopened.allEntries()[0].id)
+        XCTAssertEqual(try repo.passwordVault(for: profile.id).allEntries().count, 1)
+    }
+
+    /// The manager's password window and the profile's own process hold the same file open at
+    /// once: a login one of them saves is neither lost to nor hidden from the other.
+    func testPasswordVaultOpenTwiceKeepsBothProcessesChanges() throws {
+        let profile = try repo.create(name: "Two processes", configuration: ProfileConfiguration())
+        let manager = try repo.passwordVault(for: profile.id)
+        let profileProcess = try repo.passwordVault(for: profile.id)
+        try manager.upsert(PasswordEntry(origin: "https://a.example", username: "u", password: "1"))
+        // The other copy sees it without being reopened…
+        XCTAssertEqual(profileProcess.allEntries().map(\.origin), ["https://a.example"])
+        // …and a change it makes is made on top of it, not on what it read when it was opened.
+        try profileProcess.upsert(PasswordEntry(origin: "https://b.example", username: "u", password: "2"))
+        XCTAssertEqual(manager.allEntries().map(\.origin), ["https://a.example", "https://b.example"])
+        let first = try XCTUnwrap(manager.allEntries().first)
+        try profileProcess.markUsed(id: first.id)
+        try manager.remove(id: try XCTUnwrap(manager.allEntries().last).id)
+        XCTAssertEqual(profileProcess.allEntries().map(\.origin), ["https://a.example"])
+        XCTAssertNotNil(profileProcess.allEntries().first?.lastUsedAt)
         XCTAssertEqual(try repo.passwordVault(for: profile.id).allEntries().count, 1)
     }
 }
@@ -282,7 +306,7 @@ final class SyncTests: XCTestCase {
         let repoA = try ProfileRepository(vault: MasterVault.create(in: rootA, password: "pw", iterations: testIterations))
         let profile = try repoA.create(name: "Shared", configuration: ProfileConfiguration(timeZoneIdentifier: "Asia/Tokyo"))
         try repoA.passwordVault(for: profile.id).upsert(PasswordEntry(origin: "https://a.test", username: "u", password: "p"))
-        let engineA = SyncEngine(repository: repoA, transport: transport)
+        let engineA = try SyncEngine(repository: repoA, transport: transport)
         let first = try await engineA.sync()
         XCTAssertEqual(Set(first.pushed), ["index", "profile/\(profile.id.uuidString)/config", "profile/\(profile.id.uuidString)/passwords"])
 
@@ -302,7 +326,7 @@ final class SyncTests: XCTestCase {
         }
         let vaultB = try await SyncEngine.bootstrap(transport: transport, root: rootB, password: "pw")
         let repoB = try ProfileRepository(vault: vaultB)
-        let engineB = SyncEngine(repository: repoB, transport: transport)
+        let engineB = try SyncEngine(repository: repoB, transport: transport)
         _ = try await engineB.sync()
         XCTAssertEqual(repoB.list().map(\.name), ["Shared"])
         XCTAssertEqual(try repoB.loadConfiguration(profile.id).timeZoneIdentifier, "Asia/Tokyo")
@@ -321,19 +345,25 @@ final class SyncTests: XCTestCase {
         XCTAssertEqual(Set(repoA.list().map(\.name)), ["Renamed", "OnlyA"])
         XCTAssertEqual(Set(repoB.list().map(\.name)), ["Renamed", "OnlyA"])
 
-        // Deletion propagates and is not resurrected.
+        // Deletion propagates and is not resurrected. On the other device the profile's folder is
+        // kept, for the person to bring back or remove for good (R3); on the device that deleted
+        // it, it is gone.
         try repoA.delete(second.id)
         _ = try await engineA.sync()
         let report = try await engineB.sync()
         XCTAssertEqual(report.deletedProfileIDs, [second.id])
         XCTAssertEqual(repoB.list().map(\.name), ["Renamed"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: repoA.directory(for: second.id).path))
+        XCTAssertEqual(repoB.keptDeletedProfiles().map(\.id), [second.id])
+        XCTAssertEqual(repoB.keptDeletedProfiles().map(\.name), ["OnlyA"])
+        try repoB.removeKeptDeletedProfile(second.id)
         XCTAssertFalse(FileManager.default.fileExists(atPath: repoB.directory(for: second.id).path))
     }
 
     func testEnvelopeRejectsMovedBlob() throws {
         let root = base.appendingPathComponent("v")
         let vault = try MasterVault.create(in: root, password: "pw", iterations: testIterations)
-        let codec = SyncCodec(vault: vault)
+        let codec = try SyncCodec(vault: vault)
         let blob = try codec.encode(SyncPayload(logicalName: "index", deleted: false, data: Data("x".utf8)), revision: 3)
         XCTAssertEqual(try codec.decode(blob).payload.data, Data("x".utf8))
 

@@ -11,11 +11,24 @@ public enum CoreError: Error, Equatable, CustomStringConvertible {
     case invalidConfiguration(String)
     case profileNotFound(UUID)
     case unsupportedFormat(String)
+    /// A file a newer version of the app wrote: `what` declares format `found` (nil: not a number
+    /// this version understands), this version reads up to `supported`. Nothing was read from it,
+    /// and nothing is written over it (docs/UPDATES.md §4).
+    case newerFormat(what: String, found: Int?, supported: Int)
     case unsafeArchivePath(String)
     case syncConflict(objectID: String, remoteRevision: Int)
     /// The sync server answered with an unexpected HTTP status (401/403 = bad token).
     case syncServer(status: Int, message: String)
     case io(String)
+    /// Asked of a vault opened for one profile only (`ProfileGrant`, in that profile's own
+    /// process): what is named needs the whole vault.
+    case notGranted(String)
+    /// The profile's settings (`config.bin`) could not be read — damaged, cut short, missing, or
+    /// another key's; not a newer version's (`newerFormat`). Nothing is written over them, and the
+    /// profile does not start: started with defaults, it would go without its proxy, from this
+    /// Mac's own address. They come back from a backup, or from the sync location (Sync Now).
+    /// `profile`: its name; `reason`: why the read failed, for the log.
+    case unreadableSettings(profileID: UUID, profile: String, reason: String)
 
     public var description: String {
         switch self {
@@ -28,15 +41,39 @@ public enum CoreError: Error, Equatable, CustomStringConvertible {
         case .invalidConfiguration(let detail): return "Invalid configuration: \(detail)"
         case .profileNotFound(let id): return "Profile not found: \(id)"
         case .unsupportedFormat(let detail): return "Unsupported format: \(detail)"
+        case .newerFormat(let what, let found, let supported):
+            return "\(what) was written by a newer version of Lumen (format \(found.map(String.init) ?? "unknown"), "
+                + "this version reads up to \(supported)); nothing was read from it or written over it"
         case .unsafeArchivePath(let path): return "Archive contains unsafe path: \(path)"
         case .syncConflict(let objectID, let revision): return "Sync conflict on \(objectID) (remote revision \(revision))"
         case .syncServer(let status, let message):
             return "Sync server error \(status)\(message.isEmpty ? "" : ": \(message)")"
         case .io(let detail): return "I/O error: \(detail)"
+        case .notGranted(let detail): return "Not available to a single profile's process: \(detail)"
+        case .unreadableSettings(let id, let profile, let reason):
+            return "The settings of profile \(profile) (profiles/\(id.uuidString)/config.bin) could not be read (\(reason)); nothing is written over them, "
+                + "and the profile does not start until a readable copy is back (a backup, or Sync Now)"
         }
     }
 }
 
+/// What a person is told about an error of the core: the app sets `translate` to its own words in
+/// the person's language (`Localization.swift`); without it — the core's tests, its tools — the
+/// English `description`, which is also what logs keep.
+public enum CoreErrorText {
+    nonisolated(unsafe) public static var translate: ((Error) -> String?)?
+}
+
 extension CoreError: LocalizedError {
-    public var errorDescription: String? { description }
+    public var errorDescription: String? { CoreErrorText.translate?(self) ?? description }
+}
+
+extension PasswordVaultError: LocalizedError {
+    public var errorDescription: String? {
+        CoreErrorText.translate?(self) ?? (self == .duplicate ? "A login with this website and user name is already saved" : "The login was deleted meanwhile")
+    }
+}
+
+extension UpdateError: LocalizedError {
+    public var errorDescription: String? { CoreErrorText.translate?(self) ?? description }
 }

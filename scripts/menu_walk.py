@@ -1,0 +1,717 @@
+#!/usr/bin/env python3
+"""Every item of Safari's menu bar chosen in a profile's own process, what each did, and whether
+that is still what it did when the record was made.
+
+    python3 scripts/menu_walk.py --app build/unsandboxed/Lumen.app --out build/menu-walk \\
+        --title "Menu walk" [--record docs/menu-walk/safari-26.json] [--check] [--write-record FILE]
+
+Runs `Lumen --menu-walk` (SafariMenuWalkCheck.swift, SafariMenuWalk.swift) with the
+self-test proxy started for it (the profile's start page loads through it), reads its `MENUWALK`
+lines, and adds the crash report of every item that ended the process (scripts/crash_summary.py).
+Writes `menu-walk.json` and `menu-walk.md` (a table: item, keys, what it did, what it wrote,
+which services started) into --out.
+
+While it walks, `fs_usage` traces the file-system calls of the app's processes, WebKit's and
+cfprefsd (as the self-test's disk check does, scripts/disk_check.py; with sudo, when there is no
+other kernel trace): a write in the real Safari's places by one of them is a write by the profile.
+FSEvents, which the walk reads per item, does not say who wrote, and macOS's own daemons write in
+those places on their own schedule (Safari's bookmarks sync agent, its cache-delete extension).
+
+Each item is reduced to what is compared: its behaviour (disabled, a crash or a hang, an
+exception, our "unavailable" notice, a panel, an alert, a modal window, a window or sheet by class,
+a request to open something outside, quitting, our Settings asked for, a change in the window, or
+nothing seen), where it wrote (the profile's home, the real Safari's places, elsewhere) and the
+XPC services it started. With --record, the record for this Safari is compared item by item:
+every item whose reduction changed fails with --check (exit 1); every item gone and every new one
+is listed. Without a record, or with --write-record, the reduction is written
+for the record. A walk that did not get to the end fails with --check too, and so does a write in
+the real Safari's places that the trace puts on the profile.
+"""
+import argparse
+import glob
+import json
+import os
+import plistlib
+import re
+import socket
+import signal
+import subprocess
+import sys
+import threading
+import time
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# The app's executable and bundle ID, from its Info.plist (main): what the trace, the crash reports
+# and the walk itself know the app's processes by.
+EXECUTABLE = None
+# The executables whose processes are the app's: its own, and the one a profile's process is started
+# from (Contents/MacOS/LumenProfile, ProfileExecutable.swift) when the bundle has it. fs_usage is
+# given each by name, and a write by either is the app's.
+EXECUTABLES = []
+PROXY_PORT = 18190
+# The walk's own limits, under the CI step's 30 minutes (and the app's own 40): past them it stops the
+# app itself and says where it was — a step killed from outside would print nothing (CI run 562, 640).
+DEADLINE = 25 * 60
+# A profile's process gets 25 s an item (SafariMenuWalkCheck) and 90 s to start: nothing from the
+# walk for this long is the app's own process stuck, not an item.
+SILENCE = 5 * 60
+# Between two items a profile's process takes a few seconds (at most 4.1 in run 671): the app's own
+# watchdog stops an item that runs over 25 s, not a process that stops answering after an item's
+# end, before the next one's begin — run 672 (and 562): after File › Print…, nothing for five
+# minutes. This long after an item's end, the main threads of the profile's process and of the app
+# are written down and the profile's process is stopped; the app starts it again from the next
+# item, and the stop is said and failed on.
+STALL = 60
+
+
+def processes():
+    """(pid, parent's pid, executable) of every process (ps)."""
+    listed = subprocess.run(["ps", "-axo", "pid=,ppid=,comm="], capture_output=True, text=True).stdout
+    found = []
+    for line in listed.splitlines():
+        fields = line.split(None, 2)
+        if len(fields) == 3 and fields[0].isdigit() and fields[1].isdigit():
+            found.append((int(fields[0]), int(fields[1]), fields[2]))
+    return found
+
+
+def main_thread(pid, out, name):
+    """Where the main thread of process `pid` is: its deepest frames, as spindump sees them (as root,
+    on CI's runners, it reads any process, signed with the hardened runtime or not) or else sample.
+    The whole report is kept in `out`/stack-<name>-<pid>.txt."""
+    path = os.path.join(out, f"stack-{name}-{pid}.txt")
+    said = []
+    for command in (["sudo", "-n", "/usr/sbin/spindump", str(pid), "2", "10", "-onlyTarget", "-file", path],
+                    ["/usr/bin/sample", str(pid), "2", "-mayDie", "-file", path]):
+        tool = os.path.basename(command[2] if command[0] == "sudo" else command[0])
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, errors="replace", timeout=120)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            said.append(f"{tool}: {error}")
+            continue
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            break
+        said.append(f"{tool}: exit {result.returncode}, {' '.join((result.stderr or result.stdout).split())[:200]}")
+    else:
+        return [f"no stack of it: {'; '.join(said)}"]
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        report = handle.read().splitlines()
+    start = next((index for index, line in enumerate(report) if "com.apple.main-thread" in line), None)
+    if start is None:
+        return [f"no main thread in its report ({path})"]
+    frames = []
+    for line in report[start + 1:]:
+        if not line.strip() or re.match(r"^\s*(Thread 0x|\d+ Thread_)", line):
+            break
+        frames.append(re.sub(r"^[\s+!:|]*", "", line).rstrip())
+    return [f"{tool}, main thread, its deepest frames (all in {path}):"] + frames[-30:]
+
+
+def stalled(app, after, out, seconds):
+    """The walk stopped answering for `seconds` after an item's end: the main threads of the app's
+    profile processes and of the app written down, and those processes stopped. Returns what to say."""
+    profiles = [pid for pid, parent, executable in processes()
+                if parent == app and os.path.basename(executable) in EXECUTABLES]
+    said = (f"nothing from the walk for {seconds} s after {after.replace('MENUWALK-PROGRESS ', 'item ')}: "
+            f"the profile's process ({', '.join(map(str, profiles)) or 'none found'}) stopped answering between two items")
+    print(f"MENUWALK-ERROR {said}", flush=True)
+    for pid, name in [(pid, "profile") for pid in profiles] + [(app, "app")]:
+        for line in main_thread(pid, out, name):
+            print(f"MENUWALK-STACK {name} {pid}: {line}", flush=True)
+    for pid in profiles:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    if profiles:
+        print("MENUWALK-ERROR the profile's process stopped; the app starts it again from the next item", flush=True)
+    return said
+
+
+def run_walk(command, environment, log, out, deadline=DEADLINE, silence=SILENCE, stall=STALL):
+    """Runs the walk, its stdout read as it comes: each item's MENUWALK-PROGRESS line is printed at
+    once, so a walk that stops shows where. `stall` seconds without a line after an item's end, the
+    profile's process is written down and stopped, and the walk goes on (`stalled`). Past `deadline`,
+    or `silence` seconds without a line, the app is written down too, it and its profile's processes
+    are stopped and a MENUWALK-ERROR line says which item was last done. Returns (stdout, status,
+    stalls): status -1 when it was stopped here; stalls, what each stop between items said."""
+    process = subprocess.Popen(command, env=environment, stdout=subprocess.PIPE, stderr=log, text=True,
+                               errors="replace", start_new_session=True)
+    lines, last = [], [time.time(), "the walk's start"]
+    stalls, handled = [], None
+
+    def read():
+        for line in process.stdout:
+            lines.append(line)
+            last[0] = time.time()
+            if line.startswith("MENUWALK-PROGRESS"):
+                last[1] = line.strip()
+                print(line.rstrip(), flush=True)
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    started, stopped = time.time(), None
+    while process.poll() is None:
+        now = time.time()
+        if now - started > deadline:
+            stopped = f"the walk did not finish in {deadline // 60} minutes"
+        elif now - last[0] > silence:
+            stopped = f"nothing from the walk for {silence} s"
+        elif (now - last[0] > stall and last[1].startswith("MENUWALK-PROGRESS")
+              and "ended the process" not in last[1] and handled != last[1]):
+            handled = last[1]
+            said = stalled(process.pid, last[1], out, stall)
+            stalls.append(said)
+            lines.append(f"MENUWALK-ERROR {said}\n")
+            last[0] = time.time()
+        if stopped:
+            break
+        time.sleep(1)
+    if stopped:
+        message = f"MENUWALK-ERROR {stopped}; the last item done: {last[1]} — stopped here"
+        print(message, flush=True)
+        lines.append(message + "\n")
+        for line in main_thread(process.pid, out, "app"):
+            print(f"MENUWALK-STACK app {process.pid}: {line}", flush=True)
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(process.pid, sig)
+            except (ProcessLookupError, PermissionError):
+                pass
+            try:
+                process.wait(timeout=10)
+                break
+            except subprocess.TimeoutExpired:
+                continue
+    reader.join(timeout=10)
+    return "".join(lines), (-1 if stopped else process.returncode), stalls
+
+
+def notice(kind, title, text):
+    print(f"::{kind} title={title}::{text[:1500]}", flush=True)
+
+
+def wait_for_port(port, seconds=20):
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        with socket.socket() as probe:
+            probe.settimeout(0.5)
+            if probe.connect_ex(("127.0.0.1", port)) == 0:
+                return True
+        time.sleep(0.5)
+    return False
+
+
+def behaviour(item):
+    """What an item did, as a sorted list of words that change only when the behaviour does."""
+    if item.get("skipped"):
+        return ["not chosen: " + ("services" if "Services" in item["skipped"] else "a view")]
+    if "exit" in item:
+        return ["hang" if item.get("hang") else "crash"]
+    if not item.get("enabled"):
+        return ["disabled"]
+    words = set()
+    for effect in item.get("effects", []):
+        for pattern, word in ((r"^an open panel", "open panel"), (r"^a save panel", "save panel"),
+                              (r"^an alert", "alert"), (r"^printing", "print"), (r"^page setup", "page setup"),
+                              (r"modal", "modal window"), (r"^asks the system to open the file", "opens a file outside"),
+                              (r"^asks the system to open", "opens a URL outside"), (r"^asks .* to open", "opens a URL outside"),
+                              (r"^asks the system to start", "starts an application"), (r"^asks the Finder", "Finder"),
+                              (r"^shares", "shares"), (r"^the sharing menu", "sharing menu"), (r"Help", "Help"),
+                              (r"character viewer", "character viewer"), (r"^asks to quit", "quit"),
+                              (r"^asks to hide the other", "hides other apps"), (r"^our notice", "our notice"),
+                              (r"^nothing in the responder chain", "not taken"), (r"^another application started", "starts another app"),
+                              (r"^another application came to the front", "another app in front"),
+                              (r"Settings", "our Settings")):
+            if re.search(pattern, effect):
+                words.add(word)
+                break
+        else:
+            match = re.match(r"^(a window|a sheet): (\S+)", effect)
+            if match:
+                words.add(f"{match.group(1).split()[1]} {match.group(2)}")
+    # Which part of the window changed (key window, first responder, page, zoom) follows the
+    # state the items before left and how fast a page loaded: the record keeps that it changed.
+    if item.get("changes"):
+        words.add("changes the window")
+    if item.get("exceptions"):
+        names = sorted({entry.split(":")[0] for entry in item["exceptions"]})
+        words.add("exception " + ", ".join(names))
+    return sorted(words) or ["nothing seen"]
+
+
+# The account's home outside the profile, by what a write there would mean. Everything else in
+# it is written all the time by the system's own daemons (Spotlight, Duet, IdentityServices…),
+# whatever runs: listed in the JSON, not counted as the item's.
+BUNDLE_ID = None
+PLACES = (("this app's files in the account's home", lambda path: BUNDLE_ID in path),
+          ("the user's folders", lambda path: path.startswith(("~/Downloads", "~/Desktop", "~/Documents", "~/Pictures", "~/Movies", "~/Music"))),
+          ("the keychain", lambda path: path.startswith("~/Library/Keychains")),
+          ("recent items", lambda path: "com.apple.sharedfilelist" in path or "RecentDocuments" in path))
+
+
+def outside(item):
+    """The writes outside the profile that count: the places in PLACES."""
+    return [path for path in item.get("outside", []) if any(test(path) for _, test in PLACES)]
+
+
+def writes(item):
+    places = []
+    if item.get("home"):
+        places.append("profile's home")
+    if item.get("realSafari"):
+        places.append("REAL SAFARI")
+    for name, test in PLACES:
+        if any(test(path) for path in item.get("outside", [])):
+            places.append(name)
+    return places
+
+
+def steady(words):
+    """Of an item's behaviour, what does not follow timing: runs 463 and 468 read the same items
+    once as "changes the window", once as "nothing seen"; AppKit's own layout exception
+    (NSGenericException) came and went; and windows AppKit makes for a moment (a full-screen
+    transition's) or that a later item already took back are seen or not. Sheets and panels stay,
+    and every other word."""
+    kept = []
+    for word in words:
+        if word in ("changes the window", "nothing seen"):
+            continue
+        if word.startswith("window ") and not word.startswith("window NSPanel"):
+            continue
+        if word.startswith("exception "):
+            names = [name for name in word[len("exception "):].split(", ") if name != "NSGenericException"]
+            if not names:
+                continue
+            word = "exception " + ", ".join(names)
+        kept.append(word)
+    return kept or ["-"]
+
+
+# Items enabled or not by the system's state rather than by the build: Stop Speaking while the
+# speech Start Speaking began goes on (run 470, macOS 26: it had ended), Start Dictation… while the
+# system's dictation is there (runs 471 and 474, macOS 27: once enabled, once not). Whether they
+# were disabled is not compared; what they did when chosen is.
+ENABLED_BY_THE_SYSTEM = {"stopSpeaking:", "startDictation:"}
+
+
+def reduce(item):
+    """What the record keeps of an item: what it did (`steady`) and the services it started. Where
+    it wrote is in the table but not in the record: a file is written a moment after the item that
+    caused it, often during the next one, and the system's daemons write in the home all the time,
+    so which item a write belongs to is a guess. What is checked of writes is the walk's as a whole
+    (`traced_writes`): nothing in the real Safari's places by the profile, ever."""
+    words = steady(behaviour(item))
+    if item.get("action") in ENABLED_BY_THE_SYSTEM:
+        words = [word for word in words if word != "disabled"] or ["-"]
+    return {"behaviour": words, "xpc": sorted(set(item.get("xpc", [])))}
+
+
+def walk_writes(items):
+    """Every write of the walk in the places that count, by place."""
+    found = {"REAL SAFARI": set()}
+    for item in items:
+        found["REAL SAFARI"].update(item.get("realSafari", []))
+        for name, test in PLACES:
+            found.setdefault(name, set()).update(path for path in item.get("outside", []) if test(path))
+    return {name: sorted(paths) for name, paths in found.items()}
+
+
+def key(item):
+    """The item's name in the record: its path, action and keys. A window of the profile listed
+    in the Window menu is named by what it is, not by its title (which is the page's)."""
+    path = item.get("path", "?")
+    if item.get("action") == "makeKeyAndOrderFront:" and path.startswith("Window ›"):
+        path = "Window › (a window of the profile)"
+    return f"{path} | {item.get('action', '-')} | {item.get('keys', '-')}"
+
+
+def keyed(items):
+    """The items by key; an item whose key repeats (Safari has a few items twice, one hidden) gets
+    its place among them after it."""
+    named, seen = {}, {}
+    for item in items:
+        name = key(item)
+        seen[name] = seen.get(name, 0) + 1
+        named[name if seen[name] == 1 else f"{name} #{seen[name]}"] = item
+    return named
+
+
+def parse_name(name):
+    """A record's name as (path, action, keys, place): "path | action | keys", and " #n" for the n-th
+    item of a name that repeats."""
+    path, action, rest = (name.split(" | ", 2) + ["-", "-"])[:3]
+    keys, _, place = rest.partition(" #")
+    return path, action, keys, int(place) if place.isdigit() else 1
+
+
+def match_items(recorded, current):
+    """The record's items paired with this walk's, never by title: Safari builds its menus in the
+    system's language, so on a Mac in Russian every title differs from the record's (the owner's walk,
+    1 November: 90 items came or went by title, 144 of 147 did the same). First by action and keys;
+    then, of what is left, by an action only one item has on each side (or one item listed twice):
+    an item whose keys follow the Mac rather than Safari (Start Dictation's second key is a MacBook's
+    dictation key; Close Other Tabs has ⌥⌘W on some Macs and runners and none on others). Returns the
+    pairs (recorded name, current name, how they were paired) and the names left on each side."""
+    left_recorded = sorted(recorded, key=lambda name: (parse_name(name)[3], name))
+    left_current = sorted(current, key=lambda name: (parse_name(name)[3], name))
+    pairs = []
+    for how, part in (("action and keys", lambda name: parse_name(name)[1:3]), ("action", lambda name: parse_name(name)[1])):
+        on_record, here = {}, {}
+        for name in left_recorded:
+            on_record.setdefault(part(name), []).append(name)
+        for name in left_current:
+            here.setdefault(part(name), []).append(name)
+        paired = set()
+        for key, names in on_record.items():
+            others = here.get(key, [])
+            # By action alone: one item on each side, or one item each side lists more than once
+            # (Safari has a few items twice, one hidden), paired in their order.
+            if how == "action" and not (len(names) == len(others) and len({parse_name(name)[:3] for name in names}) == 1
+                                        and len({parse_name(name)[:3] for name in others}) == 1):
+                continue
+            for was, now in zip(names, others):
+                pairs.append((was, now, how))
+                paired.update((was, now))
+        left_recorded = [name for name in left_recorded if name not in paired]
+        left_current = [name for name in left_current if name not in paired]
+    return pairs, left_recorded, left_current
+
+
+def compare_with_record(recorded, current):
+    """The walk against its record, item by item (`match_items`): the items whose steady behaviour
+    changed, those that came or went, those paired by their action under other keys, how many were
+    paired under other titles, and how many did the same."""
+    pairs, gone, new = match_items(recorded, current)
+    differences, other_keys, retitled = [], [], 0
+    for was, now, how in pairs:
+        if parse_name(was)[0] != parse_name(now)[0]:
+            retitled += 1
+        if how == "action":
+            other_keys.append(f"other keys: {now} (the record: {parse_name(was)[2]})")
+        if recorded[was] != current[now]:
+            differences.append(f"changed: {now} (the record's {was}) — was {recorded[was]}, now {current[now]}")
+    comings = [f"gone: {name}" for name in gone] + [f"new: {name} — {'; '.join(current[name]['behaviour'])}" for name in new]
+    return differences, comings, other_keys, retitled, len(pairs) - len(differences)
+
+
+def start_trace(out):
+    """fs_usage of the app's, WebKit's and cfprefsd's file-system calls, into out/fs.txt; None
+    without sudo."""
+    if subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode != 0:
+        return None
+    trace = subprocess.Popen(["sudo", "-n", "fs_usage", "-w", "-f", "filesys", *EXECUTABLES, "com.apple.WebKit", "cfprefsd"],
+                             stdout=open(os.path.join(out, "fs.txt"), "w"), stderr=subprocess.STDOUT)
+    time.sleep(2)
+    return trace
+
+
+# Set in the real Safari's own preferences before the walk with --safari-sentinels (CI's runners
+# only): the search provider's keys, which Safari's code in a profile's process asks to remove through
+# a domain named by the real Safari's container plist (CI run 496; run 504: they were kept), and one
+# of our own.
+SAFARI_SENTINELS = {"SearchProviderIdentifier": "com.duckduckgo", "SearchProviderShortName": "DuckDuckGo",
+                    "PBMenuWalkSentinel": "kept"}
+
+
+def safari_domain():
+    """The real Safari's own preferences as `defaults export com.apple.Safari` reads them, through
+    cfprefsd — from Safari's container where it has one — and whether it has one; (None, …) when
+    they cannot be read. The file trace names cfprefsd's writes (`disk_check.Resolver`) but not the
+    process cfprefsd wrote for; this reads what the domain holds."""
+    container = os.path.isdir(os.path.expanduser("~/Library/Containers/com.apple.Safari"))
+    try:
+        data = subprocess.run(["defaults", "export", "com.apple.Safari", "-"], capture_output=True, timeout=30).stdout
+        return (plistlib.loads(data) if data else {}), container
+    except Exception:  # noqa: BLE001 - unreadable is said, not failed on
+        return None, container
+
+
+def safari_running():
+    """Whether the real Safari runs: its own writes to its domain would be counted as the profile's."""
+    return subprocess.run(["pgrep", "-x", "Safari"], capture_output=True).returncode == 0
+
+
+def domain_changes(before, after):
+    """The keys of the real Safari's domain added, removed or changed between two readings."""
+    return ([f"added {key}" for key in sorted(set(after) - set(before))]
+            + [f"removed {key}" for key in sorted(set(before) - set(after))]
+            + [f"changed {key}" for key in sorted(set(before) & set(after)) if before[key] != after[key]])
+
+
+def traced_writes(out, canary=None):
+    """The writes in the real Safari's places in out/fs.txt by the app's and WebKit's processes, as
+    "process: path"; what the trace was (lines read, or why it is none); the files cfprefsd wrote
+    there, for a process the trace cannot name; whether the trace named cfprefsd's write of
+    `canary` (disk_check.Resolver names a path given relative to a directory descriptor); and how
+    many writes it names by the app's own process (none: fs_usage was not given the app's name)."""
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import disk_check
+    path_of_trace = os.path.join(out, "fs.txt")
+    if not os.path.exists(path_of_trace):
+        return [], "no trace (no sudo)", [], None, 0
+    with open(path_of_trace, encoding="utf-8", errors="replace") as handle:
+        head = [line for _, line in zip(range(10), handle)]
+    if len(head) < 10 and any("ktrace" in line or "Resource busy" in line for line in head):
+        return [], "no trace: " + " ".join(head)[:200], [], None, 0
+    roots = disk_check.forbidden_roots(os.path.expanduser("~"))
+    resolver = disk_check.Resolver()
+    found, by_cfprefsd, kept = [], [], []
+    canary_seen = False if canary else None
+    count, app_writes = 0, 0
+    for line in open(path_of_trace, encoding="utf-8", errors="replace"):
+        count += 1
+        line = line.rstrip("\n")
+        paths = resolver.paths(line)
+        fields = line.split()
+        if len(fields) < 3:
+            continue
+        call = fields[1].split("[")[0]
+        writes = call in disk_check.WRITES or (call in disk_check.OPENS and re.search(r"\([^)]*[WC][^)]*\)", line))
+        if not writes or disk_check.FAILED.match(line):
+            continue
+        process = fields[-1].rsplit(".", 1)[0]
+        if any(process[:16] == name[:16] for name in EXECUTABLES):
+            app_writes += 1
+        if canary and process == "cfprefsd" and canary in paths:
+            canary_seen = True
+        for path in paths:
+            if disk_check.is_forbidden(path, roots):
+                # cfprefsd writes for whichever process asks it; the trace does not say which.
+                (by_cfprefsd if process == "cfprefsd" else found).append(f"{process}: {path}")
+                kept.append(line)
+    # The whole trace is hundreds of megabytes; what is kept is what counted.
+    with open(os.path.join(out, "fs-real-safari.txt"), "w") as handle:
+        handle.write("\n".join(kept) + ("\n" if kept else ""))
+    os.remove(path_of_trace)
+    return sorted(set(found)), f"{count} lines traced", sorted(set(by_cfprefsd)), canary_seen, app_writes
+
+
+def crash_reports(since, out):
+    """The crash reports of this app's processes written since `since`, summarized, by pid."""
+    found = {}
+    # *<executable>*: a fault a process lived through is ExcUserFault_<executable>-….ips.
+    for path in glob.glob(os.path.expanduser(f"~/Library/Logs/DiagnosticReports/*{EXECUTABLE}*.ips")):
+        if os.path.getmtime(path) < since:
+            continue
+        summary = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "crash_summary.py"), path],
+                                 capture_output=True, text=True).stdout
+        match = re.search(r"\(pid (\d+)\)", summary)
+        found[path] = (int(match.group(1)) if match else None, summary)
+        with open(os.path.join(out, os.path.basename(path) + ".txt"), "w") as handle:
+            handle.write(summary)
+    return found
+
+
+def table(items):
+    lines = ["| # | Item | Keys | What it did | Wrote | Services |", "|---|---|---|---|---|---|"]
+    for item in items:
+        reduced = reduce(item)
+        did = "; ".join(reduced["behaviour"])
+        details = [effect for effect in item.get("effects", [])] + item.get("exceptions", [])[:2]
+        if details:
+            did += "<br><sub>" + " · ".join(text.replace("|", "/")[:200] for text in details[:4]) + "</sub>"
+        wrote = ", ".join(writes(item)) or "—"
+        lines.append(f"| {item.get('index', '?')} | {item.get('path', '?').replace('|', '/')} | {item.get('keys', '-')} "
+                     f"| {did} | {wrote} | {', '.join(reduced['xpc'] + [a + ' (agent)' for a in item.get('agents', [])]) or '—'} |")
+    return "\n".join(lines) + "\n"
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--app", required=True)
+    parser.add_argument("--out", required=True)
+    parser.add_argument("--title", default="Menu walk")
+    parser.add_argument("--record", help="the record of this Safari's menu walk to compare with")
+    parser.add_argument("--check", action="store_true", help="fail when the walk differs from the record")
+    parser.add_argument("--write-record", help="write this walk's reduction here")
+    parser.add_argument("--ignore", default="", help="prefixes of files written by others, colon-separated")
+    parser.add_argument("--safari-sentinels", action="store_true",
+                        help="set sentinels in the real Safari's own preferences first (CI's runners only)")
+    args = parser.parse_args()
+    out = os.path.abspath(args.out)
+    os.makedirs(out, exist_ok=True)
+    global BUNDLE_ID, EXECUTABLE
+    try:
+        import plistlib
+        with open(os.path.join(args.app, "Contents", "Info.plist"), "rb") as handle:
+            info = plistlib.load(handle)
+        BUNDLE_ID, EXECUTABLE = info["CFBundleIdentifier"], info["CFBundleExecutable"]
+        EXECUTABLES[:] = [EXECUTABLE] + [name for name in ("LumenProfile",)
+                                          if os.path.exists(os.path.join(args.app, "Contents", "MacOS", name))]
+    except (OSError, ValueError, KeyError) as error:
+        print(f"::error::menu walk: {args.app} has no readable Info.plist with its bundle ID and executable ({error})")
+        return 1
+
+    proxy = subprocess.Popen([sys.executable, os.path.join(ROOT, "scripts", "selftest_proxy.py"),
+                              "--http", str(PROXY_PORT), "--socks", str(PROXY_PORT + 1)],
+                             stdout=open(os.path.join(out, "proxy.txt"), "w"), stderr=subprocess.STDOUT)
+    proxied = wait_for_port(PROXY_PORT)
+    environment = dict(os.environ, PRIVACYBROWSER_LANG="en", PB_MENU_WALK_IGNORE=args.ignore)
+    if proxied:
+        environment["PB_SELFTEST_HTTP_PROXY_PORT"] = str(PROXY_PORT)
+    if args.safari_sentinels:
+        # (Not `key`: that is the item's name in the record, used below in this function.)
+        for name, value in SAFARI_SENTINELS.items():
+            subprocess.run(["defaults", "write", "com.apple.Safari", name, "-string", value], capture_output=True)
+        time.sleep(2)
+    domain_before, container_before = safari_domain()
+    safari_ran = safari_running()
+    trace = start_trace(out)
+    # A preferences file cfprefsd writes while the trace runs, through a directory descriptor as it
+    # writes every one: the trace must name it, or it is blind to cfprefsd again.
+    canary = None
+    if trace:
+        os.makedirs(os.path.join(out, "trace-canary"), exist_ok=True)
+        domain = os.path.join(out, "trace-canary", "PBTraceCanary")
+        if subprocess.run(["defaults", "write", domain, "Canary", "-string", str(time.time())],
+                          capture_output=True).returncode == 0:
+            canary = domain + ".plist"
+    started = time.time()
+    with open(os.path.join(out, "walk.txt"), "w") as log:
+        output, status, stalls = run_walk([os.path.join(args.app, "Contents", "MacOS", EXECUTABLE), "--menu-walk"],
+                                          environment, log, out)
+        log.write(output)
+    proxy.kill()
+    if trace:
+        subprocess.run(["sudo", "-n", "pkill", "-INT", "-f", "fs_usage -w"], capture_output=True)
+        time.sleep(2)
+    by_profile, traced, by_cfprefsd, canary_seen, app_writes = traced_writes(out, canary)
+    print(f"MENU-WALK file trace: {traced}; writes by the app's process {EXECUTABLE}: {app_writes}; "
+          f"writes in the real Safari's places by the app's or WebKit's processes: "
+          f"{len(by_profile)}; by cfprefsd, for a process the trace cannot name: {len(by_cfprefsd)}; "
+          f"cfprefsd's write of the canary named: {'yes' if canary_seen else ('no' if canary_seen is False else 'no canary')}",
+          flush=True)
+    # What this walk could not look at: never a pass. Each is a SKIPPED line, and under --check the
+    # walk fails on it.
+    skipped = []
+    if traced.startswith("no trace"):
+        skipped.append(f"the file trace ({traced}): no write in the real Safari's places could have been seen")
+    elif not app_writes:
+        skipped.append(f"the file trace names no write by the app's process {EXECUTABLE}: fs_usage was not given its name, "
+                       "so what a profile's own process wrote could not have been seen")
+    time.sleep(2)
+    domain_after, container_after = safari_domain()
+    if domain_before is None or domain_after is None:
+        domain_changed = []
+        skipped.append("the real Safari's own preferences: they could not be read (defaults export com.apple.Safari)")
+    elif safari_ran or safari_running():
+        domain_changed = []
+        skipped.append("the real Safari's own preferences: the real Safari runs, and what it writes to them would be "
+                       "counted, so they are not compared")
+    else:
+        domain_changed = domain_changes(domain_before, domain_after)
+        if container_after and not container_before:
+            domain_changed.insert(0, "the real Safari's container was made")
+        print(f"MENU-WALK the real Safari's own preferences ({len(domain_after)} keys, "
+              f"{'its container' if container_after else 'no container'}"
+              f"{', sentinels set' if args.safari_sentinels else ''}): "
+              f"{'; '.join(domain_changed) if domain_changed else 'as they were'}", flush=True)
+
+    items = []
+    for line in output.splitlines():
+        if line.startswith("MENUWALK "):
+            try:
+                items.append(json.loads(line[len("MENUWALK "):]))
+            except ValueError:
+                pass
+        elif line.startswith(("MENUWALK-INFO", "MENUWALK-ERROR")):
+            print(line, flush=True)
+    finished = "the walk got to the end" in output
+    # A view whose service the profile is refused, asked for again each time that service ends, is
+    # this line each time: SafariPlatformSupport's completion list did so about a million times a
+    # walk until it was stopped (measurement runs 468 to 475), twenty times since (run 476).
+    with open(os.path.join(out, "walk.txt"), encoding="utf-8", errors="replace") as handle:
+        refused_views = sum(1 for line in handle if "listener 'com.apple.view-bridge'" in line)
+    print(f"MENU-WALK views asked for again after their service was refused: {refused_views}", flush=True)
+    reports = crash_reports(started, out)
+    for path, (pid, summary) in sorted(reports.items()):
+        if os.path.basename(path).startswith("ExcUserFault_"):
+            notice("warning", args.title, f"a fault a process lived through (pid {pid}): "
+                   + " / ".join(line.strip() for line in summary.splitlines()[:4])[:600])
+    for item in items:
+        if "exit" in item:
+            # The report of a process that ended while this item ran: written after its begin.
+            near = [summary for path, (pid, summary) in reports.items()
+                    if os.path.getmtime(path) >= item.get("begin", 0) - 1 and not os.path.basename(path).startswith("ExcUserFault_")]
+            item["crashReport"] = near[0].splitlines()[:30] if near else ["no crash report found"]
+    with open(os.path.join(out, "menu-walk.json"), "w") as handle:
+        json.dump(items, handle, indent=1, ensure_ascii=False)
+    with open(os.path.join(out, "menu-walk.md"), "w") as handle:
+        handle.write(table(items))
+
+    counts = {}
+    for item in items:
+        for word in behaviour(item):
+            counts[word] = counts.get(word, 0) + 1
+    notice("notice", args.title, f"{len(items)} items walked (exit {status}, {'to the end' if finished else 'NOT to the end'}); "
+           + "; ".join(f"{word}: {count}" for word, count in sorted(counts.items(), key=lambda entry: -entry[1])[:25]))
+    for item in items:
+        reduced = reduce(item)
+        flagged = [word for word in reduced["behaviour"] if word in ("crash", "hang") or word.startswith("exception")]
+        places = writes(item)
+        if flagged or "REAL SAFARI" in places:
+            detail = "; ".join(reduced["behaviour"]) + (f" — wrote meanwhile: {', '.join(places)}" if places else "")
+            extra = (item.get("exceptions") or [])[:1] + (item.get("realSafari") or [])[:3] + (item.get("crashReport") or [])[:6]
+            notice("warning", args.title, f"{key(item)}: {detail}. " + " · ".join(extra))
+    written = walk_writes(items)
+    for name, paths in written.items():
+        if paths:
+            notice("warning", args.title, f"during the walk, written in {name} (by any process): {len(paths)} path(s): "
+                   + " · ".join(paths[:8]))
+    if by_profile:
+        notice("error" if args.check else "warning", args.title,
+               f"the profile wrote in the real Safari's places (fs_usage): " + " · ".join(by_profile[:8]))
+    if by_cfprefsd:
+        notice("warning", args.title, f"cfprefsd wrote in the real Safari's places, for a process the trace cannot name "
+               f"(listed, not failed on): " + " · ".join(by_cfprefsd[:8]))
+    if canary_seen is False:
+        notice("error" if args.check else "warning", args.title,
+               f"the file trace did not name cfprefsd's write of {canary}: it is blind to cfprefsd's writes again")
+    if domain_changed:
+        notice("error" if args.check else "warning", args.title,
+               "the real Safari's own preferences changed during the walk: " + "; ".join(domain_changed[:20]))
+
+    current = {name: reduce(item) for name, item in keyed(items).items()}
+    if args.write_record or not args.record or not os.path.exists(args.record or ""):
+        target = args.write_record or os.path.join(out, "record.json")
+        with open(target, "w") as handle:
+            json.dump(current, handle, indent=1, ensure_ascii=False, sort_keys=True)
+        print(f"MENU-WALK record written: {target}", flush=True)
+    if refused_views > 1000:
+        notice("error" if args.check else "warning", args.title,
+               f"the profile's process asked {refused_views} times for a view whose service it is refused: a loop")
+    for what in skipped:
+        print(f"MENU-WALK SKIPPED: {what}", flush=True)
+        notice("error" if args.check else "warning", args.title, f"skipped: {what}")
+    for said in stalls:
+        notice("error" if args.check else "warning", args.title,
+               f"{said}: its main thread is in the MENUWALK-STACK lines above; it was stopped and the walk went on")
+    failed = args.check and (not finished or bool(by_profile) or bool(domain_changed) or refused_views > 1000
+                             or canary_seen is False or bool(skipped) or bool(stalls))
+    if args.record and os.path.exists(args.record):
+        with open(args.record) as handle:
+            recorded = json.load(handle)
+        # Items are paired by what they do, not by their titles (`match_items`). An item whose steady
+        # behaviour changed fails the check; an item that came or went is said: which items a menu
+        # has follows the window's state and, on Safari 27, the runner (Import Browsing Data in some
+        # runs, Import From › Bookmarks HTML File in others, either Safari); so is an item paired by
+        # its action whose keys are this Mac's.
+        differences, comings, other_keys, retitled, same = compare_with_record(recorded, current)
+        for difference in differences[:60]:
+            notice("error" if args.check else "warning", args.title, difference)
+        for line in other_keys[:20]:
+            notice("warning", args.title, line)
+        for coming in comings[:30]:
+            notice("warning", args.title, coming)
+        print(f"MENU-WALK {len(differences)} item(s) that changed, {len(comings)} that came or went, "
+              f"from the record {args.record}; {same} of {len(recorded)} recorded items did the same, "
+              f"{len(other_keys)} of them under this Mac's keys, {retitled} under other titles (the system's language)",
+              flush=True)
+        if differences and args.check:
+            failed = True
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

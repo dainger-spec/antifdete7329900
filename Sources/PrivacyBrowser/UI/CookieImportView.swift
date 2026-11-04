@@ -57,7 +57,7 @@ struct CookieImportView: View {
                 }
             }
         }
-        .frame(width: 680, height: 560)
+        .sheetFrame(width: 680, height: 560)
         .background(Theme.raised)
         .fileImporter(isPresented: $choosingFile, allowedContentTypes: [.json, .plainText, .text, .data]) { result in
             switch result {
@@ -169,7 +169,7 @@ struct CookieImportView: View {
         case .unrecognizedFormat: return L("cookies.reason.unrecognizedFormat")
         case let .fileTooLarge(size):
             return String(format: L("cookies.reason.fileTooLarge"),
-                          ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))
+                          Int64(size).formatted(.byteCount(style: .file).locale(Localization.locale)))
         case let .unreadableFile(detail): return String(format: L("cookies.reason.unreadableFile"), detail)
         case let .unsupportedFile(kind): return String(format: L("cookies.reason.unsupportedFile"), kind)
         case .encryptedValue: return L("cookies.reason.encryptedValue")
@@ -189,7 +189,7 @@ struct CookieImportView: View {
         case let .publicSuffixDomain(domain): return String(format: L("cookies.reason.publicSuffix"), domain)
         case let .invalidPath(path): return String(format: L("cookies.reason.invalidPath"), path)
         case let .invalidExpiry(text): return String(format: L("cookies.reason.invalidExpiry"), text)
-        case let .expired(date): return String(format: L("cookies.reason.expired"), date.formatted(date: .abbreviated, time: .shortened))
+        case let .expired(date): return String(format: L("cookies.reason.expired"), date.shown(date: .abbreviated, time: .shortened))
         case let .prefixRequirements(prefix):
             return L(prefix == "__Host-" ? "cookies.reason.hostPrefix" : "cookies.reason.securePrefix")
         case let .replacedByLaterEntry(later): return String(format: L("cookies.reason.replaced"), describe(later))

@@ -1,4 +1,8 @@
-# PrivacyBrowser — multi-profile WebKit browser prototype for macOS
+# Lumen — multi-profile WebKit browser prototype for macOS
+
+The app is Lumen (`Lumen.app`, bundle ID `io.lumenbrowser.Lumen`); its code — the Swift package, its
+targets and modules — keeps the name it was written under, PrivacyBrowser, and so do the vault's folder
+(`~/Library/Application Support/PrivacyBrowser`) and the log's subsystem.
 
 A Swift/SwiftUI + AppKit browser that runs several isolated profiles at once on the
 system WebKit engine (`WKWebView`), with tabs, per-profile history and bookmarks, and the
@@ -18,33 +22,46 @@ This is a prototype. The core has unit tests, and the app is checked end-to-end 
 real WebKit in CI. It has not had a security review, and some features are
 approximations limited by what WebKit exposes. The tables below say which parts are which.
 
-**Fingerprint note (2026-10-26):** no canvas, WebGL, audio or font noise — noise is exactly what fingerprinting tests detect. macOS profiles override no navigator or screen value and declare this Mac's real Safari version; iPhone/iPad profiles only get their device class's navigator/screen values. A profile with a proxy runs in the time zone of the proxy's exit IP (also in workers created from a blob), and the first profile launched sets the language websites see (otherwise this Mac's languages, as in Safari). The window reports Safari's geometry (real outer size, 52/90 px of chrome), user-installed fonts are hidden and the storage quota is Safari's. CI measures a profile against the runner's real Safari, page by page, including TLS/HTTP2 and header order: what still differs is Apple Pay/Web Push (Safari-only) and the profile's own privacy choices ([§2](docs/ISOLATION_AND_LIMITATIONS.md#measured-against-this-macs-safari)). deviceinfo.me's "Canvas: Spoofed" / "Fingerprinting Resistance: Detected" appear in real Safari 26 as well (its PNG-length list predates this WebKit). iOS fidelity remains UA-level (TLS, GPU, fonts, touch are the Mac's).
+**Fingerprint note (2026-10-26):** no canvas, WebGL, audio or font noise — noise is exactly what fingerprinting tests detect. No profile overrides a navigator or screen value: macOS profiles declare this Mac's real Safari version, and an iPhone or iPad *mobile view* is Safari on this Mac under that device's User-Agent, in a window of its screen's size, and nothing more. A profile with a proxy runs in the time zone of the proxy's exit IP (also in workers created from a blob), and the first profile launched sets the language websites see (otherwise this Mac's languages, as in Safari). The window reports Safari's geometry (real outer size, 52/90 px of chrome), user-installed fonts are hidden and the storage quota is Safari's. CI measures a profile against the runner's real Safari, page by page, including TLS/HTTP2 and header order: what still differs is Apple Pay/Web Push (Safari-only) and the profile's own privacy choices ([§2](docs/ISOLATION_AND_LIMITATIONS.md#measured-against-this-macs-safari)). Parity with Safari follows one project rule: only WebKit's own code is turned on, never JavaScript stand-ins; only when its answers are a real Safari's in some real state; nothing changes from profile to profile by chance; counts and property lists are never edited ([§2, *Parity with Safari*](docs/ISOLATION_AND_LIMITATIONS.md#parity-with-safari-the-projects-rule)). deviceinfo.me's "Canvas: Spoofed" / "Fingerprinting Resistance: Detected" appear in real Safari 26 as well (its PNG-length list predates this WebKit). A mobile view is User-Agent-level by design (touch, screen, TLS, GPU and fonts are the Mac's), and What Sites See says it has no reference for one.
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): components, key hierarchy, on-disk layout, lifecycles, tabs, testing
 - [docs/ISOLATION_AND_LIMITATIONS.md](docs/ISOLATION_AND_LIMITATIONS.md): what is isolated, what leaks, fingerprinting, App Sandbox, verified results
+- [docs/LEAK_AUDIT.md](docs/LEAK_AUDIT.md): the leak audit's short list — each channel, why it is reachable, what proves it, its state
 - [docs/SYNC_FORMAT.md](docs/SYNC_FORMAT.md): sync wire format, merge rules, what is server-ready vs. local-only
 - [docs/SYNC_SERVER_API.md](docs/SYNC_SERVER_API.md): HTTP contract for a future sync server
+- [docs/AUTOMATION_API.md](docs/AUTOMATION_API.md): the local automation API and `scripts/pbctl`
+- [docs/UPDATES.md](docs/UPDATES.md): automatic updates — why our own updater rather than Sparkle, installing only after every profile is sealed, what each file on disk may hold across versions (in force: a version refuses, and never writes over, a file a newer one wrote), the privacy of the check (design; implemented step by step)
 
 ## Requirements
 
-- macOS 14 Sonoma or later. The design depends on two APIs added in macOS 14:
-  `WKWebsiteDataStore(forIdentifier:)` and `WKWebsiteDataStore.proxyConfigurations`.
-- Xcode 15 or later, or the matching Command Line Tools (Swift 5.9+).
+- To run: macOS 26 or later (`LSMinimumSystemVersion`; what the website says too, and what CI
+  tests: macOS 26 and 27). A profile's window is Safari 26's own, whose frameworks the app loads;
+  macOS refuses to open the app on an older system, with its own message. The executables still
+  declare macOS 14 (`Package.swift`): with Xcode 27 SwiftPM writes the deployment target as the
+  declared SDK too, and a declared SDK of 15 or newer turns on WebKit's network loader, with which
+  macOS 27 fetched a certificate's intermediate outside a profile's proxy (docs/UPDATES.md §6,
+  docs/ISOLATION_AND_LIMITATIONS.md §2).
+- To build: Xcode 15 or later, or the matching Command Line Tools (Swift 5.9+); a release, Xcode 27.
 
 ## Build and run
 
 ```bash
-scripts/build-app.sh                  # sandboxed release build → build/PrivacyBrowser.app
-open build/PrivacyBrowser.app
+scripts/build-app.sh                  # sandboxed build (development; never released) → build/Lumen.app
+open build/Lumen.app
 
-SANDBOX=0 scripts/build-app.sh        # hardened runtime without App Sandbox (debugging)
+SANDBOX=0 scripts/build-app.sh        # without App Sandbox: the build that is released (Safari's window, a process per profile)
 APP_DIR=build/other scripts/build-app.sh
-BUNDLE_ID=org.example.PrivacyBrowser SIGN_IDENTITY="Developer ID Application: …" scripts/build-app.sh
+BUNDLE_ID=org.example.Lumen SIGN_IDENTITY="Developer ID Application: …" scripts/build-app.sh
 ```
 
-- The default build is **sandboxed**. Its data lives in
+- **Releases are the build without the App Sandbox**: `scripts/release.sh` refuses the sandboxed
+  one, and any app whose profiles do not open in Safari's own window (docs/UPDATES.md §6).
+- `build-app.sh`'s default build is **sandboxed**. Its data lives in
   `~/Library/Containers/<bundle-id>/Data/`. `build-app.sh` checks the signature and fails if
   the sandbox entitlement doesn't match `SANDBOX`.
+- **From a sandboxed build to an unsandboxed one** (which hosts Safari's chrome): an unsandboxed
+  build that has no vault yet takes over the one a sandboxed build of the same bundle identifier left
+  in its container, once, at its first start (moved, never copied; not while the other runs).
 - **Upgrading from an earlier unsandboxed build:** on the sandboxed build's first launch,
   macOS moves `~/Library/Application Support/PrivacyBrowser` into the container
   (`container-migration.plist`). The move is one-way. Archives sealed by the old build
@@ -52,6 +69,11 @@ BUNDLE_ID=org.example.PrivacyBrowser SIGN_IDENTITY="Developer ID Application: �
   is sealed.
 - Ad-hoc signing (the default) is enough to run locally. To distribute, sign with a
   Developer ID and notarize.
+- **Versions and updates:** `APP_VERSION` and `APP_BUILD` stamp the bundle;
+  `UPDATE_FEED_URL`, `UPDATE_PUBLIC_KEYS` (`<key id>=<base64>,…`, from `pbupdate keygen`) and
+  `UPDATE_TEAM_ID` make it a build that checks for updates — without a feed URL it has none.
+  Every build carries the installer helper (`Contents/Helpers/Lumen Updater.app`,
+  outside the sandbox, signed first); docs/UPDATES.md.
 - Run the `.app`, not `swift run`. WebKit names its storage directories after the bundle
   identifier, and the sandbox needs a signed bundle. For Xcode, run `open Package.swift`
   and select the `PrivacyBrowser` scheme. That scheme runs unsandboxed.
@@ -63,8 +85,10 @@ BUNDLE_ID=org.example.PrivacyBrowser SIGN_IDENTITY="Developer ID Application: �
 - **Appearance:** the app's own windows are always dark (Lumen's theme). Web content follows
   the system's light/dark setting, as in Safari, so pages see the `prefers-color-scheme`
   Safari would give them.
-- **Design review:** `PrivacyBrowser --render-ui-snapshots <folder>` renders the screens with
-  sample data into PNG files (CI uploads them as the `ui-snapshots` artifact).
+- **Design review:** `Lumen --render-ui-snapshots <folder>` renders the screens with
+  sample data into PNG files (CI uploads them as the `ui-snapshots` artifact). In real windows it
+  also checks that clicks reach the buttons under the transparent title bar and that a real sheet
+  fits in the narrowest Profiles window; exit code 1 otherwise.
 - **App icon:** `build-app.sh` has the app draw its icon from the Lumen mark
   (`--render-app-icon <folder>.iconset`) and packs it with `iconutil` into
   `Contents/Resources/AppIcon.icns`. A bare `swift run` sets the same icon in the Dock at launch.
@@ -77,30 +101,49 @@ TZ=America/New_York node scripts/test-shims.mjs   # JS shim logic and CreepJS-st
 TZ=America/New_York bun scripts/test-shims.mjs    # the same under JavaScriptCore, Safari's engine
 
 # End-to-end against the real WebKit of this Mac (headless, temporary vault, cleans up):
+# The last lines say PASSED, INCOMPLETE (a check could not be made on this Mac: each is a SKIP line,
+# named again below the summary) or FAILED; see docs/ISOLATION_AND_LIMITATIONS.md §0.
 python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 \
-  --socks2 18084 --socks-auth 18085 &
+  --socks2 18084 --socks-auth 18085 --tls-control 18086 --canary 18087 --silent 18088 &
 PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 \
 PB_SELFTEST_HTTP_AUTH_PROXY_PORT=18082 PB_SELFTEST_HTTP6_PROXY_PORT=18083 \
 PB_SELFTEST_SOCKS2_PROXY_PORT=18084 PB_SELFTEST_SOCKS_AUTH_PROXY_PORT=18085 \
+PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087 PB_SELFTEST_SILENT_PROXY_PORT=18088 \
 PB_SELFTEST_SURFACE_OUT=build/surface \
-  build/PrivacyBrowser.app/Contents/MacOS/PrivacyBrowser --self-test
+  build/Lumen.app/Contents/MacOS/Lumen --self-test
 
 # What a page measures in a macOS profile vs. this Mac's real Safari (needs `sudo safaridriver --enable` once):
 python3 scripts/safari_reference.py --compare build/surface/surface-macos.json
 # The same pages in Safari and in on-screen profile windows: geometry, headers, APIs, TLS/HTTP2 (unsandboxed build):
-python3 scripts/live_compare.py --app build/unsandboxed/PrivacyBrowser.app --out build/live
+python3 scripts/live_compare.py --app build/unsandboxed/Lumen.app --out build/live
 # Does QUIC or WebRTC go around a profile's proxy? (forwarding proxies on this Mac; unsandboxed build):
-python3 scripts/leak_check.py --app build/unsandboxed/PrivacyBrowser.app --out build/leaks
+python3 scripts/leak_check.py --app build/unsandboxed/Lumen.app --out build/leaks
+# What Apple Pay's, Payment Request's and Web Push's calls answer in Safari and in profiles (unsandboxed
+# build; --trust user trusts a throwaway certificate authority for the run, asking for the password or
+# Touch ID, and removes it after; CI uses --trust system, with sudo):
+python3 scripts/payments_check.py --app build/unsandboxed/Lumen.app --trust user --out build/payments
+# Updates end to end: an old and a new build, a local signed feed, the quit gate, the real installer
+# (it replaces an app, trusts a certificate for the run and captures packets with sudo: CI runners only):
+python3 scripts/update_check.py --variant sandboxed --out build/update-sandboxed
 ```
 
 CI (`.github/workflows/ci.yml`) runs on every push:
 - the core tests on Linux and macOS, and the shim tests;
-- `--self-test` for both the sandboxed and the unsandboxed build: 183 checks, covering WebKit
+- `--self-test` for both the sandboxed and the unsandboxed build, covering WebKit
   data location, seal/restore of cookies, localStorage and IndexedDB, live isolation between
   profiles, shims under JavaScriptCore, the fingerprint surface against a plain WKWebView,
   HTTP CONNECT (IPv4 and IPv6), SOCKS5 and authenticated proxies, fail-closed, three SOCKS5
   profiles launched and loading at once, the ping-load blocker, the proxy-location time zone,
-  launches that wait only briefly on the lookup through the proxy, the exit-IP warning, password
+  launches that wait only briefly on the lookup through the proxy, the exit-IP warning, the proxy
+  list's checker (every listener of the self-test proxy told apart step by step — HTTP and SOCKS5
+  found whatever type is listed, the login not needed, missing, wrong or taken, IPv6, a port that
+  takes the connection and never answers, a closed port, a host that does not exist; through a
+  working proxy its exit IP, country, city, network and median latency; dead through an
+  unreachable one, with nothing gone around it; several at a time, kept encrypted, a line without
+  a scheme given the type found and a wrong type corrected; a profile given a checked proxy; a
+  profile started with a silent proxy saying why, and Check from there — all of it, but the host
+  that does not exist, inside a packet capture that fails on anything of the app's past
+  loopback), password
   AutoFill (save, update, never, suggestions and fill, sign-in by script, sign-up, frames of
   another and of the same site, nothing for a password a page script wrote), cookie import
   (a damaged Netscape file, queued for a stopped profile and applied before its first page,
@@ -110,7 +153,10 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   session warm-up robot (pages in order through the proxy with the profile's cookies and
   User-Agent, time on each page measured at the proxy, scrolling, only the safe link followed,
   nothing in the page world while it acts, Stop, tab closed, a page dialog, the profile stopped
-  mid-run), tabs, history,
+  mid-run; a queue of two profiles warmed one after the other, each started without a window and
+  sealed again before the next, and each run's cookies per site), a proxied profile in its own
+  process with Safari's chrome on a leak page (every kind of request through the proxy, the
+  process's own report), profile export and import, tabs, history,
   bookmarks, the
   device-generation UA path, crash-recovery sealing, dialogs, Lock during launch, ⌘Q and
   the forced seal, and the window-lifecycle regression;
@@ -126,17 +172,80 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   tunnel's relay (run on the runner, since CI cannot load the extension), a page gets relay
   candidates at the proxy's address only, and a data channel through the proxy. Fails on any
   request seen going around a proxy;
+- around the unsandboxed self-test, a capture of every packet leaving the runner with its process
+  (`scripts/egress_check.py`) and of every file the app and WebKit write (`scripts/disk_check.py`):
+  nothing of a profile may leave outside its proxy, or land where the real Safari keeps its data;
+- the self-test of the unsandboxed build once more on macOS 27 (GitHub's `xcode-27` image: macOS
+  27.0.1, Safari 27.0.1), inside the egress capture: it says what fails on the next macOS before
+  users meet it, and fails the build on one thing only — this Mac fetching for a certificate
+  outside a profile's proxy (`scripts/certificate_leak_check.py`: the self-test's AIA and OCSP
+  canaries in the capture, its control seen; a run that cannot tell runs the certificate check
+  again alone, and one that still cannot fails too). In every run each group of the self-test stands on its own: an
+  error a group did not expect fails that group by name, and the run goes on. A check that could
+  not be made is a SKIP line, never a pass; on the runners a skip fails the self-test, but for the
+  few a runner cannot make (`PB_SELFTEST_EXPECTED_SKIPS`), and every skip is a warning on the job
+  and in its summary;
+- WebKit's features in a profile's web views as Safari has them (`scripts/engine_features_check.py`):
+  the four the SDK's behaviors change for a build declaring 14.0 — Trusted Types on, mutation events,
+  the legacy `FontFaceSet` constructor and near-suspended assertions off (`SafariEngineFeatures`) —
+  for the build as made and a copy declaring 14.0, the releases' SDK; fails the build on macOS 26
+  when one is not as Safari has it or a page in a profile's web view differs from one with every
+  behavior on, and reports the same on macOS 27;
+- `--check-safari-chrome`: the private Safari classes and methods the hosted chrome relies on
+  (loaded in a temporary home, held to a closed proxy, as in a profile's process);
+- "What sites see" (`--what-sites-see-check`): a new profile's snapshot next to the runner's
+  Safari, as the panel takes it — in this app's window (the sandboxed build), and in Safari's
+  window with an HTTP proxy and without one (the build without the App Sandbox);
+- the payments measurement (`scripts/payments_check.py`, never fails the build): what Apple Pay's,
+  Payment Request's and Web Push's calls answer on one HTTPS page of the runner, in Safari and in
+  new profiles with a proxy — as they ship, in this app's window and in Safari's, and with WebKit's
+  own switches for them on, the profile's scripts in the page's world, in a world of their own, or
+  none (for the parity rule, `docs/ISOLATION_AND_LIMITATIONS.md` §2);
+- `scripts/check_localization.py`: ru and en hold the same keys, no UI text is written into the code, and
+  dates and numbers are written in the interface's language;
+- `scripts/check_log_privacy.py`: nothing of the user's is written to the system log in clear;
 - a container-migration check.
 
 ## Using it
 
 1. On first launch, create a master password. It cannot be recovered.
-2. Use **＋** to create a profile and set its device/version, start URL, proxy (optionally
-   with a warning when the proxy's exit IP changes between launches), user agent, time zone,
-   geolocation, WebRTC policy, history recording and retention, and whether it is ephemeral.
-   Changes apply at the next launch. The **Device / version** picker tags the
-   profile with a target Apple OS version (macOS 26, iOS 26/27, iPadOS 26); iOS profiles also
-   get their device class's navigator/screen values (see note above).
+2. Use **＋** to create a profile. Its editor is one screen in parts — **Profile**,
+   **Connection**, **Identity**, **Window**, **Location and Language**, **Privacy**, **Data** — with an index
+   on the left that jumps to each: name, glyph (a colour of the palette and up to two letters of
+   its own), **tags** and **notes**, start URL, search engine, ephemeral; proxy (optionally with a
+   warning when the proxy's exit IP changes between launches) and WebRTC; device/version, the
+   Safari version it names in its User-Agent, and user agent; window size (as it is; as large as a 13.6″/15.3″ MacBook Air's or a 14.2″/16.2″ MacBook
+   Pro's screen allows below its menu bar; or a size of its own — a real window, which is what a
+   page measures; the screen pages see stays this Mac's, since WebKit on macOS cannot declare
+   another without CSS giving it away; one larger than the screen opens as large as it allows,
+   and the editor says so); geolocation (with Reset); time zone and language — from the connection,
+   manual (a time zone and a language of its own), or random (a country's own pair, picked once
+   and kept; one that is not where the proxy comes out is warned about); local requests (protected by
+   default: a page from the internet cannot reach this Mac or the local network — without a proxy
+   by a rule list; with one this Mac is always refused and the rest goes through the proxy); Safe
+   Browsing; cookies to start with (an export pasted as text — JSON or cookies.txt — or a file
+   dropped or chosen, read as Import Cookies reads one and queued, encrypted, for the new profile's
+   first launch); history recording and retention, AutoFill,
+   cookie sync. Changes apply at the next launch. Tags and notes are the person's own: the
+   Profiles list shows the tags on each row, lists them in its sidebar (a click shows the
+   profiles with that tag) and its search finds a profile by its name, a tag or its notes; they
+   are kept encrypted in the profile's settings, synced and exported with it, and no page sees
+   them. The **View for websites** picker sets what the profile calls itself: Safari on this Mac
+   (macOS 26), or a mobile view — Safari on this Mac under an iPhone's (Safari 26, 27) or an
+   iPad's User-Agent, in a window of that device's size and nothing more (see note above).
+   **Connection** chooses the proxy with three buttons — **No Proxy**, **From the
+   List**, **New**. **New** is one field: paste the proxy as the provider gave it —
+   `host:port:user:pass`, `user:pass@host:port`, `socks5://user:pass@host:port` (or `http://`,
+   `https://`) or `host:port`. It is read as a line of Import is (one parser), and what it was
+   read as — or why it is not a proxy, in words — shows under the field as you type; the password
+   shows as dots while the field is not being edited. The type comes from the scheme; without
+   one, from **Check**, which asks the proxy itself step by step (as the list's check) and shows
+   the type it answered as, the exit country with its flag, the latency and the exit IP — or the
+   state that says how it fails and what to do. Save checks a scheme-less proxy itself when Check
+   was not clicked, and saves nothing it could not find a type for; a proxy found but not working
+   is shown before it is saved. **From the List** lists the list's proxies (searchable, working
+   ones first, fastest first) with their last check; Check there checks the chosen one as the
+   list does.
 3. **Launch** opens a window for the profile. Profiles run side by side, and every window
    and tab is labelled with its profile. Closing a profile's last window stops that profile
    and returns you to the Profiles window; the app stays open.
@@ -162,10 +271,17 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 7. **Cookies:** **⋯ → Import Cookies…** reads a JSON or Netscape `cookies.txt` export, shows
    what can be imported and why the rest cannot (with line numbers), then imports into that
    profile: at once when it runs, otherwise when it next starts.
-8. **Warm-up:** **⋯ → Warm Up…** takes web addresses (one per line) and an optional search,
-   starts the profile if it is stopped, and visits the pages one after the other in a tab of
-   it: a random time on each page, scrolling, and if asked one plain link followed. **Stop**
-   in the sheet, closing the robot's tab or stopping the profile ends it.
+8. **Warm-up:** **⋯ → Warm Up…** takes a ready-made list (general, by interest, or by
+   country: 26 countries), one put together for the proxy's country, or web addresses of your
+   own; starts the profile without a window if it is stopped, and visits the pages one after
+   the other in a hidden window of it: a random time on each page, scrolling, and if asked one
+   plain link followed. **Stop** in the sheet, closing the robot's tab or stopping the profile
+   ends it. When the run is over the sheet lists the profile's cookies per site and how many
+   the run added. **Repeat on a schedule** runs the same plan every N hours while the app is
+   unlocked (never in a profile that is open; it is tried again 10 minutes later).
+   **More → Warm Up Several Profiles…** warms the ticked profiles one after the other with one
+   plan, each stopped and encrypted again before the next starts; the rest of the queue can be
+   cancelled.
 9. **Stop**, or closing the last window, saves history and encrypts the profile's website
    data. **Lock** stops every profile and forgets the keys. Quitting (⌘Q) does the same,
    and waits until every profile is sealed.
@@ -174,6 +290,107 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    profile's settings, passwords, bookmarks, history and persistent cookies sync, encrypted;
    another Mac gets the cookies at its next launch of the profile, before the first page
    (**⋯ → Edit…** → **Sync cookies with other devices** turns that off for a profile).
+11. **Proxies:** the Profiles window's sidebar → **Proxies** keeps a list of proxies, encrypted in the vault (this Mac
+   only, not synced):
+   - **Add** takes one proxy in the same one-line field as the profile editor, with **Check**
+     beside it: what the check found goes into the list with the proxy. A proxy without a
+     scheme whose type was not checked gets it from its first check, as an imported line.
+   - **Import…** takes a pasted list or a text file, one proxy per line: `host:port`,
+     `host:port:user:pass`, `user:pass@host:port` or `socks5://` / `http://` / `https://user:pass@host:port`
+     (` # Berlin 1` after a proxy names it). A line without a scheme gets its type from the first
+     check (**Found by Check**, the default; until then it is given to no profile), or the type
+     chosen in the sheet. Lines that cannot be read are listed with their number and why before
+     anything is added; a proxy already listed (the same host, port and user name) is not added
+     twice. The proxies typed into profiles before the list existed are in it from the first unlock.
+   - **Check All / Check Selected** checks each proxy *through itself*, step by step: its name, a
+     connection, a SOCKS5 and an HTTP handshake at once (the type is found, not assumed), the
+     login, a tunnel, then a geolocation service asked through it — exit IP, country (flag), city,
+     network, and the median of three tunnels' latency. Each way of failing has its own status,
+     symbol and colour, and the selected proxy's report says which step failed, in words, with
+     what to do: host not found, connection refused, no connection, **silent after connecting**
+     (an IP whitelist without this Mac's address, or a dead back end), login needed or rejected,
+     this Mac refused (403), no way out to the site. A check never goes direct. Checks run only
+     when asked.
+   - **Edit…** changes a proxy — its name, and the proxy as one line with **Check**; the profiles
+     that use it as it is in the list follow (a profile whose own copy was changed since keeps it).
+     A line pasted without a scheme over a proxy of a known type keeps that type while it names
+     the same proxy; another proxy is checked first, never left without a type. **Export…** writes the list for Import, after
+     saying that the user names and passwords will be in the file in plaintext (owner-only file).
+   - **Assign to Profiles…** gives the selected proxies to the profiles ticked: with one proxy all
+     of them get it, with several they get them in turn (round-robin). A running profile uses its
+     new proxy from its next launch. In the profile editor, **From the List** chooses one of the
+     list's proxies. The list shows how many profiles use each proxy.
+   - A profile started with a proxy that does not work says so in the Profiles window — which
+     profile, what the same probe found, what to do — with **Check Proxy** and **Show in Proxies**.
+12. **Several profiles at once:** ⌘-click (or ⇧-click for a range) selects rows of the Profiles
+   list; with two or more selected, a bar above the list launches, stops, warms up, assigns
+   proxies to or deletes them all (deleting asks once, naming how many).
+13. **Settings** (⌘, or **⋯ → Settings…**) — one window, a section per subject, and under every
+   setting a sentence on what it does and when it takes effect (at once, for new tabs, at a
+   profile's next start, at the app's next start, for new profiles, or "not a choice"):
+   - **Startup:** after unlocking, the Profiles window alone or also the profiles that had a window
+     at the last quit (kept encrypted in `settings.bin`, used once); restore tabs (a profile opens
+     again with the pages it left open and the tab that was in front — never an ephemeral profile
+     nor one that keeps no history; `tabs.bin`, encrypted with the profile's key, this Mac only);
+     confirm quitting (⌘Q lists what it stops and asks first).
+   - **New Profiles:** time zone and language from the connection; block local requests (on by
+     default); a random safe window size (on
+     by default: each new profile gets its own window size among those that fit this Mac's screen,
+     so that profiles do not all open with the same window); the search engine
+     (DuckDuckGo, Google, Bing, Yahoo, Ecosia or Yandex — what a new profile's address bar and
+     warm-up search with; each profile changes it in its editor, **Profile**); QUIC — off with a
+     proxy, always (it goes around proxies), not a switch.
+   - **Behavior:** AutoFill passwords (the app's switch over each profile's own); new tabs next to
+     the current one or after the last; ask before closing a window of several tabs; page zoom of
+     new tabs; in a build without the App Sandbox, each profile its own app in the Dock (its own
+     process and Safari's window) and how many letters of its name its Dock icon shows. In a
+     profile shown in Safari's own window, tabs, zoom and downloads follow Safari's settings.
+   - **Proxies:** the list; checks only on request; a profile whose proxy does not work either
+     starts and says why (the default) or is not started at all — its proxy is asked first. Either
+     way nothing goes around the proxy.
+   - **Downloads:** the folder (the Downloads folder by default; another one is reached through a
+     bookmark in the App Sandbox) and whether to ask each time.
+   - **Diagnostics:** **Collect Diagnostics…** saves a ZIP where you choose — the short report,
+     the settings, the profiles by number (running or not, the kind of connection, what their
+     settings are), this run's log and, in a build without the App Sandbox, the system's log of the
+     last 30 minutes (the app's, its profiles' processes' and WebKit's) and the Safari-chrome check.
+     Never in it: profiles' names, tags and notes, proxies' addresses and credentials, passwords,
+     cookies, history, addresses visited, request bodies — in the logs, what is the user's is
+     `<private>` as it was written, and the self-test searches a bundle's bytes for a profile's
+     name, notes and proxy credentials. **Copy Short Report** puts the version, macOS, this Mac's
+     Safari and WebKit and the app's checks of itself on the clipboard. Nothing is sent.
+   - **Updates**, **Keyboard Shortcuts** (the app's own, as its menus define them: ⌘K and ⌃⌘V
+     among them) and **About** (version, macOS, this Mac's Safari and WebKit, the build; links when
+     the release sets `WEBSITE_URL` / `SUPPORT_URL`).
+14. **Command palette** (⌘K, **File** menu): the Profiles window comes to the front (opened again
+   if it was closed) with a search field over what the app can do — each profile's own commands
+   (launch, or new window and stop while it runs; edit; warm up), found by its name, its tags or
+   the country it exits in; the proxies; warming up several profiles; Sync Now; Lock; each section
+   of Settings; Copy Short Report. Each word typed matches the start of a word, then the inside of
+   one, then letters in order. ↑/↓ choose, Return runs, Esc closes. In a page that uses ⌘K itself,
+   the page gets the key first, as in Safari.
+15. **Paste as Typed** (⌃⌘V, **Edit** menu — in a profile shown in Safari's own window, in Safari's
+   Edit menu): the clipboard's text is typed into the page's focused field as a person types it,
+   for a field that refuses pasting or watches typing. Each character is a key down and a key up
+   on the key a Mac's US or Russian layout has for it, with Shift pressed and let go around a
+   capital; 60–180 ms between keys (more after a space or a punctuation mark, and now and then a
+   pause of up to a second), each key held 30–110 ms; they start once the shortcut's keys are let
+   go. They are real key events sent to the window, so the page sees trusted `keydown`, `input`
+   and `keyup` events. A character no key types on these layouts (an emoji, an accented letter, a
+   new line, a tab) is given as an input method gives text, without a key. At most 2000
+   characters (more would take many minutes). It types only while the page has the keyboard: a
+   key or a click of yours stops it, and so does another window or tab; a word says how far it
+   got. What a page can still tell: [ISOLATION_AND_LIMITATIONS.md §8d](docs/ISOLATION_AND_LIMITATIONS.md).
+16. **What Sites See** (a profile's **⋯** menu, or ⌘K): **Take Snapshot** opens one page of this Mac
+   in a new window of the profile (starting it if it is stopped), then in Safari, and measures it in
+   each with the scripts CI's live comparison runs — navigator, screen, the window, request headers
+   in their order, TLS (the ClientHello: versions, suites, extensions, groups, ALPN, JA3, JA4), APIs,
+   rendering. The list says, signal by signal, **same** or **differs** with both values and, for
+   known differences, what they mean; the window's own size and place are shown, not compared
+   (each browser's window has its own). Nothing leaves this Mac: the page reports to a listener on
+   127.0.0.1 that is open only while the snapshot is taken, and nothing is kept. Not measured
+   here: HTTP/2 settings and the TCP SYN. How it works and what it cannot see:
+   [ISOLATION_AND_LIMITATIONS.md §2](docs/ISOLATION_AND_LIMITATIONS.md).
 
 ## What is implemented, and how
 
@@ -191,7 +408,7 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Several proxied profiles at once | Each profile's data store has its own proxy and credentials. **Three SOCKS5 profiles (one with authentication) launched together and loading at once, each through its own proxy, verified by the self-test** |
 | Fast launch with a proxy | The lookup through the proxy (time zone, exit IP) holds a launch at most 1 s when a location is remembered for that proxy (the lookup finishes in the background), at most 3 s with nothing remembered. **Verified by the self-test** |
 | Proxy exit-IP warning | Per profile, off by default: a warning when the proxy's exit IP differs from the previous launch's (same proxy and credentials); the IP is stored only while the option is on |
-| Version-aware profiles | **Device / version** picker (`DeviceGeneration`): macOS 26 / iOS 26 / iOS 27 / iPadOS 26. Sets the self-declared `User-Agent` and defaults, and names a behaviour set. The macOS UA names the host's Safari version; iOS profiles additionally get navigator/screen values. Does **not** switch the real WebKit core. |
+| Version-aware profiles | **View for websites** picker (`DeviceGeneration`): macOS 26 / mobile view iPhone (Safari 26, 27) / iPad view. Sets the self-declared `User-Agent` and defaults, and names a behaviour set. The macOS UA names the host's Safari version — or the one the profile names (editor → Identity → **Safari version in the User-Agent**: Auto, or a recent release; one of another major release than this Mac's is marked risky, since what a page measures is still the engine's); an iPhone or iPad view changes the User-Agent and the window's size, nothing a page measures. Does **not** switch the real WebKit core. |
 | Per-profile user agent | `WKWebView.customUserAgent` (an explicit UA overrides the generation) |
 | Russian / English UI | `Localizable.strings` (ru default, en fallback), deterministic bundle lookup |
 | Stable window lifecycle | closing a profile window never quits or crashes the app (use-after-free fixed); verified by the self-test |
@@ -201,8 +418,14 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Cookie import into a profile | **⋯ → Import Cookies…**: JSON (EditThisCookie, Cookie-Editor, Puppeteer/DevTools, Playwright, Selenium, Chrome and Firefox database exports, JSON Lines) and Netscape `cookies.txt`. Damaged files import whatever is readable (bad bytes, a broken or cut-off JSON entry or a malformed line cost only that cookie); the report lists every other entry with its line and reason (public-suffix domain, expired, `__Host-` rules, …). A running profile gets them at once (and the store is read back for any WebKit refused), a stopped one at its next launch before the first page loads (queued encrypted). **Checked by the self-test** end to end through the proxy |
 | App Sandbox | Default build; entitlements in `Resources/PrivacyBrowser.entitlements` (documented in the limitations doc, §9); container migration. **Sandbox enforcement and migration verified in CI** |
 | Encrypted sync client | Engine with CAS writes, per-record merges for bookmarks and history, tombstones; folder transport; HTTP transport for a documented API |
-| Session warm-up ("cookie robot") | **⋯ → Warm Up…**: the pages of a list (and a search first, if given) visited one after the other in a tab of the profile — its proxy, cookies, User-Agent and scripts, as when browsing — with a random time on each page (5–15 s by default), trackpad-like scrolling, and optionally one plain link followed (same site; from the search, a result; never sign-out, purchase, deletion, download or new-window links). Waits while its tab is not shown; stops on Stop, when its tab closes, when a page shows a dialog and when the profile stops. Scrolls with real wheel events while its window is key, otherwise from an isolated script world; clicks with real pointer events when they reach the link, otherwise with an (untrusted) script click — on the CI runner pointer events did not reach pages, so clicks there were script clicks; nothing is added to the page world, and nothing is downloaded. **Checked by the self-test** through the proxy (order, cookies and User-Agent on the requests, Referer of the followed link, links refused, the stop cases, sealing after a stop mid-run) |
+| Session warm-up ("cookie robot") | **⋯ → Warm Up…**: the pages of a list (and a search first, if given) visited one after the other in a tab of the profile — its proxy, cookies, User-Agent and scripts, as when browsing — with a random time on each page (5–15 s by default), trackpad-like scrolling, and optionally one plain link followed (same site; from the search, a result; never sign-out, purchase, deletion, download or new-window links). Waits while its tab is not shown; stops on Stop, when its tab closes, when a page shows a dialog and when the profile stops. Scrolls with real wheel events while its window is key, otherwise from an isolated script world; clicks with real pointer events when they reach the link, otherwise with an (untrusted) script click — on the CI runner pointer events did not reach pages, so clicks there were script clicks; nothing is added to the page world, and nothing is downloaded. After a run, the profile's cookies per site (registrable domain, Public Suffix List) and which of them the run added, counted in the profile's own cookie store where the robot ran (its own process included) and reported with the run's status. **More → Warm Up Several Profiles…**: a queue — the ticked profiles one after the other with one plan, each started without a window if stopped and stopped and sealed again before the next, "profile n of N", the rest cancellable. **Repeat on a schedule** (per profile, encrypted `warmup-schedule.bin`, this Mac only, not exported): every N hours with the saved plan while the app is unlocked, through the same queue (one run at a time); a profile that is running is left alone and tried again 10 minutes later; a Mac that slept runs it once, not once per missed interval. **Checked by the self-test** through the proxy (order, cookies and User-Agent on the requests, Referer of the followed link, links refused, the stop cases, sealing after a stop mid-run; a queue of two profiles never running at once, each without a window and sealed before the next; the per-site report against a cookie the profile already had); due times, postponing and the queue's order by unit tests |
+| A profile in its own process, with Safari's own window (unsandboxed build) | On by default in the unsandboxed build (`PB_PROFILE_PROCESS=0` or `defaults write <bundle id> PBProfileProcess -bool NO` switches back to one process, our own windows). One process per profile (`ProfileProcess`; only its own profile's key, on its stdin — never the vault's master key), its language, locale and time zone native to it, its window Safari's chrome hosted from Safari's frameworks. The whole process is held to the profile's proxy (`ProfileNetworkGuard`): every web view on the profile's store at its initializers, every other store closed, the process's own connections through the proxy, privacy preferences pinned (workers included), certificates checked without this Mac fetching for them, Safari's and the system's services that would fetch from another process or keep the browsing refused, Handoff off; the kernel refuses the process UDP (with a proxy) and the real Safari's folders, which Safari's frameworks would otherwise use as the profile's ([ISOLATION_AND_LIMITATIONS.md §4a](docs/ISOLATION_AND_LIMITATIONS.md)). **Checked on every push**: a leak page in Safari's chrome (every request reaches the proxy, `.local` included, and none reaches this Mac's own loopback (refused: the system never proxies it); no WebRTC or WebTransport, in workers either; a certificate that needs a fetch refused), the process's own report, and a capture of every packet and every file written around it — nothing may leave the machine outside the proxy or be written where the real Safari keeps its data. `--check-safari-chrome` lists the private pieces a macOS update removed |
+| Updates | **Settings → Updates** (⌘,): in a build with an update feed, checks a signed static appcast (automatically every 6 hours, or never), downloads a release in the background and installs it only at the end of a quit that sealed every profile — or now, after a confirmation that lists what it stops; the release notes as text. A build without a feed (every development build) has no updater and sends nothing. **Checked by** unit tests (the feed's signatures, versions, no downgrade), the installer's tests on real signed bundles, the self-test (the quit gate) and the UI snapshots ([docs/UPDATES.md](docs/UPDATES.md)) |
+| Automation API and `pbctl` | **⋯ → Automation API…** (off by default; the build without the App Sandbox): scripts on this Mac list, start (with a window or out of sight), open pages in and stop profiles, and read and write their cookies (Playwright, Netscape, extension JSON) — through the same code as the app's buttons, so a script's profile has its proxy, its process and its sealing. HTTP on 127.0.0.1 only, a 43-character token, requests from web pages (`Origin`, `Sec-Fetch-*`) and rebinding names (`Host`) refused, never a proxy's credentials in an answer; `scripts/pbctl` on the command line ([docs/AUTOMATION_API.md](docs/AUTOMATION_API.md)). It does not drive pages: WebKit's embedded views have no CDP for Puppeteer or Playwright to attach to. **Checked by the self-test** on a real listener (refusals, a hidden start, cookies in and out, stop) and by unit tests |
+| Profile export and import | **⋯ → Export Profile…** / **Import Profile…**: a profile whole — settings and proxy, passwords, history, bookmarks, warm-up plan, cookies and website data, Safari's state — in one `.pbprofile` file under a password of its own (Argon2id), for another Mac, a backup or a colleague. Nothing is written in plaintext on either side (the website data is re-encrypted from archive to archive in memory); an import is always a new profile. **Checked by the self-test** (a cookie of the original is sent by the imported profile's first request) and by unit tests |
 | Profile sync: cookies and settings | A profile's persistent cookies sync as `cookies.bin` (encrypted with the profile key), merged cookie by cookie — the newer change wins, deletions included; recorded when the profile stops, applied at its next launch before the first page loads, imported cookies joining at that launch. Settings changed on two Macs: the newer edit wins, the other kept as `config.bin.conflict`. Session and partitioned cookies, and ephemeral profiles, never sync ([docs/SYNC_FORMAT.md](docs/SYNC_FORMAT.md)). **Checked by the self-test** with a second vault set up from the sync folder, and by unit tests |
+| Proxy manager: import, stepwise check, edit, export, assign, rotate | **Profiles window sidebar → Proxies**: a list kept encrypted in the vault (`proxies.bin`, this Mac only); each profile keeps its own copy of its proxy, linked to the list by host, port and user name — profiles' proxies are taken into the list once, an edit in the list reaches the profiles that use it as it is, and a missing entry never leaves a profile without its proxy. Import reads pasted lines or a text file — `host:port`, `host:port:user:pass`, `user:pass@host:port`, `socks5://` / `http://` / `https://user:pass@host:port`, ` # label` — reports every line it could not read with its number and why, and leaves the type of a line without a scheme to the first check (`ProxyListImport`). The check (`ProxyProbe`, POSIX sockets, only to the proxy) resolves the name, connects, tries a SOCKS5 and an HTTP handshake at once, logs in, opens a tunnel (the target named to the proxy), then asks the geolocation services through the proxy (`allowFailover = false`): exit IP, country, city, network, median latency of three tunnels. Distinct states, each with its own symbol and colour, a report step by step with advice: host not found, DNS failed, a VPN's substitute DNS (fake IP: every address in 198.18.0.0/15 or 240.0.0.0/4 and no proxy's answer there — behind such a DNS a name that does not exist looks the same), refused, unreachable, no connection, **silent after connecting**, closes at once, not a proxy, login needed or rejected, refuses this Mac, no way out, no answer through it. A profile whose proxy does not work at its launch says why, with Check. Edit (profiles follow), export (plaintext warning, 0600 file), assign one to many or round-robin. Each proxy says where it came from — added by you, or given by Lumen's own proxy service (which does not exist yet: the list, its file and its screens tell the two apart already). **Checked by the self-test** against every listener of the self-test proxy (HTTP, SOCKS5, both with a login none/wrong/right, IPv6, silent, closed, unknown host), end to end with exit details, inside a packet capture that fails on any packet of the app past loopback; the probe's verdicts against scripted servers, parsing, the link and migration by unit tests |
+| Several profiles at once | ⌘-click and ⇧-click select rows of the Profiles list; with two or more, a bar acts on all of them: Launch (the stopped ones, at most four starting at a time: the next when one of those has its window up — `LaunchQueue`, checked by unit tests and the self-test), Stop (the running ones, sealed together), Warm Up (opens the warm-up for the first; a hook for a queue), Assign Proxy (from the list, one or in turn), Delete (one confirmation naming the count) |
 
 ### Approximated (the platform offers no native API)
 
@@ -212,8 +435,7 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Time zone | JS shim (`Intl`, `Date` getters, offsets, string forms, local constructors, setters, `Date.parse`), also in workers created from a blob; by default the proxy's exit-IP zone, looked up through the proxy at launch | Workers loaded from a URL and service workers keep the host zone; the lookup is a third-party request |
 | Geolocation | JS shim: deny (default) or fixed coordinates | Detectable; the IP address reveals location unless the proxy matches |
 | WebRTC leak reduction | Off in the engine (default) via a private `WKPreferences` property, JS removal as the fallback; or a JS shim forcing relay-only | Relay-only shows the TURN server this Mac's IP |
-| WebRTC through a profile's SOCKS5 proxy | Packet-tunnel system extension (`NE=1` builds): a TURN relay per profile on a virtual address, relaying through the proxy's UDP ASSOCIATE; several profiles with different proxies at once; IPv4 and IPv6 ([docs/TUNNEL.md](docs/TUNNEL.md)). Without it, or with an HTTP proxy, WebRTC is off in proxied profiles, with a warning | Needs a paid Apple Developer team and user approval; the extension itself has not run on a real Mac yet (CI cannot load it); relay-only is enforced by the page script, not the engine; starting it disconnects another VPN app's tunnel; relay candidates only; the proxy must relay UDP |
-| Navigator / screen (iPhone/iPad profiles) | Document-start JS getters on the prototypes (blob workers too) | URL-loaded workers keep the Mac's values; GPU/TLS/fonts/canvas still the Mac's |
+| WebRTC through a profile's SOCKS5 proxy | A TURN relay per profile on 127.0.0.1 in the app, relaying through the proxy's UDP ASSOCIATE, and the network guard (`NE=1` builds): a content-filter system extension that holds the profile's processes to its proxy, carrying nothing itself ([docs/TUNNEL.md](docs/TUNNEL.md)). Without the guard ready, with an HTTP proxy, a proxy without UDP, or one whose UDP leaves from another address than its TCP, WebRTC is off in proxied profiles, and the launch says why | Needs the team's content-filter entitlement and an administrator's approval once; the extension has not run on a real Mac yet (CI cannot load it; CI runs the call with the self-test standing in for it); the filter sees the start of every new connection of the Mac to tell a profile's apart; relay candidates only; the proxy must relay UDP, from the address its TCP leaves from; TURN over TCP not carried |
 | Website language (`Accept-Language`, `navigator.language`) | Set once per app run, before WebKit starts, from the first launched profile's proxy country | WebKit has one language list per process: later profiles share it |
 | Password AutoFill | A user script in its own content world (invisible to pages; no `window.webkit` in the page world), a native suggestion list and Safari's save questions | WKWebView on macOS 26 has no AutoFill API: sign-ins are recognised by heuristics (a submitted form, or the fields leaving after a click), filled values fire untrusted `input`/`change` events, and `:autofill` (Safari's highlight) and WebKit's key button need a WebKit with AutoFill scripting; no strong-password suggestions or Touch ID; passwords are per profile (Safari profiles share them) |
 
@@ -227,6 +449,11 @@ CI (`.github/workflows/ci.yml`) runs on every push:
   only at its next launch.
 - Session restore, tab drag-and-drop between windows, find-in-page, extensions, and
   content blocking (`WKContentRuleList` would be the native route).
+- The proxy list is this Mac's only (profiles carry their own copy of a proxy, which syncs); its
+  checks ask third-party geolocation services (through the proxy, only when asked), and a launch
+  with a proxy probes it (handshake and one tunnel, to the start page's site or the first
+  geolocation service, through the proxy). Warming up
+  several profiles at once opens the warm-up of the first; there is no warm-up queue yet.
 
 ## Project layout
 
@@ -237,26 +464,45 @@ Sources/
     Crypto/                        AEAD (AES-GCM), Argon2id + BLAKE2b, PBKDF2, HKDF helpers
     Vault/                         MasterVault (key hierarchy), DeviceSettings
     Profiles/                      ProfileConfiguration, ProfileRepository
+    Proxies/                       ProxyList (encrypted list, check results, rotation, the profiles' link), ProxyListImport
+                                   (pasted lines, report), ProxyProbe + ProbeSocket (the stepwise check), ProxyDiagnosis,
+                                   ProxyExitDetails, assignment
     Passwords/                     PasswordVault, PasswordMatching (site rules), PublicSuffixList
     Cookies/                       CookieImporter (JSON and Netscape readers, checks, report), CookieJar (synced cookies, merge)
-    WarmUp/                        WarmUpPlan (pages, timing, which links), WebAddress (typed text → address or search)
+    WarmUp/                        WarmUpPlan (pages, timing, which links), WebAddress (typed text → address or search),
+                                   presets and choice, WarmUpQueue, WarmUpSchedule (what is due), WarmUpCookieReport (per site)
     Library/                       HistoryStore, BookmarkStore (mergeable, tombstones)
     Archive/                       encrypted chunk stream, directory archiver, WebKitDataLayout
     Sync/                          envelope/codec, engine, SyncTransport contract
       Transports/                  LocalDirectorySyncTransport (local-only), HTTPSyncTransport (server-ready)
-    Support/                       errors, atomic 0600 writes, encrypted document files
+    Updates/                       the signed update feed (Appcast, UpdateVerifier, UpdateSigner), BuildVersion
+    Support/                       errors, atomic 0600 writes, encrypted document files, DocumentFormat
+  pbupdate/                        makes and checks the update feed: keys, a release's signature, the appcast
+  UpdateInstaller/                 macOS: replaces the app with a checked release (code signature, processes, the swap)
+  PrivacyBrowserUpdater/           macOS: the installer helper the app starts at the end of a quit
+  ObjCExceptions/                  macOS: PBCatchException, an Objective-C @try for Safari's code called from Swift tasks
   PrivacyBrowser/                  macOS app (SwiftUI + AppKit + WebKit)
-    App/                           main.swift, PrivacyBrowserApp, AppModel, AppEnvironment, SelfTest, SiteCapture
+    App/                           main.swift, PrivacyBrowserApp, AppModel (+Proxies), ProxyListModel, AppEnvironment,
+                                   SelfTest, SiteCapture, WarmUpCoordinator (warm-up queue and schedule)
     Browser/                       ProfileManager, BrowserSession, BrowserWindowController, BrowserTab,
                                    TabStripView, ProfileLibrary, LibraryWindowController, PasswordAutoFill
                                    (+ PasswordAutoFillScript, AutoFillPanel), WarmUpRobot,
-                                   WebDataStoreVault, ProxyConfigurationFactory, PrivacyScripts
-    UI/                            setup/unlock, profile list, editor, passwords, library, sync settings, warm-up
+                                   WebDataStoreVault, ProxyConfigurationFactory, ProxyGeoLookup, ProxyChecker,
+                                   PrivacyScripts, ProfileNetworkGuard, ServerTrust, SafariPaths, HandOffs
+    UI/                            setup/unlock, profile list (+ bulk bar), editor, passwords, library, sync settings,
+                                   warm-up (one profile, and several in a queue), proxies (list, report, edit, export,
+                                   import, assign, a launch's proxy problem),
+                                   profile export/import, cookie export
 Tests/BrowserCoreTests/            XCTest suite (incl. stub sync server)
-Resources/                         Info.plist, entitlements (sandboxed / not), container-migration.plist
-scripts/                           build-app.sh, test-shims.mjs, selftest_proxy.py, safari_reference.py,
+Tests/UpdateInstallerTests/        the installer on real signed bundles (macOS)
+Resources/                         Info.plist, entitlements (sandboxed / not), container-migration.plist,
+                                   Updater/Info.plist (the installer helper)
+scripts/                           build-app.sh, release.sh (a release, or a dry run of one), test-shims.mjs,
+                                   selftest_proxy.py, safari_reference.py,
                                    update_public_suffix_list.py,
-                                   live_compare.py + live_sites/ (pages measured in Safari and in profiles),
-                                   leak_check.py (QUIC/WebRTC around a proxy)
+                                   live_compare.py + live_sites/ (pages measured in Safari and in profiles;
+                                   the local pages' scripts are Resources/SiteProbes/, which the app runs too),
+                                   leak_check.py (QUIC/WebRTC around a proxy), update_check.py (updates end to end),
+                                   payments_check.py (Apple Pay and Web Push calls in Safari and in profiles)
 docs/                              architecture, isolation and limitations, sync format, sync server API
 ```

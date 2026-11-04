@@ -1,0 +1,128 @@
+{
+ "en-flat-warm.png": {
+  "textPrimary": {
+   "worst": 15.86,
+   "best": 15.86
+  },
+  "textSecondary": {
+   "worst": 7.8,
+   "best": 7.8
+  },
+  "textTertiary": {
+   "worst": 5.95,
+   "best": 5.95
+  }
+ },
+ "en-flat-dark.png": {
+  "textPrimary": {
+   "worst": 15.86,
+   "best": 15.86
+  },
+  "textSecondary": {
+   "worst": 7.8,
+   "best": 7.8
+  },
+  "textTertiary": {
+   "worst": 5.95,
+   "best": 5.95
+  }
+ },
+ "en-flat-busy.png": {
+  "textPrimary": {
+   "worst": 15.86,
+   "best": 15.86
+  },
+  "textSecondary": {
+   "worst": 7.8,
+   "best": 7.8
+  },
+  "textTertiary": {
+   "worst": 5.95,
+   "best": 5.95
+  }
+ },
+ "en-sidebar-warm.png": {
+  "textPrimary": {
+   "worst": 8.78,
+   "best": 9.06
+  },
+  "textSecondary": {
+   "worst": 4.32,
+   "best": 4.45
+  },
+  "textTertiary": {
+   "worst": 3.29,
+   "best": 3.4
+  }
+ },
+ "en-sidebar-dark.png": {
+  "textPrimary": {
+   "worst": 13.9,
+   "best": 14.67
+  },
+  "textSecondary": {
+   "worst": 6.83,
+   "best": 7.21
+  },
+  "textTertiary": {
+   "worst": 5.21,
+   "best": 5.51
+  }
+ },
+ "en-sidebar-busy.png": {
+  "textPrimary": {
+   "worst": 9.33,
+   "best": 12.84
+  },
+  "textSecondary": {
+   "worst": 4.59,
+   "best": 6.31
+  },
+  "textTertiary": {
+   "worst": 3.5,
+   "best": 4.82
+  }
+ },
+ "en-all-warm.png": {
+  "textPrimary": {
+   "worst": 8.78,
+   "best": 9.06
+  },
+  "textSecondary": {
+   "worst": 4.32,
+   "best": 4.45
+  },
+  "textTertiary": {
+   "worst": 3.29,
+   "best": 3.4
+  }
+ },
+ "en-all-dark.png": {
+  "textPrimary": {
+   "worst": 13.9,
+   "best": 14.67
+  },
+  "textSecondary": {
+   "worst": 6.83,
+   "best": 7.21
+  },
+  "textTertiary": {
+   "worst": 5.21,
+   "best": 5.51
+  }
+ },
+ "en-all-busy.png": {
+  "textPrimary": {
+   "worst": 9.33,
+   "best": 12.84
+  },
+  "textSecondary": {
+   "worst": 4.59,
+   "best": 6.31
+  },
+  "textTertiary": {
+   "worst": 3.5,
+   "best": 4.82
+  }
+ }
+}

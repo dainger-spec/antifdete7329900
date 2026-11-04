@@ -3,7 +3,9 @@ import XCTest
 
 final class CookieJarTests: XCTestCase {
     private let t0 = Date(timeIntervalSince1970: 1_800_000_000)
-    private var nextYear: Date { Date().addingTimeInterval(365 * 86_400).rounded }
+    /// Fixed for the whole test: a cookie made twice must be the same cookie, whenever it is made
+    /// (an expiry taken from the clock at each call differs by a second across a second boundary).
+    private let nextYear = Date().addingTimeInterval(365 * 86_400).rounded
 
     private func cookie(_ name: String, _ value: String, domain: String = "site.test", hostOnly: Bool = true,
                         expires: Date?? = .none) -> ImportedCookie {
@@ -180,9 +182,13 @@ final class ProfileSyncTests: XCTestCase {
         try await SyncEngine(repository: repository, transport: transport).sync()
     }
 
+    /// Fixed for the whole test, as in `CookieJarTests`: computed at each call, the same cookie made
+    /// on two devices on either side of a second boundary had expiries a second apart — a change of
+    /// its own, which then won the merge (CI run 398).
+    private let expires = Date().addingTimeInterval(30 * 86_400).rounded
+
     private func cookie(_ name: String, _ value: String) -> ImportedCookie {
-        ImportedCookie(name: name, value: value, domain: "site.test", hostOnly: false,
-                       expires: Date().addingTimeInterval(30 * 86_400).rounded, secure: true)
+        ImportedCookie(name: name, value: value, domain: "site.test", hostOnly: false, expires: expires, secure: true)
     }
 
     private func record(_ repository: ProfileRepository, _ id: UUID, store: [ImportedCookie], at time: Date) throws {

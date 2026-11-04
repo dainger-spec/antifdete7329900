@@ -1,0 +1,917 @@
+{
+ "current": {
+  "text": [
+   {
+    "fg": "textPrimary",
+    "bg": "backdrop",
+    "ratio": 16.84
+   },
+   {
+    "fg": "textPrimary",
+    "bg": "sidebar",
+    "ratio": 15.86
+   },
+   {
+    "fg": "textPrimary",
+    "bg": "surface",
+    "ratio": 15.14
+   },
+   {
+    "fg": "textPrimary",
+    "bg": "toolbar",
+    "ratio": 14.52
+   },
+   {
+    "fg": "textPrimary",
+    "bg": "card",
+    "ratio": 14.21
+   },
+   {
+    "fg": "textPrimary",
+    "bg": "raised",
+    "ratio": 13.72
+   },
+   {
+    "fg": "textPrimary",
+    "bg": "raisedInset",
+    "ratio": 12.4
+   },
+   {
+    "fg": "textPrimary",
+    "bg": "field",
+    "ratio": 16.27
+   },
+   {
+    "fg": "textSecondary",
+    "bg": "backdrop",
+    "ratio": 8.28
+   },
+   {
+    "fg": "textSecondary",
+    "bg": "sidebar",
+    "ratio": 7.8
+   },
+   {
+    "fg": "textSecondary",
+    "bg": "surface",
+    "ratio": 7.44
+   },
+   {
+    "fg": "textSecondary",
+    "bg": "toolbar",
+    "ratio": 7.14
+   },
+   {
+    "fg": "textSecondary",
+    "bg": "card",
+    "ratio": 6.99
+   },
+   {
+    "fg": "textSecondary",
+    "bg": "raised",
+    "ratio": 6.75
+   },
+   {
+    "fg": "textSecondary",
+    "bg": "raisedInset",
+    "ratio": 6.1
+   },
+   {
+    "fg": "textSecondary",
+    "bg": "field",
+    "ratio": 8.0
+   },
+   {
+    "fg": "textTertiary",
+    "bg": "backdrop",
+    "ratio": 5.2
+   },
+   {
+    "fg": "textTertiary",
+    "bg": "sidebar",
+    "ratio": 4.9
+   },
+   {
+    "fg": "textTertiary",
+    "bg": "surface",
+    "ratio": 4.68
+   },
+   {
+    "fg": "textTertiary",
+    "bg": "card",
+    "ratio": 4.39
+   },
+   {
+    "fg": "textTertiary",
+    "bg": "raised",
+    "ratio": 4.24
+   },
+   {
+    "fg": "textTertiary",
+    "bg": "raisedInset",
+    "ratio": 3.83
+   },
+   {
+    "fg": "textTertiary",
+    "bg": "field",
+    "ratio": 5.03
+   },
+   {
+    "fg": "textDisabled",
+    "bg": "backdrop",
+    "ratio": 2.95
+   },
+   {
+    "fg": "textDisabled",
+    "bg": "surface",
+    "ratio": 2.65
+   },
+   {
+    "fg": "textDisabled",
+    "bg": "raised",
+    "ratio": 2.41
+   },
+   {
+    "fg": "accent",
+    "bg": "sidebar",
+    "ratio": 5.96
+   },
+   {
+    "fg": "accent",
+    "bg": "surface",
+    "ratio": 5.69
+   },
+   {
+    "fg": "accent",
+    "bg": "raised",
+    "ratio": 5.16
+   },
+   {
+    "fg": "accent",
+    "bg": "raisedInset",
+    "ratio": 4.66
+   },
+   {
+    "fg": "running",
+    "bg": "surface",
+    "ratio": 7.94
+   },
+   {
+    "fg": "running",
+    "bg": "raised",
+    "ratio": 7.2
+   },
+   {
+    "fg": "running",
+    "bg": "raisedInset",
+    "ratio": 6.5
+   },
+   {
+    "fg": "warning",
+    "bg": "sidebar",
+    "ratio": 8.19
+   },
+   {
+    "fg": "warning",
+    "bg": "surface",
+    "ratio": 7.82
+   },
+   {
+    "fg": "warning",
+    "bg": "raised",
+    "ratio": 7.09
+   },
+   {
+    "fg": "warning",
+    "bg": "raisedInset",
+    "ratio": 6.41
+   },
+   {
+    "fg": "danger",
+    "bg": "surface",
+    "ratio": 5.25
+   },
+   {
+    "fg": "danger",
+    "bg": "raised",
+    "ratio": 4.76
+   },
+   {
+    "fg": "danger",
+    "bg": "raisedInset",
+    "ratio": 4.3
+   }
+  ],
+  "special": [
+   {
+    "pair": "textPrimary on rowSelected (surface)",
+    "ratio": 12.63,
+    "kind": "text",
+    "fgHex": "#ECEEF2",
+    "bgHex": "#20283C"
+   },
+   {
+    "pair": "textSecondary on rowSelected (surface)",
+    "ratio": 6.21,
+    "kind": "text",
+    "fgHex": "#A2A9B6",
+    "bgHex": "#20283C"
+   },
+   {
+    "pair": "textTertiary on rowSelected (surface)",
+    "ratio": 3.9,
+    "kind": "text",
+    "fgHex": "#7C8494",
+    "bgHex": "#20283C"
+   },
+   {
+    "pair": "textSecondary on rowHover (surface)",
+    "ratio": 6.72,
+    "kind": "text",
+    "fgHex": "#A2A9B6",
+    "bgHex": "#1F2229"
+   },
+   {
+    "pair": "textTertiary on rowHover (surface)",
+    "ratio": 4.22,
+    "kind": "text",
+    "fgHex": "#7C8494",
+    "bgHex": "#1F2229"
+   },
+   {
+    "pair": "textPrimary on sidebar selection",
+    "ratio": 12.9,
+    "kind": "text",
+    "fgHex": "#ECEEF2",
+    "bgHex": "#25272B"
+   },
+   {
+    "pair": "textTertiary (counts) on sidebar selection",
+    "ratio": 3.98,
+    "kind": "text",
+    "fgHex": "#7C8494",
+    "bgHex": "#25272B"
+   },
+   {
+    "pair": "accent on accentTint (exit pill, chip)",
+    "ratio": 4.65,
+    "kind": "text",
+    "fgHex": "#6F8FEA",
+    "bgHex": "#222A3C"
+   },
+   {
+    "pair": "white on accentFill (selected chip)",
+    "ratio": 3.51,
+    "kind": "text",
+    "fgHex": "#FFFFFF",
+    "bgHex": "#5E84EB"
+   },
+   {
+    "pair": "primaryText on primaryFill (primary button)",
+    "ratio": 15.03,
+    "kind": "text",
+    "fgHex": "#121419",
+    "bgHex": "#E6E8ED"
+   },
+   {
+    "pair": "textTertiary placeholder on field",
+    "ratio": 5.03,
+    "kind": "text",
+    "fgHex": "#7C8494",
+    "bgHex": "#0F1115"
+   },
+   {
+    "pair": "textPrimary at 60 % (sealing row) on surface",
+    "ratio": 6.15,
+    "kind": "text",
+    "fgHex": "#96999E",
+    "bgHex": "#161920"
+   },
+   {
+    "pair": "textSecondary at 60 % (sealing row) on surface",
+    "ratio": 3.51,
+    "kind": "text",
+    "fgHex": "#6A6F7A",
+    "bgHex": "#161920"
+   },
+   {
+    "pair": "textPrimary at 45 % (disabled secondary button) on raised",
+    "ratio": 3.91,
+    "kind": "text",
+    "fgHex": "#7B7E84",
+    "bgHex": "#1E222A"
+   },
+   {
+    "pair": "fieldBorder (white 10 %) edge vs raised",
+    "ratio": 1.36,
+    "kind": "non-text",
+    "fgHex": "#34383F",
+    "bgHex": "#1E222A"
+   },
+   {
+    "pair": "field fill vs raised",
+    "ratio": 1.19,
+    "kind": "non-text",
+    "fgHex": "#0F1115",
+    "bgHex": "#1E222A"
+   },
+   {
+    "pair": "strongBorder (white 14 %) vs raised",
+    "ratio": 1.56,
+    "kind": "non-text",
+    "fgHex": "#3E4148",
+    "bgHex": "#1E222A"
+   },
+   {
+    "pair": "white 24 % edge vs raised",
+    "ratio": 2.2,
+    "kind": "non-text",
+    "fgHex": "#54575D",
+    "bgHex": "#1E222A"
+   },
+   {
+    "pair": "white 30 % edge vs raised",
+    "ratio": 2.7,
+    "kind": "non-text",
+    "fgHex": "#62646A",
+    "bgHex": "#1E222A"
+   },
+   {
+    "pair": "focus ring accent vs raised",
+    "ratio": 5.16,
+    "kind": "non-text",
+    "fgHex": "#6F8FEA",
+    "bgHex": "#1E222A"
+   },
+   {
+    "pair": "focus ring accent vs surface",
+    "ratio": 5.69,
+    "kind": "non-text",
+    "fgHex": "#6F8FEA",
+    "bgHex": "#161920"
+   },
+   {
+    "pair": "focus ring accent at 30 % (field halo) vs raised",
+    "ratio": 1.62,
+    "kind": "non-text",
+    "fgHex": "#364364",
+    "bgHex": "#1E222A"
+   },
+   {
+    "pair": "running dot vs surface",
+    "ratio": 7.94,
+    "kind": "non-text",
+    "fgHex": "#4CC38A",
+    "bgHex": "#161920"
+   },
+   {
+    "pair": "progress track (white 10 %) vs surface",
+    "ratio": 1.33,
+    "kind": "non-text",
+    "fgHex": "#2D3036",
+    "bgHex": "#161920"
+   },
+   {
+    "pair": "progress fill accentFill vs track",
+    "ratio": 3.76,
+    "kind": "non-text",
+    "fgHex": "#5E84EB",
+    "bgHex": "#2D3036"
+   },
+   {
+    "pair": "toggle on (accentFill) vs raised",
+    "ratio": 4.54,
+    "kind": "non-text",
+    "fgHex": "#5E84EB",
+    "bgHex": "#1E222A"
+   },
+   {
+    "pair": "hairline (white 8 %) vs surface",
+    "ratio": 1.25,
+    "kind": "non-text",
+    "fgHex": "#292B32",
+    "bgHex": "#161920"
+   },
+   {
+    "pair": "rowSelected vs surface",
+    "ratio": 1.2,
+    "kind": "non-text",
+    "fgHex": "#20283C",
+    "bgHex": "#161920"
+   },
+   {
+    "pair": "controlFill (white 6 %) button vs raised",
+    "ratio": 1.19,
+    "kind": "non-text",
+    "fgHex": "#2C2F37",
+    "bgHex": "#1E222A"
+   }
+  ]
+ },
+ "proposed": {
+  "text": [
+   {
+    "fg": "textPrimary",
+    "bg": "backdrop",
+    "ratio": 16.84
+   },
+   {
+    "fg": "textPrimary",
+    "bg": "sidebar",
+    "ratio": 15.86
+   },
+   {
+    "fg": "textPrimary",
+    "bg": "surface",
+    "ratio": 15.14
+   },
+   {
+    "fg": "textPrimary",
+    "bg": "toolbar",
+    "ratio": 14.52
+   },
+   {
+    "fg": "textPrimary",
+    "bg": "card",
+    "ratio": 14.21
+   },
+   {
+    "fg": "textPrimary",
+    "bg": "raised",
+    "ratio": 13.72
+   },
+   {
+    "fg": "textPrimary",
+    "bg": "raisedInset",
+    "ratio": 12.4
+   },
+   {
+    "fg": "textPrimary",
+    "bg": "field",
+    "ratio": 16.27
+   },
+   {
+    "fg": "textSecondary",
+    "bg": "backdrop",
+    "ratio": 8.28
+   },
+   {
+    "fg": "textSecondary",
+    "bg": "sidebar",
+    "ratio": 7.8
+   },
+   {
+    "fg": "textSecondary",
+    "bg": "surface",
+    "ratio": 7.44
+   },
+   {
+    "fg": "textSecondary",
+    "bg": "toolbar",
+    "ratio": 7.14
+   },
+   {
+    "fg": "textSecondary",
+    "bg": "card",
+    "ratio": 6.99
+   },
+   {
+    "fg": "textSecondary",
+    "bg": "raised",
+    "ratio": 6.75
+   },
+   {
+    "fg": "textSecondary",
+    "bg": "raisedInset",
+    "ratio": 6.1
+   },
+   {
+    "fg": "textSecondary",
+    "bg": "field",
+    "ratio": 8.0
+   },
+   {
+    "fg": "textTertiary",
+    "bg": "backdrop",
+    "ratio": 6.32
+   },
+   {
+    "fg": "textTertiary",
+    "bg": "sidebar",
+    "ratio": 5.95
+   },
+   {
+    "fg": "textTertiary",
+    "bg": "surface",
+    "ratio": 5.68
+   },
+   {
+    "fg": "textTertiary",
+    "bg": "card",
+    "ratio": 5.33
+   },
+   {
+    "fg": "textTertiary",
+    "bg": "raised",
+    "ratio": 5.15
+   },
+   {
+    "fg": "textTertiary",
+    "bg": "raisedInset",
+    "ratio": 4.65
+   },
+   {
+    "fg": "textTertiary",
+    "bg": "field",
+    "ratio": 6.1
+   },
+   {
+    "fg": "textDisabled",
+    "bg": "backdrop",
+    "ratio": 2.95
+   },
+   {
+    "fg": "textDisabled",
+    "bg": "surface",
+    "ratio": 2.65
+   },
+   {
+    "fg": "textDisabled",
+    "bg": "raised",
+    "ratio": 2.41
+   },
+   {
+    "fg": "accent",
+    "bg": "sidebar",
+    "ratio": 5.96
+   },
+   {
+    "fg": "accent",
+    "bg": "surface",
+    "ratio": 5.69
+   },
+   {
+    "fg": "accent",
+    "bg": "raised",
+    "ratio": 5.16
+   },
+   {
+    "fg": "accent",
+    "bg": "raisedInset",
+    "ratio": 4.66
+   },
+   {
+    "fg": "running",
+    "bg": "surface",
+    "ratio": 7.94
+   },
+   {
+    "fg": "running",
+    "bg": "raised",
+    "ratio": 7.2
+   },
+   {
+    "fg": "running",
+    "bg": "raisedInset",
+    "ratio": 6.5
+   },
+   {
+    "fg": "warning",
+    "bg": "sidebar",
+    "ratio": 8.19
+   },
+   {
+    "fg": "warning",
+    "bg": "surface",
+    "ratio": 7.82
+   },
+   {
+    "fg": "warning",
+    "bg": "raised",
+    "ratio": 7.09
+   },
+   {
+    "fg": "warning",
+    "bg": "raisedInset",
+    "ratio": 6.41
+   },
+   {
+    "fg": "danger",
+    "bg": "surface",
+    "ratio": 5.9
+   },
+   {
+    "fg": "danger",
+    "bg": "raised",
+    "ratio": 5.34
+   },
+   {
+    "fg": "danger",
+    "bg": "raisedInset",
+    "ratio": 4.83
+   }
+  ],
+  "special": [
+   {
+    "pair": "textPrimary on rowSelected (surface)",
+    "ratio": 12.63,
+    "kind": "text",
+    "fgHex": "#ECEEF2",
+    "bgHex": "#20283C"
+   },
+   {
+    "pair": "textSecondary on rowSelected (surface)",
+    "ratio": 6.21,
+    "kind": "text",
+    "fgHex": "#A2A9B6",
+    "bgHex": "#20283C"
+   },
+   {
+    "pair": "textTertiary on rowSelected (surface)",
+    "ratio": 4.74,
+    "kind": "text",
+    "fgHex": "#8A93A3",
+    "bgHex": "#20283C"
+   },
+   {
+    "pair": "textSecondary on rowHover (surface)",
+    "ratio": 6.72,
+    "kind": "text",
+    "fgHex": "#A2A9B6",
+    "bgHex": "#1F2229"
+   },
+   {
+    "pair": "textTertiary on rowHover (surface)",
+    "ratio": 5.13,
+    "kind": "text",
+    "fgHex": "#8A93A3",
+    "bgHex": "#1F2229"
+   },
+   {
+    "pair": "textPrimary on sidebar selection",
+    "ratio": 12.9,
+    "kind": "text",
+    "fgHex": "#ECEEF2",
+    "bgHex": "#25272B"
+   },
+   {
+    "pair": "textTertiary (counts) on sidebar selection",
+    "ratio": 4.84,
+    "kind": "text",
+    "fgHex": "#8A93A3",
+    "bgHex": "#25272B"
+   },
+   {
+    "pair": "accent on accentTint (exit pill, chip)",
+    "ratio": 4.65,
+    "kind": "text",
+    "fgHex": "#6F8FEA",
+    "bgHex": "#222A3C"
+   },
+   {
+    "pair": "white on accentFill (selected chip)",
+    "ratio": 3.51,
+    "kind": "text",
+    "fgHex": "#FFFFFF",
+    "bgHex": "#5E84EB"
+   },
+   {
+    "pair": "white on accentFillStrong (proposed chip)",
+    "ratio": 4.96,
+    "kind": "text",
+    "fgHex": "#FFFFFF",
+    "bgHex": "#4469D6"
+   },
+   {
+    "pair": "primaryText on primaryFill (primary button)",
+    "ratio": 15.03,
+    "kind": "text",
+    "fgHex": "#121419",
+    "bgHex": "#E6E8ED"
+   },
+   {
+    "pair": "textTertiary placeholder on field",
+    "ratio": 6.1,
+    "kind": "text",
+    "fgHex": "#8A93A3",
+    "bgHex": "#0F1115"
+   },
+   {
+    "pair": "textPrimary at 60 % (sealing row) on surface",
+    "ratio": 6.15,
+    "kind": "text",
+    "fgHex": "#96999E",
+    "bgHex": "#161920"
+   },
+   {
+    "pair": "textSecondary at 60 % (sealing row) on surface",
+    "ratio": 3.51,
+    "kind": "text",
+    "fgHex": "#6A6F7A",
+    "bgHex": "#161920"
+   },
+   {
+    "pair": "textPrimary at 45 % (disabled secondary button) on raised",
+    "ratio": 3.91,
+    "kind": "text",
+    "fgHex": "#7B7E84",
+    "bgHex": "#1E222A"
+   },
+   {
+    "pair": "fieldBorder (white 10 %) edge vs raised",
+    "ratio": 1.36,
+    "kind": "non-text",
+    "fgHex": "#34383F",
+    "bgHex": "#1E222A"
+   },
+   {
+    "pair": "field fill vs raised",
+    "ratio": 1.19,
+    "kind": "non-text",
+    "fgHex": "#0F1115",
+    "bgHex": "#1E222A"
+   },
+   {
+    "pair": "strongBorder (white 14 %) vs raised",
+    "ratio": 1.56,
+    "kind": "non-text",
+    "fgHex": "#3E4148",
+    "bgHex": "#1E222A"
+   },
+   {
+    "pair": "white 24 % edge vs raised",
+    "ratio": 2.2,
+    "kind": "non-text",
+    "fgHex": "#54575D",
+    "bgHex": "#1E222A"
+   },
+   {
+    "pair": "white 30 % edge vs raised",
+    "ratio": 2.7,
+    "kind": "non-text",
+    "fgHex": "#62646A",
+    "bgHex": "#1E222A"
+   },
+   {
+    "pair": "focus ring accent vs raised",
+    "ratio": 5.16,
+    "kind": "non-text",
+    "fgHex": "#6F8FEA",
+    "bgHex": "#1E222A"
+   },
+   {
+    "pair": "focus ring accent vs surface",
+    "ratio": 5.69,
+    "kind": "non-text",
+    "fgHex": "#6F8FEA",
+    "bgHex": "#161920"
+   },
+   {
+    "pair": "focus ring accent at 30 % (field halo) vs raised",
+    "ratio": 1.62,
+    "kind": "non-text",
+    "fgHex": "#364364",
+    "bgHex": "#1E222A"
+   },
+   {
+    "pair": "running dot vs surface",
+    "ratio": 7.94,
+    "kind": "non-text",
+    "fgHex": "#4CC38A",
+    "bgHex": "#161920"
+   },
+   {
+    "pair": "progress track (white 10 %) vs surface",
+    "ratio": 1.33,
+    "kind": "non-text",
+    "fgHex": "#2D3036",
+    "bgHex": "#161920"
+   },
+   {
+    "pair": "progress fill accentFill vs track",
+    "ratio": 3.76,
+    "kind": "non-text",
+    "fgHex": "#5E84EB",
+    "bgHex": "#2D3036"
+   },
+   {
+    "pair": "toggle on (accentFill) vs raised",
+    "ratio": 4.54,
+    "kind": "non-text",
+    "fgHex": "#5E84EB",
+    "bgHex": "#1E222A"
+   },
+   {
+    "pair": "hairline (white 8 %) vs surface",
+    "ratio": 1.25,
+    "kind": "non-text",
+    "fgHex": "#292B32",
+    "bgHex": "#161920"
+   },
+   {
+    "pair": "rowSelected vs surface",
+    "ratio": 1.2,
+    "kind": "non-text",
+    "fgHex": "#20283C",
+    "bgHex": "#161920"
+   },
+   {
+    "pair": "controlFill (white 6 %) button vs raised",
+    "ratio": 1.19,
+    "kind": "non-text",
+    "fgHex": "#2C2F37",
+    "bgHex": "#1E222A"
+   }
+  ]
+ },
+ "changes": [
+  {
+   "kind": "text",
+   "ru": "\u041f\u043e\u0434\u0441\u043a\u0430\u0437\u043a\u0430 \u0432 \u043b\u0438\u0441\u0442\u0435 (EditorNote) \u00b7 textTertiary \u043d\u0430 raised",
+   "en": "Hint in a sheet (EditorNote) \u00b7 textTertiary on raised",
+   "now": 4.24,
+   "instead": "textTertiary #8A93A3",
+   "next": 5.15
+  },
+  {
+   "kind": "text",
+   "ru": "\u041f\u043e\u0434\u043f\u0438\u0441\u044c \u0432 \u043f\u0430\u043d\u0435\u043b\u0438 \u043b\u0438\u0441\u0442\u0430 \u00b7 textTertiary \u043d\u0430 raisedInset",
+   "en": "Caption in a sheet panel \u00b7 textTertiary on raisedInset",
+   "now": 3.83,
+   "instead": "textTertiary #8A93A3",
+   "next": 4.65
+  },
+  {
+   "kind": "text",
+   "ru": "\u0427\u0438\u0441\u043b\u043e \u0432 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u043c \u043f\u0443\u043d\u043a\u0442\u0435 \u0431\u043e\u043a\u043e\u0432\u043e\u0439 \u043f\u0430\u043d\u0435\u043b\u0438",
+   "en": "Count in the selected sidebar item",
+   "now": 3.98,
+   "instead": "textTertiary #8A93A3",
+   "next": 4.84
+  },
+  {
+   "kind": "text",
+   "ru": "\u041c\u0435\u0442\u0430 \u0432 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u0439 \u0441\u0442\u0440\u043e\u043a\u0435 \u00b7 textTertiary \u043d\u0430 rowSelected",
+   "en": "Meta in a selected row \u00b7 textTertiary on rowSelected",
+   "now": 3.9,
+   "instead": "textTertiary #8A93A3",
+   "next": 4.74
+  },
+  {
+   "kind": "text",
+   "ru": "\u041e\u0448\u0438\u0431\u043a\u0430 \u0432 \u043f\u0430\u043d\u0435\u043b\u0438 \u043b\u0438\u0441\u0442\u0430 \u00b7 danger \u043d\u0430 raisedInset",
+   "en": "Error in a sheet panel \u00b7 danger on raisedInset",
+   "now": 4.3,
+   "instead": "danger #EC6F68",
+   "next": 4.83
+  },
+  {
+   "kind": "text",
+   "ru": "\u0411\u0435\u043b\u044b\u0439 \u043d\u0430 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u043c \u0447\u0438\u043f\u0435 \u043f\u0440\u043e\u0433\u0440\u0435\u0432\u0430 \u00b7 accentFill",
+   "en": "White on a selected warm-up chip \u00b7 accentFill",
+   "now": 3.51,
+   "instead": "accentFillStrong #4469D6",
+   "next": 4.96
+  },
+  {
+   "kind": "text",
+   "ru": "\u0421\u0442\u0440\u043e\u043a\u0430 \u00ab\u0428\u0438\u0444\u0440\u043e\u0432\u0430\u043d\u0438\u0435\u2026\u00bb \u043f\u0440\u0438\u0433\u043b\u0443\u0448\u0435\u043d\u0430 \u0434\u043e 60 % \u00b7 \u0432\u0442\u043e\u0440\u0438\u0447\u043d\u044b\u0439 \u0442\u0435\u043a\u0441\u0442",
+   "en": "Sealing row dimmed to 60 % \u00b7 secondary text",
+   "now": 3.51,
+   "instead": "\u0431\u0435\u0437 \u043f\u0440\u0438\u0433\u043b\u0443\u0448\u0435\u043d\u0438\u044f, \u0441\u0442\u0430\u0442\u0443\u0441 \u0441\u043b\u043e\u0432\u043e\u043c / no dimming, a status",
+   "next": 7.44
+  },
+  {
+   "kind": "non-text",
+   "ru": "\u0412\u044b\u0431\u0440\u0430\u043d\u043d\u0430\u044f \u0441\u0442\u0440\u043e\u043a\u0430: \u0437\u0430\u043b\u0438\u0432\u043a\u0430 rowSelected \u043f\u0440\u043e\u0442\u0438\u0432 surface",
+   "en": "Selected row: rowSelected fill vs surface",
+   "now": 1.2,
+   "instead": "\u043f\u043e\u043b\u043e\u0441\u043a\u0430 accentFill + \u0447\u0435\u043a\u0431\u043e\u043a\u0441 / accentFill bar + checkbox",
+   "next": 4.18
+  },
+  {
+   "kind": "non-text",
+   "ru": "\u0424\u043e\u043a\u0443\u0441 \u043f\u043e\u043b\u044f: \u043e\u0440\u0435\u043e\u043b accent 30 %",
+   "en": "Field focus: 30 % accent halo",
+   "now": 1.62,
+   "instead": "\u043a\u043e\u043b\u044c\u0446\u043e 2 pt accent / 2 pt accent ring",
+   "next": 5.16
+  },
+  {
+   "kind": "non-text",
+   "ru": "\u0424\u043e\u043a\u0443\u0441 \u043a\u043d\u043e\u043f\u043a\u0438, \u0441\u0442\u0440\u043e\u043a\u0438, \u043f\u0443\u043d\u043a\u0442\u0430 \u043c\u0435\u043d\u044e",
+   "en": "Focus on a button, row, sidebar item",
+   "now": 1.0,
+   "instead": "\u043a\u043e\u043b\u044c\u0446\u043e 2 pt accent / 2 pt accent ring",
+   "next": 5.69
+  },
+  {
+   "kind": "non-text",
+   "ru": "\u041a\u0440\u0430\u0439 \u043f\u043e\u043b\u044f: fieldBorder \u0431\u0435\u043b\u044b\u0439 10 %",
+   "en": "Field edge: fieldBorder white 10 %",
+   "now": 1.36,
+   "instead": "\u00ab\u0423\u0432\u0435\u043b\u0438\u0447\u0438\u0442\u044c \u043a\u043e\u043d\u0442\u0440\u0430\u0441\u0442\u00bb: \u0431\u0435\u043b\u044b\u0439 36 % / Increase Contrast: white 36 %",
+   "next": 3.29
+  }
+ ]
+}

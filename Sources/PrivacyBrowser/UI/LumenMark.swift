@@ -97,13 +97,19 @@ struct LumenMark: View {
     var size: CGFloat
 
     var body: some View {
-        let tile = RoundedRectangle(cornerRadius: size * 0.2235, style: .continuous)
+        // The design's tile: `bg3`, a 14 % contour, a faint light along its top edge; large, it
+        // casts a soft shadow.
+        let tile = RoundedRectangle(cornerRadius: size * 0.25, style: .continuous)
+        let line: CGFloat = size >= 28 ? 1 : 0.5
         ZStack {
             tile.fill(Theme.markTile)
-            tile.strokeBorder(Color.white.opacity(0.12), lineWidth: size >= 28 ? 1 : 0.5)
+            tile.strokeBorder(Color.white.opacity(0.14), lineWidth: line)
+            tile.strokeBorder(LinearGradient(colors: [Color.white.opacity(0.08), Color.clear],
+                                             startPoint: .top, endPoint: .center), lineWidth: line)
             LumenGlyphShape(cut: LumenMarkGeometry.cut(forTileSize: size)).fill(Theme.markGlyph)
         }
         .frame(width: size, height: size)
+        .shadow(color: Color.black.opacity(size >= 48 ? 0.5 : 0), radius: 15, y: 12)
         .accessibilityElement()
         .accessibilityLabel(Text(verbatim: "Lumen"))
     }

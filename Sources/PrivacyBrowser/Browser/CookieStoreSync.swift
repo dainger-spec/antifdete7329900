@@ -13,13 +13,25 @@ enum CookieStoreSync {
         await allCookies(in: store).compactMap(cookie(from:))
     }
 
+    /// Every cookie of the store a file can hold, session cookies included (`anyCookie`).
+    static func exportableCookies(in store: WKHTTPCookieStore) async -> [ImportedCookie] {
+        await allCookies(in: store).compactMap(anyCookie(from:))
+    }
+
     /// A store cookie as the document keeps it; nil for a session cookie, and for a partitioned
     /// (CHIPS) one: WebKit marks those with its partition (`StoragePartition`), which the public
     /// API cannot set on the other device, and unpartitioned the cookie would reach more sites
     /// (as for an import).
     static func cookie(from cookie: HTTPCookie) -> ImportedCookie? {
-        guard !cookie.isSessionOnly, let expires = cookie.expiresDate else { return nil }
+        guard !cookie.isSessionOnly, cookie.expiresDate != nil else { return nil }
+        return anyCookie(from: cookie)
+    }
+
+    /// A store cookie, session cookies included (an export: `CookieExport`); nil for a
+    /// partitioned one, which no file format can tie to its top-level site.
+    static func anyCookie(from cookie: HTTPCookie) -> ImportedCookie? {
         if let partition = cookie.properties?[HTTPCookiePropertyKey("StoragePartition")] as? String, !partition.isEmpty { return nil }
+        let expires = cookie.isSessionOnly ? nil : cookie.expiresDate
         let stored = cookie.domain.lowercased()
         let hostOnly = !stored.hasPrefix(".")
         var sameSite: ImportedCookie.SameSite?

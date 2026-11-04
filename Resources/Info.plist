@@ -11,13 +11,13 @@
 		<string>en</string>
 	</array>
 	<key>CFBundleExecutable</key>
-	<string>PrivacyBrowser</string>
+	<string>Lumen</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(BUNDLE_ID)</string>
 	<key>CFBundleName</key>
-	<string>PrivacyBrowser</string>
+	<string>Lumen</string>
 	<key>CFBundleDisplayName</key>
-	<string>PrivacyBrowser</string>
+	<string>Lumen</string>
 	<!-- Contents/Resources/AppIcon.icns, drawn by the app at build time (scripts/build-app.sh). -->
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
@@ -28,7 +28,7 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
-	<string>14.0</string>
+	<string>26.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSPrincipalClass</key>

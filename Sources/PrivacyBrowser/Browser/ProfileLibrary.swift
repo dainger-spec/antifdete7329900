@@ -38,7 +38,8 @@ final class ProfileLibrary: ObservableObject {
     // MARK: History
 
     func recordVisit(url: URL, title: String?) {
-        guard recordsHistory, history.recordVisit(url: url, title: title) else { return }
+        // "What sites see" measures in a window of the profile: its page is not the person's visit.
+        guard recordsHistory, !SiteSnapshotPage.isMeasuringPage(url), history.recordVisit(url: url, title: title) else { return }
         historyChanged()
     }
 
@@ -70,7 +71,7 @@ final class ProfileLibrary: ObservableObject {
         do {
             try history.save()
         } catch {
-            report("Could not save history: \(error.localizedDescription)")
+            report(String(format: L("history.error.save"), errorText(error)))
         }
     }
 
@@ -87,7 +88,7 @@ final class ProfileLibrary: ObservableObject {
             guard let self else { return }
             self.saveTask = nil
             if case .failure(let error) = result {
-                self.report("Could not save history: \(error.localizedDescription)")
+                self.report(String(format: L("history.error.save"), errorText(error)))
             }
         }
     }
@@ -123,13 +124,13 @@ final class ProfileLibrary: ObservableObject {
         do {
             return try change()
         } catch {
-            report((error as? CoreError)?.description ?? error.localizedDescription)
+            report(errorText(error))
             return nil
         }
     }
 
     private func report(_ message: String) {
-        log.error("\(message, privacy: .public)")
+        log.error("\(message, privacy: .private)")
         onError?(message)
     }
 }

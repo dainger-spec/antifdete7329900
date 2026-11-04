@@ -27,6 +27,9 @@ struct BrowserTabContext {
     /// AutoFill on or off, and the sites passwords are never saved for, as they are now.
     let passwordSettings: ProfilePasswordSettings
     let library: ProfileLibrary
+    /// The profile has a proxy: a server's certificate is checked without this Mac fetching for
+    /// it (`ServerTrust`).
+    let hasProxy: Bool
     /// The profile proxy's user name and password, answered to the proxy's own auth challenges.
     let proxyCredential: URLCredential?
 }
@@ -37,7 +40,7 @@ struct BrowserTabContext {
 /// configuration created by `BrowserSession`), so they share cookies and storage — exactly
 /// like tabs of one browser profile. Tabs of different profiles never share anything.
 @MainActor
-final class BrowserTab: NSObject {
+final class BrowserTab: NSObject, PasswordAutoFillHost, AnswersProfileChallenges {
     let id = UUID()
     let webView: WKWebView
     weak var host: BrowserTabHost?
@@ -68,6 +71,9 @@ final class BrowserTab: NSObject {
     /// instead), and why the last one did: the warm-up robot tells a failed visit by them.
     private(set) var failedNavigations = 0
     private(set) var lastNavigationError: String?
+    /// The error the last load that failed before its page came ended with, as WebKit gave it
+    /// (the self-test's certificate check says what it carried).
+    private(set) var lastProvisionalError: NSError?
     /// Main-frame navigations whose page committed (held weakly): who started a load knows by it
     /// when its page came. The URL and `isLoading` do not always tell: a load requested while the
     /// tab's previous one is still being decided can leave the tab, for a moment, with no address
@@ -81,8 +87,26 @@ final class BrowserTab: NSObject {
     /// (a response WebKit cannot show fails as a load), so a run never saves a file.
     var refusesDownloads = false
 
+    /// When the page's process ended lately (`processEnded`). WebKit, left to itself, reloads such a
+    /// page once and then leaves it; a delegate that answers the call takes that over — this one
+    /// reloaded every time, and a page whose process ends at every load was reloaded for ever, a new
+    /// process each time: on the owner's Mac an iPhone view kept the app, the window server, launchd
+    /// and logd busy until the session was restarted (1 November). Reloaded automatically at most
+    /// `automaticReloads` times within `terminationWindow`; after that the tab loads nothing — not
+    /// even an error page, which needs a process too — and its window says so (`pageStopped`).
+    private var recentTerminations: [Date] = []
+    static let automaticReloads = 2
+    static let terminationWindow: TimeInterval = 60
+    /// The page's process ended more often than it is reloaded for: nothing loads until the person
+    /// asks (Reload, or another address), and the window covers the page with why.
+    private(set) var pageStopped = false
+    /// How many times the page's process ended in this tab, and why the last time, as WebKit said
+    /// (the self-test reads them).
+    private(set) var terminationCount = 0
+    private(set) var lastTerminationReason = "-"
+
     /// Password AutoFill in this tab: suggestions, filling, the save question.
-    private(set) lazy var passwords = TabPasswordAutoFill(tab: self, vault: context.passwordVault,
+    private(set) lazy var passwords = TabPasswordAutoFill(host: self, vault: context.passwordVault,
                                                           settings: context.passwordSettings)
 
     init(configuration: WKWebViewConfiguration, context: BrowserTabContext) {
@@ -95,6 +119,9 @@ final class BrowserTab: NSObject {
         webView.customUserAgent = context.userAgent
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true
+        // A link preview is fetched by Quick Look, outside the profile's store and proxy, and a
+        // click on it opens the link in the default browser (`HandOffs`).
+        webView.allowsLinkPreview = false
         webView.navigationDelegate = self
         webView.uiDelegate = self
         observe()
@@ -121,7 +148,17 @@ final class BrowserTab: NSObject {
     @discardableResult
     func load(_ url: URL) -> WKNavigation? {
         startsEmpty = false
+        resumeAfterStop()
         return webView.load(URLRequest(url: url))
+    }
+
+    /// The person asked for the page again after it stopped (`pageStopped`): the count of ended
+    /// processes starts afresh.
+    func resumeAfterStop() {
+        guard pageStopped || !recentTerminations.isEmpty else { return }
+        pageStopped = false
+        recentTerminations.removeAll()
+        host?.tabDidChange(self)
     }
 
     /// The page of `navigation` has committed (replaced the one before).
@@ -297,6 +334,7 @@ extension BrowserTab: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         if let navigation { abandonedNavigations.add(navigation) }
         let nsError = error as NSError
+        lastProvisionalError = nsError
         if let reason = proxyAuthFailure {
             // The load was cancelled by this tab itself, at the proxy's challenge (fail-closed).
             proxyAuthFailure = nil
@@ -327,6 +365,12 @@ extension BrowserTab: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge,
                  completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         let space = challenge.protectionSpace
+        // With a proxy, a certificate is never checked the system's default way, which can fetch
+        // from the network as this Mac (`ServerTrust`).
+        if space.authenticationMethod == NSURLAuthenticationMethodServerTrust, context.hasProxy {
+            ServerTrust.answerWithoutFetching(challenge, completionHandler)
+            return
+        }
         // The profile's proxy asks for its credentials (HTTP 407 / SOCKS auth). With
         // proxyConfigurations set, WebKit hands these to the app instead of answering them itself,
         // so the system default would never send the profile's user name and password. Without
@@ -372,7 +416,7 @@ extension BrowserTab: WKNavigationDelegate {
                 do {
                     try self.context.passwordVault.upsert(PasswordEntry(origin: origin, username: credential.user ?? "", password: password))
                 } catch {
-                    self.log.error("Could not save the HTTP sign-in: \(String(describing: error), privacy: .public)")
+                    self.log.error("Could not save the HTTP sign-in: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
                 }
             }
             completionHandler(.useCredential, credential)
@@ -380,7 +424,42 @@ extension BrowserTab: WKNavigationDelegate {
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        log.error("Web content process terminated; reloading")
+        processEnded(reason: "not said")
+    }
+
+    /// WebKit's own call with the reason, made instead of the one above when a delegate has it
+    /// (`WKNavigationDelegatePrivate`); the reason goes to the log, by name.
+    @objc(_webView:webContentProcessDidTerminateWithReason:)
+    func webView(_ webView: WKWebView, webContentProcessDidTerminateWithReason reason: Int) {
+        processEnded(reason: Self.terminationReason(reason))
+    }
+
+    /// `_WKProcessTerminationReason`, by name.
+    static func terminationReason(_ code: Int) -> String {
+        switch code {
+        case 0: return "exceeded the memory limit"
+        case 1: return "exceeded the CPU limit"
+        case 2: return "ended by the app"
+        case 3: return "crashed"
+        default: return "reason \(code)"
+        }
+    }
+
+    /// The page's process ended: reloaded, as Safari does, unless it already ended
+    /// `automaticReloads` times within `terminationWindow` — then the tab stops (`pageStopped`).
+    func processEnded(reason: String) {
+        terminationCount += 1
+        lastTerminationReason = reason
+        let now = Date()
+        recentTerminations = recentTerminations.filter { now.timeIntervalSince($0) < Self.terminationWindow } + [now]
+        let within = recentTerminations.count
+        guard within <= Self.automaticReloads, !pageStopped else {
+            log.error("The page's process ended again (\(self.lastTerminationReason, privacy: .public)), \(Int(within), privacy: .public) times within \(Int(Self.terminationWindow), privacy: .public) s: not reloaded; the tab waits for the person")
+            pageStopped = true
+            host?.tabDidChange(self)
+            return
+        }
+        log.error("The page's process ended (\(self.lastTerminationReason, privacy: .public)); reloading (\(Int(within), privacy: .public) of \(Int(Self.automaticReloads), privacy: .public) within \(Int(Self.terminationWindow), privacy: .public) s)")
         webView.reload()
     }
 
@@ -414,6 +493,15 @@ extension BrowserTab: WKNavigationDelegate {
 // MARK: - WKUIDelegate
 
 extension BrowserTab: WKUIDelegate {
+    /// The page's context menu without the items that hand its content to something outside the
+    /// profile — "Search with Google" (the real Safari, with the owner's cookies), Look Up,
+    /// Translate, Share, Quick Note, Writing Tools — and without Services (`HandOffs.strip`).
+    @objc(_webView:getContextMenuFromProposedMenu:forElement:userInfo:completionHandler:)
+    func webView(_ webView: WKWebView, contextMenuFromProposedMenu menu: NSMenu, forElement element: AnyObject?,
+                 userInfo: AnyObject?, completionHandler: @escaping (NSMenu?) -> Void) {
+        completionHandler(HandOffs.strip(menu))
+    }
+
     /// The window's frame, which WebKit turns into window.outerWidth/outerHeight and
     /// screenX/screenY. WebKit asks the UI delegate for it (`WKUIDelegatePrivate`, the method Safari
     /// answers); a delegate without it gets outerWidth = outerHeight = 0 and a screen position
@@ -499,24 +587,56 @@ extension BrowserTab: WKUIDelegate {
 // MARK: - WKDownloadDelegate
 
 extension BrowserTab: WKDownloadDelegate {
-    /// LIMITATION: downloaded files are written to ~/Downloads unencrypted; they are outside the
-    /// profile's encrypted storage. In the App Sandbox this needs
-    /// `com.apple.security.files.downloads.read-write`.
+    /// LIMITATION: downloaded files are written unencrypted, outside the profile's encrypted
+    /// storage: to the folder Settings → Downloads names (the Downloads folder by default), or
+    /// where the save panel is told to when the settings ask each time. In the App Sandbox the
+    /// Downloads folder needs `com.apple.security.files.downloads.read-write`, another folder the
+    /// bookmark the settings keep to it, and the save panel's choice is the user's own.
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
                   suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
-        completionHandler(Self.uniqueDownloadURL(suggestedFilename: suggestedFilename))
+        let preferences = BrowsingPreferences.current
+        guard preferences.askWhereToSave, let window = webView.window, window.isVisible else {
+            completionHandler(Self.uniqueDownloadURL(suggestedFilename: suggestedFilename, in: preferences.downloadFolderURL))
+            return
+        }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = Self.safeDownloadName(suggestedFilename)
+        panel.directoryURL = preferences.downloadFolderURL
+        panel.canCreateDirectories = true
+        // No destination: WebKit cancels the download, and nothing is written.
+        panel.beginSheetModal(for: window) { answer in completionHandler(answer == .OK ? panel.url : nil) }
+    }
+
+    /// A download's challenges: its certificate as a page's (`ServerTrust`), the proxy's own with
+    /// the profile's credentials, the rest the system's way.
+    func download(_ download: WKDownload, didReceive challenge: URLAuthenticationChallenge,
+                  completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        let policy = ProfileChallengePolicy(hasProxy: context.hasProxy, proxyCredential: context.proxyCredential)
+        if !policy.answer(challenge, completionHandler) {
+            completionHandler(.performDefaultHandling, nil)
+        }
     }
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        // Cancelled in the save panel: nothing failed.
+        if (error as NSError).domain == NSURLErrorDomain, (error as NSError).code == NSURLErrorCancelled { return }
         showMessage(String(format: L("download.failed"), error.localizedDescription))
     }
 
-    static func uniqueDownloadURL(suggestedFilename: String) -> URL {
-        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+    /// The suggested name without what would take it out of the folder or hide it.
+    static func safeDownloadName(_ suggestedFilename: String) -> String {
         let safeName = suggestedFilename.replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: ":", with: "_")
             .trimmingCharacters(in: CharacterSet(charactersIn: ". "))
-        var destination = downloads.appendingPathComponent(safeName.isEmpty ? "download" : safeName)
+        return safeName.isEmpty ? "download" : safeName
+    }
+
+    /// A name in `folder` (the Downloads folder by default) that no file has yet.
+    static func uniqueDownloadURL(suggestedFilename: String,
+                                  in folder: URL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]) -> URL {
+        let downloads = folder
+        let safeName = safeDownloadName(suggestedFilename)
+        var destination = downloads.appendingPathComponent(safeName)
         let base = destination.deletingPathExtension().lastPathComponent
         let ext = destination.pathExtension
         var counter = 1

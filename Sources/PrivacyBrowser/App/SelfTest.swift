@@ -1,9 +1,12 @@
 import AppKit
 import BrowserCore
 import CryptoKit
+import Darwin
+import Network
+import os
 import WebKit
 
-/// `PrivacyBrowser --self-test`: headless end-to-end checks against the real WebKit of the
+/// `Lumen --self-test`: headless end-to-end checks against the real WebKit of the
 /// running macOS, in the real (sandboxed or not) process. Exit code 0 = all checks passed.
 ///
 /// Unit tests cover the platform-independent core. This covers what only WebKit can answer:
@@ -25,37 +28,75 @@ import WebKit
 final class SelfTest {
     private var failures = 0
     private var passes = 0
+    /// Whether a plain web view of this WebKit, without the rule list, sends an `<a ping>` (the
+    /// ping checks' control); nil until measured.
+    private var pingsSentWithoutRules: Bool?
     private var retainedDelegates: [NSObject] = []
     private let origin = URL(string: "https://selftest.invalid/")!
     private let page = "<html><head><title>PB self-test</title></head><body>self-test</body></html>"
 
     static func start() {
         setvbuf(stdout, nil, _IOLBF, 0)
+        // Every check but the Safari-chrome one drives sessions of this process; that one asks for a
+        // process of its own explicitly.
+        setenv("PB_PROFILE_PROCESS", "0", 1)
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 300) {
-            print("SELFTEST TIMEOUT after 300 s")
+        let test = SelfTest()
+        // A hung check must not hold CI; the whole run takes about five minutes on the runner. What
+        // had been checked by then is still counted.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 600) {
+            print("SELFTEST TIMEOUT after 600 s")
+            MainActor.assumeIsolated { _ = test.finish(timedOut: true) }
             exit(3)
         }
         Task { @MainActor in
-            let test = SelfTest()
             await test.run()
-            print("SELFTEST \(test.failures == 0 ? "PASSED" : "FAILED"): \(test.passes) passed, \(test.failures) failed")
-            exit(test.failures == 0 ? 0 : 1)
+            exit(test.finish())
         }
         app.run()
     }
 
-    // MARK: Container migration check (two processes)
+    // MARK: Vault migration checks (two processes, two builds)
 
-    /// `--selftest-write-vault` (run by an unsandboxed build) creates a small vault at the
-    /// default location; `--selftest-read-vault` (run by the sandboxed build of the same bundle
-    /// ID, first launch) checks that macOS moved it into the container per container-migration.plist.
+    /// `--selftest-write-vault` (an unsandboxed build, CI only) creates a small vault at the default
+    /// location: a profile "Migrated" with website data of its own — localStorage and IndexedDB that
+    /// hold the token `PB_SELFTEST_MIGRATION_TOKEN`, a cookie that holds it with "-cookie" — sealed
+    /// as a profile's stop seals it: its cookies written to disk first (CFNetwork keeps a new one in
+    /// memory a while; CI run 530 sealed one second after setting it, and the cookie was not there). `--selftest-read-vault` (another build, the same token) opens the vault where that
+    /// build finds it and reads the website data back through WebKit:
+    ///   - the sandboxed build of the same bundle ID at its first launch: inside its container, where
+    ///     macOS moved it (container-migration.plist), the website data restored in the container's
+    ///     layout;
+    ///   - an unsandboxed build of another bundle ID (CI: the last build named PrivacyBrowser writes,
+    ///     the build named Lumen reads): in the same folder, the website data restored under the
+    ///     reading build's bundle ID.
     static func migrationStep(write: Bool) -> Never {
         setvbuf(stdout, nil, _IOLBF, 0)
+        let app = NSApplication.shared
+        app.setActivationPolicy(.prohibited)
+        let test = SelfTest()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 300) {
+            print("FAIL vault migration step (\(write ? "write" : "read")): no answer after 300 s")
+            exit(3)
+        }
+        Task { @MainActor in
+            exit(await test.migration(write: write))
+        }
+        app.run()
+        exit(1)
+    }
+
+    private func migration(write: Bool) async -> Int32 {
         let root = AppEnvironment.vaultDirectory
         let password = "migration-check"
+        let token = ProcessInfo.processInfo.environment["PB_SELFTEST_MIGRATION_TOKEN"] ?? ""
+        let bundleID = Bundle.main.bundleIdentifier ?? "?"
         do {
+            guard token.count >= 8 else {
+                throw CoreError.invalidConfiguration("PB_SELFTEST_MIGRATION_TOKEN (what the website data holds, 8 characters or more) is not set")
+            }
+            let layout = WebDataStoreVault.layout
             if write {
                 guard !AppEnvironment.isSandboxed else { throw CoreError.invalidConfiguration("run the unsandboxed build") }
                 // This writes a REAL vault (password "migration-check") into the real unsandboxed
@@ -65,20 +106,78 @@ final class SelfTest {
                     throw CoreError.invalidConfiguration("--selftest-write-vault creates a real vault at \(root.path); it runs only in CI with PB_SELFTEST_MIGRATION=1")
                 }
                 let repository = try ProfileRepository(vault: MasterVault.create(in: root, password: password, iterations: 10_000))
-                try repository.create(name: "Migrated", configuration: ProfileConfiguration())
-                print("PASS wrote vault at \(root.path)")
-            } else {
-                guard AppEnvironment.isSandboxed else { throw CoreError.invalidConfiguration("run the sandboxed build") }
-                let repository = try ProfileRepository(vault: MasterVault.unlock(in: root, password: password))
-                guard repository.list().map(\.name) == ["Migrated"], root.path.contains("/Library/Containers/") else {
-                    throw CoreError.corruptData("unexpected vault contents at \(root.path)")
+                let profile = try repository.create(name: "Migrated", configuration: ProfileConfiguration())
+                // A profile protects its local requests by default, and does not start without the rule list.
+                await ContentRules.prepare()
+                let vault = WebDataStoreVault(repository: repository)
+                let key = try repository.profileKey(for: profile.id)
+                try await vault.prepareForLaunch(profileID: profile.id, key: key)
+                var session: BrowserSession? = try makeSession(repository, profile.id, key: key)
+                var web: WKWebView? = WKWebView(frame: .zero, configuration: session!.makeWebViewConfiguration())
+                try await PageLoader.load(web!, html: page, baseURL: origin)
+                guard try await js(web!, Self.writeLocalStorageAndIndexedDB, ["token": token]) as? Bool == true else {
+                    throw CoreError.corruptData("the page could not write localStorage and IndexedDB")
                 }
-                print("PASS migrated vault unlocked inside the container at \(root.path)")
+                let cookie = HTTPCookie(properties: [.domain: "selftest.invalid", .path: "/", .name: "pb", .value: token + "-cookie",
+                                                     .secure: "TRUE", .expires: Date().addingTimeInterval(30 * 86_400)])!
+                await setCookie(cookie, in: session!.dataStore!)
+                // As ProfileManager's stop does, before anything else: the cookies to disk.
+                let flushed = await CookieStoreImport.flush(session!.dataStore!.httpCookieStore)
+                guard await waitUntil(timeout: 10, { self.webKitData(of: profile.id, contains: token + "-cookie") }) else {
+                    throw CoreError.corruptData("the cookie, written to disk as a profile's stop writes it (flushed: \(flushed)), is not in the "
+                                                + "profile's WebKit directories (\(layout.discoverDirectories(for: profile.id).map(\.path))): a seal would not carry it")
+                }
+                web = nil
+                session?.shutDown()
+                session = nil
+                let sealed = try await vault.seal(profileID: profile.id, key: key)
+                for directory in sealed.directories {
+                    print("INFO sealed \(directory.path) as \((try? layout.label(for: directory)) ?? "?")")
+                }
+                guard !sealed.directories.isEmpty, layout.discoverDirectories(for: profile.id).isEmpty else {
+                    throw CoreError.corruptData("the website data was not sealed (\(sealed.directories.count) directories) or was left in plaintext")
+                }
+                print("PASS wrote vault at \(root.path): profile Migrated, its website data sealed by bundle ID \(bundleID)")
+            } else {
+                let repository = try ProfileRepository(vault: MasterVault.unlock(in: root, password: password))
+                guard repository.list().map(\.name) == ["Migrated"], let profile = repository.list().first else {
+                    throw CoreError.corruptData("unexpected vault contents at \(root.path): \(repository.list().map(\.name))")
+                }
+                guard root.path.contains("/Library/Containers/") == AppEnvironment.isSandboxed else {
+                    throw CoreError.corruptData("the vault is at \(root.path), \(AppEnvironment.isSandboxed ? "not in" : "in") a container")
+                }
+                await ContentRules.prepare()
+                let vault = WebDataStoreVault(repository: repository)
+                let key = try repository.profileKey(for: profile.id)
+                try await vault.prepareForLaunch(profileID: profile.id, key: key)
+                let restored = layout.discoverDirectories(for: profile.id)
+                for directory in restored { print("INFO restored into \(directory.path)") }
+                // Where this build keeps a store: the container's own Library, or the bundle ID's subtree.
+                guard !restored.isEmpty, restored.allSatisfy({ directory in
+                    layout.searchRoots.contains { directory.standardizedFileURL.path.hasPrefix($0.standardizedFileURL.path + "/") }
+                }) else {
+                    throw CoreError.corruptData("the website data was not restored where this build looks (\(layout.searchRoots.map(\.path)))")
+                }
+                var session: BrowserSession? = try makeSession(repository, profile.id, key: key)
+                var web: WKWebView? = WKWebView(frame: .zero, configuration: session!.makeWebViewConfiguration())
+                try await PageLoader.load(web!, html: page, baseURL: origin)
+                let local = try await js(web!, "return localStorage.getItem('pb') ?? 'null';") as? String
+                let indexed = try await js(web!, Self.readIndexedDB) as? String
+                let cookie = await cookies(in: session!.dataStore!).first { $0.name == "pb" }?.value
+                web = nil
+                session?.shutDown()
+                session = nil
+                _ = try await vault.seal(profileID: profile.id, key: key)
+                guard local == token, indexed == token, cookie == token + "-cookie" else {
+                    throw CoreError.corruptData("the website data read back: localStorage \(local ?? "nil"), IndexedDB \(indexed ?? "nil"), cookie \(cookie ?? "nil")")
+                }
+                print("PASS vault at \(root.path) opened by bundle ID \(bundleID)"
+                      + "\(AppEnvironment.isSandboxed ? " inside its container" : ""): profile Migrated, its cookie, localStorage and IndexedDB read back")
             }
-            exit(0)
+            return 0
         } catch {
-            print("FAIL container migration step (\(write ? "write" : "read")): \(error)")
-            exit(1)
+            print("FAIL vault migration step (\(write ? "write" : "read")) by bundle ID \(bundleID): \(error)")
+            return 1
         }
     }
 
@@ -97,6 +196,70 @@ final class SelfTest {
 
     private func info(_ text: String) { print("INFO \(text)") }
 
+    /// Where a check could not be made: in this build (the sandboxed one cannot host Safari's
+    /// frameworks, by design), or on this machine (what the run had: a listener of the self-test
+    /// proxy not started, no keyboard for the window, an observer that saw nothing at all — its
+    /// own control included).
+    private enum SkipPlace: String {
+        case build = "in this build"
+        case machine = "on this machine"
+    }
+
+    private var skipped: [(name: String, reason: String, place: SkipPlace, expected: Bool)] = []
+
+    /// `PB_SELFTEST_STRICT=1` (CI): a check skipped on this machine fails the run, unless
+    /// `PB_SELFTEST_EXPECTED_SKIPS` (names, or their beginnings, separated by `|`) says this runner
+    /// cannot make it.
+    private static let strict = ProcessInfo.processInfo.environment["PB_SELFTEST_STRICT"] == "1"
+    private static let expectedSkips: [String] = (ProcessInfo.processInfo.environment["PB_SELFTEST_EXPECTED_SKIPS"] ?? "")
+        .split(separator: "|").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+
+    /// A check that could not be made here — never a pass, and never quiet: a line of its own,
+    /// counted, and named again in the summary. A check whose observer could have been blind (a
+    /// trace, a listener, a watch) says first that it saw its own control, or it is skipped.
+    private func skip(_ name: String, _ reason: String, _ place: SkipPlace = .machine) {
+        let expected = place == .machine && Self.expectedSkips.contains { name.hasPrefix($0) }
+        skipped.append((name, reason, place, expected))
+        print("SKIP \(name) — \(reason) (\(place.rawValue)\(expected ? "; expected on this runner" : ""))")
+    }
+
+    /// The last lines of the run: how many checks passed, failed and were skipped, then every
+    /// skipped one again by name, and the exit code. A run with a check skipped on this machine is
+    /// INCOMPLETE, not PASSED; under PB_SELFTEST_STRICT it fails, but for the expected ones.
+    private func finish(timedOut: Bool = false) -> Int32 {
+        let onMachine = skipped.filter { $0.place == .machine }
+        let inBuild = skipped.count - onMachine.count
+        let unexpected = onMachine.filter { Self.strict && !$0.expected }
+        let failed = timedOut || failures > 0 || !unexpected.isEmpty
+        let verdict: String
+        if timedOut {
+            verdict = "TIMEOUT"
+        } else if failed {
+            verdict = "FAILED"
+        } else {
+            verdict = onMachine.isEmpty ? "PASSED" : "INCOMPLETE"
+        }
+        var line = "SELFTEST \(verdict): \(passes) passed, \(failures) failed, \(skipped.count) skipped"
+        line += " (\(onMachine.count) on this machine, \(inBuild) in this build)"
+        if !unexpected.isEmpty {
+            line += "; \(unexpected.count) skipped on this machine that this strict run may not skip"
+        }
+        if let only = ProcessInfo.processInfo.environment["PB_SELFTEST_ONLY"] {
+            line += "; only the groups \(only) ran"
+        }
+        print(line)
+        for entry in skipped {
+            var place = entry.place.rawValue
+            if entry.expected {
+                place += ", expected on this runner"
+            } else if Self.strict && entry.place == .machine {
+                place += ", NOT expected: fails this run"
+            }
+            print("SELFTEST SKIPPED (\(place)): \(entry.name) — \(entry.reason)")
+        }
+        return failed ? 1 : 0
+    }
+
     // MARK: Run
 
     private func run() async {
@@ -105,42 +268,122 @@ final class SelfTest {
         info("macOS \(ProcessInfo.processInfo.operatingSystemVersionString), Safari \(HostSafari.version)")
         environmentChecks()
         vaultKeyDerivation()
-        // Without the packet tunnel (any build but a signed NE=1 one) proxied profiles keep WebRTC
-        // off; the proxy checks below verify that, scripts/leak_check.py the relay itself.
-        let tunnel = TunnelManager.shared
-        check("tunnel: a build without the network extension says so (proxied profiles keep WebRTC off)",
-              tunnel.extensionIdentifier != nil || (tunnel.state == .notBuilt && !tunnel.canCarryWebRTC), "\(tunnel.state)")
+        // Without the network guard proxied profiles keep WebRTC off (`WebRTCGate`); "WebRTC through
+        // the proxy" below checks that in a profile's own process, and the relay with a stand-in.
+        check("network guard: this build says it has none, and nothing stands in for it outside the self-test's own checks",
+              NetworkGuard.shared.state == .notInBuild && !NetworkGuard.shared.selfTestStandIn, "\(NetworkGuard.shared.state)")
         // As the first launch of a profile with a German proxy would, before WebKit starts any
         // process; checked by fingerprintSurface (navigator) and proxies (Accept-Language header).
         WebContentLanguage.decide("de-DE")
         info("web content languages: \(WebContentLanguage.decided ?? [])")
 
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-selftest-\(UUID().uuidString)")
+        // Where a user's vault is — in Application Support, under the account's ~/Library — not in a
+        // temporary folder: a profile's home is then under ~/Library too, as on a user's Mac, which
+        // is where Safari's paths were once moved into the home twice (`SafariPaths.moved`), out of
+        // CI's sight while its vault was in a temporary folder.
+        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("pb-selftest-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
+        // scripts/disk_check.py: what is written in here is the self-test's own.
+        info("vault \(root.path)")
+        // scripts/egress_check.py and disk_check.py: the name this app's processes go by in a packet
+        // capture and in a file trace (a profile's own process has the same one). Those checks tell
+        // the app's packets and writes by it, and say they were skipped without it: a name they had
+        // written in themselves would see nothing once the executable were named otherwise.
+        info("egress-process \(ProcessInfo.processInfo.processName) \(getpid())")
+        let repository: ProfileRepository
         do {
-            let repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "self-test", iterations: 10_000))
+            repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "self-test", iterations: 10_000))
             try await firstWebKitUse(repository) // must run before anything else touches WebKit
-            try await storageIsolationAndShims(repository)
-            try await deviceGenerations(repository)
-            try await fingerprintSurface(repository)
-            try await recoverySealing(repository)
-            try await deleteProfiles(repository)
-            try await proxies(repository)
-            try await proxyLocationAtLaunch(repository)
-            try await socksProfilesSideBySide(repository)
-            try await proxyLookupAndExitIP(repository)
-            try await tabsAndLibrary(repository)
-            try await windowLifecycle(repository)
-            try await dialogTeardown(repository)
-            try await passwordAutoFill(repository)
-            try await cookieImport(repository)
-            try await profileSync(repository)
-            try await warmUp(repository)
-            try await lockDuringLaunch(repository)
-            try await quitFromFocusedPage(repository)
-            try await forcedSealAtQuit(repository)
         } catch {
             check("self-test ran without unexpected errors", false, String(describing: error))
+            return
+        }
+        // A profile with a proxy does not start without the proxied profile's rule list (ContentRules).
+        await ContentRules.prepare()
+        info("WebKit \(WebKitBuild.version)")
+        // Each group on its own: an error one did not expect fails that group, by name, and the
+        // run goes on with the next, so that one error never hides the checks after it.
+        await group("exceptions") { try await exceptionChecks() }
+        await group("Safari's nibs") { try await safariNibChecks() }
+        await group("nested Safari homes") { try nestedSafariHomes() }
+        await group("saved window frame") { savedWindowFrame() }
+        await group("the home --safari-chrome left") { try standaloneSafariHomeRemoved() }
+        await group("storage isolation and shims") { try await storageIsolationAndShims(repository) }
+        await group("device generations") { try await deviceGenerations(repository) }
+        await group("fingerprint surface") { try await fingerprintSurface(repository) }
+        await group("recovery sealing") { try await recoverySealing(repository) }
+        await group("format policy") { try formatPolicy(repository) }
+        await group("unreadable settings") { try await unreadableSettings(repository) }
+        await group("unseal leftovers") { try await unsealLeftovers(repository) }
+        await group("kept deleted profiles") { try await keptDeletedProfiles(repository) }
+        await group("Safari's home: a restore that fails") { try safariHomeRestoreFailure(repository) }
+        await group("a seal whose deletion stops part-way") { try await sealWithAFailedDeletion(repository) }
+        await group("earlier versions' Safari keys") { earlierVersionsSafariKeys() }
+        await group("update gate") { try updateGate(repository) }
+        await group("settings") { try await appSettings(repository) }
+        await group("editor labels") { try editorLabels() }
+        await group("window sizes") { try await windowSizes(repository) }
+        await group("named Safari version") { try await namedSafariVersion(repository) }
+        await group("local requests") { try await localRequests(repository) }
+        await group("cookies at creation") { try await cookiesAtCreation(repository) }
+        await group("diagnostics") { try await diagnosticsBundle(repository) }
+        await group("paste as typed") { try await pasteAsTyped(repository) }
+        await group("what sites see") { try await whatSitesSee(repository) }
+        await group("deleting profiles") { try await deleteProfiles(repository) }
+        await group("proxies") { try await proxies(repository) }
+        await group("certificates") { try await certificatesWithoutFetching(repository) }
+        await group("hand-offs") { try await handOffsInOurWindows(repository) }
+        await group("workers") { try await workersInOurWindows(repository) }
+        await group("proxy location at launch") { try await proxyLocationAtLaunch(repository) }
+        await group("SOCKS5 profiles side by side") { try await socksProfilesSideBySide(repository) }
+        await group("proxy lookup and exit IP") { try await proxyLookupAndExitIP(repository) }
+        await group("proxy checker") { try await proxyChecker(repository) }
+        await group("tabs and library") { try await tabsAndLibrary(repository) }
+        await group("restoring tabs") { try await restoreTabs(repository) }
+        await group("window lifecycle") { try await windowLifecycle(repository) }
+        await group("simplified mode") { try await simplifiedMode(repository) }
+        await group("a page whose process keeps ending") { try await endedPageProcess(repository) }
+        await group("errors in the person's language") { errorsInThePersonsLanguage() }
+        await group("dates in the person's language") { datesInThePersonsLanguage() }
+        await group("dialogs") { try await dialogTeardown(repository) }
+        await group("password AutoFill") { try await passwordAutoFill(repository) }
+        await group("cookie import") { try await cookieImport(repository) }
+        await group("session cookies after a stop") { try await sessionCookieAfterStop(repository) }
+        await group("profile transfer") { try await profileTransfer(repository) }
+        await group("automation API") { try await automationAPI(repository) }
+        await group("profile sync") { try await profileSync(repository) }
+        await group("warm-up") { try await warmUp(repository) }
+        await group("warm-up queue") { try await warmUpQueue(repository) }
+        await group("Safari chrome") { try await safariChromeThroughTheProxy(repository) }
+        await group("WebRTC through the proxy") { try await webRTCThroughTheProxy(repository) }
+        await group("keychain between profiles") { try await keychainBetweenProfiles(repository) }
+        await group("Safari's app-link banner tracker") { try await safariAppLinkTracker(repository) }
+        // The license: signed in with a key against a server played on the loopback; where the key
+        // is not (account.json, the defaults, the diagnostics); without the server; revoked.
+        await group("licensing") {
+            for result in await LicenseSelfTest.run(scratch: FileManager.default.temporaryDirectory) {
+                check(result.name, result.passed, result.detail)
+            }
+        }
+        await group("a mobile view in its own process") { try await mobileViewInItsOwnProcess(repository) }
+        await group("closing a profile's window") { try await closingTheWindowEndsTheProfile(repository) }
+        await group("interface and websites' languages") { try await interfaceApartFromWebsites(repository) }
+        await group("lock during launch") { try await lockDuringLaunch(repository) }
+        await group("quit") { try await quitFromFocusedPage(repository) }
+        await group("forced seal") { try await forcedSealAtQuit(repository) }
+    }
+
+    /// One group of checks: an error it throws, which none of its checks expected, fails the group
+    /// by name with the error, and the self-test goes on. With `PB_SELFTEST_ONLY` set (group names,
+    /// comma-separated), only those groups run: a measurement of one (scripts/aia_variants.py).
+    private func group(_ name: String, _ body: () async throws -> Void) async {
+        if let only = ProcessInfo.processInfo.environment["PB_SELFTEST_ONLY"],
+           !only.split(separator: ",").contains(where: { $0 == name }) { return }
+        do {
+            try await body()
+        } catch {
+            check("\(name): ran without unexpected errors", false, String(describing: error))
         }
     }
 
@@ -274,22 +517,7 @@ final class SelfTest {
         check("native: custom user agent",
               try await js(webA!, "return navigator.userAgent;") as? String == "PrivacyBrowserSelfTest/1.0")
 
-        check("write localStorage + IndexedDB", try await js(webA!, """
-            localStorage.setItem('pb', token);
-            await new Promise((resolve, reject) => {
-              const req = indexedDB.open('pb', 1);
-              req.onupgradeneeded = () => req.result.createObjectStore('s');
-              req.onerror = () => reject(req.error);
-              req.onsuccess = () => {
-                const db = req.result;
-                const tx = db.transaction('s', 'readwrite');
-                tx.objectStore('s').put(token, 'k');
-                tx.oncomplete = () => { db.close(); resolve(); };
-                tx.onerror = () => reject(tx.error);
-              };
-            });
-            return true;
-            """, ["token": token]) as? Bool == true)
+        check("write localStorage + IndexedDB", try await js(webA!, Self.writeLocalStorageAndIndexedDB, ["token": token]) as? Bool == true)
         let cookie = HTTPCookie(properties: [.domain: "selftest.invalid", .path: "/", .name: "pb", .value: token,
                                              .secure: "TRUE", .expires: Date().addingTimeInterval(3_600)])!
         await setCookie(cookie, in: sessionA!.dataStore!)
@@ -312,7 +540,8 @@ final class SelfTest {
             let policy = try await js(webB!, "return new RTCPeerConnection({ iceTransportPolicy: 'all' }).getConfiguration().iceTransportPolicy;") as? String
             check("shim: WebRTC relay-only under JavaScriptCore", policy == "relay", policy ?? "nil")
         } else {
-            info("WKWebView exposes no RTCPeerConnection here (typeof = \(nativeRTC ?? "nil")); relay check skipped")
+            skip("shim: WebRTC relay-only under JavaScriptCore",
+                 "this WebKit's web view has no RTCPeerConnection (typeof = \(nativeRTC ?? "nil")), so there is nothing to make relay-only")
         }
 
         // --- Stop A: release everything, seal.
@@ -361,6 +590,24 @@ final class SelfTest {
         check("both profiles sealed", layout.discoverDirectories(for: a).isEmpty && layout.discoverDirectories(for: b).isEmpty)
     }
 
+    /// `token` (an argument) into localStorage and IndexedDB, as `readIndexedDB` reads it.
+    private static let writeLocalStorageAndIndexedDB = """
+        localStorage.setItem('pb', token);
+        await new Promise((resolve, reject) => {
+          const req = indexedDB.open('pb', 1);
+          req.onupgradeneeded = () => req.result.createObjectStore('s');
+          req.onerror = () => reject(req.error);
+          req.onsuccess = () => {
+            const db = req.result;
+            const tx = db.transaction('s', 'readwrite');
+            tx.objectStore('s').put(token, 'k');
+            tx.oncomplete = () => { db.close(); resolve(); };
+            tx.onerror = () => reject(tx.error);
+          };
+        });
+        return true;
+        """
+
     private static let readIndexedDB = """
         return await new Promise((resolve) => {
           const req = indexedDB.open('pb', 1);
@@ -391,15 +638,17 @@ final class SelfTest {
         check("proxy: a bracketed IPv6 proxy address is split into host and port",
               (try? ProxyHostField.parse("[::1]:1080")) == ProxyHostField(host: "::1", port: 1080))
 
-        // Every proxied session carries the ping-load blocker (dns-prefetch would resolve outside
+        // Every proxied session carries the proxied profile's rule list (dns-prefetch would resolve outside
         // the proxy; see ContentRules).
         await ContentRules.prepare()
-        check("proxy: the ping-load blocker compiled", ContentRules.dnsPrefetchBlocker != nil)
+        check("proxy: the rule list of profiles with a proxy compiled (pings, dns-prefetch, this Mac)", ContentRules.proxiedProfileRules != nil,
+              ContentRules.compileErrors.joined(separator: " | "))
 
         let environment = ProcessInfo.processInfo.environment
         guard let httpPort = environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init),
               let socksPort = environment["PB_SELFTEST_SOCKS_PROXY_PORT"].flatMap(Int.init) else {
-            info("proxy checks skipped (PB_SELFTEST_HTTP_PROXY_PORT / PB_SELFTEST_SOCKS_PROXY_PORT not set)")
+            skip("proxy: every load through the self-test proxy (HTTP, SOCKS5, IPv6, fail-closed, pings, 407)",
+                 "PB_SELFTEST_HTTP_PROXY_PORT / PB_SELFTEST_SOCKS_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
             return
         }
         let target = URL(string: "http://proxied.selftest.invalid/check")!
@@ -429,7 +678,7 @@ final class SelfTest {
             check("proxy: an IPv6 proxy address carries the request", v6Body?.contains("PB-PROXY-OK via=connect6") == true,
                   v6Body ?? "load failed")
         } else {
-            info("IPv6 proxy check skipped (PB_SELFTEST_HTTP6_PROXY_PORT not set)")
+            skip("proxy: an IPv6 proxy address carries the request", "PB_SELFTEST_HTTP6_PROXY_PORT not set: the self-test proxy's IPv6 listener is not running")
         }
 
         // Port 9 (discard) on localhost is closed on CI runners: the load must fail, not go direct.
@@ -441,12 +690,33 @@ final class SelfTest {
                                                     url: URL(string: "http://example.com/")!)
         check("proxy: fail-closed when the proxy host does not resolve", unresolved == nil, "page loaded: \(unresolved ?? "")")
 
-        // What WebKit would send outside the proxy is blocked by the ping-load blocker: an
+        // What WebKit would send outside the proxy is blocked by the proxied profile's rule list: an
         // <a ping> (the same load type as a dns-prefetch) never reaches the proxy, a fetch does.
-        let served = try await servedPathsAfterPing(repository, ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort))
-        check("proxy: ping-type loads (dns-prefetch, <a ping>) are blocked in a proxied profile",
-              served.contains("/fetch-allowed") && !served.contains("/ping-blocked"), served.joined(separator: ","))
-        info("proxy: a beacon \(served.contains("/beacon") ? "still reaches" : "does not reach") the proxy (beacons are fetches, not pings)")
+        // The control, after the profile's own (the proxy's list of served paths only grows): the
+        // same click in a plain web view without the rule list must send its ping, or this WebKit
+        // sends none, and a blocked ping could not be told from one never sent.
+        do {
+            let http = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+            let served = try await servedPathsAfterPing(repository, http)
+            let controlReached = try await controlPingReachesProxy(http)
+            pingsSentWithoutRules = controlReached
+            if controlReached {
+                check("proxy: ping-type loads (dns-prefetch, <a ping>) are blocked in a proxied profile",
+                      served.contains("/fetch-allowed") && !served.contains("/ping-blocked"), served.joined(separator: ","))
+            } else {
+                skip("proxy: ping-type loads (dns-prefetch, <a ping>) are blocked in a proxied profile",
+                     "the control — the same click in a plain web view without the rule list — sent no ping either, so a blocked ping cannot be told from none sent")
+            }
+            info("proxy: a beacon \(served.contains("/beacon") ? "still reaches" : "does not reach") the proxy (beacons are fetches, not pings)")
+        } catch {
+            check("proxy: ping-type loads (dns-prefetch, <a ping>) are blocked in a proxied profile", false, String(describing: error))
+        }
+        do {
+            try await fragmentJumps(repository, http: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort),
+                                    socks: ProxySettings(kind: .socks5, host: "127.0.0.1", port: socksPort))
+        } catch {
+            skip("fragment jump (a measurement)", "not measured: \(error)")
+        }
 
         // A proxy that answers 407: the profile's credentials are sent, wrong ones fail closed.
         // Loaded in a BrowserTab, whose navigation delegate answers the proxy's challenge.
@@ -478,7 +748,8 @@ final class SelfTest {
                   WebDataStoreVault.discoverDirectories(for: noCredentials.id).isEmpty)
             try repository.delete(noCredentials.id)
         } else {
-            info("proxy auth checks skipped (PB_SELFTEST_HTTP_AUTH_PROXY_PORT not set)")
+            skip("proxy: 407 answered with the profile's credentials, wrong ones and none fail closed",
+                 "PB_SELFTEST_HTTP_AUTH_PROXY_PORT not set: the self-test proxy's listener with a login is not running")
         }
     }
 
@@ -500,25 +771,196 @@ final class SelfTest {
         return tab.webView.title
     }
 
-    /// In a page served by the proxy: clicks an `<a ping>`, sends a beacon and a fetch to the
-    /// proxy, then reads back which paths the proxy served (`/pb-served.json`).
+    /// In a page served by the proxy: sends a beacon and a fetch to the proxy and clicks an
+    /// `<a ping>`, then reads back which paths the proxy served (`/pb-served.json`).
+    ///
+    /// The click is the page script's last act, and the script answers right after it. The link
+    /// goes to a fragment of the page, and WebKit 27 (macOS 27.0.1) makes a new document of such a
+    /// jump for a page loaded through the proxy (CI runs 432–435; a page of this Mac keeps its
+    /// document, in Safari 27 and in profiles alike — `fragmentJumps`): a script that waited across
+    /// the click lost the document it ran in, and WebKit answered WKErrorDomain 5. The pause for
+    /// the ping is waited out here, and the served paths are read afterwards, in whichever
+    /// document the page then is.
     private func servedPathsAfterPing(_ repository: ProfileRepository, _ proxy: ProxySettings) async throws -> [String] {
         let profile = try repository.create(name: "Ping", configuration: ProfileConfiguration(proxy: proxy, ephemeral: true))
         let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
         defer { session.shutDown() }
         let webView = WKWebView(frame: .zero, configuration: session.makeWebViewConfiguration())
         try await PageLoader.load(webView, url: URL(string: "http://proxied.selftest.invalid/ping-page")!)
-        let served = try await js(webView, """
+        _ = try await js(webView, Self.pingScript)
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        _ = await waitUntil(timeout: 10) { !webView.isLoading }
+        return try await js(webView, Self.readServedPaths) as? [String] ?? []
+    }
+
+    /// The ping check's control: in a plain web view whose non-persistent store has only WebKit's
+    /// own proxy setting — no profile, no script, no rule list — the page served by the proxy
+    /// clicks an `<a ping>` of its own; whether the proxy then lists the ping's path.
+    private func controlPingReachesProxy(_ proxy: ProxySettings) async throws -> Bool {
+        let configuration = WKWebViewConfiguration()
+        let store = WKWebsiteDataStore.nonPersistent()
+        store.proxyConfigurations = try ProxyConfigurationFactory.make(proxy)
+        configuration.websiteDataStore = store
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        try await PageLoader.load(webView, url: URL(string: "http://proxied.selftest.invalid/ping-page")!)
+        _ = try await js(webView, """
             const a = document.createElement('a');
-            a.href = '#clicked'; a.ping = '/ping-blocked'; a.textContent = 'ping';
+            a.href = '#control'; a.ping = '/ping-control'; a.textContent = 'ping';
             document.body.appendChild(a);
             a.click();
-            navigator.sendBeacon('/beacon', 'x');
-            await fetch('/fetch-allowed');
-            await new Promise((resolve) => setTimeout(resolve, 1500));
-            return await (await fetch('/pb-served.json', { cache: 'no-store' })).json();
-            """) as? [String] ?? []
-        return served
+            return true;
+            """)
+        let deadline = Date().addingTimeInterval(8)
+        while Date() < deadline {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            _ = await waitUntil(timeout: 5) { !webView.isLoading }
+            if let served = try? await js(webView, Self.readServedPaths) as? [String], served.contains("/ping-control") { return true }
+        }
+        return false
+    }
+
+    /// The page's actions: a beacon, a fetch, and last an `<a ping>` clicked.
+    private static let pingScript = """
+        navigator.sendBeacon('/beacon', 'x');
+        await fetch('/fetch-allowed');
+        const a = document.createElement('a');
+        a.href = '#clicked'; a.ping = '/ping-blocked'; a.textContent = 'ping';
+        document.body.appendChild(a);
+        a.click();
+        return true;
+        """
+    /// What the proxy has served, as it lists it.
+    private static let readServedPaths = "return await (await fetch('/pb-served.json', { cache: 'no-store' })).json();"
+
+    /// A jump to a fragment of the page shown (`location.hash`): does the page keep its document?
+    /// Measured, not checked. WebKit 27 (macOS 27.0.1) makes a new document of it for a page loaded
+    /// through a proxy — by name and by address alike —, where a page of this Mac, which goes
+    /// direct, keeps its document — in Safari 27, in profiles as they ship and in a plain web view
+    /// alike (CI runs 435 and 436, `scripts/fragment_check.py`). Measured here: in a profile with
+    /// the HTTP proxy, a page through it by name, one by address, and a page of this Mac; the page
+    /// by name through a SOCKS5 profile; and in a plain web view whose non-persistent store has
+    /// only WebKit's own proxy setting — no profile, no script, no rule list.
+    private func fragmentJumps(_ repository: ProfileRepository, http: ProxySettings, socks: ProxySettings) async throws {
+        let local = SiteSnapshotServer { _, _ in "<!doctype html><html><head><title>Plain page</title></head><body><p>A page of this Mac.</p></body></html>" }
+        guard await local.start() else {
+            skip("fragment jump (a measurement)", "no page of this Mac could be served (SiteSnapshotServer did not start)")
+            return
+        }
+        defer { local.stop() }
+        let profile = try repository.create(name: "Fragment", configuration: ProfileConfiguration(proxy: http, ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        defer { session.shutDown() }
+        let socksProfile = try repository.create(name: "Fragment SOCKS5", configuration: ProfileConfiguration(proxy: socks, ephemeral: true))
+        let socksSession = try makeSession(repository, socksProfile.id, key: repository.profileKey(for: socksProfile.id))
+        defer { socksSession.shutDown() }
+        enum Setup { case profile, socksProfile, plainWebView }
+        let byName = URL(string: "http://proxied.selftest.invalid/fragment")!
+        let pages: [(label: String, url: URL, setup: Setup)] = [
+            ("through the proxy, by name", byName, .profile),
+            ("through the proxy, by address", URL(string: "http://198.18.0.15/fragment")!, .profile),
+            ("a page of this Mac, direct", local.newPage(.profile).url, .profile),
+            ("through a SOCKS5 proxy, by name", byName, .socksProfile),
+            ("through the proxy, by name, in a plain web view (WebKit's own proxy setting; no profile, script or rule list)",
+             byName, .plainWebView),
+        ]
+        let mark = "window.__pbMark = 'marked'; return true;"
+        for page in pages {
+            let configuration: WKWebViewConfiguration
+            switch page.setup {
+            case .profile:
+                configuration = session.makeWebViewConfiguration()
+            case .socksProfile:
+                configuration = socksSession.makeWebViewConfiguration()
+            case .plainWebView:
+                configuration = WKWebViewConfiguration()
+                let store = WKWebsiteDataStore.nonPersistent()
+                store.proxyConfigurations = try ProxyConfigurationFactory.make(http)
+                configuration.websiteDataStore = store
+            }
+            let webView = WKWebView(frame: .zero, configuration: configuration)
+            let counter = NavigationCounter()
+            var line = "fragment jump, \(page.label): "
+            do {
+                try await PageLoader.load(webView, url: page.url)
+                webView.navigationDelegate = counter
+                _ = try await js(webView, mark)
+                _ = try await js(webView, "location.hash = 'jump'; return true;")
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                _ = await waitUntil(timeout: 10) { !webView.isLoading }
+                let same = try await js(webView, "return String(window.__pbMark);") as? String == "marked"
+                line += (same ? "the same document" : "a new document") + " (navigation \(counter.summary))"
+            } catch {
+                line += Self.javaScriptError(error) + " (navigation \(counter.summary))"
+            }
+            info(line)
+        }
+    }
+
+    /// Counts what WebKit tells a web view's navigation delegate, same-document navigations
+    /// (`_webView:navigation:didSameDocumentNavigation:`) included.
+    private final class NavigationCounter: NSObject, WKNavigationDelegate {
+        private(set) var started = 0
+        private(set) var committed = 0
+        private(set) var finished = 0
+        private(set) var failed = 0
+        private(set) var sameDocument: [Int] = []
+
+        var summary: String {
+            "started \(started), committed \(committed), finished \(finished), failed \(failed), same-document \(sameDocument)"
+        }
+
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { started += 1 }
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { committed += 1 }
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { finished += 1 }
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { failed += 1 }
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { failed += 1 }
+        @objc(_webView:navigation:didSameDocumentNavigation:)
+        func sameDocumentNavigation(_ webView: WKWebView, navigation: WKNavigation?, type: Int) { sameDocument.append(type) }
+    }
+
+    /// A preferences file's keys and when it was written, as one line (or "absent"), read as a file.
+    /// The real Safari's own preferences, as `defaults export com.apple.Safari` reads them through
+    /// cfprefsd — from Safari's container where it has one; nil when they cannot be read.
+    private static func realSafariDomain() -> [String: Any]? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+        process.arguments = ["export", "com.apple.Safari", "-"]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { return nil }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        return (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any]
+    }
+
+    /// The keys of this app's own domain in the account's home, as cfprefsd has them.
+    private static func appDomainKeys() -> Set<String> {
+        Set(UserDefaults.standard.persistentDomain(forName: Bundle.main.bundleIdentifier ?? "dev.local.PrivacyBrowser")?.keys.map { $0 } ?? [])
+    }
+
+    /// The keys whose values differ between two readings of a domain, added and removed ones too.
+    private static func changedKeys(_ before: [String: Any], _ after: [String: Any]) -> [String] {
+        Set(before.keys).union(after.keys).filter { key in
+            guard let old = before[key], let new = after[key] else { return true }
+            return !(old as AnyObject).isEqual(new)
+        }.sorted()
+    }
+
+    private static func preferencesFileState(_ path: String) -> String {
+        guard let data = FileManager.default.contents(atPath: path),
+              let plist = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any] else {
+            return "absent"
+        }
+        let written = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
+        return "\(plist.count) keys (\(plist.keys.sorted().joined(separator: ", "))), written \(written.map { "\($0)" } ?? "?")"
+    }
+
+    private static func javaScriptError(_ error: Error) -> String {
+        let error = error as NSError
+        let message = error.userInfo["WKJavaScriptExceptionMessage"] as? String
+        return "\(error.domain) \(error.code) \(error.localizedDescription)" + (message.map { " — \($0)" } ?? "")
     }
 
     /// Loads `url` in an ephemeral profile using `proxy`. Returns the page text, or nil if the load failed.
@@ -539,11 +981,1326 @@ final class SelfTest {
         return try await js(webView, script) as? String
     }
 
+
+    // MARK: Certificates, checked without this Mac fetching for them
+
+    /// The certificate of a site whose server sent its chain incomplete is completed by the
+    /// system's trust service, which downloads the missing certificate from the address the
+    /// certificate names — as this Mac, outside every proxy (`ServerTrust`). The self-test proxy
+    /// answers every TLS handshake in its tunnels with such a certificate, naming
+    /// `pbaiacanary.leak.example.com`: a DNS query for that name anywhere in the capture is a
+    /// fetch made for a profile with a proxy (scripts/egress_check.py). Its control is the same
+    /// kind of certificate, naming `pbaiacontrol`, loaded in a profile without a proxy, where the
+    /// system's default handling does fetch: the capture has to see that one.
+    private func certificatesWithoutFetching(_ repository: ProfileRepository) async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let httpPort = environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("certificates: a chain that needs a fetch is checked without one, through a proxy",
+                 "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
+            return
+        }
+        info("egress-token pbaiacanary")
+        info("egress-token pbocspcanary")
+        // What the load ended with, as WebKit gave it to the tab (`describeFailure`).
+        func load(_ url: URL, in configuration: ProfileConfiguration) async throws -> String {
+            let profile = try repository.create(name: "Certificates", configuration: configuration)
+            let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+            defer { session.shutDown() }
+            let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+            defer { tab.tearDown() }
+            tab.webView.load(URLRequest(url: url))
+            _ = await waitUntil(timeout: 20) { !tab.isLoading }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            return describeFailure(tab.lastProvisionalError)
+        }
+        if let controlPort = environment["PB_SELFTEST_TLS_CONTROL_PORT"].flatMap(Int.init) {
+            _ = try await load(URL(string: "https://localhost:\(controlPort)/pb-aia-control")!, in: ProfileConfiguration(ephemeral: true))
+            info("egress-control pbaiacontrol")
+        } else {
+            skip("certificates: the capture's control — a certificate fetched for a profile without a proxy, which the capture must see",
+                 "PB_SELFTEST_TLS_CONTROL_PORT not set: without it the capture (scripts/egress_check.py) cannot show a fetch would be seen")
+        }
+
+        let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        let before = ServerTrust.tally.counts
+        let allowedBefore = ServerTrust.tally.fetchAllowed
+        let failure = try await load(URL(string: "https://aia-\(run).leak.example.com/pb-leak/aia?run=\(run)")!,
+                                     in: ProfileConfiguration(proxy: proxy, ephemeral: true))
+        let after = ServerTrust.tally.counts
+        let allowedAfter = ServerTrust.tally.fetchAllowed
+        // How the load ended: what its error carried (CI compares the SDKs WebKit's behaviors
+        // follow, scripts/aia_variants.py).
+        info("certificates: through the proxy, the load ended with: \(failure)")
+        let log = try await loadThroughProxy(repository, proxy, url: URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!) ?? ""
+        guard log.contains("(tls handshake)") else {
+            check("certificates: the self-test proxy answers HTTPS with its certificate", false,
+                  "no TLS handshake in its log (no openssl on this Mac?): \(log.prefix(300))")
+            return
+        }
+        check("certificates: with a proxy, a certificate whose chain needs a fetch is checked without one, and refused",
+              after.refused > before.refused, "evaluations \(before) → \(after)")
+        // The order of the calls is what keeps the fetch off (ServerTrust.evaluate): the trusts
+        // evaluated must say themselves that they may not fetch.
+        check("certificates: every trust evaluated says itself it may not fetch (policies set first, then fetching off)",
+              allowedAfter == allowedBefore && allowedAfter == 0, "still allowed to fetch: \(allowedBefore) → \(allowedAfter)")
+        check("certificates: the browser refused it at the handshake, through the proxy",
+              log.contains("tls refused by the client"), String(log.prefix(400)))
+    }
+
+    /// The error a load ended with: its domain and code and the keys it carried. A server trust
+    /// among them is not read: reading one can have it evaluated, fetching allowed (`ServerTrust`).
+    private func describeFailure(_ error: NSError?) -> String {
+        guard let error else { return "no failure" }
+        var parts = ["\(error.domain) \(error.code)", "keys [\(error.userInfo.keys.sorted().joined(separator: ", "))]"]
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+            parts.append("underlying \(underlying.domain) \(underlying.code) keys [\(underlying.userInfo.keys.sorted().joined(separator: ", "))]")
+        }
+        return parts.joined(separator: "; ")
+    }
+
+    // MARK: Nothing of a page handed outside the profile
+
+    /// A profile's tab in a window of ours: no link preview (Quick Look fetches the link outside
+    /// the profile, and a click opens it in the default browser), no Services for the selection,
+    /// and a context menu without the items that send the page's content elsewhere (`HandOffs`).
+    private func handOffsInOurWindows(_ repository: ProfileRepository) async throws {
+        HandOffs.closeForWebViews()
+        // (And the plaintext of profiles running in this process is out of backups.)
+        let excluded = WebDataStoreVault.layout.searchRoots.allSatisfy {
+            (try? $0.resourceValues(forKeys: [.isExcludedFromBackupKey]))?.isExcludedFromBackup == true
+        }
+        let backupDetail = WebDataStoreVault.layout.searchRoots.map(\.path).joined(separator: ", ")
+            + " — ran: \(WebDataStoreVault.rootsExclusionRan), failures: \(WebDataStoreVault.exclusionFailures)"
+        if AppEnvironment.isSandboxed && !excluded {
+            // Measured (CI runs 383–384): in the App Sandbox the mark is set without an error and
+            // does not stay on the container's folders. A limitation of the sandboxed build
+            // (docs/ISOLATION_AND_LIMITATIONS.md §3), reported here with what writing it directly did.
+            skip("backups: WebKit's directories of this app are excluded from Time Machine",
+                 "the sandboxed build cannot keep the mark on its container's folders (docs/ISOLATION_AND_LIMITATIONS.md §3): \(backupDetail)", .build)
+        } else {
+            check("backups: WebKit's directories of this app are excluded from Time Machine", excluded, backupDetail)
+        }
+        let profile = try repository.create(name: "Hand-offs", configuration: ProfileConfiguration(ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        defer { session.shutDown() }
+        let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+        defer { tab.tearDown() }
+        tab.webView.allowsLinkPreview = true
+        check("hand-offs: a profile's web view shows no link preview, and cannot be given one", !tab.webView.allowsLinkPreview)
+        check("hand-offs: a profile's page offers its selection to no Service",
+              tab.webView.validRequestor(forSendType: .string, returnType: nil) == nil)
+        let menu = NSMenu()
+        let kept = ["WKMenuItemIdentifierCopy", "WKMenuItemIdentifierOpenLinkInNewWindow"]
+        for identifier in kept + HandOffs.refusedMenuItems.sorted() {
+            let item = NSMenuItem(title: identifier, action: nil, keyEquivalent: "") // l10n: not text
+            item.identifier = NSUserInterfaceItemIdentifier(identifier)
+            menu.addItem(item)
+            menu.addItem(.separator())
+        }
+        var stripped: NSMenu?
+        tab.webView(tab.webView, contextMenuFromProposedMenu: menu, forElement: nil, userInfo: nil) { stripped = $0 }
+        check("hand-offs: the context menu keeps Copy and the link items, and loses Search with Google, Look Up, Translate, Share, Quick Note and Writing Tools, and Services",
+              stripped?.items.compactMap(\.identifier?.rawValue) == kept && stripped?.allowsContextMenuPlugIns == false,
+              "\(stripped?.items.map(\.title) ?? [])")
+    }
+
+    // MARK: Workers of a profile with a proxy, in this process
+
+    /// Shared and service workers take their preferences from the process, not from the page that
+    /// starts them: WebKit copies the first web view's (`ProfileNetworkGuard.ensureWorkerTemplate`).
+    /// The manager's process makes no template (it kept stopped profiles' sessions alive), so here
+    /// the workers of a profile with a proxy are measured in a window of ours, after profiles
+    /// without one have had theirs: on a page of this Mac (a secure context, where WebTransport
+    /// exists at all), in the page, a dedicated, a shared and a service worker.
+    private func workersInOurWindows(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("workers: WebTransport in a page and its workers, with a proxy and without",
+                 "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
+            return
+        }
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        // `connect`: whether the page and its service worker, where WebTransport exists, try a
+        // connection to a documentation address — which the capture counts anywhere in the run.
+        // The control without a proxy only says what exists (it would go straight out, as it
+        // should); the profile with a proxy tries, so that one that could would be seen.
+        func reports(_ configuration: ProfileConfiguration, connect: Bool) async throws -> (page: [String: Any], serviceWorker: [String: Any]) {
+            let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
+            let profile = try repository.create(name: "Workers \(run)", configuration: configuration)
+            defer { try? repository.delete(profile.id) }
+            let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+            defer { session.shutDown() }
+            let webView = WKWebView(frame: .zero, configuration: session.makeWebViewConfiguration())
+            try? await PageLoader.load(webView, url: URL(string: "http://127.0.0.1:\(httpPort)/pb-leak/secure?run=\(run)&connect=\(connect ? 1 : 0)")!)
+            let logURL = URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!
+            var page: [String: Any] = [:], serviceWorker: [String: Any] = [:]
+            for _ in 0..<12 {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                guard let text = try await loadThroughProxy(repository, proxy, url: logURL),
+                      let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { continue }
+                let found = object["reports"] as? [[String: Any]] ?? []
+                page = found.first { $0["secure"] != nil } ?? page
+                serviceWorker = found.first { $0["sw"] as? Bool == true && $0["secure"] == nil } ?? serviceWorker
+                if !page.isEmpty && !serviceWorker.isEmpty { break }
+            }
+            return (page, serviceWorker)
+        }
+        let open = try await reports(ProfileConfiguration(ephemeral: true), connect: false)
+        info("workers: a profile without a proxy has WebTransport in its page \(open.page["webTransport"] ?? "nil"), shared worker \(open.page["shared"] ?? "nil"), service worker \(open.serviceWorker["webTransport"] ?? "nil")")
+        let proxied = try await reports(ProfileConfiguration(proxy: proxy, ephemeral: true), connect: true)
+        check("workers: a profile with a proxy, after profiles without one, has no WebTransport in its page, a dedicated, a shared or a service worker (each answered)",
+              proxied.page["secure"] as? Bool == true && proxied.page["webTransport"] as? String == "undefined"
+                && proxied.page["worker"] as? String == "undefined" && proxied.page["shared"] as? String == "undefined"
+                && proxied.serviceWorker["webTransport"] as? String == "undefined",
+              "page \(proxied.page), service worker \(proxied.serviceWorker.isEmpty ? "no report" : "\(proxied.serviceWorker)")")
+    }
+
+    // MARK: The local automation API
+
+    /// A script on this Mac drives a profile through the API (`AutomationServer`) as the app's own
+    /// buttons do — list, start out of sight, cookies in and out, stop — and nothing else gets in:
+    /// no token, a wrong one, a web page's request, a name pointed at 127.0.0.1. What it answers
+    /// never holds a proxy's credentials. Requests go over a plain socket, so that their headers
+    /// are exactly the ones written here.
+    private func automationAPI(_ repository: ProfileRepository) async throws {
+        let manager = ProfileManager(repository: repository)
+        manager.onError = { _ in }
+        let token = AutomationSettings.newToken()
+        let handler = AutomationHandler(manager: manager, repository: repository)
+        let server = AutomationServer(settings: AutomationSettings(isEnabled: true, port: 0, token: token), handler: handler)
+        server.start()
+        defer { server.stop() }
+        guard AutomationServer.isAvailable else {
+            check("automation: the sandboxed build does not listen, and says why",
+                  server.state == .failed(L("automation.error.sandboxed")), "\(server.state)")
+            return
+        }
+        _ = await waitUntil(timeout: 10) { if case .listening = server.state { return true } else { return false } }
+        guard case .listening(let port) = server.state else {
+            check("automation: the API listens on the loopback address", false, "\(server.state)")
+            return
+        }
+        let run = String(UUID().uuidString.prefix(8)).lowercased()
+        let secret = "api-secret-\(run)"
+        let profile = try repository.create(name: "API \(run)", configuration: ProfileConfiguration(
+            proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: 9, username: "api-user-\(run)", password: secret),
+            ephemeral: true))
+        defer { try? repository.delete(profile.id) }
+
+        func call(_ method: String, _ path: String, token given: String? = nil, host: String? = nil,
+                  extra: [String: String] = [:], body: String = "") async -> (status: Int, body: String) {
+            var head = "\(method) \(path) HTTP/1.1\r\nHost: \(host ?? "127.0.0.1:\(port)")\r\n"
+            head += "Authorization: Bearer \(given ?? token)\r\n"
+            for (name, value) in extra { head += "\(name): \(value)\r\n" }
+            head += "Content-Length: \(body.utf8.count)\r\n\r\n"
+            let request = Data((head + body).utf8)
+            let answer = await Task.detached { Self.rawHTTP(port: port, request) }.value
+            guard let answer, let text = String(data: answer, encoding: .utf8),
+                  let statusText = text.split(separator: " ", maxSplits: 2).dropFirst().first, let status = Int(statusText) else {
+                return (0, "")
+            }
+            return (status, text.components(separatedBy: "\r\n\r\n").dropFirst().joined(separator: "\r\n\r\n"))
+        }
+        let base = "/v1/profiles/\(profile.id.uuidString)"
+        check("automation: a request without the token is refused", await call("GET", "/v1/profiles", token: "").status == 401)
+        check("automation: a request with a wrong token is refused", await call("GET", "/v1/profiles", token: token + "x").status == 401)
+        check("automation: a web page's request is refused, with the token too",
+              await call("GET", "/v1/profiles", extra: ["Origin": "https://attacker.example"]).status == 403)
+        check("automation: a name pointed at 127.0.0.1 is refused (DNS rebinding)",
+              await call("GET", "/v1/profiles", host: "attacker.example:\(port)").status == 403)
+
+        let list = await call("GET", "/v1/profiles")
+        check("automation: the profiles are listed, with their proxy but not its credentials",
+              list.status == 200 && list.body.contains(profile.id.uuidString) && list.body.contains("http://127.0.0.1:9")
+                && !list.body.contains(secret) && !list.body.contains("api-user-\(run)"),
+              "\(list.status) \(list.body.prefix(300))")
+        check("automation: an unknown profile is not found", await call("GET", "/v1/profiles/nobody-\(run)").status == 404)
+
+        let started = await call("POST", base + "/start", body: "{\"window\": false}")
+        check("automation: a profile starts out of sight", started.status == 200 && manager.isRunning(profile.id),
+              "\(started.status) \(started.body.prefix(200))")
+        let expiry = Int(Date().addingTimeInterval(3600).timeIntervalSince1970)
+        let cookieFile = "api-\(run).test\tFALSE\t/\tFALSE\t\(expiry)\tpbapi\t\(run)\n"
+        let imported = await call("POST", base + "/cookies", body: cookieFile)
+        check("automation: cookies go into the running profile", imported.status == 200 && imported.body.contains("\"applied\" : 1"),
+              "\(imported.status) \(imported.body.prefix(200))")
+        let exported = await call("GET", base + "/cookies?format=netscape")
+        check("automation: the profile's cookies come back out", exported.status == 200 && exported.body.contains("\tpbapi\t\(run)"),
+              "\(exported.status) \(exported.body.prefix(300))")
+        check("automation: only an http or https address is opened",
+              await call("POST", base + "/open", body: "{\"url\": \"file:///etc/passwd\"}").status == 400)
+        let stopped = await call("POST", base + "/stop")
+        check("automation: the profile stops", stopped.status == 200 && !manager.isRunning(profile.id), "\(stopped.status)")
+
+        server.stop()
+        let afterStop = await Task.detached { Self.rawHTTP(port: port, Data("GET / HTTP/1.1\r\n\r\n".utf8)) }.value
+        check("automation: nothing answers once the API is off", afterStop == nil || afterStop?.isEmpty == true,
+              afterStop.map { String(decoding: $0.prefix(120), as: UTF8.self) } ?? "no connection")
+    }
+
+    /// One request on a plain socket to 127.0.0.1:`port`, and everything that comes back until the
+    /// other side closes; nil when no connection could be made.
+    nonisolated static func rawHTTP(port: Int, _ request: Data) -> Data? {
+        let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { return nil }
+        defer { close(descriptor) }
+        var timeout = timeval(tv_sec: 60, tv_usec: 0)
+        setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(UInt16(port).bigEndian)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let connected = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        }
+        guard connected == 0 else { return nil }
+        let sent = request.withUnsafeBytes { send(descriptor, $0.baseAddress, $0.count, 0) }
+        guard sent == request.count else { return nil }
+        var response = Data()
+        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+        while true {
+            let count = recv(descriptor, &buffer, buffer.count, 0)
+            if count <= 0 { break }
+            response.append(contentsOf: buffer[0..<count])
+        }
+        return response
+    }
+
+    // MARK: Safari's chrome, in a profile's own process, through that profile's proxy
+
+    /// The check this product cannot do without: a profile whose window is Safari's own chrome
+    /// sends nothing outside the profile's proxy — not its pages, not anything in them, not
+    /// Safari's own clients in its process.
+    ///
+    /// Every other proxy check here runs in a window of ours, where the web view is built from our
+    /// own configuration. In Safari's chrome the web views are Safari's to build, with Safari's
+    /// preferences, next to Safari's own network clients; so this runs the real thing: a profile in
+    /// a process of its own (`ProfileProcess`), its window Safari's, its start page the leak page
+    /// of the self-test proxy (`/pb-leak`), on a host that only the proxy answers. That page makes
+    /// every kind of request a page can make, to addresses in the documentation ranges and to host
+    /// names carrying this run's id, and says what it could see. Here it is checked that each of
+    /// those requests reached the proxy, and what the page and the profile's process report; the
+    /// other half — that nothing went around the proxy — is a capture of the machine's traffic
+    /// around this check (scripts/egress_check.py, in CI), for which the lines `egress-*` below
+    /// say when this check ran and which run id to look for.
+    private func safariChromeThroughTheProxy(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("Safari chrome: a profile in Safari's window, in its own process, sends nothing outside its proxy",
+                 "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
+            return
+        }
+        // A process per profile, and Safari's frameworks inside it, is a feature of the
+        // unsandboxed build (it needs library validation off); the sandboxed one cannot do it.
+        guard !AppEnvironment.isSandboxed else {
+            skip("Safari chrome: a profile in Safari's window, in its own process, sends nothing outside its proxy",
+                 "the sandboxed build runs no process per profile, and cannot host Safari's frameworks", .build)
+            return
+        }
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        // The port the leak page asks for on loopback, where the proxy's canary listener notes any
+        // connection that comes straight to it (1 when the proxy runs without one).
+        let canaryPort = ProcessInfo.processInfo.environment["PB_SELFTEST_CANARY_PORT"].flatMap(Int.init) ?? 1
+        let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
+        // An ordinary name rather than ".invalid": the system resolver would really ask the network
+        // about it (and the capture would see the run id), where ".invalid" may be answered on the Mac.
+        let domain = "leak.example.com"
+        let startPath = "/pb-leak?run=\(run)"
+        // A time zone the runner is not in, to tell the profile's from the Mac's in workers.
+        let zone = "Pacific/Chatham"
+        let profile = try repository.create(name: "Safari chrome", configuration: ProfileConfiguration(
+            startURL: URL(string: "http://start-\(run).\(domain)\(startPath)"), proxy: proxy, timeZoneIdentifier: zone,
+            matchProxyLocation: false))
+        let manager = ProfileManager(repository: repository)
+        var messages: [String] = []
+        manager.onError = { messages.append($0) }
+        var hostsChrome: Bool?
+        manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
+        var networkReport: ProfileNetworkReport?
+        manager.onNetworkReport = { _, report in networkReport = report }
+        var sealReport: ProfileSealReport?
+        manager.onChildSealed = { _, report in sealReport = report }
+
+        info("egress-token \(run)")
+        info("egress-window begin \(Date().timeIntervalSince1970)")
+        // The account's own com.apple.Safari preferences outside Safari's container, as a file:
+        // a profile's settings for Safari's services stay in its process (SafariChrome).
+        let accountSafariPreferences = SafariPaths.realHome.map { $0 + "/Library/Preferences/com.apple.Safari.plist" }
+        let accountSafariBefore = accountSafariPreferences.map(Self.preferencesFileState)
+        // And the real Safari's own preferences, as cfprefsd gives them (its container): Safari's
+        // code in the profile's process names that domain by its path (CI run 496).
+        let safariDomainBefore = Self.realSafariDomain()
+        // This app's own domain in the account's home: what Safari's chrome saves as its
+        // preferences goes to the profile's home instead (SafariDefaults).
+        let appDomainBefore = Self.appDomainKeys()
+        // The XPC services that start while the profile runs, and what they hold open in the real
+        // Safari's places: the profile's guard does not see a service asked for through libxpc.
+        let xpcWatch = SafariPaths.realHome.map { XPCServiceWatch(realHome: $0) }
+        defer { _ = xpcWatch?.stop() }
+        var profilePIDs: Set<pid_t> = []
+        // The per-profile process is off by default; this one check is what it is for.
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        // Variables of the manager's own that a profile's process must not inherit: one of the
+        // manager's, and one that would change what the process does (it would open no window).
+        setenv("PB_INHERIT_CANARY", run, 1)
+        setenv("PB_WARM_UP_ONLY", "1", 1)
+        let managerEnvironment = Set(ProcessInfo.processInfo.environment.keys)
+        defer {
+            unsetenv("PB_INHERIT_CANARY")
+            unsetenv("PB_WARM_UP_ONLY")
+        }
+        do {
+            try await manager.launch(profile.id)
+        } catch {
+            setenv("PB_PROFILE_PROCESS", "0", 1)
+            check("Safari chrome: the profile's own process started", false, String(describing: error))
+            return
+        }
+        setenv("PB_PROFILE_PROCESS", "0", 1)
+        unsetenv("PB_INHERIT_CANARY")
+        unsetenv("PB_WARM_UP_ONLY")
+        if let pid = manager.processIdentifier(of: profile.id) { info("egress-pid \(pid)"); profilePIDs.insert(pid) }
+        let started = await waitUntil(timeout: 90) { hostsChrome != nil }
+        check("Safari chrome: the profile's own process started and reported its window",
+              started, "no 'running' came back (the process may have died; see its own log)")
+        // What a selection's Launch waits for before it starts the next profile (LaunchQueue): the
+        // same word from the profile's process.
+        let windowSeen = await manager.waitForWindow(profile.id, seconds: 5)
+        check("Safari chrome: a selection's Launch sees the profile's window up once its process says so",
+              windowSeen || !started, "the process said its window was up; the manager's wait did not")
+        check("Safari chrome: the window is Safari's own chrome", hostsChrome == true,
+              "the profile opened our own window: this Mac would not host Safari's chrome")
+
+        // What the proxy answered for this run, and what the page reported, asked through the same
+        // proxy from a window of ours. Polled: the chrome's page loads are on their own schedule.
+        struct Entry { let via: String; let target: String; let path: String; let cookie: String; let userAgent: String; let language: String }
+        func leakLog() async -> (targets: [Entry], reports: [[String: Any]], canary: [String]) {
+            let url = URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!
+            let text = try? await loadThroughProxy(repository, proxy, url: url)
+            guard let data = text?.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return ([], [], []) }
+            let targets = (object["targets"] as? [[String: Any]] ?? []).map {
+                Entry(via: $0["via"] as? String ?? "", target: ($0["target"] as? String ?? "").lowercased(),
+                      path: $0["path"] as? String ?? "", cookie: $0["cookie"] as? String ?? "",
+                      userAgent: $0["userAgent"] as? String ?? "", language: $0["language"] as? String ?? "")
+            }
+            let canary = (object["canary"] as? [[String: Any]] ?? []).map { "\($0["listener"] ?? "?") \($0["request"] ?? "")" }
+            return (targets, object["reports"] as? [[String: Any]] ?? [], canary)
+        }
+        // The leak page's own report, not its frame's or its secure half's.
+        func isPage(_ report: [String: Any]) -> Bool { report["frame"] == nil && report["secure"] == nil && report["sw"] == nil }
+        var log = (targets: [Entry](), reports: [[String: Any]](), canary: [String]())
+        for _ in 0..<25 {
+            log = await leakLog()
+            if log.reports.contains(where: isPage) && log.reports.contains(where: { $0["frame"] != nil }) { break }
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+        }
+        // WebKit names an IPv6 address in its CONNECT line without brackets.
+        func reached(_ target: String, _ path: String) -> Bool {
+            let forms = [target.lowercased(), target.lowercased().replacingOccurrences(of: "[", with: "").replacingOccurrences(of: "]", with: "")]
+            return log.targets.contains { forms.contains($0.target) && $0.path.hasPrefix(path) }
+        }
+        check("Safari chrome: a profile in its own process loads its pages through its own proxy",
+              reached("start-\(run).\(domain):80", startPath),
+              "the proxy answered: \(log.targets.map { "\($0.target)\($0.path.prefix(40))" }.joined(separator: " "))")
+        // The profile's User-Agent, not one of Safari's choosing (`ProfileNetworkGuard.pinUserAgent`).
+        let startAgent = log.targets.first { $0.path.hasPrefix(startPath) }?.userAgent ?? ""
+        let wantedAgent = ProfileConfiguration(proxy: proxy).userAgent(hostSafariVersion: HostSafari.version)
+        check("Safari chrome: the start page goes out with the profile's User-Agent",
+              startAgent == wantedAgent, "sent \(startAgent), wanted \(wantedAgent)")
+        check("Safari chrome: an iPhone or iPad view gets our own window, of that device's size, not Safari's desktop chrome",
+              !SafariChromeHost.canHost(ProfileConfiguration(deviceGenerationID: "ios-26"))
+                && SafariChromeHost.canHost(ProfileConfiguration()))
+        let page = log.reports.first(where: isPage) ?? [:]
+        let frame = log.reports.first { $0["frame"] != nil } ?? [:]
+        check("Safari chrome: the leak page ran and reported", !page.isEmpty, "no report from the page")
+        info("Safari chrome: the leak page reported \(page)")
+        // WebRTC opens its sockets outside the data store's proxy: in a proxied profile without
+        // the relay it must not exist at all, in the page, in a frame of another site and in an
+        // about:blank frame (where a script-only removal is classically got round).
+        check("Safari chrome: WebRTC is off in Safari's web views (page, frame, about:blank frame)",
+              page["rtc"] as? String == "undefined" && frame["rtc"] as? String == "undefined"
+                && page["rtcBlankFrame"] as? String == "undefined",
+              "page \(page["rtc"] ?? "nil"), frame \(frame["rtc"] ?? "nil"), blank frame \(page["rtcBlankFrame"] ?? "nil")")
+        // WebTransport is QUIC, which an HTTP or SOCKS5 proxy cannot carry.
+        check("Safari chrome: WebTransport is off in a proxied profile",
+              page["webTransport"] as? String == "undefined" && frame["webTransport"] as? String == "undefined",
+              "page \(page["webTransport"] ?? "nil"), frame \(frame["webTransport"] ?? "nil")")
+        for (what, target, path) in [
+            ("a fetch to an IPv4 address", "192.0.2.10:8080", "/pb-leak/fetch4"),
+            ("a fetch to an IPv6 address", "[2001:db8::10]:8080", "/pb-leak/fetch6"),
+            ("a fetch to a host name", "fetch-\(run).\(domain):80", "/pb-leak/fetchname"),
+            ("a WebSocket", "192.0.2.11:8080", "/pb-leak/ws"),
+            ("a worker's fetch", "192.0.2.15:8080", "/pb-leak/worker"),
+            ("an image", "img-\(run).\(domain):80", "/pb-leak/img.png"),
+            ("a frame of another site", "frame-\(run).\(domain):80", "/pb-leak/frame"),
+            // The local network is not an exception to the proxy.
+            ("a fetch to a .local name", "lan-\(run).local:80", "/pb-leak/lan"),
+        ] {
+            check("Safari chrome: \(what) goes through the profile's proxy", reached(target, path),
+                  "not seen by the proxy: \(target)\(path)")
+        }
+        // This Mac itself: the system never sends loopback through a proxy (measured in run 382: the
+        // page's fetches reached the canary listener directly), so a proxied profile's pages are
+        // refused it — a fetch, a frame and a worker's fetch (`ProxiedContentRules`).
+        let refusedHere = ["loopback4", "loopbackName", "loopback6", "loopbackAny", "loopbackWorker"]
+        check("Safari chrome: a page cannot reach this Mac (127.0.0.1, localhost, ::1, 0.0.0.0, from the page and from a worker): each is refused",
+              refusedHere.allSatisfy { page[$0] as? String == "rejected" },
+              refusedHere.map { "\($0)=\(page[$0] ?? "nil")" }.joined(separator: " "))
+        // Measured through the proxy in run 383; kept that way.
+        check("Safari chrome: a fetch to a private-network address (10.255.255.1) goes through the profile's proxy",
+              reached("10.255.255.1:8080", "/pb-leak/lan10"), "not seen by the proxy (\(page["lan10"] ?? "nil"))")
+        // The proxied profile's rule list (dns-prefetch, <a ping>) reaches the web views Safari builds:
+        // shown only where the page says it clicked its ping, and a plain web view of this WebKit
+        // sends one without the rule list (the control in the proxy checks).
+        let pingName = "Safari chrome: <a ping> is blocked in Safari's web views (and dns-prefetch with it)"
+        if page["pingClicked"] as? Bool != true {
+            skip(pingName, "the leak page did not say it clicked its ping link (\(page.isEmpty ? "no report" : "pingClicked \(page["pingClicked"] ?? "nil")"))")
+        } else if pingsSentWithoutRules != true {
+            skip(pingName, pingsSentWithoutRules == nil
+                 ? "the control — a plain web view's ping without the rule list — was not measured in this run"
+                 : "the control — a plain web view's ping without the rule list — sent none either, so a blocked ping cannot be told from none sent")
+        } else {
+            check(pingName, !log.targets.contains { $0.path.hasPrefix("/pb-leak/ping") }, "the ping reached the proxy")
+        }
+        // What the capture's coverage holds: a request that reached the proxy is listed; one that
+        // did not was either not made (then nothing about it is shown) or went around the proxy
+        // (then the capture, scripts/egress_check.py, fails on it).
+        for (what, path) in [("the font", "/pb-leak/font.woff"), ("the video", "/pb-leak/media.mp4"), ("the beacon", "/pb-leak/beacon")] {
+            if log.targets.contains(where: { $0.path.hasPrefix(path) }) {
+                info("Safari chrome: \(what) reached the proxy")
+            } else {
+                skip("Safari chrome: \(what) of the leak page goes through the profile's proxy (the capture's coverage)",
+                     "it did not reach the proxy in this run: not asked for (then not shown), or gone around it (then the capture fails)")
+            }
+        }
+
+        // The profile's process, from inside: where its web views are, what WebRTC their engines
+        // have, and a request made by each of the process's own ways of making one — to a host
+        // that only the proxy answers.
+        // https: App Transport Security refuses plain http to the app's own URLSession. The test
+        // proxy cannot speak TLS, so each request fails after its CONNECT — and the CONNECT, at the
+        // proxy, is the proof of where it went.
+        let probePath = "/pb-leak/urlsession?run=\(run)"
+        _ = manager.checkNetwork(profile.id, probe: URL(string: "https://probe-\(run).\(domain)\(probePath)"))
+        _ = await waitUntil(timeout: 40) { networkReport != nil }
+        if let report = networkReport {
+            info("Safari chrome: the profile's process reports \(report)")
+            check("Safari chrome: every web view of the process is on the profile's store, with its proxy",
+                  report.webViews > 0 && report.webViewsOffProfile == 0, "\(report.webViewsOffProfile) of \(report.webViews) are not")
+            check("Safari chrome: no web view of the process has WebRTC in its engine",
+                  report.webViewsWithWebRTC == 0, "\(report.webViewsWithWebRTC) of \(report.webViews) have")
+            check("Safari chrome: WebKit's own default store is closed", report.defaultStoreClosed)
+            // The leak page submits a login form before it reports: Safari's own AutoFill must not
+            // see it (its save would go to the owner's own passwords; SafariChrome.closeSafarisAutoFill).
+            check("Safari chrome: a login form submitted in Safari's window went on without Safari's own AutoFill (passwords, cards, other forms), and nothing reached Safari's offers to save",
+                  report.safariFormSubmissionsKept >= 1 && report.safariSaveOffersReached == 0,
+                  "\(report.safariFormSubmissionsKept) submission(s) kept from it, \(report.safariSaveOffersReached) offer(s) to save reached")
+            check("Safari chrome: the kernel refuses the process the XPC services of Safari's frameworks (SafariPlatformSupport's helper reaches the real Safari's data and keychain)",
+                  report.safariXPCServicesClosed, String(describing: report.missing))
+            check("Safari chrome: the process's own connections carry the profile's proxy", report.processProxy)
+            check("Safari chrome: the process made its three probe requests", report.probes.count == 3, "\(report.probes)")
+            check("Safari chrome: this Safari has every class and method the chrome relies on",
+                  report.missing.isEmpty, report.missing.joined(separator: ", "))
+            check("Safari chrome: Safari's own services are set as the profile needs them",
+                  report.safariPreferences["UniversalSearchEnabled"] == "0"
+                    && report.safariPreferences["AutoFillPasswords"] == "0",
+                  "\(report.safariPreferences)")
+            check("Safari chrome: History › Home opens a blank page in a profile without a start page, not Apple's site",
+                  SafariChrome.homePage(for: ProfileConfiguration()) == "about:blank",
+                  SafariChrome.homePage(for: ProfileConfiguration()))
+            check("Safari chrome: Safari's home page, which History › Home opens, is the profile's start page",
+                  report.safariPreferences[SafariChrome.homePageKey] == "http://start-\(run).\(domain)\(startPath)",
+                  "\(report.safariPreferences[SafariChrome.homePageKey] ?? "unset")")
+            let accountSafariAfter = accountSafariPreferences.map(Self.preferencesFileState)
+            check("Safari chrome: the profile's settings for Safari's services stay in its process — the account's ~/Library/Preferences/com.apple.Safari.plist is not written",
+                  accountSafariAfter == accountSafariBefore,
+                  "before: \(accountSafariBefore ?? "?"), now: \(accountSafariAfter ?? "?")")
+            let realSafariPreferences = "Safari chrome: the real Safari's own preferences (its container, through cfprefsd) are as they were"
+            if !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Safari").isEmpty {
+                skip(realSafariPreferences, "the real Safari runs on this Mac: its own writes would be counted, so they are not compared")
+            } else if let before = safariDomainBefore, let after = Self.realSafariDomain() {
+                let changed = Self.changedKeys(before, after)
+                check(realSafariPreferences, changed.isEmpty, changed.joined(separator: ", "))
+            } else {
+                skip(realSafariPreferences, "they could not be read (defaults export com.apple.Safari \(safariDomainBefore == nil ? "before" : "after") the run)")
+            }
+            info("Safari chrome: WebKit \(report.webKitVersion)")
+            // The preference decides dns-prefetch only before WebKit 7621; from then on the
+            // content rules do (checked above with <a ping>), so this is a check only there.
+            info("Safari chrome: web views whose dns-prefetch preference is on: \(report.webViewsWithDNSPrefetch) of \(report.webViews)")
+            check("Safari chrome: no web view of the process has a feature on that leaves the proxy (WebTransport, PCM, WebAuthn…)",
+                  report.webViewsWithFeatureOn.values.allSatisfy { $0 == 0 }, "\(report.webViewsWithFeatureOn)")
+            check("Safari chrome: nothing the profile has off can be turned on again by another setter",
+                  report.pinBypasses.isEmpty, report.pinBypasses.joined(separator: ", "))
+            // nil: no session of the process said whether its store took them — not a pass.
+            if let workerPreferences = report.workerPreferences {
+                check("Safari chrome: the profile's service workers have the profile's preferences",
+                      workerPreferences, "this WebKit has no service-worker preferences of a store's own")
+            } else {
+                skip("Safari chrome: the profile's service workers have the profile's preferences",
+                     "the profile's process made no session of its own before it reported, so nothing said whether its store took them")
+            }
+            check("Safari chrome: nothing of a page is handed outside the profile (no link preview, no address opened in another app, no sharing service, no password kept in the keychain, copies local)",
+                  report.webViewsWithLinkPreview == 0 && !report.openedInAnotherApp && report.sharingServices == 0
+                    && !report.credentialsKept && (report.handOffsRefused["clipboard"] ?? 0) > 0,
+                  "link previews \(report.webViewsWithLinkPreview), opened \(report.openedInAnotherApp), sharing \(report.sharingServices), credentials kept \(report.credentialsKept), refused \(report.handOffsRefused)")
+            check("Safari chrome: the app's one place for what it hands the system refuses it in the profile's process (SystemOpen)",
+                  report.systemOpenRefused, "a web page asked of SystemOpen from the profile's process was not refused as such")
+            check("Safari chrome: the real Safari's places are closed to the profile's process",
+                  report.safariPlacesClosed, "no sandbox over ~/Library/Safari and the rest")
+            info("Safari chrome: \(report.safariPathsRedirected.count) path getters of Safari's frameworks answer with the profile's home: \(report.safariPathsRedirected.prefix(80).joined(separator: " "))")
+            check("Safari chrome: UDP is closed to the profile's process (QUIC cannot go around the proxy)",
+                  report.udpClosed && report.udp.count == 2 && !report.udp.values.contains { $0 == "sent" || $0.hasPrefix("ready") },
+                  "closed=\(report.udpClosed) \(report.udp)")
+            let inherited = Set(report.environmentNames).intersection(managerEnvironment.subtracting(ProfileProcess.environmentNames))
+            check("Safari chrome: the profile's process has only its own environment, not the manager's",
+                  inherited.isEmpty && !report.environmentNames.contains { $0.hasPrefix("PB_SELFTEST_") },
+                  "inherited \(inherited.sorted()), names \(report.environmentNames)")
+            let home = report.places["CFFIXED_USER_HOME"] ?? ""
+            check("Safari chrome: HOME and TMPDIR of the profile's process are in the profile's home",
+                  !home.isEmpty && report.places["HOME"] == home && (report.places["TMPDIR"] ?? "").hasPrefix(home + "/"),
+                  "\(report.places)")
+            check("Safari chrome: what Safari's chrome saves through the standard defaults is kept in the profile's home",
+                  !home.isEmpty && report.standardDefaultsDomain == SafariDefaults.domain(inHome: home),
+                  report.standardDefaultsDomain)
+            check("Safari chrome: Safari's own defaults, which it names by the real Safari's container, are that same domain of the profile's",
+                  report.safarisOwnDefaultsInProfile, "+[NSUserDefaults safari_browserDefaults] answers with another domain, or this Safari has none")
+            info("Safari chrome: Foundation's temporary directory in the profile's process is \(report.places["temporaryDirectory"] ?? "?")")
+            check("Safari chrome: certificates are checked without fetching, and the leak page's were refused",
+                  report.trustEvaluated > 0 && report.trustRefused > 0 && report.trustFetchAllowed == 0,
+                  "evaluated \(report.trustEvaluated), refused \(report.trustRefused), still allowed to fetch \(report.trustFetchAllowed)")
+            check("Safari chrome: Safari's Edit menu has Paste as Typed (⌃⌘V)", report.pasteAsTypedInMenu)
+            check("Safari chrome: the profile's File menu imports and exports its own bookmarks (Safari's two actions), whichever File menu Safari built",
+                  report.bookmarksImportExportInMenu,
+                  report.bookmarksItemsPutBack ? "put back where the Browsing Data items were" : "Safari's own items")
+            info("Safari chrome: the File menu's bookmarks items are "
+                 + (report.bookmarksItemsPutBack ? "put back where Safari had its Browsing Data items" : "Safari's own"))
+        } else {
+            check("Safari chrome: the profile's process reported where its traffic goes", false, "no report in 40 s")
+        }
+
+        // Each of those requests reached the proxy as itself — one proxy, not the profile's proxy
+        // reached through the process's own (a request whose session names its proxy explicitly,
+        // as the proxy lookup's does, must not be sent through the process-wide one as well).
+        log = await leakLog()
+        let probes = log.targets.filter { $0.target.hasPrefix("probe-") || $0.path.contains("probe-") }
+        check("Safari chrome: each of the process's own requests (shared, ephemeral and explicit URLSession) went to the proxy itself, not through another proxy",
+              probes.count >= 3 && probes.allSatisfy { $0.target == "probe-\(run).\(domain):443" },
+              probes.map { "\($0.target) \($0.path.prefix(40))" }.joined(separator: " | "))
+
+        // Cookies imported while the profile runs in its own process go into its store at once,
+        // and its next request carries them (the second window's start page, below).
+        let imported = ImportedCookie(name: "pbimported", value: run, domain: "start-\(run).\(domain)", hostOnly: true)
+        let importOutcome = try? await manager.importCookies([imported], into: profile.id)
+        check("Safari chrome: cookies imported into the running profile go into its own process's store",
+              importOutcome == .applied(stored: 1, refused: []), String(describing: importOutcome))
+        let exportedCookies = (try? await manager.exportCookies(of: profile.id)) ?? []
+        check("Safari chrome: the profile's own process exports its cookies, the imported one with them",
+              exportedCookies.contains { $0.name == "pbimported" && $0.value == run }, exportedCookies.map(\.name).joined(separator: " "))
+
+        // Another window, as ⌘N opens one: Safari builds a new web view for it, and its start page
+        // goes through the proxy as well.
+        let before = log.targets.filter { $0.path.hasPrefix(startPath) }.count
+        manager.openNewWindow(profile.id)
+        var after = before
+        for _ in 0..<10 {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            log = await leakLog()
+            after = log.targets.filter { $0.path.hasPrefix(startPath) }.count
+            if after > before { break }
+        }
+        check("Safari chrome: a second window of the profile loads through its proxy", after > before,
+              "start page requests: \(before) before, \(after) after")
+        check("Safari chrome: the second window's request carries the cookie imported meanwhile",
+              log.targets.contains { $0.path.hasPrefix(startPath) && $0.cookie.contains("pbimported=\(run)") },
+              log.targets.filter { $0.path.hasPrefix(startPath) }.map(\.cookie).joined(separator: " | "))
+
+        // The secure-context half of the leak page, on loopback (a secure context): WebTransport
+        // and WebRTC exist only in secure contexts, so only there does their absence — in the
+        // page, a dedicated, a shared and a service worker — mean something.
+        let securePath = "/pb-leak/secure?run=\(run)"
+        manager.openWindow(profile.id, url: URL(string: "http://127.0.0.1:\(httpPort)\(securePath)")!)
+        var secure: [String: Any] = [:]
+        var worker: [String: Any] = [:]
+        for _ in 0..<15 {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            log = await leakLog()
+            secure = log.reports.first { $0["secure"] != nil } ?? [:]
+            // The service worker's own report (`"sw": true`), not the page's (`"sw": "registered"`).
+            worker = log.reports.first { $0["sw"] as? Bool == true && $0["secure"] == nil } ?? [:]
+            if !secure.isEmpty && !worker.isEmpty { break }
+        }
+        // A page opened on this Mac is loaded from this Mac (the system never proxies loopback); it
+        // is the user's own machine, and its own loads stay there (`ProxiedContentRules`).
+        info("Safari chrome: the page on this Mac was loaded \(log.targets.filter { $0.path.hasPrefix(securePath) }.map { "\($0.via) \($0.target)" }.joined(separator: " | "))")
+        info("Safari chrome: the secure page reported \(secure), its service worker \(worker)")
+        if secure["secure"] as? Bool == true {
+            // Each worker answered, and without it: a worker that never answered proves nothing.
+            check("Safari chrome: WebTransport and WebRTC are absent in a secure context (page, worker, shared worker)",
+                  secure["webTransport"] as? String == "undefined" && secure["rtc"] as? String == "undefined"
+                    && secure["worker"] as? String == "undefined" && secure["shared"] as? String == "undefined",
+                  "\(secure)")
+            check("Safari chrome: WebTransport is absent in a service worker (which reported)",
+                  worker["webTransport"] as? String == "undefined", worker.isEmpty ? "no report from the service worker" : "\(worker)")
+            // The profile's time zone is the engine's own in the profile's process, workers
+            // included: a worker no script of ours reaches says what WebKit's process was given.
+            check("Safari chrome: the profile's time zone in the page, a dedicated worker and a service worker",
+                  secure["tz"] as? String == zone && secure["workerTZ"] as? String == zone
+                    && worker["tz"] as? String == zone,
+                  "page \(secure["tz"] ?? "nil"), worker \(secure["workerTZ"] ?? "nil"), service worker \(worker["tz"] ?? "nil")")
+        } else {
+            check("Safari chrome: the secure half of the leak page ran in a secure context", false, "\(secure)")
+        }
+
+        // Long enough for what Safari's chrome does on a timer (the page-text donation runs about
+        // five seconds after a load) to happen while the capture is still looking.
+        try? await Task.sleep(nanoseconds: 8_000_000_000)
+        // What Safari's frameworks keep in the profile's home (its history, bookmarks, snapshots…):
+        // listed, for the record of where a hosted chrome puts its own state.
+        let home = repository.directory(for: profile.id).appendingPathComponent("home.noindex")
+        // Plaintext while the profile runs: out of Spotlight (the name) and out of Time Machine.
+        check("Safari chrome: the profile's home is kept out of backups and Spotlight while it runs",
+              (try? home.resourceValues(forKeys: [.isExcludedFromBackupKey]))?.isExcludedFromBackup == true,
+              home.path)
+        if let files = FileManager.default.enumerator(at: home, includingPropertiesForKeys: [.fileSizeKey]) {
+            var listed: [String] = []
+            for case let file as URL in files where listed.count < 80 {
+                let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                if size > 0 { listed.append("\(file.path.replacingOccurrences(of: home.path, with: "~")) \(size)") }
+            }
+            info("Safari chrome: the profile's home holds \(listed.joined(separator: ", "))")
+        }
+        // Safari's state in the home itself, never in a home nested in it: a path Safari's frameworks
+        // built from the home they were given is not moved into the home a second time
+        // (`SafariPaths.moved`; the owner's Mac, 31 October, three homes deep). Shown where the home
+        // is under the account's ~/Library, as a user's is, and Safari wrote its own there.
+        let nestingName = "Safari chrome: Safari's own state is in the profile's home itself, not in a home nested in it"
+        if let realHome = SafariPaths.realHome, (home.path + "/").hasPrefix(realHome + "/Library/") {
+            let nested = home.path + String(home.path.dropFirst(realHome.count))
+            let safarisOwn = (try? FileManager.default.contentsOfDirectory(atPath: home.appendingPathComponent("Library/Safari").path)) ?? []
+            if FileManager.default.fileExists(atPath: nested) || !safarisOwn.isEmpty {
+                check(nestingName, !FileManager.default.fileExists(atPath: nested) && !safarisOwn.isEmpty,
+                      "nested home there: \(FileManager.default.fileExists(atPath: nested)); in the home's Library/Safari: \(safarisOwn.sorted().prefix(8))")
+            } else {
+                skip(nestingName, "Safari wrote nothing of its own in the home in this run, so where it writes is not shown")
+            }
+        } else {
+            skip(nestingName, "the profile's home is not under the account's ~/Library here (\(home.path)), where the nesting happened")
+        }
+        // The canary listener's control: a connection of the self-test's own, straight to it, under
+        // this run's id. A listener that does not list it (none started, its log unread) would not
+        // have listed the page's either: then nothing is shown about this Mac being reached.
+        let canaryControlPath = "/pb-canary-control?run=\(run)"
+        var canaryControlMade = false
+        if canaryPort > 1 {
+            let request = Data("GET \(canaryControlPath) HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n".utf8)
+            canaryControlMade = await Task.detached { Self.rawHTTP(port: canaryPort, request) != nil }.value
+        }
+        // The page's https request is answered by WebKit's own timing, which can be after the page
+        // reported: looked for last.
+        log = await leakLog()
+        check("Safari chrome: an HTTPS request goes through the proxy too (as a CONNECT)",
+              log.targets.contains { $0.target == "192.0.2.14:443" })
+        check("Safari chrome: an HTTPS image whose certificate needs a fetch reached the proxy, and its certificate was refused",
+              log.targets.contains { $0.target == "aia-\(run).\(domain):443" && $0.path.hasPrefix("(tls refused") },
+              log.targets.filter { $0.target.hasPrefix("aia-") }.map(\.path).joined(separator: " | "))
+        let directs = log.canary.filter { !$0.contains("/pb-canary-control") }
+        let canaryName = "Safari chrome: nothing reached this Mac directly (the canary listener took no connection: no fetch, frame or worker)"
+        // A connection listed fails whatever the control says; none listed is a pass only where
+        // the control was listed.
+        if !directs.isEmpty || log.canary.contains(where: { $0.contains("/pb-canary-control") }) {
+            check(canaryName, directs.isEmpty, directs.joined(separator: " | "))
+        } else {
+            skip(canaryName, canaryPort <= 1
+                 ? "PB_SELFTEST_CANARY_PORT not set: no canary listener runs, so a direct connection would go unseen"
+                 : "the canary listener did not list the self-test's own direct connection (\(canaryControlMade ? "made" : "not made")), so it would not have listed the page's")
+        }
+        // Whether Safari fetches these is Safari's business; where it does, it is through the proxy
+        // (https: the CONNECT is the proof), and anything it fetched another way is in the capture.
+        for (what, host) in [("the page's icon", "icon-"), ("its touch icon", "touchicon-"), ("its OpenSearch description", "osd-")] {
+            if log.targets.contains(where: { $0.target.hasPrefix(host + run) }) {
+                info("Safari chrome: \(what) was fetched through the proxy")
+            } else {
+                skip("Safari chrome: \(what), where Safari fetches it, goes through the profile's proxy (the capture's coverage)",
+                     "Safari did not fetch it in this run (not exercised): where it would go is not shown")
+            }
+        }
+        // A stop: Safari's window goes first, then the seal, whose retries no longer wait for Safari
+        // (it keeps the pages of the windows it closes); the process reports how the seal went.
+        sealReport = nil
+        let stopStarted = Date()
+        try? await manager.stop(profile.id)
+        let stopSeconds = Date().timeIntervalSince(stopStarted)
+        _ = await waitUntil(timeout: 5) { sealReport != nil }
+        check("Safari chrome: a stop ends the profile's process within 15 s, its data sealed and the seal reported (it took 20 s and more of retries)",
+              stopSeconds < 15 && sealReport != nil, "\(Int(stopSeconds)) s, \(String(describing: sealReport))")
+        info("Safari chrome: the stop sealed the profile's data "
+             + (sealReport.map { $0.forced ? "by force (WebKit kept the store in use)" : "without force (WebKit let the store go)" } ?? "(no report)")
+             + ", attempts \(sealReport?.attempts ?? 0), pages closed first \(sealReport?.pagesClosed ?? 0), seal \(Int(sealReport?.seconds ?? 0)) s, stop \(Int(stopSeconds)) s")
+        // Nothing is written in the home once it is sealed: a file written there late (cfprefsd
+        // writes a domain's file a moment after a change) would make a plaintext home, which the
+        // next launch takes for one a crash left and uses instead of the archive.
+        try? await Task.sleep(nanoseconds: 5_000_000_000)
+        let leftInHome = (FileManager.default.enumerator(atPath: home.path)?.allObjects ?? []).compactMap { $0 as? String }
+        check("Safari chrome: the profile's home stays sealed after the stop (nothing is there 5 s later)",
+              !FileManager.default.fileExists(atPath: home.path), leftInHome.prefix(10).joined(separator: ", "))
+        // What Safari's window visited is in the profile's own, encrypted history (`HostedPageHistory`).
+        let visited = (try? repository.historyStore(for: profile.id, key: repository.profileKey(for: profile.id)).entries().map(\.url)) ?? []
+        check("Safari chrome: the pages Safari's window visited are in the profile's own encrypted history",
+              visited.contains { $0.contains("start-\(run).\(domain)/pb-leak") }, visited.prefix(10).joined(separator: " "))
+
+        // Again, as an owner's profile usually runs: its second launch, on the home restored from
+        // its archive, through SOCKS5, following its proxy's location (the lookup goes through
+        // the proxy from the profile's process). Still inside the capture's window.
+        if let socksPort = ProcessInfo.processInfo.environment["PB_SELFTEST_SOCKS_PROXY_PORT"].flatMap(Int.init) {
+            var again = try repository.loadConfiguration(profile.id)
+            again.proxy = ProxySettings(kind: .socks5, host: "127.0.0.1", port: socksPort)
+            again.matchProxyLocation = true
+            again.timeZoneIdentifier = nil
+            try repository.saveConfiguration(again, for: profile.id)
+            // The manager looks the new proxy up before the process starts (nothing is remembered
+            // for it): the self-test proxy's answer is Germany, so the process starts in German.
+            let services = ProxyGeoLookup.services
+            ProxyGeoLookup.services = [.init(url: URL(string: "http://geo.selftest.invalid/pb-geo.json")!,
+                                             timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"])]
+            defer { ProxyGeoLookup.services = services }
+            hostsChrome = nil
+            networkReport = nil
+            let before = (await leakLog()).targets.filter { $0.path.hasPrefix(startPath) }.count
+            setenv("PB_PROFILE_PROCESS", "1", 1)
+            do { try await manager.launch(profile.id) } catch {
+                check("Safari chrome, second launch: the profile's process started", false, String(describing: error))
+            }
+            setenv("PB_PROFILE_PROCESS", "0", 1)
+            if let pid = manager.processIdentifier(of: profile.id) { info("egress-pid \(pid)"); profilePIDs.insert(pid) }
+            let restarted = await waitUntil(timeout: 90) { hostsChrome != nil }
+            var arrived: [Entry] = []
+            for _ in 0..<15 {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                arrived = (await leakLog()).targets.filter { $0.path.hasPrefix(startPath) }
+                if arrived.count > before { break }
+            }
+            check("Safari chrome, second launch on the restored home through SOCKS5: Safari's window again, its start page through the proxy, by name",
+                  restarted && hostsChrome == true && arrived.dropFirst(before).contains { $0.via == "via=socks5" },
+                  "chrome \(String(describing: hostsChrome)), start page requests \(arrived.map(\.via))")
+            check("Safari chrome, a new proxy's first launch: the page is asked for in the proxy's country's language",
+                  arrived.dropFirst(before).contains { $0.language.hasPrefix("de") },
+                  arrived.dropFirst(before).map(\.language).joined(separator: " | "))
+            _ = manager.checkNetwork(profile.id, probe: URL(string: "https://probe-\(run).\(domain)/pb-leak/second?run=\(run)"))
+            _ = await waitUntil(timeout: 40) { networkReport != nil }
+            check("Safari chrome, second launch: every web view on the profile's store, none with WebRTC, the kernel's closures in place",
+                  networkReport.map { $0.webViews > 0 && $0.webViewsOffProfile == 0 && $0.webViewsWithWebRTC == 0 && $0.udpClosed && $0.safariPlacesClosed } == true,
+                  String(describing: networkReport))
+            info("exceptions: in the profile's process with Safari's chrome, an exception passed through the preprocessor keeps its call stack: "
+                 + "\(networkReport.map { String($0.exceptionCallStacks) } ?? "no report")")
+            let saved = Set(networkReport?.standardDefaultsSavedKeys ?? [])
+            check("Safari chrome, second launch: what Safari's chrome saved in the first run came back with the profile's home",
+                  !saved.isEmpty, "\(saved.count) keys: \(saved.sorted().prefix(12).joined(separator: ", "))")
+            try? await manager.stop(profile.id)
+            let added = Self.appDomainKeys().subtracting(appDomainBefore)
+            info("Safari chrome: keys this app's own domain in the account's home got while the profile ran: \(added.sorted())")
+            check("Safari chrome: none of it went to this app's own domain in the account's home",
+                  added.isDisjoint(with: saved), added.intersection(saved).sorted().joined(separator: ", "))
+        } else {
+            skip("Safari chrome, second launch: on the restored home, through SOCKS5, in the proxy's country's language, Safari's saved state back",
+                 "PB_SELFTEST_SOCKS_PROXY_PORT not set: the self-test proxy's SOCKS5 listener is not running")
+        }
+        await manager.shutDown()
+        if let xpcWatch {
+            reportXPCServices(xpcWatch.stop(), profilePIDs: profilePIDs)
+        } else {
+            skip("Safari chrome: no XPC service of Safari's frameworks started for the profile",
+                 "the account's real home is not known (SafariPaths.realHome), so no watch of XPC services ran")
+        }
+        info("egress-window end \(Date().timeIntervalSince1970)")
+        check("Safari chrome: nothing went wrong while it ran", messages.isEmpty, messages.joined(separator: " | "))
+    }
+
+    // MARK: WebRTC through the profile's proxy
+
+    /// WebRTC of a profile with a SOCKS5 proxy that relays UDP — the self-test proxy's `--socks-udp`
+    /// listener, which connects nowhere and plays the NAT itself — in the profile's own process, in
+    /// Safari's chrome, on `/pb-rtc` opened on loopback (a secure context, where WebRTC exists), each
+    /// run inside an egress window: nothing of the profile's may leave this Mac then
+    /// (scripts/egress_check.py).
+    ///   * The control: no network guard in this build (nor could a CI runner load one), so the
+    ///     profile runs with no RTCPeerConnection at all, in its page and in an about:blank frame,
+    ///     and is told why (`WebRTCGate`).
+    ///   * The call: the self-test stands in for the guard, so the profile gets the product's own
+    ///     relay (`WebRTCRelays`, here) and user script: a video call between two connections of the
+    ///     page, through the relay and the proxy's UDP, with relay candidates only, at the proxy's
+    ///     public address, frames decoded on the far side, and the page's own STUN server — named
+    ///     after the run — never asked (a DNS question for it fails the capture).
+    ///   * One address: the gate's comparison of the proxy's UDP address with its TCP exit (the
+    ///     self-test proxy's trace says the exit), alone — the same address, another one, none found
+    ///     — and a launch whose proxy's UDP leaves from another address than its TCP: no
+    ///     RTCPeerConnection, and the profile is told why.
+    /// Then the capture's control for WebRTC, outside any window: a STUN request made on purpose
+    /// from a profile without a proxy, which the capture must see as the app's.
+    private func webRTCThroughTheProxy(_ repository: ProfileRepository) async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let udpPort = environment["PB_SELFTEST_SOCKS_UDP_PROXY_PORT"].flatMap(Int.init),
+              let httpPort = environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("WebRTC through the proxy: a video call through the profile's proxy, and none without the guard",
+                 "PB_SELFTEST_SOCKS_UDP_PROXY_PORT not set: the self-test proxy's UDP listener is not running")
+            return
+        }
+        guard !AppEnvironment.isSandboxed else {
+            skip("WebRTC through the proxy: a video call through the profile's proxy, and none without the guard",
+                 "the sandboxed build runs no process per profile, which WebRTC through a proxy needs", .build)
+            return
+        }
+        let socks = ProxySettings(kind: .socks5, host: "127.0.0.1", port: udpPort)
+        let http = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        // Where the proxy's TCP leaves from: the self-test proxy's own trace answers in place of
+        // Cloudflare's, with the address its UDP leaves from too (203.0.113.77) unless told another.
+        let exitTrace = "http://exit.selftest.invalid/cdn-cgi/trace"
+        let endpoints = ProxyExitLookup.endpoints
+        ProxyExitLookup.endpoints = [URL(string: exitTrace)!]
+        defer { ProxyExitLookup.endpoints = endpoints }
+
+        // What the proxy's UDP side did so far, asked through its HTTP listener.
+        func udpStats() async -> [String: Any] {
+            let url = URL(string: "http://proxied.selftest.invalid/pb-udp.json")!
+            guard let text = try? await loadThroughProxy(repository, http, url: url) else { return [:] }
+            return (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
+        }
+        // The WebRTC page's report for a run.
+        func rtcReport(_ run: String) async -> [String: Any]? {
+            let url = URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!
+            guard let text = try? await loadThroughProxy(repository, http, url: url),
+                  let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] else { return nil }
+            return (object["reports"] as? [[String: Any]])?.first { $0["rtcPage"] != nil }
+        }
+        // One launch of the proxied profile in its own process, on the WebRTC page in `mode`.
+        func launch(mode: String) async throws -> (report: [String: Any], refusals: [WebRTCRefusal], messages: [String], started: Bool) {
+            let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
+            let profile = try repository.create(name: "WebRTC \(mode)", configuration: ProfileConfiguration(
+                startURL: URL(string: "http://127.0.0.1:\(httpPort)/pb-rtc?run=\(run)&mode=\(mode)"),
+                proxy: socks, webRTCPolicy: .unrestricted, matchProxyLocation: false))
+            defer { try? repository.delete(profile.id) }
+            let manager = ProfileManager(repository: repository)
+            var messages: [String] = []
+            manager.onError = { messages.append($0) }
+            var hostsChrome: Bool?
+            manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
+            info("egress-token \(run)")
+            info("egress-window begin \(Date().timeIntervalSince1970)")
+            setenv("PB_PROFILE_PROCESS", "1", 1)
+            do {
+                try await manager.launch(profile.id)
+            } catch {
+                setenv("PB_PROFILE_PROCESS", "0", 1)
+                info("egress-window end \(Date().timeIntervalSince1970)")
+                throw error
+            }
+            setenv("PB_PROFILE_PROCESS", "0", 1)
+            if let pid = manager.processIdentifier(of: profile.id) { info("egress-pid \(pid)") }
+            let started = await waitUntil(timeout: 90) { hostsChrome != nil }
+            var report: [String: Any] = [:]
+            let deadline = Date().addingTimeInterval(mode == "call" ? 120 : 60)
+            while report.isEmpty, Date() < deadline {
+                report = await rtcReport(run) ?? [:]
+                if report.isEmpty { try? await Task.sleep(nanoseconds: 2_000_000_000) }
+            }
+            let refusals = Array(manager.webRTCRefusals.values)
+            await manager.shutDown()
+            info("egress-window end \(Date().timeIntervalSince1970)")
+            return (report, refusals, messages, started)
+        }
+
+        // The control: the production gate, nothing standing in for the guard.
+        let control = try await launch(mode: "presence")
+        info("WebRTC through the proxy, the control: \(control.report), refusals \(control.refusals), messages \(control.messages)")
+        check("WebRTC through the proxy, the control: the profile's own process started", control.started)
+        check("WebRTC through the proxy, the control: without the guard no RTCPeerConnection, in the page or in an about:blank frame",
+              control.report["rtc"] as? String == "undefined" && control.report["rtcFrame"] as? String == "undefined",
+              control.report.isEmpty ? "no report from the page" : "\(control.report)")
+        let refusal = control.refusals.first
+        check("WebRTC through the proxy, the control: the profile is told why, in words",
+              control.refusals.count == 1 && refusal.map { $0.rawValue.hasPrefix("guard") } == true
+                && refusal.map { control.messages.contains(ProfileManager.webRTCOffText($0)) } == true,
+              "refusals \(control.refusals), messages \(control.messages)")
+
+        // The call: the product's relay, the self-test standing in for the guard.
+        let before = await udpStats()
+        NetworkGuard.shared.selfTestStandIn = true
+        let call: (report: [String: Any], refusals: [WebRTCRefusal], messages: [String], started: Bool)
+        do {
+            call = try await launch(mode: "call")
+        } catch {
+            NetworkGuard.shared.selfTestStandIn = false
+            throw error
+        }
+        NetworkGuard.shared.selfTestStandIn = false
+        let after = await udpStats()
+        info("WebRTC through the proxy, the call: \(call.report), refusals \(call.refusals), proxy UDP before \(before) after \(after)")
+        let types = call.report["candidateTypes"] as? [String] ?? []
+        let addresses = call.report["candidateAddresses"] as? [String] ?? []
+        let inbound = call.report["inbound"] as? [String: Any] ?? [:]
+        let frames = (inbound["framesDecoded"] as? NSNumber)?.intValue ?? 0
+        func count(_ stats: [String: Any], _ key: String) -> Int { (stats[key] as? NSNumber)?.intValue ?? 0 }
+        check("WebRTC through the proxy, the call: the profile's own process started", call.started)
+        check("WebRTC through the proxy, the call: RTCPeerConnection is there with the relay", call.report["rtc"] as? String == "function"
+                && call.refusals.isEmpty, call.report.isEmpty ? "no report from the page" : "\(call.report), refusals \(call.refusals)")
+        check("WebRTC through the proxy, the call: relay candidates only, at the proxy's public address",
+              types == ["relay"] && addresses == ["203.0.113.77"], "types \(types), addresses \(addresses)")
+        check("WebRTC through the proxy, the call: the video went through and was decoded on the far side",
+              call.report["connected"] as? Bool == true && call.report["track"] as? Bool == true && frames >= 30,
+              "connected \(call.report["connected"] ?? "nil"), track \(call.report["track"] ?? "nil"), frames \(frames), \(inbound)")
+        check("WebRTC through the proxy, the call: its UDP went through the proxy's associations",
+              count(after, "associations") - count(before, "associations") >= 2
+                && count(after, "handedOver") - count(before, "handedOver") >= 100,
+              "associations \(count(before, "associations"))→\(count(after, "associations")), datagrams handed over \(count(before, "handedOver"))→\(count(after, "handedOver"))")
+        // A peer's candidates named by host names (in its description, trickled, an mDNS one): the
+        // page is told they were taken, and no resolver is asked — the capture holds no packet with
+        // this run's name (egress_check.py, the run's token).
+        check("WebRTC through the proxy, the call: a peer's candidates named by host names are taken without asking any resolver",
+              call.report["namedCandidates"] as? String == "taken", "\(call.report["namedCandidates"] ?? "nil")")
+        let dropped = (after["dropped"] as? [String] ?? []).filter { !((before["dropped"] as? [String] ?? []).contains($0)) }
+        check("WebRTC through the proxy, the call: the relay asked the proxy for nothing but peers and its egress probe",
+              dropped.isEmpty, dropped.joined(separator: ", "))
+
+        // One address: the gate's own comparison, against this proxy's UDP (203.0.113.77).
+        let userAgent = ProfileConfiguration(ephemeral: true).userAgent(hostSafariVersion: HostSafari.version)
+        let same = await ProfileManager.proxyUDP(socks, userAgent: userAgent)
+        ProxyExitLookup.endpoints = [URL(string: exitTrace + "?ip=203.0.113.78")!]
+        let elsewhere = await ProfileManager.proxyUDP(socks, userAgent: userAgent)
+        ProxyExitLookup.endpoints = [URL(string: "http://exit.selftest.invalid/pb-no-trace")!]
+        let unknown = await ProfileManager.proxyUDP(socks, userAgent: userAgent)
+        check("WebRTC through the proxy, one address: UDP that leaves from the proxy's TCP exit gives the relay, held to that address",
+              same.support == .supported && same.exit?.description == "203.0.113.77", "\(same.support) \(same.exit?.description ?? "no exit")")
+        check("WebRTC through the proxy, one address: UDP that leaves from another address than the proxy's TCP gives no relay",
+              elsewhere.support == .elsewhere && elsewhere.exit == nil, "\(elsewhere.support) \(elsewhere.exit?.description ?? "no exit")")
+        check("WebRTC through the proxy, one address: a TCP exit that cannot be found out gives no relay",
+              unknown.support == .exitUnknown && unknown.exit == nil, "\(unknown.support) \(unknown.exit?.description ?? "no exit")")
+
+        // One address, a launch: the guard standing in as for the call, a proxy whose UDP leaves from
+        // another address than its TCP leaves the profile without WebRTC, and says why.
+        ProxyExitLookup.endpoints = [URL(string: exitTrace + "?ip=203.0.113.78")!]
+        NetworkGuard.shared.selfTestStandIn = true
+        let apart: (report: [String: Any], refusals: [WebRTCRefusal], messages: [String], started: Bool)
+        do {
+            apart = try await launch(mode: "presence")
+        } catch {
+            NetworkGuard.shared.selfTestStandIn = false
+            throw error
+        }
+        NetworkGuard.shared.selfTestStandIn = false
+        ProxyExitLookup.endpoints = [URL(string: exitTrace)!]
+        info("WebRTC through the proxy, one address, a launch: \(apart.report), refusals \(apart.refusals), messages \(apart.messages)")
+        check("WebRTC through the proxy, one address: a proxy whose UDP leaves from elsewhere — no RTCPeerConnection, in the page or in an about:blank frame",
+              apart.started && apart.report["rtc"] as? String == "undefined" && apart.report["rtcFrame"] as? String == "undefined",
+              apart.report.isEmpty ? "no report from the page (started \(apart.started))" : "\(apart.report)")
+        check("WebRTC through the proxy, one address: the profile is told why, in words",
+              apart.refusals == [.proxyUDPElsewhere] && apart.messages.contains(ProfileManager.webRTCOffText(.proxyUDPElsewhere)),
+              "refusals \(apart.refusals), messages \(apart.messages)")
+
+        // The capture's control for WebRTC's UDP: a STUN request from a profile without a proxy, on
+        // purpose, outside every window, to a public STUN server (Google's, by address: no DNS).
+        let stun = (ip: "74.125.250.129", port: 19302)
+        let direct = try repository.create(name: "WebRTC control", configuration: ProfileConfiguration(webRTCPolicy: .unrestricted, ephemeral: true))
+        defer { try? repository.delete(direct.id) }
+        let session = try makeSession(repository, direct.id, key: repository.profileKey(for: direct.id))
+        defer { session.shutDown() }
+        let webView = WKWebView(frame: .zero, configuration: session.makeWebViewConfiguration())
+        try await PageLoader.load(webView, html: "<!doctype html><title>WebRTC control</title>", baseURL: URL(string: "https://localhost/")!)
+        info("egress-control-udp webrtc \(stun.ip) \(stun.port)")
+        let sent = try await js(webView, """
+            if (typeof RTCPeerConnection !== 'function') return 'no RTCPeerConnection';
+            const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:\(stun.ip):\(stun.port)' }] });
+            const types = [];
+            pc.onicecandidate = (event) => {
+              if (event.candidate && event.candidate.candidate) types.push((/ typ (\\w+)/.exec(event.candidate.candidate) || [])[1]);
+            };
+            pc.createDataChannel('control');
+            await pc.setLocalDescription(await pc.createOffer());
+            await new Promise((resolve) => {
+              const timer = setTimeout(resolve, 6000);
+              pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') { clearTimeout(timer); resolve(); } };
+            });
+            pc.close();
+            return 'gathered: ' + types.join(',');
+            """) as? String
+        check("WebRTC through the proxy: the capture's control — a profile without a proxy sends WebRTC's STUN itself",
+              sent?.hasPrefix("gathered") == true, sent ?? "nil")
+    }
+
+    /// What `XPCServiceWatch` saw while the profile ran in Safari's chrome: every XPC service that
+    /// started, and whether this app (the self-test, or the profile's process it started) is the
+    /// one the system holds responsible for it; and each one's files open in the real Safari's
+    /// places. A measurement: which services a profile's process must be closed to is decided from
+    /// it (the owner's Mac showed one, Safari's SafariPlatformSupport helper, in the real container).
+    private func reportXPCServices(_ seen: [(service: XPCServiceWatch.Service, opened: [String])], profilePIDs: Set<pid_t>) {
+        let ours = profilePIDs.union([getpid()])
+        let ownResponsible = XPCServiceWatch.responsible(for: getpid())
+        func whose(_ service: XPCServiceWatch.Service) -> String {
+            guard let responsible = service.responsible else { return "responsible process not known" }
+            return ours.contains(responsible) || responsible == ownResponsible ? "for this app" : "for pid \(responsible)"
+        }
+        info("XPC services started while the profile ran in Safari's chrome: "
+             + (seen.isEmpty ? "none" : seen.map { "\($0.service.bundleName) (pid \($0.service.pid), \(whose($0.service)))" }.joined(separator: ", ")))
+        for entry in seen where !entry.opened.isEmpty {
+            info("XPC service \(entry.service.bundleName) (pid \(entry.service.pid), \(whose(entry.service))) held open in the real Safari's places: "
+                 + entry.opened.prefix(20).joined(separator: ", "))
+        }
+        // The profile's process is closed to them (ProfileNetworkGuard.closeTheProcess). Ours: the
+        // system holds this app — or what this app runs under, as CI's runner — responsible.
+        let safaris = seen.filter { entry in
+            entry.service.bundleName.hasPrefix("com.apple.Safari")
+                && entry.service.responsible.map { ours.contains($0) || $0 == ownResponsible } ?? true
+        }
+        // The watch's control: the profile's own web content process, which WebKit starts as an XPC
+        // service for it every time. A watch that did not see that one would not have seen
+        // Safari's either.
+        let ownWebContent = seen.contains { entry in
+            entry.service.bundleName.hasPrefix("com.apple.WebKit.WebContent")
+                && entry.service.responsible.map { ours.contains($0) || $0 == ownResponsible } == true
+        }
+        let name = "Safari chrome: no XPC service of Safari's frameworks started for the profile"
+        if !safaris.isEmpty || ownWebContent {
+            check(name, safaris.isEmpty, safaris.map { "\($0.service.bundleName) (pid \($0.service.pid))" }.joined(separator: ", "))
+        } else {
+            skip(name, "the watch saw no WebKit content process start for this app (\(seen.count) services seen in all), so it would not have seen Safari's")
+        }
+    }
+
+    // MARK: Exceptions
+
+    /// An exception thrown in AppKit's run loop is written down, readably, and lived through
+    /// (`ExceptionLog`), in a process of its own (`--exception-check`): with this build's hooks, and
+    /// — the control — with the earlier hook, which replaced CoreFoundation's preprocessor instead
+    /// of calling it and is what took a profile's process down on ⌘, in Safari's chrome.
+    private func exceptionChecks() async throws {
+        info("exceptions: in this process an exception passed through the preprocessor keeps its call stack: "
+             + "\(ExceptionLog.preprocessorKeepsCallStacks())")
+        guard let executable = profileLikeExecutable() else {
+            check("exceptions: this build's profile executable is there to run the check", false)
+            return
+        }
+        let chained = await runOwnExecutable(executable, ["--exception-check"], timeout: 30)
+        let logged = chained.output.split(separator: "\n").filter { $0.hasPrefix("EXCEPTION-CHECK logged:") }.joined(separator: " | ")
+        check("exceptions: one thrown in AppKit's run loop is caught, reported and lived through (CoreFoundation's preprocessor kept in the chain)",
+              !chained.signaled && chained.status == 0 && chained.output.contains("EXCEPTION-CHECK lived through it; reportException: saw 1"),
+              chained.output.trimmingCharacters(in: .whitespacesAndNewlines))
+        check("exceptions: the log has its name and its reason in clear, with the address and the quoted name cut out",
+              logged.contains("PBExceptionCheck") && logged.contains("a check of this build at <url> for \"…\"")
+                  && !logged.contains("bank.example") && !logged.contains("Alice"),
+              logged)
+        // The same in a process like a profile's: NSApp is Safari's own application object, Safari's
+        // frameworks loaded and prepared. Only a build without the App Sandbox can host them.
+        let inSafari = await runOwnExecutable(executable, ["--exception-check", "--safari"], timeout: 60)
+        if inSafari.status == 2, inSafari.output.contains("cannot be hosted") {
+            skip("exceptions: with Safari's own application object as NSApp, one thrown by a menu item's action is lived through, and the user told",
+                 AppEnvironment.isSandboxed ? "the sandboxed build cannot host Safari's frameworks"
+                     : "Safari's frameworks did not load here: \(inSafari.output.trimmingCharacters(in: .whitespacesAndNewlines).prefix(300))",
+                 AppEnvironment.isSandboxed ? .build : .machine)
+        } else {
+            check("exceptions: with Safari's own application object as NSApp, one thrown by a menu item's action reaches reportException: and is lived through",
+                  !inSafari.signaled && inSafari.status == 0 && inSafari.output.contains("EXCEPTION-CHECK lived through it; reportException: saw 1"),
+                  inSafari.output.trimmingCharacters(in: .whitespacesAndNewlines))
+            check("exceptions: the profile's window would tell the user that the menu item's Safari feature is not available, naming the item",
+                  inSafari.output.contains("EXCEPTION-CHECK the user is told:") && inSafari.output.contains("PB check item"),
+                  inSafari.output.split(separator: "\n").filter { $0.contains("told") }.joined(separator: " | "))
+        }
+        // Thrown by Objective-C code called from a Swift task — as Safari's code is when a profile's
+        // window opens — and caught where it is called (PBCatchException, the ObjCExceptions target).
+        let inTask = await runOwnExecutable(executable, ["--exception-check", "--in-task"], timeout: 30)
+        check("exceptions: one thrown by Objective-C code called from a Swift task is caught where it is called, and the task goes on",
+              !inTask.signaled && inTask.status == 0 && inTask.output.contains("EXCEPTION-CHECK caught in a Swift task: PBExceptionCheck")
+                  && inTask.output.contains("EXCEPTION-CHECK the task went on"),
+              inTask.output.trimmingCharacters(in: .whitespacesAndNewlines))
+        // Nothing catches it, on a background queue (Safari's WBSBannerTracker on the owner's Mac): the
+        // process ends by the exception (SIGABRT) after writing down which queue threw — an earlier
+        // reportException: hook read AppKit's current event under MainActor.assumeIsolated, which
+        // trapped there (SIGTRAP) and made every such exception a crash of this app's own.
+        let background = await runOwnExecutable(executable, ["--exception-check", "--background"], timeout: 30)
+        check("exceptions: one nothing catches on a background queue is written down with its queue, and the process ends by the exception, not by a trap in this app's handler",
+              background.signaled && background.status == SIGABRT
+                  && background.output.contains("EXCEPTION-CHECK not caught, on PBExceptionCheck.background: PBExceptionCheck"),
+              "\(background.signaled ? "signal" : "exit") \(background.status): \(background.output.trimmingCharacters(in: .whitespacesAndNewlines))")
+        let control = await runOwnExecutable(executable, ["--exception-check", "--replacing"], timeout: 30)
+        let first = control.output.split(separator: "\n").first.map(String.init) ?? ""
+        info("exceptions, the control (the earlier hook, CoreFoundation's preprocessor replaced): "
+             + (control.signaled ? "died by signal \(control.status)" : "lived, exit \(control.status)") + " — \(first)")
+    }
+
+    /// What the exception and nib checks start: a process like a profile's, started as one is — from
+    /// LumenProfile (`ProfileExecutable`). The sandboxed build runs every profile in the app's one
+    /// process, so there it is the app's own executable: LumenProfile, started from the sandboxed app,
+    /// dies in the App Sandbox's own initialization (`_libsecinit_appsandbox`, signal 5) before a
+    /// line of this app's runs (CI run 650).
+    private func profileLikeExecutable() -> URL? {
+        if AppEnvironment.isSandboxed { return Bundle.main.executableURL }
+        return try? ProfileExecutable.url()
+    }
+
+    /// Safari's Bookmarks sidebar makes its nibs itself, with this app as their bundle, and they are
+    /// Safari's: in a process like a profile's, made the same way, each must come from Safari's file
+    /// (`SafariChrome.bridgeNibInitializers`), with nothing thrown. A nib this Safari does not have
+    /// is said, not failed on.
+    private func safariNibChecks() async throws {
+        guard let executable = profileLikeExecutable() else {
+            check("Safari's nibs: this build's profile executable is there to run the check", false)
+            return
+        }
+        let run = await runOwnExecutable(executable, ["--nib-check"], timeout: 60)
+        let name = "Safari's chrome: the Bookmarks sidebar's nibs, asked of this app as Safari's code asks, are made from Safari's files, and nothing throws"
+        if run.status == 2, run.output.contains("cannot be hosted") {
+            skip(name, AppEnvironment.isSandboxed ? "the sandboxed build cannot host Safari's frameworks"
+                     : "Safari's frameworks did not load here: \(run.output.trimmingCharacters(in: .whitespacesAndNewlines).prefix(300))",
+                 AppEnvironment.isSandboxed ? .build : .machine)
+            return
+        }
+        let lines = run.output.split(separator: "\n").map(String.init).filter { $0.hasPrefix("NIB-CHECK") }
+        let detail = lines.joined(separator: " | ")
+        let held = SafariChrome.checkedNibs.filter { !lines.contains("NIB-CHECK \($0): not in this Safari") }
+        for nib in SafariChrome.checkedNibs where !held.contains(nib) {
+            skip("Safari's chrome: the nib \(nib) is made from Safari's file", "this Safari has no such nib")
+        }
+        guard !held.isEmpty else { return }
+        let made = held.filter { lines.contains("NIB-CHECK \($0): made") }
+        let bridged = run.output.range(of: #"made from Safari's files: (\d+)"#, options: .regularExpression)
+            .flatMap { Int(run.output[$0].split(separator: " ").last ?? "") } ?? 0
+        check(name,
+              !run.signaled && run.status == 0 && made.count == held.count && bridged >= held.count
+                  && run.output.contains("; exceptions: 0"),
+              detail.isEmpty ? run.output.trimmingCharacters(in: .whitespacesAndNewlines) : detail)
+    }
+
+    /// Safari's state that earlier builds put homes deep in a profile's home (`SafariPaths.moved`)
+    /// comes back up into the home at launch (`SafariHomeVault.flattenNested`): where two levels hold
+    /// a file the newer stays, a database comes with its own journal files and never meets another
+    /// level's, and the nested folders are gone. On a home made here, under a stand-in account home.
+    private func nestedSafariHomes() throws {
+        let account = FileManager.default.temporaryDirectory.appendingPathComponent("pb-selftest-nested-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: account) }
+        let home = account.appendingPathComponent("Library/Application Support/PrivacyBrowser/profiles/ID/home.noindex")
+        let suffix = String(home.path.dropFirst(account.path.count))
+        let firstLevel = URL(fileURLWithPath: home.path + suffix), secondLevel = URL(fileURLWithPath: home.path + suffix + suffix)
+        func write(_ base: URL, _ path: String, _ text: String, secondsAgo: TimeInterval) throws {
+            let file = base.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: file)
+            try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-secondsAgo)], ofItemAtPath: file.path)
+        }
+        // The home's own: the preferences written last, and an old history with its journal.
+        try write(home, "Library/Preferences/com.apple.Safari.plist", "the home's preferences", secondsAgo: 10)
+        try write(home, "Library/Safari/History.db", "the home's history", secondsAgo: 3000)
+        try write(home, "Library/Safari/History.db-wal", "the home's journal", secondsAgo: 3000)
+        // One home deep: older preferences, and a database only it has.
+        try write(firstLevel, "Library/Preferences/com.apple.Safari.plist", "older preferences", secondsAgo: 2000)
+        try write(firstLevel, "Library/Safari/Bookmarks.db", "the bookmarks", secondsAgo: 1000)
+        // Two homes deep, where Safari worked last: the history with its journal, and a journal
+        // whose database is not there.
+        try write(secondLevel, "Library/Safari/History.db", "the latest history", secondsAgo: 100)
+        try write(secondLevel, "Library/Safari/History.db-wal", "the latest journal", secondsAgo: 100)
+        try write(secondLevel, "Library/Safari/Orphan.db-shm", "a journal without its database", secondsAgo: 50)
+        let flattened = SafariHomeVault.flattenNested(home: home, realHome: account.path)
+        func read(_ path: String) -> String? { try? String(contentsOf: home.appendingPathComponent(path), encoding: .utf8) }
+        check("Safari's home: the homes nested in a profile's home by earlier builds come up into it at launch, and are gone",
+              flattened.levels == 2 && !FileManager.default.fileExists(atPath: firstLevel.path)
+                  && !FileManager.default.fileExists(atPath: home.appendingPathComponent("Library/Application Support").path),
+              "levels \(flattened.levels), files \(flattened.files)")
+        check("Safari's home: where two levels hold a file the newer stays, and a database comes with its own journal, never another level's",
+              read("Library/Preferences/com.apple.Safari.plist") == "the home's preferences"
+                  && read("Library/Safari/History.db") == "the latest history" && read("Library/Safari/History.db-wal") == "the latest journal"
+                  && read("Library/Safari/Bookmarks.db") == "the bookmarks" && read("Library/Safari/Orphan.db-shm") == nil,
+              ["Library/Preferences/com.apple.Safari.plist", "Library/Safari/History.db", "Library/Safari/History.db-wal",
+               "Library/Safari/Bookmarks.db", "Library/Safari/Orphan.db-shm"].map { "\($0): \(read($0) ?? "none")" }.joined(separator: "; "))
+        // And a path moved into the home is moved once: one in the home stays where it is.
+        let realHome = account.path, profileHome = home.path
+        check("Safari's home: a path under ~/Library is moved into the profile's home once; one already in it stays",
+              SafariPaths.moved(realHome + "/Library/Safari/History.db", realHome: realHome, home: profileHome) == profileHome + "/Library/Safari/History.db"
+                  && SafariPaths.moved(profileHome + "/Library/Safari/History.db", realHome: realHome, home: profileHome) == nil
+                  && SafariPaths.moved(profileHome, realHome: realHome, home: profileHome) == nil
+                  && SafariPaths.moved("/tmp/elsewhere", realHome: realHome, home: profileHome) == nil)
+    }
+
+    /// `<vault>/SafariChromeHome`, the home `--safari-chrome` gave itself up to 1 November — Safari's
+    /// chrome and WebKit's data of whatever was browsed in it, in plaintext, in no profile — goes at
+    /// the app's launch, whatever is in it, and nothing else of the vault's folder with it
+    /// (`AppEnvironment.removeStandaloneSafariHome`, on a folder made for the purpose).
+    private func standaloneSafariHomeRemoved() throws {
+        let vault = FileManager.default.temporaryDirectory.appendingPathComponent("pb-standalone-home-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+        let safari = vault.appendingPathComponent("SafariChromeHome/Library/Safari", isDirectory: true)
+        try FileManager.default.createDirectory(at: safari, withIntermediateDirectories: true)
+        try Data("plaintext".utf8).write(to: safari.appendingPathComponent("History.db"))
+        let kept = [vault.appendingPathComponent("vault.json"), vault.appendingPathComponent("profiles/ID/home.noindex/Library/Safari/History.db")]
+        for file in kept {
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("{}".utf8).write(to: file)
+        }
+        AppEnvironment.removeStandaloneSafariHome(in: vault)
+        let gone = !FileManager.default.fileExists(atPath: vault.appendingPathComponent("SafariChromeHome").path)
+        let left = kept.filter { !FileManager.default.fileExists(atPath: $0.path) }
+        check("the plaintext home --safari-chrome left in the vault's folder goes at launch, and nothing else of the folder",
+              gone && left.isEmpty, "SafariChromeHome \(gone ? "gone" : "still there"); gone with it: \(left.map(\.lastPathComponent))")
+    }
+
+    /// Where a profile's first window opens (`SavedWindowFrame`): the frame the user left, kept with
+    /// the window size it was saved under — the profile's size again once that was changed in the
+    /// editor — and never larger than the screen, or hanging outside it. On a defaults suite of its
+    /// own; the window itself moved and reopened is not shown here.
+    private func savedWindowFrame() {
+        let suite = "PrivacyBrowser.SelfTest.Frame-\(UUID().uuidString.prefix(8))"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            check("saved window frame: a defaults suite of the check's own", false)
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let size = WindowSize.custom(width: 1324, height: 940)
+        let frame = NSRect(x: 246, y: 112, width: 1054, height: 795)
+        let nothingYet = SavedWindowFrame.read(for: size, in: defaults)
+        SavedWindowFrame.save(frame, for: size, in: defaults)
+        check("saved window frame: the first window opens where the user left one, and at the profile's size until then",
+              nothingYet == nil && SavedWindowFrame.read(for: size, in: defaults) == frame,
+              "before \(String(describing: nothingYet)), after \(String(describing: SavedWindowFrame.read(for: size, in: defaults)))")
+        check("saved window frame: a window size changed in the editor since is used again, not the frame kept under the old one",
+              SavedWindowFrame.read(for: .custom(width: 1440, height: 900), in: defaults) == nil && SavedWindowFrame.read(for: nil, in: defaults) == nil)
+        let visible = NSRect(x: 0, y: 0, width: 1470, height: 920)
+        let huge = SavedWindowFrame.fitted(NSRect(x: -400, y: 700, width: 3000, height: 2000), in: visible)
+        let away = SavedWindowFrame.fitted(NSRect(x: 2500, y: 1500, width: 800, height: 600), in: visible)
+        check("saved window frame: a kept frame is never larger than the screen, and never hangs outside it",
+              huge == visible && visible.contains(away) && away.size == NSSize(width: 800, height: 600),
+              "\(huge) \(away)")
+    }
+
+    /// This build's executable with `arguments`, in a process of its own: what it printed, and how it
+    /// ended (an exit status, or the signal that ended it).
+    private func runOwnExecutable(_ executable: URL, _ arguments: [String], timeout: TimeInterval) async
+        -> (output: String, status: Int32, signaled: Bool) {
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = arguments
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            return ("could not start: \(error)", -1, false)
+        }
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        if process.isRunning {
+            process.terminate()
+            process.waitUntilExit()
+            return ("did not end within \(Int(timeout)) s", -1, false)
+        }
+        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        return (output, process.terminationStatus, process.terminationReason == .uncaughtSignal)
+    }
+
     // MARK: Tabs, history, bookmarks
 
     private func tabsAndLibrary(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            info("tab/history checks skipped (need the self-test proxy to serve pages)")
+            skip("tabs and library: pages loaded in tabs, history, bookmarks, closed tabs", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the pages)")
             return
         }
         let profile = try repository.create(name: "Tabs", configuration: ProfileConfiguration(
@@ -586,6 +2343,70 @@ final class SelfTest {
         controller.close()
     }
 
+    // MARK: Restore tabs (Settings → Startup)
+
+    /// A profile stopped with tabs open keeps them, encrypted, and its next start opens them again
+    /// with the same tab shown; set off, what was kept is forgotten at the next stop; an ephemeral
+    /// profile never keeps any.
+    private func restoreTabs(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("restore tabs: a profile's tabs come back, an ephemeral one's never", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the pages)")
+            return
+        }
+        defer { BrowsingPreferences.current = BrowsingPreferences() }
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        let profile = try repository.create(name: "Restore tabs", configuration: ProfileConfiguration(
+            proxy: proxy, matchProxyLocation: false))
+        let ephemeral = try repository.create(name: "Restore tabs, ephemeral", configuration: ProfileConfiguration(
+            proxy: proxy, ephemeral: true, matchProxyLocation: false))
+        let manager = ProfileManager(repository: repository)
+        let one = URL(string: "http://proxied.selftest.invalid/one")!
+        let two = URL(string: "http://proxied.selftest.invalid/two")!
+        BrowsingPreferences.current.restoreTabs = true
+
+        /// Starts `id`, opens `one` and `two` in its window with the first one shown, and stops it.
+        func browseAndStop(_ id: UUID) async throws -> Bool {
+            try await manager.launch(id)
+            guard let controller = manager.session(for: id)?.windowControllers.first else { return false }
+            controller.selectedTab?.load(one)
+            controller.addTab(url: two)
+            let loaded = await waitUntil(timeout: 20) {
+                controller.tabs.compactMap(\.url) == [one, two] && controller.tabs.allSatisfy { !$0.isLoading }
+            }
+            controller.selectTab(at: 0)
+            try await manager.stop(id)
+            return loaded
+        }
+
+        let browsed = try await browseAndStop(profile.id)
+        let kept = try repository.openTabs(for: profile.id)
+        let keptRight: Bool = kept?.windows == [OpenTabs.Window(tabs: [one, two], selected: 0)]
+        check("restore tabs: a stopped profile keeps the pages its window had open, and the tab shown",
+              browsed && keptRight, String(describing: kept?.windows))
+
+        try await manager.launch(profile.id)
+        let reopened = manager.session(for: profile.id)?.windowControllers.first
+        let opened = await waitUntil(timeout: 20) { reopened?.tabs.compactMap(\.url) == [one, two] }
+        let shown: URL? = reopened?.selectedTab?.url
+        check("restore tabs: the next start opens them again, the same tab shown",
+              opened && shown == one, "\(reopened?.tabs.compactMap(\.url) ?? []) shown \(shown?.absoluteString ?? "none")")
+
+        BrowsingPreferences.current.restoreTabs = false
+        try await manager.stop(profile.id)
+        let forgotten = try repository.openTabs(for: profile.id) == nil
+        check("restore tabs: set off, what was kept is forgotten when the profile stops", forgotten)
+
+        BrowsingPreferences.current.restoreTabs = true
+        let ephemeralBrowsed = try await browseAndStop(ephemeral.id)
+        let ephemeralKept = try repository.openTabs(for: ephemeral.id)
+        check("restore tabs: an ephemeral profile never keeps its tabs", ephemeralBrowsed && ephemeralKept == nil,
+              String(describing: ephemeralKept?.windows))
+
+        await manager.shutDown()
+        try repository.delete(profile.id)
+        try repository.delete(ephemeral.id)
+    }
+
     // MARK: Device generations (version-aware UA reaches the page)
 
     /// A profile tagged with a device generation must apply that generation's self-declared
@@ -619,10 +2440,9 @@ final class SelfTest {
 
     // MARK: Fingerprint surface (what deviceinfo.me-style pages test)
 
-    /// A macOS profile must look exactly like a plain WKWebView of this Mac (no own properties,
-    /// native navigator and screen values, untouched rendering), an iPhone profile like an
-    /// iPhone's Safari where the shim can say so, and neither may add noise or Chromium-only
-    /// properties. Compared against a web view without any profile script. The probe is
+    /// Every profile must look exactly like a plain WKWebView of this Mac (no own properties,
+    /// native navigator and screen values, untouched rendering) — an iPhone view too, which differs
+    /// in its User-Agent only — and none may add noise or Chromium-only properties. Compared against a web view without any profile script. The probe is
     /// Resources/fingerprint_probe.js, the one scripts/safari_reference.py runs in real Safari;
     /// with PB_SELFTEST_SURFACE_OUT set, every result is written there as JSON for that comparison.
     private func fingerprintSurface(_ repository: ProfileRepository) async throws {
@@ -632,9 +2452,11 @@ final class SelfTest {
         }
         let plainConfiguration = WKWebViewConfiguration()
         plainConfiguration.websiteDataStore = .nonPersistent()
-        // The one engine preference a profile sets (as Safari has it), so the engine is compared
-        // like for like.
+        // The engine preferences a profile sets as Safari has them, so the engine is compared like
+        // for like: the Fullscreen API, and the features the SDK's behaviors change
+        // (SafariEngineFeatures).
         plainConfiguration.preferences.isElementFullscreenEnabled = true
+        SafariEngineFeatures.apply(to: plainConfiguration.preferences)
         let plain = WKWebView(frame: .zero, configuration: plainConfiguration)
         try await PageLoader.load(plain, html: page, baseURL: origin)
         let reference = Self.flatten(try await js(plain, probe) as? [String: Any] ?? [:])
@@ -651,9 +2473,9 @@ final class SelfTest {
         info("plain WKWebView: plugins \(string(reference, "plugins")), languages \(string(reference, "languages")), WebGL \(string(reference, "webgl.unmaskedRenderer"))")
         check("language: navigator.language is the language WebKit was given",
               string(reference, "language") == WebContentLanguage.decided?.first, string(reference, "language"))
-        // A profile without a proxy country: this Mac's languages, as Safari has them — not the
-        // app's UI language, which Localization.applyProcessLanguage keeps in the app's domain.
-        // (scripts/live_compare.py checks the result against Safari's navigator.language.)
+        // A profile without a proxy country: this Mac's languages, as Safari has them — never the
+        // app's interface language (the group "interface and websites' languages" checks that in
+        // a profile's own process). (scripts/live_compare.py checks the result against Safari's.)
         let systemLanguages = WebContentLanguage.languages(for: nil)
         check("language: without a proxy country, websites get this Mac's languages, not the app's UI language",
               !systemLanguages.isEmpty && systemLanguages == WebContentLanguage.systemLanguages, systemLanguages.joined(separator: ","))
@@ -678,17 +2500,32 @@ final class SelfTest {
             let tab = BrowserTab(configuration: tabConfiguration, context: session.tabContext)
             try await PageLoader.load(tab.webView, html: page, baseURL: origin)
             let probed = Self.flatten(try await js(tab.webView, probe) as? [String: Any] ?? [:])
+            // The features the SDK's behaviors change, as Safari has them: in the profile's
+            // preferences, and as its page sees them (scripts/engine_features_check.py compares the
+            // page with one with every behavior on).
+            if !SafariEngineFeatures.appliesHere {
+                skip("surface (\(generationID)): WebKit's features the SDK's behaviors change are as Safari has them",
+                     "SafariEngineFeatures does not apply to this WebKit (\(WebKitBuild.version))")
+            } else {
+                let otherwise = SafariEngineFeatures.asSafari
+                    .filter { WebKitFeatures.isEnabled(tabConfiguration.preferences, $0.key) != $0.enabled }.map { $0.key }
+                let seen = try await js(tab.webView, "return [typeof trustedTypes, typeof MutationEvent].join(' ');") as? String
+                check("surface (\(generationID)): WebKit's features the SDK's behaviors change are as Safari has them",
+                      otherwise.isEmpty && seen == "object undefined",
+                      "not as Safari: \(otherwise.isEmpty ? "none" : otherwise.joined(separator: ", ")); "
+                          + "typeof trustedTypes, MutationEvent: \(seen ?? "nil")")
+            }
             // Safari's quota (82 463 372 084 on any Mac), not the 1000 MiB WebKit gives an app that is not a browser.
             let quota = try await js(tab.webView, "return (await navigator.storage.estimate()).quota;") as? NSNumber
-            let safariQuota = PrivacyScripts.safariStorageQuota(for: DeviceGenerations.resolved(id: generationID).platform).rounded(.up)
+            let safariQuota = PrivacyScripts.safariStorageQuota.rounded(.up)
             check("surface (\(generationID)): storage quota is Safari's",
                   quota?.doubleValue == safariQuota, "\(quota?.stringValue ?? "nil") vs \(String(format: "%.0f", safariQuota))")
             tab.tearDown()
             session.shutDown()
             try repository.delete(profile.id)
 
-            let name = generationID == DeviceGenerations.defaultID ? "macOS" : "iPhone"
-            writeSurface(probed, name: name.lowercased())
+            let name = generationID == DeviceGenerations.defaultID ? "macOS" : "iPhone view"
+            writeSurface(probed, name: generationID == DeviceGenerations.defaultID ? "macos" : "iphone")
             let differing = engineKeys.filter { string(probed, $0) != string(reference, $0) }
             check("surface (\(name)): engine and hardware signals as in a plain web view (\(engineKeys.count) keys)",
                   differing.isEmpty, differing.map { "\($0): \(string(probed, $0)) vs \(string(reference, $0))" }.joined(separator: "; "))
@@ -700,24 +2537,47 @@ final class SelfTest {
                   !renderingNatives.isEmpty && renderingNatives.values.allSatisfy { $0.hasPrefix("native-text") || $0 == "absent" },
                   renderingNatives.map { "\($0.key)=\($0.value)" }.joined(separator: "; "))
             check("surface (\(name)): one language, as WebKit exposes", string(probed, "languages") == string(probed, "language"))
-            // Safari the app exposes window.safari on the Mac and not on iOS.
-            check("surface (\(name)): window.safari \(name == "macOS" ? "present, as in Safari" : "absent, as on iOS")",
-                  string(probed, "features.safari") == (name == "macOS" ? "object" : "undefined"), string(probed, "safariShape"))
+            // Safari the app exposes window.safari on the Mac — in an iPhone view too, which is
+            // Safari on this Mac under an iPhone's User-Agent (the owner's decision, 31 October).
+            check("surface (\(name)): window.safari present, as in Safari on the Mac",
+                  string(probed, "features.safari") == "object", string(probed, "safariShape"))
+            // No generation changes what a page measures of this Mac: the touch points, the
+            // platform and the screen of a phone, said without touch, broke sites and gave the
+            // profile away all the same.
+            for key in ["platform", "maxTouchPoints", "hardwareConcurrency", "screen", "standalone", "pointer", "touch",
+                        "timeZone", "tzOffset", "dateString"] {
+                check("surface (\(name)): native \(key)", string(probed, key) == string(reference, key),
+                      "\(string(probed, key)) vs \(string(reference, key))")
+            }
             if name == "macOS" {
-                for key in ["ua", "platform", "maxTouchPoints", "hardwareConcurrency", "screen", "standalone", "pointer", "touch",
-                            "timeZone", "tzOffset", "dateString"] where key != "ua" {
-                    check("surface (macOS): native \(key)", string(probed, key) == string(reference, key),
-                          "\(string(probed, key)) vs \(string(reference, key))")
-                }
                 check("surface (macOS): the UA is this Mac's Safari",
                       string(probed, "ua").hasSuffix("Version/\(HostSafari.version) Safari/605.1.15"), string(probed, "ua"))
             } else {
-                check("surface (iPhone): navigator", string(probed, "platform") == "iPhone" && string(probed, "maxTouchPoints") == "5"
-                      && string(probed, "hardwareConcurrency") == "4" && string(probed, "standalone") == "false",
-                      "\(string(probed, "platform")) \(string(probed, "maxTouchPoints")) \(string(probed, "hardwareConcurrency")) \(string(probed, "standalone"))")
-                check("surface (iPhone): screen", string(probed, "screen") == "390x844x390x844x3", string(probed, "screen"))
+                check("surface (iPhone view): the UA is an iPhone's Safari, the one thing that says iPhone",
+                      string(probed, "ua") == DeviceGenerations.resolved(id: generationID).userAgent, string(probed, "ua"))
             }
         }
+
+        // Which of WebKit's behaviors that follow an app's SDK this run has (SDKBehaviors).
+        info("WebKit's behaviors that follow the SDK: \(SDKBehaviors.matched ? "every one, as Safari's (--sdk-everything)" : "this build's, the macOS \(SDKBehaviors.linkedSDK ?? "?") SDK's")")
+
+        // A persistent profile's store is made with a browser's share of the disk
+        // (BrowserStorageQuota): Safari's quota is then WebKit's own answer. Read in a world the
+        // profile's scripts are not in, which would otherwise map an app's figure to Safari's.
+        let persistent = try repository.create(name: "Quota", configuration: ProfileConfiguration(webRTCPolicy: .unrestricted))
+        let quotaSession = try makeSession(repository, persistent.id, key: repository.profileKey(for: persistent.id))
+        let madeWithRatios = BrowserStorageQuota.lastStoreHadBrowserRatios
+        let quotaTab = BrowserTab(configuration: quotaSession.makeWebViewConfiguration(), context: quotaSession.tabContext)
+        try await PageLoader.load(quotaTab.webView, html: page, baseURL: origin)
+        let nativeQuota = try await js(quotaTab.webView, "return (await navigator.storage.estimate()).quota;", world: .defaultClient) as? NSNumber
+        let macQuota = PrivacyScripts.safariStorageQuota.rounded(.up)
+        check("storage quota: a persistent profile's store gives a site Safari's share itself (WebKit's own answer, no script)",
+              madeWithRatios && nativeQuota?.doubleValue == macQuota,
+              "made with a browser's ratios: \(madeWithRatios), quota \(nativeQuota?.stringValue ?? "nil") vs \(String(format: "%.0f", macQuota))")
+        quotaTab.tearDown()
+        quotaSession.shutDown()
+        await WebDataStoreVault(repository: repository).deleteData(profileID: persistent.id)
+        try repository.delete(persistent.id)
     }
 
     /// The probe from the app bundle (build-app.sh copies it), else from PB_SELFTEST_PROBE.
@@ -767,7 +2627,9 @@ final class SelfTest {
             let data = try JSONSerialization.data(withJSONObject: nested, options: [.prettyPrinted, .sortedKeys])
             try data.write(to: URL(fileURLWithPath: directory).appendingPathComponent("surface-\(name).json"))
         } catch {
-            info("could not write the \(name) surface: \(error.localizedDescription)")
+            // PB_SELFTEST_SURFACE_OUT is CI's: its comparison with the real Safari reads this file.
+            check("surface (\(name)): written for the comparison with this Mac's Safari (PB_SELFTEST_SURFACE_OUT)", false,
+                  error.localizedDescription)
         }
     }
 
@@ -779,7 +2641,7 @@ final class SelfTest {
     /// answers the lookup itself (Europe/Berlin, DE).
     private func proxyLocationAtLaunch(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            info("proxy location checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            skip("proxy location: the time zone and country of the proxy's exit, looked up at launch", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
             return
         }
         let services = ProxyGeoLookup.services
@@ -813,6 +2675,39 @@ final class SelfTest {
         lookUp(at: "/no-location-here") // an HTML page, not a location
         let fallback = try await launchedTimeZone()
         check("proxy location: a failed lookup falls back to the remembered location", fallback == "Europe/Berlin", fallback ?? "nil")
+        check("proxy location: a lookup no service answered is said and marked for the profile's row and editor, not only logged",
+              manager.proxyLocationUnknown.contains(profile.id))
+
+        // A first service the proxy holds open (it answers only after 20 s) leaves time for the next
+        // one: it is waited for alone at most `nextServiceAfter`, then the next is asked as well. It
+        // used to have the whole lookup's time, and the services after it were never asked. (A slow
+        // service that is the only one is still waited for: the launch checks above, 4 and 8 s.)
+        ProxyGeoLookup.services = [
+            .init(url: URL(string: "http://geo.selftest.invalid/pb-geo.json?delay=20&tz=Asia/Tokyo")!,
+                  timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"]),
+            .init(url: URL(string: "http://geo.selftest.invalid/pb-geo.json")!, timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"]),
+        ]
+        let held = Date()
+        let behindHeld = await ProxyGeoLookup.lookUp(proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort),
+                                                     userAgent: "PrivacyBrowser self-test")
+        let heldFor = Date().timeIntervalSince(held)
+        check("proxy location: a service the proxy holds open does not use up the lookup, the next one answers",
+              behindHeld.location?.timeZoneIdentifier == "Europe/Berlin" && heldFor < ProxyGeoLookup.nextServiceAfter + 4,
+              "\(behindHeld.location?.timeZoneIdentifier ?? "nil") after \(Int(heldFor)) s")
+
+        // A profile's bypass list is for its pages. The lookup is the app's own request about the
+        // proxy and goes through it whatever the list says: around it, it would ask from this Mac's
+        // address (here: a name no resolver knows, so no answer) and be answered with this Mac's
+        // location.
+        ProxyGeoLookup.services = [.init(url: URL(string: "http://geo.selftest.invalid/pb-geo.json?tz=America/Chicago")!,
+                                         timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"])]
+        let bypassing = await ProxyGeoLookup.lookUp(proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort,
+                                                                         excludedDomains: ["geo.selftest.invalid"]),
+                                                    userAgent: "PrivacyBrowser self-test")
+        check("proxy location: a profile's bypass list naming the service does not take the lookup around the proxy",
+              bypassing.location?.timeZoneIdentifier == "America/Chicago"
+                && !bypassing.connections.isEmpty && bypassing.connections.allSatisfy { $0.port == httpPort },
+              "\(bypassing.location?.timeZoneIdentifier ?? "nil"), connections \(bypassing.connections)")
 
         var explicit = stored
         explicit.timeZoneIdentifier = "Asia/Tokyo"
@@ -820,6 +2715,8 @@ final class SelfTest {
         lookUp(at: "/pb-geo.json")
         let tokyo = try await launchedTimeZone()
         check("proxy location: an explicit time zone wins", tokyo == "Asia/Tokyo", tokyo ?? "nil")
+        check("proxy location: the mark of a failed lookup goes with the next launch",
+              !manager.proxyLocationUnknown.contains(profile.id))
         try repository.delete(profile.id)
     }
 
@@ -835,7 +2732,7 @@ final class SelfTest {
         guard let socksPort = environment["PB_SELFTEST_SOCKS_PROXY_PORT"].flatMap(Int.init),
               let socks2Port = environment["PB_SELFTEST_SOCKS2_PROXY_PORT"].flatMap(Int.init),
               let authPort = environment["PB_SELFTEST_SOCKS_AUTH_PROXY_PORT"].flatMap(Int.init) else {
-            info("concurrent SOCKS5 checks skipped (PB_SELFTEST_SOCKS2_PROXY_PORT / PB_SELFTEST_SOCKS_AUTH_PROXY_PORT not set)")
+            skip("SOCKS5 side by side: several profiles, each through its own SOCKS5 proxy at once", "PB_SELFTEST_SOCKS2_PROXY_PORT / PB_SELFTEST_SOCKS_AUTH_PROXY_PORT not set: the self-test proxy's second SOCKS5 listeners are not running")
             return
         }
         let services = ProxyGeoLookup.services
@@ -942,7 +2839,7 @@ final class SelfTest {
     /// With `warnOnProxyIPChange` (off by default) a changed exit IP is reported, and only then.
     private func proxyLookupAndExitIP(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            info("proxy lookup timing and exit IP checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            skip("launch: how long a launch waits for the lookup through the proxy, and the exit IP warning", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
             return
         }
         let services = ProxyGeoLookup.services
@@ -1066,6 +2963,421 @@ final class SelfTest {
         try repository.delete(unwatched.id)
     }
 
+    // MARK: The proxy list's checker
+
+    /// The proxy list's checker (`ProxyChecker`) against the self-test proxy, whose stand-in
+    /// geolocation service (`/pb-geo.json`) only answers through it:
+    ///   * the probe tells every listener of the self-test proxy apart, step by step: HTTP CONNECT
+    ///     and SOCKS5 each found whatever type the settings say, the login not needed, missing,
+    ///     wrong or taken (HTTP and SOCKS5), on IPv6 too, a port that takes the connection and never
+    ///     answers (silent), a closed port (refused), a host name that does not exist;
+    ///   * a working proxy is alive, with the exit IP, country, time zone, city and network the
+    ///     service saw through it, and the probe's median latency;
+    ///   * an unreachable proxy, and one whose host does not resolve, are dead — and a real website
+    ///     among the services, which a request made directly would reach, did not answer either, nor
+    ///     was any connection made but to the proxy: a dead proxy is never gone around;
+    ///   * a proxy that wants credentials it was not given is dead for that reason, and settings
+    ///     that cannot be applied are not checked at all (no request is made);
+    ///   * the list's model checks several at a time and keeps each result with its proxy,
+    ///     encrypted, finds the type of a line without a scheme and corrects a wrong one; a profile
+    ///     given a checked proxy knows at once where it exits;
+    ///   * a profile started with a silent proxy says so (`ProfileManager.onProxyProblem`), one with
+    ///     a working proxy says nothing, and Check from what it said is the same check.
+    /// All of it but the host name that does not resolve (this Mac's resolver is asked for the
+    /// proxy's own name: there is nothing else to reach a proxy by) runs inside an egress window:
+    /// scripts/egress_check.py fails on any packet of this process past loopback during it, and on
+    /// any DNS question for the geolocation service's name, which carries the run's id. The host
+    /// name that does not resolve is the capture's control for such questions (`egress-control`).
+    private func proxyChecker(_ repository: ProfileRepository) async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let httpPort = environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("proxy checker: every listener told apart, end to end, the list and the launch", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
+            return
+        }
+        // A listener of the self-test proxy that is not running: every check through it is skipped,
+        // said once per listener.
+        var missingListeners: Set<String> = []
+        func port(_ name: String) -> Int? {
+            if let value = environment[name].flatMap(Int.init) { return value }
+            if missingListeners.insert(name).inserted {
+                skip("proxy checker: the checks through the self-test proxy's listener of \(name)",
+                     "\(name) not set: scripts/selftest_proxy.py runs without that listener")
+            }
+            return nil
+        }
+        let loopback = "127.0.0.1"
+        let services = ProxyGeoLookup.services
+        let timeout = ProxyChecker.timeout
+        let concurrentChecks = ProxyChecker.concurrentChecks
+        defer {
+            ProxyGeoLookup.services = services
+            ProxyChecker.timeout = timeout
+            ProxyChecker.concurrentChecks = concurrentChecks
+        }
+        // The service's name carries the run's id: asked of this Mac's resolver instead of named to
+        // the proxy, it is in the capture (scripts/egress_check.py). Under selftest.invalid, the one
+        // name the app's App Transport Security lets a URLSession ask over plain HTTP.
+        let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
+        ProxyGeoLookup.services = [
+            .init(url: URL(string: "http://geo-\(run).selftest.invalid/pb-geo.json?ip=203.0.113.21")!,
+                  timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"],
+                  cityKeyPath: ["city"], asnKeyPath: ["org"], organizationKeyPath: ["org"]),
+            // A real website, as the fail-closed checks above use one: a request made directly would
+            // reach it and be answered, so any answer through a dead proxy would have gone around it.
+            .init(url: URL(string: "https://example.com/")!, timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"]),
+        ]
+        ProxyChecker.timeout = 8
+
+        // Before the window: the proxy's own name is asked of this Mac's resolver. It is a control
+        // for the capture: seen there, a question this Mac asks for a .invalid name reaches the
+        // network, and one for the service's name inside the window would have been caught too.
+        let control = "pbinvalid\(run.prefix(6))"
+        info("egress-control \(control)")
+        let unknownHost = "proxy-\(control).selftest.invalid"
+        let unresolvedProbe = await ProxyChecker.probe(latencySamples: 1).run(ProxySettings(kind: .socks5, host: unknownHost, port: 1080))
+        // Behind a VPN whose DNS gives every name a substitute address (fake IP), no resolver says
+        // "no such host": the probe must then say that, not that a proxy refused or closed.
+        let substituted = unresolvedProbe.verdict == .substituteDNS
+            && unresolvedProbe.connectedAddress.map(SubstituteDNS.isSubstitute) == true
+        if substituted {
+            skip("proxy probe: a proxy whose host name does not exist is told as host not found",
+                 "this Mac's resolver gives a name that does not exist a VPN's substitute address "
+                 + "(\(unresolvedProbe.connectedAddress ?? "")); what is checked here is that the probe says so instead")
+        }
+        check("proxy probe: a proxy whose host name does not exist is told apart (host not found, or a VPN's substitute DNS said as that)",
+              unresolvedProbe.verdict == .hostNotFound || substituted, String(describing: unresolvedProbe))
+        let unresolved = ProxyChecker.result(of: await ProxyChecker.lookUp(ProxySettings(kind: .socks5, host: unknownHost, port: 1080)))
+        check("proxy checker: a proxy whose host does not resolve is dead (nothing goes direct)",
+              unresolved.failure == .noAnswer, String(describing: unresolved))
+
+        info("egress-token \(run)")
+        info("egress-window begin \(Date().timeIntervalSince1970)")
+        defer { info("egress-window end \(Date().timeIntervalSince1970)") }
+
+        // Every listener, told apart. Each working one is listed as the other type: the type is
+        // found, not taken from the settings.
+        struct ProbeCase {
+            let name: String
+            let proxy: ProxySettings
+            let verdict: ProxyDiagnosis.Verdict
+            var kind: ProxySettings.Kind?
+            var authentication: ProxyDiagnosis.Authentication?
+        }
+        var cases = [
+            ProbeCase(name: "HTTP CONNECT, listed as SOCKS5", proxy: ProxySettings(kind: .socks5, host: loopback, port: httpPort),
+                      verdict: .works, kind: .httpConnect, authentication: .notRequired),
+            ProbeCase(name: "a closed port", proxy: ProxySettings(kind: .socks5, host: loopback, port: 9), verdict: .refused),
+        ]
+        if let socksPort = port("PB_SELFTEST_SOCKS_PROXY_PORT") {
+            cases.append(ProbeCase(name: "SOCKS5, listed as HTTP", proxy: ProxySettings(kind: .httpConnect, host: loopback, port: socksPort),
+                                   verdict: .works, kind: .socks5, authentication: .notRequired))
+        }
+        if let authPort = port("PB_SELFTEST_HTTP_AUTH_PROXY_PORT") {
+            cases += [
+                ProbeCase(name: "HTTP with a login, none given", proxy: ProxySettings(kind: .httpConnect, host: loopback, port: authPort),
+                          verdict: .credentialsNeeded, kind: .httpConnect, authentication: .missing),
+                ProbeCase(name: "HTTP with a login, a wrong one",
+                          proxy: ProxySettings(kind: .httpConnect, host: loopback, port: authPort, username: "pb-user", password: "wrong"),
+                          verdict: .credentialsRejected, kind: .httpConnect, authentication: .rejected),
+                ProbeCase(name: "HTTP with a login, the right one",
+                          proxy: ProxySettings(kind: .httpConnect, host: loopback, port: authPort, username: "pb-user", password: "pb-pass"),
+                          verdict: .works, kind: .httpConnect, authentication: .accepted),
+            ]
+        }
+        if let socksAuthPort = port("PB_SELFTEST_SOCKS_AUTH_PROXY_PORT") {
+            cases += [
+                ProbeCase(name: "SOCKS5 with a login, none given", proxy: ProxySettings(kind: .socks5, host: loopback, port: socksAuthPort),
+                          verdict: .credentialsNeeded, kind: .socks5, authentication: .missing),
+                ProbeCase(name: "SOCKS5 with a login, a wrong one",
+                          proxy: ProxySettings(kind: .socks5, host: loopback, port: socksAuthPort, username: "pb-user2", password: "wrong"),
+                          verdict: .credentialsRejected, kind: .socks5, authentication: .rejected),
+                ProbeCase(name: "SOCKS5 with a login, the right one",
+                          proxy: ProxySettings(kind: .socks5, host: loopback, port: socksAuthPort, username: "pb-user2", password: "pb-pass2"),
+                          verdict: .works, kind: .socks5, authentication: .accepted),
+            ]
+        }
+        if let http6Port = port("PB_SELFTEST_HTTP6_PROXY_PORT") {
+            cases.append(ProbeCase(name: "HTTP CONNECT on the IPv6 loopback", proxy: ProxySettings(kind: .httpConnect, host: "::1", port: http6Port),
+                                   verdict: .works, kind: .httpConnect, authentication: .notRequired))
+        }
+        let silentPort = port("PB_SELFTEST_SILENT_PROXY_PORT")
+        if let silentPort {
+            cases.append(ProbeCase(name: "a port that takes the connection and never answers",
+                                   proxy: ProxySettings(kind: .socks5, host: loopback, port: silentPort), verdict: .silent))
+        }
+        let probe = ProxyChecker.probe()
+        // All at once: the silent one alone takes the probe's whole answer timeout.
+        let diagnoses = await withTaskGroup(of: (Int, ProxyDiagnosis).self) { group -> [Int: ProxyDiagnosis] in
+            for (index, item) in cases.enumerated() {
+                let proxy = item.proxy
+                group.addTask { (index, await probe.run(proxy)) }
+            }
+            var found: [Int: ProxyDiagnosis] = [:]
+            for await (index, diagnosis) in group { found[index] = diagnosis }
+            return found
+        }
+        for (index, item) in cases.enumerated() {
+            let diagnosis = diagnoses[index]
+            var expected = item.verdict.rawValue
+            if let kind = item.kind { expected += ", \(kind.rawValue)" }
+            if let authentication = item.authentication { expected += ", login \(authentication.rawValue)" }
+            check("proxy probe: \(item.name) — \(expected)",
+                  diagnosis?.verdict == item.verdict && (item.kind == nil || diagnosis?.kinds.first == item.kind)
+                      && (item.authentication == nil || diagnosis?.authentication == item.authentication)
+                      && (item.verdict != .works || diagnosis?.latencies.count == probe.latencySamples),
+                  String(describing: diagnosis))
+        }
+
+        // End to end through a working proxy listed with the wrong type: where it exits.
+        let full = await ProxyChecker.check(ProxySettings(kind: .socks5, host: loopback, port: httpPort))
+        check("proxy checker: a working proxy listed with the wrong type is checked as the type that answered, end to end — exit IP, country, city, network, and the probe's median latency",
+              full.isAlive && full.exitIP == "203.0.113.21" && full.countryCode == "DE" && full.timeZoneIdentifier == "Europe/Berlin"
+                  && full.city == "Berlin" && full.asn == "AS64500" && full.organization == "Example Networks"
+                  && full.diagnosis?.kinds.first == .httpConnect && full.latencyMilliseconds != nil
+                  && full.latencyMilliseconds == full.diagnosis?.medianLatency,
+              String(describing: full))
+        // And through each other listener that works: the exit the service saw came back through it.
+        var throughEach: [(String, ProxySettings)] = []
+        if let socksPort = port("PB_SELFTEST_SOCKS_PROXY_PORT") {
+            throughEach.append(("SOCKS5 listed as HTTP", ProxySettings(kind: .httpConnect, host: loopback, port: socksPort)))
+        }
+        if let socksAuthPort = port("PB_SELFTEST_SOCKS_AUTH_PROXY_PORT") {
+            throughEach.append(("SOCKS5 with its login", ProxySettings(kind: .socks5, host: loopback, port: socksAuthPort,
+                                                                       username: "pb-user2", password: "pb-pass2")))
+        }
+        // The HTTP listener with a login answers CONNECT only: the lookup through it is tunnelled
+        // too (measured in CI run 392, where this was an info line and came back alive).
+        if let authPort = port("PB_SELFTEST_HTTP_AUTH_PROXY_PORT") {
+            throughEach.append(("HTTP CONNECT with its login", ProxySettings(kind: .httpConnect, host: loopback, port: authPort,
+                                                                             username: "pb-user", password: "pb-pass")))
+        }
+        if let http6Port = port("PB_SELFTEST_HTTP6_PROXY_PORT") {
+            throughEach.append(("HTTP CONNECT on ::1", ProxySettings(kind: .httpConnect, host: "::1", port: http6Port)))
+        }
+        for (name, proxy) in throughEach {
+            let result = await ProxyChecker.check(proxy)
+            check("proxy checker: through \(name), end to end — the exit IP, country and city the service saw",
+                  result.isAlive && result.exitIP == "203.0.113.21" && result.countryCode == "DE" && result.city == "Berlin",
+                  String(describing: result))
+        }
+        if let silentPort {
+            let silent = await ProxyChecker.check(ProxySettings(kind: .socks5, host: loopback, port: silentPort))
+            check("proxy checker: the silent proxy fails as silent, and nothing came back from anywhere",
+                  silent.failure == .noAnswer && silent.diagnosis?.verdict == .silent && silent.exitIP == nil,
+                  String(describing: silent))
+        }
+
+        let working = ProxySettings(kind: .httpConnect, host: loopback, port: httpPort)
+        let alive = await ProxyChecker.lookUp(working)
+        let aliveResult = ProxyChecker.result(of: alive)
+        info("proxy checker: through the working proxy \(aliveResult), on \(alive?.connections.map(\.description) ?? [])")
+        check("proxy checker: a working proxy is alive, with the exit IP, country and time zone the service saw through it, and a latency",
+              aliveResult.isAlive && aliveResult.exitIP == "203.0.113.21" && aliveResult.countryCode == "DE"
+                  && aliveResult.timeZoneIdentifier == "Europe/Berlin" && (aliveResult.latencyMilliseconds ?? 0) > 0,
+              String(describing: aliveResult))
+        // How the URL loading system reports a proxied connection's peer is not documented: said, not checked.
+        info("proxy checker: the working proxy's check was made on connections "
+             + ((alive?.connections ?? []).allSatisfy { ($0.port ?? httpPort) == httpPort } ? "to the proxy only" : "NOT all to the proxy"))
+
+        // Port 9 (discard) on localhost is closed on CI runners, as in the fail-closed check above.
+        let unreachable = await ProxyChecker.lookUp(ProxySettings(kind: .httpConnect, host: loopback, port: 9))
+        let unreachableResult = ProxyChecker.result(of: unreachable)
+        check("proxy checker: an unreachable proxy is dead, and nothing answered — not the website a direct request would reach either",
+              unreachableResult.failure == .noAnswer && unreachable?.answered == false && unreachableResult.exitIP == nil,
+              String(describing: unreachableResult))
+        // A refused connection has no peer, so nothing listed is what a clean check shows; it is a
+        // pass only where the same observer (the task's metrics) listed the working proxy's.
+        let unreachableName = "proxy checker: checking the unreachable proxy connected to nothing but it"
+        let elsewhere = unreachable?.connections.filter { ($0.port ?? 9) != 9 } ?? []
+        if !elsewhere.isEmpty || alive?.connections.isEmpty == false {
+            check(unreachableName, unreachable != nil && elsewhere.isEmpty,
+                  unreachable?.connections.map(\.description).joined(separator: ", ") ?? "no lookup")
+        } else {
+            skip(unreachableName, "the lookup's metrics listed no connection for the working proxy either, so one made elsewhere would not have been listed")
+        }
+        let notApplicable = await ProxyChecker.lookUp(ProxySettings(kind: .socks5, host: "127.0.0.1:1080", port: 1080))
+        check("proxy checker: settings that cannot be applied are not checked at all (no request without the proxy)",
+              notApplicable == nil && ProxyChecker.result(of: notApplicable).failure == .invalidSettings)
+        if let authPort = port("PB_SELFTEST_HTTP_AUTH_PROXY_PORT") {
+            let noCredentials = await ProxyChecker.check(ProxySettings(kind: .httpConnect, host: loopback, port: authPort))
+            check("proxy checker: a proxy that wants credentials it was not given is dead for that reason",
+                  noCredentials.failure == .needsCredentials && noCredentials.diagnosis?.verdict == .credentialsNeeded,
+                  String(describing: noCredentials))
+        }
+
+        // The list's model: an import, a check of all of it two at a time, the results kept with
+        // their proxies in the encrypted file.
+        var lines = "http://127.0.0.1:\(httpPort)  # working\n127.0.0.1:9  # unreachable\n"
+        let socksAuthPort = port("PB_SELFTEST_SOCKS_AUTH_PROXY_PORT")
+        if let socksAuthPort { lines += "socks5://pb-user2:pb-pass2@127.0.0.1:\(socksAuthPort)  # socks with credentials\n" }
+        var messages: [String] = []
+        let model = ProxyListModel(vault: repository.vault) { messages.append($0) }
+        let added = model.add(ProxyListImport.read(lines, defaultKind: .httpConnect).proxies)
+        ProxyChecker.concurrentChecks = 2
+        model.check()
+        let finished = await waitUntil(timeout: 40) { !model.isChecking }
+        let stored = try ProxyList.load(from: repository.vault)
+        let found = Dictionary(stored.entries.compactMap { entry in entry.lastCheck.map { (entry.label, $0) } },
+                               uniquingKeysWith: { first, _ in first })
+        check("proxy list: several proxies checked at a time, each result kept with its proxy and saved encrypted",
+              finished && added?.added.count == (socksAuthPort == nil ? 2 : 3)
+                  && found["working"]?.isAlive == true && found["unreachable"]?.failure == .noAnswer
+                  && found["unreachable"]?.diagnosis?.verdict == .refused
+                  && (socksAuthPort == nil || found["socks with credentials"]?.isAlive == true) && messages.isEmpty,
+              "\(found) \(messages)")
+
+        // The type found by the check: a line without a scheme gets the one that answered, and an
+        // entry listed with the wrong one is corrected.
+        if let socksPort = port("PB_SELFTEST_SOCKS_PROXY_PORT"), let socks2Port = port("PB_SELFTEST_SOCKS2_PROXY_PORT") {
+            let kindLines = "127.0.0.1:\(socksPort)  # no scheme\nhttp://127.0.0.1:\(socks2Port)  # SOCKS5 listed as HTTP\n"
+            let kindIDs = model.add(ProxyListImport.read(kindLines).proxies)?.added ?? []
+            let unknownBefore = kindIDs.first.flatMap { model.list.entry($0) }.map { !$0.kindKnown } ?? false
+            model.check(Set(kindIDs))
+            let kindsFinished = await waitUntil(timeout: 30) { !model.isChecking }
+            let entries = kindIDs.compactMap { model.list.entry($0) }
+            check("proxy list: a line without a scheme gets the type the check found, and a wrong type is corrected",
+                  kindsFinished && unknownBefore && entries.count == 2 && entries.allSatisfy { $0.kindKnown && $0.proxy.kind == .socks5 }
+                      && entries[0].lastCheck?.kindFinding == .found && entries[1].lastCheck?.kindFinding == .corrected(from: .httpConnect)
+                      && entries.allSatisfy { $0.lastCheck?.isAlive == true },
+                  entries.map { "\($0.label): \($0.proxy.kind.rawValue) known=\($0.kindKnown) \(String(describing: $0.lastCheck?.kindFinding))" }
+                      .joined(separator: " | "))
+        }
+
+        // One proxy, one line (the editor's New, the list's Add): the four forms providers sell name
+        // the same proxy; without a scheme its type is not known until Check finds it; the field
+        // never shows the password while it is not being edited; and a draft makes the profile's
+        // proxy from it with the type found.
+        struct LineCase {
+            let form: String
+            let kind: ProxySettings.Kind
+            let port: Int
+            let user: String
+            let password: String
+        }
+        var lineCases: [LineCase] = []
+        if let socksAuthPort {
+            lineCases += ["127.0.0.1:\(socksAuthPort):pb-user2:pb-pass2", "pb-user2:pb-pass2@127.0.0.1:\(socksAuthPort)",
+                          "socks5://pb-user2:pb-pass2@127.0.0.1:\(socksAuthPort)", " 127.0.0.1:\(socksAuthPort):pb-user2:pb-pass2\n"]
+                .map { LineCase(form: $0, kind: .socks5, port: socksAuthPort, user: "pb-user2", password: "pb-pass2") }
+        }
+        // An HTTP proxy without a scheme: the placeholder (SOCKS5) is not what it gets.
+        if let authPort = port("PB_SELFTEST_HTTP_AUTH_PROXY_PORT") {
+            lineCases += ["127.0.0.1:\(authPort):pb-user:pb-pass", "http://pb-user:pb-pass@127.0.0.1:\(authPort)"]
+                .map { LineCase(form: $0, kind: .httpConnect, port: authPort, user: "pb-user", password: "pb-pass") }
+        }
+        if !lineCases.isEmpty {
+            var outcomes: [String] = []
+            var allRight = true
+            for item in lineCases {
+                var line = ProxyLine(text: item.form)
+                let shown = line.maskedText ?? ""
+                let before = line.reading
+                var draft = ProfileDraft()
+                draft.proxyMode = .new
+                draft.proxyLine = line
+                let saveChecksFirst = draft.needsKindCheck
+                guard let checkable = line.checkable else {
+                    allRight = false
+                    outcomes.append("\(shown): not read")
+                    continue
+                }
+                let result = await ProxyChecker.check(checkable)
+                line.check = ProxyLine.Check(proxy: checkable, result: result)
+                draft.proxyLine = line
+                let made = try? draft.makeProxy()
+                let schemeGiven = item.form.contains("://")
+                let typeBefore: Bool
+                switch before {
+                case .proxy(_, .scheme): typeBefore = schemeGiven
+                case .kindUnknown: typeBefore = !schemeGiven && saveChecksFirst
+                default: typeBefore = false
+                }
+                let right = typeBefore && result.isAlive && made?.kind == item.kind && made?.host == "127.0.0.1"
+                    && made?.port == item.port && made?.username == item.user && made?.password == item.password
+                    && !shown.isEmpty && !shown.contains(item.password)
+                allRight = allRight && right
+                outcomes.append("\(shown) → " + (right ? "\(item.kind.rawValue)"
+                    : "WRONG: type before \(typeBefore), alive \(result.isAlive), made \(made?.kind.rawValue ?? "nothing")"))
+            }
+            check("proxy line: the forms providers sell name the same proxy; without a scheme the type is not known (Save would check first) until Check finds the one that answers, end to end; the password is never shown",
+                  allRight, outcomes.joined(separator: " | "))
+        }
+        if let silentPort {
+            // A proxy that answers neither handshake: its type is never guessed, and no profile gets it.
+            var line = ProxyLine(text: "127.0.0.1:\(silentPort)")
+            if let checkable = line.checkable {
+                line.check = ProxyLine.Check(proxy: checkable, result: await ProxyChecker.check(checkable))
+            }
+            var draft = ProfileDraft()
+            draft.proxyMode = .new
+            draft.proxyLine = line
+            let refused = (try? draft.makeProxy()) == nil
+            check("proxy line: a proxy whose check found no type (silent) is not made into a profile's proxy",
+                  draft.needsKindCheck && refused && line.currentCheck?.result.diagnosis?.verdict == .silent,
+                  String(describing: line.currentCheck?.result.diagnosis?.verdict))
+        }
+
+        // Given that checked proxy, a profile has it, and where it exits, before any launch.
+        let profile = try repository.create(name: "Proxy from the list", configuration: ProfileConfiguration(ephemeral: true))
+        if let entry = stored.entries.first(where: { $0.label == "working" }) {
+            let outcome = repository.assign(ProxyList.rotation(of: [entry], over: [profile.id]))
+            let configuration = try repository.loadConfiguration(profile.id)
+            check("proxy list: a profile given a checked proxy has it, and knows where it exits without a launch",
+                  outcome.changed == [profile.id] && configuration.proxy == entry.proxy
+                      && configuration.rememberedProxyLocation?.countryCode == "DE"
+                      && configuration.rememberedProxyLocation?.timeZoneIdentifier == "Europe/Berlin",
+                  String(describing: configuration.lastProxyLocation))
+        } else {
+            check("proxy list: a profile given a checked proxy has it, and knows where it exits without a launch", false,
+                  "the list kept no entry labelled working: \(stored.entries.map(\.label))")
+        }
+        try repository.delete(profile.id)
+
+        // A profile started with a proxy that takes the connection and never answers says so, in
+        // the checker's words; one whose proxy works says nothing.
+        if let silentPort {
+            let manager = ProfileManager(repository: repository)
+            var reported: [(id: UUID, diagnosis: ProxyDiagnosis)] = []
+            manager.onProxyProblem = { id, _, diagnosis in reported.append((id, diagnosis)) }
+            let silentProfile = try repository.create(name: "Silent proxy", configuration: ProfileConfiguration(
+                proxy: ProxySettings(kind: .socks5, host: loopback, port: silentPort), ephemeral: true, matchProxyLocation: false))
+            let workingProfile = try repository.create(name: "Working proxy", configuration: ProfileConfiguration(
+                proxy: working, ephemeral: true, matchProxyLocation: false))
+            try await manager.launch(workingProfile.id)
+            try await manager.launch(silentProfile.id)
+            let said = await waitUntil(timeout: 25) { !reported.isEmpty }
+            check("launch: a profile whose proxy takes the connection and never answers says why (silent), and one whose proxy works says nothing",
+                  said && reported.map { $0.id } == [silentProfile.id] && reported.first?.diagnosis.verdict == .silent,
+                  reported.map { "\($0.id == silentProfile.id ? "silent" : "working"): \($0.diagnosis.verdict.rawValue)" }.joined(separator: ", "))
+            // Check, as what the profile said offers it: the same check, of the profile's own proxy.
+            let fromProblem = await model.checkProfileProxy(ProxySettings(kind: .socks5, host: loopback, port: silentPort))
+            check("launch: Check from what the profile said is the list's check of its proxy (silent), kept in the list",
+                  fromProblem.diagnosis?.verdict == .silent && !fromProblem.isAlive
+                      && model.list.entry(for: ProxySettings(kind: .socks5, host: loopback, port: silentPort))?.lastCheck?.diagnosis?.verdict == .silent,
+                  String(describing: fromProblem))
+            await manager.shutDown()
+            // Settings → Proxies → do not start it: the proxy is asked first, and a profile whose
+            // proxy does not work stays stopped, saying why; one whose proxy works starts.
+            let refusing = ProfileManager(repository: repository)
+            var refused: [(UUID, ProxyDiagnosis.Verdict)] = []
+            refusing.refusesFailingProxy = { true }
+            refusing.onProxyProblem = { _, _, _ in }
+            refusing.onProxyLaunchRefused = { id, _, diagnosis in refused.append((id, diagnosis.verdict)) }
+            try await refusing.launch(silentProfile.id)
+            try await refusing.launch(workingProfile.id)
+            let refusedIDs: [UUID] = refused.map { $0.0 }
+            let refusedSilent: Bool = refused.first?.1 == ProxyDiagnosis.Verdict.silent
+            check("launch: set not to start a profile whose proxy does not work, the silent one stays stopped and says why; the working one starts",
+                  !refusing.isRunning(silentProfile.id) && refusedIDs == [silentProfile.id] && refusedSilent
+                      && refusing.isRunning(workingProfile.id),
+                  refused.map { "\($0.0 == silentProfile.id ? "silent" : "working"): \($0.1.rawValue)" }.joined(separator: ", "))
+            await refusing.shutDown()
+            try repository.delete(silentProfile.id)
+            try repository.delete(workingProfile.id)
+        }
+        try? FileManager.default.removeItem(at: repository.root.appendingPathComponent("proxies.bin"))
+    }
+
     // MARK: Profile deletion (regression for the delete crash)
 
     /// `remove(forIdentifier:)` and `WKWebsiteDataStore.nonPersistent()` crash (EXC_BAD_ACCESS on a
@@ -1083,8 +3395,25 @@ final class SelfTest {
         check("first WebKit use: deleting a never-launched profile does not call remove(forIdentifier:)",
               WebDataStoreVault.removeCallCount == removalsBefore && (try? repository.summary(for: fresh.id)) == nil)
 
+        // Fail-closed, before anything has touched WebKit: a profile that protects its local requests
+        // (every profile without a proxy, by default) does not start without its rule list, which
+        // `ContentRules.prepare` compiles.
+        let protected = try repository.create(name: "Protected first", configuration: ProfileConfiguration(ephemeral: true))
+        var refusal = "started"
+        do {
+            try makeSession(repository, protected.id, key: repository.profileKey(for: protected.id)).shutDown()
+        } catch CoreError.invalidConfiguration(let message) {
+            refusal = message
+        }
+        try repository.delete(protected.id)
+        check("local requests: a profile that protects them does not start before its rule list is ready",
+              refusal == "the local-network rule list is not ready", refusal)
+
         // An ephemeral profile as the first WebKit use: its non-persistent store needs WebKit initialized.
-        let ephemeral = try repository.create(name: "Ephemeral first", configuration: ProfileConfiguration(ephemeral: true))
+        // Its local requests allowed, so that it needs no rule list (compiling one initializes WebKit).
+        var firstConfiguration = ProfileConfiguration(ephemeral: true)
+        firstConfiguration.localRequests = .allowed
+        let ephemeral = try repository.create(name: "Ephemeral first", configuration: firstConfiguration)
         let session = try makeSession(repository, ephemeral.id, key: repository.profileKey(for: ephemeral.id))
         check("first WebKit use: ephemeral profile starts without crashing", session.dataStore != nil)
         session.shutDown()
@@ -1180,6 +3509,1861 @@ final class SelfTest {
         session2.shutDown()
     }
 
+    // MARK: What earlier versions left in the account's com.apple.Safari.plist
+
+    /// `SafariAccountPreferences`, on a domain of the self-test's own in place of
+    /// `com.apple.Safari` (the account's file is left alone): the keys earlier versions wrote, as a
+    /// profile with a proxy and Safe Browsing off wrote them, three of them changed since — one to
+    /// the other value, one to a value no profile of the vault gives, one to a number — and a key
+    /// of the open and save panel's. The keys still holding a profile's value go; the three and the
+    /// panel's stay, as another process (`defaults`) reads the domain; and a second time nothing
+    /// is done.
+    private func earlierVersionsSafariKeys() {
+        guard !AppEnvironment.isSandboxed else {
+            skip("earlier versions' Safari keys: taken out of the account's com.apple.Safari once, the changed ones kept", "the sandboxed build does not take them out (it cannot write that domain)", .build)
+            return
+        }
+        let domain = "PrivacyBrowser.SelfTest.SafariKeys-\(UUID().uuidString.prefix(8))"
+        let suite = "PrivacyBrowser.SelfTest.SafariKeysDone-\(UUID().uuidString.prefix(8))"
+        let app = domain as CFString
+        func set(_ key: String, _ value: CFPropertyList?) {
+            CFPreferencesSetValue(key as CFString, value, app, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        }
+        /// What the `defaults` command prints: another process, which gets the domain from cfprefsd.
+        func defaultsCommand(_ arguments: [String]) -> Data {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+            process.arguments = arguments
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+            guard (try? process.run()) != nil else { return Data() }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return data
+        }
+        func exported() -> [String: Any] {
+            let data = defaultsCommand(["export", domain, "-"])
+            return (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any] ?? [:]
+        }
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            check("earlier versions' Safari keys: a defaults suite of the self-test's own", false, suite)
+            return
+        }
+        defer {
+            for (key, _) in SafariAccountPreferences.written { set(key, nil) }
+            set("NSNavLastRootDirectory", nil)
+            CFPreferencesSynchronize(app, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+            _ = defaultsCommand(["delete", domain])
+            defaults.removePersistentDomain(forName: suite)
+        }
+        var profile = ProfileConfiguration()
+        profile.proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: 9)
+        profile.safeBrowsingEnabled = false
+        let profiles = [profile]
+        for (key, written) in SafariAccountPreferences.written {
+            set(key, written.value(for: profile) ? kCFBooleanTrue : kCFBooleanFalse)
+        }
+        let changed = ["AutoFillPasswords", "WebKitDNSPrefetchingEnabled", "PreloadTopHit"]
+        set("AutoFillPasswords", kCFBooleanTrue)
+        set("WebKitDNSPrefetchingEnabled", kCFBooleanTrue)
+        set("PreloadTopHit", NSNumber(value: 0))
+        set("NSNavLastRootDirectory", "~/Documents" as CFString)
+        CFPreferencesSynchronize(app, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        let planted = exported()
+        check("earlier versions' Safari keys: the domain holds them as planted, for another process too",
+              planted.count == SafariAccountPreferences.written.count + 1, "\(planted.keys.sorted())")
+
+        let first = SafariAccountPreferences.removeOnce(from: domain, defaults: defaults) { profiles }
+        let ours = SafariAccountPreferences.written.map(\.key).filter { !changed.contains($0) }
+        check("earlier versions' Safari keys: those still holding a profile's value are taken out, the three changed since are left",
+              first?.removed == ours && first?.left == changed, String(describing: first))
+        let after = exported()
+        check("earlier versions' Safari keys: another process reads the domain without them",
+              ours.allSatisfy { after[$0] == nil }, "\(after.keys.sorted())")
+        check("earlier versions' Safari keys: the three changed since and the panel's key are as they were",
+              (after["AutoFillPasswords"] as? Bool) == true && (after["WebKitDNSPrefetchingEnabled"] as? Bool) == true
+                  && (after["PreloadTopHit"] as? NSNumber)?.intValue == 0
+                  && (after["NSNavLastRootDirectory"] as? String) == "~/Documents",
+              "\(after)")
+
+        set("ExtensionsEnabled", kCFBooleanFalse)
+        CFPreferencesSynchronize(app, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        let second = SafariAccountPreferences.removeOnce(from: domain, defaults: defaults) { profiles }
+        check("earlier versions' Safari keys: taken out once — the second time nothing is done",
+              second == nil && (exported()["ExtensionsEnabled"] as? Bool) == false, String(describing: second))
+    }
+
+    // MARK: Format policy (docs/UPDATES.md §4)
+
+    /// Safari's home archive written by a newer version: refused as one, with no home left behind
+    /// — an empty one would be sealed over the archive at the next stop or unlock — and the seals
+    /// that follow leave the archive as it was. (The rules for every file: FormatPolicyTests.)
+    private func formatPolicy(_ repository: ProfileRepository) throws {
+        let profile = try repository.create(name: "Newer archive", configuration: ProfileConfiguration())
+        defer { try? repository.delete(profile.id) }
+        let key = try repository.profileKey(for: profile.id)
+        let homes = SafariHomeVault(repository: repository)
+        let home = homes.homeDirectory(for: profile.id)
+        let staging = FileManager.default.temporaryDirectory.appendingPathComponent("pb-selftest-home-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: staging) }
+        try FileManager.default.createDirectory(at: staging.appendingPathComponent("Library/Safari"), withIntermediateDirectories: true)
+        try Data("history".utf8).write(to: staging.appendingPathComponent("Library/Safari/History.db"))
+        let archive = repository.safariHomeArchiveURL(for: profile.id)
+        try EncryptedDirectoryArchive.seal(roots: [ProfileTransfer.safariHomeLabel: staging], to: archive, key: key)
+        var newer = try Data(contentsOf: archive)
+        newer[4] = 2 // the version, after "PBSA"
+        try newer.write(to: archive)
+
+        // A first launch, and one after a run that left an empty home (as a profile that wrote nothing does).
+        for leftover in [false, true] {
+            if leftover { try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true) }
+            var refusal: Error?
+            do { try homes.prepareForLaunch(profileID: profile.id, key: key) } catch { refusal = error }
+            var refusedAsNewer = false
+            if case .newerFormat? = refusal as? CoreError { refusedAsNewer = true }
+            let when = leftover ? "after an empty home was left" : "at a first launch"
+            check("format policy: Safari's home archive of a newer version is refused as one, \(when)", refusedAsNewer,
+                  String(describing: refusal))
+            check("format policy: the refused archive leaves no home to be sealed over it, \(when)",
+                  !FileManager.default.fileExists(atPath: home.path))
+            try? homes.seal(profileID: profile.id, key: key) // what a stop, or the recovery at unlock, does next
+            check("format policy: the newer version's archive is as it was, \(when)", (try? Data(contentsOf: archive)) == newer)
+        }
+        // Even with a home there, nothing is sealed over the archive. (A home with a file in it: one
+        // without a file is never sealed over an archive at all, `safariHomeRestoreFailure`.)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try Data("history".utf8).write(to: home.appendingPathComponent("History.db"))
+        var sealRefusal: Error?
+        do { try homes.seal(profileID: profile.id, key: key) } catch { sealRefusal = error }
+        var sealRefusedAsNewer = false
+        if case .newerFormat? = sealRefusal as? CoreError { sealRefusedAsNewer = true }
+        check("format policy: a home is not sealed over a newer version's archive",
+              sealRefusedAsNewer && (try? Data(contentsOf: archive)) == newer, String(describing: sealRefusal))
+        try? FileManager.default.removeItem(at: home)
+    }
+
+    /// A profile's settings that cannot be read — damaged, or not there — never start the profile
+    /// with defaults (no proxy: this Mac's own address) and are never written over (R1,
+    /// docs/DESTRUCTIVE_PATHS.md). The launch refuses before anything is decrypted, and says how to
+    /// get them back: the file from a backup, at its path, or Sync Now, by its menu item's name.
+    private func unreadableSettings(_ repository: ProfileRepository) async throws {
+        let profile = try repository.create(name: "Unreadable settings", configuration: ProfileConfiguration(
+            proxy: ProxySettings(kind: .socks5, host: "127.0.0.1", port: 9)))
+        defer { try? repository.delete(profile.id) }
+        // The core's configURL is its own: the file is named here by the profile's folder.
+        let url = repository.directory(for: profile.id).appendingPathComponent("config.bin")
+        var damaged = try Data(contentsOf: url)
+        damaged[damaged.count - 1] ^= 0x01
+        try damaged.write(to: url)
+        let manager = ProfileManager(repository: repository)
+
+        for missing in [false, true] {
+            if missing { try FileManager.default.removeItem(at: url) }
+            let state = missing ? "missing" : "damaged"
+            var refusal: Error?
+            do { try await manager.launch(profile.id) } catch { refusal = error }
+            var refusedAsUnreadable = false
+            if case .unreadableSettings(profile.id, "Unreadable settings", _)? = refusal as? CoreError { refusedAsUnreadable = true }
+            check("unreadable settings: a profile whose settings are \(state) does not start",
+                  refusedAsUnreadable && !manager.isRunning(profile.id) && WebDataStoreVault.discoverDirectories(for: profile.id).isEmpty,
+                  refusal.map { String(describing: $0) } ?? "launched")
+            let text = refusal.map(errorText) ?? ""
+            check("unreadable settings: the refusal says both ways back — the file at its path, and Sync Now by its name (\(state))",
+                  text.contains("profiles/\(profile.id.uuidString)/config.bin") && text.contains(L("profiles.menu.syncNow"))
+                    && text.contains(L("profiles.menu.more")), text)
+            var saveRefusal: Error?
+            do { try repository.saveConfiguration(ProfileConfiguration(), for: profile.id) } catch { saveRefusal = error }
+            var saveRefused = false
+            if case .unreadableSettings? = saveRefusal as? CoreError { saveRefused = true }
+            let onDisk = try? Data(contentsOf: url)
+            check("unreadable settings: a save is refused and writes nothing (\(state))",
+                  saveRefused && onDisk == (missing ? nil : damaged), saveRefusal.map { String(describing: $0) } ?? "saved")
+        }
+    }
+
+    /// What an unseal that did not finish left — part of a profile's plaintext in a hidden staging
+    /// directory next to WebKit's data or to Safari's home, after a crash or a kill (R8,
+    /// docs/DESTRUCTIVE_PATHS.md) — goes: a profile's own at its launch (here a launch refused right
+    /// after, its settings damaged), every profile's at the app's launch and at unlock
+    /// (`AppEnvironment.removeUnsealLeftovers`). Not another profile's data, nor an archive.
+    private func unsealLeftovers(_ repository: ProfileRepository) async throws {
+        let layout = WebDataStoreVault.layout
+        let launched = try repository.create(name: "Unseal leftovers", configuration: ProfileConfiguration())
+        let other = try repository.create(name: "Unseal leftovers, other", configuration: ProfileConfiguration())
+        defer {
+            try? repository.delete(launched.id)
+            try? repository.delete(other.id)
+        }
+        func exists(_ url: URL) -> Bool { FileManager.default.fileExists(atPath: url.path) }
+        // Named as `EncryptedDirectoryArchive` names them: `.<destination>.unseal-<UUID>`, beside it.
+        func staged(_ destination: URL) throws -> URL {
+            let url = destination.deletingLastPathComponent()
+                .appendingPathComponent(".\(destination.lastPathComponent).unseal-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            try Data("plaintext".utf8).write(to: url.appendingPathComponent("part"))
+            return url
+        }
+        func leftovers(of id: UUID) throws -> [URL] {
+            [try staged(layout.destination(forLabel: "WebKit|WebsiteDataStore|\(id.uuidString)", profileID: id)),
+             try staged(layout.destination(forLabel: "Caches|WebKit|WebsiteDataStore|\(id.uuidString)", profileID: id)),
+             try staged(SafariHomeVault(repository: repository).homeDirectory(for: id))]
+        }
+        let mine = try leftovers(of: launched.id), others = try leftovers(of: other.id)
+        defer { for url in mine + others { try? FileManager.default.removeItem(at: url) } }
+        // The other profile's own data, which nothing here may touch: its store and its archive.
+        let store = try layout.destination(forLabel: "WebKit|WebsiteDataStore|\(other.id.uuidString)", profileID: other.id)
+        try FileManager.default.createDirectory(at: store, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: store) }
+        try Data("data".utf8).write(to: store.appendingPathComponent("data"))
+        let archive = repository.webDataArchiveURL(for: other.id)
+        try Data("archive".utf8).write(to: archive)
+
+        let url = repository.directory(for: launched.id).appendingPathComponent("config.bin")
+        var damaged = try Data(contentsOf: url)
+        damaged[damaged.count - 1] ^= 0x01
+        try damaged.write(to: url)
+        let manager = ProfileManager(repository: repository)
+        var refusal: Error?
+        do { try await manager.launch(launched.id) } catch { refusal = error }
+        check("unseal leftovers: a profile's launch removes what an unseal of it left (\(mine.count) places), and no other profile's",
+              refusal != nil && mine.allSatisfy { !exists($0) } && others.allSatisfy(exists),
+              "left of it: \(mine.filter(exists).map(\.lastPathComponent)); the other's gone: \(others.filter { !exists($0) }.map(\.lastPathComponent))")
+        let removed = AppEnvironment.removeUnsealLeftovers(vault: repository.root)
+        check("unseal leftovers: the app's launch and unlock remove every profile's, and neither a store nor an archive",
+              removed >= others.count && others.allSatisfy { !exists($0) } && exists(store.appendingPathComponent("data")) && exists(archive),
+              "removed \(removed); left: \(others.filter(exists).map(\.lastPathComponent)); store \(exists(store)), archive \(exists(archive))")
+    }
+
+    /// A deleted profile's folder put back — from a backup, or kept because the deletion came from
+    /// another device — is not removed by the sweep that runs at unlock and after a sync (R3,
+    /// docs/DESTRUCTIVE_PATHS.md). It is listed for the person, who brings it back as a new profile
+    /// (the old folder kept, marked) or removes it. Deleted by the app's own path, as the Profiles
+    /// window deletes.
+    private func keptDeletedProfiles(_ repository: ProfileRepository) async throws {
+        let profile = try repository.create(name: "Kept deleted", configuration: ProfileConfiguration(
+            proxy: ProxySettings(kind: .socks5, host: "127.0.0.1", port: 9)))
+        let folder = repository.directory(for: profile.id)
+        // A file set aside as unreadable: a deletion's confirmation says it goes too (the owner, 1 November).
+        try Data([0x42]).write(to: folder.appendingPathComponent("config.bin.unreadable"))
+        let said = String(format: L("profiles.delete.unreadable"), 1, "config.bin.unreadable")
+        let asked = ProfileListView.deletionMessage(L("profiles.delete.message"), unreadable: repository.unreadableFiles(for: profile.id))
+        let copy = repository.root.appendingPathComponent("kept-deleted-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.copyItem(at: folder, to: copy)
+        defer { try? FileManager.default.removeItem(at: copy) }
+        try await ProfileManager(repository: repository).deleteBecauseThePersonAsked(profile.id)
+        let goneAfterDeletion = !FileManager.default.fileExists(atPath: folder.path)
+        try FileManager.default.copyItem(at: copy, to: folder) // put back from a backup
+        defer { try? FileManager.default.removeItem(at: folder) }
+        repository.removeOrphanedDirectories() // the sweep an unlock and a sync run
+        let kept = repository.keptDeletedProfiles().first { $0.id == profile.id }
+        let askedAgain = ProfileListView.deletionMessage(L("profiles.kept.removeMessage"), unreadable: repository.unreadableFiles(for: profile.id))
+        check("kept deleted profiles: a deletion's confirmation names the files set aside as unreadable, which go too",
+              asked.hasPrefix(L("profiles.delete.message")) && asked.contains(said) && askedAgain.contains(said),
+              "\(asked) | \(askedAgain)")
+        check("kept deleted profiles: a deleted profile's folder put back is not removed by the sweep, and is listed by its name",
+              goneAfterDeletion && FileManager.default.fileExists(atPath: folder.path) && kept?.name == "Kept deleted" && kept?.isReadable == true,
+              "gone after the deletion: \(goneAfterDeletion); listed: \(kept.map { "\($0)" } ?? "no")")
+
+        let back = try ProfileTransfer.bringBack(profile.id, in: repository)
+        defer { try? repository.delete(back.id) }
+        let marked = repository.keptDeletedProfiles().first { $0.id == profile.id }?.broughtBack == true
+        let port = (try? repository.loadConfiguration(back.id))?.proxy?.port
+        check("kept deleted profiles: brought back as a new profile with its settings; the old folder kept, marked brought back",
+              back.id != profile.id && port == 9 && marked && FileManager.default.fileExists(atPath: folder.path),
+              "new id \(back.id != profile.id), proxy port \(port.map(String.init) ?? "none"), marked \(marked)")
+
+        try repository.removeKeptDeletedProfile(profile.id)
+        check("kept deleted profiles: the old folder goes by the person's hand",
+              !FileManager.default.fileExists(atPath: folder.path) && !repository.keptDeletedProfiles().contains { $0.id == profile.id },
+              "folder there: \(FileManager.default.fileExists(atPath: folder.path))")
+    }
+
+    /// Safari's home archive that cannot be restored — damaged, not a newer version's: the launch
+    /// fails and leaves no home, and the seals that follow (a stop, the recovery at unlock) keep the
+    /// archive as it was. Before, the failed restore left an empty home and the next unlock sealed
+    /// it over the archive. A home without a file is never sealed over an archive either.
+    private func safariHomeRestoreFailure(_ repository: ProfileRepository) throws {
+        let profile = try repository.create(name: "Damaged archive", configuration: ProfileConfiguration())
+        defer { try? repository.delete(profile.id) }
+        let key = try repository.profileKey(for: profile.id)
+        let homes = SafariHomeVault(repository: repository)
+        let home = homes.homeDirectory(for: profile.id)
+        let history = home.appendingPathComponent("Library/Safari/History.db")
+        let staging = FileManager.default.temporaryDirectory.appendingPathComponent("pb-selftest-home-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: staging) }
+        try FileManager.default.createDirectory(at: staging.appendingPathComponent("Library/Safari"), withIntermediateDirectories: true)
+        try Data("history".utf8).write(to: staging.appendingPathComponent("Library/Safari/History.db"))
+        let archive = repository.safariHomeArchiveURL(for: profile.id)
+        try EncryptedDirectoryArchive.seal(roots: [ProfileTransfer.safariHomeLabel: staging], to: archive, key: key)
+        let good = try Data(contentsOf: archive)
+        var damaged = good
+        damaged[damaged.count - 1] ^= 0x01 // the last chunk's tag: the archive no longer authenticates
+        try damaged.write(to: archive)
+
+        // A first launch, and one after a run that left an empty home (as a profile that wrote nothing does).
+        for leftover in [false, true] {
+            if leftover { try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true) }
+            var refusal: Error?
+            do { try homes.prepareForLaunch(profileID: profile.id, key: key) } catch { refusal = error }
+            let when = leftover ? "after an empty home was left" : "at a first launch"
+            check("Safari's home: an archive that cannot be restored fails the launch, \(when)", refusal != nil)
+            check("Safari's home: a restore that failed leaves no home to be sealed over the archive, \(when)",
+                  !FileManager.default.fileExists(atPath: home.path))
+            try? homes.seal(profileID: profile.id, key: key) // what a stop, or the recovery at unlock, does next
+            check("Safari's home: the archive is as it was after the seal that follows, \(when)",
+                  (try? Data(contentsOf: archive)) == damaged)
+        }
+
+        // A home of empty folders is not sealed over a good archive: removed, the archive kept, and
+        // it restores whole.
+        try good.write(to: archive)
+        try FileManager.default.createDirectory(at: history.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try homes.seal(profileID: profile.id, key: key)
+        check("Safari's home: a home without a file is not sealed over the archive",
+              (try? Data(contentsOf: archive)) == good && !FileManager.default.fileExists(atPath: home.path))
+        try homes.prepareForLaunch(profileID: profile.id, key: key)
+        check("Safari's home: the archive kept restores whole", (try? Data(contentsOf: history)) == Data("history".utf8))
+        // A home with files in it is sealed as before.
+        try Data("history 2".utf8).write(to: history)
+        try homes.seal(profileID: profile.id, key: key)
+        check("Safari's home: a home with files is sealed as before",
+              (try? Data(contentsOf: archive)) != good && !FileManager.default.fileExists(atPath: home.path))
+        try homes.prepareForLaunch(profileID: profile.id, key: key)
+        check("Safari's home: and restored as before", (try? Data(contentsOf: history)) == Data("history 2".utf8))
+        try? FileManager.default.removeItem(at: home)
+    }
+
+    /// A seal whose deletion of what it sealed stops part-way — a file it cannot delete, made
+    /// immutable here: what is left is part of what the archive holds whole, and is discarded at the
+    /// next launch or seal — never sealed again over the archive, nor used as the profile's data.
+    /// Before, the next attempt (the WebKit data) or the next unlock (Safari's home) sealed the
+    /// remains over the archive, and a launch took them for newer data. The WebKit data and
+    /// Safari's home alike (`webdata.forced`, `home.sealed`).
+    private func sealWithAFailedDeletion(_ repository: ProfileRepository) async throws {
+        let profile = try repository.create(name: "Failed deletion", configuration: ProfileConfiguration())
+        defer { try? repository.delete(profile.id) }
+        let key = try repository.profileKey(for: profile.id)
+        func immutable(_ url: URL, _ on: Bool) throws {
+            var values = URLResourceValues()
+            values.isUserImmutable = on
+            var url = url
+            try url.setResourceValues(values)
+        }
+
+        // Safari's home.
+        let homes = SafariHomeVault(repository: repository)
+        let home = homes.homeDirectory(for: profile.id)
+        let history = home.appendingPathComponent("Library/Safari/History.db")
+        let stuck = home.appendingPathComponent("Library/Safari/Stuck.plist")
+        try FileManager.default.createDirectory(at: history.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("history".utf8).write(to: history)
+        try Data("stuck".utf8).write(to: stuck)
+        try immutable(stuck, true)
+        var homeError: Error?
+        do { try homes.seal(profileID: profile.id, key: key) } catch { homeError = error }
+        try immutable(stuck, false)
+        let homeArchive = repository.safariHomeArchiveURL(for: profile.id)
+        let homeSealed = try? Data(contentsOf: homeArchive)
+        check("a seal's deletion stopped part-way: Safari's home was sealed whole first, and marked so",
+              homeSealed != nil && FileManager.default.fileExists(atPath: homes.sealedMarkerURL(for: profile.id).path),
+              String(describing: homeError))
+        try homes.seal(profileID: profile.id, key: key) // what the next stop, or the recovery at unlock, does
+        check("a seal's deletion stopped part-way: what was left of Safari's home is discarded, not sealed over the archive",
+              (try? Data(contentsOf: homeArchive)) == homeSealed && !FileManager.default.fileExists(atPath: home.path))
+        try homes.prepareForLaunch(profileID: profile.id, key: key)
+        check("a seal's deletion stopped part-way: Safari's home restores whole",
+              (try? Data(contentsOf: history)) == Data("history".utf8) && (try? Data(contentsOf: stuck)) == Data("stuck".utf8))
+        try? FileManager.default.removeItem(at: home)
+
+        // The WebKit data.
+        let vault = WebDataStoreVault(repository: repository)
+        let store = WebDataStoreVault.layout.searchRoots[0]
+            .appendingPathComponent("WebsiteDataStore/\(profile.id.uuidString.lowercased())", isDirectory: true)
+        let local = store.appendingPathComponent("LocalStorage/local.sqlite3")
+        let held = store.appendingPathComponent("LocalStorage/held.sqlite3")
+        try FileManager.default.createDirectory(at: local.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("local".utf8).write(to: local)
+        try Data("held".utf8).write(to: held)
+        try immutable(held, true)
+        var dataError: Error?
+        do { _ = try await vault.seal(profileID: profile.id, key: key, activeStore: false) } catch { dataError = error }
+        try immutable(held, false)
+        let dataArchive = repository.webDataArchiveURL(for: profile.id)
+        let dataSealed = try? Data(contentsOf: dataArchive)
+        check("a seal's deletion stopped part-way: the WebKit data was sealed whole first, and marked so",
+              dataSealed != nil && FileManager.default.fileExists(atPath: vault.forcedSealMarkerURL(for: profile.id).path),
+              String(describing: dataError))
+        try await vault.prepareForLaunch(profileID: profile.id, key: key) // the next launch
+        check("a seal's deletion stopped part-way: the next launch restores the WebKit data whole, not what was left",
+              (try? Data(contentsOf: local)) == Data("local".utf8) && (try? Data(contentsOf: held)) == Data("held".utf8)
+                  && (try? Data(contentsOf: dataArchive)) == dataSealed)
+        for directory in WebDataStoreVault.discoverDirectories(for: profile.id) { try? FileManager.default.removeItem(at: directory) }
+    }
+
+    /// Every error of the core a person can be shown — the vault's, sync's, saved passwords' and
+    /// the updater's — is said in the interface's language wherever the app shows one
+    /// (`localizedDescription`, `errorText`): never the core's English, never a key without its
+    /// text. Before, "Wrong master password", "Sync failed: …" and "Authentication failed" were
+    /// shown in English in the Russian interface.
+    private func errorsInThePersonsLanguage() {
+        let core: [CoreError] = [
+            .authenticationFailed, .wrongPassword, .vaultAlreadyExists, .vaultNotFound, .corruptData("x"), .cryptoFailure("x"),
+            .invalidConfiguration("x"), .profileNotFound(UUID()), .unsupportedFormat("x"),
+            .newerFormat(what: "x.bin", found: 3, supported: 2), .unsafeArchivePath("x"), .syncConflict(objectID: "x", remoteRevision: 2),
+            .syncServer(status: 403, message: ""), .syncServer(status: 500, message: "x"), .io("x"), .notGranted("x"),
+            .unreadableSettings(profileID: UUID(), profile: "x", reason: "x"),
+        ]
+        let update: [UpdateError] = [
+            .notAnAppcast, .newerAppcastFormat(3), .unknownKey("x"), .badSignature("appcast"), .badSignature("archive"),
+            .staleAppcast(generatedAt: Date(), newestAccepted: Date()), .invalidItem("x"), .notNewer(build: "1", running: "2"),
+            .needsNewerSystem("26.0"), .archiveLength(expected: 2, found: 1), .archiveHash,
+        ]
+        let errors: [(Error, String)] = core.map { ($0, $0.description) } + update.map { ($0, $0.description) }
+            + [(PasswordVaultError.duplicate, ""), (PasswordVaultError.notFound, "")]
+        var wrong: [String] = []
+        for (error, english) in errors {
+            let shown = error.localizedDescription
+            if shown.contains("error.") || shown.contains("passwords.") || (Localization.languageCode != "en" && shown == english) {
+                wrong.append(shown)
+            }
+            if errorText(error) != shown { wrong.append("errorText: \(errorText(error))") }
+        }
+        check("errors in the person's language: every error of the core is said in the interface's language (\(errors.count))",
+              wrong.isEmpty, wrong.joined(separator: " | "))
+        check("errors in the person's language: the sync messages are the interface's",
+              !L("sync.error.failed").hasPrefix("sync.") && !L("sync.error.profilesRunning").hasPrefix("sync."))
+    }
+
+    /// Dates the app's own windows show are in the interface's language (`Localization.locale`,
+    /// `Date.shown`), whatever this Mac's: a Russian interface on a Mac set to English said
+    /// "yesterday" and "Oct 31" among Russian words (CI run 541's snapshots).
+    private func datesInThePersonsLanguage() {
+        let name = "dates in the person's language: \"yesterday\" and a date are said in the interface's language"
+        let thisMac = Locale.autoupdatingCurrent.language.languageCode?.identifier ?? "?"
+        guard Localization.languageCode != "en" else {
+            skip(name, "the interface is English here (this Mac's language: \(thisMac)): English dates tell nothing apart")
+            return
+        }
+        let yesterday = Date(timeIntervalSinceNow: -86_400)
+        let english = Locale(identifier: "en_US")
+        let shown = [yesterday.shownRelative, yesterday.shown(date: .abbreviated, time: .omitted)]
+        let inEnglish = [yesterday.formatted(.relative(presentation: .named).locale(english)),
+                         yesterday.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted, locale: english))]
+        check("\(name) (\(Localization.languageCode); this Mac's: \(thisMac))",
+              Localization.locale.language.languageCode?.identifier == Localization.languageCode
+                  && zip(shown, inEnglish).allSatisfy { $0 != $1 },
+              "\(Localization.locale.identifier): \(shown.joined(separator: " · ")) — in English: \(inEnglish.joined(separator: " · "))")
+    }
+
+    // MARK: Update gate (docs/UPDATES.md §3)
+
+    /// The check before an update may be handed to its installer, on this Mac's real layout and
+    /// vault: a sealed profile passes it; website data or a Safari home left in plaintext, or a home
+    /// a process still holds, fails it and names the profile; so do activity and a killed process.
+    private func updateGate(_ repository: ProfileRepository) throws {
+        let profile = try repository.create(name: "Update gate", configuration: ProfileConfiguration())
+        defer { try? repository.delete(profile.id) }
+        let id = profile.id.uuidString
+        func verdict(activity: Bool = false, killed: Int = 0) -> UpdateGate.Verdict {
+            UpdateGate.check(vaultRoot: repository.root, hasActivity: activity, forcedExits: killed)
+        }
+        func ours(_ verdict: UpdateGate.Verdict) -> [String] { verdict.reasons.filter { $0.contains(id) } }
+
+        check("update gate: a sealed profile passes it", ours(verdict()).isEmpty, verdict().reasons.joined(separator: "; "))
+        check("update gate: a profile still running, starting or sealing fails it", !verdict(activity: true).passed)
+        check("update gate: a profile process killed during the quit fails it", !verdict(killed: 1).passed)
+
+        let leftover = WebDataStoreVault.layout.searchRoots[0].appendingPathComponent("WebsiteDataStore/\(id.lowercased())", isDirectory: true)
+        try FileManager.default.createDirectory(at: leftover, withIntermediateDirectories: true)
+        let withData = ours(verdict())
+        try? FileManager.default.removeItem(at: leftover)
+        check("update gate: website data left in plaintext fails it", withData.contains { $0.contains("website data") }, withData.joined(separator: "; "))
+
+        let home = repository.directory(for: profile.id).appendingPathComponent("home.noindex", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let withHome = ours(verdict())
+        try? FileManager.default.removeItem(at: home)
+        check("update gate: a Safari home left in plaintext fails it", withHome.contains { $0.contains("Safari's home") }, withHome.joined(separator: "; "))
+
+        // Held the way a profile's process holds its home (`SafariHomeVault.holdWhileRunning`).
+        let lock = repository.directory(for: profile.id).appendingPathComponent("home.lock")
+        let descriptor = open(lock.path, O_RDWR | O_CREAT, 0o600)
+        flock(descriptor, LOCK_EX)
+        let held = ours(verdict())
+        flock(descriptor, LOCK_UN)
+        close(descriptor)
+        check("update gate: a home a process still holds fails it", held.contains { $0.contains("holds its home") }, held.joined(separator: "; "))
+        check("update gate: passes again once all of that is gone", ours(verdict()).isEmpty, verdict().reasons.joined(separator: "; "))
+    }
+
+    // MARK: Settings (one window, ⌘,)
+
+    /// The app's settings: each kept in its own key and read back as set, what is out of range read
+    /// as the default; a quit that asks first and stops nothing on "no"; and in a browser window,
+    /// where a new tab goes and the zoom it opens at, the question before closing a window of
+    /// several tabs, AutoFill's switch over the profile's own, where a download goes, the letters
+    /// on a profile's Dock icon, which profiles a quit keeps to reopen, and the settings as a
+    /// profile's own process gets them.
+    /// A profile's glyph, tags and notes: through the editor as written and held to their limits,
+    /// and the Profiles list finding profiles by them.
+    private func editorLabels() throws {
+        var labelled = ProfileDraft(name: "Labelled", configuration: ProfileConfiguration())
+        labelled.tags = [" ads ", "ADS", "US"]
+        labelled.notes = "  renews monthly \n"
+        labelled.avatarColor = 6
+        labelled.avatarLetters = "N W"
+        let labels = try labelled.makeConfiguration()
+        let reopened = ProfileDraft(name: "Labelled", configuration: labels)
+        let keptTags: Bool = labels.tags == ["ads", "US"]
+        let keptNotes: Bool = labels.notes == "renews monthly"
+        let keptGlyph: Bool = labels.avatar == ProfileAvatarStyle(color: 6, letters: "NW")
+        let shownAgain: Bool = reopened.tags == labels.tags && reopened.notes == labels.notes
+        let glyphAgain: Bool = reopened.avatarStyle == labels.avatar
+        check("editor: tags, notes and the glyph are kept as written (each tag once, trimmed) and shown again as kept",
+              keptTags && keptNotes && keptGlyph && shownAgain && glyphAgain,
+              "tags \(labels.tags), notes \(labels.notes), glyph \(String(describing: labels.avatar))")
+        let plain = ProfileDraft(name: "Plain", configuration: ProfileConfiguration())
+        let plainConfiguration = try plain.makeConfiguration()
+        let plainKept: Bool = plainConfiguration.tags.isEmpty && plainConfiguration.notes.isEmpty && plainConfiguration.avatar == nil
+        check("editor: a profile without them is saved without them", plainKept)
+
+        // Time zone and language: from the connection, chosen, or a place picked at random.
+        var manual = ProfileDraft(name: "Locale", configuration: ProfileConfiguration())
+        manual.localeMode = .manual
+        manual.timeZone = "Asia/Tokyo"
+        manual.language = "ja-JP"
+        let manualSaved = try manual.makeConfiguration()
+        var random = ProfileDraft(name: "Locale", configuration: ProfileConfiguration())
+        random.pickRandomPlace()
+        let randomSaved = try random.makeConfiguration()
+        let connectionSaved = try ProfileDraft(name: "Locale", configuration: ProfileConfiguration()).makeConfiguration()
+        let manualKept: Bool = manualSaved.timeZoneIdentifier == "Asia/Tokyo" && manualSaved.languageOverride == "ja-JP"
+            && !manualSaved.matchProxyLocation && manualSaved.effectiveLocaleSource == LocaleSource.manual
+        let randomPlace = LocalePlaces.place(timeZone: randomSaved.timeZoneIdentifier, language: randomSaved.languageOverride)
+        let randomKept: Bool = randomSaved.localeSource == LocaleSource.random && randomPlace != nil
+            && ProfileDraft(name: "Locale", configuration: randomSaved).localeMode == LocaleSource.random
+        let connectionKept: Bool = connectionSaved.timeZoneIdentifier == nil && connectionSaved.languageOverride == nil
+            && connectionSaved.matchProxyLocation && connectionSaved.localeSource == nil
+        check("editor: time zone and language from the connection, chosen, or a place picked at random — saved as such and shown again so",
+              manualKept && randomKept && connectionKept,
+              "manual \(manualSaved.timeZoneIdentifier ?? "-") \(manualSaved.languageOverride ?? "-"), random \(randomSaved.timeZoneIdentifier ?? "-") \(randomSaved.languageOverride ?? "-")")
+
+        let row = ProfileRowItem(id: UUID(), name: "Northwind", activity: .stopped, exit: .direct, ephemeral: false,
+                                 appearsAs: "", lastUsed: nil, tags: ["ads", "US"], notes: "Renews monthly")
+        let other = ProfileRowItem(id: UUID(), name: "Research", activity: .stopped, exit: .direct, ephemeral: false,
+                                   appearsAs: "", lastUsed: nil, tags: ["mobile", "ads"])
+        let byTag: Bool = ProfileFilter.tag("ADS").includes(row) && !ProfileFilter.tag("mobile").includes(row)
+        let bySearch: Bool = ProfilesScreen.matches(row, "renews") && ProfilesScreen.matches(row, "us")
+            && !ProfilesScreen.matches(row, "mobile")
+        let sidebarTags: [String] = ProfileFilter.tags(of: [row, other])
+        check("profiles: a tag in the sidebar shows the profiles with it, whatever its case; the search finds a profile by a tag or its notes",
+              byTag && bySearch && sidebarTags == ["ads", "mobile", "US"], "sidebar tags \(sidebarTags)")
+    }
+
+    /// A profile's window size: its window really opens at it — a page measures the window it is
+    /// in — and never larger than the screen allows; a new profile's random size fits.
+    private func windowSizes(_ repository: ProfileRepository) async throws {
+        guard let visible = WindowSizing.visibleScreen else {
+            skip("window size: a profile's window opens at its size, never larger than the screen", "this Mac has no screen to measure against (NSScreen.main is nil)")
+            return
+        }
+        func frame(of size: WindowSize) async throws -> (window: CGSize, page: [Int]) {
+            let profile = try repository.create(name: "Window size", configuration: ProfileConfiguration(ephemeral: true, windowSize: size))
+            let key = try repository.profileKey(for: profile.id)
+            let session = try makeSession(repository, profile.id, key: key)
+            let controller = BrowserWindowController(session: session)
+            defer {
+                controller.close()
+                session.shutDown()
+                try? repository.delete(profile.id)
+            }
+            let window = controller.window?.frame.size ?? .zero
+            guard let tab = controller.addTab(url: nil) else { return (window, []) }
+            tab.webView.loadHTMLString("<!doctype html><title>measured</title>", baseURL: nil)
+            _ = await waitUntil(timeout: 10) { tab.webView.title == "measured" }
+            let measured = try? await js(tab.webView, "return [window.outerWidth, window.outerHeight]")
+            return (window, ((measured as? [NSNumber]) ?? []).map(\.intValue))
+        }
+        let wanted = WindowSize.custom(width: 1000, height: 700)
+        let expected = WindowSizing.fitted(wanted, in: visible)
+        let sized = try await frame(of: wanted)
+        let pageSize: [Int] = [Int(sized.window.width), Int(sized.window.height)]
+        check("window size: a profile's window opens at its size (as large as the screen allows)",
+              sized.window == expected, "window \(sized.window), expected \(expected), screen \(visible)")
+        check("window size: a page measures that window — outerWidth × outerHeight are its real frame",
+              sized.page == pageSize, "page \(sized.page), window \(sized.window)")
+        let huge = try await frame(of: .custom(width: 7000, height: 4000))
+        check("window size: one larger than the screen opens as large as the screen allows, never larger",
+              huge.window.width <= visible.width && huge.window.height <= visible.height
+                && huge.window == WindowSizing.fitted(.custom(width: 7000, height: 4000), in: visible),
+              "window \(huge.window), screen \(visible)")
+        var generator = SystemRandomNumberGenerator()
+        let fits = (0..<50).allSatisfy { _ in
+            let random = WindowSize.randomSafe(fitting: (Int(visible.width), Int(visible.height)), using: &generator)
+            return WindowSizing.fitted(random, in: visible) == CGSize(width: random.frame.width, height: random.frame.height)
+                || visible.width < CGFloat(WindowSize.minimumWidth) || visible.height < CGFloat(WindowSize.minimumHeight)
+        }
+        check("window size: a new profile's random size always fits this Mac's screen", fits, "screen \(visible)")
+    }
+
+    /// A macOS profile that names another Safari version: the page's navigator.userAgent says
+    /// that version, as the request headers do (the same string, WebKit's customUserAgent).
+    private func namedSafariVersion(_ repository: ProfileRepository) async throws {
+        let named = SafariVersions.recent.first { SafariVersions.distance(of: $0, fromHost: HostSafari.version) == .far } ?? "18.6"
+        let configuration = ProfileConfiguration(ephemeral: true, safariVersion: named)
+        let wanted = configuration.userAgent(hostSafariVersion: HostSafari.version)
+        let profile = try repository.create(name: "Safari version", configuration: configuration)
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        defer {
+            session.shutDown()
+            try? repository.delete(profile.id)
+        }
+        let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+        defer { tab.tearDown() }
+        tab.webView.loadHTMLString("<!doctype html><title>agent</title>", baseURL: nil)
+        _ = await waitUntil(timeout: 10) { tab.webView.title == "agent" }
+        let seen = (try? await js(tab.webView, "return navigator.userAgent")) as? String ?? ""
+        check("identity: a named Safari version is what the profile calls itself — the page's User-Agent says Version/\(named), the engine stays Safari \(HostSafari.version)",
+              seen == wanted && wanted.contains("Version/\(named) Safari/"), "page \(seen), wanted \(wanted)")
+    }
+
+    /// A profile without a proxy that protects its local requests: a page of the internet reaches
+    /// neither this Mac nor the local network; allowed, it reaches this Mac, as in Safari. (A
+    /// profile with a proxy keeps the proxied list's checks: this Mac refused, the local network
+    /// through the proxy — the Safari-chrome check.)
+    private func localRequests(_ repository: ProfileRepository) async throws {
+        let compiled = ContentRules.localNetworkRules != nil
+        check("local requests: the local-network rule list compiled", compiled, ContentRules.compileErrors.joined(separator: " | "))
+        let environment = ProcessInfo.processInfo.environment
+        guard compiled, let canary = environment["PB_SELFTEST_CANARY_PORT"].flatMap(Int.init) else {
+            skip("local requests: protected, a page reaches neither this Mac nor the local network; allowed, it reaches this Mac", compiled ? "PB_SELFTEST_CANARY_PORT not set: no canary listener runs to take the page's requests" : "the rule list did not compile (failed above)")
+            return
+        }
+        func attempt(_ requests: LocalRequests, run: String) async throws -> [String: String] {
+            let profile = try repository.create(name: "Local requests", configuration: ProfileConfiguration(ephemeral: true, localRequests: requests))
+            let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+            defer {
+                session.shutDown()
+                try? repository.delete(profile.id)
+            }
+            let tab = BrowserTab(configuration: session.makeWebViewConfiguration(), context: session.tabContext)
+            defer { tab.tearDown() }
+            // A page of the internet: its document's address is a public name (its bytes come from here).
+            tab.webView.loadHTMLString("<!doctype html><title>local</title>", baseURL: URL(string: "http://public-\(run).example/"))
+            _ = await waitUntil(timeout: 10) { tab.webView.title == "local" }
+            let script = """
+            const attempt = async (url) => {
+              const outcome = fetch(url, { mode: 'no-cors', cache: 'no-store' }).then(() => 'resolved', () => 'rejected');
+              const late = new Promise((resolve) => setTimeout(() => resolve('pending'), 2500));
+              return await Promise.race([outcome, late]);
+            };
+            return {
+              loopback: await attempt(`http://127.0.0.1:${port}/pb-local?run=${run}`),
+              lan: await attempt('http://10.255.255.1:8080/pb-local-lan'),
+              name: await attempt(`http://printer-${run}.local/pb-local-name`),
+            };
+            """
+            return (try? await js(tab.webView, script, ["port": canary, "run": run])) as? [String: String] ?? [:]
+        }
+        func canaryHits(_ run: String) async -> Int? {
+            guard let httpPort = environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else { return nil }
+            let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+            let url = URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!
+            guard let text = try? await loadThroughProxy(repository, proxy, url: url),
+                  let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { return nil }
+            return (object["canary"] as? [Any])?.count
+        }
+        func runID() -> String { String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased() }
+
+        let protectedRun = runID()
+        let protected = try await attempt(.protected, run: protectedRun)
+        let protectedHits = await canaryHits(protectedRun)
+        let refused: Bool = protected["loopback"] == "rejected" && protected["lan"] == "rejected" && protected["name"] == "rejected"
+        check("local requests: protected, a page of the internet reaches neither this Mac (127.0.0.1) nor the local network (10.x, a .local name)",
+              refused && (protectedHits ?? 0) == 0, "\(protected), canary \(protectedHits.map(String.init) ?? "not asked")")
+
+        let allowedRun = runID()
+        let allowed = try await attempt(.allowed, run: allowedRun)
+        let allowedHits = await canaryHits(allowedRun)
+        check("local requests: allowed, the same page reaches this Mac, as in Safari",
+              allowed["loopback"] == "resolved" && (allowedHits ?? 1) > 0, "\(allowed), canary \(allowedHits.map(String.init) ?? "not asked")")
+        // The canary's side is what shows a request did not arrive; with its log unread, only the
+        // page's own answers were checked above.
+        if protectedHits == nil || allowedHits == nil {
+            skip("local requests: what reached the canary listener — nothing when protected, the page's request when allowed",
+                 "the self-test proxy's log could not be read (PB_SELFTEST_HTTP_PROXY_PORT), so only the page's own answers were checked")
+        }
+        info("local requests: allowed, the local network answered \(allowed["lan"] ?? "?") (10.255.255.1) and \(allowed["name"] ?? "?") (a .local name)")
+    }
+
+    /// Cookies pasted in the editor of a new profile: read as Import Cookies reads a file, and
+    /// queued for the new profile, encrypted, until its first launch.
+    private func cookiesAtCreation(_ repository: ProfileRepository) async throws {
+        let expiry = Int(Date().addingTimeInterval(30 * 86_400).timeIntervalSince1970)
+        var draft = ProfileDraft()
+        draft.cookieText = "# Netscape HTTP Cookie File\n.example.com\tTRUE\t/\tTRUE\t\(expiry)\tsid\tabc123\n"
+        draft.readCookieText()
+        let netscape: [ImportedCookie] = draft.cookieReport?.cookies ?? []
+        draft.cookieText = #"[{"domain":".example.org","name":"pref","value":"1","path":"/","expirationDate":\#(expiry)}]"#
+        draft.readCookieText()
+        let json: [ImportedCookie] = draft.cookieReport?.cookies ?? []
+        let readNetscape: Bool = netscape.count == 1 && netscape.first?.name == "sid"
+        let readJSON: Bool = json.count == 1 && json.first?.name == "pref"
+        check("editor: cookies pasted for a new profile are read as Import Cookies reads a file (cookies.txt, JSON)",
+              readNetscape && readJSON, "cookies.txt \(netscape.map(\.name)), JSON \(json.map(\.name))")
+
+        let profile = try repository.create(name: "Cookies at creation", configuration: ProfileConfiguration())
+        defer { try? repository.delete(profile.id) }
+        let manager = ProfileManager(repository: repository)
+        let outcome = try await manager.importCookies(netscape + json, into: profile.id)
+        var queued = 0
+        if case let .queued(count) = outcome { queued = count }
+        check("editor: a new profile's cookies wait, encrypted, for its first launch (as Import Cookies queues them)",
+              queued == 2, "outcome \(outcome)")
+    }
+
+    /// Settings → Diagnostics: the ZIP holds the report, the state and the logs, and nothing of
+    /// the user's — searched for in its bytes (stored, not compressed, so the bytes are the files).
+    private func diagnosticsBundle(_ repository: ProfileRepository) async throws {
+        let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
+        let secrets = ["Diag-\(run)", "tag-\(run)", "note-\(run)", "proxy-\(run).example", "user-\(run)", "pw-\(run)", run]
+        let proxy = ProxySettings(kind: .socks5, host: "proxy-\(run).example", port: 1080, username: "user-\(run)", password: "pw-\(run)")
+        let profile = try repository.create(name: "Diag-\(run)", configuration: ProfileConfiguration(
+            proxy: proxy, ephemeral: true, tags: ["tag-\(run)"], notes: "note-\(run)"))
+        defer { try? repository.delete(profile.id) }
+        // A value of the user's in the log, as the app writes one: the bundle must show it as <private>.
+        Logger(subsystem: "PrivacyBrowser", category: "Diagnostics").notice("Self-test diagnostics marker \(run, privacy: .private)")
+
+        let data = await Diagnostics.bundle(Diagnostics.snapshot(repository: repository), logMinutes: 5)
+        let entries = StoredZip.entries(of: data) ?? []
+        let paths = Set(entries.map(\.path))
+        let wanted: Set<String> = ["report.txt", "state.json", "logs/this-run.txt", "README.txt"]
+        check("diagnostics: the ZIP holds the report, the state and the logs, and reads back", wanted.isSubset(of: paths),
+              "\(paths.sorted())")
+        let leaked = secrets.filter { data.range(of: Data($0.utf8)) != nil }
+        let log = String(decoding: entries.first { $0.path == "logs/this-run.txt" }?.data ?? Data(), as: UTF8.self)
+        let markerSeen: Bool = log.contains("Self-test diagnostics marker")
+        check("diagnostics: nothing of the user's is in it — a profile's name, tag and notes, its proxy's address, user and password, a private log value",
+              leaked.isEmpty, "found: \(leaked)")
+        check("diagnostics: this run's log is in it, with the user's values as <private>",
+              markerSeen, String(log.suffix(400)))
+        let report = String(decoding: entries.first { $0.path == "report.txt" }?.data ?? Data(), as: UTF8.self)
+        let named: Bool = report.contains("Lumen ") && report.contains("macOS ") && report.contains("Safari \(HostSafari.version)")
+        check("diagnostics: the short report names the version, macOS, Safari and WebKit, and the checks made",
+              named && report.contains("✓"), report)
+        info("diagnostics: the short report reads\n\(report)")
+    }
+
+    /// Paste as Typed, in a real window: in the key window the text arrives in the page's focused
+    /// field as typing — trusted keydown, input and keyup events, Shift around a capital, each
+    /// character's own key — and a page with no focused field is told so; a window without the
+    /// keyboard gets nothing (a runner that gives none is reported: the typing is then not shown).
+    /// The command palette ranks what is typed.
+    private func pasteAsTyped(_ repository: ProfileRepository) async throws {
+        let commands = ["Launch Northwind", "Settings: Startup", "Edit Research…", "Proxies…"].map { title in
+            CommandPaletteView.Command(id: title, title: title, symbol: "circle", run: {})
+        }
+        let ranked = CommandPaletteView.rank(commands, query: "north").map(\.title)
+        let all = CommandPaletteView.rank(commands, query: "  ").map(\.title)
+        check("palette: what is typed finds the command, and nothing typed shows all of them in order",
+              ranked == ["Launch Northwind"] && all == commands.map(\.title), "\(ranked)")
+
+        let profile = try repository.create(name: "Typing", configuration: ProfileConfiguration(ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        let policy = NSApp.activationPolicy()
+        defer {
+            session.shutDown()
+            try? repository.delete(profile.id)
+            NSApp.setActivationPolicy(policy)
+        }
+        // Key events reach a web view in a key window, which the self-test's .prohibited
+        // activation policy never gives (as in the password checks).
+        NSApp.setActivationPolicy(.accessory)
+        NSApp.activate(ignoringOtherApps: true)
+        let controller = session.openWindow(url: nil)
+        guard let tab = controller.selectedTab, let window = controller.window else {
+            check("paste as typed: a profile window with a tab", false)
+            return
+        }
+        window.makeKeyAndOrderFront(nil)
+        let webView = tab.webView
+        let page = """
+        <!doctype html><title>typing</title><input id="field">
+        <script>
+        window.typed = [];
+        for (const kind of ['keydown', 'keyup', 'input']) {
+          document.addEventListener(kind, (e) => window.typed.push([kind, e.isTrusted, e.key || e.data || '', e.code || '']), true);
+        }
+        </script>
+        """
+        webView.loadHTMLString(page, baseURL: nil)
+        let loaded = await waitUntil(timeout: 10) { webView.title == "typing" && !webView.isLoading }
+        let isKey = await waitUntil(timeout: 3) { window.isKeyWindow }
+        _ = window.makeFirstResponder(webView)
+        _ = try? await js(webView, "document.getElementById('field').focus(); return true;")
+        info("paste as typed: app active: \(NSApp.isActive); key window: \(isKey)")
+        guard loaded else {
+            check("paste as typed: the page to type in loads", false, webView.title ?? "nil")
+            return
+        }
+        func field() async -> String {
+            (try? await js(webView, "return document.getElementById('field').value;")) as? String ?? ""
+        }
+        let text = "Hi, Мир 1!"
+        guard isKey else {
+            // A person types only where the keyboard is: into a window without it, nothing.
+            let outcome = await HumanPaste.type(text, into: webView, speed: 8)
+            let value = await field()
+            check("paste as typed: into a window without the keyboard nothing is typed, and it says so",
+                  outcome == HumanPaste.Outcome.notAField && value.isEmpty, "outcome \(outcome), field \(value)")
+            for name in Self.pasteAsTypedTypingChecks {
+                skip(name, "this Mac gives the self-test's window no keyboard (app active: \(NSApp.isActive), key window: false), so nothing can be typed into it")
+            }
+            return
+        }
+        // The control: one key down and up as the password checks send theirs. Where it does not
+        // reach the page, no synthesized key does on this machine, Paste as Typed's included.
+        for type in [NSEvent.EventType.keyDown, .keyUp] {
+            if let event = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [],
+                                            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                            context: nil, characters: "z", charactersIgnoringModifiers: "z",
+                                            isARepeat: false, keyCode: 0x06) {
+                window.sendEvent(event)
+            }
+        }
+        var control = await field()
+        let controlDeadline = Date().addingTimeInterval(2)
+        while control != "z", Date() < controlDeadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            control = await field()
+        }
+        _ = try? await js(webView, "document.getElementById('field').value = ''; document.activeElement.blur(); return true;")
+        let unfocused = await HumanPaste.type("x", into: webView, speed: 8)
+        let untouched = await field()
+        check(Self.pasteAsTypedTypingChecks[0],
+              unfocused == HumanPaste.Outcome.notAField && untouched.isEmpty, "\(unfocused), field \(untouched)")
+        _ = try? await js(webView, "document.getElementById('field').focus(); window.typed = []; return true;")
+        guard control == "z" else {
+            let none = await HumanPaste.type(text, into: webView, speed: 8)
+            for name in Self.pasteAsTypedTypingChecks.dropFirst() {
+                skip(name, "synthesized key events do not reach the page on this Mac: the control key did not arrive (Paste as Typed: \(none))")
+            }
+            return
+        }
+        let outcome = await HumanPaste.type(text, into: webView, speed: 8)
+        var value = await field()
+        let deadline = Date().addingTimeInterval(3)
+        while value != text, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            value = await field()
+        }
+        let events = (try? await js(webView, "return window.typed;")) as? [[Any]] ?? []
+        check(Self.pasteAsTypedTypingChecks[1],
+              outcome == HumanPaste.Outcome.typed(text.count) && value == text, "outcome \(outcome), field \(value)")
+        let keydowns = events.filter { $0.first as? String == "keydown" }
+        let characterDowns = keydowns.filter { ($0[2] as? String) != "Shift" }
+        let trusted: Bool = !events.isEmpty && events.allSatisfy { ($0[1] as? Bool) == true }
+        let shift: Bool = keydowns.contains { ($0[2] as? String) == "Shift" }
+        let codes: Bool = characterDowns.contains { ($0[2] as? String) == "H" && ($0[3] as? String) == "KeyH" }
+            && characterDowns.contains { ($0[2] as? String) == "М" && ($0[3] as? String) == "KeyV" }
+        check(Self.pasteAsTypedTypingChecks[2],
+              trusted && characterDowns.count == text.count && shift && codes,
+              "\(events.prefix(16).map { $0.map { "\($0)" }.joined(separator: " ") })")
+    }
+
+    /// Paste as Typed's checks that need the keyboard: skipped by name where there is none.
+    private static let pasteAsTypedTypingChecks = [
+        "paste as typed: with no field focused in the page, nothing is typed and it says so",
+        "paste as typed: the clipboard's text arrives in the page's focused field, as typed",
+        "paste as typed: the page sees trusted key events — a key down per character, on its own key (H on KeyH, М on KeyV), Shift around a capital",
+    ]
+
+    /// What sites see, in this process: the snapshot's listener answers only its own pages and
+    /// only to this Mac's loopback address; a profile's window (no proxy, its local requests
+    /// protected) measures every part — navigator, screen, the window, request headers in their
+    /// order, TLS (a ClientHello read: JA3, JA4), APIs — and the page is neither in its history
+    /// nor left open. Safari's side is stood in for by a plain WebKit view: this run is inside the
+    /// egress capture, where Safari's own traffic would count. The real Safari is CI's step
+    /// "What sites see" (`--what-sites-see-check`).
+    private func whatSitesSee(_ repository: ProfileRepository) async throws {
+        let listener = SiteSnapshotServer { token, _ in "page of \(token)" }
+        guard await listener.start() else {
+            check("what sites see: the snapshot listens on 127.0.0.1", false)
+            return
+        }
+        let page = listener.newPage(.profile)
+        let port = Int(listener.httpPort)
+        func get(_ target: String, host: String) async -> (status: Int, body: String) {
+            let request = Data("GET \(target) HTTP/1.1\r\nHost: \(host)\r\nContent-Length: 0\r\n\r\n".utf8)
+            let answer = await Task.detached { Self.rawHTTP(port: port, request) }.value
+            guard let answer, let text = String(data: answer, encoding: .utf8),
+                  let status = text.split(separator: " ", maxSplits: 2).dropFirst().first.flatMap({ Int($0) }) else { return (0, "") }
+            return (status, text.components(separatedBy: "\r\n\r\n").dropFirst().joined(separator: "\r\n\r\n"))
+        }
+        let own = await get("/headers.html?token=\(page.token)", host: "127.0.0.1:\(port)")
+        let rebound = await get("/headers.html?token=\(page.token)", host: "rebind.example:\(port)")
+        let stranger = await get("/headers.html?token=\(SiteSnapshotPage.token(.profile))", host: "127.0.0.1:\(port)")
+        listener.stop()
+        check("what sites see: the listener serves its own page, and refuses another token and a name that is not this Mac's",
+              own.status == 200 && own.body == "page of \(page.token)" && rebound.status == 404 && stranger.status == 404,
+              "own \(own.status), rebound \(rebound.status), stranger \(stranger.status)")
+
+        let profile = try repository.create(name: "What sites see", configuration: ProfileConfiguration(ephemeral: true))
+        let manager = ProfileManager(repository: repository)
+        final class StandIn {
+            var window: NSWindow?
+            var launchError = ""
+        }
+        let standIn = StandIn()
+        let snapshot = WhatSitesSee(profileID: profile.id, manager: { manager }, launch: { id in
+            do { try await manager.launch(id) } catch { standIn.launchError = String(describing: error) }
+        })
+        // The system stands in only where the app hands something to it (SystemOpen): everything
+        // above — the panel's model, its "Compare with Safari" — is the app's own path. Safari's
+        // side is a plain WebKit view: this run is inside the egress capture.
+        SystemOpen.standIn = { purpose, url in
+            guard purpose == .compareInSafari else { return false }
+            let configuration = WKWebViewConfiguration()
+            configuration.websiteDataStore = .nonPersistent()
+            let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 1000, height: 700), configuration: configuration)
+            let window = NSWindow(contentRect: view.frame, styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = view
+            window.orderFront(nil)
+            view.load(URLRequest(url: url))
+            standIn.window = window
+            return true
+        }
+        snapshot.safariTimeout = 60
+        defer {
+            SystemOpen.standIn = nil
+            standIn.window?.close()
+            try? repository.delete(profile.id)
+        }
+        let handedBefore = SystemOpen.requests.count
+        await snapshot.take()
+        let handedByTaking = Array(SystemOpen.requests.dropFirst(handedBefore))
+        check("what sites see: taking a snapshot hands nothing to the system — this Mac's Safari is not opened unless the person asks",
+              handedByTaking.isEmpty && !snapshot.comparedWithSafari,
+              "handed \(handedByTaking.map { "\($0.purpose.rawValue) \($0.target)" }), compared \(snapshot.comparedWithSafari)")
+        let measured = snapshot.profileSnapshot?.values ?? [:]
+        let parts = ["probe.ua", "probe.screen", "geometry.chrome", "apis.quota", "headers.navigation.order", "tls.ja4", "tls.cipherSuites"]
+        let missing = parts.filter { measured[$0] == nil }
+        check("what sites see: a profile's window measured every part — navigator, screen, the window, request headers in order, TLS (a ClientHello read), APIs",
+              snapshot.step == WhatSitesSee.Step.done && missing.isEmpty && (measured["headers.navigation.order"] ?? "").contains("User-Agent"),
+              "step \(snapshot.step), missing \(missing), launch \(standIn.launchError)")
+        // The person's "Compare with Safari": one page, to Safari, through the one place.
+        let handedBeforeComparing = SystemOpen.requests.count
+        await snapshot.compareWithSafari()
+        let handedByComparing = Array(SystemOpen.requests.dropFirst(handedBeforeComparing))
+        check("what sites see: \"Compare with Safari\" hands the system one address — the measuring page on this Mac, for Safari — and nothing else",
+              handedByComparing.count == 1 && handedByComparing.first?.purpose == .compareInSafari
+                && handedByComparing.first.map { $0.target.hasPrefix("http://127.0.0.1:") } == true,
+              "\(handedByComparing.map { "\($0.purpose.rawValue) \($0.target)" })")
+        let ja4 = snapshot.signals.first { $0.key == "tls.ja4" }
+        check("what sites see: compared with the other side; the profile's ClientHello is a plain WebKit view's (one network stack)",
+              snapshot.comparedWithSafari && ja4?.verdict == .same,
+              "compared \(snapshot.comparedWithSafari), ja4 \(ja4?.profile ?? "nil") / \(ja4?.safari ?? "nil")")
+        info("what sites see: the profile next to a plain WebKit view — " + SiteSignalCategory.allCases.map { category in
+            "\(category.rawValue) \(WhatSitesSeeView.summary(snapshot.signals.filter { $0.category == category }))"
+        }.joined(separator: "; "))
+        let session = manager.session(for: profile.id)
+        let inHistory = session?.library.historyEntries(matching: "127.0.0.1") ?? []
+        let leftOpen = session?.windowControllers.contains { controller in
+            controller.tabs.contains { $0.url.map(SiteSnapshotPage.isMeasuringPage) == true }
+        } ?? true
+        check("what sites see: the measuring page is not in the profile's history, and its window is closed",
+              session != nil && inHistory.isEmpty && !leftOpen, "history \(inHistory.map(\.url)), left open \(leftOpen)")
+        try? await manager.stop(profile.id)
+    }
+
+    /// `--what-sites-see-check [--safari-window] [--proxy host:port]`: a new profile's snapshot next
+    /// to this Mac's real Safari, taken as the panel takes it — "Take", which must hand the system
+    /// nothing (exit 1 otherwise), then "Compare with Safari" — printed signal by signal — CI's steps
+    /// after the egress capture. `--safari-window`: the profile in a process of its own showing
+    /// Safari's window, as the build without the App Sandbox shows a profile (refused when the
+    /// window would not be Safari's); without it, in this process and this app's window. `--proxy`:
+    /// an HTTP CONNECT proxy in the profile's settings, as a customer's profile has one; the
+    /// measuring page is on this Mac and loads directly, so the proxy need not answer. Exit 0 when
+    /// both were measured, 2 when Safari did not answer (CI warns), 1 when the profile's side could
+    /// not be taken.
+    static func whatSitesSeeCheck(arguments: [String]) {
+        setvbuf(stdout, nil, _IOLBF, 0)
+        let inSafariWindow = arguments.contains("--safari-window")
+        let proxy: ProxySettings?
+        if let index = arguments.firstIndex(of: "--proxy") {
+            guard arguments.indices.contains(index + 1), let field = try? ProxyHostField.parse(arguments[index + 1]),
+                  let port = field.port else {
+                print("WHAT-SITES-SEE --proxy wants host:port")
+                exit(64)
+            }
+            proxy = ProxySettings(kind: .httpConnect, host: field.host, port: port)
+        } else {
+            proxy = nil
+        }
+        // In this process, as in the self-test, or in one of its own with Safari's window.
+        setenv("PB_PROFILE_PROCESS", inSafariWindow ? "1" : "0", 1)
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 360) {
+            print("WHAT-SITES-SEE TIMEOUT after 360 s")
+            exit(1)
+        }
+        Task { @MainActor in exit(await runWhatSitesSeeCheck(inSafariWindow: inSafariWindow, proxy: proxy)) }
+        app.run()
+    }
+
+    private static func runWhatSitesSeeCheck(inSafariWindow: Bool, proxy: ProxySettings?) async -> Int32 {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-what-sites-see-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository: ProfileRepository
+        let profile: ProfileSummary
+        do {
+            repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "what-sites-see", iterations: 10_000))
+            profile = try repository.create(name: "What sites see", configuration: ProfileConfiguration(proxy: proxy))
+        } catch {
+            print("WHAT-SITES-SEE could not make a profile: \(error)")
+            return 1
+        }
+        let place = inSafariWindow ? "in Safari's window (a process of its own)" : "in this app's window (this process)"
+        print("WHAT-SITES-SEE measured: a new profile \(proxy == nil ? "without a proxy" : "with an HTTP proxy"), \(place), "
+              + "next to this Mac's Safari \(HostSafari.version)")
+        let manager = ProfileManager(repository: repository)
+        var hostsChrome: Bool?
+        manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
+        if inSafariWindow {
+            do {
+                try await manager.launch(profile.id)
+            } catch {
+                print("WHAT-SITES-SEE the profile did not start: \(error)")
+                return 1
+            }
+            let deadline = Date().addingTimeInterval(90)
+            while hostsChrome == nil, Date() < deadline { try? await Task.sleep(nanoseconds: 200_000_000) }
+            guard hostsChrome == true else {
+                print("WHAT-SITES-SEE the profile's window is not Safari's (\(hostsChrome == nil ? "no answer in 90 s" : "this app's own window")): "
+                      + "nothing of Safari's window to measure")
+                try? await manager.stop(profile.id)
+                return 1
+            }
+        }
+        let snapshot = WhatSitesSee(profileID: profile.id, manager: { manager }, launch: { id in
+            do { try await manager.launch(id) } catch { print("INFO the profile's launch failed: \(error)") }
+        })
+        let handedBefore = SystemOpen.requests.count
+        await snapshot.take()
+        guard snapshot.step == .done else {
+            print("WHAT-SITES-SEE the profile's side was not taken: \(snapshot.step)")
+            try? await manager.stop(profile.id)
+            return 1
+        }
+        // The panel's "Take" alone hands nothing to the system; Safari only on "Compare with Safari".
+        let handedByTaking = SystemOpen.requests.dropFirst(handedBefore)
+        print("WHAT-SITES-SEE taking the snapshot handed the system: \(handedByTaking.isEmpty ? "nothing" : handedByTaking.map(\.target).joined(separator: " "))")
+        guard handedByTaking.isEmpty else {
+            try? await manager.stop(profile.id)
+            return 1
+        }
+        await snapshot.compareWithSafari()
+        // First, with the categories after it: what CI turns into notices on the job.
+        let count = snapshot.signals.first { $0.key == "probe.windowOwnCount" }
+        print("WHAT-SITES-SEE the window's own properties: profile \(count?.profile ?? "-"), Safari \(count?.safari ?? "-")")
+        for category in SiteSignalCategory.allCases {
+            let signals = snapshot.signals.filter { $0.category == category }
+            print("WHAT-SITES-SEE \(category.rawValue): \(WhatSitesSeeView.summary(signals))")
+            for signal in signals where signal.verdict != .same {
+                print("  \(signal.verdict) \(signal.key): profile=\(String((signal.profile ?? "-").prefix(160))) safari=\(String((signal.safari ?? "-").prefix(160)))")
+            }
+        }
+        let differing = snapshot.signals.filter { $0.verdict != .same && $0.verdict != .perWindow }.map(\.key)
+        print("WHAT-SITES-SEE differing: \(differing.isEmpty ? "none" : differing.joined(separator: " "))")
+        try? await manager.stop(profile.id)
+        print("WHAT-SITES-SEE compared with this Mac's Safari: \(snapshot.comparedWithSafari)")
+        return snapshot.comparedWithSafari ? 0 : 2
+    }
+
+    private func appSettings(_ repository: ProfileRepository) async throws {
+        defer { BrowsingPreferences.current = BrowsingPreferences() }
+        let suite = "pb-selftest-settings-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            check("settings: a defaults suite of the self-test's own", false)
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let fresh = AppSettings(defaults: defaults)
+        let defaultStart: Bool = fresh.startup == AppSettings.Startup.profilesWindow
+        let defaultFailure: Bool = fresh.proxyFailure == AppSettings.ProxyFailure.launchAndExplain
+        let defaultBrowsing: Bool = fresh.browsing == BrowsingPreferences()
+        let defaultSearch: Bool = fresh.newProfileSearchEngine == SearchEngine.standard
+        let defaultWindow: Bool = fresh.newProfileRandomWindowSize && fresh.newProfileBlocksLocalRequests
+        check("settings: the defaults — the Profiles window after unlocking, quitting asks, new profiles follow the connection, search with the standard engine, get a random window size and block local requests, a failing proxy's profile starts and says why, AutoFill on, new tabs next to the current one, closing several tabs asks, 100 %, the Downloads folder, two letters, no tabs restored",
+              defaultStart && fresh.confirmQuit && fresh.newProfileMatchesConnection && defaultSearch && defaultWindow
+                && defaultFailure && defaultBrowsing,
+              String(describing: fresh.browsing))
+        fresh.startup = .reopenProfiles
+        fresh.confirmQuit = false
+        fresh.newProfileMatchesConnection = false
+        fresh.newProfileSearchEngine = .ecosia
+        fresh.newProfileRandomWindowSize = false
+        fresh.newProfileBlocksLocalRequests = false
+        fresh.proxyFailure = .doNotLaunch
+        fresh.browsing.passwordAutoFill = false
+        fresh.browsing.newTabsNextToCurrent = false
+        fresh.browsing.warnClosingTabs = false
+        fresh.browsing.pageZoom = 1.25
+        fresh.browsing.askWhereToSave = true
+        fresh.browsing.dockInitials = 3
+        let reread = AppSettings(defaults: defaults)
+        var expected = BrowsingPreferences()
+        expected.passwordAutoFill = false
+        expected.newTabsNextToCurrent = false
+        expected.warnClosingTabs = false
+        expected.pageZoom = 1.25
+        expected.askWhereToSave = true
+        expected.dockInitials = 3
+        let rereadStart: Bool = reread.startup == AppSettings.Startup.reopenProfiles
+        let rereadFailure: Bool = reread.proxyFailure == AppSettings.ProxyFailure.doNotLaunch
+        let rereadBrowsing: Bool = reread.browsing == expected
+        let rereadSearch: Bool = reread.newProfileSearchEngine == SearchEngine.ecosia
+        let rereadWindow: Bool = !reread.newProfileRandomWindowSize && !reread.newProfileBlocksLocalRequests
+        check("settings: every setting is read back as it was set, each from its own key",
+              rereadStart && !reread.confirmQuit && !reread.newProfileMatchesConnection && rereadSearch && rereadWindow
+                && rereadFailure && rereadBrowsing,
+              String(describing: reread.browsing))
+        defaults.set(3.7, forKey: "PBSettingsPageZoom")
+        defaults.set(9, forKey: "PBSettingsDockInitials")
+        defaults.set("sideways", forKey: "PBSettingsStartup")
+        defaults.set("someEngine", forKey: "PBSettingsNewProfileSearchEngine")
+        let odd = AppSettings(defaults: defaults)
+        let oddZoom: Bool = odd.browsing.pageZoom == 1
+        let oddLetters: Bool = odd.browsing.dockInitials == 2
+        let oddStart: Bool = odd.startup == AppSettings.Startup.profilesWindow
+        let oddSearch: Bool = odd.newProfileSearchEngine == SearchEngine.standard
+        check("settings: what is out of range — a zoom of 370 %, nine letters, an unknown start, an unknown search engine — is read as the default",
+              oddZoom && oddLetters && oddStart && oddSearch,
+              "zoom \(odd.browsing.pageZoom), letters \(odd.browsing.dockInitials), start \(odd.startup.rawValue), search \(odd.newProfileSearchEngine.rawValue)")
+
+        // A profile's search engine through the editor: one chosen is kept; the standard one is
+        // stored as none, as profiles from before the choice have it, so saving such a profile
+        // unchanged is no edit.
+        let bingDraft = ProfileDraft(name: "Bing", configuration: ProfileConfiguration(searchEngine: .bing))
+        let plainDraft = ProfileDraft(name: "Plain", configuration: ProfileConfiguration())
+        let bingSaved: SearchEngine? = try bingDraft.makeConfiguration().searchEngine
+        let plainSaved: SearchEngine? = try plainDraft.makeConfiguration().searchEngine
+        let plainShown: Bool = plainDraft.searchEngine == SearchEngine.standard
+        check("settings: the editor keeps a profile's search engine, and stores the standard one as none",
+              bingSaved == SearchEngine.bing && plainSaved == nil && plainShown,
+              "kept \(bingSaved?.rawValue ?? "none"), standard stored as \(plainSaved?.rawValue ?? "none")")
+
+        // A quit that asks: "no" stops nothing and quits nothing; "yes" seals, then quits.
+        var sealRounds = 0
+        var terminated = 0
+        var answers = [false, true]
+        let coordinator = QuitCoordinator(hasActivity: { sealRounds == 0 }, lockForQuit: { sealRounds += 1 },
+                                          terminate: { terminated += 1 },
+                                          confirm: { answers.isEmpty ? true : answers.removeFirst() })
+        let declined = coordinator.shouldTerminate(NSApp)
+        _ = await waitUntil(timeout: 2) { answers.count == 1 }
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        let declinedReply: Bool = declined == NSApplication.TerminateReply.terminateCancel
+        check("settings: a quit while profiles run asks first, and \"no\" stops nothing and quits nothing",
+              declinedReply && answers.count == 1 && sealRounds == 0 && terminated == 0,
+              "seal rounds \(sealRounds), terminate \(terminated)")
+        let accepted = coordinator.shouldTerminate(NSApp)
+        let quit = await waitUntil(timeout: 5) { terminated == 1 }
+        let acceptedReply: Bool = accepted == NSApplication.TerminateReply.terminateCancel
+        check("settings: \"yes\" stops and encrypts every profile, then quits",
+              acceptedReply && quit && sealRounds == 1, "seal rounds \(sealRounds), terminate \(terminated)")
+
+        // In a browser window of a profile (never shown).
+        let profile = try repository.create(name: "Settings", configuration: ProfileConfiguration(ephemeral: true, searchEngine: .bing))
+        let key = try repository.profileKey(for: profile.id)
+        let session = try makeSession(repository, profile.id, key: key)
+        defer {
+            session.shutDown()
+            try? repository.delete(profile.id)
+        }
+        BrowsingPreferences.current = BrowsingPreferences()
+        let controller = BrowserWindowController(session: session)
+        defer { controller.close() }
+        let searched: String = controller.addressURL("cats & dogs")?.absoluteString ?? ""
+        let opened: String = controller.addressURL("example.com")?.absoluteString ?? ""
+        check("settings: the address bar of a profile's window searches with the profile's engine, and opens an address as it is",
+              searched == "https://www.bing.com/search?q=cats%20%26%20dogs" && opened == "https://example.com",
+              "\(searched), \(opened)")
+        let first = controller.addTab(url: nil)
+        _ = controller.addTab(url: nil)
+        controller.selectTab(at: 0)
+        let nextTo = controller.addTab(url: nil)
+        BrowsingPreferences.current.newTabsNextToCurrent = false
+        controller.selectTab(at: 0)
+        let atEnd = controller.addTab(url: nil)
+        let nextToIndex: Int = controller.tabs.firstIndex(where: { $0 === nextTo }) ?? -1
+        let atEndIndex: Int = controller.tabs.firstIndex(where: { $0 === atEnd }) ?? -1
+        let lastIndex: Int = controller.tabs.count - 1
+        check("settings: a new tab opens next to the current one, or — set so — after the last",
+              nextToIndex == 1 && atEndIndex == lastIndex,
+              "next to: \(nextToIndex), at the end: \(atEndIndex) of \(controller.tabs.count)")
+        BrowsingPreferences.current.pageZoom = 1.25
+        let zoomed = controller.addTab(url: nil)
+        let newZoom: CGFloat = zoomed?.webView.pageZoom ?? 0
+        let earlierZoom: CGFloat = first?.webView.pageZoom ?? 0
+        check("settings: a new tab's pages open at the zoom the settings give",
+              newZoom == 1.25 && earlierZoom == 1, "new \(newZoom), earlier \(earlierZoom)")
+        // What a page sees of a zoom (said, not checked: it is WebKit's, as in Safari).
+        if let plain = first?.webView, let big = zoomed?.webView {
+            plain.loadHTMLString("<!doctype html><title>100</title>", baseURL: nil)
+            big.loadHTMLString("<!doctype html><title>125</title>", baseURL: nil)
+            _ = await waitUntil(timeout: 10) { plain.title == "100" && big.title == "125" }
+            let at100 = try? await js(plain, "return [window.devicePixelRatio, window.innerWidth]")
+            let at125 = try? await js(big, "return [window.devicePixelRatio, window.innerWidth]")
+            info("settings: what a page sees at 100 % and at 125 % (devicePixelRatio, innerWidth): \(String(describing: at100)) → \(String(describing: at125))")
+        }
+
+        var asked: [Int] = []
+        let previousAsk = BrowserWindowController.askToCloseTabs
+        BrowserWindowController.askToCloseTabs = { _, count, answer in
+            asked.append(count)
+            answer(false)
+        }
+        defer { BrowserWindowController.askToCloseTabs = previousAsk }
+        if let window = controller.window {
+            BrowsingPreferences.current.warnClosingTabs = true
+            let closedAsked = controller.windowShouldClose(window)
+            BrowsingPreferences.current.warnClosingTabs = false
+            let closedUnasked = controller.windowShouldClose(window)
+            let askedOnce: Bool = asked == [controller.tabs.count]
+            check("settings: the close button of a window of several tabs asks first, and \"no\" keeps it open; set off, it closes unasked",
+                  !closedAsked && askedOnce && closedUnasked, "asked \(asked)")
+        } else {
+            check("settings: the browser window exists", false)
+        }
+
+        let configuration = try repository.loadConfiguration(profile.id, key: key)
+        let passwords = ProfilePasswordSettings(repository: repository, profileID: profile.id, profileName: profile.name,
+                                                launchConfiguration: configuration)
+        BrowsingPreferences.current.passwordAutoFill = false
+        let offInSettings = passwords.autoFill
+        BrowsingPreferences.current.passwordAutoFill = true
+        let bothOn: Bool = passwords.autoFill == configuration.passwordAutoFill
+        check("settings: AutoFill works only while both the app's switch and the profile's are on", !offInSettings && bothOn)
+
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("pb-selftest-downloads-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        var chosen = BrowsingPreferences()
+        chosen.downloadFolder = folder.path
+        let destination = BrowserTab.uniqueDownloadURL(suggestedFilename: "../report:1.pdf", in: chosen.downloadFolderURL)
+        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+        let inFolder: Bool = destination.deletingLastPathComponent().standardizedFileURL.path == folder.standardizedFileURL.path
+        let safeName: Bool = destination.lastPathComponent == "_report_1.pdf"
+        let toProcess: Bool = BrowsingPreferences().forProfileProcess.downloadFolder == downloads.path
+        check("settings: a download goes to the folder chosen, under a name that cannot leave it; a profile's own process is told the Downloads folder by path",
+              inFolder && safeName && toProcess, destination.path)
+
+        let twoLetters: Bool = DockIcon.letters(2, of: "North wind") == "No"
+        let shortName: Bool = DockIcon.letters(3, of: "AB") == "AB"
+        let noLetters: Bool = DockIcon.image(initials: 0, of: "North wind") == nil
+        let withLetters: Bool = DockIcon.image(initials: 2, of: "North wind") != nil
+        check("settings: a profile's Dock icon shows the first letters of its name, and none means the app's icon",
+              twoLetters && shortName && noLetters && withLetters)
+
+        // The exit country's flag beside the letters: the tile with "DE" differs from the tile
+        // without a country where the flag is drawn, and what changed is mostly Germany's red and
+        // gold (CI run 599: counting gold alone found 3 pixels of the flag, too few to tell). A code
+        // that is no country's draws nothing.
+        func bitmap(_ image: NSImage?) -> NSBitmapImageRep? {
+            image?.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:))
+        }
+        // Red or gold: much more red than blue. The app's icon and the letters have none.
+        func isWarm(_ colour: NSColor) -> Bool { colour.redComponent > 0.55 && colour.redComponent > colour.blueComponent + 0.25 }
+        var changed = 0, warmWith = 0, warmWithout = 0
+        var mean = (red: 0.0, green: 0.0, blue: 0.0)
+        if let with = bitmap(DockIcon.image(initials: 2, of: "North wind", country: "DE")),
+           let without = bitmap(DockIcon.image(initials: 2, of: "North wind")),
+           with.pixelsWide == without.pixelsWide, with.pixelsHigh == without.pixelsHigh {
+            for y in stride(from: 0, to: with.pixelsHigh, by: 2) {
+                for x in stride(from: 0, to: with.pixelsWide, by: 2) {
+                    guard let a = with.colorAt(x: x, y: y)?.usingColorSpace(.sRGB),
+                          let b = without.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                    if isWarm(a) { warmWith += 1 }
+                    if isWarm(b) { warmWithout += 1 }
+                    let difference = abs(a.redComponent - b.redComponent) + abs(a.greenComponent - b.greenComponent)
+                        + abs(a.blueComponent - b.blueComponent)
+                    guard difference > 0.25 else { continue }
+                    changed += 1
+                    mean.red += Double(a.redComponent)
+                    mean.green += Double(a.greenComponent)
+                    mean.blue += Double(a.blueComponent)
+                }
+            }
+        }
+        let count = Double(max(changed, 1))
+        let average = String(format: "%.2f %.2f %.2f", mean.red / count, mean.green / count, mean.blue / count)
+        let flagAlone = DockIcon.image(initials: 0, of: "North wind", country: "DE") != nil
+        let notACountry = DockIcon.image(initials: 0, of: "North wind", country: "XX") == nil
+        check("settings: a profile's Dock icon shows its exit country's flag beside the letters (Germany's red and gold on the tile, none without it); no flag for a code that is no country's",
+              changed > 200 && warmWith > 150 && warmWithout == 0 && flagAlone && notACountry,
+              "pixels changed by the flag \(changed) (every other row and column), their mean colour \(average); red or gold with the flag \(warmWith), without \(warmWithout); the flag alone \(flagAlone); XX drew nothing \(notACountry)")
+
+        let a = UUID(), b = UUID(), c = UUID(), d = UUID(), gone = UUID()
+        var activity: [(id: UUID, activity: ProfileManager.Activity)] = []
+        activity.append((id: a, activity: ProfileManager.Activity.window(ownProcess: false)))
+        activity.append((id: b, activity: ProfileManager.Activity.warmUpOnly))
+        activity.append((id: c, activity: ProfileManager.Activity.busy))
+        activity.append((id: d, activity: ProfileManager.Activity.window(ownProcess: true)))
+        let recorded: [UUID] = StartupReopen.toRecord(activity)
+        let launched: [UUID] = StartupReopen.toLaunch(recorded: [a, gone, a, d], existing: [d, a])
+        let expectedIDs: [UUID] = [a, d]
+        check("settings: a quit keeps to reopen the profiles with a window, not one warming up or starting; an unlock starts those that still exist, each once",
+              recorded == expectedIDs && launched == expectedIDs)
+
+        var sent = BrowsingPreferences()
+        sent.pageZoom = 1.5
+        sent.dockInitials = 1
+        let line = ProfileChannel.encode(ProfileCommand.preferences(sent)).map { String(decoding: $0, as: UTF8.self) } ?? ""
+        let received = ProfileChannel.decode(ProfileCommand.self, from: line.trimmingCharacters(in: .newlines))
+        var receivedRight = false
+        if case .preferences(let preferences)? = received { receivedRight = preferences == sent }
+        check("settings: a profile's own process gets the settings over its channel as they were sent", receivedRight, line)
+    }
+
+    // MARK: Simplified mode (a profile's window that is not Safari's)
+
+    /// A profile whose window is the app's own and not Safari's runs in a simplified mode, and that
+    /// window says so with why (`SimplifiedModeNotice`): its toolbar has the chip, in the toolbar —
+    /// whose height a page measures — and no taller than what is already there; its reason is the
+    /// one the window was opened for; and the chip's popover opens and closes. Every session here
+    /// is in this process: a Mac profile's window is ours because the App Sandbox is on (the
+    /// sandboxed build) or profiles are not in processes of their own (this run), an iPhone's always.
+    /// Nothing opens by itself here (`presentsAutomatically`): a page of the self-test keeps its focus.
+    private func simplifiedMode(_ repository: ProfileRepository) async throws {
+        check("simplified mode: nothing opens by itself in the self-test, whose pages keep their focus",
+              !SimplifiedModeNotice.presentsAutomatically)
+        let macReason: SafariChromeHost.OwnWindowReason = AppEnvironment.isSandboxed ? .sandboxed : .notInProfileProcess
+        for (name, configuration, expected) in [
+            ("Mac", ProfileConfiguration(ephemeral: true), macReason),
+            ("iPhone", ProfileConfiguration(ephemeral: true, deviceGenerationID: "ios-26"), SafariChromeHost.OwnWindowReason.deviceProfile),
+        ] {
+            let profile = try repository.create(name: "Simplified \(name)", configuration: configuration)
+            let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+            let controller = session.openWindow(url: nil)
+            defer {
+                controller.close()
+                session.shutDown()
+                try? repository.delete(profile.id)
+            }
+            let shown = await waitUntil(timeout: 5) {
+                controller.window?.toolbar?.items.contains { $0.itemIdentifier.rawValue == "simplified" && $0.view === controller.simplifiedChip } == true
+            }
+            let chip = controller.simplifiedChip
+            let height = chip?.fittingSize.height ?? 0
+            check("simplified mode: a \(name) profile's own window has the chip in its toolbar, no taller than the address field",
+                  shown && chip != nil && height > 0 && height <= 28, "in the toolbar: \(shown), height \(height)")
+            check("simplified mode: a \(name) profile's window gives the reason it is not Safari's (\(expected))",
+                  controller.ownWindowReason == expected, "\(controller.ownWindowReason)")
+            if name == "Mac", let chip {
+                guard chip.window?.isVisible == true else {
+                    skip("simplified mode: the chip's popover opens and closes", "the profile's window is not on screen here, so nothing can be shown from it")
+                    continue
+                }
+                SimplifiedModeNotice.present(from: chip, reason: controller.ownWindowReason)
+                let opened = await waitUntil(timeout: 3) { SimplifiedModeNotice.shown?.isShown == true }
+                SimplifiedModeNotice.shown?.performClose(nil)
+                let closed = await waitUntil(timeout: 3) { SimplifiedModeNotice.shown?.isShown != true }
+                check("simplified mode: the chip's popover opens and closes", opened && closed, "opened \(opened), closed \(closed)")
+            }
+        }
+        // Every reason says something of its own, and the missing pieces by name.
+        let reasons: [SafariChromeHost.OwnWindowReason] = [.deviceProfile, .sandboxed, .turnedOff, .notInProfileProcess,
+                                                           .frameworksDidNotLoad, .missingPieces(["BrowserWindowController"]),
+                                                           .notSafarisApplication, .windowDidNotOpen]
+        let texts = reasons.map { SimplifiedModeNotice.reasonText($0) }
+        check("simplified mode: each of the eight reasons is said in words of its own, the missing pieces by name",
+              texts.allSatisfy { $0.count > 20 && !$0.contains("simplified.") } && Set(texts).count == reasons.count
+                && texts[5].contains("BrowserWindowController"), texts.joined(separator: " | "))
+    }
+
+    // MARK: A page whose process keeps ending
+
+    /// The owner, 1 November: an iPhone view kept the app, the window server, launchd and logd
+    /// busy until the session was restarted. Our window reloaded a page every time its process
+    /// ended — a page that ends it at every load was reloaded for ever, a new process each time.
+    /// Here, in an iPhone view's window of ours: the page's process is ended from outside, as a
+    /// crash ends it, four times. Reloaded twice, then left: no new process, the window says so
+    /// over the tab, and Reload asks for the page again. Before that, the same window, idle, with
+    /// its page: how busy this process and the window server are (an iPhone view's window is
+    /// narrower than its toolbar asks for), against a control that keeps this process busy.
+    private func endedPageProcess(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("ended page: a page whose process keeps ending is reloaded twice, then left",
+                 "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the page)")
+            return
+        }
+        let profile = try repository.create(name: "Ended page", configuration: ProfileConfiguration(
+            proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), ephemeral: true, deviceGenerationID: "ios-26"))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        let page = URL(string: "http://proxied.selftest.invalid/one")!
+        let controller = session.openWindow(url: page)
+        defer {
+            controller.close()
+            session.shutDown()
+            try? repository.delete(profile.id)
+        }
+        guard let tab = controller.selectedTab else {
+            check("ended page: the iPhone view's window has a tab", false, "no tab")
+            return
+        }
+        func pid() -> pid_t { (tab.webView.value(forKey: "_webProcessIdentifier") as? NSNumber)?.int32Value ?? 0 }
+        let loaded = await waitUntil(timeout: 20) { !tab.isLoading && tab.webView.title?.hasPrefix("PB proxied") == true && pid() > 0 }
+        guard loaded else {
+            check("ended page: the iPhone view's page loads", false, "title \(tab.webView.title ?? "nil"), process \(pid())")
+            return
+        }
+
+        // Idle: this process and the window server, over four seconds, against a control. Only
+        // with the window on screen: off it, AppKit lays out no toolbar to be busy with.
+        func cpuSeconds() -> Double {
+            var usage = rusage()
+            getrusage(RUSAGE_SELF, &usage)
+            return Double(usage.ru_utime.tv_sec) + Double(usage.ru_utime.tv_usec) / 1_000_000
+                + Double(usage.ru_stime.tv_sec) + Double(usage.ru_stime.tv_usec) / 1_000_000
+        }
+        let controlStart = Date(), controlCPU = cpuSeconds()
+        var spin = 0.0
+        while Date().timeIntervalSince(controlStart) < 0.6 { spin += sin(spin + 1) }
+        let control = (cpuSeconds() - controlCPU) / Date().timeIntervalSince(controlStart)
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        let serverBefore = await windowServerCPUSeconds()
+        let idleStart = Date(), idleCPU = cpuSeconds()
+        try? await Task.sleep(nanoseconds: 4_000_000_000)
+        let idle = (cpuSeconds() - idleCPU) / Date().timeIntervalSince(idleStart)
+        let serverAfter = await windowServerCPUSeconds()
+        let server = zip2(serverBefore, serverAfter).map { ($0.1 - $0.0) / 4 }
+        info("ended page: an iPhone view's window, idle: this process \(Int(idle * 100)) %, the window server "
+             + "\(server.map { "\(Int($0 * 100)) %" } ?? "not measured"); the control (this process kept busy) \(Int(control * 100)) % (\(spin > 0 ? "+" : "-"))")
+        if controller.window?.isVisible != true {
+            skip("ended page: an iPhone view's window, idle, does not keep this process busy",
+                 "the window is not on screen here, so its toolbar is not laid out")
+        } else if control < 0.5 {
+            skip("ended page: an iPhone view's window, idle, does not keep this process busy",
+                 "the control, this process kept busy for 0.6 s, read \(Int(control * 100)) %: the measure cannot be trusted")
+        } else {
+            check("ended page: an iPhone view's window, idle, does not keep this process busy",
+                  idle < 0.4, "\(Int(idle * 100)) % of a core over 4 s (the control read \(Int(control * 100)) %)")
+        }
+
+        // The page's process ended from outside, as a crash ends it, four times at most. A
+        // sandboxed build may not signal another process: there WebKit's own call ends it
+        // (`_killWebContentProcess`), which our tab is told of the same way.
+        var ended = 0
+        var started: [pid_t] = []
+        var last: pid_t = 0
+        var throughWebKit = 0
+        let killSelector = NSSelectorFromString("_killWebContentProcess")
+        for _ in 0..<4 {
+            let current = pid()
+            guard current > 0, current != last else { break }
+            last = current
+            if kill(current, SIGKILL) != 0 {
+                guard tab.webView.responds(to: killSelector) else { break }
+                _ = tab.webView.perform(killSelector)
+                throughWebKit += 1
+            }
+            ended += 1
+            _ = await waitUntil(timeout: 10) { tab.terminationCount >= ended && (tab.pageStopped || (pid() > 0 && pid() != current)) }
+            if tab.pageStopped { break }
+            started.append(pid())
+        }
+        check("ended page: a page whose process keeps ending is reloaded twice, then left",
+              tab.pageStopped && ended == 3 && tab.terminationCount == 3 && started.count == 2,
+              "ended \(ended), reported \(tab.terminationCount), new processes \(started.count), stopped \(tab.pageStopped)")
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        let after = pid()
+        check("ended page: once left, no new process is started for it",
+              tab.pageStopped && (after == 0 || after == last), "the page's process now \(after), the one ended last \(last)")
+        check("ended page: its window says so over the tab", controller.showsStoppedPage)
+        info("ended page: WebKit said why the last time: \(tab.lastTerminationReason); ended by a signal \(ended - throughWebKit) times, "
+             + "through WebKit \(throughWebKit) (this build \(throughWebKit > 0 ? "may not signal another process" : "signals it"))")
+
+        controller.reload()
+        let back = await waitUntil(timeout: 20) { !tab.pageStopped && !tab.isLoading && pid() > 0 && pid() != last }
+        check("ended page: Reload asks for the page again", back && !controller.showsStoppedPage,
+              "stopped \(tab.pageStopped), process \(pid()), cover shown \(controller.showsStoppedPage)")
+    }
+
+    /// The owner, 1 November, a sample of the process: an iPhone view, in its own process as the
+    /// app starts one, spun in -[SPSafariPlatformSupport viewServiceDidTerminateWithError:] under
+    /// -[NSRemoteView invalidate] — Safari's completion list, which WebKit brings in, asking for its
+    /// view again each time the service refused to the profile's process ended it — and the window
+    /// server with it, until the session was restarted. The stub that stops it was made only where
+    /// Safari's chrome is hosted. Here an iPhone view runs in its own process, its page loaded; once
+    /// it settles, its processor time over eight seconds, against a control that keeps this process
+    /// busy, read the same way.
+    /// Safari's app-link banner tracker in a profile's own process, in Safari's window. The banner
+    /// ("Open in …", shown for a page an app or a web app of this Mac opens) asks the tracker
+    /// whether it is blocked; the tracker first reads its file (-load), whose path (-_filePath) is
+    /// nil in a profile's process: -[NSURL initFileURLWithPath:isDirectory:] threw "nil string
+    /// parameter" on the tracker's own queue, nothing caught it, and the profile's process ended
+    /// (the owner's Mac, 31 October and 1 November, youtube.com).
+    ///
+    /// A runner has no app or web app for any address (measured, branch claude/measure-banner, CI
+    /// 566: none for Music's, the App Store's, News', Podcasts', TV's or YouTube's addresses — Safari
+    /// asked, and nothing came back), so no page brings the banner up here. The profile's process is
+    /// asked to ask the tracker as the banner asks it (the network report's probe). Measured the same
+    /// way on both macOS (CI 571): without the fix the process ends there, with the owner's
+    /// exception; with it, the tracker answers and its file reading, closed, says it was reached.
+    ///
+    /// The start page is one with a Smart App Banner (`<meta name="apple-itunes-app">`), as the
+    /// owner asked: measured, it brings no tracker up (CI 564), so nothing here rests on it.
+    private func safariAppLinkTracker(_ repository: ProfileRepository) async throws {
+        let name = "app links: Safari's app-link banner tracker, asked in a profile's own process as its banner asks it, answers, and the process lives"
+        guard !AppEnvironment.isSandboxed else {
+            skip(name, "the sandboxed build runs no process per profile", .build)
+            return
+        }
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip(name, "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the page)")
+            return
+        }
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
+        let profile = try repository.create(name: "App links", configuration: ProfileConfiguration(
+            startURL: URL(string: "http://banner-\(run).selftest.invalid/pb-app-banner?run=\(run)"), proxy: proxy,
+            matchProxyLocation: false))
+        defer { try? repository.delete(profile.id) }
+        let manager = ProfileManager(repository: repository)
+        var hostsChrome: Bool?
+        manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
+        var exited: Int32?
+        manager.onChildExited = { _, status in exited = status }
+        var report: ProfileNetworkReport?
+        manager.onNetworkReport = { _, received in report = received }
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        do {
+            try await manager.launch(profile.id)
+        } catch {
+            setenv("PB_PROFILE_PROCESS", "0", 1)
+            check(name, false, "its process did not start: \(error)")
+            return
+        }
+        setenv("PB_PROFILE_PROCESS", "0", 1)
+        if let pid = manager.processIdentifier(of: profile.id) { info("egress-pid \(pid)") }
+        let up = await waitUntil(timeout: 90) { hostsChrome != nil || exited != nil }
+        guard up, hostsChrome == true, exited == nil else {
+            check(name, false, "Safari's window did not come up in the profile's process (running \(String(describing: hostsChrome)), ended \(exited.map(String.init) ?? "no"))")
+            await manager.shutDown()
+            return
+        }
+        try? await Task.sleep(nanoseconds: 4_000_000_000)
+        _ = manager.checkNetwork(profile.id, probe: URL(string: "https://probe-\(run).selftest.invalid/pb-leak/applinks?run=\(run)"))
+        _ = await waitUntil(timeout: 40) { report != nil || exited != nil }
+        // The tracker reads on its own queue: the process is looked at again a little later.
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        let reads = report?.stubsReached["-[WBSBannerTracker load]"] ?? 0
+        check(name, exited == nil && report?.appLinkTrackerAnswer.hasSuffix("blocked") == true,
+              "the tracker answered \(report.map { "\"\($0.appLinkTrackerAnswer)\"" } ?? "nothing (no report)"), the process \(exited.map { "ENDED with status \($0)" } ?? "is running")")
+        check("app links: the tracker went to read its file, and that reading — from a path a profile's process does not have — was closed",
+              reads >= 1, "-[WBSBannerTracker load] reached \(reads) times: the probe did not get the tracker to its file, so this run says nothing about the reading that ended the profiles")
+        await manager.shutDown()
+    }
+
+    /// The keychain between profiles (`KeychainIsolation`): two profiles in processes of their own,
+    /// held to a proxy that goes nowhere, each asked from inside; this process and a process of the
+    /// app's own executable — a profile as it was started before LumenProfile — are the controls.
+    private func keychainBetweenProfiles(_ repository: ProfileRepository) async throws {
+        guard !AppEnvironment.isSandboxed else {
+            for name in [KeychainIsolation.entitlementsName, KeychainIsolation.loginName, KeychainIsolation.itemsName] {
+                skip(name, "the sandboxed build runs no process per profile", .build)
+            }
+            return
+        }
+        let closed = ProfileConfiguration(proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: 1), matchProxyLocation: false)
+        let first = try repository.create(name: "Keychain A", configuration: closed)
+        defer { try? repository.delete(first.id) }
+        let second = try repository.create(name: "Keychain B", configuration: closed)
+        defer { try? repository.delete(second.id) }
+        let manager = ProfileManager(repository: repository)
+        var running: Set<UUID> = []
+        var exited: [UUID: Int32] = [:]
+        manager.onProfileRunning = { id, _ in running.insert(id) }
+        manager.onChildExited = { id, status in exited[id] = status }
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        defer { setenv("PB_PROFILE_PROCESS", "0", 1) }
+        for profile in [first, second] {
+            do {
+                try await manager.launch(profile.id)
+            } catch {
+                for name in [KeychainIsolation.entitlementsName, KeychainIsolation.loginName, KeychainIsolation.itemsName] {
+                    check(name, false, "\(profile.name) did not start: \(error)")
+                }
+                await manager.shutDown()
+                return
+            }
+        }
+        let up = await waitUntil(timeout: 120) { running.isSuperset(of: [first.id, second.id]) || !exited.isEmpty }
+        guard up, exited.isEmpty, manager.processIdentifier(of: first.id) != nil, manager.processIdentifier(of: second.id) != nil else {
+            let why = "the profiles did not both come up in processes of their own (up \(running.count) of 2, ended \(exited))"
+            for name in [KeychainIsolation.entitlementsName, KeychainIsolation.loginName, KeychainIsolation.itemsName] {
+                check(name, false, why)
+            }
+            await manager.shutDown()
+            return
+        }
+        let outcome = await KeychainIsolation.look(manager: manager, profiles: first.id, second.id) { detail in
+            self.info("keychain: \(detail)")
+        }
+        await manager.shutDown()
+        for (name, verdict) in KeychainIsolation.verdicts(outcome) {
+            switch verdict {
+            case .pass: check(name, true)
+            case .fail(let why): check(name, false, why)
+            case .skip(let why):
+                // Not shown in this build, or not with this signature: a build without the network
+                // guard, or one no team signed. An identity of the team's that the keychain then
+                // refused is a check that could not be made where it must be.
+                if outcome.appHoldsTeamIdentity {
+                    check(name, false, why)
+                } else {
+                    skip(name, why, name == KeychainIsolation.entitlementsName ? .build : .machine)
+                }
+            }
+        }
+    }
+
+    /// A person ends a profile two ways: by closing its window, or with Stop in the Profiles window
+    /// while the window is open. Either quits the profile's process, whose quit closes every page
+    /// before the seal (`ProfileNetworkGuard.closeEveryPage`) and then lets Safari's chrome go its
+    /// own way out — which, on the owner's Mac (2 November, macOS 27.0.1), set the find delegate of
+    /// a page closed under it and trapped in -[WKWebView _setFindDelegate:] (the second terminate:
+    /// Safari's tryToTerminate tore its tabs down). Each way here: the process must end by itself,
+    /// status 0 — no crash, no kill — and leave nothing of the profile in plaintext on disk: its
+    /// website data and Safari's home sealed.
+    private func closingTheWindowEndsTheProfile(_ repository: ProfileRepository) async throws {
+        for byStop in [false, true] {
+            try await endAProfile(repository, byStop: byStop)
+        }
+    }
+
+    private func endAProfile(_ repository: ProfileRepository, byStop: Bool) async throws {
+        let name = byStop
+            ? "Safari chrome: Stop with the profile's window open ends its process by itself — no crash, nothing left in plaintext"
+            : "Safari chrome: closing a profile's window as its close button does ends its process by itself — no crash, nothing left in plaintext"
+        guard !AppEnvironment.isSandboxed else {
+            skip(name, "the sandboxed build runs no process per profile", .build)
+            return
+        }
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip(name, "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the page)")
+            return
+        }
+        let profile = try repository.create(name: byStop ? "Stop with the window open" : "Close the window", configuration: ProfileConfiguration(
+            startURL: URL(string: "http://proxied.selftest.invalid/one"),
+            proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), matchProxyLocation: false))
+        defer { try? repository.delete(profile.id) }
+        let manager = ProfileManager(repository: repository)
+        var messages: [String] = []
+        manager.onError = { messages.append($0) }
+        var hostsChrome: Bool?
+        manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
+        var exited: Int32?
+        manager.onChildExited = { _, status in exited = status }
+        manager.onChildStopped = { _, status in exited = status }
+        var sealReport: ProfileSealReport?
+        manager.onChildSealed = { _, report in sealReport = report }
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        do {
+            try await manager.launch(profile.id)
+        } catch {
+            setenv("PB_PROFILE_PROCESS", "0", 1)
+            check(name, false, "its process did not start: \(error)")
+            return
+        }
+        setenv("PB_PROFILE_PROCESS", "0", 1)
+        if let pid = manager.processIdentifier(of: profile.id) { info("egress-pid \(pid)") }
+        let up = await waitUntil(timeout: 90) { hostsChrome != nil || exited != nil }
+        guard up, hostsChrome == true, exited == nil else {
+            check(name, false, "Safari's window did not come up in the profile's process (running \(String(describing: hostsChrome)), ended \(exited.map(String.init) ?? "no"))")
+            await manager.shutDown()
+            return
+        }
+        // The page loads; then the profile is ended as a person ends it, and nothing else is asked.
+        try? await Task.sleep(nanoseconds: 4_000_000_000)
+        if byStop {
+            try? await manager.stop(profile.id)
+        } else {
+            _ = manager.closeWindows(profile.id)
+        }
+        let ended = await waitUntil(timeout: 60) { exited != nil }
+        // Nothing of the profile in plaintext on disk, as the update's gate looks for it (UpdateGate).
+        let folder = repository.directory(for: profile.id)
+        let plaintext = WebDataStoreVault.discoverDirectories(for: profile.id).map(\.lastPathComponent)
+            + ["home.noindex", "home"].filter { FileManager.default.fileExists(atPath: folder.appendingPathComponent($0).path) }
+        info("\(byStop ? "stop with the window open" : "closing a profile's window"): the process ended with status \(exited.map(String.init) ?? "none"), its seal "
+             + (sealReport.map { "\($0.forced ? "forced" : "not forced"), pages closed first \($0.pagesClosed)" } ?? "not reported"))
+        check(name, ended && exited == 0 && sealReport != nil && plaintext.isEmpty,
+              "ended \(ended ? "with status \(exited.map(String.init) ?? "?")" : "NOT within 60 s"), seal \(sealReport == nil ? "NOT reported" : "reported"), "
+              + "in plaintext: \(plaintext.isEmpty ? "nothing" : plaintext.joined(separator: ", ")), messages \(messages)")
+        if !ended { await manager.shutDown() }
+    }
+
+    private func mobileViewInItsOwnProcess(_ repository: ProfileRepository) async throws {
+        let name = "mobile view process: an iPhone view in its own process, idle, does not keep it busy"
+        guard !AppEnvironment.isSandboxed else {
+            skip(name, "the sandboxed build runs no process per profile", .build)
+            return
+        }
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip(name, "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the page)")
+            return
+        }
+        let profile = try repository.create(name: "Mobile view process", configuration: ProfileConfiguration(
+            startURL: URL(string: "http://proxied.selftest.invalid/one"),
+            proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort),
+            deviceGenerationID: "ios-26", matchProxyLocation: false))
+        let manager = ProfileManager(repository: repository)
+        var hostsChrome: Bool?
+        manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
+        var exited: Int32?
+        manager.onChildExited = { _, status in exited = status }
+        defer { try? repository.delete(profile.id) }
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        do {
+            try await manager.launch(profile.id)
+        } catch {
+            setenv("PB_PROFILE_PROCESS", "0", 1)
+            check(name, false, "its process did not start: \(error)")
+            return
+        }
+        setenv("PB_PROFILE_PROCESS", "0", 1)
+        guard let pid = manager.processIdentifier(of: profile.id) else {
+            check(name, false, "no process for it")
+            return
+        }
+        info("egress-pid \(pid)")
+        let up = await waitUntil(timeout: 90) { hostsChrome != nil || exited != nil }
+        check("mobile view process: it opens our own window, not Safari's", up && hostsChrome == false,
+              "running \(hostsChrome.map { $0 ? "in Safari's window" : "in our window" } ?? "not reported"), exited \(exited.map(String.init) ?? "no")")
+        if up && exited == nil {
+            // Its page loads, and the loop came within seconds of the start.
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            var timebase = mach_timebase_info_data_t()
+            mach_timebase_info(&timebase)
+            func cpuSeconds(_ process: pid_t) -> Double? {
+                var usage = rusage_info_v4()
+                let result = withUnsafeMutablePointer(to: &usage) { pointer in
+                    pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(process, RUSAGE_INFO_V4, $0) }
+                }
+                guard result == 0 else { return nil }
+                let ticks = Double(usage.ri_user_time + usage.ri_system_time)
+                return ticks * Double(timebase.numer) / Double(timebase.denom) / 1_000_000_000
+            }
+            // The control: this process kept busy for 0.6 s, read the same way.
+            let controlStart = Date(), controlCPU = cpuSeconds(getpid())
+            var spin = 0.0
+            while Date().timeIntervalSince(controlStart) < 0.6 { spin += sin(spin + 1) }
+            let control = zip2(controlCPU, cpuSeconds(getpid())).map { ($0.1 - $0.0) / Date().timeIntervalSince(controlStart) }
+            let start = Date(), before = cpuSeconds(pid)
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            let busy = zip2(before, cpuSeconds(pid)).map { ($0.1 - $0.0) / Date().timeIntervalSince(start) }
+            info("mobile view process: idle, its process \(busy.map { "\(Int($0 * 100)) %" } ?? "not read") over 8 s; "
+                 + "the control (this process kept busy) \(control.map { "\(Int($0 * 100)) %" } ?? "not read") (\(spin > 0 ? "+" : "-"))")
+            if let control, control >= 0.5, let busy {
+                check(name, busy < 0.3, "\(Int(busy * 100)) % of a core over 8 s (the control read \(Int(control * 100)) %)")
+            } else {
+                skip(name, "the processor time could not be read, or the control read \(control.map { "\(Int($0 * 100)) %" } ?? "nothing"): the measure cannot be trusted")
+            }
+        } else {
+            skip(name, "the iPhone view's process did not come up")
+        }
+        try? await manager.stop(profile.id)
+    }
+
+    /// The interface's language and the language websites see are apart, both ways (the owner, 1
+    /// November: an interface in Russian, a profile that looks American to every site). A profile's
+    /// own process, started as the app starts one, twice: the interface Russian and the profile's
+    /// language German, then the interface English and the profile's language Russian — in each
+    /// pair the language the other side would show were they linked either way, and neither this
+    /// Mac's (CI's runners are English). Its pages must see the profile's language
+    /// (`navigator.language`, `navigator.languages`, `Accept-Language`, as "What sites see" reads
+    /// them), and the process must say it took the interface's: its own words, its bundles' (AppKit),
+    /// Safari's chrome's.
+    private func interfaceApartFromWebsites(_ repository: ProfileRepository) async throws {
+        guard !AppEnvironment.isSandboxed else {
+            skip("languages: the interface's and the websites' apart in a profile's own process",
+                 "the sandboxed build runs no process per profile", .build)
+            return
+        }
+        let given = ProcessInfo.processInfo.environment["PRIVACYBROWSER_LANG"]
+        defer {
+            if let given { setenv("PRIVACYBROWSER_LANG", given, 1) } else { unsetenv("PRIVACYBROWSER_LANG") }
+        }
+        for (interface, websites) in [("ru", "de-DE"), ("en", "ru-RU")] {
+            let pair = "interface \(interface), the profile's language \(websites)"
+            var configuration = ProfileConfiguration(ephemeral: true)
+            configuration.languageOverride = websites
+            let profile = try repository.create(name: "Languages \(interface) \(websites)", configuration: configuration)
+            defer { try? repository.delete(profile.id) }
+            let manager = ProfileManager(repository: repository)
+            var reported: (code: String, bundles: String, chrome: String?)?
+            manager.onInterfaceLanguage = { _, code, bundles, chrome in reported = (code, bundles, chrome) }
+            var launchError = ""
+            let snapshot = WhatSitesSee(profileID: profile.id, manager: { manager }, launch: { id in
+                do { try await manager.launch(id) } catch { launchError = String(describing: error) }
+            })
+            // This process's interface stays as it is; the profile's process is given this one.
+            setenv("PRIVACYBROWSER_LANG", interface, 1)
+            setenv("PB_PROFILE_PROCESS", "1", 1)
+            await snapshot.take()
+            setenv("PB_PROFILE_PROCESS", "0", 1)
+            let ownProcess = manager.processIdentifier(of: profile.id) != nil
+            _ = await waitUntil(timeout: 10) { reported != nil }
+            let values = snapshot.profileSnapshot?.values ?? [:]
+            let language = values["probe.language"] ?? "nil", languages = values["probe.languages"] ?? "nil"
+            let accept = values["headers.navigation.accept-language"] ?? "nil"
+            // By the language itself: WebKit gives a page "ru" for (ru-RU) and "de-DE" for (de-DE)
+            // (CI run 580), as Safari does for the same list.
+            func primary(_ tag: String) -> String { String(tag.lowercased().prefix { $0.isLetter }) }
+            let wanted = primary(websites)
+            info("languages: \(pair): pages see navigator.language \(language), navigator.languages \(languages), "
+                 + "Accept-Language \(accept); its process: \(reported.map { "words \($0.code), bundles \($0.bundles), chrome \($0.chrome ?? "not hosted")" } ?? "said nothing")")
+            check("languages: \(pair) — its pages see \(websites) (navigator.language, navigator.languages, Accept-Language)",
+                  ownProcess && primary(language) == wanted && primary(languages) == wanted && primary(accept) == wanted,
+                  "own process \(ownProcess), navigator.language \(language), navigator.languages \(languages), "
+                  + "Accept-Language \(accept), step \(snapshot.step)\(launchError.isEmpty ? "" : ", launch \(launchError)")")
+            check("languages: \(pair) — its process took the interface's: its words and its bundles' (AppKit) \(interface)",
+                  reported?.code == interface && reported?.bundles == interface,
+                  reported.map { "words \($0.code), bundles \($0.bundles)" } ?? "the process did not say")
+            if let chrome = reported?.chrome {
+                check("languages: \(pair) — Safari's chrome in its window \(interface)", chrome == interface, chrome)
+            } else {
+                skip("languages: \(pair) — Safari's chrome in its window \(interface)",
+                     reported == nil ? "the process did not say" : "Safari's chrome is not hosted in this process")
+            }
+            try? await manager.stop(profile.id)
+        }
+    }
+
+    /// The window server's processor time so far, in seconds (`ps`); nil where it cannot be read.
+    private func windowServerCPUSeconds() async -> Double? {
+        // Short names (-c): the whole list then stays well within a pipe's buffer.
+        let (output, status, _) = await runOwnExecutable(URL(fileURLWithPath: "/bin/ps"), ["-A", "-c", "-o", "comm=,time="], timeout: 10)
+        guard status == 0 else { return nil }
+        for line in output.split(separator: "\n") where line.trimmingCharacters(in: .whitespaces).hasPrefix("WindowServer") {
+            guard let time = line.split(separator: " ").last else { continue }
+            // [[dd-]hh:]mm:ss.ss
+            let parts = time.split(separator: ":").map { Double($0.split(separator: "-").last ?? "") ?? 0 }
+            return parts.reduce(0) { $0 * 60 + $1 }
+        }
+        return nil
+    }
+
+    private func zip2<A, B>(_ a: A?, _ b: B?) -> (A, B)? {
+        guard let a, let b else { return nil }
+        return (a, b)
+    }
+
     // MARK: Window lifecycle (regression test for the close/quit crash)
 
     /// Closing a profile's last window must (a) not release the window controller while AppKit is
@@ -1235,7 +5419,7 @@ final class SelfTest {
     /// (reported).
     private func passwordAutoFill(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            info("password AutoFill checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            skip("passwords: AutoFill in a profile's window — save, suggest, fill, update, never, other sites' frames", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the sign-in page)")
             return
         }
         let profile = try repository.create(name: "Passwords", configuration: ProfileConfiguration(
@@ -1340,8 +5524,15 @@ final class SelfTest {
                 let typed = await eventually(2) { await self.inputValues(webView, selectors) == values }
                 if realInput == nil {
                     realInput = typed
-                    info(typed ? "password AutoFill: real clicks and typing reach the page"
-                               : "password AutoFill: no real key events reach the page on this runner; the isolated world is driven directly")
+                    if typed {
+                        info("password AutoFill: real clicks and typing reach the page")
+                    } else {
+                        // The checks below still run, on values written from the page and marked
+                        // typed in the AutoFill world: what a person's own clicks and keys do is
+                        // what is not shown.
+                        skip("passwords: a person's own clicks and keys reach the sign-in page and drive AutoFill",
+                             "no real key events reach the page on this Mac (app active: \(NSApp.isActive), key window: \(window.isKeyWindow)); the AutoFill world is driven directly instead")
+                    }
                 }
                 if typed {
                     AutoFillPanel.current?.dismiss()
@@ -1408,7 +5599,8 @@ final class SelfTest {
             let marked = await page("return document.querySelector('#pass').matches(':-webkit-autofill');") as? Bool
             check("passwords: filled fields are marked :autofill (Safari's highlight)", marked == true, "\(String(describing: marked))")
         } else {
-            info("password AutoFill: no AutoFill world in this WebKit; filled fields are not marked :autofill")
+            skip("passwords: filled fields are marked :autofill (Safari's highlight)",
+                 "this WebKit has no AutoFill world (\(PasswordAutoFill.worldKind)): filled fields cannot be marked")
         }
         check("passwords: the filled login is marked used (offered first next time)", vault.allEntries().first?.lastUsedAt != nil)
         _ = await page("document.querySelector('form').requestSubmit(); return true;")
@@ -1482,7 +5674,7 @@ final class SelfTest {
     /// imported cookies survive a stop (sealed) and a launch, the session cookie does not.
     private func cookieImport(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            info("cookie import checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            skip("cookie import and export: into a stopped and a running profile, back out, and what survives a stop", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it shows what a request carries)")
             return
         }
         let start = URL(string: "http://cookies.selftest.invalid/pb-cookies")!
@@ -1569,14 +5761,121 @@ final class SelfTest {
               "\(live) \(second)")
 
         info("cookie import: WebKit can write cookies to disk on request: \(CookieStoreImport.canFlush)")
+        // Exported from the running profile: the file holds what the store holds, the session
+        // cookie included, and this app's own import reads it back.
+        let exported = (try? await manager.exportCookies(of: profile.id)) ?? []
+        let exportedFile = CookieExport.data(exported, format: .netscape)
+        let readBack = CookieImporter.read(exportedFile).cookies
+        check("cookie export: a running profile's cookies, session ones too, in a cookies.txt this app reads back",
+              exported.contains { $0.name == "live" && $0.value == "imported-live-value" }
+                  && exported.contains { $0.name == "session" && $0.expires == nil }
+                  && readBack.count == CookieExport.count(exported, format: .netscape) && !readBack.isEmpty,
+              exported.map { "\($0.name)=\($0.value)" }.joined(separator: " "))
         // Stop (sealed) and launch: persistent imported cookies kept, the session cookie gone.
+        // WebKit lets go of a stopped profile's store: one still alive is handed back at the next
+        // launch (`WKWebsiteDataStore(forIdentifier:)`), session cookies and all.
+        weak var storeBeforeStop = manager.session(for: profile.id)?.dataStore
         try await manager.stop(profile.id)
+        let storeReleased = await waitUntil(timeout: 10) { storeBeforeStop == nil }
+        check("cookie import: WebKit lets go of a stopped profile's data store", storeReleased, "still alive 10 s after the stop")
+        // Exported while stopped: started without a window, read, and stopped again.
+        let fromStopped = (try? await manager.exportCookies(of: profile.id)) ?? []
+        let stoppedAgain = await waitUntil(timeout: 30) { !manager.isRunning(profile.id) && !manager.busyProfileIDs.contains(profile.id) }
+        check("cookie export: a stopped profile's cookies are read and the profile is stopped again",
+              fromStopped.contains { $0.name == "live" } && !fromStopped.contains { $0.name == "session" } && stoppedAgain,
+              "\(fromStopped.map(\.name)) running=\(manager.isRunning(profile.id))")
         try await manager.launch(profile.id)
         let third = await pageText()
         check("cookie import: imported persistent cookies survive a stop and a launch; the session cookie does not",
               third.contains("hostonly=imported-hostonly-value") && third.contains("live=imported-live-value")
                   && !third.contains("session="), third)
-        try await manager.delete(profile.id)
+        try await manager.deleteBecauseThePersonAsked(profile.id)
+    }
+
+    // MARK: Session cookies after a stop
+
+    /// A stopped profile's session cookie does not come back at its next launch — with no other
+    /// profile running, and while another profile of this process keeps running. In this app's
+    /// windows every profile shares WebKit's one network process, and while it runs it handed the
+    /// session cookies back (CI run 436, macOS 27: "still there" with another profile running,
+    /// "gone" without); a stop now deletes them (`ProfileManager.stop`).
+    private func sessionCookieAfterStop(_ repository: ProfileRepository) async throws {
+        let manager = ProfileManager(repository: repository)
+        let cookies = CookieImporter.read(Data("session.selftest.invalid\tFALSE\t/\tFALSE\t0\tpbsession\tsession-value".utf8)).cookies
+        for withAnother in [false, true] {
+            let measured = try repository.create(name: "Session cookie", configuration: ProfileConfiguration())
+            var other: ProfileSummary?
+            if withAnother { other = try repository.create(name: "Keeps running", configuration: ProfileConfiguration()) }
+            try await manager.launch(measured.id, openingWindow: false)
+            if let other { try await manager.launch(other.id, openingWindow: false) }
+            let imported = try await manager.importCookies(cookies, into: measured.id)
+            weak var store = manager.session(for: measured.id)?.dataStore
+            try await manager.stop(measured.id)
+            let released = await waitUntil(timeout: 10) { store == nil }
+            try await manager.launch(measured.id, openingWindow: false)
+            let after = (try? await manager.exportCookies(of: measured.id)) ?? []
+            let kept = after.contains { $0.name == "pbsession" }
+            let situation = withAnother ? "while another profile keeps running" : "with no other profile running"
+            check("cookies: a stopped profile's session cookie does not come back at its next launch, \(situation)",
+                  imported == .applied(stored: 1, refused: []) && !kept,
+                  "import \(imported); the store \(released ? "let go" : "still alive 10 s after the stop"); "
+                      + "after the launch \(after.map(\.name))")
+            try await manager.deleteBecauseThePersonAsked(measured.id)
+            if let other { try await manager.deleteBecauseThePersonAsked(other.id) }
+        }
+    }
+
+    // MARK: Profile export and import
+
+    /// A profile carried in a `.pbprofile` file arrives with its website data: a cookie the
+    /// original had in its (sealed) WebKit store is sent by the imported profile's first request.
+    /// That is what proves the website data was restored where WebKit looks for the new profile's
+    /// store — the archive's directories are renamed after the new profile on the way.
+    private func profileTransfer(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("profile transfer: an export carries the website data, encrypted, and opens with its password only", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
+            return
+        }
+        let start = URL(string: "http://transfer.selftest.invalid/pb-cookies")!
+        let original = try repository.create(name: "Carried", configuration: ProfileConfiguration(
+            startURL: start, proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), matchProxyLocation: false))
+        let manager = ProfileManager(repository: repository)
+        var messages: [String] = []
+        manager.onError = { messages.append($0) }
+        func pageText(_ id: UUID) async -> String {
+            guard let tab = manager.session(for: id)?.windowControllers.first?.selectedTab else { return "" }
+            _ = await waitUntil(timeout: 15) { !tab.isLoading && tab.url == start }
+            return (try? await js(tab.webView, "return document.body ? document.body.innerText : '';")) as? String ?? ""
+        }
+        // Into the original's WebKit store (queued, applied at launch), then sealed with it at stop.
+        let cookie = ImportedCookie(name: "carried", value: "carried-value", domain: "transfer.selftest.invalid", hostOnly: true,
+                                    expires: Date().addingTimeInterval(30 * 86_400))
+        _ = try await manager.importCookies([cookie], into: original.id)
+        try await manager.launch(original.id)
+        let before = await pageText(original.id)
+        try await manager.stop(original.id)
+        check("profile transfer: the original profile has the cookie", before.contains("carried=carried-value"), before)
+
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("pb-transfer-\(UUID().uuidString).\(ProfileTransfer.fileExtension)")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let manifest = try ProfileTransfer.export(original.id, from: repository, to: file, password: "transfer pw",
+                                                  kdf: .generate(iterations: 10_000))
+        let bytes = (try? Data(contentsOf: file)) ?? Data()
+        check("profile transfer: the export carries the website data, and nothing of it is readable in the file",
+              manifest.hasWebsiteData && !bytes.isEmpty && bytes.range(of: Data("carried-value".utf8)) == nil
+                && bytes.range(of: Data("Carried".utf8)) == nil, "\(manifest.hasWebsiteData) \(bytes.count) bytes")
+        check("profile transfer: a wrong password opens nothing",
+              (try? ProfileTransfer.manifest(of: file, password: "wrong")) == nil)
+
+        let imported = try ProfileTransfer.importProfile(from: file, password: "transfer pw", into: repository, name: "Carried (imported)")
+        try await manager.launch(imported.id)
+        let after = await pageText(imported.id)
+        check("profile transfer: the imported profile — a new profile — sends the original's cookie from its first request",
+              imported.id != original.id && after.contains("carried=carried-value"), after)
+        try await manager.stop(imported.id)
+        check("profile transfer: nothing went wrong", messages.isEmpty, messages.joined(separator: " | "))
+        try await manager.deleteBecauseThePersonAsked(imported.id)
+        try await manager.deleteBecauseThePersonAsked(original.id)
     }
 
     // MARK: Profile sync (cookies and settings between two devices)
@@ -1588,7 +5887,7 @@ final class SelfTest {
     /// settings changed on both devices end as the newer ones, the older kept as a conflict copy.
     private func profileSync(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            info("profile sync checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            skip("profile sync: cookies recorded at stop, uploaded encrypted, in the other device's store before its first page", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
             return
         }
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("pb-selftest-sync-\(UUID().uuidString)")
@@ -1678,7 +5977,7 @@ final class SelfTest {
                   && FileManager.default.fileExists(atPath: copy.path),
               "\(zones) \(conflict.resolvedConflicts)")
         check("profile sync: no errors reported", messages.isEmpty, "\(messages)")
-        try await managerA.delete(profile.id)
+        try await managerA.deleteBecauseThePersonAsked(profile.id)
     }
 
     // MARK: Session warm-up robot
@@ -1690,7 +5989,7 @@ final class SelfTest {
     /// shows a dialog and when the profile stops (whose data then seals as usual).
     private func warmUp(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            info("warm-up checks skipped (PB_SELFTEST_HTTP_PROXY_PORT not set)")
+            skip("warm-up: a plan's pages visited, dwelt on, scrolled and followed as the plan says", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves and times the pages)")
             return
         }
         let run = String(UUID().uuidString.prefix(8)).lowercased()
@@ -1806,19 +6105,26 @@ final class SelfTest {
                   && ["pbwarm_a", "pbwarm_b", "pbwarm_c", "pbwarm_a_next"].allSatisfy(stored.contains),
               "history=\(history) cookies=\(stored.sorted())")
 
-        // An address that only jumps within the page shown (the same page with a fragment): WebKit
-        // makes no new page for it, so nothing commits; the robot takes it as visited once the tab
-        // shows that page instead of waiting out its load time. The page then rewrites `#part` to
-        // `#/part`, as a single-page app's router might.
+        // An address that only jumps within the page shown (the same page with a fragment). WebKit
+        // 26 makes no new page for it, so nothing commits, and the robot takes it as visited once
+        // the tab shows that page instead of waiting out its load time; WebKit 27 makes a new page
+        // of it for a page loaded through the proxy (`fragmentJumps`), which the robot waits for as
+        // for any load. Either way the page rewrites `#part` to `#/part`, as a single-page app's
+        // router might.
         let jump = WarmUpPlan(addresses: [page("f"), page("f") + "#part"].joined(separator: "\n"), scroll: false, followLinks: false)
         robot.limits.dwellOverride = 1...1
         robot.limits.pauseOverride = 0.2...0.2
         let jumpStarted = Date()
         manager.startWarmUp(profile.id, plan: jump)
-        let jumped = await waitUntil(timeout: 20) { robot.state != .running }
+        // The address the robot's own tab last showed, read while the run is on: the warm-up
+        // browses in a window of its own that is closed when the run ends.
+        var jumpShown: URL?
+        let jumped = await waitUntil(timeout: 20) {
+            if let url = robot.currentTab?.url { jumpShown = url }
+            return robot.state != .running
+        }
         let jumpTime = Date().timeIntervalSince(jumpStarted)
-        let jumpShown = manager.session(for: profile.id)?.frontmostWindow?.selectedTab?.url
-        check("warm-up: an address that only jumps within the page shown counts as visited at once (no new page comes for it), also when the page rewrites the fragment",
+        check("warm-up: an address that only jumps within the page shown counts as visited without waiting out a load time (whether or not WebKit makes a new page of it), also when the page rewrites the fragment",
               jumped && robot.state == .finished && robot.visits.map(\.outcome) == [.loaded, .loaded] && jumpTime < 10
                   && jumpShown?.fragment == "/part",
               "state=\(robot.state) \(robot.visits.map(\.outcome)) in \(String(format: "%.1f", jumpTime)) s shown=\(jumpShown?.absoluteString ?? "nil")")
@@ -1841,7 +6147,7 @@ final class SelfTest {
         // Its tab closed by the user.
         manager.startWarmUp(profile.id, plan: long)
         _ = await waitUntil(timeout: 20) { robot.visits.first?.outcome == .loaded }
-        if let tab = robot.currentTab, let controller = manager.session(for: profile.id)?.frontmostWindow,
+        if let tab = robot.currentTab, let controller = manager.session(for: profile.id)?.window(of: tab),
            let index = controller.tabs.firstIndex(where: { $0 === tab }) {
             controller.closeTab(at: index)
         }
@@ -1871,7 +6177,102 @@ final class SelfTest {
               stoppedFirst && sealError == nil && !manager.isRunning(profile.id)
                   && !webKitDataDirectoriesExist(profile.id) && messages.isEmpty,
               "stoppedFirst=\(stoppedFirst) state=\(robot.state) seal=\(sealError ?? "ok") messages=\(messages)")
-        try await manager.delete(profile.id)
+        try await manager.deleteBecauseThePersonAsked(profile.id)
+    }
+
+    /// Two profiles warmed up through the queue (`WarmUpCoordinator`), as "Warm Up Several…" does:
+    /// each started without a window, warmed up through the self-test proxy, stopped and sealed
+    /// again, and only then the next — never both at once. Each run's report counts the profile's
+    /// cookies per site (registrable domain) in its own store, telling the cookies the run added
+    /// from one the profile already had; and a run from the queue counts as the profile's last
+    /// run for its schedule.
+    private func warmUpQueue(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("warm-up queue: profiles warmed up one after another, each sealed before the next", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
+            return
+        }
+        let run = String(UUID().uuidString.prefix(8)).lowercased()
+        func page(_ host: String, _ name: String) -> String { "http://\(host)/pb-warmup/\(name)?run=\(run)" }
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        let first = try repository.create(name: "Queue 1", configuration: ProfileConfiguration(proxy: proxy, matchProxyLocation: false))
+        let second = try repository.create(name: "Queue 2", configuration: ProfileConfiguration(proxy: proxy, matchProxyLocation: false))
+        // The second profile already holds a cookie of the site it is going to visit: the report
+        // has to tell it from the one the run adds.
+        try repository.queueImportedCookies([ImportedCookie(name: "pbwarm_before", value: run, domain: "warmup.selftest.invalid",
+                                                            hostOnly: true, expires: Date().addingTimeInterval(86_400))],
+                                            for: second.id)
+        // The first repeats on a schedule (not due for a day): its run from the queue counts.
+        let queued = Date()
+        try repository.saveWarmUpSchedule(WarmUpSchedule(everyHours: 24, since: queued), for: first.id)
+        let manager = ProfileManager(repository: repository)
+        var messages: [String] = []
+        manager.onError = { messages.append($0) }
+        // As AppModel.startWarmUp: a stopped profile is launched without a window for its run.
+        let coordinator = WarmUpCoordinator(manager: manager, repository: repository) { plan, id in
+            if !manager.isRunning(id) {
+                do {
+                    try await manager.launch(id, openingWindow: false)
+                } catch {
+                    manager.onError?(String(describing: error))
+                    return false
+                }
+            }
+            guard manager.isRunning(id) else { return false }
+            manager.warmUpRobot(for: id).limits = .init(loadTimeout: 15, startTimeout: 8, scriptTimeout: 5,
+                                                         dwellOverride: 1...1.2, pauseOverride: 0.2...0.3)
+            return manager.startWarmUp(id, plan: plan)
+        }
+        defer { coordinator.shutDown() }
+        let policy = NSApp.activationPolicy()
+        NSApp.setActivationPolicy(.accessory)
+        defer { NSApp.setActivationPolicy(policy) }
+
+        let plans: [UUID: WarmUpPlan] = [
+            first.id: WarmUpPlan(addresses: [page("warmup.selftest.invalid", "qa"), page("www.queue-site.invalid", "qb")].joined(separator: "\n"),
+                                 scroll: false, followLinks: false),
+            second.id: WarmUpPlan(addresses: page("warmup.selftest.invalid", "qc"), scroll: false, followLinks: false),
+        ]
+        coordinator.enqueue([first.id, second.id]) { plans[$0] ?? WarmUpPlan() }
+        // Watched every tenth of a second while the queue goes.
+        var bothRunning = false
+        var windowShown = false
+        var order: [UUID] = []
+        let done = await waitUntil(timeout: 120) {
+            for id in [first.id, second.id] where manager.isRunning(id) {
+                if order.last != id { order.append(id) }
+                if manager.session(for: id)?.hasVisibleWindow == true { windowShown = true }
+            }
+            if manager.isRunning(first.id) && manager.isRunning(second.id) { bothRunning = true }
+            return !coordinator.queue.isActive
+        }
+        let entries = coordinator.queue.entries
+        func report(_ id: UUID) -> WarmUpStatus? {
+            guard let entry = entries.first(where: { $0.profileID == id }), case let .done(status) = entry.state else { return nil }
+            return status
+        }
+        let firstReport = report(first.id), secondReport = report(second.id)
+        check("warm-up queue: two profiles warmed up one after the other, each started without a window, then stopped and sealed before the next began",
+              done && !bothRunning && !windowShown && order == [first.id, second.id]
+                  && firstReport?.phase == .finished && secondReport?.phase == .finished
+                  && !manager.isRunning(first.id) && !manager.isRunning(second.id)
+                  && !webKitDataDirectoriesExist(first.id) && !webKitDataDirectoriesExist(second.id) && messages.isEmpty,
+              "done=\(done) both=\(bothRunning) window=\(windowShown) order=\(order.map { $0 == first.id ? 1 : 2 }) "
+                  + "states=\(entries.map(\.state)) messages=\(messages)")
+        func counts(_ status: WarmUpStatus?, _ site: String) -> [Int] {
+            guard let found = status?.sites?.first(where: { $0.site == site }) else { return [] }
+            return [found.cookies, found.added]
+        }
+        check("warm-up report: the profile's cookies per site (registrable domain) after the run, the run's own told from those it had",
+              counts(firstReport, "selftest.invalid") == [1, 1] && counts(firstReport, "queue-site.invalid") == [1, 1]
+                  && firstReport?.cookies == 2
+                  && counts(secondReport, "selftest.invalid") == [2, 1] && secondReport?.cookies == 1,
+              "first=\(firstReport?.sites ?? []) (\(firstReport?.cookies ?? -1)) second=\(secondReport?.sites ?? []) (\(secondReport?.cookies ?? -1))")
+        let stored = try repository.warmUpSchedule(for: first.id)
+        check("warm-up schedule: a run from the queue counts as the profile's last run, stored with its schedule",
+              (stored?.lastRunAt ?? .distantPast) >= queued && (coordinator.nextRun(of: first.id) ?? .distantPast) > Date().addingTimeInterval(23 * 3600),
+              "lastRunAt=\(String(describing: stored?.lastRunAt)) next=\(String(describing: coordinator.nextRun(of: first.id)))")
+        try await manager.deleteBecauseThePersonAsked(first.id)
+        try await manager.deleteBecauseThePersonAsked(second.id)
     }
 
     /// The profile's WebKit data is not on disk in plain form (sealed).

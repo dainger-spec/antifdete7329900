@@ -90,9 +90,66 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// rewritten by an older build.
     public var settingsModifiedAt: Date?
 
-    /// Set by the app for one launch, never stored: the relay in the packet tunnel that carries
-    /// this profile's WebRTC through its SOCKS5 proxy. Nil when the tunnel is not available.
+    /// Set by the app for one launch, never stored: the relay (on 127.0.0.1, the app's own) that
+    /// carries this profile's WebRTC through its SOCKS5 proxy. Nil unless `WebRTCGate` decided so.
     public var webRTCRelay: WebRTCRelay?
+
+    /// What the address bar searches with (and the warm-up's searches). Nil: `SearchEngine.standard`
+    /// — every profile from before there was a choice, and one a later build gave an engine this
+    /// one does not know.
+    public var searchEngine: SearchEngine?
+
+    /// The person's own labels for the profile, which the Profiles list shows and filters by
+    /// (`ProfileTags.normalized`). Kept, synced and exported with the profile's settings, and
+    /// nowhere else: no page ever sees them.
+    public var tags: [String]
+
+    /// The person's own notes about the profile, at most `maximumNotesLength` characters; kept
+    /// like the tags.
+    public var notes: String
+
+    /// How the profile's glyph looks in the app; nil: the colour its id gives and the first
+    /// letter of its name.
+    public var avatar: ProfileAvatarStyle?
+
+    /// How large the profile's browser windows open (`WindowSize`: a real window, never a size
+    /// only told to pages). Nil: as the app opens windows.
+    public var windowSize: WindowSize?
+
+    /// The Safari version a macOS profile names in its User-Agent ("26.0"); nil: this Mac's own
+    /// (`userAgent(hostSafariVersion:)`). Only the name changes, never the engine
+    /// (`SafariVersions`); a mobile generation and a typed User-Agent ignore it.
+    public var safariVersion: String?
+
+    /// Whether the profile's pages may reach this Mac and the local network (`LocalRequests`);
+    /// protected unless the person allowed it.
+    public var localRequests: LocalRequests
+
+    /// The language websites see (`Accept-Language`, `navigator.language`), BCP 47; nil: the
+    /// connection's (its proxy's country when the profile follows it), else this Mac's.
+    public var languageOverride: String?
+
+    /// Where the time zone and language come from, as the editor shows it; nil: from the fields
+    /// themselves — a time zone or language set is manual, none is the connection's. Only a
+    /// random choice is written (`LocaleSource.random`).
+    public var localeSource: LocaleSource?
+
+    /// Where the time zone and language come from.
+    public var effectiveLocaleSource: LocaleSource {
+        localeSource ?? (timeZoneIdentifier != nil || languageOverride != nil ? .manual : .connection)
+    }
+
+    /// The language a launch gives websites: the one set, else the proxy country's (`location`,
+    /// found when the profile follows its proxy), else nil — this Mac's.
+    public func webLanguage(for location: ProxyLocation?) -> String? {
+        languageOverride ?? location?.webLanguage
+    }
+
+    /// The local-network rule list applies (`LocalNetworkRules`): protected, and no proxy — with
+    /// one, this Mac is blocked by the proxied list, and the rest goes through the proxy.
+    public var blocksLocalNetwork: Bool { proxy == nil && localRequests == .protected }
+
+    public static let maximumNotesLength = 4000
 
     public init(startURL: URL? = nil,
                 userAgent: String? = nil,
@@ -111,7 +168,16 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 passwordAutoFill: Bool = true,
                 passwordNeverSaveSites: [String] = [],
                 syncCookies: Bool = true,
-                settingsModifiedAt: Date? = nil) {
+                settingsModifiedAt: Date? = nil,
+                searchEngine: SearchEngine? = nil,
+                tags: [String] = [],
+                notes: String = "",
+                avatar: ProfileAvatarStyle? = nil,
+                windowSize: WindowSize? = nil,
+                safariVersion: String? = nil,
+                localRequests: LocalRequests = .protected,
+                languageOverride: String? = nil,
+                localeSource: LocaleSource? = nil) {
         self.startURL = startURL
         self.userAgent = userAgent
         self.proxy = proxy
@@ -130,6 +196,15 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.passwordNeverSaveSites = passwordNeverSaveSites
         self.syncCookies = syncCookies
         self.settingsModifiedAt = settingsModifiedAt
+        self.searchEngine = searchEngine
+        self.tags = ProfileTags.normalized(tags)
+        self.notes = String(notes.prefix(Self.maximumNotesLength))
+        self.avatar = avatar?.normalized
+        self.windowSize = windowSize
+        self.safariVersion = safariVersion
+        self.localRequests = localRequests
+        self.languageOverride = languageOverride
+        self.localeSource = localeSource
     }
 
     /// Whether this profile's cookies take part in sync (never for an ephemeral profile).
@@ -154,19 +229,21 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     }
 
     /// The User-Agent applied: an explicit `userAgent` override wins; otherwise the generation's
-    /// (the default generation when none is stored), the macOS one naming the host's Safari
-    /// version. Never WebKit's bare default, which lacks the "Version/… Safari/…" every Safari sends.
+    /// (the default generation when none is stored), the macOS one naming the profile's Safari
+    /// version (`safariVersion`), else the host's. Never WebKit's bare default, which lacks the
+    /// "Version/… Safari/…" every Safari sends.
     public func userAgent(hostSafariVersion: String?) -> String {
         if let userAgent, !userAgent.isEmpty { return userAgent }
-        return deviceGeneration.userAgent(hostSafariVersion: hostSafariVersion)
+        return deviceGeneration.userAgent(hostSafariVersion: safariVersion ?? hostSafariVersion)
     }
 
     /// How this launch's pages do WebRTC. WebKit opens WebRTC's sockets (STUN, TURN over UDP or
     /// TCP, media) outside the data store's proxy, so with a proxy a page's ICE traffic would
     /// leave from this Mac's own address — STUN shows it to the page, a TURN server to whoever
-    /// runs it. A proxied profile therefore gets WebRTC only through the packet tunnel's relay
-    /// (`webRTCRelay`, set at launch when the tunnel is on and the proxy is SOCKS5, the kind that
-    /// carries UDP); otherwise it is switched off. The stored choice is kept either way.
+    /// runs it. A proxied profile therefore gets WebRTC only through the app's relay
+    /// (`webRTCRelay`, set at launch when `WebRTCGate` allows it: a SOCKS5 proxy that carries UDP,
+    /// the network guard holding the profile's process); otherwise it is switched off. The stored
+    /// choice is kept either way.
     public var webRTCRouting: WebRTCRouting {
         if webRTCPolicy == .disabled { return .off }
         guard let proxy else { return .native(webRTCPolicy) }
@@ -175,7 +252,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     }
 
     /// The policy the routing amounts to: `.disabled` when WebRTC is off, `.relayOnly` through the
-    /// tunnel's relay, the stored policy without a proxy.
+    /// app's relay, the stored policy without a proxy.
     public var effectiveWebRTCPolicy: WebRTCPolicy {
         switch webRTCRouting {
         case .off: return .disabled
@@ -256,7 +333,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         case startURL, userAgent, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, ephemeral,
              safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID,
              matchProxyLocation, lastProxyLocation, warnOnProxyIPChange, passwordAutoFill, passwordNeverSaveSites,
-             syncCookies, settingsModifiedAt
+             syncCookies, settingsModifiedAt, searchEngine, tags, notes, avatar, windowSize, safariVersion,
+             localRequests, languageOverride, localeSource
     }
 
     /// Tolerant decoding: fields added in later versions fall back to their defaults, so
@@ -285,6 +363,24 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         passwordNeverSaveSites = try c.decodeIfPresent([String].self, forKey: .passwordNeverSaveSites) ?? defaults.passwordNeverSaveSites
         syncCookies = try c.decodeIfPresent(Bool.self, forKey: .syncCookies) ?? defaults.syncCookies
         settingsModifiedAt = try? c.decodeIfPresent(Date.self, forKey: .settingsModifiedAt)
+        // One a later build knows and this one does not is the standard one here, not a failure.
+        searchEngine = try? c.decodeIfPresent(SearchEngine.self, forKey: .searchEngine)
+        // The person's own words: what does not read is dropped, never a reason to fail the
+        // profile, and what reads is held to the limits a build of this version writes.
+        tags = ProfileTags.normalized((try? c.decodeIfPresent([String].self, forKey: .tags)) ?? [])
+        notes = String(((try? c.decodeIfPresent(String.self, forKey: .notes)) ?? "").prefix(Self.maximumNotesLength))
+        avatar = (try? c.decodeIfPresent(ProfileAvatarStyle.self, forKey: .avatar))?.normalized
+        // A size a later build knows and this one does not, or one out of bounds: as the app
+        // opens windows.
+        windowSize = (try? c.decodeIfPresent(WindowSize.self, forKey: .windowSize)).flatMap { $0.isValid ? $0 : nil }
+        // Only what Safari writes after "Version/": anything else is this Mac's own version.
+        safariVersion = (try? c.decodeIfPresent(String.self, forKey: .safariVersion))
+            .flatMap { DeviceGeneration.isSafariVersion($0) ? $0 : nil }
+        // Fail-closed: anything but an explicit "allowed" is protected.
+        localRequests = (try? c.decodeIfPresent(LocalRequests.self, forKey: .localRequests)) ?? .protected
+        languageOverride = (try? c.decodeIfPresent(String.self, forKey: .languageOverride))
+            .flatMap { LocalePlaces.isLanguageTag($0) ? $0 : nil }
+        localeSource = try? c.decodeIfPresent(LocaleSource.self, forKey: .localeSource)
     }
 
     /// Explicit so that `historyRetentionDays: nil` ("keep forever") is written as JSON null
@@ -309,6 +405,16 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         try c.encode(passwordNeverSaveSites, forKey: .passwordNeverSaveSites)
         try c.encode(syncCookies, forKey: .syncCookies)
         try c.encodeIfPresent(settingsModifiedAt, forKey: .settingsModifiedAt)
+        try c.encodeIfPresent(searchEngine, forKey: .searchEngine)
+        // Written only when there is something: a profile without them is written as before.
+        if !tags.isEmpty { try c.encode(tags, forKey: .tags) }
+        if !notes.isEmpty { try c.encode(notes, forKey: .notes) }
+        try c.encodeIfPresent(avatar, forKey: .avatar)
+        try c.encodeIfPresent(windowSize, forKey: .windowSize)
+        try c.encodeIfPresent(safariVersion, forKey: .safariVersion)
+        if localRequests != .protected { try c.encode(localRequests, forKey: .localRequests) }
+        try c.encodeIfPresent(languageOverride, forKey: .languageOverride)
+        try c.encodeIfPresent(localeSource, forKey: .localeSource)
     }
 
     public var historyPolicy: HistoryStore.Policy {
@@ -337,6 +443,15 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         }
         try proxy?.validate()
         try geolocation.validate()
+        if let languageOverride, !LocalePlaces.isLanguageTag(languageOverride) {
+            throw CoreError.invalidConfiguration("a language is a tag such as de-DE")
+        }
+        if let safariVersion, !DeviceGeneration.isSafariVersion(safariVersion) {
+            throw CoreError.invalidConfiguration("a Safari version is written like 26.0 or 26.0.1")
+        }
+        if let windowSize, !windowSize.isValid {
+            throw CoreError.invalidConfiguration("window size must be \(WindowSize.minimumWidth)–\(WindowSize.maximumWidth) × \(WindowSize.minimumHeight)–\(WindowSize.maximumHeight) points")
+        }
     }
 }
 
@@ -401,7 +516,7 @@ public enum GeolocationSetting: Codable, Equatable, Sendable {
     }
 }
 
-/// A TURN relay a profile's pages are given as their only ICE server (the packet tunnel's).
+/// A TURN relay a profile's pages are given as their only ICE server (`WebRTCRelays`).
 public struct WebRTCRelay: Equatable, Sendable {
     public var urls: [String]
     public var username: String
@@ -419,7 +534,7 @@ public enum WebRTCRouting: Equatable, Sendable {
     case native(WebRTCPolicy)
     /// Switched off in the engine.
     case off
-    /// Relay-only through the packet tunnel's TURN server and the profile's SOCKS5 proxy.
+    /// Relay-only through the app's TURN server on 127.0.0.1 and the profile's SOCKS5 proxy.
     case relay(WebRTCRelay)
 }
 
@@ -429,7 +544,7 @@ public enum WebRTCPolicy: String, Codable, CaseIterable, Sendable {
     /// Force `iceTransportPolicy: "relay"`: no host/srflx candidates are gathered, so the
     /// local and STUN-discovered public IP are not exposed to the page. Requires the site to
     /// provide TURN, and the TURN server sees this Mac's address. With a proxy, WebRTC instead
-    /// goes through the packet tunnel's relay, or is off (`webRTCRouting`).
+    /// goes through the app's relay, or is off (`webRTCRouting`).
     case relayOnly
     /// WebKit default (host candidates are mDNS-obfuscated by WebKit, but STUN
     /// requests go out over UDP *outside* the proxy and reveal the real public IP).

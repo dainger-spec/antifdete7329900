@@ -17,18 +17,22 @@ public struct WarmUpPlan: Codable, Equatable, Sendable {
     /// Before leaving a page, follow one plain link on it: on the same site, or, on the search
     /// results, to a result. Never a sign-out, purchase, deletion or download link.
     public var followLinks: Bool
+    /// Where this plan came from, so the screen opens where it was left. Absent in plans saved
+    /// before the screen had ready-made lists, and in those written by hand.
+    public var choice: WarmUpChoice?
 
     public static let dwellLimits: ClosedRange<TimeInterval> = 2...300
     public static let maximumPages = 50
 
     public init(addresses: String = "", searchQuery: String = "", minimumDwell: TimeInterval = 5, maximumDwell: TimeInterval = 15,
-                scroll: Bool = true, followLinks: Bool = false) {
+                scroll: Bool = true, followLinks: Bool = false, choice: WarmUpChoice? = nil) {
         self.addresses = addresses
         self.searchQuery = searchQuery
         self.minimumDwell = minimumDwell
         self.maximumDwell = maximumDwell
         self.scroll = scroll
         self.followLinks = followLinks
+        self.choice = choice
     }
 
     public struct Page: Equatable, Sendable {
@@ -66,12 +70,12 @@ public struct WarmUpPlan: Codable, Equatable, Sendable {
         public var reason: Reason
     }
 
-    /// The pages to visit, and the lines that are not.
-    public func pages() -> (pages: [Page], problems: [Problem]) {
+    /// The pages to visit, and the lines that are not; the search with the profile's `engine`.
+    public func pages(searchEngine engine: SearchEngine = .standard) -> (pages: [Page], problems: [Problem]) {
         var pages: [Page] = []
         var problems: [Problem] = []
         var seen: Set<String> = []
-        if let search = WebAddress.searchURL(for: searchQuery) {
+        if let search = WebAddress.searchURL(for: searchQuery, engine: engine) {
             pages.append(Page(url: search, kind: .search))
             seen.insert(search.absoluteString)
         }

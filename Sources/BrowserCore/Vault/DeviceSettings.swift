@@ -1,7 +1,7 @@
 import Foundation
 
 /// Settings that belong to this device and vault, not to a profile, and are never synced:
-/// where to sync to and the outcome of the last sync. Stored as `settings.bin`,
+/// where to sync to, the outcome of the last sync, and the local automation API's. Stored as `settings.bin`,
 /// AES-GCM with `HKDF(VMK, "device-settings")` — the sync token and folder location are
 /// therefore only readable after unlock.
 public struct DeviceSettings: Codable, Equatable, Sendable {
@@ -21,6 +21,9 @@ public struct DeviceSettings: Codable, Equatable, Sendable {
         public var conflicts: Int
         public var deferred: Int
         public var error: String?
+        /// Whose master password the sync location holds (`SyncReport.passwordHeader`); nil when
+        /// it is this Mac's, or in a status from before it was kept.
+        public var passwordHeader: SyncReport.PasswordHeader?
 
         public init(date: Date = Date(), report: SyncReport) {
             self.date = date
@@ -30,6 +33,7 @@ public struct DeviceSettings: Codable, Equatable, Sendable {
             conflicts = report.resolvedConflicts.count
             deferred = report.deferred.count
             error = nil
+            passwordHeader = report.passwordHeader == .same ? nil : report.passwordHeader
         }
 
         public init(date: Date = Date(), error: String) {
@@ -41,16 +45,24 @@ public struct DeviceSettings: Codable, Equatable, Sendable {
 
     public var syncTarget: SyncTarget?
     public var lastSync: SyncStatus?
+    /// The local automation API (`AutomationHTTP`): nil until it is first set up.
+    public var automation: AutomationSettings?
+    /// The profiles that had a window when the app last quit, for the next unlock to start again
+    /// (the app's Settings → Startup); used once, and kept only while that setting asks for it.
+    public var reopenAtUnlock: [UUID]?
 
-    public init(syncTarget: SyncTarget? = nil, lastSync: SyncStatus? = nil) {
+    public init(syncTarget: SyncTarget? = nil, lastSync: SyncStatus? = nil, automation: AutomationSettings? = nil,
+                reopenAtUnlock: [UUID]? = nil) {
         self.syncTarget = syncTarget
         self.lastSync = lastSync
+        self.automation = automation
+        self.reopenAtUnlock = reopenAtUnlock
     }
 }
 
 extension DeviceSettings {
-    private static func file(for vault: UnlockedVault) -> EncryptedDocumentFile<DeviceSettings> {
-        EncryptedDocumentFile(url: vault.root.appendingPathComponent("settings.bin"), key: vault.settingsKey,
+    static func file(for vault: UnlockedVault) throws -> EncryptedDocumentFile<DeviceSettings> {
+        EncryptedDocumentFile(url: vault.root.appendingPathComponent("settings.bin"), key: try vault.settingsKey,
                               aad: "device-settings:v1:\(vault.vaultID.uuidString)")
     }
 
@@ -60,5 +72,15 @@ extension DeviceSettings {
 
     public func save(to vault: UnlockedVault) throws {
         try Self.file(for: vault).save(self)
+    }
+
+    /// Moves a `settings.bin` that could not be read aside — `settings.bin.unreadable`, then
+    /// `.unreadable-2`, … — so that saving new settings never writes over it: it holds the sync
+    /// target, the server's token and the automation token. Returns where it went (nil: no file).
+    @discardableResult
+    public static func moveUnreadableAside(in vault: UnlockedVault) throws -> URL? {
+        let file = vault.root.appendingPathComponent("settings.bin")
+        guard FileManager.default.fileExists(atPath: file.path) else { return nil }
+        return try SecureFile.moveAside(file, suffix: "unreadable")
     }
 }

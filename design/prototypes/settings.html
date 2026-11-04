@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="ru" class="v-proposed">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings — prototype</title>
+<link rel="stylesheet" href="kit/lumen.css">
+<style>
+  /* PROPOSED: one Settings window (⌘,) for what belongs to the app on this Mac — sync, the network
+     extension, the master password — instead of three sheets reached from a ⋯ menu. The same row
+     anatomy as the profile editor. Change password stays a sheet, opened from Security. */
+  .window { flex-direction: column; background: var(--raised); }
+  .titlebar { height: 28px; flex: none; display: flex; align-items: center; justify-content: center; font: 600 13px/16px var(--font); color: var(--textPrimary); }
+  .traffic { top: 8px; left: 10px; }
+  .toolbar { height: 56px; flex: none; display: flex; justify-content: center; gap: 4px; padding-bottom: 6px; border-bottom: 1px solid var(--divider); }
+  .tab { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-width: 84px; padding: 0 10px; border-radius: 7px; border: 0; background: none; color: var(--textSecondary); font: var(--tCaption); }
+  .tab .icon { width: 20px; height: 20px; }
+  .tab.on { background: rgba(255, 255, 255, 0.08); color: var(--textPrimary); }
+  .tab.on .icon { color: var(--accent); }
+  .pane { flex: 1; min-height: 0; overflow: auto; scrollbar-width: none; padding: 16px 20px 20px; }
+  .pane::-webkit-scrollbar { display: none; }
+  .pane > .group-title:not(:first-child) { margin-top: 18px; }
+  .path { font: 400 11px/14px var(--fontMono); color: var(--textSecondary); margin-top: 2px; }
+  .status-line { display: flex; align-items: center; gap: 8px; }
+  .status-line .icon { width: 16px; height: 16px; }
+  .info-btn { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin: -6px -4px -6px 0; border: 0; background: none; color: var(--textTertiary); border-radius: 5px; vertical-align: middle; }
+  .info-btn .icon { width: 13px; height: 13px; }
+  .foot-link { margin: 12px 2px 0; }
+  .note-warning { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: rgba(217, 164, 65, 0.10); border: 1px solid rgba(217, 164, 65, 0.28); font: var(--tCaption); color: var(--textPrimary); }
+  .note-warning .icon { color: var(--warning); width: 13px; height: 13px; margin-top: 1px; }
+  /* the change-password sheet */
+  .sheet-body { flex: 1; padding: 0 24px 12px; display: flex; flex-direction: column; gap: 12px; }
+  .rule { display: flex; align-items: center; gap: 5px; font: var(--tCaption); color: var(--textSecondary); margin-top: 6px; }
+  .rule .icon { width: 11px; height: 11px; }
+  .rule.ok { color: var(--running); }
+  .rule.bad { color: var(--danger); }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="kit/wordmark.js"></script>
+<script src="kit/geometry.js"></script>
+<script src="kit/strings.js"></script>
+<script src="kit/icons.js"></script>
+<script src="kit/lumen.js"></script>
+<script>
+(function () {
+  'use strict';
+  const { L, H, icon, params } = Lumen;
+  const en = Lumen.lang === 'en';
+  const T = (ruText, enText) => (en ? enText : ruText);
+  const E = Lumen.escapeHTML;
+
+  const SCENARIOS = {
+    sync:     { title: T('Синхронизация', 'Sync'), pane: 'sync', w: 540, h: 460 },
+    network:  { title: T('WebRTC через прокси', 'WebRTC'), pane: 'network', w: 600, h: 400 },
+    security: { title: T('Безопасность', 'Security'), pane: 'security', w: 540, h: 320 },
+    changepw: { title: T('Смена пароля (лист)', 'Change password (sheet)'), sheet: true, w: 420, h: 378 },
+  };
+  const scenarioId = SCENARIOS[params.get('state')] ? params.get('state') : 'sync';
+  const scenario = SCENARIOS[scenarioId];
+  const state = { pane: scenario.pane || 'sync', mode: 'folder', pw: { current: '••••••••••••', next: 'correct-hor', again: 'correct-hors' } };
+  const win = Lumen.shell({ title: T('Настройки — предлагаемый вид', 'Settings — proposed'),
+    width: Number(params.get('w')) || scenario.w, height: Number(params.get('h')) || scenario.h,
+    scenarios: Object.entries(SCENARIOS).map(([id, s]) => ({ id, title: s.title })) });
+
+  const info = (key) => `<button class="info-btn" aria-label="${E(L('common.details'))}" title="${E(L(key))}">${icon('infoCircle', 13)}</button>`;
+  function row({ title, hint = '', control = '', infoKey = null, extra = '' }) {
+    return `<div class="row-f"><div class="text"><div class="title">${title}</div>${hint ? `<div class="hint"><span>${hint}</span>${infoKey ? info(infoKey) : ''}</div>` : ''}${extra}</div><div class="control">${control}</div></div>`;
+  }
+
+  const PANES = [['sync', 'syncArrows', 'sync.title'], ['network', 'shieldSlash', 'tunnel.title'], ['security', 'lock', 'settings.tab.security']];
+
+  function chrome(title) {
+    return `<div class="traffic"><i></i><i></i><i></i></div><div class="titlebar">${E(title)}</div>
+      <div class="toolbar" role="tablist">${PANES.map(([id, sym, key]) => `<button class="tab ${state.pane === id ? 'on' : ''}" data-pane="${id}" role="tab" aria-selected="${state.pane === id}">${icon(sym, 20)}<span>${H(key)}</span></button>`).join('')}</div>`;
+  }
+
+  function syncPane() {
+    const modes = { off: 'sync.mode.off', folder: 'sync.mode.folder', server: 'sync.mode.server' };
+    const when = T('29 окт. 2026 г., 14:21', 'Oct 29, 2026 at 2:21 PM');
+    const status = L('sync.status.ok', when, [L('sync.status.uploaded', 12), L('sync.status.downloaded', 3)].join(', '));
+    return `<div class="group">
+        ${row({ title: H('sync.to'), hint: H('sync.to.hint'), control: `<span class="popup">${H(modes[state.mode])}${icon('chevronUpDown', 12)}</span>` })}
+        ${row({ title: H('sync.folder.label'), hint: H('sync.folder.hint'), infoKey: 'sync.folder.note', extra: '<div class="path">/Volumes/NAS/Lumen</div>', control: `<button class="btn secondary">${H('sync.folder.choose')}</button>` })}
+      </div>
+      <div class="group-title">${H('sync.status')}</div>
+      <div class="group">
+        <div class="row-f"><div class="text"><div class="num">${E(status)}</div></div></div>
+        ${row({ title: `<span style="font-weight:400;color:var(--warning);display:inline-flex;gap:6px;align-items:center">${icon('exclamationTriangleFill', 12)}${H('sync.stopFirst')}</span>`, control: `<button class="btn secondary" disabled>${H('sync.now')}</button>` })}
+      </div>
+      <div class="foot-link"><button class="more-link">${icon('infoCircle', 11)}${H('sync.whatSyncs')}</button></div>`;
+  }
+
+  function networkPane() {
+    return `<div class="group">
+        ${row({ title: `<span class="status-line" style="color:var(--textSecondary)">${icon('shieldSlash', 16)}<span style="color:var(--textPrimary)">${H('tunnel.state.off')}</span></span>`, hint: H('tunnel.hint'), infoKey: 'tunnel.intro',
+          control: `<button class="btn primary">${H('tunnel.enable')}</button>` })}
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px"><button class="btn secondary">${H('tunnel.openSettings')}</button><button class="btn ghost">${H('tunnel.refresh')}</button></div>
+      <div class="note-warning" role="note">${icon('exclamationTriangleFill', 13)}<span>${H('tunnel.warning.off')}</span></div>
+      <div class="foot-link"><button class="more-link">${icon('infoCircle', 11)}${H('tunnel.limits.title')}</button></div>`;
+  }
+
+  function securityPane() {
+    return `<div class="group">
+        ${row({ title: H('settings.security.password'), hint: H('settings.security.password.hint'), control: `<button class="btn secondary">${H('settings.security.change')}</button>` })}
+        ${row({ title: H('settings.security.lock'), hint: H('settings.security.lock.hint'), control: `<button class="btn secondary">${icon('lock', 13)}${H('profiles.action.lock')}</button>` })}
+      </div>
+      <p class="t-caption c-secondary" style="margin:12px 2px 0">${H('settings.window.hint')}</p>`;
+  }
+
+  function changePassword() {
+    const p = state.pw;
+    const longEnough = p.next.length >= 10;
+    const matches = p.again === p.next;
+    const field = (label, value, id, after = '') => `<div><label class="field-label" for="${id}">${label}</label><label class="field ${after.includes('bad') ? 'error' : ''}"><input id="${id}" type="password" value="${E(value)}"></label>${after}</div>`;
+    return `<div class="sheet-header"><div class="t-sheet">${H('changepw.title')}</div><div class="t-secondary" style="margin-top:4px">${H('changepw.note')}</div></div>
+      <div class="sheet-body">
+        ${field(H('changepw.current'), p.current, 'cur')}
+        ${field(H('changepw.new'), p.next, 'new', `<div class="rule ${longEnough ? 'ok' : ''}">${icon(longEnough ? 'check' : 'infoCircle', 11)}${longEnough ? H('changepw.rule.ok') : H('setup.rule.length')}</div>`)}
+        ${field(H('changepw.repeat'), p.again, 'again', matches || !p.again ? '' : `<div class="rule bad">${icon('exclamationTriangleFill', 11)}${H('setup.rule.match')}</div>`)}
+      </div>
+      <div class="sheet-footer"><span class="spacer"></span><button class="btn secondary">${H('common.cancel')}</button><button class="btn primary" ${longEnough && matches && p.current ? '' : 'disabled'}>${H('changepw.action.change')}</button></div>`;
+  }
+
+  function render() {
+    if (scenario.sheet) { win.innerHTML = changePassword(); return; }
+    const titles = { sync: L('sync.title'), network: L('tunnel.title'), security: L('settings.tab.security') };
+    const body = { sync: syncPane, network: networkPane, security: securityPane }[state.pane]();
+    win.innerHTML = `${chrome(titles[state.pane])}<div class="pane">${body}</div>`;
+  }
+
+  win.addEventListener('click', (e) => {
+    const p = e.target.closest('[data-pane]');
+    if (p) { state.pane = p.dataset.pane; render(); }
+  });
+  win.addEventListener('input', (e) => {
+    if (!scenario.sheet) return;
+    const map = { cur: 'current', new: 'next', again: 'again' };
+    if (map[e.target.id]) { state.pw[map[e.target.id]] = e.target.value; const id = e.target.id; render(); const f = document.getElementById(id); f.focus(); f.setSelectionRange(f.value.length, f.value.length); }
+  });
+  render();
+  window.__ready = true;
+})();
+</script>
+</body>
+</html>

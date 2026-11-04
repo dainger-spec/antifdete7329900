@@ -18,8 +18,8 @@ import Network
 ///
 /// What it does NOT cover (platform limitations):
 ///   * WebRTC (STUN, TURN over UDP or TCP, media): WebKit opens those sockets itself, without
-///     the proxy. A proxied profile runs with WebRTC off, or relay-only through the packet
-///     tunnel's relay for a SOCKS5 proxy (`ProfileConfiguration.webRTCRouting`, docs/TUNNEL.md).
+///     the proxy. A proxied profile runs with WebRTC off, or relay-only through the app's relay
+///     for a SOCKS5 proxy, held there by the network guard (`WebRTCGate`, docs/TUNNEL.md).
 ///   * Traffic the app process itself makes outside WebKit (none in this prototype besides sync).
 ///   * WebKit's Safe Browsing lookups (made by the system outside the data store); this is
 ///     why `safeBrowsingEnabled` defaults to false.
@@ -51,5 +51,14 @@ enum ProxyConfigurationFactory {
         configuration.allowFailover = false
         configuration.excludedDomains = settings.excludedDomains
         return [configuration]
+    }
+
+    /// For the app's own requests about a profile's proxy (where it exits): through the proxy
+    /// whatever the profile's bypass list says. A request that went around it would come from this
+    /// Mac's own address — and be answered with it.
+    static func makeWithoutBypass(_ settings: ProxySettings) throws -> [ProxyConfiguration] {
+        var settings = settings
+        settings.excludedDomains = []
+        return try make(settings)
     }
 }

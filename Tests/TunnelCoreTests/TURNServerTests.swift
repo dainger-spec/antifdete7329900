@@ -76,9 +76,11 @@ final class TURNServerTests: XCTestCase {
     var server: TURNServer!
     var turn = TURNTestClient(username: "user", realm: TunnelAddressing.realm, password: "secret", nonce: nil)
 
-    func route(_ id: String = "route-a", slot: Int = 0, username: String = "user", password: String = "secret") -> TunnelRoute {
+    /// The proxy's TCP exit is the egress's address unless a test says otherwise.
+    func route(_ id: String = "route-a", slot: Int = 0, username: String = "user", password: String = "secret",
+               exit: IPAddr? = IPAddr("203.0.113.9")) -> TunnelRoute {
         TunnelRoute(id: id, relayIPv4: TunnelAddressing.relayIPv4(slot: slot), relayIPv6: TunnelAddressing.relayIPv6(slot: slot),
-                    username: username, password: password, proxy: SOCKSProxy(host: "proxy.example", port: 1080))
+                    username: username, password: password, proxy: SOCKSProxy(host: "proxy.example", port: 1080), exit: exit)
     }
 
     override func setUp() {
@@ -412,7 +414,7 @@ final class TURNServerTests: XCTestCase {
         let v6Egress = SocketAddress(ip: IPAddr("2001:db8:5::9")!, port: 40002)
         relays.egress["route-a"] = v6Egress
         var answers: [[UInt8]] = []
-        let server = TURNServer(route: route(), relays: relays, now: { [unowned self] in self.clock },
+        let server = TURNServer(route: route(exit: v6Egress.ip), relays: relays, now: { [unowned self] in self.clock },
                                 send: { payload, _, _ in answers.append(payload) })
         let v6Client = SocketAddress(ip: IPAddr("2001:db8:1::20")!, port: 50000)
         let attributes: [(UInt16, [UInt8])] = [(STUNMessage.Attribute.requestedTransport, [17, 0, 0, 0])]
@@ -425,81 +427,72 @@ final class TURNServerTests: XCTestCase {
         XCTAssertEqual(STUNMessage.decodeXorAddress(try XCTUnwrap(success.attribute(STUNMessage.Attribute.xorRelayedAddress)),
                                                     transactionID: success.transactionID), v6Egress)
     }
-}
 
-final class PacketRouterTests: XCTestCase {
-    /// Two profiles with different proxies at once: each one's TURN traffic reaches its own server
-    /// and leaves through its own proxy; one's credentials do not work at the other's address.
-    func testRoutesSeveralProfilesAtOnce() throws {
-        let relays = FakeRelayFactory()
-        var out: [[UInt8]] = []
-        let router = PacketRouter(relays: relays, emit: { out.append($0) })
-        let a = TunnelRoute(id: "a", relayIPv4: TunnelAddressing.relayIPv4(slot: 0), relayIPv6: TunnelAddressing.relayIPv6(slot: 0),
-                            username: "ua", password: "pa", proxy: SOCKSProxy(host: "proxy-a", port: 1080))
-        let b = TunnelRoute(id: "b", relayIPv4: TunnelAddressing.relayIPv4(slot: 1), relayIPv6: TunnelAddressing.relayIPv6(slot: 1),
-                            username: "ub", password: "pb", proxy: SOCKSProxy(host: "proxy-b", port: 1080))
-        // B is reached at its IPv6 relay address, so its relay is an IPv6 one.
-        relays.egress = ["a": SocketAddress(ip: IPAddr("203.0.113.1")!, port: 1), "b": SocketAddress(ip: IPAddr("2001:db8::2")!, port: 2)]
-        router.register(a)
-        router.register(b)
-        XCTAssertEqual(router.routeIDs, ["a", "b"])
+    // MARK: One address: the relayed address is the proxy's TCP exit, or there is none
 
-        let browser4 = SocketAddress(ip: IPAddr("192.168.1.20")!, port: 50000)
-        let browser6 = SocketAddress(ip: IPAddr("fd6b:3a1c:94e2:1::1")!, port: 50001)
-
-        func roundTrip(_ client: TURNTestClient, from: SocketAddress, to: SocketAddress, _ method: STUNMessage.Method = .allocate,
-                       authenticated: Bool = true) throws -> STUNMessage {
-            out.removeAll()
-            let request = client.request(method, [(STUNMessage.Attribute.requestedTransport, [17, 0, 0, 0])], authenticated: authenticated)
-            router.handlePacket(try XCTUnwrap(IPPacket.buildUDP(UDPDatagram(source: from, destination: to, payload: request))))
-            let packet = try XCTUnwrap(out.last)
-            let datagram = try XCTUnwrap(IPPacket.parseUDP(packet))
-            XCTAssertEqual(datagram.source, to, "answers come from the virtual relay address")
-            XCTAssertEqual(datagram.destination, from)
-            return try XCTUnwrap(STUNMessage.parse(datagram.payload))
-        }
-
-        for (route, client) in [(a, browser4), (b, browser6)] {
-            var turn = TURNTestClient(username: route.username, realm: route.realm, password: route.password, nonce: nil)
-            let endpoint = client.family == .v4 ? route.endpoints[0] : route.endpoints[1]
-            let challenge = try roundTrip(turn, from: client, to: endpoint, authenticated: false)
-            turn.nonce = challenge.attribute(STUNMessage.Attribute.nonce)
-            let success = try roundTrip(turn, from: client, to: endpoint)
-            XCTAssertEqual(STUNMessage.decodeXorAddress(try XCTUnwrap(success.attribute(STUNMessage.Attribute.xorRelayedAddress)),
-                                                        transactionID: success.transactionID), relays.egress[route.id])
-        }
-        XCTAssertEqual(relays.relays.map(\.route.proxy.host), ["proxy-a", "proxy-b"])
-        XCTAssertEqual(router.allocationCount, 2)
-
-        // B's credentials at A's address: refused.
-        var intruder = TURNTestClient(username: "ub", realm: TunnelAddressing.realm, password: "pb", nonce: nil)
-        let other = SocketAddress(ip: IPAddr("192.168.1.20")!, port: 50002)
-        intruder.nonce = try roundTrip(intruder, from: other, to: a.endpoints[0], authenticated: false).attribute(STUNMessage.Attribute.nonce)
-        let refused = try roundTrip(intruder, from: other, to: a.endpoints[0])
-        XCTAssertEqual(refused.attribute(STUNMessage.Attribute.errorCode).flatMap(STUNMessage.decodeErrorCode), 401)
-
-        // Anything not addressed to a relay is dropped.
-        router.handlePacket(try XCTUnwrap(IPPacket.buildUDP(UDPDatagram(source: browser4, destination: SocketAddress(ip: IPAddr("192.0.2.99")!, port: 3478), payload: [0]))))
-        XCTAssertEqual(router.droppedPackets, 1)
-
-        // Registering a route again (as the app does on every reconnect) keeps its allocations.
-        router.register(a)
-        XCTAssertEqual(router.allocationCount, 2)
-        XCTAssertFalse(relays.relays[0].closed)
-
-        router.unregister(id: "a")
-        XCTAssertTrue(relays.relays[0].closed)
-        XCTAssertFalse(relays.relays[1].closed)
-        XCTAssertEqual(router.routeIDs, ["b"])
+    /// Allocate on a server for `route`, the relay ready with `egress`: the final answer, and the
+    /// server (to look at what it kept).
+    func allocate(on route: TunnelRoute, egress: SocketAddress, client: SocketAddress? = nil,
+                  server address: SocketAddress? = nil) throws -> (answer: STUNMessage, server: TURNServer) {
+        relays.egress[route.id] = egress
+        var answers: [[UInt8]] = []
+        let server = TURNServer(route: route, relays: relays, now: { [unowned self] in self.clock },
+                                send: { payload, _, _ in answers.append(payload) })
+        let client = client ?? self.client
+        let address = address ?? relayAddress
+        let attributes: [(UInt16, [UInt8])] = [(STUNMessage.Attribute.requestedTransport, [17, 0, 0, 0])]
+        server.receive(turn.request(.allocate, attributes, authenticated: false), from: client, to: address)
+        turn.nonce = try XCTUnwrap(STUNMessage.parse(try XCTUnwrap(answers.last))?.attribute(STUNMessage.Attribute.nonce))
+        server.receive(turn.request(.allocate, attributes), from: client, to: address)
+        return (try XCTUnwrap(STUNMessage.parse(try XCTUnwrap(answers.last))), server)
     }
 
-    func testControlMessagesRoundTrip() throws {
-        let route = TunnelRoute(id: "x", relayIPv4: TunnelAddressing.relayIPv4(slot: 5), relayIPv6: TunnelAddressing.relayIPv6(slot: 5),
-                                username: "u", password: "p", proxy: SOCKSProxy(host: "h", port: 1, username: "pu", password: "pp"))
-        for message in [TunnelControlMessage.register(route), .unregister(id: "x"), .status] {
-            XCTAssertEqual(try TunnelControlMessage.decode(message.encoded()), message)
-        }
-        XCTAssertEqual(route.turnURLs, ["turn:192.0.2.15:3478?transport=udp", "turn:[fd6b:3a1c:94e2:1::f]:3478?transport=udp"])
-        XCTAssertEqual(TunnelAddressing.relayIPv4(slot: 0).description, "192.0.2.10")
+    func testTheExitsOwnAddressOnAnotherPortIsTheRelayedAddress() throws {
+        let (answer, server) = try allocate(on: route("one-address"), egress: SocketAddress(ip: IPAddr("203.0.113.9")!, port: 52_000))
+        XCTAssertEqual(answer.messageClass, .success)
+        XCTAssertEqual(STUNMessage.decodeXorAddress(try XCTUnwrap(answer.attribute(STUNMessage.Attribute.xorRelayedAddress)),
+                                                    transactionID: answer.transactionID),
+                       SocketAddress(ip: IPAddr("203.0.113.9")!, port: 52_000))
+        XCTAssertEqual(server.allocationCount, 1)
+    }
+
+    /// A proxy whose UDP leaves from another address than its TCP (the next one in its subnet, as
+    /// a pool might): no relayed address, the association closed, the 5-tuple refused.
+    func testARelayedAddressOtherThanTheExitIsRefused() throws {
+        let (answer, server) = try allocate(on: route("elsewhere"), egress: SocketAddress(ip: IPAddr("203.0.113.10")!, port: 40_001))
+        XCTAssertEqual(answer.messageClass, .error)
+        XCTAssertEqual(answer.attribute(STUNMessage.Attribute.errorCode).flatMap(STUNMessage.decodeErrorCode), 403)
+        XCTAssertNil(answer.attribute(STUNMessage.Attribute.xorRelayedAddress))
+        XCTAssertNil(answer.attribute(STUNMessage.Attribute.xorMappedAddress))
+        XCTAssertEqual(server.allocationCount, 0)
+        XCTAssertTrue(try XCTUnwrap(relays.relays.last).closed, "the association is closed")
+    }
+
+    /// No exit known for the route: nothing to compare with, so no relayed address at all.
+    func testARouteWithoutAnExitGetsNoRelayedAddress() throws {
+        let (answer, server) = try allocate(on: route("no-exit", exit: nil), egress: egress)
+        XCTAssertEqual(answer.attribute(STUNMessage.Attribute.errorCode).flatMap(STUNMessage.decodeErrorCode), 403)
+        XCTAssertEqual(server.allocationCount, 0)
+        XCTAssertTrue(try XCTUnwrap(relays.relays.last).closed)
+    }
+
+    /// An IPv6 relay next to an IPv4 exit would be a second address too.
+    func testAnIPv6RelayIsRefusedWhileTheExitIsIPv4() throws {
+        let (answer, server) = try allocate(on: route("v6"), egress: SocketAddress(ip: IPAddr("2001:db8:5::9")!, port: 40_002),
+                                            client: SocketAddress(ip: IPAddr("2001:db8:1::20")!, port: 50_000),
+                                            server: SocketAddress(ip: TunnelAddressing.relayIPv6(slot: 0), port: 3478))
+        XCTAssertEqual(answer.attribute(STUNMessage.Attribute.errorCode).flatMap(STUNMessage.decodeErrorCode), 403)
+        XCTAssertEqual(server.allocationCount, 0)
+    }
+
+    func testExitTrace() {
+        let trace = "fl=12f34\nh=1.1.1.1\nip=198.51.100.23\nts=1762000000.123\nvisit_scheme=https\nuag=Mozilla/5.0\ncolo=AMS\n"
+        XCTAssertEqual(ExitTrace.ipv4(in: trace), IPAddr("198.51.100.23"))
+        XCTAssertEqual(ExitTrace.ipv4(in: "ip= 198.51.100.24 \r\nip=198.51.100.25\n"), IPAddr("198.51.100.24"), "the first ip= line")
+        XCTAssertNil(ExitTrace.ipv4(in: "fl=1\nip=2001:db8::23\n"), "an IPv6 exit cannot be compared with an IPv4 relay")
+        XCTAssertNil(ExitTrace.ipv4(in: "fl=1\nh=1.1.1.1\n"))
+        XCTAssertNil(ExitTrace.ipv4(in: "ip=not-an-address\n"))
+        XCTAssertNil(ExitTrace.ipv4(in: "<html>ip=198.51.100.23</html>"), "only a line of its own")
+        XCTAssertNil(ExitTrace.ipv4(in: ""))
     }
 }

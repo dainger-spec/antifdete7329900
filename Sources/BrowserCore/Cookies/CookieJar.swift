@@ -124,6 +124,18 @@ public struct CookieJarDocument: Codable, Equatable, Sendable {
         return result.pruned(at: now)
     }
 
+    /// The document at a profile's launch, before it is applied to the store: what a run that
+    /// ended without a stop changed — the store as that run left it, against the baseline —
+    /// recorded as changes of the baseline's time. Only a store that came up with what an earlier
+    /// run left (its plaintext, or the archive it was sealed into: `storeRestored`) tells of such
+    /// changes. A store that came up with nothing — no archive, no plaintext: the website data
+    /// lost — is not every cookie deleted: recorded, those deletions took the cookies out of the
+    /// document and, through sync, off every other device; not recorded, the document applied to
+    /// the store puts them back.
+    public func atLaunch(store: [ImportedCookie], baseline: CookieBaseline, storeRestored: Bool) -> CookieJarDocument {
+        storeRestored ? recording(store: store, baseline: baseline.cookies, at: baseline.savedAt) : self
+    }
+
     /// What `store` (the store's persistent cookies now) changed since `baseline` (what it held
     /// when last recorded or applied), written into the document as changes made at `time`.
     public func recording(store: [ImportedCookie], baseline: [ImportedCookie], at time: Date) -> CookieJarDocument {

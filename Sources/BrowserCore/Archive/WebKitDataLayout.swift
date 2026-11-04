@@ -67,6 +67,14 @@ public struct WebKitDataLayout: Equatable, Sendable {
         }
     }
 
+    /// Removes what an unseal of WebKit's data that never finished left in this layout's roots
+    /// (`EncryptedDirectoryArchive.removeStagingLeftovers`): every profile's, or `profileID`'s.
+    @discardableResult
+    public func removeUnsealLeftovers(of profileID: UUID? = nil) -> (removed: Int, failed: Int) {
+        EncryptedDirectoryArchive.removeStagingLeftovers(below: searchRoots, depth: Self.searchDepth,
+                                                         destinationNamed: profileID?.uuidString)
+    }
+
     /// Archive root label of a discovered directory: its path relative to Library with
     /// "/" → "|" (labels are single path components).
     public func label(for directory: URL) throws -> String {

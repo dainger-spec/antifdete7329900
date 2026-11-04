@@ -32,14 +32,14 @@ final class TabStripView: NSView {
     private let buttonWidth: CGFloat = 30
 
     override init(frame frameRect: NSRect) {
-        newTabButton = NSButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: "New Tab") ?? NSImage(),
+        newTabButton = NSButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: L("tab.newTab")) ?? NSImage(),
                                 target: nil, action: nil)
         super.init(frame: frameRect)
         newTabButton.target = self
         newTabButton.action = #selector(newTab)
         newTabButton.isBordered = false
-        newTabButton.toolTip = "New Tab (⌘T)"
-        newTabButton.contentTintColor = Theme.NS.textSecondary
+        newTabButton.toolTip = L("tab.newTab") + " (⌘T)"
+        newTabButton.contentTintColor = ProfileWindowTheme.NS.textSecondary
         addSubview(newTabButton)
         wantsLayer = true
         separator.boxType = .separator
@@ -55,7 +55,7 @@ final class TabStripView: NSView {
 
     override func updateLayer() {
         // The toolbar's colour: the strip reads as part of the window's chrome.
-        layer?.backgroundColor = Theme.NS.toolbar.cgColor
+        layer?.backgroundColor = ProfileWindowTheme.NS.toolbar.cgColor
     }
 
     func update(items: [Item], selectedIndex: Int) {
@@ -124,7 +124,7 @@ final class TabItemView: NSView {
     private var isHovered = false
 
     init() {
-        closeButton = NSButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close Tab") ?? NSImage(),
+        closeButton = NSButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: L("tab.close")) ?? NSImage(),
                                target: nil, action: nil)
         super.init(frame: .zero)
         wantsLayer = true
@@ -135,8 +135,8 @@ final class TabItemView: NSView {
         closeButton.imageScaling = .scaleProportionallyDown
         closeButton.target = self
         closeButton.action = #selector(close)
-        closeButton.toolTip = "Close Tab (⌘W)"
-        closeButton.contentTintColor = Theme.NS.textTertiary
+        closeButton.toolTip = L("tab.close") + " (⌘W)"
+        closeButton.contentTintColor = ProfileWindowTheme.NS.textTertiary
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
@@ -158,7 +158,7 @@ final class TabItemView: NSView {
         if item.isLoading { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
         isLoading = item.isLoading
         isSelected = selected
-        titleField.textColor = selected ? Theme.NS.textPrimary : Theme.NS.textSecondary
+        titleField.textColor = selected ? ProfileWindowTheme.NS.textPrimary : ProfileWindowTheme.NS.textSecondary
         titleField.font = .systemFont(ofSize: 12, weight: selected ? .medium : .regular)
         needsDisplay = true
         needsLayout = true
@@ -181,9 +181,9 @@ final class TabItemView: NSView {
         // Resolved against the current appearance (light/dark) each time AppKit asks.
         layer?.cornerRadius = 6
         layer?.backgroundColor = isSelected
-            ? Theme.NS.tabSelected.cgColor
-            : (isHovered ? Theme.NS.hover.cgColor : NSColor.clear.cgColor)
-        layer?.borderColor = Theme.NS.hairline.cgColor
+            ? ProfileWindowTheme.NS.tabSelected.cgColor
+            : (isHovered ? ProfileWindowTheme.NS.hover.cgColor : NSColor.clear.cgColor)
+        layer?.borderColor = ProfileWindowTheme.NS.hairline.cgColor
         layer?.borderWidth = isSelected ? 1 : 0
     }
 

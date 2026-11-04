@@ -58,12 +58,58 @@ public enum SecureFile {
         return temp
     }
 
+    /// Writes `data` over the file at `url` in place — no temp file beside it — readable by its
+    /// owner alone (0600) from the first byte on, a file that was there before included. For a
+    /// file the user chose in a save panel: the App Sandbox lets the app write that one file and
+    /// nothing next to it. A symbolic link at `url` is refused, not followed.
+    public static func writeOwnerOnly(_ data: Data, over url: URL) throws {
+        let descriptor = open(url.path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0o600)
+        guard descriptor >= 0 else { throw CoreError.io("open \(url.lastPathComponent) failed: errno \(errno)") }
+        defer { _ = close(descriptor) }
+        // A file that was there keeps its mode through O_CREAT: made owner-only before the data.
+        guard fchmod(descriptor, 0o600) == 0 else { throw CoreError.io("chmod \(url.lastPathComponent) failed: errno \(errno)") }
+        do {
+            try FileHandle(fileDescriptor: descriptor, closeOnDealloc: false).write(contentsOf: data)
+        } catch {
+            throw CoreError.io("write \(url.lastPathComponent): \(error)")
+        }
+    }
+
     public static func read(_ url: URL) throws -> Data {
         do {
             return try Data(contentsOf: url)
         } catch {
             throw CoreError.io("read \(url.lastPathComponent): \(error)")
         }
+    }
+
+    /// Moves the file at `url` aside, next to it — `<name>.<suffix>`, then `<name>.<suffix>-2`, … —
+    /// never over a file there already. For a file that could not be read: it is never deleted
+    /// and never written over (docs/DESTRUCTIVE_PATHS.md), only moved out of the way of a readable
+    /// one. Returns where it went.
+    @discardableResult
+    public static func moveAside(_ url: URL, suffix: String) throws -> URL {
+        var aside = url.appendingPathExtension(suffix)
+        var next = 2
+        while FileManager.default.fileExists(atPath: aside.path) {
+            aside = url.appendingPathExtension("\(suffix)-\(next)")
+            next += 1
+        }
+        try FileManager.default.moveItem(at: url, to: aside)
+        return aside
+    }
+
+    /// Writes `data` beside the file at `url` — `<name>.<suffix>`, then `<name>.<suffix>-2`, … —
+    /// never over a file there already. Returns where it went.
+    @discardableResult
+    public static func writeBeside(_ data: Data, of url: URL, suffix: String) throws -> URL {
+        var beside = url.appendingPathExtension(suffix)
+        var next = 2
+        while try !createNew(data, at: beside) {
+            beside = url.appendingPathExtension("\(suffix)-\(next)")
+            next += 1
+        }
+        return beside
     }
 
     /// Atomically moves `source` over `destination` (rename(2) on the same volume).

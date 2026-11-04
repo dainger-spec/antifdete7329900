@@ -1,0 +1,195 @@
+import Foundation
+
+/// A banner about the license above the profiles (the server's `docs/CONTRACT.md` §8.5). One is
+/// shown — the most important whose condition holds — with "N more" beside it; the order below is
+/// the contract's (the owner's decision of 1 November). Texts: §17.4, word for word, in the app's
+/// localization under the contract's keys.
+public enum LicenseBanner: Equatable, Sendable {
+    /// `device.revoked`: the server said this Mac was unlinked.
+    case deviceRevoked
+    /// `device.machine_mismatch`: the token belongs to another Mac (the app's files were moved).
+    case machineMismatch
+    /// `mode.not_signed_in`.
+    case notSignedIn
+    /// `error.account_disabled`: export-only because the account is blocked.
+    case accountDisabled
+    /// `export.period_ended` / `export.period_ended.member`.
+    case periodEnded(owner: Bool, endedAt: Date?)
+    /// `export.no_license`.
+    case noLicense
+    /// `mode.grace.unreachable` / `mode.grace.outdated`; `until`: the GRACE date.
+    case grace(outdated: Bool, lastSuccessAt: Date?, until: Date)
+    /// `mode.expired.unreachable` / `mode.expired.outdated`: export only because the document's grace
+    /// is over and the server has not answered since `lastSuccessAt` (the last line of §8.2).
+    case expired(outdated: Bool, lastSuccessAt: Date?)
+    /// `mode.unverified`: export only because no stored document passes the check (the second line
+    /// of §8.2) — none, or one that did not check — until a refresh brings one that does.
+    case unverified
+    /// `app.outdated` (not shown with `grace(outdated: true)` or `expired(outdated: true)`, which say
+    /// it already).
+    case appOutdated
+    /// `clock.skew`: this Mac's clock is off from the server's by `seconds`.
+    case clockSkew(seconds: TimeInterval)
+    /// `period.ending` / `period.ending.member`: the period ends soon. `final`: within a day — the
+    /// last warning (the owner asked for a week and a day before, 1 November).
+    case periodEnding(owner: Bool, endsAt: Date, final: Bool)
+    /// `trial.started`: until the person closes it.
+    case trialStarted(until: Date)
+    /// The app's own (the owner, 3 November): this Mac works, but its renewals have failed since
+    /// `since` — said once the document has less than two days left, with why and until when this
+    /// Mac works without one (the GRACE date). Silence is not success.
+    case renewalFailing(since: Date, reason: LicenseClient.RefreshFailure.Reason, status: Int?, until: Date)
+
+    /// It says why this Mac works no more — export only, or not signed in — not a warning: such
+    /// banners come before every other notice above the profiles, and in red.
+    public var stopsWork: Bool {
+        switch self {
+        case .deviceRevoked, .machineMismatch, .notSignedIn, .accountDisabled, .periodEnded, .noLicense, .expired, .unverified:
+            return true
+        case .grace, .appOutdated, .clockSkew, .periodEnding, .trialStarted, .renewalFailing:
+            return false
+        }
+    }
+
+    /// Its place in the contract's order (§8.5): 1 is the most important.
+    public var rank: Int {
+        switch self {
+        case .deviceRevoked: return 1
+        case .machineMismatch: return 2
+        case .notSignedIn: return 3
+        case .accountDisabled: return 4
+        case .periodEnded: return 5
+        case .noLicense: return 6
+        // One place for the four: they never hold at once (§8.5 item 7) — a failing renewal is
+        // said while the mode is FULL, the other three in other modes.
+        case .grace, .expired, .unverified, .renewalFailing: return 7
+        case .appOutdated: return 8
+        case .clockSkew: return 9
+        case .periodEnding: return 10
+        case .trialStarted: return 11
+        }
+    }
+}
+
+/// Why this Mac is signed out, when the server said so (§9.4): kept until the next sign-in, so that
+/// its banner says why rather than only "sign in".
+public enum SignedOutReason: String, Codable, Equatable, Sendable {
+    case deviceRevoked = "device_revoked"
+    case machineMismatch = "machine_mismatch"
+}
+
+public enum LicenseBanners {
+    /// How long before the period's end the warnings start: a week, and the last one a day before
+    /// (the owner, 1 November: "за неделю и за день" — above all for accounts without an email,
+    /// whom no letter can reach).
+    public static let periodEndingWarning: TimeInterval = 7 * 86_400
+    public static let periodEndingFinalWarning: TimeInterval = 86_400
+    /// A failing renewal is said once the document has less than this left before its expiry: a
+    /// day of failures is not alarming (the server issues a document for four days, renewed after
+    /// one); the last two days before the GRACE are.
+    public static let renewalFailingWarning: TimeInterval = 2 * 86_400
+
+    public struct Input: Equatable, Sendable {
+        public var mode: LicenseMode
+        /// The stored document, checked; nil when there is none or it did not pass.
+        public var entitlement: Entitlement?
+        public var signedOutReason: SignedOutReason?
+        public var appOutdated: Bool
+        public var lastSuccessAt: Date?
+        /// The clock's difference found at the last contact with the server, when over ten minutes.
+        public var clockSkew: TimeInterval?
+        /// The trial's banner was closed (for this license).
+        public var trialNoticeClosed: Bool
+        /// The period-end warning the person closed, if any (§8.5 item 10).
+        public var periodEndingClosed: AccountRecord.PeriodEndingClosed?
+        /// The renewals that failed since the last one that brought a document.
+        public var renewalFailure: AccountRecord.RenewalFailure?
+        public var now: Date
+
+        public init(mode: LicenseMode, entitlement: Entitlement?, signedOutReason: SignedOutReason? = nil, appOutdated: Bool = false,
+                    lastSuccessAt: Date? = nil, clockSkew: TimeInterval? = nil, trialNoticeClosed: Bool = false,
+                    periodEndingClosed: AccountRecord.PeriodEndingClosed? = nil,
+                    renewalFailure: AccountRecord.RenewalFailure? = nil, now: Date) {
+            self.mode = mode
+            self.entitlement = entitlement
+            self.signedOutReason = signedOutReason
+            self.appOutdated = appOutdated
+            self.lastSuccessAt = lastSuccessAt
+            self.clockSkew = clockSkew
+            self.trialNoticeClosed = trialNoticeClosed
+            self.periodEndingClosed = periodEndingClosed
+            self.renewalFailure = renewalFailure
+            self.now = now
+        }
+    }
+
+    /// Every banner whose condition holds, most important first (§8.5).
+    public static func banners(_ input: Input) -> [LicenseBanner] {
+        var banners: [LicenseBanner] = []
+        let p = input.entitlement
+        switch input.mode {
+        case .notSignedIn:
+            // A revocation or a moved Mac is the reason: then "sign in" is not said again.
+            switch input.signedOutReason {
+            case .deviceRevoked?: banners.append(.deviceRevoked)
+            case .machineMismatch?: banners.append(.machineMismatch)
+            case nil: banners.append(.notSignedIn)
+            }
+        case .exportOnly:
+            if let p {
+                switch exportReason(p, at: input.now) {
+                case "account_disabled"?: banners.append(.accountDisabled)
+                case "no_license"?: banners.append(.noLicense)
+                case .some: banners.append(.periodEnded(owner: p.isOwner, endedAt: p.periodEndsAt))
+                // The document would let this Mac work: its grace is over, the server silent since.
+                case nil: banners.append(.expired(outdated: input.appOutdated, lastSuccessAt: input.lastSuccessAt))
+                }
+            } else {
+                banners.append(.unverified)
+            }
+        case .grace:
+            if let p {
+                banners.append(.grace(outdated: input.appOutdated, lastSuccessAt: input.lastSuccessAt, until: LicenseDecision.graceDate(p)))
+            }
+        case .full:
+            if let p, let failure = input.renewalFailure, p.expiresAt.timeIntervalSince(input.now) < renewalFailingWarning {
+                banners.append(.renewalFailing(since: failure.since, reason: failure.reason, status: failure.status,
+                                               until: LicenseDecision.graceDate(p)))
+            }
+        }
+        let saysOutdated = banners.contains {
+            switch $0 {
+            case .grace(true, _, _), .expired(true, _): return true
+            default: return false
+            }
+        }
+        if input.appOutdated && !(input.mode == .grace) && input.mode != .notSignedIn && !saysOutdated {
+            banners.append(.appOutdated)
+        }
+        if let skew = input.clockSkew, input.mode != .notSignedIn {
+            banners.append(.clockSkew(seconds: skew))
+        }
+        if input.mode.allowsWork, let p, let end = p.periodEndsAt {
+            let left = end.timeIntervalSince(input.now)
+            let final = left < periodEndingFinalWarning
+            if left > 0 && left < periodEndingWarning, input.periodEndingClosed?.hides(endsAt: end, final: final) != true {
+                banners.append(.periodEnding(owner: p.isOwner, endsAt: end, final: final))
+            }
+        }
+        if input.mode.allowsWork, let p, p.plan == "trial", !input.trialNoticeClosed, let end = p.periodEndsAt, end > input.now {
+            banners.append(.trialStarted(until: end))
+        }
+        return banners.sorted { $0.rank < $1.rank }
+    }
+
+    /// Why a document leaves only export (§8.2, §13): its own reason when it says export-only; a
+    /// period that ended by this Mac's time while the document still said active; no period at all.
+    /// Nil when the document lets this Mac work — export-only then comes from the time without the
+    /// server (after the GRACE date): `mode.expired.*`.
+    public static func exportReason(_ p: Entitlement, at t: Date) -> String? {
+        if p.status == .exportOnly { return p.exportReason ?? "period_ended" }
+        guard let end = p.periodEndsAt else { return "no_license" }
+        if t >= end { return "period_ended" }
+        return nil
+    }
+}

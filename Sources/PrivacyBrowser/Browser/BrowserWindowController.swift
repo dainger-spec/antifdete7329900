@@ -25,6 +25,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     private let library: ProfileLibrary
 
     private(set) var tabs: [BrowserTab] = []
+    /// The window the warm-up robot browses in (`BrowserSession.openOffscreenWindow`): invisible,
+    /// not one of the profile's own, and closing it is not the profile's last window closing.
+    var isForWarmUp = false
     private var selectedIndex = 0
     /// URLs of recently closed tabs, most recent last (⇧⌘T).
     private var recentlyClosed: [URL] = []
@@ -34,6 +37,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     private let chrome: BrowserChromeModel
     /// Over the web views while the selected tab is an empty new tab.
     private var startPage: NSHostingView<StartPageView>!
+    /// Over the web views while the selected tab's page stopped (`BrowserTab.pageStopped`): its
+    /// process kept ending, and the tab no longer reloads it by itself.
+    private var stoppedPage: NSHostingView<StoppedPageView>!
     /// 0 with one tab: like Safari, the tab bar shows from the second tab on.
     private var tabStripHeight: NSLayoutConstraint!
     /// The address field's width: what the other toolbar items leave, up to 680 pt (`fitAddressField`).
@@ -50,17 +56,19 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     private var startPageObservation: AnyCancellable?
     private var isClosing = false
     private let log = Logger(subsystem: "PrivacyBrowser", category: "BrowserWindow")
-
-    /// Search used for address-bar input that is not a URL (`WebAddress`). Queries go through the
-    /// profile's proxy.
-    static let searchURLTemplate = WebAddress.searchURLTemplate
+    /// Why this window is ours and not Safari's: the profile runs in a simplified mode, and its
+    /// toolbar says so (`SimplifiedModeNotice`).
+    let ownWindowReason: SafariChromeHost.OwnWindowReason
+    private(set) var simplifiedChip: NSView?
 
     init(session: BrowserSession) {
         self.session = session
         self.profileName = session.profileName
         self.library = session.library
         self.chrome = BrowserChromeModel(profileName: session.profileName, profileID: session.profileID,
-                                         exit: BrowserWindowController.profileExit(of: session))
+                                         exit: BrowserWindowController.profileExit(of: session),
+                                         avatar: session.configuration.avatar)
+        self.ownWindowReason = SafariChromeHost.reasonForOwnWindow(session.configuration)
 
         // A mobile generation's window is the declared device's screen: its web content can never
         // be wider or taller than the screen the page is told about (see PrivacyScripts).
@@ -74,7 +82,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         // Never saved as restorable state at quit: AppKit would write the title — the profile's
         // name — to ~/Library/Saved Application State in plaintext.
         window.isRestorable = false
-        window.title = "[\(session.profileName)]"
+        window.title = "[\(session.profileName)]" // l10n: not text
         // Safari's window: the controls in a unified toolbar, no separate title row. A page measures
         // the browser's chrome as outerHeight − innerHeight; this gives Safari's (52 pt with one tab).
         window.titleVisibility = .hidden
@@ -90,10 +98,16 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         Theme.applyChrome(to: window)
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .line
-        window.backgroundColor = Theme.NS.toolbar
+        window.backgroundColor = ProfileWindowTheme.NS.toolbar
         buildInterface(in: window)
         WebContentAppearance.shared.follow(webContainer)
-        window.center()
+        // The profile's window size (Profile editor → Window), a real frame; a mobile generation's
+        // window is its device's screen instead.
+        if deviceScreen == nil, let size = session.configuration.windowSize {
+            WindowSizing.apply(size, to: window)
+        } else {
+            window.center()
+        }
         // @Published emits before the value changes; read the store on the next main-actor turn.
         libraryObservation = library.$bookmarks.sink { [weak self] _ in
             Task { @MainActor in self?.updateBookmarkButton() }
@@ -112,18 +126,18 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     // MARK: Interface
 
     private func buildInterface(in window: NSWindow) {
-        backButton = toolbarButton("chevron.left", "Back (⌘[)", #selector(goBack))
-        forwardButton = toolbarButton("chevron.right", "Forward (⌘])", #selector(goForward))
-        reloadButton = toolbarButton("arrow.clockwise", "Reload (⌘R)", #selector(reload))
-        bookmarkButton = toolbarButton("star", "Bookmark this page (⌘D)", #selector(toggleBookmark))
-        let bookmarksMenuButton = toolbarButton("book", "Bookmarks", #selector(showBookmarksMenu(_:)))
-        let historyButton = toolbarButton("clock.arrow.circlepath", "History (⌘Y)", #selector(showHistory))
+        backButton = toolbarButton("chevron.left", L("toolbar.back"), shortcut: "⌘[", #selector(goBack))
+        forwardButton = toolbarButton("chevron.right", L("toolbar.forward"), shortcut: "⌘]", #selector(goForward))
+        reloadButton = toolbarButton("arrow.clockwise", L("toolbar.reload"), shortcut: "⌘R", #selector(reload))
+        bookmarkButton = toolbarButton("star", L("toolbar.bookmark"), shortcut: "⌘D", #selector(toggleBookmark))
+        let bookmarksMenuButton = toolbarButton("book", L("toolbar.bookmarks"), #selector(showBookmarksMenu(_:)))
+        let historyButton = toolbarButton("clock.arrow.circlepath", L("toolbar.history"), shortcut: "⌘Y", #selector(showHistory))
         let fillButton = toolbarButton("key.fill", L("toolbar.fillPassword"), #selector(fillPassword(_:)))
         let saveButton = toolbarButton("key.viewfinder", L("toolbar.savePassword"), #selector(savePassword))
 
         addressField.placeholderAttributedString = NSAttributedString(
             string: L("toolbar.address.placeholder"),
-            attributes: [.foregroundColor: Theme.NS.textTertiary, .font: NSFont.systemFont(ofSize: 13)])
+            attributes: [.foregroundColor: ProfileWindowTheme.NS.textTertiary, .font: NSFont.systemFont(ofSize: 13)])
         addressField.delegate = self
         addressField.lineBreakMode = .byTruncatingTail
         addressField.cell?.usesSingleLineMode = true
@@ -133,6 +147,12 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         // The profile chip: its glyph, name and the flag of where it exits.
         let badge = NSHostingView(rootView: ProfileChipView(model: chrome))
         badge.setContentCompressionResistancePriority(.required, for: .horizontal)
+        // This window is not Safari's: said where the person looks, with why (SimplifiedModeNotice).
+        // In the toolbar, whose height a page measures and which this leaves as it is.
+        let reason = ownWindowReason
+        let simplified = NSHostingView(rootView: SimplifiedModeChip(reason: reason) { [weak self] in self?.showSimplifiedMode() })
+        simplified.setContentCompressionResistancePriority(.required, for: .horizontal)
+        simplifiedChip = simplified
         // The app's mark, where Safari has its sidebar button.
         let mark = NSHostingView(rootView: LumenMark(size: 20))
         mark.setFrameSize(NSSize(width: 20, height: 20))
@@ -152,7 +172,8 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
             (.init("reload"), "Reload", reloadButton!), (.init("address"), "Address", addressField),
             (.init("bookmark"), "Bookmark", bookmarkButton!), (.init("bookmarks"), "Bookmarks", bookmarksMenuButton),
             (.init("history"), "History", historyButton), (.init("fill"), "Fill Password", fillButton),
-            (.init("save"), "Save Password", saveButton), (.init("profile"), profileName, badge),
+            (.init("save"), "Save Password", saveButton), (.init("simplified"), L("simplified.chip"), simplified),
+            (.init("profile"), profileName, badge),
         ]
         let toolbar = NSToolbar(identifier: "PrivacyBrowser.BrowserWindow")
         toolbar.delegate = self
@@ -166,13 +187,20 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
             model: chrome,
             open: { [weak self] url in self?.openFromStartPage(url) },
             submit: { [weak self] text in
-                guard let url = BrowserWindowController.url(fromAddressBarInput: text) else { return }
-                self?.openFromStartPage(url)
+                guard let self, let url = self.addressURL(text) else { return }
+                self.openFromStartPage(url)
             }))
         // Part of the chrome (dark), unlike the web views beside it (the system's appearance).
         startPage.appearance = Theme.chromeAppearance
         startPage.isHidden = true
-        for view in [tabStrip, webContainer, startPage] as [NSView] {
+        stoppedPage = NSHostingView(rootView: StoppedPageView(reload: { [weak self] in self?.reload() }))
+        // It fills the tab's place and asks for no size of its own: SwiftUI's minimum for it — its
+        // text wrapped at the narrowest width — held the web view some 2,700 pt tall even while it
+        // was hidden, and a page measured that (the self-test's window size, CI run 559).
+        stoppedPage.sizingOptions = []
+        stoppedPage.appearance = Theme.chromeAppearance
+        stoppedPage.isHidden = true
+        for view in [tabStrip, webContainer, startPage, stoppedPage] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(view)
         }
@@ -190,6 +218,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
             startPage.leadingAnchor.constraint(equalTo: webContainer.leadingAnchor),
             startPage.trailingAnchor.constraint(equalTo: webContainer.trailingAnchor),
             startPage.bottomAnchor.constraint(equalTo: webContainer.bottomAnchor),
+            stoppedPage.topAnchor.constraint(equalTo: webContainer.topAnchor),
+            stoppedPage.leadingAnchor.constraint(equalTo: webContainer.leadingAnchor),
+            stoppedPage.trailingAnchor.constraint(equalTo: webContainer.trailingAnchor),
+            stoppedPage.bottomAnchor.constraint(equalTo: webContainer.bottomAnchor),
         ])
         window.contentView = container
         fitAddressField()
@@ -211,27 +243,51 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         fitAddressField()
     }
 
-    private func toolbarButton(_ symbol: String, _ label: String, _ action: Selector) -> NSButton {
+    /// The simplified mode's popover, from the chip.
+    private func showSimplifiedMode() {
+        guard let simplifiedChip else { return }
+        SimplifiedModeNotice.present(from: simplifiedChip, reason: ownWindowReason)
+    }
+
+    /// The first time a profile's window of this process is key, the popover opens by itself: the
+    /// mode and its reason are read, not only found in the toolbar (`SimplifiedModeNotice`).
+    func windowDidBecomeKey(_ notification: Notification) {
+        guard !isForWarmUp else { return }
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, let chip = self.simplifiedChip else { return }
+                SimplifiedModeNotice.presentAutomaticallyOnce(from: chip, reason: self.ownWindowReason)
+            }
+        }
+    }
+
+    /// A toolbar button: VoiceOver reads `label`; the tooltip adds the keyboard shortcut.
+    private func toolbarButton(_ symbol: String, _ label: String, shortcut: String? = nil, _ action: Selector) -> NSButton {
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label) ?? NSImage()
         let button = NSButton(image: image, target: self, action: action)
         button.isBordered = false
-        button.toolTip = label
+        button.toolTip = shortcut.map { "\(label) (\($0))" } ?? label
+        button.setAccessibilityLabel(label)
         return button
     }
 
     // MARK: Tabs
 
     /// Adds a tab. `configuration` is only passed for popups (WebKit supplies it); otherwise the
-    /// session's standard configuration is used.
+    /// session's standard configuration is used. `afterSelected` nil: where the app's settings put
+    /// a new tab (next to the current one, or after the last); the tab's pages open at the zoom the
+    /// settings give (`BrowsingPreferences`).
     @discardableResult
     func addTab(url: URL?, configuration: WKWebViewConfiguration? = nil, select: Bool = true,
-                afterSelected: Bool = true) -> BrowserTab? {
+                afterSelected: Bool? = nil) -> BrowserTab? {
         guard let session else { return nil }
         let tab = BrowserTab(configuration: configuration ?? session.makeWebViewConfiguration(),
                              context: session.tabContext)
         tab.host = self
         tab.startsEmpty = url == nil && configuration == nil
-        let index = afterSelected && !tabs.isEmpty ? selectedIndex + 1 : tabs.count
+        tab.webView.pageZoom = BrowsingPreferences.current.pageZoom
+        let nextToCurrent = afterSelected ?? BrowsingPreferences.current.newTabsNextToCurrent
+        let index = nextToCurrent && !tabs.isEmpty ? selectedIndex + 1 : tabs.count
         tabs.insert(tab, at: index)
         if !select && index <= selectedIndex { selectedIndex += 1 }
         if let url { tab.load(url) }
@@ -313,6 +369,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         tabStrip.isHidden = !showsTabStrip
         tabStripHeight.constant = showsTabStrip ? TabStripView.height : 0
         updateStartPage()
+        stoppedPage.isHidden = !(selectedTab?.pageStopped ?? false)
         tabStrip.update(items: tabs.map { tab in
             TabStripView.Item(title: tab.displayTitle,
                               toolTip: [tab.webView.title, tab.url?.absoluteString].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n"),
@@ -386,12 +443,21 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     @objc func goForward() { selectedTab?.webView.goForward() }
 
     @objc func reload() {
-        guard let webView = selectedTab?.webView else { return }
-        if webView.isLoading { webView.stopLoading() } else { webView.reload() }
+        guard let tab = selectedTab else { return }
+        // A page that stopped (its process kept ending) is asked for again: counted afresh.
+        if tab.pageStopped {
+            tab.resumeAfterStop()
+            tab.webView.reload()
+            return
+        }
+        if tab.webView.isLoading { tab.webView.stopLoading() } else { tab.webView.reload() }
     }
 
+    /// Whether the window covers the selected tab with "This page stopped working" (the self-test).
+    var showsStoppedPage: Bool { !stoppedPage.isHidden }
+
     @objc private func addressEntered() {
-        guard let url = Self.url(fromAddressBarInput: addressField.stringValue) else { return }
+        guard let url = addressURL(addressField.stringValue) else { return }
         load(url)
         if let webView = selectedTab?.webView { window?.makeFirstResponder(webView) }
     }
@@ -404,8 +470,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         return true
     }
 
-    static func url(fromAddressBarInput input: String) -> URL? {
-        WebAddress.url(fromAddressBarInput: input)
+    /// What the address bar (or the start page's field) opens for `input`: a web address, else a
+    /// search with the profile's engine (`ProfileConfiguration.searchEngine`), through its proxy.
+    func addressURL(_ input: String) -> URL? {
+        WebAddress.url(fromAddressBarInput: input, engine: session?.configuration.searchEngine ?? .standard)
     }
 
     // MARK: Bookmarks and history
@@ -486,6 +554,33 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
 
     // MARK: Lifecycle
 
+    /// Closing a window of several tabs was confirmed: the close that follows is not asked about.
+    private var closeConfirmed = false
+
+    /// Asks whether to close a window of `count` tabs, as a sheet on it; the answer comes to
+    /// `answer`. The self-test answers in its place.
+    static var askToCloseTabs: @MainActor (NSWindow, Int, @escaping (Bool) -> Void) -> Void = { window, count, answer in
+        let alert = NSAlert()
+        alert.messageText = String(format: L("window.closeTabs.title"), count)
+        alert.informativeText = L("window.closeTabs.message")
+        alert.addButton(withTitle: L("window.closeTabs.confirm"))
+        alert.addButton(withTitle: L("common.cancel"))
+        alert.beginSheetModal(for: window) { answer($0 == .alertFirstButtonReturn) }
+    }
+
+    /// The window's close button with more than one tab asks first (Settings → Behavior): the last
+    /// window of a profile stops it. A close the app makes itself — Stop, Lock, Quit — is a plain
+    /// `close()` and never asks.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard BrowsingPreferences.current.warnClosingTabs, !isForWarmUp, tabs.count > 1, !closeConfirmed else { return true }
+        Self.askToCloseTabs(sender, tabs.count) { [weak self] confirmed in
+            guard confirmed, let self else { return }
+            self.closeConfirmed = true
+            sender.performClose(nil)
+        }
+        return false
+    }
+
     func windowWillClose(_ notification: Notification) {
         tearDown()
         // CRASH FIX: `windowDidClose` removes this controller from `session.windows`, which can
@@ -499,11 +594,23 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         }
     }
 
+    /// The window's tabs as a start can open them again (Settings → Startup → restore tabs): every
+    /// tab's address, and the one shown.
+    var openTabs: OpenTabs.Window {
+        OpenTabs.Window(tabs: tabs.map { $0.url ?? Self.blankPage }, selected: selectedIndex)
+    }
+
+    /// `openTabs` as it was when the window closed: its tabs are gone after.
+    private(set) var closedTabs: OpenTabs.Window?
+
+    private static let blankPage = URL(string: "about:blank")!
+
     /// Tears down every tab so the web views (and with them the profile's data store) can be
     /// deallocated promptly.
     func tearDown() {
         guard !isClosing else { return }
         isClosing = true
+        if !isForWarmUp { closedTabs = openTabs }
         libraryObservation = nil
         startPageObservation = nil
         tabs.forEach { $0.tearDown() }
@@ -563,7 +670,7 @@ extension BrowserWindowController: NSToolbarDelegate {
         // bordered items one), the same look on every macOS.
         item.isBordered = false
         switch itemIdentifier.rawValue {
-        case "address", "profile": item.visibilityPriority = .high
+        case "address", "profile", "simplified": item.visibilityPriority = .high
         case "mark": item.visibilityPriority = .low
         default: break
         }
