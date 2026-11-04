@@ -46,11 +46,49 @@ public final class FlowTally: @unchecked Sendable {
         /// The process that opened the socket (`sourceProcessAuditToken`), and its name.
         public var openerPID: Int32?
         public var openerName: String
-        /// "allow", "drop", "inspectDNS".
+        /// "allow", "drop", "inspectDNS", or "looked into": decided at its first outbound data.
         public var verdict: String
+        /// The flow's own identifier (NEFilterFlow.identifier), to find it again at its first data.
+        public var id: String?
+        /// The kernel's record of the flow's socket when the flow came: the process it counts it for.
+        public var kernel: KernelSocket?
+        /// Why there is no record (the table refused, no socket on its port, no local port yet).
+        public var kernelNote: String?
+        /// The answer the guard held it by ("sourceApplication", "kernelSocket"); nil when not held.
+        public var heldBy: String?
+        /// Every property the flow object carried, by its class, when it came ("NEFilterFlow.x = …").
+        public var properties: [String]?
+        /// What was read again at its first outbound data, when the guard looked into it.
+        public var firstData: Look?
+        /// The kernel's record read again after it came: "+5 ms: …".
+        public var later: [String]?
+
+        /// What the guard read of a flow at its first outbound data.
+        public struct Look: Codable, Equatable, Sendable {
+            public var appPID: Int32?
+            public var appName: String
+            public var kernel: KernelSocket?
+            public var kernelNote: String?
+            public var heldBy: String?
+            public var verdict: String
+            /// The flow object's properties whose value differs from when it came.
+            public var changedProperties: [String]
+
+            public init(appPID: Int32?, appName: String, kernel: KernelSocket?, kernelNote: String?, heldBy: String?,
+                        verdict: String, changedProperties: [String]) {
+                self.appPID = appPID
+                self.appName = appName
+                self.kernel = kernel
+                self.kernelNote = kernelNote
+                self.heldBy = heldBy
+                self.verdict = verdict
+                self.changedProperties = changedProperties
+            }
+        }
 
         public init(at: Date, transport: GuardTransport, remote: String, kind: Kind, appPID: Int32?, appName: String,
-                    appIdentifier: String?, openerPID: Int32?, openerName: String, verdict: String) {
+                    appIdentifier: String?, openerPID: Int32?, openerName: String, verdict: String, id: String? = nil,
+                    kernel: KernelSocket? = nil, kernelNote: String? = nil, heldBy: String? = nil, properties: [String]? = nil) {
             self.at = at
             self.transport = transport
             self.remote = remote
@@ -61,6 +99,11 @@ public final class FlowTally: @unchecked Sendable {
             self.openerPID = openerPID
             self.openerName = openerName
             self.verdict = verdict
+            self.id = id
+            self.kernel = kernel
+            self.kernelNote = kernelNote
+            self.heldBy = heldBy
+            self.properties = properties
         }
 
         /// The guard's log line for it: "udp 203.0.113.1:3478, counted for com.apple.WebKit.Networking
@@ -71,6 +114,8 @@ public final class FlowTally: @unchecked Sendable {
             return "\(transport.rawValue) \(remote), counted for \(who(appName, appPID))"
                 + (appIdentifier.map { ", signed as \($0)" } ?? "")
                 + ", opened by \(who(openerName, openerPID)): \(kind.rawValue), \(verdict)"
+                + "; the kernel's record of its socket: " + (kernel.map(String.init(describing:)) ?? kernelNote ?? "not read")
+                + (heldBy.map { "; held by the \($0 == GuardAttribution.Source.kernelSocket.rawValue ? "kernel's record" : "source application")" } ?? "")
         }
     }
 
@@ -135,7 +180,8 @@ public final class FlowTally: @unchecked Sendable {
     @discardableResult
     public func record(_ kind: Kind, at: Date = Date(), appPID: Int32?, appName: String, appIdentifier: String?,
                        openerPID: Int32?, openerName: String, transport: GuardTransport, remoteAddress: String?,
-                       remotePort: UInt16?, verdict: String) -> CheckFlow? {
+                       remotePort: UInt16?, verdict: String, id: String? = nil, kernel: KernelSocket? = nil,
+                       kernelNote: String? = nil, heldBy: String? = nil, properties: [String]? = nil) -> CheckFlow? {
         lock.lock()
         defer { lock.unlock() }
         total += 1
@@ -153,10 +199,29 @@ public final class FlowTally: @unchecked Sendable {
         guard Self.isCheckAddress(remoteAddress), let remoteAddress else { return nil }
         let check = CheckFlow(at: at, transport: transport, remote: remotePort.map { "\(remoteAddress):\($0)" } ?? remoteAddress,
                               kind: kind, appPID: appPID, appName: appName, appIdentifier: appIdentifier,
-                              openerPID: openerPID, openerName: openerName, verdict: verdict)
+                              openerPID: openerPID, openerName: openerName, verdict: verdict, id: id, kernel: kernel,
+                              kernelNote: kernelNote, heldBy: heldBy, properties: properties)
         checkFlows.append(check)
         if checkFlows.count > Self.checkFlowLimit { checkFlows.removeFirst(checkFlows.count - Self.checkFlowLimit) }
         return check
+    }
+
+    /// What was read of a flow to TEST-NET-3 at its first outbound data; the first look only.
+    @discardableResult
+    public func noteFirstData(of id: String, _ look: CheckFlow.Look) -> CheckFlow? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let index = checkFlows.lastIndex(where: { $0.id == id }), checkFlows[index].firstData == nil else { return nil }
+        checkFlows[index].firstData = look
+        return checkFlows[index]
+    }
+
+    /// The kernel's record of a flow to TEST-NET-3, read again a moment after it came.
+    public func noteLater(of id: String, _ line: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let index = checkFlows.lastIndex(where: { $0.id == id }) else { return }
+        checkFlows[index].later = (checkFlows[index].later ?? []) + [line]
     }
 
     public func snapshot() -> Snapshot {

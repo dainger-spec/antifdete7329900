@@ -192,8 +192,28 @@ enum GuardDiagnosis {
                 say("4. The probe's \(flow.transport.rawValue.uppercased()) to \(flow.remote): counted for \(describe(flow.appName, flow.appPID))"
                     + (flow.appIdentifier.map { ", signed as \($0)" } ?? "")
                     + (forProbe ? " — the probe itself (pid \(probe.pid)), as the guard needs" : " — NOT the probe (pid \(probe.pid))")
-                    + "; opened by \(describe(flow.openerName, flow.openerPID)); \(flow.kind.rawValue), \(flow.verdict).")
+                    + " (the filter's source application); opened by \(describe(flow.openerName, flow.openerPID)); "
+                    + "\(flow.kind.rawValue), \(flow.verdict).")
+                say("   The kernel's record of its socket, read by the guard when it came: " + kernelWords(flow.kernel, flow.kernelNote, probe.pid))
+                for line in flow.later ?? [] { say("   … read again \(line)") }
+                if let look = flow.firstData {
+                    say("   At its first datagram: counted for \(describe(look.appName, look.appPID)) (the filter's source application); "
+                        + "the kernel's record: " + kernelWords(look.kernel, look.kernelNote, probe.pid)
+                        + "; \(look.heldBy.map { "held by its \($0)" } ?? "not held"): \(look.verdict).")
+                    for line in look.changedProperties { say("   … the flow object, changed: \(line)") }
+                }
+                let heldBy = flow.heldBy.map { "by its \($0), when it came" }
+                    ?? flow.firstData?.heldBy.map { "by its \($0), at its first datagram" }
+                say("   The guard held it " + (heldBy ?? "by neither answer") + ".")
+                for line in flow.properties ?? [] { say("   … the flow object: \(line)") }
             }
+        }
+        // 4b. The kernel's table, read by this process while the probe ran.
+        if probe.kernelLines.isEmpty {
+            say("4b. The kernel's table, read by this process while the probe ran: no socket to \(probeAddress) was seen in it.")
+        } else {
+            say("4b. The kernel's table, read by this process while the probe ran (what a capture shows as proc and eproc):")
+            for line in probe.kernelLines { say("   \(line)") }
         }
         // 5. Its life.
         say("5. The probe lived \(String(format: "%.1f", probe.seconds)) s and \(probe.endedBy): its page loads (up to 5 s), then "
@@ -208,6 +228,12 @@ enum GuardDiagnosis {
                 + (probe.refusal.map { "; the guard did not hold the probe: \($0)" } ?? "") + ".")
         }
         return holds
+    }
+
+    /// The kernel's record of a socket in words, against the probe's pid.
+    private static func kernelWords(_ socket: KernelSocket?, _ note: String?, _ probe: Int32) -> String {
+        guard let socket else { return note ?? "not read (a guard older than this app's reads none)" }
+        return "\(socket)" + (socket.countedFor == probe ? " — the probe" : " — NOT the probe")
     }
 
     private static func describe(_ name: String, _ pid: Int32?) -> String {
@@ -402,6 +428,9 @@ enum GuardDiagnosis {
         var report: GuardReport?
         var seconds: Double = 0
         var endedBy = "did not start"
+        /// The kernel's table read by this process while the probe ran: each socket to the probe's
+        /// STUN address, the first time it was seen (and again if whom it is counted for changed).
+        var kernelLines: [String] = []
 
         /// The probe's own account in one sentence: what its page did, from its lines.
         var summary: String {
@@ -469,7 +498,25 @@ enum GuardDiagnosis {
         }
         try? input.fileHandleForWriting.write(contentsOf: Data("go\n".utf8))
         try? input.fileHandleForWriting.close()
-        for _ in 0..<250 where process.isRunning { try? await Task.sleep(nanoseconds: 100_000_000) }
+        // While it runs, this process reads the kernel's table itself — what a packet capture shows as
+        // proc and eproc — every tenth of a second: the third account beside the filter's and the
+        // probe's own.
+        var seen: [UInt16: Int32] = [:]
+        for _ in 0..<250 where process.isRunning {
+            switch SocketTable.read(.udp) {
+            case .failure(let error):
+                if run.kernelLines.isEmpty { run.kernelLines.append("the kernel's table could not be read here: \(error)") }
+            case .success(let sockets):
+                for socket in sockets where socket.remoteAddress == GuardProof.stunAddress && socket.remotePort == GuardProof.stunPort
+                    && seen[socket.localPort] != socket.countedFor {
+                    seen[socket.localPort] = socket.countedFor
+                    let whose = socket.countedFor == pid ? " — the probe" : " — NOT the probe (pid \(pid))"
+                    run.kernelLines.append(String(format: "+%.0f ms ", Date().timeIntervalSince(launched) * 1000)
+                                           + "\(socket)" + whose)
+                }
+            }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
         if process.isRunning {
             process.terminate()
             run.endedBy = "was ended after 25 s by this diagnosis"
