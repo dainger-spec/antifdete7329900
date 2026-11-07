@@ -82,6 +82,16 @@ enum WebContentLanguage {
         log.info("Websites see the languages \(decided?.joined(separator: ",") ?? "", privacy: .private) for this run")
     }
 
+    /// In a profile's own process: the list its command line gave (`-AppleLanguages`), which is
+    /// the one WebKit read before anything in the process could change it (CI run 579). Only the
+    /// first call counts, as with `decide`.
+    static func adoptCommandLine() {
+        guard decided == nil else { return }
+        let arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        decided = arguments["AppleLanguages"] as? [String] ?? UserDefaults.standard.stringArray(forKey: "AppleLanguages") ?? []
+        log.info("Websites see the languages \(decided?.joined(separator: ",") ?? "", privacy: .private) for this run (the process's command line)")
+    }
+
     /// The list WebKit is given: the proxy country's language, else the user's own languages.
     static func languages(for language: String?) -> [String] {
         if let language { return [language] }
