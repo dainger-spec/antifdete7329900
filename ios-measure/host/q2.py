@@ -83,9 +83,19 @@ async def scenario(h, capture):
         await language(h)
     except Exception as error:
         check("q2.language-at-runtime", "INCONCLUSIVE", f"stopped: {error!r}")
+    # The reference was taken over plain http on a LAN address, which is not a secure context; a
+    # page on 127.0.0.1 is one. So the web view is read again where it is not: http through a proxy.
+    insecure = {}
+    try:
+        proxy = {"type": "http", "host": h.ARGS.proxy_host, "port": h.ARGS.port_a, "user": "ua", "pass": "pa"}
+        await app.cmd("session", session="NI", store="ephemeral", proxies=[proxy])
+        await app.cmd("load", session="NI", url=f"http://ni-{h.ARGS.run}.lumentest:{h.ARGS.http_port}/blank", timeout=30)
+        insecure = (await app.cmd("eval", session="NI", js="return { secure: isSecureContext, names: Object.getOwnPropertyNames(window), ua: navigator.userAgent };")).get("value") or {}
+    except Exception as error:
+        insecure = {"error": repr(error)}
     N, K, M, M2 = (results[k] for k in ("N", "K", "M", "M2"))
     with open(os.path.join(h.ARGS.out, "q2-probes.json"), "w") as f:
-        json.dump({"N": N, "K": K, "M": M, "M2": M2, "M-reload": again, "M-newview": newview}, f, indent=1)
+        json.dump({"N": N, "K": K, "M": M, "M2": M2, "M-reload": again, "M-newview": newview, "N-insecure": insecure}, f, indent=1)
 
     def g(d, *path):
         for p in path:
@@ -201,13 +211,22 @@ async def scenario(h, capture):
           f"prototype property lists equal to the engine's: {shapes}; window own properties N {N.get('windowOwn')} M {M.get('windowOwn')}, "
           f"extra {extra[:10]}, missing {missing[:10]}", core=True)
     if ref.get("windowNames"):
-        only_safari = sorted(set(ref["windowNames"]) - set(N.get("windowNames") or []))
-        only_view = sorted(set(N.get("windowNames") or []) - set(ref["windowNames"]))
-        check("q2.webview-vs-safari", "INFO", f"window properties only in Safari on the iPhone: {only_safari[:40]}; only in this web view: {only_view[:40]}")
+        safari = set(ref["windowNames"]) - set(ref.get("pageGlobals") or [])
+        for label, names, secure in (("insecure", insecure.get("names"), insecure.get("secure")),
+                                     ("secure", N.get("windowNames"), True)):
+            if not names:
+                check(f"q2.webview-vs-safari-{label}", "INCONCLUSIVE", f"no names read ({insecure.get('error') if label == 'insecure' else ''})")
+                continue
+            view = set(names)
+            only_safari, only_view = sorted(safari - view), sorted(view - safari)
+            check(f"q2.webview-vs-safari-{label}", "INFO" if label == "secure" else ("PASS" if not only_safari and not only_view else "FAIL"),
+                  f"this web view ({app.info.get('os')}, isSecureContext {secure}): {len(view)} own window properties; Safari on the "
+                  f"owner's iPhone ({ref.get('context')}): {len(safari)} without the probe page's own {ref.get('pageGlobals')}; "
+                  f"only in Safari {len(only_safari)} {only_safari}; only in the web view {len(only_view)} {only_view[:60]}")
     else:
         check("q2.webview-vs-safari", "INFO",
-              f"this web view has {N.get('windowOwn')} own window properties; the owner's iPhone Safari 27 has 951 "
-              f"(no name list in the repository to compare: ios-measure/DEVICE.md asks for one)")
+              f"this web view has {N.get('windowOwn')} own window properties; the owner's iPhone Safari 27 has 951 (no reference list)")
+
 
 
 async def language(h):
