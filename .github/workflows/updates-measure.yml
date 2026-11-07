@@ -1,0 +1,24 @@
+name: Updates end to end (measurement)
+
+# Measurement only (claude/measure-updates-*, never merged): scripts/update_check.py, the step of
+# CI — full, alone.
+on:
+  push:
+    branches: ['claude/measure-updates-*']
+  workflow_dispatch:
+
+jobs:
+  updates:
+    name: Updates end to end (macos-26, unsandboxed)
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Updates end to end
+        run: python3 scripts/update_check.py --variant unsandboxed --out build/update-unsandboxed
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: update-check
+          path: build/update-unsandboxed
+          if-no-files-found: ignore

@@ -196,7 +196,7 @@ final class AppUpdater: ObservableObject, Updater {
         timer = nil
         guard automaticChecks, !isPreview else { return }
         let last = defaults.object(forKey: Key.lastCheck) as? Date ?? .distantPast
-        let due = launching ? Self.firstCheckDelay : max(Self.firstCheckDelay, Self.interval - Date().timeIntervalSince(last))
+        let due = max(Self.firstCheckDelay, Self.interval - Date().timeIntervalSince(last)) // the code before the fix
         timer = Timer.scheduledTimer(withTimeInterval: due, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.automaticChecks else { return }
