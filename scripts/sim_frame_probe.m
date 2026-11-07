@@ -173,6 +173,31 @@ int main(int argc, const char **argv) {
             usleep(2000);
         }
         printf("FRAME seed changed %u times in 3 s (%.1f frames a second)\n", changes, changes / 3.0);
+        // The surface fetched again, 12 times 0.3 s apart, while the page moves: does each fetch
+        // carry the screen as it is now (polling works), or one picture (a callback is needed)?
+        NSMutableSet *hashes = [NSMutableSet set];
+        id displayDescriptor = nil;
+        for (id port in ports) {
+            id d = call(port, @"descriptor");
+            if (d && [d respondsToSelector:NSSelectorFromString(@"framebufferSurface")]) { displayDescriptor = d; break; }
+        }
+        NSDate *pollStart = [NSDate date];
+        for (int i = 0; i < 12 && displayDescriptor; i++) {
+            IOSurfaceRef s = (__bridge IOSurfaceRef)call(displayDescriptor, @"framebufferSurface");
+            if (!s) continue;
+            IOSurfaceLock(s, kIOSurfaceLockReadOnly, NULL);
+            const uint8_t *base = IOSurfaceGetBaseAddress(s);
+            size_t rows = IOSurfaceGetHeight(s), stride = IOSurfaceGetBytesPerRow(s);
+            uint64_t h = 1469598103934665603ULL;
+            for (size_t y = rows / 4; y < rows * 3 / 4 && base; y += 7) {
+                for (size_t x = 0; x < stride; x += 64) { h ^= base[y * stride + x]; h *= 1099511628211ULL; }
+            }
+            IOSurfaceUnlock(s, kIOSurfaceLockReadOnly, NULL);
+            [hashes addObject:@(h)];
+            usleep(300000);
+        }
+        printf("FRAME polling: %lu different pictures in 12 fetches over %.1f s\n", (unsigned long)hashes.count,
+               [[NSDate date] timeIntervalSinceDate:pollStart]);
         BOOL wrote = writePNG(found, out);
         printf("FRAME %s %s\n", wrote ? "YES: a frame written to" : "NO: could not write", out.UTF8String);
         CFRelease(found);

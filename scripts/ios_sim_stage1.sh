@@ -294,10 +294,10 @@ fi
 say "1c. hardwareConcurrency: WebKit's own setting for its processor count, given to the device"
 rm -f "$REPORTS/probe-cores-before.json" "$REPORTS/probe-cores-after.json"
 open_url "$A" "$PAGES/probe?name=probe-cores-before"; note "before: $(wait_report probe-cores-before 60) s"
-xcrun simctl spawn "$A" launchctl setenv WTF_numberOfProcessorCores 4 2>&1 | sed 's/^/   setenv: /'
+xcrun simctl spawn "$A" launchctl setenv WTF_numberOfProcessorCores 2 2>&1 | sed 's/^/   setenv: /'
 xcrun simctl terminate "$A" "$SAFARI" >/dev/null 2>&1
 for pid in $(device_pids "$A"); do
-    case "$(ps -o comm= -p "$pid" 2>/dev/null)" in *WebContent*|*com.apple.WebKit*) kill "$pid" 2>/dev/null ;; esac
+    case "$(ps -o comm= -p "$pid" 2>/dev/null)" in *WebContent*|*com.apple.WebKit*) echo "   stopping $(ps -o comm= -p "$pid") ($pid)"; kill "$pid" 2>/dev/null ;; esac
 done
 sleep 2
 open_url "$A" "$PAGES/probe?name=probe-cores-after"; note "after: $(wait_report probe-cores-after 60) s"
@@ -357,7 +357,7 @@ sleep 2
 if clang -fobjc-arc -framework Foundation -framework AppKit -framework IOSurface -framework CoreImage -framework CoreGraphics -framework ImageIO \
         "$HERE/sim_frame_probe.m" -o "$WORK/sim_frame_probe" 2>"$WORK/clang.err"; then
     "$WORK/sim_frame_probe" "$A" "$DEVELOPER" "$OUT/frame-A.png" 2>&1 | grep -v '^FRAME   ROCK\|^FRAME port' | head -60
-    note "the page's own count of frames drawn: $(wait_report anim 15) s → $(cat "$REPORTS/anim.json" 2>/dev/null)"
+    note "the page's own count of frames drawn: $(wait_report anim 30) s → $(cat "$REPORTS/anim.json" 2>/dev/null)"
     SIMKIT="$(find "$XCODE_APP" /Library/Developer/PrivateFrameworks -name SimulatorKit.framework -maxdepth 8 2>/dev/null | head -1)"
     note "SimulatorKit: ${SIMKIT:-not found}"
     if [[ -n "$SIMKIT" ]]; then
@@ -384,8 +384,8 @@ done
 xcrun simctl shutdown "$B" >/dev/null 2>&1
 BOOTED=("$A")
 echo "   devices | boot s | page s (new) | page s (device A) | footprint total MB | free MB"
-[[ "${PB_SIM_SKIP_CAPACITY:-}" == 1 ]] && MAX_DEVICES=1
-for n in $(seq 2 "$MAX_DEVICES"); do
+[[ "${PB_SIM_SKIP_CAPACITY:-}" == 1 ]] && MAX_DEVICES=0
+for (( n = 2; n <= MAX_DEVICES; n++ )); do
     if (( $(free_mb) < 1200 )); then note "stopping: $(free_mb) MB free"; break; fi
     new_device "N$n"; u=$NEW_UDID
     secs="$(boot "$u")"

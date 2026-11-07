@@ -160,7 +160,7 @@ class Handler(BaseHTTPRequestHandler):
         elif url.path == "/anim":
             script = SEND + """
 let frames = 0; const box = document.getElementById('box'); const start = performance.now();
-function step(t) { frames++; box.style.transform = 'rotate(' + (t / 5) + 'deg)'; if (t - start < 4000) requestAnimationFrame(step); else send('anim', {frames: frames, seconds: (t - start) / 1000}); }
+function step(t) { frames++; box.style.transform = 'rotate(' + (t / 5) + 'deg)'; if (t - start < 15000) requestAnimationFrame(step); else send('anim', {frames: frames, seconds: (t - start) / 1000}); }
 requestAnimationFrame(step);"""
             self.reply(page("anim", script, "<div id=box style='width:300px;height:300px;margin:80px auto;background:linear-gradient(red,blue)'></div>"))
         elif url.path == "/tap":
