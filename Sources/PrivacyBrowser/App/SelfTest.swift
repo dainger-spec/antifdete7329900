@@ -396,6 +396,7 @@ final class SelfTest {
         await group("closing a profile's window") { try await closingTheWindowEndsTheProfile(repository) }
         await group("interface and websites' languages") { try await interfaceApartFromWebsites(repository) }
         await group("languages per profile") { try await languagesPerProfile(repository) }
+        await group("a direct connection is an exit") { try await directConnectionIsAnExit(repository) }
         await group("lock during launch") { try await lockDuringLaunch(repository) }
         await group("quit") { try await quitFromFocusedPage(repository) }
         await group("forced seal") { try await forcedSealAtQuit(repository) }
@@ -5657,6 +5658,53 @@ final class SelfTest {
                 check(name, ru1[known] == en[known] && ru1[known] != nil, ru1[known] ?? "nil")
             }
         }
+    }
+
+    /// A profile with no proxy learns where it exits as one with a proxy does (the lead, 7 November):
+    /// looked up at launch over its own connection, the country and address remembered and shown,
+    /// its time zone and language that country's. The geolocation service here is the self-test
+    /// proxy's page asked directly (http://127.0.0.1:<port>/pb-geo.json), answering Japan; the
+    /// runner's own time zone is GMT and its language English, so a profile that did not look
+    /// itself up shows neither.
+    private func directConnectionIsAnExit(_ repository: ProfileRepository) async throws {
+        let name = "direct connection: a profile with no proxy exits in Japan — its pages see Asia/Tokyo and ja, its card Japan and the address"
+        guard !AppEnvironment.isSandboxed else {
+            skip(name, "the sandboxed build runs no process per profile", .build)
+            return
+        }
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip(name, "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
+            return
+        }
+        let services = ProxyGeoLookup.services
+        let givenProcess = ProcessInfo.processInfo.environment["PB_PROFILE_PROCESS"]
+        defer {
+            ProxyGeoLookup.services = services
+            if let givenProcess { setenv("PB_PROFILE_PROCESS", givenProcess, 1) } else { unsetenv("PB_PROFILE_PROCESS") }
+        }
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        ProxyGeoLookup.services = [.init(url: URL(string: "http://127.0.0.1:\(httpPort)/pb-geo.json?country=JP&tz=Asia/Tokyo&ip=203.0.113.88")!,
+                                         timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"])]
+        let profile = try repository.create(name: "Direct exit", configuration: ProfileConfiguration(ephemeral: true))
+        defer { try? repository.delete(profile.id) }
+        let manager = ProfileManager(repository: repository)
+        var launchError = ""
+        let snapshot = WhatSitesSee(profileID: profile.id, manager: { manager }, launch: { id in
+            do { try await manager.launch(id) } catch { launchError = String(describing: error) }
+        })
+        await snapshot.take()
+        let values = snapshot.profileSnapshot?.values ?? [:]
+        let stored = try? repository.loadConfiguration(profile.id)
+        let details = stored.map { ProfileDetails($0) }
+        let seen = "time zone \(values["probe.timeZone"] ?? "nil"), language \(values["probe.language"] ?? "nil"), "
+            + "Accept-Language \(values["headers.navigation.accept-language"] ?? "nil"); remembered \(stored?.lastProxyLocation.map { "\($0.countryCode ?? "?") \($0.timeZoneIdentifier) \($0.exitIP ?? "no address") (\($0.proxyEndpoint))" } ?? "nothing"); "
+            + "card: country \(details?.exitCountryCode ?? "nil"), address \(details?.exitIP ?? "nil"), time zone \(details?.timeZone ?? "nil")"
+            + (launchError.isEmpty ? "" : "; launch \(launchError)")
+        info("direct connection: \(seen)")
+        check(name, values["probe.timeZone"] == "Asia/Tokyo" && (values["probe.language"] ?? "").hasPrefix("ja")
+                && details?.exitCountryCode == "JP" && details?.exitIP == "203.0.113.88"
+                && stored?.lastProxyLocation?.proxyEndpoint == "direct", seen)
+        try? await manager.stop(profile.id)
     }
 
     /// The window server's processor time so far, in seconds (`ps`); nil where it cannot be read.
