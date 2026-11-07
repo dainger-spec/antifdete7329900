@@ -256,6 +256,8 @@ safe('safariShape', () => {
 });
 safe('webkitObject', () => typeof window.webkit);
 safe('windowOwnCount', () => Object.getOwnPropertyNames(window).length);
+// The names themselves, so that a difference in the count says which ones (scripts/safari_reference.py).
+safe('windowOwnNames', () => Object.getOwnPropertyNames(window).sort().join(' '));
 
 // Native-looking functions (CreepJS "lies"): toString, name, length, own property names
 safe('natives', () => {

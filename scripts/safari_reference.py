@@ -45,7 +45,7 @@ PROBE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Resource
 
 # Differ by design between the self-test (which gives WebKit a fixed language, uses a hidden
 # window) and a Safari window: reported, never fatal.
-INFO_KEYS = {"language", "languages", "intlLocale", "innerSize", "outerSize", "windowOwnCount", "errorStack",
+INFO_KEYS = {"language", "languages", "intlLocale", "innerSize", "outerSize", "windowOwnCount", "windowOwnNames", "errorStack",
              "orientation", "audio", "cookieEnabled",
              # Date#toString names the zone in the default locale, which the self-test overrides.
              "dateString",
@@ -220,6 +220,11 @@ def compare(safari, ours):
             same += 1
             continue
         line = f"{key}: Safari={json.dumps(a)[:160]}  profile={json.dumps(b)[:160]}"
+        if key == "windowOwnNames":
+            # By name, not the whole list: what only one side has.
+            sa, sb = set(a.split()), set(b.split())
+            line = (f"{key}: only in Safari ({len(sa - sb)}): {' '.join(sorted(sa - sb)) or '-'}; "
+                    f"only in the profile ({len(sb - sa)}): {' '.join(sorted(sb - sa)) or '-'}")
         must = key in MUST_MATCH or key.startswith(MUST_MATCH_PREFIXES)
         if key in INFO_KEYS or key.split(".")[0] in INFO_KEYS and key.split(".")[0] not in ("features", "natives"):
             diffs.append("INFO " + line)
