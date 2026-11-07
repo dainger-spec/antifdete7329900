@@ -1,0 +1,28 @@
+name: iOS Simulator measurement (stage 1)
+
+# Measurement only (claude/measure-ios-sim, never merged): scripts/ios_sim_stage1.sh on GitHub's
+# macOS images, which come with Xcode and an iOS simulator runtime. Report-only: the results are the
+# artifact and the log.
+on:
+  push:
+    branches: [claude/measure-ios-sim]
+  workflow_dispatch:
+
+jobs:
+  measure:
+    name: iOS Simulator stage 1 (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, xcode-27]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: Measure
+        run: scripts/ios_sim_stage1.sh --yes --out build/ios-sim-stage1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-sim-stage1-${{ matrix.os }}
+          path: build/ios-sim-stage1
