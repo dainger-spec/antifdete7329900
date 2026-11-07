@@ -848,8 +848,9 @@ final class ProfileManager: ObservableObject {
     /// profile asks for that), and the location to remember for the next launch.
     private func proxyLookupFinished(_ result: ProxyGeoLookup.Result, for id: UUID, name: String, stored: ProfileConfiguration) {
         guard let found = result.location else {
-            // No service answered through the proxy: not only a line in the log.
-            if stored.needsProxyLocation {
+            // No service answered through the proxy: not only a line in the log. None asked (none
+            // configured: CI's PB_GEO_SERVICES_OFF) is not that, and says nothing.
+            if stored.needsProxyLocation, !ProxyGeoLookup.services.isEmpty {
                 if runsInProfileProcess {
                     onProxyLocationUnknown?(id)
                 } else {

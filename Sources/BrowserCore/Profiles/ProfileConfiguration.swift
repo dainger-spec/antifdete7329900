@@ -285,10 +285,14 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
             edited.lastProxyLocation = stored.lastProxyLocation
             edited.passwordNeverSaveSites = stored.passwordNeverSaveSites
         }
-        // The exit IP stays with the location of the exit the profile has now: a direct connection's
-        // always (it is shown, like the country), a proxy's while the warning that asks for it is on.
-        let current = edited.lastProxyLocation?.proxyEndpoint == ProxyLocation.exitEndpoint(of: edited.proxy)
-        if !current || (edited.proxy != nil && !edited.warnOnProxyIPChange) { edited.lastProxyLocation?.exitIP = nil }
+        // A proxy's exit IP only while the warning that asks for it is on (and kept for the
+        // proxy it was found for, the one a replaced proxy is compared with); a direct connection's
+        // always (it is shown, like the country), and only its own.
+        if edited.proxy != nil {
+            if !edited.warnOnProxyIPChange { edited.lastProxyLocation?.exitIP = nil }
+        } else if edited.lastProxyLocation?.proxyEndpoint != ProxyLocation.directEndpoint {
+            edited.lastProxyLocation?.exitIP = nil
+        }
         return edited
     }
 
