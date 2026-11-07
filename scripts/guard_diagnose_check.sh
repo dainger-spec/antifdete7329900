@@ -10,7 +10,9 @@
 #   2. A copy with the extension laid inside, as an NE=1 build has it (ad hoc: CI has no team), must
 #      name its guard, ask systemextensionsctl and NEFilterManager, say it cannot ask a guard signed
 #      by no team, and print its answers.
-# Either run fails this when it crashes, hangs (60 s), exits 0 — a pass where no guard runs would
+#   3. The same copy with the listing of a Mac where an earlier copy waits for the restart must say
+#      so on its first line (the owner's Mac after updating to 0.1.3).
+# Any run fails this when it crashes, hangs (60 s), exits 0 — a pass where no guard runs would
 # be a false one — or leaves out a section the owner's run needs.
 set -euo pipefail
 
@@ -83,6 +85,30 @@ expect with-guard "signed by no team"
 expect with-guard "== ANSWERS"
 expect with-guard "1. Does the filter receive flows? UNKNOWN"
 expect with-guard "The check: CANNOT RUN"
+# 3. The owner's Mac after an update (0.1.3): macOS keeps the earlier copy until the next restart.
+#    The listing as systemextensionsctl gives it there; the first line must say to restart.
+cat >"$work/list.txt" <<LIST
+2 extension(s)
+--- com.apple.system_extension.network_extension
+enabled	active	teamID	bundleID (version)	name	[state]
+*	*	ABCDE12345	$identifier (0.1.3/4)	Lumen Network Guard	[activated enabled]
+		ABCDE12345	$identifier (0.1.2/3)	Lumen Network Guard	[terminated waiting to uninstall on reboot]
+LIST
+status=0
+PB_GUARD_DIAGNOSE_EXTENSIONS_LIST="$work/list.txt" perl -e 'alarm shift; exec @ARGV' 60 "$copy/Contents/MacOS/Lumen" --guard-diagnose \
+  >"$work/restart.txt" 2>&1 || status=$?
+echo "---- restart: exit $status"; cat "$work/restart.txt"; echo "----"
+expect_status restart
+if head -1 "$work/restart.txt" | grep -q "^RESTART THIS MAC:"; then
+  echo "OK   restart says to restart the Mac, on its first line"
+else
+  echo "FAIL restart's first line is not the restart: $(head -1 "$work/restart.txt")"
+  failed=1
+fi
+if head -1 "$work/with-guard.txt" | grep -q "RESTART"; then
+  echo "FAIL with-guard (nothing waits for a restart) says to restart"
+  failed=1
+fi
 if grep -q "The check: PASSES" "$work/as-built.txt" "$work/with-guard.txt"; then
   echo "FAIL a run says the check passes where no guard runs"
   failed=1
