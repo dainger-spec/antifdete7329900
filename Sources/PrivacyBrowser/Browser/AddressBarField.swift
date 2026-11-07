@@ -31,7 +31,13 @@ final class AddressBarField: NSTextField {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not supported") }
 
+    /// Its own box; off in the phone's address pill, which is the box there.
+    var drawsBox = true
+    /// The field took the keyboard (the phone's pill shows the whole address only then).
+    var onBeginEditing: (() -> Void)?
+
     override func draw(_ dirtyRect: NSRect) {
+        guard drawsBox else { return super.draw(dirtyRect) }
         let box = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 7, yRadius: 7)
         ProfileWindowTheme.NS.field.setFill()
         box.fill()
@@ -43,7 +49,10 @@ final class AddressBarField: NSTextField {
 
     override func becomeFirstResponder() -> Bool {
         let became = super.becomeFirstResponder()
-        if became { isEditingText = true }
+        if became {
+            isEditingText = true
+            onBeginEditing?()
+        }
         return became
     }
 

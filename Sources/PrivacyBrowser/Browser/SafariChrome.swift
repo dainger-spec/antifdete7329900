@@ -395,6 +395,7 @@ enum SafariChrome {
     /// Core Foundation's lookup of `com.apple.Safari`, a suite of it and the standard defaults all
     /// answer with the profile's values, and the account's file is not written.
     static func configureSafarisOwnServices(for configuration: ProfileConfiguration) {
+        profileSearchEngine = configuration.searchEngine ?? .standard
         var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
         for (key, value) in servicePreferenceValues(for: configuration) {
             arguments[key] = value
@@ -405,8 +406,27 @@ enum SafariChrome {
         // argument domain.
         arguments[homePageKey] = homePage(for: configuration)
         servicePreferenceKeys.append(homePageKey)
+        // The engine Safari's address bar searches with, by the names Safari keeps it under (its
+        // provider list is set below too: CI run 42421408245 had the list say Bing and the address
+        // bar still go to Google).
+        let engine = configuration.searchEngine ?? .standard
+        arguments["SearchProviderShortName"] = engine.name
+        arguments["SearchProviderIdentifier"] = safariSearchProviderIdentifier(engine)
+        servicePreferenceKeys += ["SearchProviderShortName", "SearchProviderIdentifier"]
         UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
         log.notice("Safari's own services are set for this profile (\(servicePreferenceKeys.count, privacy: .public) keys)")
+    }
+
+    /// The identifier Safari's provider list gives an engine.
+    nonisolated static func safariSearchProviderIdentifier(_ engine: SearchEngine) -> String {
+        switch engine {
+        case .google: return "com.google.www"
+        case .bing: return "com.bing.www"
+        case .yahoo: return "com.yahoo.www"
+        case .duckDuckGo: return "com.duckduckgo"
+        case .ecosia: return "org.ecosia.www"
+        case .yandex: return "ru.yandex.www"
+        }
     }
 
     /// Safari's home page, which History › Home opens.
@@ -503,9 +523,9 @@ enum SafariChrome {
         if let base: AnyObject = NSClassFromString("WBSSearchProvidersController"),
            base.responds(to: NSSelectorFromString("shared")),
            let shared = base.perform(NSSelectorFromString("shared"))?.takeUnretainedValue() as? NSObject {
-            setDefaultSearchEngine("Google", on: shared)
+            setDefaultSearchEngine(profileSearchEngine.name, on: shared)
         }
-        setDefaultSearchEngine("Google", on: controller)
+        setDefaultSearchEngine(profileSearchEngine.name, on: controller)
         // Safari's chrome reaches its providers through +[WBSSearchProvidersController shared],
         // which the base class creates bare: it never loads the provider list, so the suggestions
         // fetcher is handed a provider with no suggestions template and throws on the nil. Our
@@ -519,6 +539,15 @@ enum SafariChrome {
         }
         log.notice("Search providers: \(String(describing: controller.value(forKey: "defaultSearchEngineName")), privacy: .private)")
         return controller
+    }
+
+    /// The profile's search engine (its editor), which Safari's address bar searches with. It was
+    /// Google for every profile whatever its setting said (the owner, 8 November).
+    private(set) static var profileSearchEngine = SearchEngine.standard
+
+    /// What Safari's search providers say their default engine is now (the self-test reads it).
+    static var searchEngineInUse: String {
+        searchProviders.flatMap { $0.value(forKey: "defaultSearchEngineName") as? String } ?? "none"
     }
 
     /// `-setDefaultSearchEngine:forPrivateBrowsing:` takes a `BOOL`, which `perform` cannot pass,

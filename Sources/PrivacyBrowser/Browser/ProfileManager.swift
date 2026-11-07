@@ -58,6 +58,8 @@ final class ProfileManager: ObservableObject {
     var onMenuWalk: ((UUID, String) -> Void)?
     /// What a profile's History window showed when the self-test asked (`lookAtHistory`).
     var onHistoryLook: ((UUID, HistoryWindowLook) -> Void)?
+    /// What a profile's window showed after the self-test acted on it (`lookAtWindow`).
+    var onWindowLook: ((UUID, WindowLook) -> Void)?
     /// A profile's process ended on its own (a quit of its own, or a crash: `status` is not 0),
     /// after its home was sealed. Not called for a stop asked for from here (`--menu-walk`).
     var onChildExited: ((UUID, Int32) -> Void)?
@@ -363,6 +365,10 @@ final class ProfileManager: ObservableObject {
             passwordSettings.showManager = { [weak self] in self?.onShowPasswords?(id) }
             session = try BrowserSession(profileID: id, profileName: summary.name, configuration: configuration,
                                          passwordVault: passwords, passwordSettings: passwordSettings, library: library)
+            // The engine as saved now, read at each search: a change in the editor applies at once.
+            session.searchEngine = { [repository, configuration] in
+                (try? repository.loadConfiguration(id, key: key))?.searchEngine ?? configuration.searchEngine ?? .standard
+            }
         } catch {
             // Thrown before the session created its data store (see BrowserSession.init).
             if !configuration.ephemeral { _ = try? await webDataVault.seal(profileID: id, key: key, activeStore: false) }
@@ -506,6 +512,8 @@ final class ProfileManager: ObservableObject {
                 self.onMenuWalk?(id, line)
             case .historyLook(let look):
                 self.onHistoryLook?(id, look)
+            case .windowLook(let look):
+                self.onWindowLook?(id, look)
             }
         }
         child.onExit = { [weak self] status in
@@ -959,6 +967,15 @@ final class ProfileManager: ObservableObject {
 
     /// Asks a profile running in its own process to open its History window as the person does and
     /// say what it shows; the answer comes back through `onHistoryLook`. The self-test's only.
+    /// Asks a profile running in its own process to act on its window as a person would
+    /// (`WindowProbe`); the answer comes back through `onWindowLook`. The self-test's only.
+    @discardableResult
+    func lookAtWindow(_ id: UUID, _ action: WindowProbeAction) -> Bool {
+        guard let child = children[id] else { return false }
+        child.send(.lookAtWindow(action))
+        return true
+    }
+
     @discardableResult
     func lookAtHistory(_ id: UUID) -> Bool {
         guard let child = children[id] else { return false }

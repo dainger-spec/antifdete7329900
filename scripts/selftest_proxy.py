@@ -506,6 +506,13 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
         answer_json["country"] = params.get("country", answer_json["country"])
         time.sleep(min(float(params.get("delay", "0")), 30))
         body, content_type = json.dumps(answer_json).encode(), "application/json"
+    elif plain_path == "/pb-targets.json":
+        # Every request and tunnel seen, from `since` on (the self-test notes the count before it
+        # acts, then reads what came after: which search engine a typed query went to).
+        since = int(parse_qs(query).get("since", ["0"])[0] or 0)
+        with SERVED_LOCK:
+            body = json.dumps({"count": len(TARGETS), "targets": [t["target"] for t in TARGETS[since:]]}).encode()
+        content_type = "application/json"
     elif plain_path == "/pb-served.json":
         body, content_type = json.dumps(served).encode(), "application/json"
     elif plain_path == "/pb-leak":
