@@ -366,9 +366,9 @@ final class ProfileManager: ObservableObject {
             session = try BrowserSession(profileID: id, profileName: summary.name, configuration: configuration,
                                          passwordVault: passwords, passwordSettings: passwordSettings, library: library)
             // The engine as saved now, read at each search: a change in the editor applies at once.
-            session.searchEngine = { [repository, configuration] in
+            if false { session.searchEngine = { [repository, configuration] in
                 (try? repository.loadConfiguration(id, key: key))?.searchEngine ?? configuration.searchEngine ?? .standard
-            }
+            } } // measurement: as before
         } catch {
             // Thrown before the session created its data store (see BrowserSession.init).
             if !configuration.ephemeral { _ = try? await webDataVault.seal(profileID: id, key: key, activeStore: false) }

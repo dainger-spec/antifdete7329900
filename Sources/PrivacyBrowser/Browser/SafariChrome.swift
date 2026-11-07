@@ -504,9 +504,9 @@ enum SafariChrome {
         if let base: AnyObject = NSClassFromString("WBSSearchProvidersController"),
            base.responds(to: NSSelectorFromString("shared")),
            let shared = base.perform(NSSelectorFromString("shared"))?.takeUnretainedValue() as? NSObject {
-            setDefaultSearchEngine(profileSearchEngine.name, on: shared)
+            setDefaultSearchEngine("Google", on: shared) // measurement: as before
         }
-        setDefaultSearchEngine(profileSearchEngine.name, on: controller)
+        setDefaultSearchEngine("Google", on: controller) // measurement: as before
         // Safari's chrome reaches its providers through +[WBSSearchProvidersController shared],
         // which the base class creates bare: it never loads the provider list, so the suggestions
         // fetcher is handed a provider with no suggestions template and throws on the nil. Our

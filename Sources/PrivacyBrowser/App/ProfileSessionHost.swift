@@ -157,7 +157,7 @@ enum ProfileSessionHost {
             ProfileNetworkGuard.takeOverDefaultStore()
             // Our own window (an iPhone view, the simplified mode): no Safari menu bar comes with it,
             // so it gets ours — New Tab, Close Tab, Open Location… (OwnWindowMenu).
-            if !SafariChromeHost.isHosting { OwnWindowMenu.install() }
+            if false && !SafariChromeHost.isHosting { OwnWindowMenu.install() } // measurement: as before
             // What Safari's chrome needs and this macOS does not have is said where the user is
             // looking, not only in the log: a renamed method can be a feature gone quiet. Only while
             // the chrome is hosted: without it the profile's window itself says why, and a missing

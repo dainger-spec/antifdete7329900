@@ -77,7 +77,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
                                          exit: BrowserWindowController.profileExit(of: session),
                                          avatar: session.configuration.avatar)
         self.ownWindowReason = SafariChromeHost.reasonForOwnWindow(session.configuration)
-        self.isPhoneLayout = session.configuration.deviceGeneration.platform == .iOS
+        self.isPhoneLayout = false // measurement: as before the change
 
         // A mobile generation's window is the declared device's screen: its web content can never
         // be wider or taller than the screen the page is told about (see PrivacyScripts).
