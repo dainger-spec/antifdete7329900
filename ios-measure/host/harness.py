@@ -219,7 +219,8 @@ async def site_handler(reader, writer, scheme):
 PROXY_WRITERS = {}   # name -> set of client writers (to kill a proxy with its connections)
 
 
-TESTNET = "192.0.2.1"   # TEST-NET-1: routed nowhere; the proxies take it for the site
+TESTNET = "192.0.2.1"   # TEST-NET-1: routed nowhere; the proxies take it (all of 192.0.2.0/24) for the site
+NET_C, NET_D, NET_E, NET_F = "192.0.2.10", "192.0.2.11", "192.0.2.12", "192.0.2.13"   # one per fail-closed test
 
 
 def resolve_name(host):
@@ -227,7 +228,7 @@ def resolve_name(host):
     through a proxy: a direct attempt to it goes nowhere, and the capture sees its packets."""
     if host.endswith(".lumentest") or host == "lumentest":
         return "127.0.0.1", "test-name"
-    if host == TESTNET:
+    if host.startswith("192.0.2."):
         return "127.0.0.1", "test-ip"
     return host, "passthrough"
 
@@ -498,7 +499,7 @@ class Capture:
             self.state = "off"
             return
         tcpdump = shutil.which("tcpdump") or "/usr/sbin/tcpdump"
-        command = ["sudo", "-n", tcpdump, "-i", self.interface, "-n", "-l", "-tt", "port 53 or host 192.0.2.1"]
+        command = ["sudo", "-n", tcpdump, "-i", self.interface, "-n", "-l", "-tt", "port 53 or net 192.0.2.0/24"]
         if self.interface.startswith("pktap"):
             command[4:4] = []
             command.insert(5, "-k")
@@ -746,54 +747,52 @@ async def scenario_q1(capture):
     if capturing:
         # The detector's own red run: C has no proxy, so its load of TEST-NET is a direct attempt.
         tc = time.time()
-        await APP.cmd("load", session="C", url=f"http://{TESTNET}:{hp}/ctl?sid=C", timeout=8)
+        await APP.cmd("load", session="C", url=f"http://{NET_C}:{hp}/ctl?sid=C", timeout=8)
         await asyncio.sleep(1.5)
-        control = capture.between(TESTNET, tc, time.time())
+        control = capture.between(NET_C + ".", tc, time.time() + 60)
         check("q1.direct-detector-sees-a-direct-attempt", "PASS" if control else "INCONCLUSIVE",
-              f"the session without a proxy, a load of {TESTNET}: {len(control)} packets seen {control[:1]}")
+              f"the session without a proxy, a load of {NET_C}: {len(control)} packets seen {control[:1]}")
         capturing = bool(control)
 
-    def direct_attempts(t0, t1):
-        return capture.between(TESTNET, t0, t1) if capturing else None
+    def direct_attempts(address):
+        # Each test has an address of its own, so whatever reaches it, whenever, is that test's.
+        return capture.seen(address + ".") if capturing else None
 
     dead = {"type": "http", "host": ARGS.proxy_host, "port": ARGS.port_dead}
     await APP.cmd("session", session="D", store=stores["D"], proxies=[dict(dead, allowFailover=False)])
     await APP.cmd("session", session="E", store=stores["E"], proxies=[dead])
     t0 = time.time()
-    rd = await APP.cmd("load", session="D", url=f"http://{TESTNET}:{hp}/fo?sid=D", timeout=25)
-    t1 = time.time()
-    re_ = await APP.cmd("load", session="E", url=f"http://{TESTNET}:{hp}/fo?sid=E", timeout=25)
-    t2 = time.time()
-    await asyncio.sleep(1.5)
+    rd = await APP.cmd("load", session="D", url=f"http://{NET_D}:{hp}/fo?sid=D", timeout=25)
+    re_ = await APP.cmd("load", session="E", url=f"http://{NET_E}:{hp}/fo?sid=E", timeout=25)
+    await asyncio.sleep(3)
     d_rows = site_events(lambda e: e["path"] == "/fo" and e["query"].get("sid") == "D")
     e_rows = site_events(lambda e: e["path"] == "/fo" and e["query"].get("sid") == "E")
-    d_direct, e_direct = direct_attempts(t0, t1), direct_attempts(t1, t2)
+    d_direct, e_direct = direct_attempts(NET_D), direct_attempts(NET_E)
     check("q1.dead-proxy-failover-off", ("PASS" if not d_rows and not d_direct else "LEAK") if capturing else "INCONCLUSIVE",
           f"proxy port with nothing on it, allowFailover=false: load ok={rd.get('ok')} ({rd.get('error')}); the site saw "
-          f"{[(e['via'], e['peer']) for e in d_rows]}; direct packets to {TESTNET}: {len(d_direct or [])} {(d_direct or [])[:1]}",
+          f"{[(e['via'], e['peer']) for e in d_rows]}; direct packets to {NET_D}: {len(d_direct or [])} {(d_direct or [])[:1]}",
           core=capturing)
     check("q1.dead-proxy-failover-default", ("LEAK" if e_rows or e_direct else "PASS") if capturing else "INCONCLUSIVE",
           f"same, allowFailover at its default ({info.get('proxyConfigurationDefaultAllowFailover')}): load ok={re_.get('ok')}; "
           f"the site saw {[(e['via'], e['peer']) for e in e_rows]}; direct packets: {len(e_direct or [])}")
     await APP.cmd("session", session="F", store=stores["F"],
                   proxies=[{"type": "http", "host": ARGS.proxy_host, "port": ARGS.port_f, "allowFailover": False}])
-    r1 = await APP.cmd("load", session="F", url=f"http://{TESTNET}:{hp}/whoami?sid=F&k=before", timeout=25)
+    r1 = await APP.cmd("load", session="F", url=f"http://{NET_F}:{hp}/whoami?sid=F&k=before", timeout=25)
     await kill_proxy("F", SERVERS["F"])
     t3 = time.time()
-    r2 = await APP.cmd("load", session="F", url=f"http://{TESTNET}:{hp}/fo2?sid=F", timeout=25)
-    r3 = await APP.cmd("eval", session="F", js=f"return await fetch('http://{TESTNET}:{hp}/fo2?sid=F&k=fetch').then(() => 'loaded', (e) => String(e));")
-    t4 = time.time()
-    await asyncio.sleep(1.5)
+    r2 = await APP.cmd("load", session="F", url=f"http://{NET_F}:{hp}/fo2?sid=F", timeout=25)
+    r3 = await APP.cmd("eval", session="F", js=f"return await fetch('http://{NET_F}:{hp}/fo2?sid=F&k=fetch').then(() => 'loaded', (e) => String(e));")
+    await asyncio.sleep(3)
     f_rows = site_events(lambda e: e["path"] == "/fo2")
     before = site_events(lambda e: e["query"].get("sid") == "F" and e["query"].get("k") == "before")
-    f_direct = direct_attempts(t3, t4)
+    f_direct = direct_attempts(NET_F)
     ok_before = r1.get("ok") and before and all(e["via"] == "F" for e in before)
     check("q1.proxy-dies-mid-session",
           ("PASS" if ok_before and not f_rows and not f_direct else ("LEAK" if f_rows or f_direct else "INCONCLUSIVE"))
           if capturing else "INCONCLUSIVE",
           f"through F first: ok={r1.get('ok')} via {[e['via'] for e in before]}; F stopped with its connections; next load "
           f"ok={r2.get('ok')} ({r2.get('error')}), a fetch {r3.get('value')}; the site saw {[(e['via'], e['peer']) for e in f_rows]}; "
-          f"direct packets to {TESTNET}: {len(f_direct or [])}", core=capturing)
+          f"direct packets to {NET_F}: {len(f_direct or [])} {(f_direct or [])[:1]}", core=capturing)
 
     # 7. Proxy credentials: wrong ones must fail, and never go around the proxy.
     await APP.cmd("session", session="G", store=stores["G"], proxies=[dict(proxy_a, **{"pass": "wrong"})])
@@ -843,6 +842,26 @@ async def scenario_q1(capture):
               f"RTC names left on window {v.get('names')}; STUN binding requests during it: {stun_after - stun_before}")
     except Exception as error:
         check("q1.webrtc-off-by-script", "INCONCLUSIVE", f"stopped: {error!r}")
+
+    # 7c. The macOS fix for dns-prefetch and loopback, with public API only: ProxiedContentRules'
+    # list (a ping-type block, which WebKit 7621+ applies to dns-prefetch; this device's addresses).
+    this_device = [r"^[a-z]+://127\.[0-9]+\.[0-9]+\.[0-9]+[:/]", r"^[a-z]+://0\.0\.0\.0[:/]", r"^[a-z]+://localhost\.?[:/]",
+                   r"^[a-z]+://[a-z0-9.-]*\.localhost\.?[:/]", r"^[a-z]+://\[::1\]", r"^[a-z]+://\[::\]", r"^[a-z]+://\[::ffff:7f"]
+    rules = [{"trigger": {"url-filter": ".*", "resource-type": ["ping"]}, "action": {"type": "block"}}]
+    rules += [{"trigger": {"url-filter": p, "unless-top-url": this_device}, "action": {"type": "block"}} for p in this_device]
+    made_p = await APP.cmd("session", session="P", store=f"persistent:{uuid.uuid4()}", proxies=[proxy_a], contentRules=json.dumps(rules))
+    lp = await APP.cmd("load", session="P", url=f"http://{tok('p', 'P')}.lumentest:{hp}/page?sid=P", timeout=30)
+    pv = (await APP.cmd("eval", session="P", js=f"""
+        const t = (u) => fetch(u, {{ mode: 'no-cors' }}).then(() => 'loaded', (e) => String(e));
+        return {{ lo4: await t('http://127.0.0.1:{hp}/lo?sid=P&k=lo4'), lohost: await t('http://localhost:{hp}/lo?sid=P&k=lohost'),
+                  site: await t('/whoami?sid=P&k=same') }};""")).get("value") or {}
+    await asyncio.sleep(2)
+    p_lo = site_events(lambda e: e["query"].get("sid") == "P" and e["query"].get("k") in ("lo4", "lohost"))
+    p_pf = capture.seen(tok("pf", "P")) if capture.state.startswith("running") else None
+    check("q1.rules-close-prefetch-and-loopback",
+          "PASS" if lp.get("ok") and not p_lo and p_pf == [] else ("LEAK" if p_lo or p_pf else "INCONCLUSIVE"),
+          f"rule list {made_p.get('contentRules')}; page ok={lp.get('ok')}; fetches {pv}; the site got loopback requests {len(p_lo)}; "
+          f"dns-prefetch name in the capture: {p_pf if p_pf is not None else 'no capture'}")
 
     # 8. Leaks the page cannot see: DNS and WebRTC.
     await asyncio.sleep(2)

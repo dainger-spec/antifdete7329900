@@ -23,6 +23,7 @@ window.TelegramWebviewProxy = { postEvent(type, data) { (window.__lumenTgEvents 
 """
 
 TG_HOST = re.compile(r"telegram|t\.me\b|tdesktop|telesco", re.I)
+TG_SOCKET = re.compile(r"^[kz]ws\d")   # Telegram Web's MTProto-over-WebSocket hosts (kws1…, zws2…)
 
 
 def init_data(run):
@@ -45,9 +46,11 @@ async def telegram_web(h, sid, url, wait):
             let regs = null; try { regs = navigator.serviceWorker ? (await navigator.serviceWorker.getRegistrations()).map((r) => r.scope) : 'no navigator.serviceWorker'; } catch (e) { regs = 'error ' + e.message; }
             return { title: document.title, url: location.href, canvases, text, serviceWorker: typeof navigator.serviceWorker, registrations: regs,
                      sharedWorker: typeof SharedWorker, controller: !!(navigator.serviceWorker && navigator.serviceWorker.controller),
-                     localStorageKeys: Object.keys(localStorage).slice(0, 20), qr: !!document.querySelector('.qr-container canvas, .auth-image canvas, [class*="qr"] canvas, canvas[class*="qr"], [class*="qr"] svg') };""")
+                     localStorageKeys: Object.keys(localStorage).slice(0, 20),
+                     signIn: /phone number|Sign in|Log in/i.test(text),
+                     qr: !!document.querySelector('.qr-container canvas, .auth-image canvas, [class*="qr"] canvas, canvas[class*="qr"], [class*="qr"] svg') };""")
         state = r.get("value") if isinstance(r.get("value"), dict) else {"error": r}
-        if state.get("qr"):
+        if state.get("signIn") or state.get("qr"):
             break
     hosts = sorted({(e["proxy"], e.get("host"), e.get("port"), e.get("method")) for e in h.EVENTS
                     if e["kind"] == "proxy" and e.get("t", 0) >= started and e["proxy"] == ("A" if sid == "T1" else "B")})
@@ -69,7 +72,7 @@ async def scenario(h, capture):
     await app.cmd("session", session="T0", store=f"persistent:{uuid.uuid4()}",
                   proxies=[{"type": "http", "host": args.proxy_host, "port": args.port_dead, "allowFailover": False}], **extra)
     loaded, state, _, _ = await telegram_web(h, "T0", "https://web.telegram.org/k/", 10)
-    check("q3.red-dead-proxy", "PASS" if not state.get("qr") else "FAIL",
+    check("q3.red-dead-proxy", "PASS" if not (state.get("signIn") or state.get("qr")) else "FAIL",
           f"the same check behind a dead proxy: load ok={loaded.get('ok')} ({loaded.get('error')}), QR shown: {state.get('qr')} "
           f"— the QR check fails when Telegram is not reached", core=True)
 
@@ -77,9 +80,12 @@ async def scenario(h, capture):
         loaded, state, hosts, started = await telegram_web(h, sid, url, 60)
         own = "A" if sid == "T1" else "B"
         tg_hosts = sorted({x[1] for x in hosts if x[1] and TG_HOST.search(x[1])})
-        check(f"q3.{sid}.telegram-web", "PASS" if loaded.get("ok") and state.get("qr") else "FAIL",
+        sockets = sorted({h for h in tg_hosts if TG_SOCKET.match(h)})
+        keys = [k for k in (state.get("localStorageKeys") or []) if "auth_key" in k]
+        check(f"q3.{sid}.telegram-web", "PASS" if loaded.get("ok") and (state.get("signIn") or state.get("qr")) and sockets else "FAIL",
               f"{url} through proxy {own}: load ok={loaded.get('ok')} ({loaded.get('error')}); title {state.get('title')!r}; "
-              f"QR sign-in shown: {state.get('qr')}; canvases {state.get('canvases')}; text {state.get('text', '')[:120]!r}", core=True)
+              f"sign-in screen: {state.get('signIn')}, QR: {state.get('qr')}; MTProto WebSocket hosts reached through the proxy: {sockets}; "
+              f"auth keys in localStorage: {keys}; text {state.get('text', '')[:100]!r}", core=True)
         check(f"q3.{sid}.hosts", "INFO", f"hosts the session reached through proxy {own}: {tg_hosts} (all: {len(hosts)} connections)")
         check(f"q3.{sid}.workers", "INFO",
               f"navigator.serviceWorker {state.get('serviceWorker')}, registrations {state.get('registrations')}, controller "
@@ -118,7 +124,7 @@ async def scenario(h, capture):
     check("q3.miniapp-bridge", "PASS" if ok else "FAIL",
           f"load ok={loaded.get('ok')} ({loaded.get('error')}); SDK through proxy A from {sdk_via}; WebApp.platform {v.get('platform')!r}, "
           f"version {v.get('version')}, user {v.get('user')}, events the host app received {events}, viewport after the host's event "
-          f"{v.get('viewportHeight')} (initData here is unsigned: a bot's server would refuse it)", core=True)
+          f"{v.get('viewportHeight')} (initData here is unsigned: a bot's server would refuse it); eval error: {r.get('error')}", core=True)
 
     # Red: the same mini app without the bridge — the SDK must not say iOS.
     await app.cmd("session", session="T3r", store=f"persistent:{uuid.uuid4()}", proxies=[proxy_a])
@@ -137,9 +143,13 @@ async def scenario(h, capture):
 
     # App-Bound Domains: what a script can do on a site that is not bound (bound build only).
     if bound:
-        await app.cmd("session", session="T5", store=f"persistent:{uuid.uuid4()}",
-                      userScripts=[{"source": "window.__lumenUserScript = 1;", "mainFrameOnly": True}])
-        await app.cmd("load", session="T5", url=f"http://127.0.0.1:{args.http_port}/blank?bound=1", timeout=30)
-        r = await app.cmd("eval", session="T5", js="return { userScript: typeof window.__lumenUserScript };")
-        check("q3.bound-elsewhere", "INFO",
-              f"bound build, a page outside WKAppBoundDomains: the user script ran: {r.get('value')}; evaluate: ok={r.get('ok')} {r.get('error')}")
+        for label, url in (("loopback", f"http://127.0.0.1:{args.http_port}/blank?bound=1"), ("t.me", "https://t.me/durov"),
+                           ("web.telegram.org", "https://web.telegram.org/k/")):
+            sid = "T5" + label.replace(".", "")
+            await app.cmd("session", session=sid, store=f"persistent:{uuid.uuid4()}", proxies=[proxy_a],
+                          userScripts=[{"source": "window.__lumenUserScript = 1;", "mainFrameOnly": True}])
+            lr = await app.cmd("load", session=sid, url=url, timeout=40)
+            r = await app.cmd("eval", session=sid, js="return { userScript: typeof window.__lumenUserScript, href: location.href };")
+            check(f"q3.bound-scripts-{label}", "INFO",
+                  f"bound build, {url} (load ok={lr.get('ok')}): user script ran: {(r.get('value') or {}).get('userScript')}; "
+                  f"callAsyncJavaScript ok={r.get('ok')} error={r.get('error')}")

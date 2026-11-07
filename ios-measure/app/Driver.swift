@@ -150,7 +150,7 @@ final class Driver: NSObject {
         case "info":
             return Self.info()
         case "session":
-            return try makeSession(c)
+            return try await makeSession(c)
         case "load":
             let session = try find(c)
             return await session.load(c["url"] as? String ?? "about:blank", timeout: c["timeout"] as? Double ?? 20)
@@ -197,7 +197,7 @@ final class Driver: NSObject {
     private var stores: [String: WKWebsiteDataStore] = [:]
 
     @MainActor
-    private func makeSession(_ c: [String: Any]) throws -> [String: Any] {
+    private func makeSession(_ c: [String: Any]) async throws -> [String: Any] {
         guard let id = c["session"] as? String, let container else { throw DriverError.message("no session id") }
         sessions.removeValue(forKey: id)?.close()
         var notes: [String: Any] = [:]
@@ -237,6 +237,20 @@ final class Driver: NSObject {
             let world: WKContentWorld = (script["world"] as? String) == "isolated" ? .defaultClient : .page
             controller.addUserScript(WKUserScript(source: source, injectionTime: atEnd ? .atDocumentEnd : .atDocumentStart,
                                                   forMainFrameOnly: mainOnly, in: world))
+        }
+        // WebKit's content blocker (public API): what the macOS profile adds with a proxy
+        // (ProxiedContentRules: ping loads, which carry dns-prefetch, and this device's own addresses).
+        if let rules = c["contentRules"] as? String {
+            let ruleStore: WKContentRuleListStore? = WKContentRuleListStore.default()
+            if let ruleStore {
+                do {
+                    let list: WKContentRuleList? = try await ruleStore.compileContentRuleList(
+                        forIdentifier: "lumen-\(id)-\(UUID().uuidString)", encodedContentRuleList: rules)
+                    if let list { controller.add(list); notes["contentRules"] = "added" } else { notes["contentRules"] = "nil" }
+                } catch {
+                    notes["contentRules"] = "compile failed: \(error)"
+                }
+            }
         }
         configuration.userContentController = controller
 
@@ -400,6 +414,7 @@ final class Session: NSObject, WKNavigationDelegate, WKUIDelegate {
     private func waitForNavigation(timeout: Double, start: () -> Void) async -> [String: Any] {
         let timer = Task { @MainActor in
             try? await Task.sleep(nanoseconds: UInt64(timeout * 1e9))
+            if self.pending != nil { self.webView?.stopLoading() }   // a timed-out load must not go on in the background
             self.finish(["ok": false, "error": "timeout after \(timeout)s"])
         }
         let result = await withCheckedContinuation { (continuation: CheckedContinuation<[String: Any], Never>) in

@@ -34,6 +34,11 @@ function fpNoisePixels(data, seed) {
 
 function patchFingerprint(w, fp) {
   if (!fp) return;
+  // A frame is reached twice: by its own user script and by its parent's hookChildWindows. The
+  // registry is shared by the page's frames, so a wrapper already there means this realm is done.
+  const H0 = w.HTMLCanvasElement || w.OffscreenCanvas;
+  if (H0 && registry.has(H0.prototype[w.HTMLCanvasElement ? 'toDataURL' : 'convertToBlob'])) return;
+  if (!H0 && w.WorkerNavigator && registry.has(Object.getOwnPropertyDescriptor(w.WorkerNavigator.prototype, 'hardwareConcurrency').get)) return;
   const seed = fpHash(String(fp.seed || ''), 7);
   const apply = Reflect.apply;
   if (fp.canvas === 'noise') {
@@ -43,7 +48,8 @@ function patchFingerprint(w, fp) {
     for (const [Ctx, nativeGet] of [[C2D, nativeGet2D], [OC2D, nativeGetOff]]) {
       if (!Ctx || !nativeGet) continue;
       define(Ctx.prototype, 'getImageData', method('getImageData', 4, function (...args) {
-        const image = apply(nativeGet, this, args);
+        let image;
+        try { image = apply(nativeGet, this, args); } catch (e) { return apply(nativeGet, this, args); } // rethrown by the engine, from a tail call
         fpNoisePixels(image.data, seed);
         return image;
       }));
@@ -97,7 +103,8 @@ function patchFingerprint(w, fp) {
       if (!G) continue;
       const nativeParameter = G.prototype.getParameter;
       define(G.prototype, 'getParameter', method('getParameter', 1, function (...args) {
-        const value = apply(nativeParameter, this, args); // the receiver and argument checks stay native
+        let value;
+        try { value = apply(nativeParameter, this, args); } catch (e) { return apply(nativeParameter, this, args); }
         if (args[0] === 0x9245 && fp.webgl.vendor) return fp.webgl.vendor;     // UNMASKED_VENDOR_WEBGL
         if (args[0] === 0x9246 && fp.webgl.renderer) return fp.webgl.renderer; // UNMASKED_RENDERER_WEBGL
         return value;
@@ -119,7 +126,10 @@ function patchFingerprint(w, fp) {
       }
       return data;
     };
-    define(AB.prototype, 'getChannelData', method('getChannelData', 1, function (...args) { return channelData(this, args[0]); }));
+    define(AB.prototype, 'getChannelData', method('getChannelData', 1, function (...args) {
+      try { apply(nativeChannel, this, args); } catch (e) { return apply(nativeChannel, this, args); }
+      return channelData(this, args[0]);
+    }));
     if (nativeCopy) {
       define(AB.prototype, 'copyFromChannel', method('copyFromChannel', 2, function (...args) {
         try { channelData(this, args[1] | 0); } catch (e) {}
@@ -135,7 +145,10 @@ function patchFingerprint(w, fp) {
       const nativeCores = descriptor.get;
       Object.defineProperty(N.prototype, 'hardwareConcurrency', {
         configurable: descriptor.configurable, enumerable: descriptor.enumerable, set: descriptor.set,
-        get: getter('hardwareConcurrency', function () { apply(nativeCores, this, []); return fp.cores; }),
+        get: getter('hardwareConcurrency', function () {
+          try { apply(nativeCores, this, []); } catch (e) { return apply(nativeCores, this, []); }
+          return fp.cores;
+        }),
       });
     }
   }

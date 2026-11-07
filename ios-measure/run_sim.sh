@@ -17,6 +17,15 @@ say() { echo "$@" | tee -a "$LOG"; }
 
 say "== $(sw_vers -productName) $(sw_vers -productVersion) ($(sw_vers -buildVersion)), $(uname -m)"
 say "== $(xcodebuild -version | tr '\n' ' ')"
+# Older iOS runtimes this image does not carry, downloaded from Apple (INSTALL_RUNTIMES="17.5 16.4").
+for v in ${INSTALL_RUNTIMES:-}; do
+    T0=$(date +%s)
+    if xcodebuild -downloadPlatform iOS -buildVersion "$v" >>"$OUT/runtime-download.txt" 2>&1; then
+        say "downloaded the iOS $v runtime in $(( $(date +%s) - T0 ))s"
+    else
+        say "could not download the iOS $v runtime: $(tail -2 "$OUT/runtime-download.txt" | tr '\n' ' ')"
+    fi
+done
 xcrun simctl list runtimes | tee -a "$LOG"
 
 # lo0 aliases: proxy A's and B's upstream connections come from addresses of their own.

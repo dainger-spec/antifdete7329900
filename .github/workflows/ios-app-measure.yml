@@ -43,10 +43,12 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - name: Measure
+        env:
+          INSTALL_RUNTIMES: ${{ matrix.install }}
         run: ios-measure/run_sim.sh "build/ios-measure" "${{ matrix.scenario }}" "${{ matrix.runtimes }}"
       - uses: actions/upload-artifact@v4
         if: always()
