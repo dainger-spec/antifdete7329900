@@ -38,19 +38,23 @@ else
 fi
 
 # ---- 2. A simulated iPhone: the reference's screen (iPhone 17 Pro, else 16 Pro), on the iOS asked for.
-RUNTIME="$(xcrun simctl list -j runtimes | python3 -c '
+read -r RUNTIME_ID RUNTIME_VERSION TYPE <<<"$(xcrun simctl list -j | python3 -c '
 import json, sys
 want = sys.argv[1]
-rs = [r for r in json.load(sys.stdin)["runtimes"] if r.get("platform", "iOS") == "iOS" and r.get("isAvailable", True)]
-rs.sort(key=lambda r: tuple(int(x) for x in r["version"].split(".")))
-pick = rs[-1] if want == "newest" else next((r for r in rs if r["version"] == want), None)
-print(pick["identifier"] + " " + pick["version"] if pick else "")' "$WANT")"
-[[ -n "$RUNTIME" ]] || { say "no iOS runtime $WANT"; exit 2; }
-read -r RUNTIME_ID RUNTIME_VERSION <<<"$RUNTIME"
-TYPE="$(xcrun simctl list -j devicetypes | python3 -c '
-import json, sys
-names = {t["name"]: t["identifier"] for t in json.load(sys.stdin)["devicetypes"]}
-print(next((names[n] for n in ("iPhone 17 Pro", "iPhone 16 Pro", "iPhone 15 Pro") if n in names), ""))')"
+data = json.load(sys.stdin)
+names = {t["identifier"]: t["name"] for t in data["devicetypes"]}
+rs = [r for r in data["runtimes"] if r.get("platform", "iOS") == "iOS" and r.get("isAvailable", True)]
+rs.sort(key=lambda r: tuple(int(x) for x in r["version"].split(".")), reverse=True)
+if want != "newest":
+    rs = [r for r in rs if r["version"] == want or r["version"].startswith(want + ".")]
+for r in rs:
+    supported = {t["identifier"] for t in r.get("supportedDeviceTypes", [])} or set(names)
+    for name in ("iPhone 17 Pro", "iPhone 16 Pro", "iPhone 15 Pro"):
+        hit = [i for i in supported if names.get(i) == name]
+        if hit:
+            print(r["identifier"], r["version"], hit[0]); sys.exit()
+' "$WANT")"
+[[ -n "${TYPE:-}" ]] || { say "no iOS runtime $WANT with an iPhone 15/16/17 Pro"; exit 2; }
 UDID="$(xcrun simctl create "Lumen CI" "$TYPE" "$RUNTIME_ID")" || { say "cannot create a simulator"; exit 2; }
 xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b >/dev/null 2>&1
 say "== simulator $UDID: $TYPE, iOS $RUNTIME_VERSION"
