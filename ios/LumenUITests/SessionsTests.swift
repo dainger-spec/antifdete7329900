@@ -34,7 +34,7 @@ final class SessionsTests: LumenUITestCase {
 
         // Opening a session is what "last opened" shows.
         sessionCard("Реклама").tap()
-        wait(app.staticTexts["browserPlaceholder"], "the session opens")
+        wait(app.textFields["addressBar"], "the session opens in its browser")
         app.navigationBars.buttons.element(boundBy: 0).tap()
         wait(sessionCard("Реклама"), "back to the list")
         XCTAssertTrue(sessionCard("Реклама").label.contains("Открывали"), "the card says it was opened: \(sessionCard("Реклама").label)")

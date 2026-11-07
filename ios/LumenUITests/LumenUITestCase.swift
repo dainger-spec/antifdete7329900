@@ -18,9 +18,9 @@ class LumenUITestCase: XCTestCase {
         if let faults = ProcessInfo.processInfo.environment["LUMEN_FAULTS"], !faults.isEmpty {
             app.launchEnvironment["LUMEN_FAULTS"] = faults
         }
-        for (key, value) in ProcessInfo.processInfo.environment where key.hasPrefix("LUMEN_TEST_") {
-            app.launchEnvironment[key] = value
-        }
+        // The proxy check asks the testbed's geolocation service and STUN server (through the proxy).
+        app.launchEnvironment["LUMEN_TEST_GEO_URL"] = "http://geo.lumentest:28380/geo.json"
+        app.launchEnvironment["LUMEN_TEST_STUN"] = "stun.lumentest:3478"
         app.launch()
         self.app = app
         XCTAssertTrue(app.navigationBars["Сессии"].waitForExistence(timeout: 30), "the sessions list comes up")
@@ -65,6 +65,106 @@ class LumenUITestCase: XCTestCase {
             field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count + 2))
         }
         field.typeText(text)
+    }
+
+    // MARK: Browser
+
+    /// The testbed's site on this Mac (ios/testbed/testbed.py), reached directly.
+    let site = "127.0.0.1:28380"
+
+    func openSession(_ name: String) {
+        wait(sessionCard(name), "the session \(name) is in the list").tap()
+        wait(app.textFields["addressBar"], "the session \(name) opens in its browser")
+    }
+
+    func backToList() {
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        wait(app.navigationBars["Сессии"], "back on the session list")
+    }
+
+    /// Types into the address bar and goes.
+    func go(_ text: String) {
+        let bar = wait(app.textFields["addressBar"], "the address bar is there")
+        replaceText(bar, with: text + "\n")
+    }
+
+    /// Text the page shows (a static text of the web view whose label contains `text`).
+    @discardableResult
+    func page(_ text: String, timeout: TimeInterval = 20, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
+        let element = app.webViews.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+        XCTAssertTrue(element.waitForExistence(timeout: timeout), "the page shows \"\(text)\"", file: file, line: line)
+        return element
+    }
+
+    /// A number the page shows after `prefix` ("cache: 3"), once the page's script has put it there.
+    func pageNumber(_ prefix: String, file: StaticString = #filePath, line: UInt = #line) -> String {
+        let element = app.webViews.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "\(prefix)[0-9]+")).firstMatch
+        XCTAssertTrue(element.waitForExistence(timeout: 20), "the page shows \(prefix)<number>", file: file, line: line)
+        return element.label
+    }
+
+    /// The page's line that starts with `prefix` once its script has filled it ("canvas: 1a2b3c4d").
+    func pageLine(_ prefix: String, file: StaticString = #filePath, line: UInt = #line) -> String {
+        let predicate = NSPredicate(format: "label BEGINSWITH %@ AND NOT (label ENDSWITH %@)", prefix, "…")
+        let element = app.webViews.staticTexts.matching(predicate).firstMatch
+        XCTAssertTrue(element.waitForExistence(timeout: 20), "the page shows \(prefix)…", file: file, line: line)
+        return element.label
+    }
+
+    /// What the address bar shows.
+    var address: String { (app.textFields["addressBar"].value as? String) ?? "" }
+
+    func waitForAddress(containing text: String, timeout: TimeInterval = 20, file: StaticString = #filePath, line: UInt = #line) {
+        let predicate = NSPredicate(format: "value CONTAINS %@", text)
+        let result = XCTWaiter.wait(for: [expectation(for: predicate, evaluatedWith: app.textFields["addressBar"])], timeout: timeout)
+        XCTAssertEqual(result, .completed, "the address bar shows \(text) (it shows \(address))", file: file, line: line)
+    }
+
+    func openTabs() {
+        app.buttons["tabsButton"].tap()
+        wait(app.buttons["newTab"], "the tabs open as cards")
+    }
+
+    func historyLabels() -> [String] {
+        app.buttons["historyButton"].tap()
+        wait(app.navigationBars["История"], "the history opens")
+        let labels = app.buttons.matching(identifier: "historyRow").allElementsBoundByIndex.map(\.label)
+        return labels
+    }
+
+    // MARK: Proxies
+
+    func proxyRow(_ name: String) -> XCUIElement { app.descendants(matching: .any)["proxy-\(name)"] }
+
+    func addProxy(name: String, kind: String, host: String = "127.0.0.1", port: String, user: String, password: String) {
+        app.buttons["newProxy"].tap()
+        let field = wait(app.textFields["proxyName"], "the new proxy form opens")
+        field.tap()
+        field.typeText(name)
+        app.segmentedControls["proxyKind"].buttons[kind].tap()
+        app.textFields["proxyHost"].tap()
+        app.textFields["proxyHost"].typeText(host)
+        app.textFields["proxyPort"].tap()
+        app.textFields["proxyPort"].typeText(port)
+        app.textFields["proxyUser"].tap()
+        app.textFields["proxyUser"].typeText(user)
+        app.secureTextFields["proxyPassword"].tap()
+        app.secureTextFields["proxyPassword"].typeText(password)
+        app.buttons["saveProxy"].tap()
+        wait(proxyRow(name), "the proxy \(name) is in the list")
+    }
+
+    /// Waits until a proxy's row says `text` (its check is done).
+    func waitRow(_ name: String, says text: String, timeout: TimeInterval = 30, file: StaticString = #filePath, line: UInt = #line) {
+        let predicate = NSPredicate(format: "label CONTAINS %@", text)
+        let result = XCTWaiter.wait(for: [expectation(for: predicate, evaluatedWith: proxyRow(name))], timeout: timeout)
+        XCTAssertEqual(result, .completed, "the row of \(name) says \(text): \(proxyRow(name).label)", file: file, line: line)
+    }
+
+    func chooseProxy(_ name: String) {
+        app.buttons["settingsButton"].tap()
+        wait(app.buttons[name], "the settings list the proxy \(name)").tap()
+        app.buttons["settingsDone"].tap()
     }
 
     // MARK: Sessions

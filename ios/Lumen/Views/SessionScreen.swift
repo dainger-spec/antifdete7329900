@@ -9,7 +9,7 @@ struct SessionScreen: View {
     var body: some View {
         Group {
             if let session = model.session(sessionID) {
-                BrowserView(session: session)
+                BrowserView(runtime: SessionRuntimes.shared.runtime(for: session, model: model))
             } else {
                 ContentUnavailableView("Сессия удалена", systemImage: "trash")
             }
