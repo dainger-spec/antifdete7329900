@@ -1227,15 +1227,19 @@ struct ProfileDetails: Equatable {
         if let zone = configuration.timeZoneIdentifier {
             timeZone = zone
         } else if configuration.needsProxyLocation {
-            timeZone = configuration.rememberedProxyLocation.map { String(format: L("inspector.timeZone.fromProxy"), $0.timeZoneIdentifier) }
-                ?? L("inspector.fromProxy")
+            let direct = configuration.proxy == nil
+            timeZone = configuration.rememberedProxyLocation.map {
+                String(format: L(direct ? "inspector.timeZone.fromExit" : "inspector.timeZone.fromProxy"), $0.timeZoneIdentifier)
+            } ?? L(direct ? "inspector.fromExit" : "inspector.fromProxy")
         } else {
             timeZone = L("inspector.asThisMac")
         }
         webRTCChoice = configuration.webRTCPolicy
         // Nil: the connection's — its proxy's country when the profile follows it — else this Mac's.
         languages = configuration.languageOverride
-            ?? (configuration.needsProxyLocation ? L("inspector.languages.fromProxy") : L("inspector.asThisMac"))
+            ?? (configuration.needsProxyLocation
+                ? L(configuration.proxy == nil ? "inspector.languages.fromExit" : "inspector.languages.fromProxy")
+                : L("inspector.asThisMac"))
         window = configuration.windowSize.map { "\($0.frame.width) × \($0.frame.height)" } ?? L("editor.window.app")
         syncsCookies = configuration.syncsCookies
         historyPolicy = configuration.historyPolicy

@@ -27,6 +27,9 @@ env:
   # And no ad hoc signature opens the data-protection keychain, even with the app group (run 646):
   # the keychain between profiles is shown on the build signed for release (release.sh's release
   # check), here only the entitlements are.
+  # No geolocation service is asked unless a check sets one (ProxyGeoLookup.services): a profile
+  # with no proxy follows where it exits, and the runners keep GMT while their address is elsewhere.
+  PB_GEO_SERVICES_OFF: "1"
   # The browser's own words for an invalid form field follow the interface's language (the
   # menus'), and a page reads them: known since 7 November, the lead's choice pending (SelfTest's
   # "languages per profile").

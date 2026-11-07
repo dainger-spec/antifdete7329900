@@ -425,6 +425,7 @@ struct ProfileListView: View {
                     if country == nil { exitNote = ProfileRowItem.unknownCountryNote(check: check, lookupFailed: lookupFailed) }
                 } else {
                     exit = .direct
+                    if details.exitCountryCode == nil, lookupFailed { exitNote = L("inspector.exit.directUnknown") }
                 }
             }
             return ProfileRowItem(
@@ -446,7 +447,8 @@ struct ProfileListView: View {
                            $0.proxy.displayAddress)
                 },
                 deviceSymbol: details.flatMap { ProfileRowItem.deviceSymbol($0.deviceGeneration) },
-                exportOnly: model.license.isExportOnly(profile.id))
+                exportOnly: model.license.isExportOnly(profile.id),
+                directCountry: details?.proxyEndpoint == nil ? details?.exitCountryCode : nil)
         }
     }
 
@@ -564,6 +566,9 @@ struct ProfileRowItem: Identifiable {
     /// The license lets it open only for export (CONTRACT §8.4, the owner's decision of 1 November):
     /// the row says "Export only" where a stopped profile's state is; an open one keeps working.
     var exportOnly = false
+    /// A profile with no proxy: the country its own connection exits in, once a launch looked it up
+    /// (the lead, 7 November: a direct connection is an exit like a proxy's).
+    var directCountry: String?
 
     var isRunning: Bool { activity == .running }
     /// Grouped under "Need attention": its last launch failed, or its settings cannot be read (R1).
@@ -1628,7 +1633,7 @@ private struct ProfileRow: View {
 
     private var exitCell: some View {
         HStack(spacing: 6) {
-            ExitLabel(exit: row.exit, note: row.exitNote)
+            ExitLabel(exit: row.exit, note: row.exitNote, directCountry: row.directCountry)
             if row.exitUnconfirmed {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 11))
@@ -1830,10 +1835,27 @@ struct ExitLabel: View {
     var showsFlag = true
     /// Why the country is not known, when it is not (`ProfileRowItem.unknownCountryNote`).
     var note: String?
+    /// With no proxy: the country the profile's own connection exits in, when a launch found it.
+    var directCountry: String?
 
     var body: some View {
         HStack(spacing: 8) {
             switch exit {
+            case .direct where directCountry != nil:
+                let code = directCountry ?? ""
+                if showsFlag {
+                    CountryFlag(code: code, size: flagSize)
+                        .accessibilityHidden(true)
+                }
+                ViewThatFits(in: .horizontal) {
+                    Text(CountryNames.name(for: code))
+                    Text(verbatim: code.uppercased())
+                }
+                .font(.lumenBody)
+                .foregroundStyle(Theme.textPrimary)
+                .help(L("profiles.exit.directIn"))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(CountryNames.name(for: code) + ", " + L("profiles.exit.directIn"))
             case .direct:
                 Image(systemName: "arrow.right")
                     .font(.system(size: 11, weight: .medium))

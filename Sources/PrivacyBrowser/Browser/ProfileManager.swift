@@ -271,7 +271,7 @@ final class ProfileManager: ObservableObject {
             // that leaves the remembered location, and the profile's process looks again and says
             // when the country changed.
             var foundNow = false
-            if stored.needsProxyLocation, (try? stored.proxy?.validate()) != nil {
+            if stored.needsProxyLocation, stored.proxy == nil || (try? stored.proxy?.validate()) != nil {
                 let lookup = Task { await self.lookUpProxyLocation(stored) }
                 if let result = await Self.value(of: lookup, within: Self.firstLookupWait), result.location != nil {
                     proxyLookupFinished(result, for: id, name: summary.name, stored: stored)
@@ -808,8 +808,8 @@ final class ProfileManager: ObservableObject {
     }
 
     private func lookUpProxyLocation(_ configuration: ProfileConfiguration) async -> ProxyGeoLookup.Result {
-        guard configuration.needsProxyLookup, let proxy = configuration.proxy else { return ProxyGeoLookup.Result() }
-        let result = await ProxyGeoLookup.lookUp(proxy: proxy,
+        guard configuration.needsProxyLookup else { return ProxyGeoLookup.Result() }
+        let result = await ProxyGeoLookup.lookUp(proxy: configuration.proxy,
                                                  userAgent: configuration.userAgent(hostSafariVersion: HostSafari.version))
         if result.location == nil {
             log.notice("Could not look up where the profile's proxy exits; using \(configuration.lastProxyLocation == nil ? "the system time zone" : "the last known location", privacy: .public)")
@@ -822,12 +822,14 @@ final class ProfileManager: ObservableObject {
     func noteProxyLocationUnknown(_ id: UUID, name: String, last: ProxyLocation?) {
         guard !proxyLocationUnknown.contains(id) else { return }
         proxyLocationUnknown.insert(id)
-        log.notice("No geolocation service answered through the proxy of \(id.uuidString, privacy: .public)")
+        // A profile with no proxy is told apart: it has no proxy to blame (the lead, 7 November).
+        let direct = (try? repository.loadConfiguration(id))?.proxy == nil
+        log.notice("No geolocation service answered for \(id.uuidString, privacy: .public)\(direct ? " (direct)" : " (through its proxy)")")
         if let last {
-            onError?(String(format: L("launch.proxyLocationUnknown.last"), name,
+            onError?(String(format: L(direct ? "launch.directLocationUnknown.last" : "launch.proxyLocationUnknown.last"), name,
                             last.countryCode.map(CountryNames.name(for:)) ?? last.timeZoneIdentifier))
         } else {
-            onError?(String(format: L("launch.proxyLocationUnknown.mac"), name))
+            onError?(String(format: L(direct ? "launch.directLocationUnknown.mac" : "launch.proxyLocationUnknown.mac"), name))
         }
     }
 
@@ -859,7 +861,7 @@ final class ProfileManager: ObservableObject {
         // Not when, since the launch, the warning was turned off or the proxy removed or replaced
         // (a late answer): it is about a proxy the profile no longer asks about.
         let current = try? repository.loadConfiguration(id)
-        let stillAsked = current.map { $0.warnOnProxyIPChange && $0.proxy.map(ProxyLocation.endpoint(of:)) == found.proxyEndpoint } ?? true
+        let stillAsked = current.map { $0.warnOnProxyIPChange && $0.proxy.map(ProxyLocation.endpoint(of:)) == found.proxyEndpoint } ?? (stored.proxy != nil)
         if stored.warnOnProxyIPChange, stillAsked, let change = found.exitIPChange(since: stored.lastProxyLocation) {
             log.notice("The proxy of \(id.uuidString, privacy: .public) exits from another IP than at the previous launch")
             onError?(String(format: L("launch.proxyIPChanged"), name, change.old, change.new))
@@ -902,8 +904,10 @@ final class ProfileManager: ObservableObject {
         do {
             var current = try repository.loadConfiguration(id)
             var found = found
-            if !current.warnOnProxyIPChange { found.exitIP = nil }
-            guard current.proxy.map(ProxyLocation.endpoint(of:)) == found.proxyEndpoint,
+            // A direct connection's address is kept as its country is (it is shown); a proxy's only
+            // while the warning that asks for it is on.
+            if current.proxy != nil, !current.warnOnProxyIPChange { found.exitIP = nil }
+            guard ProxyLocation.exitEndpoint(of: current.proxy) == found.proxyEndpoint,
                   !found.isSameLocation(as: current.lastProxyLocation) else { return }
             current.lastProxyLocation = found
             try repository.saveConfiguration(current, for: id)

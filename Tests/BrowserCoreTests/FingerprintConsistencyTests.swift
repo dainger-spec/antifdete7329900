@@ -151,10 +151,11 @@ final class ProxyLocationTests: XCTestCase {
         config.proxy = ProxySettings(kind: .socks5, host: "198.51.100.1", port: 1080)
         XCTAssertNil(config.proxyLocation(lookedUp: nil))
 
-        // An explicit time zone is kept; no proxy or matching off: nothing is looked up.
+        // An explicit time zone is kept; matching off: nothing is looked up. A direct connection is
+        // looked up as a proxy is (testADirectConnectionIsAnExitLikeAProxy).
         config.timeZoneIdentifier = "America/New_York"
         XCTAssertEqual(config.applying(berlin).timeZoneIdentifier, "America/New_York")
-        XCTAssertFalse(ProfileConfiguration().needsProxyLocation)
+        XCTAssertFalse(ProfileConfiguration(matchProxyLocation: false).needsProxyLocation)
         XCTAssertFalse(ProfileConfiguration(proxy: proxy, matchProxyLocation: false).needsProxyLocation)
         XCTAssertNil(ProfileConfiguration(proxy: proxy, matchProxyLocation: false).applying(berlin).timeZoneIdentifier)
     }
@@ -191,12 +192,45 @@ final class ProxyLocationTests: XCTestCase {
         XCTAssertTrue(ProfileConfiguration(proxy: proxy).needsProxyLookup)
         XCTAssertFalse(ProfileConfiguration(proxy: proxy, matchProxyLocation: false).needsProxyLookup)
         XCTAssertTrue(ProfileConfiguration(proxy: proxy, matchProxyLocation: false, warnOnProxyIPChange: true).needsProxyLookup)
-        XCTAssertFalse(ProfileConfiguration(warnOnProxyIPChange: true).needsProxyLookup, "no proxy")
+        XCTAssertFalse(ProfileConfiguration(matchProxyLocation: false, warnOnProxyIPChange: true).needsProxyLookup,
+                       "no proxy: the IP warning is a proxy's")
         let remembered = ProxyLocation(timeZoneIdentifier: "Europe/Berlin", countryCode: "DE", proxyEndpoint: ProxyLocation.endpoint(of: proxy))
         var config = ProfileConfiguration(proxy: proxy, lastProxyLocation: remembered)
         XCTAssertEqual(config.rememberedProxyLocation, remembered)
         config.proxy = ProxySettings(kind: .socks5, host: "198.51.100.1", port: 1080)
         XCTAssertNil(config.rememberedProxyLocation, "remembered for another proxy")
+    }
+
+    /// The lead, 7 November: a profile with no proxy learns where it exits as one with a proxy does —
+    /// looked up at launch, remembered between launches with its address, its time zone and language
+    /// following that country — and a proxy's location is never taken for it, nor its for a proxy.
+    func testADirectConnectionIsAnExitLikeAProxy() {
+        XCTAssertEqual(ProxyLocation.exitEndpoint(of: nil), ProxyLocation.directEndpoint)
+        let direct = ProfileConfiguration()
+        XCTAssertTrue(direct.needsProxyLocation)
+        XCTAssertTrue(direct.needsProxyLookup)
+        let helsinki = ProxyLocation(timeZoneIdentifier: "Europe/Helsinki", countryCode: "FI",
+                                     proxyEndpoint: ProxyLocation.directEndpoint, exitIP: "203.0.113.9")
+        XCTAssertEqual(direct.proxyLocation(lookedUp: helsinki), helsinki)
+        XCTAssertEqual(direct.applying(helsinki).timeZoneIdentifier, "Europe/Helsinki")
+        XCTAssertEqual(direct.webLanguage(for: helsinki), "fi-FI")
+        var remembered = ProfileConfiguration(lastProxyLocation: helsinki)
+        XCTAssertEqual(remembered.rememberedProxyLocation, helsinki)
+        XCTAssertEqual(remembered.proxyLocation(lookedUp: nil), helsinki, "lookup failed: the last one")
+        // Its address is kept, as its country is, warning or not.
+        XCTAssertEqual(remembered.keepingStoredState(of: remembered).lastProxyLocation?.exitIP, "203.0.113.9")
+        // A proxy added: the direct location is not that proxy's, and the other way round.
+        let proxy = ProxySettings(kind: .socks5, host: "203.0.113.7", port: 1080)
+        remembered.proxy = proxy
+        XCTAssertNil(remembered.rememberedProxyLocation)
+        XCTAssertNil(remembered.keepingStoredState(of: remembered).lastProxyLocation?.exitIP)
+        let berlin = ProxyLocation(timeZoneIdentifier: "Europe/Berlin", countryCode: "DE", proxyEndpoint: ProxyLocation.endpoint(of: proxy))
+        XCTAssertNil(ProfileConfiguration(lastProxyLocation: berlin).rememberedProxyLocation, "remembered for a proxy")
+        // Matching off: this Mac's own time zone and languages, nothing looked up.
+        let off = ProfileConfiguration(matchProxyLocation: false, lastProxyLocation: helsinki)
+        XCTAssertFalse(off.needsProxyLookup)
+        XCTAssertNil(off.proxyLocation(lookedUp: helsinki))
+        XCTAssertNil(off.applying(helsinki).timeZoneIdentifier)
     }
 
     func testRememberedLocationBelongsToTheProxysCredentialsToo() {

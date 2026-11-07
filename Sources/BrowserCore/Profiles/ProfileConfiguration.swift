@@ -262,15 +262,16 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     }
 
     /// The profile runs in its proxy's time zone (`matchProxyLocation`).
-    public var needsProxyLocation: Bool { matchProxyLocation && proxy != nil }
+    /// With no proxy too: a direct connection's exit is looked up as a proxy's is (the lead, 7 November).
+    public var needsProxyLocation: Bool { matchProxyLocation }
 
     /// Launching asks a geolocation service through the proxy: for its time zone, or for its exit
     /// IP (`warnOnProxyIPChange`). The same request also finds a proxy that wants credentials.
-    public var needsProxyLookup: Bool { proxy != nil && (matchProxyLocation || warnOnProxyIPChange) }
+    public var needsProxyLookup: Bool { matchProxyLocation || (proxy != nil && warnOnProxyIPChange) }
 
     /// The location remembered for the current proxy, if any.
     public var rememberedProxyLocation: ProxyLocation? {
-        guard let proxy, let cached = lastProxyLocation, cached.proxyEndpoint == ProxyLocation.endpoint(of: proxy) else { return nil }
+        guard let cached = lastProxyLocation, cached.proxyEndpoint == ProxyLocation.exitEndpoint(of: proxy) else { return nil }
         return cached
     }
 
@@ -284,7 +285,10 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
             edited.lastProxyLocation = stored.lastProxyLocation
             edited.passwordNeverSaveSites = stored.passwordNeverSaveSites
         }
-        if !edited.warnOnProxyIPChange || edited.proxy == nil { edited.lastProxyLocation?.exitIP = nil }
+        // The exit IP stays with the location of the exit the profile has now: a direct connection's
+        // always (it is shown, like the country), a proxy's while the warning that asks for it is on.
+        let current = edited.lastProxyLocation?.proxyEndpoint == ProxyLocation.exitEndpoint(of: edited.proxy)
+        if !current || (edited.proxy != nil && !edited.warnOnProxyIPChange) { edited.lastProxyLocation?.exitIP = nil }
         return edited
     }
 
@@ -313,8 +317,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
 
     /// This launch's lookup, or else the last location found for the same proxy.
     public func proxyLocation(lookedUp: ProxyLocation?) -> ProxyLocation? {
-        guard needsProxyLocation, let proxy else { return nil }
-        let endpoint = ProxyLocation.endpoint(of: proxy)
+        guard needsProxyLocation else { return nil }
+        let endpoint = ProxyLocation.exitEndpoint(of: proxy)
         if let lookedUp, lookedUp.proxyEndpoint == endpoint { return lookedUp }
         if let cached = lastProxyLocation, cached.proxyEndpoint == endpoint { return cached }
         return nil

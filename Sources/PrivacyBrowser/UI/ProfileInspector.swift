@@ -163,6 +163,14 @@ struct ProfileInspectorView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.bottom, 4)
             }
+            if case .direct = row.exit, row.directCountry == nil {
+                // No country for a profile with no proxy: said why, never left empty.
+                Text(row.exitNote ?? L("inspector.exit.directNotYet"))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 4)
+            }
             if let ip = details.exitIP ?? check?.exitIP {
                 fact(L("inspector.exitIP"), ip, mono: true)
             }
@@ -192,7 +200,9 @@ struct ProfileInspectorView: View {
 
     private func exitText(check: ProxyCheckResult?) -> String {
         switch row.exit {
-        case .direct: return L("profiles.exit.direct")
+        case .direct:
+            guard let code = row.directCountry else { return L("profiles.exit.direct") }
+            return String(format: L("inspector.exit.directCountry"), CountryNames.name(for: code))
         case let .proxy(_, code?):
             let country = CountryNames.name(for: code)
             // The check's city only where the check found the same country.

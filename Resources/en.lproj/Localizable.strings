@@ -328,6 +328,8 @@
 "launch.proxyZoneChanged" = "Profile “%1$@”: its proxy now exits in the time zone %2$@. The profile uses it from its next launch; pages open now keep the current one.";
 "launch.proxyLocationUnknown.last" = "Profile “%1$@”: where its proxy exits to the internet could not be found — no geolocation service answered through it (they are often blocked). Its time zone and language are those of its last launch (%2$@).";
 "launch.proxyLocationUnknown.mac" = "Profile “%@”: where its proxy exits to the internet could not be found — no geolocation service answered through it (they are often blocked). Its time zone and language are this Mac's, not the proxy country's: a site comparing them with its address sees the mismatch. Set them in the editor, or check the proxy.";
+"launch.directLocationUnknown.last" = "Profile “%1$@” (no proxy): where it exits to the internet could not be found — no geolocation service answered. Its time zone and language are those of its last launch (%2$@).";
+"launch.directLocationUnknown.mac" = "Profile “%@” (no proxy): where it exits to the internet could not be found — no geolocation service answered. Its time zone and language are this Mac's.";
 "profiles.exit.lookupFailed" = "At the last launch no geolocation service answered through the proxy: where it exits is not confirmed.";
 "editor.location.lookupFailed" = "At the last launch no geolocation service answered through the proxy — where it exits is not confirmed, and the time zone and language did not come from it.";
 "launch.webrtcOff.httpProxy" = "WebRTC is off in this profile: an HTTP proxy cannot carry UDP. WebRTC through a proxy needs SOCKS5.";
@@ -1364,6 +1366,13 @@
 "inspector.fromProxy" = "From the proxy, at launch";
 "inspector.asThisMac" = "As on this Mac";
 "inspector.languages.fromProxy" = "From the proxy's country";
+"inspector.timeZone.fromExit" = "%@ · from where it exits";
+"inspector.fromExit" = "From where it exits, at launch";
+"inspector.languages.fromExit" = "From the country it exits in";
+"inspector.exit.directCountry" = "%@ · direct";
+"inspector.exit.directNotYet" = "Where it exits shows after its first launch: it is looked up then, as a proxy's is.";
+"inspector.exit.directUnknown" = "Where it exits could not be found at its last launch: no geolocation service answered.";
+"profiles.exit.directIn" = "Direct, no proxy";
 "inspector.webRTC" = "WebRTC";
 "inspector.webRTC.viaProxy" = "Through the proxy, relay only";
 "inspector.webRTC.offHTTP" = "Off: an HTTP proxy does not carry UDP";
