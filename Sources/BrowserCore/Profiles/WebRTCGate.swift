@@ -43,7 +43,7 @@ public enum WebRTCProtectionNotice: String, Equatable, Sendable, CaseIterable {
 
     public static func notice(state: NetworkGuardState, checking: Bool,
                               profilesWantingIt: Bool) -> WebRTCProtectionNotice? {
-        guard profilesWantingIt, !checking else { return nil }
+        guard profilesWantingIt else { return nil }
         switch state {
         case .restartNeeded: return .restartNeeded
         case .notInstalled: return .notInstalled
