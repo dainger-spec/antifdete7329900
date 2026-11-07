@@ -984,6 +984,9 @@
 "updates.installNow.stops" = "Сначала будут остановлены, а их данные зашифрованы:";
 "updates.installNow.title" = "Установить %@ сейчас?";
 "updates.installed" = "Обновлено до %@ (%@).";
+"updates.banner.title" = "Lumen обновлён до версии %@";
+"updates.banner.details" = "Подробнее";
+"updates.banner.ok" = "Понятно";
 "updates.notes" = "Что нового в %@";
 "updates.notes.none" = "У этого выпуска нет заметок.";
 "updates.notice.deferred" = "При прошлом выходе обновление не установлено: %@. Оно установится при следующем выходе, когда все профили будут зашифрованы.";

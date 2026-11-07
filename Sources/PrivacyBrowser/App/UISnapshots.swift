@@ -397,6 +397,10 @@ enum UISnapshots {
             ProfilesPreview(rows: rows, sync: .off,
                             engineWarning: EngineWarning.Facts(safari: "27.2", engine: "26.6.2", macOS: 26)) // l10n: not text
         }.capture(into: folder)
+        // After an update, the launch it made says which version runs now (the lead, 7 November).
+        problems += await Shot(name: "profiles-updated", size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: 620), edges: true) {
+            ProfilesPreview(rows: rows, sync: .off, updatedTo: "0.1.5") // l10n: not text
+        }.capture(into: folder)
         problems += await Shot(name: "profiles-guard-banners", size: CGSize(width: 1180, height: 640), edges: true) {
             ProfilesPreview(rows: rows, sync: .off, indexNotice: unlisted, proxyProblem: threeAtOnce, guardNotice: .notInstalled)
         }.capture(into: folder)
@@ -1504,13 +1508,15 @@ private struct ProfilesPreview: View {
     var bannersExpanded = false
     var guardNotice: WebRTCProtectionNotice?
     var engineWarning: EngineWarning.Facts?
+    var updatedTo: String?
 
     var body: some View {
         ProfilesScreen(rows: rows, isWorking: isWorking, sync: sync, filter: $filter, search: $search, actions: actions,
                        section: .constant(section), proxyCount: proxyCount, proxies: proxies, indexNotice: indexNotice,
                        keptDeleted: keptDeleted, showsInspector: .constant(showsInspector), inspectorInfo: inspectorInfo,
                        guardReady: true, initialSelection: selected, initialBannersExpanded: bannersExpanded,
-                       proxyProblem: proxyProblem, guardNotice: guardNotice, engineWarning: engineWarning)
+                       proxyProblem: proxyProblem, guardNotice: guardNotice, engineWarning: engineWarning,
+                       updatedTo: updatedTo)
     }
 }
 

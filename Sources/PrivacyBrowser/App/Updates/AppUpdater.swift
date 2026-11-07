@@ -182,17 +182,21 @@ final class AppUpdater: ObservableObject, Updater {
 
     // MARK: Checks
 
-    /// Starts the automatic checks — when they are on. Off means off: no timer, no request.
+    /// Starts the automatic checks — when they are on. Off means off: no timer, no request. Every
+    /// launch asks the feed once, `firstCheckDelay` after it, however recently the last one did: a
+    /// release that came out meanwhile is found when the person starts the app, not hours later
+    /// (0.1.2 → 0.1.3 and 0.1.3 → 0.1.4 were never offered: the app had asked less than the
+    /// interval before it was started again, and waited out the rest). Then every `interval`.
     func start() {
-        scheduleChecks()
+        scheduleChecks(launching: true)
     }
 
-    private func scheduleChecks() {
+    private func scheduleChecks(launching: Bool = false) {
         timer?.invalidate()
         timer = nil
         guard automaticChecks, !isPreview else { return }
         let last = defaults.object(forKey: Key.lastCheck) as? Date ?? .distantPast
-        let due = max(Self.firstCheckDelay, Self.interval - Date().timeIntervalSince(last))
+        let due = launching ? Self.firstCheckDelay : max(Self.firstCheckDelay, Self.interval - Date().timeIntervalSince(last))
         timer = Timer.scheduledTimer(withTimeInterval: due, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.automaticChecks else { return }

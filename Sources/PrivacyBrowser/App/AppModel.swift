@@ -84,6 +84,13 @@ final class AppModel: ObservableObject {
     /// pair of versions (`EngineWarning`).
     @Published private(set) var engineWarning: EngineWarning.Facts?
 
+    /// The version an update installed at the last quit: the profiles' window says it once.
+    @Published private(set) var updatedTo: String?
+
+    func updatedNoticeSeen() {
+        updatedTo = nil
+    }
+
     func engineWarningSeen() {
         if let engineWarning { EngineWarning.markSeen(engineWarning) }
         engineWarning = nil
@@ -1099,7 +1106,7 @@ final class AppModel: ObservableObject {
         switch updater.notice {
         case .outcome(let outcome)?:
             switch outcome.result {
-            case .installed: break // the Updates sheet says which update this launch is
+            case .installed: updatedTo = outcome.version // and the Updates section says when
             case .rolledBack: showError(String(format: L("updates.notice.rolledBack"), outcome.version, outcome.detail))
             case .refused: showError(String(format: L("updates.notice.refused"), outcome.version, outcome.detail))
             case .gaveUp: showError(String(format: L("updates.notice.gaveUp"), outcome.version, outcome.detail))

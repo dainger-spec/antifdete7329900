@@ -984,6 +984,9 @@
 "updates.installNow.stops" = "These are stopped first, and their data encrypted:";
 "updates.installNow.title" = "Install %@ now?";
 "updates.installed" = "Updated to %@ (%@).";
+"updates.banner.title" = "Lumen was updated to %@";
+"updates.banner.details" = "Details";
+"updates.banner.ok" = "OK";
 "updates.notes" = "What's new in %@";
 "updates.notes.none" = "This release has no notes.";
 "updates.notice.deferred" = "The update was not installed at the last quit: %@. It installs at the next quit that encrypts every profile.";

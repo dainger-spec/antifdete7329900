@@ -367,7 +367,14 @@ struct ProfileListView: View {
                            model.settingsSection = .about
                            openSettings()
                        },
-                       dismissEngineWarning: { model.engineWarningSeen() })
+                       dismissEngineWarning: { model.engineWarningSeen() },
+                       updatedTo: model.updatedTo,
+                       openUpdates: {
+                           model.updatedNoticeSeen()
+                           model.settingsSection = .updates
+                           openSettings()
+                       },
+                       dismissUpdated: { model.updatedNoticeSeen() })
     }
 
     /// The window's Proxies section; with `ids`, those proxies selected (else the selection it had).
@@ -820,6 +827,10 @@ struct ProfilesScreen: View {
     var engineWarning: EngineWarning.Facts?
     var openEngineDetails: () -> Void = {}
     var dismissEngineWarning: () -> Void = {}
+    /// The version an update installed at the last quit, said once at the launch it made.
+    var updatedTo: String?
+    var openUpdates: () -> Void = {}
+    var dismissUpdated: () -> Void = {}
     /// Rows selected with a click, ⌘- and ⇧-click or their checkboxes; one is what the inspector
     /// shows, with two or more `ProfileBulkBar` acts on them all.
     @State private var selection = ProfileSelection()
@@ -946,6 +957,7 @@ struct ProfilesScreen: View {
         case index(AppModel.IndexNotice)
         case proxyProblem(ProxyProblemBanner.Item)
         case engines(EngineWarning.Facts)
+        case updated(String)
         case keptDeleted
 
         var id: String {
@@ -954,6 +966,7 @@ struct ProfilesScreen: View {
             case .index: return "index"
             case .proxyProblem: return "proxy"
             case .engines: return "engines"
+            case .updated: return "updated"
             case .keptDeleted: return "kept"
             }
         }
@@ -968,6 +981,7 @@ struct ProfilesScreen: View {
         if let proxyProblem { banners.append(.proxyProblem(proxyProblem)) }
         banners += licenseBanners.filter { !$0.stopsWork }.map { .license($0) }
         if let engineWarning { banners.append(.engines(engineWarning)) }
+        if let updatedTo { banners.append(.updated(updatedTo)) }
         if !keptDeleted.isEmpty { banners.append(.keptDeleted) }
         return banners
     }
@@ -1006,6 +1020,8 @@ struct ProfilesScreen: View {
             ProxyProblemBanner(item: item, open: openProxyProblem, retry: retryProxyProblem, dismiss: dismissProxyProblem)
         case let .engines(facts):
             EngineWarningBanner(facts: facts, details: openEngineDetails, done: dismissEngineWarning)
+        case let .updated(version):
+            UpdatedBanner(version: version, details: openUpdates, done: dismissUpdated)
         case .keptDeleted:
             KeptDeletedBox(profiles: keptDeleted, isWorking: isWorking, bringBack: bringBack,
                            removeForGood: removeForGood, reveal: revealKeptDeleted)
@@ -2123,10 +2139,27 @@ struct KeptDeletedBox: View {
 /// A box above the list that asks for the person (the design's banner): a tint of its colour and
 /// its line, radius 12, its edges in line with the header's.
 struct LumenBanner<Content: View>: View {
-    enum Tone { case danger, warning }
+    /// `info`: news, nothing wrong (an update that installed) — the neutral tint.
+    enum Tone { case danger, warning, info }
 
     let tone: Tone
     @ViewBuilder let content: () -> Content
+
+    private var tint: Color {
+        switch tone {
+        case .danger: return Theme.dangerTint
+        case .warning: return Theme.warningTint
+        case .info: return Theme.accentTint
+        }
+    }
+
+    private var line: Color {
+        switch tone {
+        case .danger: return Theme.dangerLine
+        case .warning: return Theme.warningLine
+        case .info: return Theme.accentTintStrong
+        }
+    }
     /// The first of several banners: "N more" (or "collapse") at its end.
     @Environment(\.bannerMore) private var more
 
@@ -2153,10 +2186,8 @@ struct LumenBanner<Content: View>: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(tone == .danger ? Theme.dangerTint : Theme.warningTint))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .strokeBorder(tone == .danger ? Theme.dangerLine : Theme.warningLine, lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(tint))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(line, lineWidth: 1))
         .padding(.horizontal, ProfilesScreen.headerTrailing)
         .padding(.bottom, 10)
         .accessibilityElement(children: .contain)
@@ -2297,6 +2328,40 @@ struct EngineWarningBanner: View {
             }
         }
         .accessibilityIdentifier("engine-warning")
+    }
+}
+
+/// After an update: the launch it made says once which version now runs (the lead, 7 November: the
+/// person was never told an update had been installed). "Details" opens Settings › Updates.
+struct UpdatedBanner: View {
+    let version: String
+    let details: () -> Void
+    let done: () -> Void
+
+    var body: some View {
+        LumenBanner(tone: .info) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.running)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(String(format: L("updates.banner.title"), version))
+                        .font(.lumenLabel)
+                        .foregroundStyle(Theme.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Button(L("updates.banner.details"), action: details)
+                            .buttonStyle(.lumenGhost)
+                        Button(L("updates.banner.ok"), action: done)
+                            .buttonStyle(.lumenGhost)
+                    }
+                    .padding(.top, 4)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .accessibilityIdentifier("updated-banner")
     }
 }
 
