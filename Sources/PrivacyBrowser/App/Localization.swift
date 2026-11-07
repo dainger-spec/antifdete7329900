@@ -132,9 +132,15 @@ enum Localization {
             let mixed = Bundle.main.object(forInfoDictionaryKey: "CFBundleAllowMixedLocalizations").map { "\($0)" } ?? "absent"
             variant3Note = "v3 ran; mixed \(mixed); AppKit \(appKit); Safari.framework \(safari); argument AppleLanguages \(UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)["AppleLanguages"] ?? "none")"
         }
+        // The main bundle first, while the process's languages are still the websites' (round 2:
+        // left for later, it took the interface's language with the frameworks).
+        _ = Bundle.main.preferredLocalizations
+        _ = Bundle.main.path(forResource: "Profile", ofType: "strings")
+        _ = Bundle.main.localizedString(forKey: "PBMeasure", value: nil, table: "Profile")
+        let interface = languageCode
         let commandLine = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
         var pinned = commandLine
-        pinned["AppleLanguages"] = [languageCode]
+        pinned["AppleLanguages"] = [interface]
         UserDefaults.standard.setVolatileDomain(pinned, forName: UserDefaults.argumentDomain)
         let paths = ["/System/Library/Frameworks/AppKit.framework",
                      "/System/Library/PrivateFrameworks/Safari.framework",
