@@ -19,6 +19,8 @@ enum WindowProbeAction: Codable, Equatable {
     /// A drag along the phone's bottom bar by this many points (negative: to the left), made of
     /// the mouse events a drag sends.
     case dragBottomBar(Double)
+    /// A picture of the window's content as it is drawn now (PNG, base64), for a person to look at.
+    case picture
 }
 
 struct WindowLook: Codable, Equatable {
@@ -36,6 +38,7 @@ struct WindowLook: Codable, Equatable {
     var controls: [String] = []
     /// The menu bar's items with a ⌘ shortcut: "⌘T New Tab".
     var menuItems: [String] = []
+    var picture: String?
 }
 
 @MainActor
@@ -53,7 +56,14 @@ enum WindowProbe {
         case .press(let identifier):
             look.action = "press \(identifier)"
             if let window, let element = element(identifier, in: window) {
-                look.found = press(element)
+                // An AppKit button is clicked as a click clicks it; anything else is pressed as
+                // VoiceOver presses it.
+                if let button = element as? NSButton, button.isEnabled {
+                    button.performClick(nil)
+                    look.found = true
+                } else {
+                    look.found = press(element)
+                }
                 look.detail = String(describing: type(of: element))
             }
         case .shortcut(let key):
@@ -82,6 +92,13 @@ enum WindowProbe {
                     bar.mouseUp(with: up)
                     look.found = true
                 }
+            }
+        case .picture:
+            look.action = "picture"
+            if let view = window?.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                view.cacheDisplay(in: view.bounds, to: rep)
+                look.picture = rep.representation(using: .png, properties: [:])?.base64EncodedString()
+                look.found = look.picture != nil
             }
         case .search(let text):
             look.action = "search"

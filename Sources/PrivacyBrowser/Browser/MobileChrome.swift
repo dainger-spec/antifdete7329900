@@ -65,23 +65,6 @@ final class MobileCircleButton: NSButton {
     }
 }
 
-/// What the tab overview shows: one card a tab.
-@MainActor
-final class MobileTabsModel: ObservableObject {
-    struct Card: Identifiable {
-        let id: Int
-        var title: String
-        var image: NSImage?
-    }
-
-    @Published var cards: [Card] = []
-    @Published var selected = 0
-    var select: @MainActor (Int) -> Void = { _ in }
-    var close: @MainActor (Int) -> Void = { _ in }
-    var newTab: @MainActor () -> Void = {}
-    var done: @MainActor () -> Void = {}
-}
-
 /// "2 tabs", "1 tab", in the interface's language (Russian has three forms).
 func mobileTabCount(_ count: Int) -> String {
     let key: String
@@ -96,100 +79,138 @@ func mobileTabCount(_ count: Int) -> String {
     return String(format: L(key), count)
 }
 
-struct MobileTabOverview: View {
-    @ObservedObject var model: MobileTabsModel
-    private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
-
-    var body: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: 18) {
-                    ForEach(model.cards) { card in
-                        VStack(alignment: .leading, spacing: 8) {
-                            ZStack(alignment: .topTrailing) {
-                                Button { model.select(card.id) } label: {
-                                    thumbnail(card)
-                                        .frame(height: 220)
-                                        .frame(maxWidth: .infinity)
-                                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                                        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                            .strokeBorder(card.id == model.selected ? Color.accentColor : .clear, lineWidth: 3))
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel(card.title)
-                                .accessibilityIdentifier("mobile-tab-card-\(card.id)")
-                                Button { model.close(card.id) } label: {
-                                    Image(systemName: "xmark")
-                                        .font(.system(size: 12, weight: .bold))
-                                        .foregroundStyle(.white)
-                                        .frame(width: 26, height: 26)
-                                        .background(Circle().fill(Color.black.opacity(0.55)))
-                                }
-                                .buttonStyle(.plain)
-                                .padding(8)
-                                .accessibilityLabel(String(format: L("mobile.tabs.close"), card.title))
-                                .accessibilityIdentifier("mobile-tab-close-\(card.id)")
-                            }
-                            Text(card.title)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.white)
-                                .lineLimit(1)
-                                .padding(.horizontal, 4)
-                        }
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 20)
-            }
-            HStack(spacing: 12) {
-                circle("plus", L("mobile.tabs.new"), "mobile-new-tab", action: model.newTab)
-                Text(mobileTabCount(model.cards.count))
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .background(Capsule().fill(Color(white: 0.2)))
-                    .accessibilityIdentifier("mobile-tab-count")
-                Button(action: model.done) {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
-                        .background(Circle().fill(Color.accentColor))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(L("mobile.tabs.done"))
-                .accessibilityIdentifier("mobile-tabs-done")
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-        }
-        .background(Color(white: 0.11))
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("mobile-tab-overview")
+/// The tab overview: the tabs as cards in two columns, each with its ×, and below them +, the
+/// number of tabs and the blue check. AppKit controls, so that each is a control of the window a
+/// person — or VoiceOver, or the self-test — presses.
+final class MobileTabOverview: NSView {
+    struct Card {
+        var title: String
+        var image: NSImage?
     }
 
-    @ViewBuilder
-    private func thumbnail(_ card: MobileTabsModel.Card) -> some View {
-        if let image = card.image {
-            Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
-        } else {
-            ZStack {
-                Color(white: 0.2)
-                Image(systemName: "globe").font(.system(size: 28)).foregroundStyle(Color(white: 0.5))
-            }
-        }
+    var select: (Int) -> Void = { _ in }
+    var close: (Int) -> Void = { _ in }
+    var newTab: () -> Void = {}
+    var done: () -> Void = {}
+
+    private let scroll = NSScrollView()
+    private let grid = FlippedView()
+    private let plus = NSButton()
+    private let count = NSTextField(labelWithString: "")
+    private let check = NSButton()
+    private var cards: [(card: NSButton, close: NSButton, title: NSTextField)] = []
+    private var selected = 0
+    private static let barHeight: CGFloat = 64
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor(white: 0.11, alpha: 1).cgColor
+        scroll.documentView = grid
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        addSubview(scroll)
+        Self.circle(plus, symbol: "plus", fill: NSColor(white: 0.2, alpha: 1), label: L("mobile.tabs.new"), identifier: "mobile-new-tab")
+        plus.target = self
+        plus.action = #selector(plusPressed)
+        Self.circle(check, symbol: "checkmark", fill: .controlAccentColor, label: L("mobile.tabs.done"), identifier: "mobile-tabs-done")
+        check.target = self
+        check.action = #selector(checkPressed)
+        count.font = .systemFont(ofSize: 15, weight: .semibold)
+        count.textColor = .white
+        count.alignment = .center
+        count.wantsLayer = true
+        count.setAccessibilityIdentifier("mobile-tab-count")
+        for view in [plus, count, check] as [NSView] { addSubview(view) }
+        setAccessibilityIdentifier("mobile-tab-overview")
     }
 
-    private func circle(_ symbol: String, _ label: String, _ identifier: String, action: @escaping @MainActor () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-                .background(Circle().fill(Color(white: 0.2)))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
-        .accessibilityIdentifier(identifier)
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not supported") }
+
+    private static func circle(_ button: NSButton, symbol: String, fill: NSColor, label: String, identifier: String) {
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)?
+            .withSymbolConfiguration(.init(pointSize: 17, weight: .semibold))
+        button.imagePosition = .imageOnly
+        button.isBordered = false
+        button.wantsLayer = true
+        button.layer?.cornerRadius = 22
+        button.layer?.backgroundColor = fill.cgColor
+        button.contentTintColor = .white
+        button.setAccessibilityLabel(label)
+        button.setAccessibilityIdentifier(identifier)
     }
+
+    func show(_ cards: [Card], selected: Int) {
+        self.selected = selected
+        self.cards.forEach { $0.card.removeFromSuperview(); $0.close.removeFromSuperview(); $0.title.removeFromSuperview() }
+        self.cards = cards.enumerated().map { index, card in
+            let button = NSButton()
+            button.isBordered = false
+            button.title = ""
+            button.image = card.image
+            button.imageScaling = .scaleProportionallyUpOrDown
+            button.wantsLayer = true
+            button.layer?.cornerRadius = 18
+            button.layer?.masksToBounds = true
+            button.layer?.backgroundColor = NSColor(white: 0.2, alpha: 1).cgColor
+            button.layer?.borderWidth = index == selected ? 3 : 0
+            button.layer?.borderColor = NSColor.controlAccentColor.cgColor
+            if card.image == nil {
+                button.image = NSImage(systemSymbolName: "globe", accessibilityDescription: nil)
+                button.imageScaling = .scaleNone
+                button.contentTintColor = NSColor(white: 0.5, alpha: 1)
+            }
+            button.tag = index
+            button.target = self
+            button.action = #selector(cardPressed(_:))
+            button.setAccessibilityLabel(card.title)
+            button.setAccessibilityIdentifier("mobile-tab-card-\(index)")
+            let close = NSButton()
+            Self.circle(close, symbol: "xmark", fill: NSColor(white: 0, alpha: 0.55),
+                        label: String(format: L("mobile.tabs.close"), card.title), identifier: "mobile-tab-close-\(index)")
+            close.image = close.image?.withSymbolConfiguration(.init(pointSize: 11, weight: .bold))
+            close.layer?.cornerRadius = 13
+            close.tag = index
+            close.target = self
+            close.action = #selector(closePressed(_:))
+            let title = NSTextField(labelWithString: card.title)
+            title.font = .systemFont(ofSize: 12, weight: .medium)
+            title.textColor = .white
+            title.lineBreakMode = .byTruncatingTail
+            for view in [button, close, title] as [NSView] { grid.addSubview(view) }
+            return (button, close, title)
+        }
+        count.stringValue = mobileTabCount(cards.count)
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        let bar = Self.barHeight
+        scroll.frame = NSRect(x: 0, y: bar, width: bounds.width, height: bounds.height - bar)
+        let margin: CGFloat = 16, gap: CGFloat = 14, cardHeight: CGFloat = 220, rowHeight = cardHeight + 30
+        let width = (bounds.width - margin * 2 - gap) / 2
+        for (index, entry) in cards.enumerated() {
+            let x = margin + CGFloat(index % 2) * (width + gap), y = 20 + CGFloat(index / 2) * (rowHeight + 18)
+            entry.card.frame = NSRect(x: x, y: y, width: width, height: cardHeight)
+            entry.close.frame = NSRect(x: x + width - 34, y: y + 8, width: 26, height: 26)
+            entry.title.frame = NSRect(x: x + 4, y: y + cardHeight + 6, width: width - 8, height: 18)
+        }
+        let rows = CGFloat((cards.count + 1) / 2)
+        grid.frame = NSRect(x: 0, y: 0, width: scroll.contentSize.width, height: max(scroll.contentSize.height, 20 + rows * (rowHeight + 18)))
+        plus.frame = NSRect(x: margin, y: (bar - 44) / 2, width: 44, height: 44)
+        check.frame = NSRect(x: bounds.width - margin - 44, y: (bar - 44) / 2, width: 44, height: 44)
+        count.frame = NSRect(x: margin + 56, y: (bar - 20) / 2, width: bounds.width - 2 * (margin + 56), height: 20)
+    }
+
+    @objc private func cardPressed(_ sender: NSButton) { select(sender.tag) }
+    @objc private func closePressed(_ sender: NSButton) { close(sender.tag) }
+    @objc private func plusPressed() { newTab() }
+    @objc private func checkPressed() { done() }
+}
+
+/// A view whose y runs down, for the overview's grid.
+final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
 }

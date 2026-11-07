@@ -5636,6 +5636,12 @@ final class SelfTest {
             deviceGenerationID: "ios-27", matchProxyLocation: false, searchEngine: .duckDuckGo), "Phone window")
         defer { try? repository.delete(phoneID) }
         let start = await act(phone, phoneID, .describe)
+        let firstPicture = await act(phone, phoneID, .picture)
+        if let base64 = firstPicture.picture, let data = Data(base64Encoded: base64),
+           let folder = ProcessInfo.processInfo.environment["PB_SELFTEST_SHOTS"] {
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            try? data.write(to: URL(fileURLWithPath: folder).appendingPathComponent("phone-page.png"))
+        }
         check("\(prefix): the bottom bar has the tabs button, as Safari on an iPhone (Back, the address, Tabs)",
               ["mobile-back", "mobile-address", "mobile-tabs"].allSatisfy(start.controls.contains),
               "controls: \(start.controls.joined(separator: " "))")
@@ -5648,6 +5654,17 @@ final class SelfTest {
         check("\(prefix): the overview then lists both tabs, a card each",
               listed.overviewShown && listed.controls.contains("mobile-tab-card-0") && listed.controls.contains("mobile-tab-card-1"),
               listed.controls.filter { $0.hasPrefix("mobile-tab") }.joined(separator: " "))
+        // What the overview looks like, kept for a person to compare with an iPhone's (PB_SELFTEST_SHOTS).
+        let shots = ProcessInfo.processInfo.environment["PB_SELFTEST_SHOTS"].map { URL(fileURLWithPath: $0) }
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent("pb-phone-\(run)")
+        func keep(_ name: String) async {
+            let look = await act(phone, phoneID, .picture)
+            guard let base64 = look.picture, let data = Data(base64Encoded: base64) else { return }
+            try? FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+            try? data.write(to: shots.appendingPathComponent("phone-\(name).png"))
+            info("\(prefix): picture of the \(name) kept in \(shots.path)")
+        }
+        await keep("overview")
         let closed = await act(phone, phoneID, .press("mobile-tab-close-0"))
         check("\(prefix): a card's × closes that tab — one left", closed.found && closed.tabs == 1, "tabs \(closed.tabs)")
         _ = await act(phone, phoneID, .press("mobile-tabs-done"))

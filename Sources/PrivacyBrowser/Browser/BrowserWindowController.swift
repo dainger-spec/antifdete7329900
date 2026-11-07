@@ -63,8 +63,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     /// An iPhone view: laid out as Safari on an iPhone (MobileChrome.swift) — the bottom bar, the tab
     /// overview, the swipe between tabs — instead of desktop Safari's toolbar and tab strip.
     let isPhoneLayout: Bool
-    private let mobileTabs = MobileTabsModel()
-    private var tabOverview: CoverHostingView<MobileTabOverview>?
+    private var tabOverview: MobileTabOverview?
     private var mobileBack: NSButton?
     /// The last picture of each tab, taken as it stops being the selected one: the overview's cards.
     private var snapshots: [ObjectIdentifier: NSImage] = [:]
@@ -288,19 +287,18 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         for view in [back, pill, tabsButton] as [NSView] { bar.addSubview(view) }
         bar.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(bar)
-        let overview = CoverHostingView(rootView: MobileTabOverview(model: mobileTabs))
-        overview.sizingOptions = []
+        let overview = MobileTabOverview()
         overview.appearance = Theme.chromeAppearance
         overview.isHidden = true
         overview.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(overview)
         tabOverview = overview
-        mobileTabs.select = { [weak self] index in
+        overview.select = { [weak self] index in
             guard let self else { return }
             self.selectTab(at: index)
             self.hideTabOverview()
         }
-        mobileTabs.close = { [weak self] index in
+        overview.close = { [weak self] index in
             guard let self else { return }
             if self.tabs.count == 1 {
                 // The last tab closed from the overview leaves an empty one, as on the phone.
@@ -311,11 +309,11 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
             }
             self.refreshOverview()
         }
-        mobileTabs.newTab = { [weak self] in
+        overview.newTab = { [weak self] in
             self?.hideTabOverview()
             self?.addTab(url: nil)
         }
-        mobileTabs.done = { [weak self] in self?.hideTabOverview() }
+        overview.done = { [weak self] in self?.hideTabOverview() }
         NSLayoutConstraint.activate([
             webContainer.bottomAnchor.constraint(equalTo: bar.topAnchor),
             bar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -361,10 +359,8 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     }
 
     private func refreshOverview() {
-        mobileTabs.cards = tabs.enumerated().map { index, tab in
-            MobileTabsModel.Card(id: index, title: tab.displayTitle, image: snapshots[ObjectIdentifier(tab)])
-        }
-        mobileTabs.selected = selectedIndex
+        tabOverview?.show(tabs.map { MobileTabOverview.Card(title: $0.displayTitle, image: snapshots[ObjectIdentifier($0)]) },
+                          selected: selectedIndex)
     }
 
     private func takeSnapshot(of tab: BrowserTab?, then done: @escaping () -> Void = {}) {
