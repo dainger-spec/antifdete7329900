@@ -291,27 +291,61 @@ else
 fi
 
 # --- 1c. A processor count of the device's own ------------------------------------------------------
+# WebKit's rule (NavigatorBase::hardwareConcurrency): fewer than 8 cores → 4, 8 or more → 8. A runner
+# has 3, so a page sees 4 whether or not a count given to the device reaches WebKit; 16 is given
+# instead, and a page that then says 8 proves the count reached it (on a Mac with 8 or more cores the
+# test is the other way round: give 4, see 4 instead of 8). Two routes, each measured alone: the
+# device's launchd environment (every process it starts later), and Safari's own launch environment.
 say "1c. hardwareConcurrency: WebKit's own setting for its processor count, given to the device"
-rm -f "$REPORTS/probe-cores-before.json" "$REPORTS/probe-cores-after.json"
-open_url "$A" "$PAGES/probe?name=probe-cores-before"; note "before: $(wait_report probe-cores-before 60) s"
-xcrun simctl spawn "$A" launchctl setenv WTF_numberOfProcessorCores 2 2>&1 | sed 's/^/   setenv: /'
-xcrun simctl terminate "$A" "$SAFARI" >/dev/null 2>&1
-for pid in $(device_pids "$A"); do
-    case "$(ps -o comm= -p "$pid" 2>/dev/null)" in *WebContent*|*com.apple.WebKit*) echo "   stopping $(ps -o comm= -p "$pid") ($pid)"; kill "$pid" 2>/dev/null ;; esac
-done
-sleep 2
-open_url "$A" "$PAGES/probe?name=probe-cores-after"; note "after: $(wait_report probe-cores-after 60) s"
-python3 - "$REPORTS" <<'PY'
+CORES=${PB_SIM_CORES:-16}
+note "this Mac: $(sysctl -n hw.ncpu) cores; given to the device: $CORES"
+cores_report() {
+    python3 - "$REPORTS" "$1" <<'PY'
 import json, os, sys
-for name in ("probe-cores-before", "probe-cores-after"):
-    path = os.path.join(sys.argv[1], name + ".json")
-    if os.path.exists(path):
-        p = json.load(open(path))
-        print("   %s: page %s, worker %s" % (name, p.get("hardwareConcurrency"), p.get("_page", {}).get("workerHardwareConcurrency")))
-    else:
-        print("   %s: no report" % name)
+path = os.path.join(sys.argv[1], sys.argv[2] + ".json")
+if os.path.exists(path):
+    p = json.load(open(path))
+    print("   %s: page %s, worker %s" % (sys.argv[2], p.get("hardwareConcurrency"), p.get("_page", {}).get("workerHardwareConcurrency")))
+else:
+    print("   %s: no report" % sys.argv[2])
 PY
+}
+stop_web() {
+    xcrun simctl terminate "$A" "$SAFARI" >/dev/null 2>&1
+    for pid in $(device_pids "$A"); do
+        case "$(ps -o comm= -p "$pid" 2>/dev/null)" in *WebContent*|*com.apple.WebKit*) kill "$pid" 2>/dev/null ;; esac
+    done
+    sleep 2
+}
+web_env() {
+    # The device's processes are this Mac's processes: their environment is readable from here.
+    for pid in $(device_pids "$A"); do
+        case "$(ps -o comm= -p "$pid" 2>/dev/null)" in
+            *WebContent*|*MobileSafari*) echo "   $1: $(basename "$(ps -o comm= -p "$pid")")($pid) WTF_numberOfProcessorCores=$(ps -wwE -p "$pid" -o command= | tr ' ' '\n' | sed -n 's/^WTF_numberOfProcessorCores=//p' | head -1)" ;;
+        esac
+    done
+}
+rm -f "$REPORTS"/probe-cores-*.json
+open_url "$A" "$PAGES/probe?name=probe-cores-before"; note "before: $(wait_report probe-cores-before 60) s"
+cores_report probe-cores-before
+# Route 1: the device's launchd.
+xcrun simctl spawn "$A" launchctl setenv WTF_numberOfProcessorCores "$CORES" 2>&1 | sed 's/^/   setenv: /'
+note "launchd of the device says: $(xcrun simctl spawn "$A" launchctl getenv WTF_numberOfProcessorCores 2>&1)"
+stop_web
+open_url "$A" "$PAGES/probe?name=probe-cores-launchd"; note "launchd route: $(wait_report probe-cores-launchd 60) s"
+web_env "launchd route"
+cores_report probe-cores-launchd
 xcrun simctl spawn "$A" launchctl unsetenv WTF_numberOfProcessorCores >/dev/null 2>&1
+stop_web
+# Route 2: Safari's own launch environment (SIMCTL_CHILD_), as the Safari library is given.
+SIMCTL_CHILD_WTF_numberOfProcessorCores="$CORES" xcrun simctl launch "$A" "$SAFARI" "$PAGES/probe?name=probe-cores-launch" >/dev/null 2>&1 \
+    || note "simctl launch failed"
+note "launch route: $(wait_report probe-cores-launch 60) s"
+web_env "launch route"
+cores_report probe-cores-launch
+stop_web
+open_url "$A" "$PAGES/probe?name=probe-cores-after"; note "after both taken back: $(wait_report probe-cores-after 60) s"
+cores_report probe-cores-after
 
 # --- 2. Isolation --------------------------------------------------------------------------------
 say "2. Isolation of two devices"
