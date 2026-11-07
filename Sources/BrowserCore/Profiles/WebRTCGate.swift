@@ -27,6 +27,39 @@ public enum NetworkGuardState: String, Codable, Equatable, Sendable, CaseIterabl
     case ready
 }
 
+/// What the profiles window says at its foot when WebRTC through a proxy cannot work (the lead,
+/// 7 November): only while the guard really does not work — not installed, waiting for the
+/// person's approval, switched off, not answering, or waiting for a restart of the Mac — and
+/// only when some profile wants it: a SOCKS5 proxy (the kind that carries UDP) with WebRTC not
+/// switched off. Nothing while macOS is still being asked (`checking`: the guard starts as "not
+/// installed" until its answer comes), in a build without the guard, or when the guard answers
+/// but its check on this Mac has not passed (`unproven`: the settings page says that one).
+public enum WebRTCProtectionNotice: String, Equatable, Sendable, CaseIterable {
+    case restartNeeded
+    case notInstalled
+    case awaitingApproval
+    case off
+    case notAnswering
+
+    public static func notice(state: NetworkGuardState, checking: Bool,
+                              profilesWantingIt: Bool) -> WebRTCProtectionNotice? {
+        guard profilesWantingIt, !checking else { return nil }
+        switch state {
+        case .restartNeeded: return .restartNeeded
+        case .notInstalled: return .notInstalled
+        case .awaitingApproval: return .awaitingApproval
+        case .off: return .off
+        case .notAnswering: return .notAnswering
+        case .notInBuild, .unproven, .ready: return nil
+        }
+    }
+
+    /// A profile that would carry WebRTC through its proxy if the guard worked.
+    public static func wants(proxyKind: ProxySettings.Kind?, webRTC: WebRTCPolicy) -> Bool {
+        proxyKind == .socks5 && webRTC != .disabled
+    }
+}
+
 /// What is known of a proxy's UDP: a SOCKS5 UDP ASSOCIATE, a STUN answer through it, and whether
 /// it leaves from the address the proxy's TCP leaves from — the one sites see the pages come from.
 public enum ProxyUDPSupport: String, Codable, Equatable, Sendable, CaseIterable {
