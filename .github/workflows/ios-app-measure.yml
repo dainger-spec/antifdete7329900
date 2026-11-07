@@ -1,0 +1,47 @@
+name: iOS app — stage 1 measurements
+
+# Measurement only (claude/ios-app-measure, never merged): the iPhone app's four questions, measured
+# on GitHub's macOS images (Xcode and iOS simulator runtimes). Report-only: the results are the log
+# and the artifact. ios-measure/README.md says what each scenario measures.
+on:
+  push:
+    branches: [claude/ios-app-measure]
+    paths:
+      - "ios-measure/**"
+      - ".github/workflows/ios-app-measure.yml"
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: q1 (proxy per data store), q2 (fingerprint), q3 (Telegram)
+        default: q1
+      runtimes:
+        description: newest, majors, all, or versions (27.1,18.6)
+        default: newest
+
+jobs:
+  measure:
+    name: ${{ inputs.scenario || 'q1' }} on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: xcode-27
+            runtimes: newest
+          - os: macos-26
+            runtimes: newest
+          - os: macos-15
+            runtimes: majors
+          - os: macos-14
+            runtimes: all
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Measure
+        run: ios-measure/run_sim.sh build/ios-measure "${{ inputs.scenario || 'q1' }}" "${{ inputs.runtimes || matrix.runtimes }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-measure-${{ inputs.scenario || 'q1' }}-${{ matrix.os }}
+          path: build/ios-measure
+          if-no-files-found: warn
