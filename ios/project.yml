@@ -1,0 +1,73 @@
+# Lumen for iPhone (stage 2, branch claude/ios-app, never merged). `xcodegen generate` writes
+# Lumen.xcodeproj from this file; the project itself is not kept in git.
+name: Lumen
+options:
+  bundleIdPrefix: io.lumenbrowser
+  deploymentTarget:
+    iOS: "17.0"
+  developmentLanguage: ru
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+packages:
+  LumenCore:
+    path: LumenCore
+targets:
+  Lumen:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Lumen
+        excludes:
+          - "Resources/**"
+          - "Info.plist"
+      - path: Lumen/Resources
+        buildPhase: resources
+    dependencies:
+      - package: LumenCore
+    info:
+      path: Lumen/Info.plist
+      properties:
+        CFBundleDisplayName: Lumen
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoadsInWebContent: true
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.lumenbrowser.ios
+        TARGETED_DEVICE_FAMILY: "1"
+  LumenUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: LumenUITests
+    dependencies:
+      - target: Lumen
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.lumenbrowser.ios.uitests
+        TEST_TARGET_NAME: Lumen
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Lumen:
+    build:
+      targets:
+        Lumen: all
+        LumenUITests: [test]
+    test:
+      config: Debug
+      targets:
+        - LumenUITests

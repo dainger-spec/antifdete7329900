@@ -1,0 +1,37 @@
+name: iOS app (stage 2)
+
+# Lumen for iPhone (claude/ios-app, never merged): the core's tests, then the end-to-end tests of a
+# person's path on the iOS Simulator — every planted fault in ios/scripts/faults.tsv first (each must
+# make its test fail), then the green run. Screenshots of what the tests saw are in the artifact.
+on:
+  push:
+    branches: [claude/ios-app]
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-app.yml"
+  workflow_dispatch:
+    inputs:
+      os:
+        description: runner image
+        default: xcode-27
+      ios:
+        description: iOS runtime (newest, or a version such as 17.5)
+        default: newest
+
+jobs:
+  app:
+    name: Lumen iOS on ${{ inputs.os || 'xcode-27' }} (iOS ${{ inputs.ios || 'newest' }})
+    runs-on: ${{ inputs.os || 'xcode-27' }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test (red runs first)
+        run: ios/scripts/ci.sh build/ios-app "${{ inputs.ios || 'newest' }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-app-${{ github.run_number }}
+          path: |
+            build/ios-app
+            !build/ios-app/dd
+          if-no-files-found: warn

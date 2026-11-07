@@ -1,0 +1,12 @@
+# fault	kind	test that must fail with it (the red run); kind: core = swift test --filter, ui = xcodebuild -only-testing
+sessionsNotSaved	core	LumenCoreTests.CatalogTests/testSessionsSurviveARelaunch
+renameIgnored	core	LumenCoreTests.CatalogTests/testRename
+notesNotSaved	core	LumenCoreTests.CatalogTests/testNotesAndTags
+searchIgnoresTags	core	LumenCoreTests.CatalogTests/testSearchByNameNotesTagsAndProxy
+tabsNotRestored	core	LumenCoreTests.CatalogTests/testTabsAndHistorySurviveARelaunch
+settingsNotSaved	core	LumenCoreTests.CatalogTests/testSettingsSurviveARelaunch
+searchEngineIgnored	core	LumenCoreTests.AddressTests/testAddressesAndSearches
+sessionsNotSaved	ui	LumenUITests/SessionsTests/testSessionListPersonPath
+renameIgnored	ui	LumenUITests/SessionsTests/testSessionListPersonPath
+notesNotSaved	ui	LumenUITests/SessionsTests/testSessionListPersonPath
+searchIgnoresTags	ui	LumenUITests/SessionsTests/testSessionListPersonPath
