@@ -12,6 +12,7 @@ on:
     branches: ['**']
 
 env:
+  MEASURE_ALLOW_MIXED: "1"
   # The self-test's checks a GitHub runner cannot make, by the beginnings of their names: no real
   # key event reaches a page there (a person's typing into AutoFill is not shown; the AutoFill
   # world is driven directly), and Safari fetches neither a page's touch icon nor its OpenSearch
