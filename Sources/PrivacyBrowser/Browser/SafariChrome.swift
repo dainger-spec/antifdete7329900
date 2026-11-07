@@ -406,8 +406,27 @@ enum SafariChrome {
         // argument domain.
         arguments[homePageKey] = homePage(for: configuration)
         servicePreferenceKeys.append(homePageKey)
+        // The engine Safari's address bar searches with, by the names Safari keeps it under (its
+        // provider list is set below too: CI run 42421408245 had the list say Bing and the address
+        // bar still go to Google).
+        let engine = configuration.searchEngine ?? .standard
+        arguments["SearchProviderShortName"] = engine.name
+        arguments["SearchProviderIdentifier"] = safariSearchProviderIdentifier(engine)
+        servicePreferenceKeys += ["SearchProviderShortName", "SearchProviderIdentifier"]
         UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
         log.notice("Safari's own services are set for this profile (\(servicePreferenceKeys.count, privacy: .public) keys)")
+    }
+
+    /// The identifier Safari's provider list gives an engine.
+    nonisolated static func safariSearchProviderIdentifier(_ engine: SearchEngine) -> String {
+        switch engine {
+        case .google: return "com.google.www"
+        case .bing: return "com.bing.www"
+        case .yahoo: return "com.yahoo.www"
+        case .duckDuckGo: return "com.duckduckgo"
+        case .ecosia: return "org.ecosia.www"
+        case .yandex: return "ru.yandex.www"
+        }
     }
 
     /// Safari's home page, which History › Home opens.

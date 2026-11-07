@@ -94,7 +94,7 @@ enum WindowProbe {
                     look.found = true
                 }
                 look.detail = String(describing: type(of: field))
-                    + (SafariChromeHost.isHosting ? ", Safari's engine \(SafariChrome.searchEngineInUse)" : "")
+                    + (SafariChromeHost.isHosting ? ", Safari's engine \(SafariChrome.searchEngineInUse); search keys: \(searchKeys())" : "")
             }
         }
         try? await Task.sleep(nanoseconds: 1_500_000_000)
@@ -137,23 +137,31 @@ enum WindowProbe {
         return unsafeBitCast(method_getImplementation(method), to: Press.self)(object, selector)
     }
 
-    /// Every accessibility element under `root`, depth first (a window's tree is a few hundred).
-    private static func walk(_ root: Any, depth: Int = 0, _ visit: (Any) -> Bool) -> Bool {
-        guard depth < 40 else { return false }
-        if visit(root) { return true }
-        for child in children(of: root) where walk(child, depth: depth + 1, visit) { return true }
+    /// Every control under the window's content: its views (an AppKit control's identifier is its
+    /// view's), and inside a SwiftUI hosting view the accessibility nodes SwiftUI makes for its
+    /// buttons — each with whether something above it is hidden (a hidden overview's buttons are
+    /// not there for a person).
+    private static func walk(_ root: Any, hidden: Bool = false, depth: Int = 0, _ visit: (Any, Bool) -> Bool) -> Bool {
+        guard depth < 60 else { return false }
+        var hidden = hidden
+        if let view = root as? NSView { hidden = hidden || view.isHidden }
+        if visit(root, hidden) { return true }
+        if let view = root as? NSView {
+            for subview in view.subviews where walk(subview, hidden: hidden, depth: depth + 1, visit) { return true }
+            if String(describing: type(of: view)).contains("HostingView") {
+                for child in children(of: view) where walk(child, hidden: hidden, depth: depth + 1, visit) { return true }
+            }
+        } else {
+            for child in children(of: root) where walk(child, hidden: hidden, depth: depth + 1, visit) { return true }
+        }
         return false
-    }
-
-    private static func isShown(_ element: Any) -> Bool {
-        if let view = element as? NSView { return !view.isHiddenOrHasHiddenAncestor && view.window != nil }
-        return true
     }
 
     private static func element(_ identifier: String, in window: NSWindow) -> Any? {
         var found: Any?
-        _ = walk(window) { element in
-            guard Self.identifier(of: element) == identifier, isShown(element) else { return false }
+        guard let content = window.contentView else { return nil }
+        _ = walk(content) { element, hidden in
+            guard !hidden, Self.identifier(of: element) == identifier else { return false }
             found = element
             return true
         }
@@ -162,8 +170,9 @@ enum WindowProbe {
 
     private static func identifiers(in window: NSWindow) -> [String] {
         var names: [String] = []
-        _ = walk(window) { element in
-            if let id = Self.identifier(of: element), !id.isEmpty, isShown(element) { names.append(id) }
+        guard let content = window.contentView else { return [] }
+        _ = walk(content) { element, hidden in
+            if !hidden, let id = Self.identifier(of: element), !id.isEmpty { names.append(id) }
             return names.count > 300
         }
         return names
@@ -185,6 +194,20 @@ enum WindowProbe {
         }
         if let frameView = window.contentView?.superview { search(frameView) }
         return field
+    }
+
+    /// The preferences this process reads with "Search" in their name, and what they say.
+    private static func searchKeys() -> String {
+        var found: [String] = []
+        for (key, value) in UserDefaults.standard.dictionaryRepresentation() where key.localizedCaseInsensitiveContains("search") {
+            found.append("\(key)=\(String(describing: value).prefix(60))")
+        }
+        let domain = "com.apple.Safari" as CFString
+        for key in (CFPreferencesCopyKeyList(domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? [String] ?? [])
+        where key.localizedCaseInsensitiveContains("search") {
+            found.append("Safari:\(key)=\(String(describing: CFPreferencesCopyAppValue(key as CFString, domain)).prefix(60))")
+        }
+        return found.sorted().joined(separator: "; ")
     }
 
     private static func menuShortcuts(_ menu: NSMenu?) -> [String] {
