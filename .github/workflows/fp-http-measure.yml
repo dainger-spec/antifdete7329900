@@ -1,0 +1,44 @@
+name: Fingerprint over plain http (measurement)
+
+# Measurement only (claude/measure-fp-http, never merged): the self-test's fingerprint surface of a
+# regular and a mobile profile, once on its usual https origin and once over plain http, so that our
+# mobile profile is compared with a simulator and a real iPhone under the same scheme.
+on:
+  push:
+    branches: [claude/measure-fp-http]
+  workflow_dispatch:
+
+jobs:
+  measure:
+    name: Surface over http and https (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, xcode-27]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build unsandboxed app
+        run: NE=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: Surface, https and http
+        run: |
+          mkdir -p build/surface
+          sw_vers | tee build/surface/machine.txt
+          sysctl -n hw.ncpu machdep.cpu.brand_string | tee -a build/surface/machine.txt
+          for scheme in https http; do
+            echo "::group::$scheme"
+            PB_SELFTEST_ONLY="fingerprint surface" PB_SELFTEST_SURFACE_OUT="$PWD/build/surface" \
+              PB_SURFACE_ORIGIN="$scheme://selftest.invalid/" PB_SURFACE_TAG="$scheme" \
+              build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --self-test | tee "build/surface/selftest-$scheme.txt" || true
+            echo "::endgroup::"
+          done
+          ls -la build/surface
+          for f in build/surface/surface-*.json; do
+            python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(sys.argv[1], d.get('_secureContext'), d.get('hardwareConcurrency'))" "$f"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fp-http-${{ matrix.os }}
+          path: build/surface

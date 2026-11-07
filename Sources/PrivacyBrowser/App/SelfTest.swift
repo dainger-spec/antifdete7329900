@@ -2573,6 +2573,9 @@ final class SelfTest {
             check("surface: fingerprint_probe.js found (app bundle or PB_SELFTEST_PROBE)", false)
             return
         }
+        // Measurement (never merged): the page's origin, so that the surface can be taken over plain
+        // http as an iPhone and a simulator are probed over the network (not a secure context).
+        let origin = ProcessInfo.processInfo.environment["PB_SURFACE_ORIGIN"].flatMap { URL(string: $0) } ?? self.origin
         let plainConfiguration = WKWebViewConfiguration()
         plainConfiguration.websiteDataStore = .nonPersistent()
         // The engine preferences a profile sets as Safari has them, so the engine is compared like
@@ -2623,6 +2626,12 @@ final class SelfTest {
             let tab = BrowserTab(configuration: tabConfiguration, context: session.tabContext)
             try await PageLoader.load(tab.webView, html: page, baseURL: origin)
             let probed = Self.flatten(try await js(tab.webView, probe) as? [String: Any] ?? [:])
+            // Measurement: written at once (over http, storage.estimate below throws), with the
+            // page's own word on whether it is a secure context.
+            var measured = probed
+            measured["_secureContext"] = try await js(tab.webView, "return String(window.isSecureContext) + ' ' + location.origin;") as? String ?? "nil"
+            writeSurface(measured, name: (generationID == DeviceGenerations.defaultID ? "macos" : "iphone")
+                + (ProcessInfo.processInfo.environment["PB_SURFACE_TAG"].map { "-" + $0 } ?? ""))
             // The features the SDK's behaviors change, as Safari has them: in the profile's
             // preferences, and as its page sees them (scripts/engine_features_check.py compares the
             // page with one with every behavior on).
