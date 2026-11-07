@@ -46,9 +46,10 @@ final class SelfTest {
         let test = SelfTest()
         // A hung check must not hold CI; what had been checked by then is still counted. The whole
         // run took 538–596 s on macOS 27.0.1's runner (full runs 3 to 5) and was cut at 600 s in
-        // run 6, its last ~25 checks never made: 900 s.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 900) {
-            print("SELFTEST TIMEOUT after 900 s")
+        // run 6, its last ~25 checks never made: 900 s; 1080 s since the languages-per-profile
+        // group (six launches of a profile's own process, about three minutes).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1080) {
+            print("SELFTEST TIMEOUT after 1080 s")
             MainActor.assumeIsolated { _ = test.finish(timedOut: true) }
             exit(3)
         }
@@ -394,6 +395,7 @@ final class SelfTest {
         await group("a mobile view in its own process") { try await mobileViewInItsOwnProcess(repository) }
         await group("closing a profile's window") { try await closingTheWindowEndsTheProfile(repository) }
         await group("interface and websites' languages") { try await interfaceApartFromWebsites(repository) }
+        await group("languages per profile") { try await languagesPerProfile(repository) }
         await group("lock during launch") { try await lockDuringLaunch(repository) }
         await group("quit") { try await quitFromFocusedPage(repository) }
         await group("forced seal") { try await forcedSealAtQuit(repository) }
@@ -5512,6 +5514,134 @@ final class SelfTest {
                      reported == nil ? "the process did not say" : "Safari's chrome is not hosted in this process")
             }
             try? await manager.stop(profile.id)
+        }
+    }
+
+    /// Languages per profile (the lead, 7 November: "the language websites see is one for the whole
+    /// app, the first profile started in the run sets it"). Measured, not assumed, each profile in
+    /// a process of its own as the released build runs them:
+    /// (1) two profiles whose proxies exit in different countries (Finland, the United States),
+    ///     both running at once: what each one's pages see of language, formats, the browser's own
+    ///     words and labels, and time zone — the first read again while the second runs;
+    /// (2) a profile whose proxy exited in Finland at its last launch and exits in the United States
+    ///     now: what its process starts with;
+    /// (3) one profile, the websites' language fixed (en-US), started with the interface in Russian,
+    ///     in English and in Russian again: every value its page reads, compared between the
+    ///     languages, the two Russian runs the control for what differs from one run to the next.
+    private func languagesPerProfile(_ repository: ProfileRepository) async throws {
+        let prefix = "languages per profile"
+        guard !AppEnvironment.isSandboxed else {
+            skip("\(prefix): each profile's process its own language", "the sandboxed build runs no process per profile", .build)
+            return
+        }
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("\(prefix): each profile's process its own language", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
+            return
+        }
+        let services = ProxyGeoLookup.services
+        let givenProcess = ProcessInfo.processInfo.environment["PB_PROFILE_PROCESS"]
+        let givenLanguage = ProcessInfo.processInfo.environment["PRIVACYBROWSER_LANG"]
+        defer {
+            ProxyGeoLookup.services = services
+            if let givenProcess { setenv("PB_PROFILE_PROCESS", givenProcess, 1) } else { unsetenv("PB_PROFILE_PROCESS") }
+            if let givenLanguage { setenv("PRIVACYBROWSER_LANG", givenLanguage, 1) } else { unsetenv("PRIVACYBROWSER_LANG") }
+        }
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        func exits(in country: String, zone: String) {
+            ProxyGeoLookup.services = [.init(url: URL(string: "http://geo.selftest.invalid/pb-geo.json?country=\(country)&tz=\(zone)")!,
+                                             timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"])]
+        }
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        let manager = ProfileManager(repository: repository)
+        var messages: [String] = []
+        manager.onError = { messages.append($0) }
+        func primary(_ tag: String) -> String { String(tag.lowercased().prefix { $0.isLetter }) }
+        struct Seen { var values: [String: String]; var ownProcess: Bool; var error: String }
+        func look(_ id: UUID) async -> Seen {
+            var launchError = ""
+            let snapshot = WhatSitesSee(profileID: id, manager: { manager }, launch: { id in
+                do { try await manager.launch(id) } catch { launchError = String(describing: error) }
+            })
+            await snapshot.take()
+            return Seen(values: snapshot.profileSnapshot?.values ?? [:], ownProcess: manager.processIdentifier(of: id) != nil,
+                        error: launchError.isEmpty ? "\(snapshot.step)" : launchError)
+        }
+        let localeKeys = ["probe.language", "probe.languages", "headers.navigation.accept-language", "probe.intlLocale",
+                          "probe.localeFormats", "probe.validationMessages", "probe.controlWidths", "probe.dateString", "probe.timeZone"]
+        func describe(_ seen: Seen) -> String {
+            localeKeys.map { "\($0.replacingOccurrences(of: "probe.", with: "")) \(seen.values[$0] ?? "nil")" }.joined(separator: "; ")
+                + "; own process \(seen.ownProcess)\(seen.values.isEmpty ? ", \(seen.error)" : "")"
+        }
+        func sees(_ seen: Seen, _ language: String, _ zone: String) -> Bool {
+            let wanted = primary(language)
+            return seen.ownProcess
+                && primary(seen.values["probe.language"] ?? "") == wanted && primary(seen.values["probe.languages"] ?? "") == wanted
+                && primary(seen.values["headers.navigation.accept-language"] ?? "") == wanted
+                && primary(seen.values["probe.intlLocale"] ?? "") == wanted && seen.values["probe.timeZone"] == zone
+        }
+        func profile(_ name: String, remembered: ProxyLocation? = nil, language: String? = nil, proxied: Bool = true) throws -> UUID {
+            var configuration = ProfileConfiguration(proxy: proxied ? proxy : nil, ephemeral: true)
+            configuration.matchProxyLocation = proxied
+            configuration.lastProxyLocation = remembered
+            configuration.languageOverride = language
+            return try repository.create(name: name, configuration: configuration).id
+        }
+
+        // (1) Two countries at once.
+        let finnish = try profile("Languages: Finland")
+        let american = try profile("Languages: United States")
+        defer { try? repository.delete(finnish); try? repository.delete(american) }
+        exits(in: "FI", zone: "Europe/Helsinki")
+        let first = await look(finnish)
+        exits(in: "US", zone: "America/New_York")
+        let second = await look(american)
+        let firstAgain = await look(finnish)
+        info("\(prefix): Finland, alone: \(describe(first))")
+        info("\(prefix): the United States, Finland running: \(describe(second))")
+        info("\(prefix): Finland again, the United States running: \(describe(firstAgain))")
+        check("\(prefix): two profiles at once, proxies in Finland and the United States — each one's pages see its own country's language and time zone",
+              sees(first, "fi-FI", "Europe/Helsinki") && sees(second, "en-US", "America/New_York") && sees(firstAgain, "fi-FI", "Europe/Helsinki"),
+              "Finland: \(describe(first)) | United States: \(describe(second)) | Finland again: \(describe(firstAgain))")
+        try? await manager.stop(finnish)
+        try? await manager.stop(american)
+
+        // (2) The proxy exited in Finland last time, in the United States now.
+        let endpoint = ProxyLocation.endpoint(of: proxy)
+        let moved = try profile("Languages: moved", remembered: ProxyLocation(timeZoneIdentifier: "Europe/Helsinki", countryCode: "FI",
+                                                                              proxyEndpoint: endpoint))
+        defer { try? repository.delete(moved) }
+        exits(in: "US", zone: "America/Chicago")
+        messages.removeAll()
+        let movedSeen = await look(moved)
+        _ = await waitUntil(timeout: 10) { !manager.hasProxyLookupsInFlight }
+        info("\(prefix): remembered Finland, exits in the United States now: \(describe(movedSeen)); messages: \(messages)")
+        check("\(prefix): a proxy that exited in Finland last time and exits in the United States now — the pages see the United States (en, America/Chicago), not the last launch's country",
+              sees(movedSeen, "en-US", "America/Chicago"), "\(describe(movedSeen)); messages: \(messages)")
+        try? await manager.stop(moved)
+
+        // (3) The interface's language: invisible to pages?
+        let fixed = try profile("Languages: interface", language: "en-US", proxied: false)
+        defer { try? repository.delete(fixed) }
+        var runs: [(String, [String: String])] = []
+        for interface in ["ru", "en", "ru"] {
+            setenv("PRIVACYBROWSER_LANG", interface, 1)
+            let seen = await look(fixed)
+            runs.append((interface, seen.values))
+            try? await manager.stop(fixed)
+        }
+        let (ru1, en, ru2) = (runs[0].1, runs[1].1, runs[2].1)
+        let keys = Set(ru1.keys).union(en.keys).union(ru2.keys).filter { !SiteComparison.perWindow($0) }
+        let noise = keys.filter { ru1[$0] != ru2[$0] }
+        let leaks = keys.filter { !noise.contains($0) && ru1[$0] != en[$0] }.sorted()
+        info("\(prefix): the interface Russian, English, Russian, websites en-US: \(keys.count) values read; "
+             + "\(noise.count) differ between the two Russian runs (\(noise.sorted().prefix(12).joined(separator: ", ")))")
+        for key in leaks { info("\(prefix): differs with the interface's language: \(key): ru \(ru1[key] ?? "nil") | en \(en[key] ?? "nil")") }
+        if ru1.isEmpty || en.isEmpty || ru2.isEmpty {
+            check("\(prefix): the interface's language (Russian, English) shows in nothing a page reads", false,
+                  "a run read nothing: ru \(ru1.count), en \(en.count), ru \(ru2.count) values")
+        } else {
+            check("\(prefix): the interface's language (Russian, English) shows in nothing a page reads — \(keys.count) values, \(noise.count) of them differing between two runs alike",
+                  leaks.isEmpty, leaks.map { "\($0): ru \(ru1[$0] ?? "nil") | en \(en[$0] ?? "nil")" }.joined(separator: "; "))
         }
     }
 

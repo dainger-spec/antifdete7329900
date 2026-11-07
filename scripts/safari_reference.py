@@ -49,6 +49,8 @@ INFO_KEYS = {"language", "languages", "intlLocale", "innerSize", "outerSize", "w
              "orientation", "audio", "cookieEnabled",
              # Date#toString names the zone in the default locale, which the self-test overrides.
              "dateString",
+             # The same for the default formats and the browser's own words and labels.
+             "localeFormats", "validationMessages", "controlWidths",
              # Safari under safaridriver reports navigator.webdriver = true; a profile reports false.
              "webdriver",
              # The WebRTC policy removes these on purpose in a default profile.
