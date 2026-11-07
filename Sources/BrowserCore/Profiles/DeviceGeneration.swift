@@ -49,10 +49,21 @@ public struct DeviceGeneration: Identifiable, Equatable, Sendable {
     public let defaultWebRTCPolicy: WebRTCPolicy
     /// Which injected-script behaviour set this generation uses (extension point).
     public let behaviorSetID: String
+    /// The processor count WebKit is given in the profile's process (`ProfileProcess`), so that
+    /// `navigator.hardwareConcurrency` is the device's in the page, its frames and every worker —
+    /// WebKit's own value, not a script's. nil: this Mac's own count.
+    ///
+    /// WebKit reports 4 for fewer than 8 cores and 8 from 8 cores up (`NavigatorBase::
+    /// hardwareConcurrency`), so most Macs say 8 and an iPhone says 4: every iPhone iOS 26 and 27
+    /// run on has a 6-core CPU (A13 to A19: two performance and four efficiency cores, Apple's
+    /// specifications), and the owner's iPhone (iOS 27.0) reports 4. The iPad view keeps the Mac's
+    /// count: it sends the Mac's User-Agent, as Safari on an iPad does by default, so a page takes
+    /// it for a Mac, and iPads themselves differ (an A-series iPad 4, an M-series iPad 8).
+    public let processorCores: Int?
 
     public init(id: String, nameKey: String, platform: Platform, osVersionLabel: String,
                 userAgent: String, matchesEngine: Bool,
-                defaultWebRTCPolicy: WebRTCPolicy, behaviorSetID: String) {
+                defaultWebRTCPolicy: WebRTCPolicy, behaviorSetID: String, processorCores: Int? = nil) {
         self.id = id
         self.nameKey = nameKey
         self.platform = platform
@@ -61,6 +72,7 @@ public struct DeviceGeneration: Identifiable, Equatable, Sendable {
         self.matchesEngine = matchesEngine
         self.defaultWebRTCPolicy = defaultWebRTCPolicy
         self.behaviorSetID = behaviorSetID
+        self.processorCores = processorCores
     }
 
     /// The User-Agent this generation declares on a Mac whose Safari is `hostSafariVersion`
@@ -170,11 +182,11 @@ public enum DeviceGenerations {
         DeviceGeneration(
             id: "ios-27", nameKey: "gen.ios27", platform: .iOS, osVersionLabel: "27",
             userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Mobile/15E148 Safari/604.1",
-            matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior),
+            matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior, processorCores: 6),
         DeviceGeneration(
             id: "ios-26", nameKey: "gen.ios26", platform: .iOS, osVersionLabel: "26",
             userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Mobile/15E148 Safari/604.1",
-            matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior),
+            matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior, processorCores: 6),
         DeviceGeneration(
             id: "ipados-26", nameKey: "gen.ipados26", platform: .iPadOS, osVersionLabel: "26",
             // Safari's default on an iPad: the desktop website, with the Mac's UA.

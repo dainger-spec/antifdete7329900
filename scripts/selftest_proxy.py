@@ -123,6 +123,8 @@ import threading
 import time
 from urllib.parse import parse_qs
 
+import cores_page  # scripts/cores_page.py: the processor-count page, served at /pb-cores
+
 
 def read_until_blank_line(conn: socket.socket) -> bytes:
     data = b""
@@ -521,6 +523,18 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
         body, content_type = b"postMessage(Intl.DateTimeFormat().resolvedOptions().timeZone)", "text/javascript"
     elif plain_path == "/pb-leak/frame":
         body, content_type = leak_frame(safe_run(query)), "text/html; charset=utf-8"
+    elif plain_path == "/pb-cores":
+        # What a page is told of the processor count, everywhere it can ask (scripts/cores_page.py);
+        # the other-origin frame on "localhost" of the same port, the report into the leak log.
+        port = header(request, "Host").rpartition(":")[2] or "80"
+        body = cores_page.page_html(f"/pb-leak/report?run={safe_run(query)}&data=", f"http://localhost:{port}", "/pb-cores").encode()
+        content_type = "text/html; charset=utf-8"
+    elif plain_path == "/pb-cores/worker.js":
+        body, content_type = cores_page.URL_WORKER_SCRIPT.encode(), "text/javascript"
+    elif plain_path == "/pb-cores/sw.js":
+        body, content_type = cores_page.SW_SCRIPT.encode(), "text/javascript"
+    elif plain_path == "/pb-cores/frame":
+        body, content_type = ("<!doctype html><script>" + cores_page.FRAME_SCRIPT + "</script>").encode(), "text/html; charset=utf-8"
     elif plain_path == "/pb-rtc":
         params = parse_qs(query)
         body, content_type = rtc_page(safe_run(query), params.get("mode", ["presence"])[0]), "text/html; charset=utf-8"

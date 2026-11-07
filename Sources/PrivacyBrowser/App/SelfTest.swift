@@ -394,6 +394,7 @@ final class SelfTest {
             }
         }
         await group("a mobile view in its own process") { try await mobileViewInItsOwnProcess(repository) }
+        await group("processor count") { try await processorCountInOwnProcess(repository) }
         await group("closing a profile's window") { try await closingTheWindowEndsTheProfile(repository) }
         await group("interface and websites' languages") { try await interfaceApartFromWebsites(repository) }
         await group("languages per profile") { try await languagesPerProfile(repository) }
@@ -5500,6 +5501,78 @@ final class SelfTest {
             skip(name, "the iPhone view's process did not come up")
         }
         try? await manager.stop(profile.id)
+    }
+
+    /// What a page is told of the processor count (`navigator.hardwareConcurrency`), everywhere it
+    /// can ask — the page, a dedicated worker made from a blob, one loaded from a URL and one inside
+    /// another, a shared worker, a service worker, a frame of the same origin, one of another
+    /// origin and an empty one — in a profile's own process, started as the app starts one, on a
+    /// Mac with ten cores: CI's runners have three, where WebKit says 4 whatever it is told, so this
+    /// process stands in for the Mac (`ProfileProcess.machineProcessorCoresStandIn`), as the real
+    /// count would reach WebKit. A Mac profile must then see 8 everywhere — the control: the stand-in
+    /// reached WebKit — and an iPhone view 4 everywhere, an iPhone's (the owner, 7 November: the
+    /// iPhone says 4, a Mac with eight cores or more 8). WebKit's own value in each, so the getter
+    /// stays the engine's (native text, nothing on `navigator` itself); scripts/cores_page.py is
+    /// the page (served by scripts/selftest_proxy.py at /pb-cores).
+    private func processorCountInOwnProcess(_ repository: ProfileRepository) async throws {
+        let prefix = "processor count"
+        guard !AppEnvironment.isSandboxed else {
+            skip("\(prefix): an iPhone view says an iPhone's in its pages, frames and workers",
+                 "the sandboxed build runs no process per profile", .build)
+            return
+        }
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("\(prefix): an iPhone view says an iPhone's in its pages, frames and workers",
+                 "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the page)")
+            return
+        }
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        let givenProcess = ProcessInfo.processInfo.environment["PB_PROFILE_PROCESS"]
+        ProfileProcess.machineProcessorCoresStandIn = 10
+        defer {
+            ProfileProcess.machineProcessorCoresStandIn = nil
+            if let givenProcess { setenv("PB_PROFILE_PROCESS", givenProcess, 1) } else { unsetenv("PB_PROFILE_PROCESS") }
+        }
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        let places = ["page", "blobWorker", "urlWorker", "nestedWorker", "sharedWorker", "serviceWorker",
+                      "sameOriginFrame", "otherOriginFrame", "blankFrame"]
+        for (generationID, expected, what) in [("macos-26", 8, "a Mac profile (the control: the stand-in reached WebKit)"),
+                                                ("ios-27", 4, "an iPhone view (iOS 27)"), ("ios-26", 4, "an iPhone view (iOS 26)")] {
+            let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
+            // No proxy: the page is on this Mac, which a profile reaches directly.
+            let profile = try repository.create(name: "Processor count \(generationID)", configuration: ProfileConfiguration(
+                startURL: URL(string: "http://127.0.0.1:\(httpPort)/pb-cores?run=\(run)"), ephemeral: true,
+                deviceGenerationID: generationID, matchProxyLocation: false))
+            defer { try? repository.delete(profile.id) }
+            let manager = ProfileManager(repository: repository)
+            var launchError = ""
+            do { try await manager.launch(profile.id) } catch { launchError = String(describing: error) }
+            let ownProcess = manager.processIdentifier(of: profile.id) != nil
+            var report: [String: Any] = [:]
+            if launchError.isEmpty {
+                for _ in 0..<30 where report.isEmpty {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    let url = URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!
+                    if let text = try? await loadThroughProxy(repository, proxy, url: url),
+                       let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] {
+                        report = (object["reports"] as? [[String: Any]] ?? []).first { $0["page"] != nil } ?? [:]
+                    }
+                }
+            }
+            // A number, or "<number> <getter native>" from a worker that also reports its getter.
+            func count(_ place: String) -> String { String(describing: report[place] ?? "nil").components(separatedBy: " ").first ?? "nil" }
+            let seen = places.map { "\($0) \(String(describing: report[$0] ?? "nil"))" }.joined(separator: ", ")
+            info("\(prefix): \(what): \(seen); getter native \(report["getterNative"] ?? "nil"), own properties on navigator \(report["navigatorOwn"] ?? "nil")")
+            check("\(prefix): \(what) says \(expected) in the page, every worker and every frame",
+                  ownProcess && !report.isEmpty && places.allSatisfy { count($0) == String(expected) },
+                  report.isEmpty ? "no report (own process \(ownProcess)\(launchError.isEmpty ? "" : ", launch \(launchError)"))" : seen)
+            check("\(prefix): \(what) — the getter is the engine's (native text in the page and in workers, nothing on navigator)",
+                  report["getterNative"] as? Bool == true && (report["navigatorOwn"] as? NSNumber)?.intValue == 0
+                    && ["blobWorker", "urlWorker"].allSatisfy { String(describing: report[$0] ?? "").hasSuffix(" true") },
+                  report.isEmpty ? "no report" : "page \(report["getterNative"] ?? "nil"), navigator's own \(report["navigatorOwn"] ?? "nil"), "
+                    + "workers \(report["blobWorker"] ?? "nil") / \(report["urlWorker"] ?? "nil")")
+            try? await manager.stop(profile.id)
+        }
     }
 
     /// The interface's language and the language websites see are apart, both ways (the owner, 1

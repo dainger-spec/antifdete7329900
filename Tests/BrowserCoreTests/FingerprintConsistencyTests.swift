@@ -354,4 +354,20 @@ final class ProxiedWebRTCTests: XCTestCase {
         XCTAssertTrue(iPad.hasPrefix("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26."), iPad)
         XCTAssertTrue(iPad.hasSuffix(" Safari/605.1.15"), iPad)
     }
+
+    /// The processor count WebKit is given in an iPhone view: an iPhone's six cores, which WebKit
+    /// reports as 4 (fewer than 8), as the owner's iPhone does. The Mac and the iPad view (the
+    /// Mac's User-Agent) keep this Mac's own.
+    func testAnIPhoneViewIsGivenAnIPhonesProcessorCount() {
+        for id in ["ios-26", "ios-27"] {
+            let cores = DeviceGenerations.generation(id: id)?.processorCores
+            XCTAssertEqual(cores, 6, id)
+            XCTAssertLessThan(cores ?? 8, 8, "WebKit would report 8 for \(id)")
+        }
+        XCTAssertNil(DeviceGenerations.generation(id: DeviceGenerations.defaultID)?.processorCores)
+        XCTAssertNil(DeviceGenerations.generation(id: "ipados-26")?.processorCores)
+        for generation in DeviceGenerations.all where generation.platform == .iOS {
+            XCTAssertNotNil(generation.processorCores, "an iPhone generation without a processor count: \(generation.id)")
+        }
+    }
 }

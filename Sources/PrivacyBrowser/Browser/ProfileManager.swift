@@ -455,7 +455,8 @@ final class ProfileManager: ObservableObject {
             forWarmUpOnly: forWarmUpOnly,
             proxyLocationFound: proxyLocationFound,
             preferences: BrowsingPreferences.current.forProfileProcess,
-            menusInAppLanguage: stored.menusInAppLanguage)
+            menusInAppLanguage: stored.menusInAppLanguage,
+            processorCores: stored.deviceGeneration.processorCores)
         child.onEvent = { [weak self] event in
             guard let self else { return }
             switch event {

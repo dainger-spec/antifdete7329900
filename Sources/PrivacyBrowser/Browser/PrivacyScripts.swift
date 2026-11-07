@@ -15,9 +15,10 @@ import WebKit
 ///   * navigator.language(s): it must match the Accept-Language header, which only WebKit sets
 ///     (see `WebContentLanguage`); WebKit exposes a single language, as Safari does;
 ///   * navigator.deviceMemory: Safari does not implement it, so defining it marks a fake.
-/// No profile overrides a navigator or screen value: it runs on the very engine and hardware it
-/// declares, and native values agree with everything else a page can measure (CSS media queries,
-/// window sizes, touch events), which a declared phone would not. An iPhone or iPad view is
+/// No script overrides a navigator or screen value: a profile runs on the very engine and hardware
+/// it declares, and native values agree with everything else a page can measure (CSS media
+/// queries, window sizes, touch events), which a declared phone would not. The one value an iPhone
+/// view changes, the processor count, WebKit itself is given (`DeviceGeneration.processorCores`). An iPhone or iPad view is
 /// Safari on this Mac under that device's User-Agent, in a window of its screen's size — what
 /// Safari's own Develop › User Agent gives — and nothing more (the owner's decision, 31 October).
 ///
