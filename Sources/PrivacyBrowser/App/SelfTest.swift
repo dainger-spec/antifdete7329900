@@ -3301,6 +3301,32 @@ final class SelfTest {
                   result.isAlive && result.exitIP == "203.0.113.21" && result.countryCode == "DE" && result.city == "Berlin",
                   String(describing: result))
         }
+        // Its UDP, tried for real (the lead, 7 November): the proxy with UDP ASSOCIATE carries it from
+        // its pages' address; the plain SOCKS5 refuses the association; with the pages' address not
+        // found out it could not be checked; an HTTP proxy is not tried and says nothing.
+        if let udpPort = port("PB_SELFTEST_SOCKS_UDP_PROXY_PORT"), let socksPort = port("PB_SELFTEST_SOCKS_PROXY_PORT") {
+            let endpoints = ProxyExitLookup.endpoints
+            defer { ProxyExitLookup.endpoints = endpoints }
+            let withUDP = ProxySettings(kind: .socks5, host: loopback, port: udpPort)
+            ProxyExitLookup.endpoints = [URL(string: "http://exit.selftest.invalid/cdn-cgi/trace")!]
+            let carries = await ProxyChecker.check(withUDP)
+            check("proxy checker, UDP: a SOCKS5 proxy that relays UDP from its pages' address — UDP works",
+                  carries.isAlive && carries.udp == .supported && carries.udpLabel == .supported, String(describing: carries))
+            let plain = await ProxyChecker.check(ProxySettings(kind: .socks5, host: loopback, port: socksPort))
+            check("proxy checker, UDP: a SOCKS5 proxy that refuses UDP ASSOCIATE — no UDP, WebRTC will not work with it",
+                  plain.isAlive && plain.udp == .unsupported && plain.udpLabel == .unsupported, String(describing: plain))
+            ProxyExitLookup.endpoints = [URL(string: "http://exit.selftest.invalid/cdn-cgi/trace?ip=203.0.113.78")!]
+            let apart = await ProxyChecker.check(withUDP)
+            check("proxy checker, UDP: UDP that leaves from another address than the pages — no UDP",
+                  apart.isAlive && apart.udp == .elsewhere && apart.udpLabel == .unsupported, String(describing: apart))
+            ProxyExitLookup.endpoints = [URL(string: "http://exit.selftest.invalid/pb-no-trace")!]
+            let unknown = await ProxyChecker.check(withUDP)
+            check("proxy checker, UDP: the pages' address not found out — UDP not checked",
+                  unknown.isAlive && unknown.udp == .exitUnknown && unknown.udpLabel == .unchecked, String(describing: unknown))
+            let http = await ProxyChecker.check(ProxySettings(kind: .httpConnect, host: loopback, port: httpPort))
+            check("proxy checker, UDP: an HTTP proxy is not tried and nothing is said of its UDP",
+                  http.isAlive && http.udp == nil && http.udpLabel == nil, String(describing: http))
+        }
         if let silentPort {
             let silent = await ProxyChecker.check(ProxySettings(kind: .socks5, host: loopback, port: silentPort))
             check("proxy checker: the silent proxy fails as silent, and nothing came back from anywhere",

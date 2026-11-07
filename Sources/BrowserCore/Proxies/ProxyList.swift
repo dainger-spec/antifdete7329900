@@ -41,6 +41,21 @@ public struct ProxyCheckResult: Codable, Equatable, Sendable {
     public var organization: String?
     /// What the check found about the proxy's type, when the list did not have it right.
     public var kindFinding: KindFinding?
+    /// A working SOCKS5 proxy's UDP, tried for real when it was checked (`ProxyUDPCheck`: one UDP
+    /// association and a STUN request through it, then the address its UDP leaves from against
+    /// the one its pages leave from). Nil: not tried — an HTTP proxy, a dead one, or a check from a
+    /// build before this.
+    public var udp: ProxyUDPSupport?
+
+    /// What the list and a profile's card say of the proxy's UDP; nil when nothing is said.
+    public var udpLabel: ProxyUDPLabel? {
+        guard isAlive, let udp else { return nil }
+        switch udp {
+        case .supported: return .supported
+        case .unsupported, .elsewhere: return .unsupported
+        case .unknown, .exitUnknown: return .unchecked
+        }
+    }
 
     /// The type the check found, against what the list had.
     public enum KindFinding: Codable, Equatable, Sendable {
@@ -86,6 +101,14 @@ public struct ProxyCheckResult: Codable, Equatable, Sendable {
         return ProxyLocation(timeZoneIdentifier: timeZoneIdentifier, countryCode: countryCode,
                              proxyEndpoint: ProxyLocation.endpoint(of: proxy), resolvedAt: checkedAt, exitIP: exitIP)
     }
+}
+
+/// The three things said of a proxy's UDP (the lead, 7 November): it carries WebRTC, it does not
+/// (WebRTC will not work in profiles with it), or it could not be found out.
+public enum ProxyUDPLabel: String, Equatable, Sendable, CaseIterable {
+    case supported
+    case unsupported
+    case unchecked
 }
 
 /// Where a proxy of the list came from. Only the user's own exist for now: Lumen's own

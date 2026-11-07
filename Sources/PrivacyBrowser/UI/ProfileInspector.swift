@@ -181,6 +181,9 @@ struct ProfileInspectorView: View {
                 fact(L("inspector.latency"), String(format: L("inspector.latency.value"), latency),
                      help: String(format: L("inspector.latency.checked"), checked.shownRelative))
             }
+            if details.proxyCarriesUDP, let check, let label = check.udpLabel {
+                fact(L("inspector.udp"), ProxyUDPText.short(label), help: ProxyUDPText.help(check))
+            }
             fact(L("inspector.timeZone"), details.timeZone)
             fact(L("inspector.webRTC"), webRTCText(details))
             if details.proxyEndpoint != nil {
