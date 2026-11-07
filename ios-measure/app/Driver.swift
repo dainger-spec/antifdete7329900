@@ -62,9 +62,13 @@ final class Driver: NSObject {
     /// or typed into the launch arguments (`-control http://192.168.1.10:28310`).
     let controlURL: URL = {
         let env = ProcessInfo.processInfo.environment
-        if let value = env["LUMEN_CONTROL"], let url = URL(string: value) { return url }
         let args = ProcessInfo.processInfo.arguments
-        if let i = args.firstIndex(of: "-control"), i + 1 < args.count, let url = URL(string: args[i + 1]) { return url }
+        var found: URL?
+        if let value = env["LUMEN_CONTROL"], let url = URL(string: value) { found = url }
+        if found == nil, let i = args.firstIndex(of: "-control"), i + 1 < args.count { found = URL(string: args[i + 1]) }
+        // A real iPhone may be relaunched by hand: it keeps the last address it was given.
+        if let found { UserDefaults.standard.set(found.absoluteString, forKey: "lumenControl"); return found }
+        if let saved = UserDefaults.standard.string(forKey: "lumenControl"), let url = URL(string: saved) { return url }
         return URL(string: "http://127.0.0.1:28310")!
     }()
 
@@ -172,6 +176,14 @@ final class Driver: NSObject {
             let session = try find(c)
             session.close()
             return ["dropped": true]
+        case "defaults":
+            // The app's own preferences, e.g. AppleLanguages: does a web view made afterwards speak
+            // another language without the app being relaunched?
+            let key = c["key"] as? String ?? ""
+            if let value = c["value"] { UserDefaults.standard.set(value, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
+            UserDefaults.standard.synchronize()
+            return ["key": key, "now": UserDefaults.standard.object(forKey: key).map { String(describing: $0) } ?? NSNull(),
+                    "preferredLanguages": Locale.preferredLanguages, "timeZone": TimeZone.current.identifier]
         case "sleep":
             try await Task.sleep(nanoseconds: UInt64((c["seconds"] as? Double ?? 1) * 1e9))
             return ["slept": true]
@@ -264,6 +276,11 @@ final class Driver: NSObject {
             "machine": machine,
             "simulator": env["SIMULATOR_DEVICE_NAME"] ?? NSNull(),
             "simulatorRuntime": env["SIMULATOR_RUNTIME_VERSION"] ?? NSNull(),
+            "preferredLanguages": Locale.preferredLanguages,
+            "timeZone": TimeZone.current.identifier,
+            "processorCount": ProcessInfo.processInfo.activeProcessorCount,
+            "bundle": Bundle.main.bundleIdentifier ?? "?",
+            "appBoundDomains": Bundle.main.object(forInfoDictionaryKey: "WKAppBoundDomains") ?? NSNull(),
             // The runtime's own answer, independent of what this binary was compiled against.
             "storeRespondsToSetProxyConfigurations": WKWebsiteDataStore.instancesRespond(to: NSSelectorFromString("setProxyConfigurations:")),
             "storeRespondsToDataStoreForIdentifier": WKWebsiteDataStore.responds(to: NSSelectorFromString("dataStoreForIdentifier:")),
@@ -451,35 +468,36 @@ final class Session: NSObject, WKNavigationDelegate, WKUIDelegate {
         finish(["ok": false, "error": ns.localizedDescription, "code": ns.code, "domain": ns.domain])
     }
 
-    func webView(_ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge,
-                 completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+    // The async form of webView(_:didReceive:completionHandler:): its Swift signature is the same in
+    // every SDK, so it is never left out as a near miss (the completion-handler form was, in run 1).
+    func webView(_ webView: WKWebView, respondTo challenge: URLAuthenticationChallenge) async
+        -> (URLSession.AuthChallengeDisposition, URLCredential?) {
         let space = challenge.protectionSpace
         var record: [String: Any] = ["host": space.host, "port": space.port, "method": space.authenticationMethod,
                                      "isProxy": space.isProxy(), "previousFailures": challenge.previousFailureCount]
-        defer { challenges.append(record) }
+        defer {
+            challenges.append(record)
+            driver?.log("challenge \(record)")
+        }
         if space.authenticationMethod == NSURLAuthenticationMethodServerTrust {
             // Only the harness's own self-signed names; everything else the system's default way.
             if trustTestCertificates, space.host.hasSuffix(".lumentest"), let trust = space.serverTrust {
                 record["answer"] = "trusted test certificate"
-                completionHandler(.useCredential, URLCredential(trust: trust))
-            } else {
-                record["answer"] = "default"
-                completionHandler(.performDefaultHandling, nil)
+                return (.useCredential, URLCredential(trust: trust))
             }
-            return
+            record["answer"] = "default"
+            return (.performDefaultHandling, nil)
         }
         if space.isProxy() {
             if answerProxyAuth, challenge.previousFailureCount == 0, let credential = proxyCredential {
                 record["answer"] = "credential"
-                completionHandler(.useCredential, credential)
-            } else {
-                record["answer"] = "cancel"
-                completionHandler(.cancelAuthenticationChallenge, nil)
+                return (.useCredential, credential)
             }
-            return
+            record["answer"] = "cancel"
+            return (.cancelAuthenticationChallenge, nil)
         }
         record["answer"] = "default"
-        completionHandler(.performDefaultHandling, nil)
+        return (.performDefaultHandling, nil)
     }
 
     // MARK: WKUIDelegate: a page's window.open stays in the same session (no new view needed here)

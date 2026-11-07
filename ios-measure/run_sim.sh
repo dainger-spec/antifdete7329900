@@ -45,6 +45,10 @@ if ! "$HERE/build_sim_app.sh" "$BUILD" 16.0 plain >>"$LOG" 2>&1; then
 fi
 APP="$BUILD/LumenMeasure.app"
 BUNDLE="io.lumenbrowser.measure"
+if [[ "$SCENARIO" == "q3" ]]; then   # a second build with WKAppBoundDomains (web.telegram.org, lumentest)
+    mkdir -p "$BUILD/bound"
+    "$HERE/build_sim_app.sh" "$BUILD/bound" 17.0 bound >>"$LOG" 2>&1 || say "bound build failed"
+fi
 say "built $(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP/Info.plist") minimum"
 
 # Runtimes to measure: identifier and version, newest first.
@@ -68,8 +72,8 @@ say "runtimes to measure: $(echo $RUNTIMES)"
 [[ -n "$RUNTIMES" ]] || { say "no iOS runtime"; exit 2; }
 
 STATUS=0
-run_mode() { # udid version mode
-    local udid="$1" version="$2" mode="$3" dir="$OUT/ios-$2/$3"
+run_mode() { # udid version mode [label]
+    local udid="$1" version="$2" mode="$3" dir="$OUT/ios-$2/$3${4:+-$4}"
     mkdir -p "$dir"
     python3 "$HERE/host/harness.py" --scenario "$SCENARIO" --brk "$mode" --out "$dir" --lan-ip "$LAN" \
         --bind-a 127.0.0.2 --bind-b 127.0.0.3 --cert "$OUT/cert.pem" --key "$OUT/key.pem" \
@@ -111,6 +115,9 @@ print((pro or cands)[-1]["identifier"])' "$RUNTIME")"
             for mode in noproxy swap sharestore; do run_mode "$UDID" "$VERSION" "$mode"; done
         fi
         run_mode "$UDID" "$VERSION" none
+        if [[ "$SCENARIO" == "q3" && -d "$BUILD/bound/LumenMeasure.app" ]] && xcrun simctl install "$UDID" "$BUILD/bound/LumenMeasure.app" >>"$LOG" 2>&1; then
+            BUNDLE="io.lumenbrowser.measure.bound"; run_mode "$UDID" "$VERSION" none bound; BUNDLE="io.lumenbrowser.measure"
+        fi
         FIRST=0
     fi
     # What the simulated device ran while it was up (WebKit's processes per session).

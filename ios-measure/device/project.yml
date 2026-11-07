@@ -1,0 +1,22 @@
+# XcodeGen spec for the measurement driver on a real iPhone (ios-measure/run_device.sh generates the
+# project from it; the simulator build needs no project). Not product code.
+name: LumenMeasure
+options:
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  LumenMeasure:
+    type: application
+    platform: iOS
+    sources:
+      - path: ../app/Driver.swift
+      - path: ../app/main.swift
+    settings:
+      base:
+        PRODUCT_NAME: LumenMeasure
+        PRODUCT_BUNDLE_IDENTIFIER: io.lumenbrowser.measure
+        INFOPLIST_FILE: ../app/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic

@@ -1,8 +1,9 @@
 name: iOS app — stage 1 measurements
 
-# Measurement only (claude/ios-app-measure, never merged): the iPhone app's four questions, measured
-# on GitHub's macOS images (Xcode and iOS simulator runtimes). Report-only: the results are the log
-# and the artifact. ios-measure/README.md says what each scenario measures.
+# Measurement only (claude/ios-app-measure, never merged): the iPhone app's questions, measured on
+# GitHub's macOS images (Xcode and iOS simulator runtimes). Report-only: the results are the log and
+# the artifact. Which scenario runs on which image is ios-measure/ci-plan.json (a push runs that
+# plan), or the inputs of a manual run. ios-measure/README.md says what each scenario measures.
 on:
   push:
     branches: [claude/ios-app-measure]
@@ -14,34 +15,45 @@ on:
       scenario:
         description: q1 (proxy per data store), q2 (fingerprint), q3 (Telegram)
         default: q1
+      os:
+        description: runner image
+        default: xcode-27
       runtimes:
         description: newest, majors, all, or versions (27.1,18.6)
         default: newest
 
 jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: plan
+        run: |
+          if [[ -n "${{ inputs.scenario }}" ]]; then
+            echo 'matrix={"include":[{"scenario":"${{ inputs.scenario }}","os":"${{ inputs.os }}","runtimes":"${{ inputs.runtimes }}"}]}' >> "$GITHUB_OUTPUT"
+          else
+            echo "matrix=$(jq -c . ios-measure/ci-plan.json)" >> "$GITHUB_OUTPUT"
+          fi
   measure:
-    name: ${{ inputs.scenario || 'q1' }} on ${{ matrix.os }}
+    needs: plan
+    name: ${{ matrix.scenario }} on ${{ matrix.os }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: xcode-27
-            runtimes: newest
-          - os: macos-26
-            runtimes: newest
-          - os: macos-15
-            runtimes: majors
-          - os: macos-14
-            runtimes: all
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: Measure
-        run: ios-measure/run_sim.sh build/ios-measure "${{ inputs.scenario || 'q1' }}" "${{ inputs.runtimes || matrix.runtimes }}"
+        run: ios-measure/run_sim.sh "build/ios-measure" "${{ matrix.scenario }}" "${{ matrix.runtimes }}"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ios-measure-${{ inputs.scenario || 'q1' }}-${{ matrix.os }}
-          path: build/ios-measure
+          name: ios-measure-${{ matrix.scenario }}-${{ matrix.os }}
+          path: |
+            build/ios-measure
+            !build/ios-measure/build
+            !build/ios-measure/key.pem
           if-no-files-found: warn
