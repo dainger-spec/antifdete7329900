@@ -32,6 +32,10 @@ final class BrowserSession {
     let passwordSettings: ProfilePasswordSettings
     let library: ProfileLibrary
     var onAllWindowsClosed: (() -> Void)?
+    /// The search engine the address bar searches with now: the profile's setting as it is saved,
+    /// so a change made while the profile runs applies to the next search (ProfileManager reads
+    /// it from the vault); the launch's own setting until it is given that.
+    lazy var searchEngine: () -> SearchEngine = { [configuration] in configuration.searchEngine ?? .standard }
     /// Where this run's proxy exits (the launch's lookup, or what was remembered for the proxy),
     /// shown in its windows' chrome; set again when a lookup finishes after launch.
     var exitLocation: ProxyLocation? {

@@ -155,6 +155,9 @@ enum ProfileSessionHost {
             // A process without Safari's chrome has its default store closed here, before the
             // launch builds anything (with the chrome, that happened before its menu came up).
             ProfileNetworkGuard.takeOverDefaultStore()
+            // Our own window (an iPhone view, the simplified mode): no Safari menu bar comes with it,
+            // so it gets ours — New Tab, Close Tab, Open Location… (OwnWindowMenu).
+            if !SafariChromeHost.isHosting { OwnWindowMenu.install() }
             // What Safari's chrome needs and this macOS does not have is said where the user is
             // looking, not only in the log: a renamed method can be a feature gone quiet. Only while
             // the chrome is hosted: without it the profile's window itself says why, and a missing
@@ -291,6 +294,10 @@ enum ProfileSessionHost {
                 SafariChromeHost.performCloseEveryWindow()
             case .checkKeychain(let probe):
                 ProfileSessionHost.send(.keychainReport(KeychainCheck.run(probe)))
+            case .lookAtWindow(let action):
+                Task { @MainActor in
+                    ProfileSessionHost.send(.windowLook(await WindowProbe.perform(action, session: self.manager?.session(for: self.profileID))))
+                }
             case .lookAtHistory:
                 Task { @MainActor in
                     ProfileSessionHost.send(.historyLook(await HistoryWindowReader.look()))

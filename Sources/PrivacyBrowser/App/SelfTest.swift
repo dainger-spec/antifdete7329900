@@ -395,6 +395,7 @@ final class SelfTest {
         }
         await group("a mobile view in its own process") { try await mobileViewInItsOwnProcess(repository) }
         await group("processor count") { try await processorCountInOwnProcess(repository) }
+        await group("a phone's window") { try await phoneWindowAndSearch(repository) }
         await group("closing a profile's window") { try await closingTheWindowEndsTheProfile(repository) }
         await group("interface and websites' languages") { try await interfaceApartFromWebsites(repository) }
         await group("languages per profile") { try await languagesPerProfile(repository) }
@@ -5573,6 +5574,125 @@ final class SelfTest {
                     + "workers \(report["blobWorker"] ?? "nil") / \(report["urlWorker"] ?? "nil")")
             try? await manager.stop(profile.id)
         }
+    }
+
+    /// An iPhone view's window used as a person uses a phone's Safari (the owner, 8 November: no way
+    /// to open a second tab, no list of tabs, the search engine of the profile's settings not used),
+    /// in the profile's own process, its controls pressed as VoiceOver presses them (`WindowProbe`):
+    /// the bottom bar's tabs button opens the overview, + there opens a second tab, the overview then
+    /// lists two, the first one's × closes it; ⌘T from the menu bar opens a tab; a drag along the
+    /// bottom bar goes to the next tab and back. A search typed into the address bar goes to the
+    /// engine of the profile's settings — chosen while the profile runs — as the proxy sees it; and
+    /// in a profile in Safari's window, to the engine chosen there (it was Google for every profile).
+    private func phoneWindowAndSearch(_ repository: ProfileRepository) async throws {
+        let prefix = "phone window"
+        guard !AppEnvironment.isSandboxed else {
+            skip("\(prefix): tabs as on an iPhone, and the search engine of the profile",
+                 "the sandboxed build runs no process per profile", .build)
+            return
+        }
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("\(prefix): tabs as on an iPhone, and the search engine of the profile",
+                 "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
+            return
+        }
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        let givenProcess = ProcessInfo.processInfo.environment["PB_PROFILE_PROCESS"]
+        defer { if let givenProcess { setenv("PB_PROFILE_PROCESS", givenProcess, 1) } else { unsetenv("PB_PROFILE_PROCESS") } }
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(10)).lowercased()
+
+        func act(_ manager: ProfileManager, _ id: UUID, _ action: WindowProbeAction) async -> WindowLook {
+            var look: WindowLook?
+            manager.onWindowLook = { _, answer in look = answer }
+            guard manager.lookAtWindow(id, action) else { return WindowLook(action: "\(action)", detail: "no process") }
+            _ = await waitUntil(timeout: 25) { look != nil }
+            let seen = look ?? WindowLook(action: "\(action)", detail: "no answer")
+            info("\(prefix): \(seen.action) → found \(seen.found), tabs \(seen.tabs), selected \(seen.selected), "
+                 + "overview \(seen.overviewShown), controls \(seen.controls.filter { $0.hasPrefix("mobile") }.joined(separator: " ")), "
+                 + "menu \(seen.menuItems.prefix(6).joined(separator: ", "))\(seen.detail.isEmpty ? "" : ", \(seen.detail)")")
+            return seen
+        }
+        func targets(since: Int) async -> (count: Int, hosts: [String]) {
+            let url = URL(string: "http://proxied.selftest.invalid/pb-targets.json?since=\(since)")!
+            guard let text = try? await loadThroughProxy(repository, proxy, url: url),
+                  let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { return (since, []) }
+            return (object["count"] as? Int ?? since, (object["targets"] as? [String] ?? []).map { $0.lowercased() })
+        }
+        func launch(_ configuration: ProfileConfiguration, _ name: String) async throws -> (ProfileManager, UUID, Bool?) {
+            let profile = try repository.create(name: name, configuration: configuration)
+            let manager = ProfileManager(repository: repository)
+            var hostsChrome: Bool?
+            manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
+            do { try await manager.launch(profile.id) } catch { info("\(prefix): \(name) did not start: \(error)") }
+            _ = await waitUntil(timeout: 90) { hostsChrome != nil }
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            return (manager, profile.id, hostsChrome)
+        }
+
+        // An iPhone view.
+        let (phone, phoneID, _) = try await launch(ProfileConfiguration(
+            startURL: URL(string: "http://proxied.selftest.invalid/one?phone=\(run)"), proxy: proxy, ephemeral: true,
+            deviceGenerationID: "ios-27", matchProxyLocation: false, searchEngine: .duckDuckGo), "Phone window")
+        defer { try? repository.delete(phoneID) }
+        let start = await act(phone, phoneID, .describe)
+        check("\(prefix): the bottom bar has the tabs button, as Safari on an iPhone (Back, the address, Tabs)",
+              ["mobile-back", "mobile-address", "mobile-tabs"].allSatisfy(start.controls.contains),
+              "controls: \(start.controls.joined(separator: " "))")
+        let overview = await act(phone, phoneID, .press("mobile-tabs"))
+        check("\(prefix): the tabs button opens the tab overview", overview.found && overview.overviewShown, overview.detail)
+        let added = await act(phone, phoneID, .press("mobile-new-tab"))
+        check("\(prefix): + in the overview opens a new tab — two tabs, the overview closed",
+              added.found && added.tabs == 2 && !added.overviewShown, "tabs \(added.tabs), overview \(added.overviewShown)")
+        let listed = await act(phone, phoneID, .press("mobile-tabs"))
+        check("\(prefix): the overview then lists both tabs, a card each",
+              listed.overviewShown && listed.controls.contains("mobile-tab-card-0") && listed.controls.contains("mobile-tab-card-1"),
+              listed.controls.filter { $0.hasPrefix("mobile-tab") }.joined(separator: " "))
+        let closed = await act(phone, phoneID, .press("mobile-tab-close-0"))
+        check("\(prefix): a card's × closes that tab — one left", closed.found && closed.tabs == 1, "tabs \(closed.tabs)")
+        _ = await act(phone, phoneID, .press("mobile-tabs-done"))
+        let menu = await act(phone, phoneID, .shortcut("t"))
+        check("\(prefix): the menu bar has New Tab (⌘T), and ⌘T opens a tab",
+              menu.menuItems.contains { $0.hasPrefix("⌘T ") } && menu.found && menu.tabs == 2,
+              "tabs \(menu.tabs), menu \(menu.menuItems.joined(separator: ", "))")
+        let swiped = await act(phone, phoneID, .dragBottomBar(-160))
+        let back = await act(phone, phoneID, .dragBottomBar(160))
+        check("\(prefix): a drag along the bottom bar goes to the other tab, and back",
+              swiped.found && swiped.tabs == 2 && back.tabs == 2 && swiped.selected != menu.selected && back.selected == menu.selected,
+              "selected \(menu.selected) → \(swiped.selected) → \(back.selected)")
+        // The engine changed in the profile's settings while it runs, as the editor saves it.
+        var changed = try repository.loadConfiguration(phoneID)
+        changed.searchEngine = .bing
+        try repository.saveConfiguration(changed, for: phoneID)
+        let before = await targets(since: 0)
+        let searched = await act(phone, phoneID, .search("pbq\(run) weather"))
+        try? await Task.sleep(nanoseconds: 4_000_000_000)
+        let after = await targets(since: before.count)
+        check("\(prefix): a search from the address bar goes to the engine of the profile's settings (Bing, chosen while it ran)",
+              searched.found && after.hosts.contains { $0.hasPrefix("www.bing.com") }
+                && !after.hosts.contains { $0.hasPrefix("duckduckgo.com") || $0.hasPrefix("www.google.com") },
+              "requests after the search: \(after.hosts.joined(separator: " ")), tabs \(searched.urls.joined(separator: " "))")
+        try? await phone.stop(phoneID)
+
+        // A profile in Safari's window: Safari's address bar, the profile's engine.
+        let (desk, deskID, hosts) = try await launch(ProfileConfiguration(
+            startURL: URL(string: "http://proxied.selftest.invalid/one?desk=\(run)"), proxy: proxy, ephemeral: true,
+            matchProxyLocation: false, searchEngine: .bing), "Search in Safari's window")
+        defer { try? repository.delete(deskID) }
+        if hosts == true {
+            let deskBefore = await targets(since: 0)
+            let deskSearch = await act(desk, deskID, .search("pbq\(run) news"))
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            let deskAfter = await targets(since: deskBefore.count)
+            check("\(prefix): in Safari's window, a search from its address bar goes to the profile's engine (Bing), not Google",
+                  deskSearch.found && deskAfter.hosts.contains { $0.hasPrefix("www.bing.com") }
+                    && !deskAfter.hosts.contains { $0.hasPrefix("www.google.com") },
+                  "\(deskSearch.detail); requests after the search: \(deskAfter.hosts.joined(separator: " "))")
+        } else {
+            skip("\(prefix): in Safari's window, a search goes to the profile's engine",
+                 hosts == nil ? "the profile's process did not report its window" : "Safari's chrome is not hosted here")
+        }
+        try? await desk.stop(deskID)
     }
 
     /// The interface's language and the language websites see are apart, both ways (the owner, 1

@@ -53,6 +53,9 @@ enum ProfileCommand: Codable {
     /// Choose History › Show All History as the person does, and say what the window then shows
     /// (`HistoryWindowReader`). Sent by the self-test only, never by the app.
     case lookAtHistory
+    /// Do `action` to the profile's window as a person would and say what the window then shows
+    /// (`WindowProbe`). Sent by the self-test only, never by the app.
+    case lookAtWindow(WindowProbeAction)
 }
 
 /// What the manager decided for a launch's WebRTC. With `relay`, the profile's pages are given that
@@ -113,6 +116,8 @@ enum ProfileEvent: Codable {
     case keychainReport(KeychainReport)
     /// The answer to `lookAtHistory`.
     case historyLook(HistoryWindowLook)
+    /// The answer to `lookAtWindow`.
+    case windowLook(WindowLook)
 }
 
 /// How a profile's WebKit data was sealed as its process quit: whether WebKit let the store go
