@@ -9,6 +9,7 @@
 // tools such as idb use), lists the classes that name displays, surfaces and HID input, finds the
 // device, walks its I/O ports and, where a port's descriptor hands out an IOSurface, writes that
 // surface to a PNG and says how often it changes. Nothing here sends input to the device.
+#import <AppKit/AppKit.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreImage/CoreImage.h>
 #import <Foundation/Foundation.h>
@@ -78,10 +79,49 @@ static BOOL writePNG(IOSurfaceRef surface, NSString *path) {
     return ok;
 }
 
+// A tap at the centre of the screen through the device's HID port, the way idb does it
+// (SimulatorKit's SimDeviceLegacyHIDClient and IndigoHIDMessageForMouseNSEvent; the signature is
+// idb's, for Xcode 11 and later — an assumption this run tests). Run as its own process: a wrong
+// signature crashes only this.
+typedef void *IndigoMessageRef;
+static int tap(id device, NSString *simulatorKit) {
+    void *sk = dlopen(simulatorKit.UTF8String, RTLD_NOW);
+    if (!sk) { printf("TAP NO: SimulatorKit did not load: %s\n", dlerror()); return 1; }
+    listClasses(simulatorKit.UTF8String, @[@"HID", @"Indigo", @"Touch", @"Display", @"Screen"]);
+    IndigoMessageRef (*message)(CGPoint *, CGPoint *, uint32_t, NSEventType, BOOL) = dlsym(sk, "IndigoHIDMessageForMouseNSEvent");
+    Class clientClass = NSClassFromString(@"_TtC12SimulatorKit24SimDeviceLegacyHIDClient") ?: NSClassFromString(@"SimDeviceLegacyHIDClient");
+    printf("TAP IndigoHIDMessageForMouseNSEvent %s, HID client class %s\n", message ? "found" : "missing", clientClass ? class_getName(clientClass) : "missing");
+    if (!message || !clientClass) return 1;
+    NSError *error = nil;
+    id client = ((id (*)(id, SEL, id, NSError **))objc_msgSend)([clientClass alloc], NSSelectorFromString(@"initWithDevice:error:"), device, &error);
+    if (!client) { printf("TAP NO: the HID client did not start: %s\n", error.description.UTF8String); return 1; }
+    listMethods(client, @"send");
+    SEL send = NSSelectorFromString(@"sendWithMessage:freeWhenDone:completionQueue:completion:");
+    if (![client respondsToSelector:send]) { printf("TAP NO: no sendWithMessage:freeWhenDone:completionQueue:completion:\n"); return 1; }
+    dispatch_queue_t queue = dispatch_queue_create("tap", DISPATCH_QUEUE_SERIAL);
+    __block int answered = 0;
+    for (NSNumber *type in @[@(NSEventTypeLeftMouseDown), @(NSEventTypeLeftMouseUp)]) {
+        CGPoint point = CGPointMake(0.5, 0.5);
+        IndigoMessageRef m = message(&point, NULL, 0x32, (NSEventType)type.unsignedIntegerValue, NO);
+        if (!m) { printf("TAP NO: no message built\n"); return 1; }
+        ((void (*)(id, SEL, IndigoMessageRef, BOOL, dispatch_queue_t, void (^)(NSError *)))objc_msgSend)(
+            client, send, m, YES, queue, ^(NSError *sendError) {
+                printf("TAP sent %s: %s\n", type.unsignedIntegerValue == NSEventTypeLeftMouseDown ? "down" : "up",
+                       sendError ? sendError.description.UTF8String : "ok");
+                answered++;
+            });
+        usleep(80000);
+    }
+    for (int i = 0; i < 50 && answered < 2; i++) usleep(100000);
+    printf("TAP %d of 2 messages answered\n", answered);
+    return answered == 2 ? 0 : 1;
+}
+
 int main(int argc, const char **argv) {
     @autoreleasepool {
-        if (argc < 4) { fprintf(stderr, "usage: sim_frame_probe UDID DEVELOPER_DIR OUT.png\n"); return 2; }
+        if (argc < 4) { fprintf(stderr, "usage: sim_frame_probe UDID DEVELOPER_DIR OUT.png [--tap SIMULATORKIT]\n"); return 2; }
         NSString *udid = @(argv[1]), *developer = @(argv[2]), *out = @(argv[3]);
+        NSString *tapKit = (argc >= 6 && strcmp(argv[4], "--tap") == 0) ? @(argv[5]) : nil;
         const char *coreSimulator = "/Library/Developer/PrivateFrameworks/CoreSimulator.framework/CoreSimulator";
         NSString *simulatorKit = [developer stringByAppendingPathComponent:@"Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit"];
         void *cs = dlopen(coreSimulator, RTLD_NOW);
@@ -102,6 +142,7 @@ int main(int argc, const char **argv) {
         }
         if (!device) { printf("FRAME NO: device %s not found (%s)\n", udid.UTF8String, error.description.UTF8String ?: ""); return 1; }
         printf("FRAME device %s: %s\n", udid.UTF8String, [[call(device, @"stateString") description] UTF8String] ?: "?");
+        if (tapKit) return tap(device, tapKit);
         id io = call(device, @"io");
         if (!io) { printf("FRAME NO: the device has no io client\n"); return 1; }
         listMethods(io, nil);
@@ -131,7 +172,7 @@ int main(int argc, const char **argv) {
             if (now != seed) { changes++; seed = now; }
             usleep(2000);
         }
-        printf("FRAME seed changed %u times in 3 s\n", changes);
+        printf("FRAME seed changed %u times in 3 s (%.1f frames a second)\n", changes, changes / 3.0);
         BOOL wrote = writePNG(found, out);
         printf("FRAME %s %s\n", wrote ? "YES: a frame written to" : "NO: could not write", out.UTF8String);
         CFRelease(found);

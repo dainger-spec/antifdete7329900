@@ -122,10 +122,12 @@ note "device: ${DEVICE_NAME//_/ } on iOS $RUNTIME_VERSION ($RUNTIME_ID)"
 # --- The proxy and the pages -----------------------------------------------------------------------
 python3 "$HERE/selftest_proxy.py" --http "$HTTP_PORT" --socks "$SOCKS_PORT" >"$WORK/proxy.log" 2>&1 &
 BACKGROUND+=("$!")
-python3 "$HERE/sim_pages.py" --port "$PAGE_PORT" --reports "$REPORTS" >"$WORK/pages.log" 2>&1 &
+python3 "$HERE/sim_pages.py" --host 0.0.0.0 --port "$PAGE_PORT" --reports "$REPORTS" >"$WORK/pages.log" 2>&1 &
 BACKGROUND+=("$!")
 for _ in $(seq 1 40); do lsof -nP -iTCP:"$PAGE_PORT" -sTCP:LISTEN >/dev/null 2>&1 && lsof -nP -iTCP:"$HTTP_PORT" -sTCP:LISTEN >/dev/null 2>&1 && break; sleep 0.5; done
 PAGES="http://127.0.0.1:$PAGE_PORT"
+LAN_ADDRESS="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)"
+SUDO=0; sudo -n true 2>/dev/null && SUDO=1
 
 proxy_saw() {
     curl -s --noproxy '*' --max-time 5 "http://127.0.0.1:$HTTP_PORT/pb-leak/log.json?run=$RUN" | python3 -c '
@@ -241,16 +243,75 @@ if [[ "${CI:-}" == true ]]; then
     [[ -n "$HOSTSEEN" ]] && echo "PROXY-FROM-MAC YES" || echo "PROXY-FROM-MAC NO"
 fi
 
-# --- 1b. What the network guard needs: whose connection it is ----------------------------------
-say "1b. Which process holds a device's connection"
-open_url "$A" "$PAGES/plain?tag=owner"
-sleep 3
-pids="$(device_pids "$A")"
-lsof -nP -iTCP:"$PAGE_PORT" -sTCP:ESTABLISHED 2>/dev/null | awk -v port=":$PAGE_PORT" 'NR > 1 && index($9, port) > 0 && index($9, "->") > 0' | while read -r command pid _; do
-    parent="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
-    case " $pids " in *" $pid "*) mine="one of device A's processes" ;; *) mine="NOT under device A's launchd_sim" ;; esac
-    echo "   connection held by $command ($pid, parent $parent): $mine"
+# --- 1b. What the network guard needs: whose connection it is ------------------------------------
+say "1b. Which process holds a device's connection, and what the kernel counts it for"
+ancestry() {  # $1: pid — the chain of parents up to launchd, with the device named where it is one
+    local pid=$1 chain=""
+    while [[ -n "$pid" && "$pid" != 0 && "$pid" != 1 ]]; do
+        local line; line="$(ps -o ppid=,comm= -p "$pid" 2>/dev/null)" || break
+        local ppid="${line%% *}"; line="${line#* }"; ppid="$(echo "$ppid" | tr -d ' ')"
+        local name; name="$(basename "$(echo "$line" | sed 's/^ *//')")"
+        if [[ "$name" == launchd_sim ]]; then
+            name="launchd_sim[$(ps -o args= -p "$pid" | grep -oE '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' | head -1)]"
+        fi
+        chain="$chain → $name($pid)"
+        pid="$ppid"
+    done
+    echo "${chain# → }"
+}
+holders() {  # the processes holding client ends of connections to the page server now
+    lsof -nP -iTCP:"$PAGE_PORT" -sTCP:ESTABLISHED -F pcn 2>/dev/null | awk -v port=":$PAGE_PORT" '
+        /^p/ { pid = substr($0, 2) } /^c/ { cmd = substr($0, 2) }
+        /^n/ { name = substr($0, 2); split(name, ends, "->"); if (index(ends[2], port) > 0) print pid " " cmd }' | sort -u
+}
+if [[ $SUDO == 1 ]]; then
+    sudo -n tcpdump -i pktap,lo0 -k NP -n -tt -l "tcp port $PAGE_PORT and tcp[tcpflags] & tcp-syn != 0" >"$WORK/pktap-pages.txt" 2>/dev/null &
+    TCPDUMP=$!; BACKGROUND+=("$TCPDUMP"); sleep 2
+fi
+for d in A; do
+    open_url "$A" "$PAGES/hold?dev=$d"
+    sleep 6
+    holders | while read -r pid command; do
+        echo "   device $d's page connection held by $command($pid): $(ancestry "$pid")"
+    done
 done
+if [[ $SUDO == 1 ]]; then
+    sleep 1; sudo -n kill "$TCPDUMP" 2>/dev/null
+    note "the kernel's record of those connections (pktap: proc = the socket's process, eproc = whom it is counted for):"
+    sed 's/^/     /' "$WORK/pktap-pages.txt" | head -12
+    note "DNS: device A looks up a name of its own; who asks the resolver, and for whom"
+    sudo -n tcpdump -i pktap,all -k NP -n -tt -l "udp port 53 or tcp port 53" >"$WORK/pktap-dns.txt" 2>/dev/null &
+    TCPDUMP=$!; BACKGROUND+=("$TCPDUMP"); sleep 2
+    open_url "$A" "http://pbsim-$RUN.example.com/"
+    sleep 8; sudo -n kill "$TCPDUMP" 2>/dev/null
+    grep -i "pbsim-$RUN" "$WORK/pktap-dns.txt" | sed 's/^/     /' | head -8
+    [[ -s "$WORK/pktap-dns.txt" ]] || note "no DNS packet captured"
+else
+    note "no sudo without a password here: the kernel's record (pktap) and the DNS capture are skipped"
+fi
+
+# --- 1c. A processor count of the device's own ------------------------------------------------------
+say "1c. hardwareConcurrency: WebKit's own setting for its processor count, given to the device"
+rm -f "$REPORTS/probe-cores-before.json" "$REPORTS/probe-cores-after.json"
+open_url "$A" "$PAGES/probe?name=probe-cores-before"; note "before: $(wait_report probe-cores-before 60) s"
+xcrun simctl spawn "$A" launchctl setenv WTF_numberOfProcessorCores 4 2>&1 | sed 's/^/   setenv: /'
+xcrun simctl terminate "$A" "$SAFARI" >/dev/null 2>&1
+for pid in $(device_pids "$A"); do
+    case "$(ps -o comm= -p "$pid" 2>/dev/null)" in *WebContent*|*com.apple.WebKit*) kill "$pid" 2>/dev/null ;; esac
+done
+sleep 2
+open_url "$A" "$PAGES/probe?name=probe-cores-after"; note "after: $(wait_report probe-cores-after 60) s"
+python3 - "$REPORTS" <<'PY'
+import json, os, sys
+for name in ("probe-cores-before", "probe-cores-after"):
+    path = os.path.join(sys.argv[1], name + ".json")
+    if os.path.exists(path):
+        p = json.load(open(path))
+        print("   %s: page %s, worker %s" % (name, p.get("hardwareConcurrency"), p.get("_page", {}).get("workerHardwareConcurrency")))
+    else:
+        print("   %s: no report" % name)
+PY
+xcrun simctl spawn "$A" launchctl unsetenv WTF_numberOfProcessorCores >/dev/null 2>&1
 
 # --- 2. Isolation --------------------------------------------------------------------------------
 say "2. Isolation of two devices"
@@ -278,7 +339,11 @@ done
 # --- 4. The fingerprint ---------------------------------------------------------------------------
 say "4. The fingerprint probe in MobileSafari"
 open_url "$A" "$PAGES/probe?name=probe-simulator"
-note "probe: $(wait_report probe-simulator 60) s"
+note "probe (loopback, a secure context): $(wait_report probe-simulator 60) s"
+if [[ -n "$LAN_ADDRESS" ]]; then
+    open_url "$A" "http://$LAN_ADDRESS:$PAGE_PORT/probe?name=probe-simulator-lan"
+    note "probe over plain http on this Mac's network address ($LAN_ADDRESS), as the real iPhone's: $(wait_report probe-simulator-lan 60) s"
+fi
 [[ -s "$REPORTS/probe-simulator.json" ]] && python3 -c '
 import json, sys
 p = json.load(open(sys.argv[1]))
@@ -287,9 +352,20 @@ for k in ("ua", "platform", "hardwareConcurrency", "maxTouchPoints", "screen", "
 
 # --- 5. The screen --------------------------------------------------------------------------------
 say "5. The device's screen, outside Simulator.app"
-if clang -fobjc-arc -framework Foundation -framework IOSurface -framework CoreImage -framework CoreGraphics -framework ImageIO \
+open_url "$A" "$PAGES/anim"
+sleep 2
+if clang -fobjc-arc -framework Foundation -framework AppKit -framework IOSurface -framework CoreImage -framework CoreGraphics -framework ImageIO \
         "$HERE/sim_frame_probe.m" -o "$WORK/sim_frame_probe" 2>"$WORK/clang.err"; then
-    "$WORK/sim_frame_probe" "$A" "$DEVELOPER" "$OUT/frame-A.png" 2>&1 | head -120
+    "$WORK/sim_frame_probe" "$A" "$DEVELOPER" "$OUT/frame-A.png" 2>&1 | grep -v '^FRAME   ROCK\|^FRAME port' | head -60
+    note "the page's own count of frames drawn: $(wait_report anim 15) s → $(cat "$REPORTS/anim.json" 2>/dev/null)"
+    SIMKIT="$(find "$XCODE_APP" /Library/Developer/PrivateFrameworks -name SimulatorKit.framework -maxdepth 8 2>/dev/null | head -1)"
+    note "SimulatorKit: ${SIMKIT:-not found}"
+    if [[ -n "$SIMKIT" ]]; then
+        open_url "$A" "$PAGES/tap"; sleep 3
+        "$WORK/sim_frame_probe" "$A" "$DEVELOPER" "$WORK/unused.png" --tap "$SIMKIT/SimulatorKit" 2>&1 | grep -v '^FRAME   ROCK' | head -60
+        note "exit status of the tap: $?"
+        note "what the page saw of the tap: $(wait_report tap 10) s → $(cat "$REPORTS/tap.json" 2>/dev/null || echo nothing)"
+    fi
 else
     note "the frame probe did not build: $(head -5 "$WORK/clang.err")"
 fi
@@ -308,6 +384,7 @@ done
 xcrun simctl shutdown "$B" >/dev/null 2>&1
 BOOTED=("$A")
 echo "   devices | boot s | page s (new) | page s (device A) | footprint total MB | free MB"
+[[ "${PB_SIM_SKIP_CAPACITY:-}" == 1 ]] && MAX_DEVICES=1
 for n in $(seq 2 "$MAX_DEVICES"); do
     if (( $(free_mb) < 1200 )); then note "stopping: $(free_mb) MB free"; break; fi
     new_device "N$n"; u=$NEW_UDID

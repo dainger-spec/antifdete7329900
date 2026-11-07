@@ -20,7 +20,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Measure
+        env:
+          PB_SIM_SKIP_CAPACITY: "1"
         run: scripts/ios_sim_stage1.sh --yes --out build/ios-sim-stage1
+      - name: The library inside the device's Safari, again on this runtime (the spike of 31 October)
+        if: always()
+        run: |
+          mkdir -p build/ios-sim-stage1/spike
+          cd build/ios-sim-stage1/spike && ../../../scripts/ios_simulator_spike.sh --yes
       - uses: actions/upload-artifact@v4
         if: always()
         with:

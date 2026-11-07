@@ -54,14 +54,25 @@ const name = params.get('name') || 'probe';
 let result;
 try { result = (function () { %s })(); } catch (e) { result = {probeError: String(e)}; }
 result._page = {devicePixelRatio: window.devicePixelRatio, screen: screen.width + 'x' + screen.height,
-                inner: innerWidth + 'x' + innerHeight, time: new Date().toISOString()};
+                inner: innerWidth + 'x' + innerHeight, time: new Date().toISOString(),
+                secureContext: String(window.isSecureContext), origin: location.origin};
+// What a worker sees of the processor count (a page's override would not reach it).
+function workerConcurrency() {
+  return new Promise((resolve) => {
+    try {
+      const w = new Worker(URL.createObjectURL(new Blob(['postMessage(String(navigator.hardwareConcurrency))'], {type: 'text/javascript'})));
+      w.onmessage = (e) => resolve(e.data); w.onerror = () => resolve('error');
+      setTimeout(() => resolve('timeout'), 3000);
+    } catch (e) { resolve('error: ' + e); }
+  });
+}
 document.getElementById('out').textContent = JSON.stringify(result, null, 1);
 document.getElementById('share').onclick = () => {
   const text = JSON.stringify(result);
   if (navigator.share) navigator.share({title: 'Lumen probe', text: text}).catch(() => {});
   else navigator.clipboard.writeText(text);
 };
-send(name, result);
+workerConcurrency().then((value) => { result._page.workerHardwareConcurrency = value; send(name, result); });
 """ % PROBE
 
 ISO_SET = SEND + """
@@ -131,6 +142,39 @@ class Handler(BaseHTTPRequestHandler):
                        extra=[("Set-Cookie", f"pbiso_srv={dev}; Max-Age=86400; Path=/")])
         elif url.path == "/iso/get":
             self.reply(page("iso get " + dev, ISO_GET, "<p id=state>reading"))
+        elif url.path == "/hold":
+            # A page whose connection stays open for 25 s, so that the process holding its other end
+            # can be found (Content-Length promises more than is sent, then the rest comes).
+            body = b"<!doctype html><title>hold</title><p>held" + b" " * 64
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body[:20])
+            self.wfile.flush()
+            time.sleep(25)
+            try:
+                self.wfile.write(body[20:])
+            except OSError:
+                pass
+        elif url.path == "/anim":
+            script = SEND + """
+let frames = 0; const box = document.getElementById('box'); const start = performance.now();
+function step(t) { frames++; box.style.transform = 'rotate(' + (t / 5) + 'deg)'; if (t - start < 4000) requestAnimationFrame(step); else send('anim', {frames: frames, seconds: (t - start) / 1000}); }
+requestAnimationFrame(step);"""
+            self.reply(page("anim", script, "<div id=box style='width:300px;height:300px;margin:80px auto;background:linear-gradient(red,blue)'></div>"))
+        elif url.path == "/tap":
+            script = SEND + """
+const seen = [];
+for (const type of ['touchstart', 'touchend', 'pointerdown', 'pointerup', 'mousedown', 'click']) {
+  document.addEventListener(type, (e) => {
+    seen.push({type: e.type, trusted: e.isTrusted, pointerType: e.pointerType || null,
+               x: Math.round((e.touches && e.touches[0] ? e.touches[0].clientX : e.clientX) || 0),
+               y: Math.round((e.touches && e.touches[0] ? e.touches[0].clientY : e.clientY) || 0)});
+    if (e.type === 'click') send('tap', {events: seen});
+  }, {passive: true});
+}"""
+            self.reply(page("tap", script, "<div style='position:fixed;inset:0;background:#eef;font-size:30px;padding:40px'>tap anywhere</div>"))
         elif url.path == "/plain":
             tag = SAFE.sub("", (query.get("tag") or ["plain"])[0])[:40]
             self.reply(page("plain " + tag, SEND + f"send('plain-{tag}', {{loaded: performance.now()}});", "<p>" + tag))
