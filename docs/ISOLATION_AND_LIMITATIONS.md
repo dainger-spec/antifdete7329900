@@ -484,6 +484,25 @@ compares nothing and checks only that the profile names its own engine's Safari;
 on macOS 27 (`full.yml`, the owner's system), where Safari and apps share WebKit 22625.1.29.11.28,
 is the one that holds a profile to Safari there.
 
+Where Safari's engine lives, and why only macOS 27 ends it (measured on the runner image of 2
+November, macOS 26.7.2, claude/measure-safari-engines). Software Update installed macOS 26.7.2, then
+Safari 27.2 as a package of its own (`com.apple.pkg.Safari27.2TahoeAuto`). Safari 27.2 brought its
+WebKit, WebCore and JavaScriptCore (build 21625.2.8.18.4) into Safari's part of the system, the App
+cryptex: `/System/Volumes/Preboot/Cryptexes/App/System/Library/StagedFrameworks/Safari`. Safari and
+its web processes load the engine from there — Safari's executable names that folder for the
+dynamic loader (`DYLD_FRAMEWORK_PATH`, read in Safari 26.6.2's; Safari 27.2's processes were seen
+loading from it). An app's web view loads `/System/Library/Frameworks/WebKit.framework`, which
+macOS 26.7.2 left at 21624.5.1.11.3, as in 26.6.2. The machine restarted twice after Safari was
+installed and once more for the job: still two engines. So a restart does not end it, nor does an
+update of macOS 26; macOS 27, whose system WebKit is Safari 27's, does. On any Mac:
+
+    defaults read /Applications/Safari.app/Contents/Info.plist CFBundleVersion
+    defaults read /System/Library/Frameworks/WebKit.framework/Resources/Info.plist CFBundleVersion
+
+Different builds: two engines. The app says so once in the profiles window for each pair of
+versions, and always in Settings › About (`EngineWarning`). Not measured: whether Safari 27 comes to
+a Mac on its own, without the person's say (the package's name says "Auto"; that proves nothing).
+
 What `safari_reference.py` says, besides passing: NOT DRIVEN (Safari could not be driven, or its
 probe came back short), DIVERGES (a must-match key differs, and a plain Safari window opened without
 WebDriver says what WebDriver said, or could not be read), WEBDRIVER ONLY (every differing key reads

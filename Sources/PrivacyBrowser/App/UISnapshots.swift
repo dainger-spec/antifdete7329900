@@ -87,6 +87,12 @@ enum UISnapshots {
                 SettingsView(section: section).environmentObject(model)
             }.capture(into: folder)
         }
+        // A Mac whose Safari runs a newer engine than profiles, on whatever runner this is.
+        EngineWarning.standIn = EngineWarning.Facts(safari: "27.2", engine: "26.6.2", macOS: 26) // l10n: not text
+        problems += await Shot(name: "settings-about-engines", size: SettingsView.size, edges: true) {
+            SettingsView(section: .about).environmentObject(model)
+        }.capture(into: folder)
+        EngineWarning.standIn = nil
         let configuration = AppUpdater.Configuration(
             feed: URL(string: "https://updates.example/lumen/appcast.json")!, keys: [:], version: "0.1.0",
             build: BuildVersion("1")!, bundleIdentifier: "io.lumenbrowser.Lumen",
@@ -386,6 +392,10 @@ enum UISnapshots {
         problems += await Shot(name: "profiles-guard-restart", size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: 620),
                                edges: true) {
             ProfilesPreview(rows: rows, sync: .off, guardNotice: .restartNeeded)
+        }.capture(into: folder)
+        problems += await Shot(name: "profiles-engines", size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: 620), edges: true) {
+            ProfilesPreview(rows: rows, sync: .off,
+                            engineWarning: EngineWarning.Facts(safari: "27.2", engine: "26.6.2", macOS: 26)) // l10n: not text
         }.capture(into: folder)
         problems += await Shot(name: "profiles-guard-banners", size: CGSize(width: 1180, height: 640), edges: true) {
             ProfilesPreview(rows: rows, sync: .off, indexNotice: unlisted, proxyProblem: threeAtOnce, guardNotice: .notInstalled)
@@ -1490,13 +1500,14 @@ private struct ProfilesPreview: View {
     var proxyProblem: ProxyProblemBanner.Item?
     var bannersExpanded = false
     var guardNotice: WebRTCProtectionNotice?
+    var engineWarning: EngineWarning.Facts?
 
     var body: some View {
         ProfilesScreen(rows: rows, isWorking: isWorking, sync: sync, filter: $filter, search: $search, actions: actions,
                        section: .constant(section), proxyCount: proxyCount, proxies: proxies, indexNotice: indexNotice,
                        keptDeleted: keptDeleted, showsInspector: .constant(showsInspector), inspectorInfo: inspectorInfo,
                        guardReady: true, initialSelection: selected, initialBannersExpanded: bannersExpanded,
-                       proxyProblem: proxyProblem, guardNotice: guardNotice)
+                       proxyProblem: proxyProblem, guardNotice: guardNotice, engineWarning: engineWarning)
     }
 }
 

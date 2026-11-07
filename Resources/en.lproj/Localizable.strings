@@ -1330,6 +1330,14 @@
 "settings.about.macOS" = "macOS";
 "settings.about.safari" = "Safari on this Mac";
 "settings.about.safari.ownEngine" = "%@ — with an engine of its own, not the WebKit this Mac gives apps; profiles run that WebKit and name its Safari, %@";
+"engines.banner.title" = "Safari on this Mac is newer than the profiles’ engine";
+"engines.banner.text" = "Safari %1$@ came with an engine of its own; profiles run the system’s, Safari %2$@’s. Sites see Safari %2$@. Moving to macOS %3$@ fixes this; restarting does not.";
+"engines.banner.details" = "Details";
+"engines.banner.ok" = "OK";
+"engines.about.title" = "Safari and profiles run different engines";
+"engines.about.what" = "Safari %1$@ has an engine of its own. Profiles run the engine macOS %2$@ gives apps and call themselves its Safari, %3$@.";
+"engines.about.risk" = "What it means: sites see Safari %1$@. Nothing in the fingerprint contradicts itself, but the more people install Safari %2$@, the rarer %1$@ gets and the more a profile stands out.";
+"engines.about.todo" = "What to do: update this Mac to macOS %1$@, where Safari and profiles share one engine again. Restarting and macOS %2$@ updates do not change this. If you cannot update, profiles keep working as they are.";
 "settings.about.webKit" = "WebKit";
 "settings.about.build" = "Build";
 "settings.about.build.sandboxed" = "App Sandbox";

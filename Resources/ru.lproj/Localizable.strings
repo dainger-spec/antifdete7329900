@@ -1330,6 +1330,14 @@
 "settings.about.macOS" = "macOS";
 "settings.about.safari" = "Safari на этом Mac";
 "settings.about.safari.ownEngine" = "%@ — со своим движком, не тем WebKit, что этот Mac даёт приложениям; профили работают на этом WebKit и называют его Safari, %@";
+"engines.banner.title" = "Safari на этом Mac новее движка профилей";
+"engines.banner.text" = "Safari %1$@ пришёл со своим движком, а профили работают на системном — от Safari %2$@. Сайты видят Safari %2$@. Исправит переход на macOS %3$@; перезагрузка не поможет.";
+"engines.banner.details" = "Подробнее";
+"engines.banner.ok" = "Понятно";
+"engines.about.title" = "Safari и профили на разных движках";
+"engines.about.what" = "Safari %1$@ — со своим движком. Профили работают на движке, который macOS %2$@ даёт приложениям, и называют себя его Safari — %3$@.";
+"engines.about.risk" = "Чем грозит: сайты видят Safari %1$@. Противоречий в отпечатке нет, но чем больше людей поставит Safari %2$@, тем реже встречается %1$@ и тем заметнее профиль.";
+"engines.about.todo" = "Что делать: обновить Mac до macOS %1$@ — там Safari и профили снова на одном движке. Перезагрузка и обновления macOS %2$@ этого не меняют. Если обновиться нельзя, профили работают дальше как есть.";
 "settings.about.webKit" = "WebKit";
 "settings.about.build" = "Сборка";
 "settings.about.build.sandboxed" = "С песочницей App Sandbox";

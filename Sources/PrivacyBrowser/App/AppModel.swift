@@ -80,6 +80,14 @@ final class AppModel: ObservableObject {
     /// The network guard's notice at the foot of the profiles was closed: not again until the app
     /// starts again (kept nowhere but here).
     @Published var guardNoticeHidden = false
+    /// Safari on this Mac runs a newer engine than profiles, and OK was not yet pressed for this
+    /// pair of versions (`EngineWarning`).
+    @Published private(set) var engineWarning: EngineWarning.Facts?
+
+    func engineWarningSeen() {
+        if let engineWarning { EngineWarning.markSeen(engineWarning) }
+        engineWarning = nil
+    }
     /// This quit has recorded the profiles to reopen (a quit locks in more than one round).
     private var recordedProfilesToReopen = false
 
@@ -120,6 +128,7 @@ final class AppModel: ObservableObject {
     private var licenseObservation: AnyCancellable?
 
     init() {
+        _engineWarning = Published(initialValue: EngineWarning.unseen(EngineWarning.current))
         // Before the vault is looked for: a vault a sandboxed build of this app left in its
         // container is this build's to use (an unsandboxed build hosts Safari's chrome).
         AppEnvironment.adoptSandboxedDataIfNeeded()

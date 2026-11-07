@@ -361,7 +361,13 @@ struct ProfileListView: View {
                            model.settingsSection = .webRTC
                            openSettings()
                        },
-                       hideGuardNotice: { model.guardNoticeHidden = true })
+                       hideGuardNotice: { model.guardNoticeHidden = true },
+                       engineWarning: model.engineWarning,
+                       openEngineDetails: {
+                           model.settingsSection = .about
+                           openSettings()
+                       },
+                       dismissEngineWarning: { model.engineWarningSeen() })
     }
 
     /// The window's Proxies section; with `ids`, those proxies selected (else the selection it had).
@@ -809,6 +815,11 @@ struct ProfilesScreen: View {
     /// Settings, opened at its WebRTC section.
     var openGuardSettings: () -> Void = {}
     var hideGuardNotice: () -> Void = {}
+    /// Safari on this Mac runs a newer engine than profiles (`EngineWarning`): said once for each
+    /// pair of versions; Details opens Settings › About, OK puts it away for that pair.
+    var engineWarning: EngineWarning.Facts?
+    var openEngineDetails: () -> Void = {}
+    var dismissEngineWarning: () -> Void = {}
     /// Rows selected with a click, ⌘- and ⇧-click or their checkboxes; one is what the inspector
     /// shows, with two or more `ProfileBulkBar` acts on them all.
     @State private var selection = ProfileSelection()
@@ -934,6 +945,7 @@ struct ProfilesScreen: View {
         case license(LicenseBanner)
         case index(AppModel.IndexNotice)
         case proxyProblem(ProxyProblemBanner.Item)
+        case engines(EngineWarning.Facts)
         case keptDeleted
 
         var id: String {
@@ -941,6 +953,7 @@ struct ProfilesScreen: View {
             case .license(let banner): return "license-\(banner.rank)"
             case .index: return "index"
             case .proxyProblem: return "proxy"
+            case .engines: return "engines"
             case .keptDeleted: return "kept"
             }
         }
@@ -954,6 +967,7 @@ struct ProfilesScreen: View {
         if let indexNotice { banners.append(.index(indexNotice)) }
         if let proxyProblem { banners.append(.proxyProblem(proxyProblem)) }
         banners += licenseBanners.filter { !$0.stopsWork }.map { .license($0) }
+        if let engineWarning { banners.append(.engines(engineWarning)) }
         if !keptDeleted.isEmpty { banners.append(.keptDeleted) }
         return banners
     }
@@ -990,6 +1004,8 @@ struct ProfilesScreen: View {
             IndexNoticeBox(notice: notice, reveal: revealVault)
         case let .proxyProblem(item):
             ProxyProblemBanner(item: item, open: openProxyProblem, retry: retryProxyProblem, dismiss: dismissProxyProblem)
+        case let .engines(facts):
+            EngineWarningBanner(facts: facts, details: openEngineDetails, done: dismissEngineWarning)
         case .keptDeleted:
             KeptDeletedBox(profiles: keptDeleted, isWorking: isWorking, bringBack: bringBack,
                            removeForGood: removeForGood, reveal: revealKeptDeleted)
@@ -2244,6 +2260,43 @@ struct ProxyProblemBanner: View {
                     .accessibilityLabel(L("common.close"))
             }
         }
+    }
+}
+
+/// Safari on this Mac is newer than the profiles' engine (`EngineWarning`): what it is, that sites
+/// see the older Safari, and that only the next macOS fixes it.
+struct EngineWarningBanner: View {
+    let facts: EngineWarning.Facts
+    let details: () -> Void
+    let done: () -> Void
+
+    var body: some View {
+        LumenBanner(tone: .warning) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.warning)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L("engines.banner.title"))
+                        .font(.lumenLabel)
+                        .foregroundStyle(Theme.textPrimary)
+                    Text(EngineWarning.bannerText(facts))
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Button(L("engines.banner.details"), action: details)
+                            .buttonStyle(.lumenGhost)
+                        Button(L("engines.banner.ok"), action: done)
+                            .buttonStyle(.lumenGhost)
+                    }
+                    .padding(.top, 4)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .accessibilityIdentifier("engine-warning")
     }
 }
 

@@ -351,6 +351,7 @@ final class SelfTest {
         await group("editor labels") { try editorLabels() }
         await group("window sizes") { try await windowSizes(repository) }
         await group("named Safari version") { try await namedSafariVersion(repository) }
+        await group("two engines: said once for each pair") { enginesWarningOnce() }
         await group("local requests") { try await localRequests(repository) }
         await group("cookies at creation") { try await cookiesAtCreation(repository) }
         await group("diagnostics") { try await diagnosticsBundle(repository) }
@@ -2344,6 +2345,28 @@ final class SelfTest {
     /// the window size it was saved under — the profile's size again once that was changed in the
     /// editor — and never larger than the screen, or hanging outside it. On a defaults suite of its
     /// own; the window itself moved and reopened is not shown here.
+    /// Safari newer than the profiles' engine (`EngineWarning`): the profiles window says it until
+    /// OK, not again for the same pair of versions, and again for a newer Safari. This Mac's own
+    /// state is said, not checked: it is the runner image's.
+    private func enginesWarningOnce() {
+        info("two engines on this Mac: \(EngineWarning.current.map { "Safari \($0.safari), profiles' engine \($0.engine)" } ?? "no")")
+        let key = "engineWarning.seen"
+        let kept = UserDefaults.standard.string(forKey: key)
+        defer { UserDefaults.standard.set(kept, forKey: key) }
+        UserDefaults.standard.removeObject(forKey: key)
+        let pair = EngineWarning.Facts(safari: "27.2", engine: "26.6.2", macOS: 26)
+        check("two engines: said before OK", EngineWarning.unseen(pair) == pair)
+        EngineWarning.markSeen(pair)
+        check("two engines: not said again for the same pair after OK", EngineWarning.unseen(pair) == nil)
+        let newer = EngineWarning.Facts(safari: "27.3", engine: "26.6.2", macOS: 26)
+        check("two engines: said again for a newer Safari", EngineWarning.unseen(newer) == newer)
+        check("two engines: nothing said where Safari and profiles share one engine", EngineWarning.unseen(nil) == nil)
+        let text = EngineWarning.bannerText(pair) + " " + EngineWarning.aboutParagraphs(pair).joined(separator: " ")
+        check("two engines: the words name both Safaris and both macOS versions, with nothing left unfilled",
+              text.contains("27.2") && text.contains("26.6.2") && text.contains("26") && text.contains("27")
+                  && !text.contains("%@") && !text.contains("$@"), text)
+    }
+
     private func savedWindowFrame() {
         let suite = "PrivacyBrowser.SelfTest.Frame-\(UUID().uuidString.prefix(8))"
         guard let defaults = UserDefaults(suiteName: suite) else {

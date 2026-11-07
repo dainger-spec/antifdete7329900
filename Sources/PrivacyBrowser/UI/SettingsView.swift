@@ -849,6 +849,22 @@ private struct AboutSettings: View {
                 }
                 .padding(.vertical, 5)
             }
+            if let engines = EngineWarning.current {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(L("engines.about.title"), systemImage: "exclamationmark.triangle.fill")
+                        .font(.lumenLabel)
+                        .foregroundStyle(Theme.warning)
+                    ForEach(EngineWarning.aboutParagraphs(engines), id: \.self) { paragraph in
+                        Text(paragraph)
+                            .font(.lumenBody)
+                            .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                }
+                .padding(.top, 12)
+                .accessibilityElement(children: .combine)
+            }
             if !Self.links.isEmpty {
                 HStack(spacing: 16) {
                     ForEach(Self.links) { link in
