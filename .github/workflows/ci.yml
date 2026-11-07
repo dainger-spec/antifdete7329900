@@ -556,8 +556,10 @@ jobs:
         if: matrix.variant == 'unsandboxed'
         run: |
           sudo safaridriver --enable || echo "::warning::safaridriver --enable failed"
-          python3 scripts/safari_reference.py --compare build/surface-unsandboxed/surface-macos.json --out build/safari-surface.json
-          code=$?
+          # The step's shell is bash -e: the script's own exit would end it before the case below
+          # reads it (b56fa52: ENGINES DIFFER, exit 4, failed the step it was to warn in).
+          code=0
+          python3 scripts/safari_reference.py --compare build/surface-unsandboxed/surface-macos.json --out build/safari-surface.json || code=$?
           # The script tells the outcomes apart itself (scripts/test_safari_reference.sh); each fails
           # the step under its own name, none passes.
           case "$code" in
