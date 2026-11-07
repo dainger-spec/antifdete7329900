@@ -97,6 +97,8 @@ final class MobileTabOverview: NSView {
     private let grid = FlippedView()
     private let plus = NSButton()
     private let count = NSTextField(labelWithString: "")
+    private let countPill = NSView()
+    private var images: [NSImage?] = []
     private let check = NSButton()
     private var cards: [(card: NSButton, close: NSButton, title: NSTextField)] = []
     private var selected = 0
@@ -119,9 +121,12 @@ final class MobileTabOverview: NSView {
         count.font = .systemFont(ofSize: 15, weight: .semibold)
         count.textColor = .white
         count.alignment = .center
-        count.wantsLayer = true
         count.setAccessibilityIdentifier("mobile-tab-count")
-        for view in [plus, count, check] as [NSView] { addSubview(view) }
+        countPill.wantsLayer = true
+        countPill.layer?.cornerRadius = 22
+        countPill.layer?.backgroundColor = NSColor(white: 0.2, alpha: 1).cgColor
+        countPill.addSubview(count)
+        for view in [plus, countPill, check] as [NSView] { addSubview(view) }
         setAccessibilityIdentifier("mobile-tab-overview")
     }
 
@@ -143,6 +148,7 @@ final class MobileTabOverview: NSView {
 
     func show(_ cards: [Card], selected: Int) {
         self.selected = selected
+        images = cards.map(\.image)
         self.cards.forEach { $0.card.removeFromSuperview(); $0.close.removeFromSuperview(); $0.title.removeFromSuperview() }
         self.cards = cards.enumerated().map { index, card in
             let button = NSButton()
@@ -194,6 +200,11 @@ final class MobileTabOverview: NSView {
         for (index, entry) in cards.enumerated() {
             let x = margin + CGFloat(index % 2) * (width + gap), y = 20 + CGFloat(index / 2) * (rowHeight + 18)
             entry.card.frame = NSRect(x: x, y: y, width: width, height: cardHeight)
+            // The page's top as the card's picture, filling it, as on the phone.
+            if index < images.count, let image = images[index] {
+                entry.card.image = Self.top(of: image, aspect: width / cardHeight)
+                entry.card.imageScaling = .scaleAxesIndependently
+            }
             entry.close.frame = NSRect(x: x + width - 34, y: y + 8, width: 26, height: 26)
             entry.title.frame = NSRect(x: x + 4, y: y + cardHeight + 6, width: width - 8, height: 18)
         }
@@ -201,7 +212,21 @@ final class MobileTabOverview: NSView {
         grid.frame = NSRect(x: 0, y: 0, width: scroll.contentSize.width, height: max(scroll.contentSize.height, 20 + rows * (rowHeight + 18)))
         plus.frame = NSRect(x: margin, y: (bar - 44) / 2, width: 44, height: 44)
         check.frame = NSRect(x: bounds.width - margin - 44, y: (bar - 44) / 2, width: 44, height: 44)
-        count.frame = NSRect(x: margin + 56, y: (bar - 20) / 2, width: bounds.width - 2 * (margin + 56), height: 20)
+        countPill.frame = NSRect(x: margin + 56, y: (bar - 44) / 2, width: bounds.width - 2 * (margin + 56), height: 44)
+        count.frame = NSRect(x: 0, y: 12, width: countPill.frame.width, height: 20)
+    }
+
+    /// The top of `image`, cut to `aspect` (width over height).
+    private static func top(of image: NSImage, aspect: CGFloat) -> NSImage {
+        let size = image.size
+        guard size.width > 0, size.height > 0, aspect > 0 else { return image }
+        let height = min(size.height, size.width / aspect)
+        let source = NSRect(x: 0, y: size.height - height, width: size.width, height: height)
+        let cut = NSImage(size: NSSize(width: size.width, height: height))
+        cut.lockFocus()
+        image.draw(in: NSRect(origin: .zero, size: cut.size), from: source, operation: .copy, fraction: 1)
+        cut.unlockFocus()
+        return cut
     }
 
     @objc private func cardPressed(_ sender: NSButton) { select(sender.tag) }

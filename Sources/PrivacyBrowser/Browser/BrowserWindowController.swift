@@ -253,6 +253,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     /// tab overview over everything (MobileChrome.swift).
     private func buildPhoneBars(in container: NSView) {
         let bar = MobileBottomBar()
+        bar.appearance = Theme.chromeAppearance
         bar.wantsLayer = true
         bar.layer?.backgroundColor = ProfileWindowTheme.NS.toolbar.cgColor
         bar.onSwipe = { [weak self] next in
@@ -281,6 +282,14 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         addressField.drawsBackground = false
         addressField.focusRingType = .none
         addressField.setAccessibilityIdentifier("mobile-address")
+        addressField.drawsBox = false
+        addressField.textColor = .white
+        // As on the phone: the site's name in the pill, the whole address once it is tapped.
+        addressField.onBeginEditing = { [weak self] in
+            guard let self, let url = self.selectedTab?.url else { return }
+            self.addressField.stringValue = url.absoluteString
+            self.addressField.currentEditor()?.selectAll(nil)
+        }
         addressField.translatesAutoresizingMaskIntoConstraints = false
         pill.addSubview(magnifier)
         pill.addSubview(addressField)
@@ -338,6 +347,12 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
             overview.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             overview.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
+    }
+
+    /// What the phone's pill shows of an address: the site's name, as Safari on an iPhone does.
+    static func siteName(_ url: URL?) -> String {
+        guard let url, let host = url.host, !host.isEmpty else { return url?.absoluteString ?? "" }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 
     // MARK: The phone's tab overview
@@ -540,7 +555,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         guard let tab = selectedTab else { return }
         window?.title = String(format: L("window.browser.title"), profileName, tab.displayTitle)
         if addressField.currentEditor() == nil { // don't overwrite what the user is typing
-            addressField.stringValue = tab.url?.absoluteString ?? ""
+            addressField.stringValue = isPhoneLayout ? Self.siteName(tab.url) : tab.url?.absoluteString ?? ""
         }
         backButton.isEnabled = tab.webView.canGoBack
         mobileBack?.isEnabled = tab.webView.canGoBack
