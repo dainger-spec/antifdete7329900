@@ -32,7 +32,7 @@ jobs:
                 | awk '{ v = "none"; for (f = 1; f <= NF; f++) if ($f ~ /^WTF_numberOfProcessorCores=/) v = $f; print $1, v }' \
                 >> build/phone/webcontent-env.txt
               sleep 2; done ) &
-          PB_SELFTEST_ONLY="a phone's window" PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 \
+          PB_SELFTEST_SHOTS="$PWD/build/phone/shots" PB_SELFTEST_ONLY="a phone's window" PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 \
             build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --self-test | tee build/phone/selftest.txt || true
           echo "== WebContent processes and the count in their environment (sampled every 3 s)"
           sort -u build/phone/webcontent-env.txt | head -40
