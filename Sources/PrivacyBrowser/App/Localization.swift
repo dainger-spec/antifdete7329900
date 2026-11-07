@@ -122,7 +122,16 @@ enum Localization {
     /// the main bundle left to the websites' list on the command line. With
     /// CFBundleAllowMixedLocalizations each framework picks for itself; its choice is cached on its
     /// first lookup, made here while the process's languages are the interface's.
+    /// MEASUREMENT: set when `pinFrameworksOnly` ran, with what it saw.
+    static var variant3Note: String?
+
     static func pinFrameworksOnly() {
+        defer {
+            let appKit = Bundle(path: "/System/Library/Frameworks/AppKit.framework")?.preferredLocalizations.first ?? "?"
+            let safari = Bundle(path: "/System/Library/PrivateFrameworks/Safari.framework")?.preferredLocalizations.first ?? "?"
+            let mixed = Bundle.main.object(forInfoDictionaryKey: "CFBundleAllowMixedLocalizations").map { "\($0)" } ?? "absent"
+            variant3Note = "v3 ran; mixed \(mixed); AppKit \(appKit); Safari.framework \(safari); argument AppleLanguages \(UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)["AppleLanguages"] ?? "none")"
+        }
         let commandLine = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
         var pinned = commandLine
         pinned["AppleLanguages"] = [languageCode]

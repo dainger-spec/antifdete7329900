@@ -214,7 +214,7 @@ enum ProfileSessionHost {
                     self.showedWindow = !self.isForWarmUpOnly
                     self.isReady = true
                     ProfileSessionHost.send(.running(hostsSafariChrome: SafariChromeHost.isHosting))
-                    ProfileSessionHost.send(.interfaceLanguage(code: Localization.languageCode, bundles: Localization.bundlesLanguage,
+                    ProfileSessionHost.send(.interfaceLanguage(code: Localization.languageCode + (Localization.variant3Note.map { " [\($0); main localizations \(Bundle.main.preferredLocalizations.prefix(3))]" } ?? ""), bundles: Localization.bundlesLanguage,
                                                                chrome: SafariChrome.chromeLanguage))
                     // Whatever the manager asked for while the profile was still starting.
                     let waiting = self.pendingCommands

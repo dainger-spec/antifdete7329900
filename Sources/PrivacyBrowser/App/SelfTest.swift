@@ -5513,6 +5513,7 @@ final class SelfTest {
             info("languages: \(pair): pages see navigator.language \(language), navigator.languages \(languages), "
                  + "Accept-Language \(accept); form words \(validation); its process: \(reported.map { "words \($0.code), bundles \($0.bundles), chrome \($0.chrome ?? "not hosted")" } ?? "said nothing")")
             if variant3 {
+                info("MEASUREMENT variant 3: the process said \(reported.map { "words \($0.code), bundles \($0.bundles), chrome \($0.chrome ?? "not hosted")" } ?? "nothing"); PB_MEASURE_VARIANT3 here \(ProcessInfo.processInfo.environment["PB_MEASURE_VARIANT3"] ?? "unset")")
                 check("MEASUREMENT variant 3: \(pair) — the main bundle in the websites' language", reported?.bundles == String(websites.prefix(2)),
                       reported.map { "bundles \($0.bundles)" } ?? "the process did not say")
                 check("MEASUREMENT variant 3: \(pair) — Safari's chrome in the app's language", reported?.chrome == interface,
