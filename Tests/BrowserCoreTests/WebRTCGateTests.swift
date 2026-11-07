@@ -69,4 +69,38 @@ final class WebRTCGateTests: XCTestCase {
         XCTAssertFalse(WebRTCGate.wantsRelay(policy: .unrestricted, proxy: http))
         XCTAssertFalse(WebRTCGate.wantsRelay(policy: .unrestricted, proxy: nil))
     }
+
+
+    // MARK: The notice at the foot of the profiles window
+
+    /// Said exactly in the five states where the guard does not work, once macOS has answered, and
+    /// only when some profile wants WebRTC through a SOCKS5 proxy; each state its own notice.
+    func testTheProtectionNoticeOnlyWhenTheGuardDoesNotWorkAndAProfileWantsIt() {
+        let broken: [NetworkGuardState: WebRTCProtectionNotice] = [
+            .restartNeeded: .restartNeeded, .notInstalled: .notInstalled, .awaitingApproval: .awaitingApproval,
+            .off: .off, .notAnswering: .notAnswering,
+        ]
+        for state in NetworkGuardState.allCases {
+            for checking in [false, true] {
+                for wanted in [false, true] {
+                    let notice = WebRTCProtectionNotice.notice(state: state, checking: checking, profilesWantingIt: wanted)
+                    let expected = wanted && !checking ? broken[state] : nil
+                    XCTAssertEqual(notice, expected, "\(state) checking \(checking) wanted \(wanted)")
+                }
+            }
+        }
+        // Every notice is reached, by one state each.
+        XCTAssertEqual(Set(broken.values), Set(WebRTCProtectionNotice.allCases))
+    }
+
+    /// Wanted: a SOCKS5 proxy with WebRTC not switched off; an HTTP proxy, no proxy, or WebRTC off: not.
+    func testAProfileWantsTheProtectionOnlyWithSOCKS5AndWebRTCOn() {
+        let kinds: [ProxySettings.Kind?] = [nil] + ProxySettings.Kind.allCases.map { $0 }
+        for kind in kinds {
+            for policy in WebRTCPolicy.allCases {
+                XCTAssertEqual(WebRTCProtectionNotice.wants(proxyKind: kind, webRTC: policy),
+                               kind == .socks5 && policy != .disabled, "\(String(describing: kind)) \(policy)")
+            }
+        }
+    }
 }

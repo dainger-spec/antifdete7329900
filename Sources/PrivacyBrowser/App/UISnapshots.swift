@@ -381,6 +381,15 @@ enum UISnapshots {
             ProfilesPreview(rows: rows, sync: .off, indexNotice: unlisted, keptDeleted: keptOne, proxyProblem: threeAtOnce,
                             bannersExpanded: true)
         }.capture(into: folder)
+        // The network guard's notice at the foot (the lead, 7 November): the longest text, the
+        // restart's, at the narrowest window, and one with the banners above it.
+        problems += await Shot(name: "profiles-guard-restart", size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: 620),
+                               edges: true) {
+            ProfilesPreview(rows: rows, sync: .off, guardNotice: .restartNeeded)
+        }.capture(into: folder)
+        problems += await Shot(name: "profiles-guard-banners", size: CGSize(width: 1180, height: 640), edges: true) {
+            ProfilesPreview(rows: rows, sync: .off, indexNotice: unlisted, proxyProblem: threeAtOnce, guardNotice: .notInstalled)
+        }.capture(into: folder)
         problems += await Shot(name: "profiles-no-matches", size: CGSize(width: 1180, height: 520), edges: true) {
             ProfilesPreview(rows: rows, search: "zzz", sync: .syncing)
         }.capture(into: folder)
@@ -1480,13 +1489,14 @@ private struct ProfilesPreview: View {
     var inspectorInfo: (UUID) -> InspectorInfo = { _ in InspectorInfo() }
     var proxyProblem: ProxyProblemBanner.Item?
     var bannersExpanded = false
+    var guardNotice: WebRTCProtectionNotice?
 
     var body: some View {
         ProfilesScreen(rows: rows, isWorking: isWorking, sync: sync, filter: $filter, search: $search, actions: actions,
                        section: .constant(section), proxyCount: proxyCount, proxies: proxies, indexNotice: indexNotice,
                        keptDeleted: keptDeleted, showsInspector: .constant(showsInspector), inspectorInfo: inspectorInfo,
                        guardReady: true, initialSelection: selected, initialBannersExpanded: bannersExpanded,
-                       proxyProblem: proxyProblem)
+                       proxyProblem: proxyProblem, guardNotice: guardNotice)
     }
 }
 

@@ -353,7 +353,15 @@ struct ProfileListView: View {
                        },
                        dismissProxyProblem: {
                            if let problem = model.proxyProblems.first { model.dismissProxyProblem(problem) }
-                       })
+                       },
+                       guardNotice: model.guardNoticeHidden ? nil : WebRTCProtectionNotice.notice(
+                           state: networkGuard.state, checking: networkGuard.checking,
+                           profilesWantingIt: model.details.values.contains(where: \.wantsNetworkGuard)),
+                       openGuardSettings: {
+                           model.settingsSection = .webRTC
+                           openSettings()
+                       },
+                       hideGuardNotice: { model.guardNoticeHidden = true })
     }
 
     /// The window's Proxies section; with `ids`, those proxies selected (else the selection it had).
@@ -794,6 +802,13 @@ struct ProfilesScreen: View {
     var openProxyProblem: () -> Void = {}
     var retryProxyProblem: () -> Void = {}
     var dismissProxyProblem: () -> Void = {}
+    /// The network guard does not work while some profile wants WebRTC through its SOCKS5 proxy
+    /// (`WebRTCProtectionNotice`): said at the foot of the profiles until closed with ×, which
+    /// keeps it away until the app starts again.
+    var guardNotice: WebRTCProtectionNotice?
+    /// Settings, opened at its WebRTC section.
+    var openGuardSettings: () -> Void = {}
+    var hideGuardNotice: () -> Void = {}
     /// Rows selected with a click, ⌘- and ⇧-click or their checkboxes; one is what the inspector
     /// shows, with two or more `ProfileBulkBar` acts on them all.
     @State private var selection = ProfileSelection()
@@ -893,8 +908,14 @@ struct ProfilesScreen: View {
                                     .transition(.move(edge: .bottom).combined(with: .opacity))
                             }
                         }
+                    if let guardNotice {
+                        GuardNoticeBar(notice: guardNotice, open: openGuardSettings, hide: hideGuardNotice)
+                            .padding(.top, 10)
+                            .transition(.opacity)
+                    }
                 }
                 .animation(Motion.isReduced(reduceMotion) ? nil : Theme.appearAnimation, value: selectedRows.count >= 2)
+                .animation(Motion.isReduced(reduceMotion) ? nil : Theme.appearAnimation, value: guardNotice)
             }
         }
         .opacity(appeared ? 1 : 0)
@@ -2223,6 +2244,49 @@ struct ProxyProblemBanner: View {
                     .accessibilityLabel(L("common.close"))
             }
         }
+    }
+}
+
+/// At the foot of the profiles (the lead, 7 November): the network guard does not work, so WebRTC
+/// is off in the profiles that want it through their proxy. Not a sheet, nothing to answer: one
+/// line, a button to Settings' WebRTC section, and × until the app starts again.
+struct GuardNoticeBar: View {
+    let notice: WebRTCProtectionNotice
+    let open: () -> Void
+    let hide: () -> Void
+
+    static func text(_ notice: WebRTCProtectionNotice) -> String {
+        switch notice {
+        case .restartNeeded: return L("guardNotice.restartNeeded")
+        case .notInstalled: return L("guardNotice.notInstalled")
+        case .awaitingApproval: return L("guardNotice.awaitingApproval")
+        case .off: return L("guardNotice.off")
+        case .notAnswering: return L("guardNotice.notAnswering")
+        }
+    }
+
+    var body: some View {
+        LumenBanner(tone: .warning) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: notice == .restartNeeded ? "arrow.clockwise" : "exclamationmark.triangle.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.warning)
+                    .accessibilityHidden(true)
+                Text(Self.text(notice))
+                    .font(.lumenBody)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button(L("guardNotice.open"), action: open)
+                    .buttonStyle(.lumenGhost)
+                    .fixedSize()
+                Button(action: hide) { Image(systemName: "xmark") }
+                    .buttonStyle(LumenIconButtonStyle(size: 26))
+                    .help(L("guardNotice.hide"))
+                    .accessibilityLabel(L("guardNotice.hide"))
+            }
+        }
+        .accessibilityIdentifier("guard-notice")
     }
 }
 

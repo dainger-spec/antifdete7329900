@@ -1812,3 +1812,10 @@
 "guard.state.proving" = "Being checked on this Mac…";
 "guard.todo.proving" = "Lumen checks that the guard sees the connections WebKit opens for a profile: a helper process with no profile's data sends one WebRTC request to an address that leads nowhere, and the guard must drop it. About 10 seconds.";
 "guard.todo.proofFailed" = "The check failed: the guard did not see the connection WebKit opened for a profile — it would have nothing to hold the profile to its proxy with. So WebRTC is off in profiles with a proxy. Click Check Again; after an update of macOS or Safari the check runs again by itself.";
+"guardNotice.restartNeeded" = "The network guard starts working after you restart this Mac: macOS finishes installing it at startup. Until then WebRTC is off in profiles with a proxy.";
+"guardNotice.notInstalled" = "The network guard is not installed — WebRTC is off in profiles with a proxy.";
+"guardNotice.awaitingApproval" = "The network guard is waiting for your approval in System Settings — until then WebRTC is off in profiles with a proxy.";
+"guardNotice.off" = "The network guard is turned off — WebRTC is off in profiles with a proxy.";
+"guardNotice.notAnswering" = "The network guard is not responding — WebRTC is off in profiles with a proxy.";
+"guardNotice.open" = "WebRTC Settings…";
+"guardNotice.hide" = "Hide until Lumen starts again";
