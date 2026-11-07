@@ -52,10 +52,18 @@ enum GuardDiagnosis {
     static func diagnose() async -> Bool {
         let started = Date()
         let info = Bundle.main.infoDictionary ?? [:]
+        let bundledGuard = NetworkGuard.bundledGuard()
+        var listed: [String] = []
+        if let bundledGuard { listed = await systemExtensionLines(bundledGuard.identifier) }
+        // An earlier copy waiting for a restart is the first thing said: until the Mac restarts,
+        // nothing below can work, and the person is to restart, not to read on (the owner's Mac,
+        // 0.1.3: the diagnosis said "not running, not this team's, or switched off" instead).
+        let restartPending = Self.restartPending(listed)
+        if restartPending { say(Self.restartLine) }
         say("Lumen's network guard on this Mac, \(ISO8601DateFormatter().string(from: started))")
         say("macOS \(ProcessInfo.processInfo.operatingSystemVersionString); Lumen \(info["CFBundleShortVersionString"] as? String ?? "?") "
             + "(\(info["CFBundleVersion"] as? String ?? "?")) at \(Bundle.main.bundlePath); this process: pid \(getpid())")
-        guard let bundled = NetworkGuard.bundledGuard() else {
+        guard let bundled = bundledGuard else {
             section("ANSWERS")
             say("This copy of Lumen has no network guard in it (a build made without NE=1): there is no filter to ask.")
             return false
@@ -63,7 +71,6 @@ enum GuardDiagnosis {
         say("its guard: \(bundled.identifier), version \(bundled.version ?? "?")")
 
         section("The system extension (systemextensionsctl list)")
-        let listed = await systemExtensionLines(bundled.identifier)
         if listed.isEmpty { say("not listed: the guard was never installed on this Mac") }
         for line in listed { say(line) }
 
@@ -89,9 +96,12 @@ enum GuardDiagnosis {
             guardian.hello { done(($0, $1)) }
         }
         guard let hello else {
-            say("the guard does not answer at its Mach service \(service): it is not running, not this team's, or switched off")
+            say("the guard does not answer at its Mach service \(service): "
+                + (restartPending ? "macOS starts it only after this Mac restarts — an earlier copy waits to be removed (the first line)"
+                                  : "it is not running, not this team's, or switched off"))
             await printGuardLog(since: started)
             section("ANSWERS")
+            if restartPending { say(Self.restartLine) }
             say("1. Does the filter receive flows? UNKNOWN — the guard does not answer at all. \(configuration.hint)")
             say("The check: CANNOT RUN — the app holds its probe through this same service.")
             return false
@@ -273,7 +283,25 @@ enum GuardDiagnosis {
         }
     }
 
+    /// The first line when macOS keeps an earlier copy of the guard until the next restart.
+    static let restartLine = "RESTART THIS MAC: macOS keeps an earlier copy of Lumen's network guard, to be removed at the next restart "
+        + "(systemextensionsctl: \"terminated waiting to uninstall on reboot\"), and until then the new guard does not answer. "
+        + "Restart, open Lumen once, and run this again."
+
+    /// An earlier copy of the guard waits for the next restart to be removed, as `systemextensionsctl
+    /// list` says it (the app reads the same from OSSystemExtensionProperties.isUninstalling).
+    static func restartPending(_ lines: [String]) -> Bool {
+        lines.contains { $0.contains("waiting to uninstall on reboot") }
+    }
+
     private static func systemExtensionLines(_ identifier: String) async -> [String] {
+        // scripts/guard_diagnose_check.sh: a listing as macOS gives it on a Mac where an earlier copy
+        // waits for the restart (CI cannot install the guard to make one).
+        if let file = ProcessInfo.processInfo.environment["PB_GUARD_DIAGNOSE_EXTENSIONS_LIST"],
+           let text = try? String(contentsOfFile: file, encoding: .utf8) {
+            return text.split(separator: "\n").map(String.init).filter { $0.contains(identifier) }
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+        }
         guard let text = await output(of: "/usr/bin/systemextensionsctl", ["list"], seconds: 20) else {
             return ["systemextensionsctl did not run"]
         }
