@@ -49,6 +49,7 @@ final class SessionRuntime: ObservableObject {
         // The session's own store; the planted fault puts every session on WebKit's default one.
         dataStore = Faults.isActive(.sharedStore) ? .default() : WKWebsiteDataStore(forIdentifier: session.storeID)
         history = store.loadHistory(of: session.id)
+        applyProxy()
         let saved = store.loadTabs(of: session.id)
         tabs = saved.tabs.map { makeTab($0, configuration: nil) }
         if tabs.isEmpty { tabs = [makeTab(TabRecord(), configuration: nil)] }
@@ -65,6 +66,7 @@ final class SessionRuntime: ObservableObject {
         configuration.allowsInlineMediaPlayback = true
         // Safari's application name after WebKit's own string: the User-Agent Safari on this iPhone sends.
         configuration.applicationNameForUserAgent = UserAgentPreset.safariApplicationName(systemVersion: UIDevice.current.systemVersion)
+        if proxy != nil, let rules = ContentRules.proxied { configuration.userContentController.add(rules) }
         return configuration
     }
 
@@ -75,6 +77,31 @@ final class SessionRuntime: ObservableObject {
     func update(session: Session, proxy: ProxyEntry?) {
         self.session = session
         self.proxy = proxy
+        applyProxy()
+    }
+
+    // MARK: Proxy
+
+    /// What the data store was last given: the proxy's address, kind, user and password.
+    private var appliedProxy: String?
+
+    /// The session's proxy, on its data store; a change applies at once to every tab — the next
+    /// request goes through the new proxy (measured on iOS 18.6–27.2: no new web view needed).
+    private func applyProxy() {
+        guard !Faults.isActive(.proxyNotApplied) else { return }
+        let password = proxy.flatMap { ProxyPasswords.get($0.id) }
+        let key = proxy.map { "\($0.kind.rawValue)://\($0.username):\(password ?? "")@\($0.host):\($0.port)" } ?? "direct"
+        guard key != appliedProxy else { return }
+        if appliedProxy != nil, Faults.isActive(.proxyChangeNotLive) { return }
+        dataStore.proxyConfigurations = proxy.map { ProxyFactory.make($0, password: password) } ?? []
+        appliedProxy = key
+        if let rules = ContentRules.proxied {
+            for tab in tabs {
+                let controller = tab.webView.configuration.userContentController
+                controller.remove(rules)
+                if proxy != nil { controller.add(rules) }
+            }
+        }
     }
 
     // MARK: Tabs

@@ -103,17 +103,29 @@ struct HistoryView: View {
     }
 }
 
-/// A session's settings. Step 2: its search engine. Every change is saved at once.
+/// A session's settings: its proxy and its search engine. Every change is saved and applied at once.
 struct SessionSettingsView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
     let sessionID: UUID
     @State private var settings = SessionSettings()
+    @State private var proxyID: UUID?
     @State private var loaded = false
 
     var body: some View {
         NavigationStack {
             Form {
+                Section("Прокси") {
+                    Picker("Прокси", selection: Binding(get: { proxyID }, set: { proxyID = $0; model.setProxy(sessionID, proxyID: $0) })) {
+                        Text("Без прокси").tag(UUID?.none)
+                        ForEach(model.proxies) { entry in
+                            Text(entry.displayName).tag(UUID?.some(entry.id))
+                        }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                    .accessibilityIdentifier("proxyPicker")
+                }
                 Section("Поисковик") {
                     Picker("Поисковик", selection: $settings.searchEngine) {
                         ForEach(SearchEngine.allCases) { engine in
@@ -131,7 +143,10 @@ struct SessionSettingsView: View {
                 ToolbarItem(placement: .confirmationAction) { Button("Готово") { dismiss() }.accessibilityIdentifier("settingsDone") }
             }
             .onAppear {
-                if let session = model.session(sessionID) { settings = session.settings }
+                if let session = model.session(sessionID) {
+                    settings = session.settings
+                    proxyID = session.proxyID
+                }
                 loaded = true
             }
             .onChange(of: settings) { _, new in

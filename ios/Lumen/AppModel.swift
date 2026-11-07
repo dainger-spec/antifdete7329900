@@ -24,27 +24,34 @@ final class AppModel: ObservableObject {
     @Published private(set) var proxies: [ProxyEntry] = []
     @Published var path: [UUID] = []
     /// Set once a reset launch has removed every WebKit store (the UI waits for it).
-    @Published private(set) var ready = !LaunchOptions.resetState
+    @Published private(set) var ready = false
+    /// Proxies being checked right now (their rows show it).
+    @Published private(set) var checking: Set<UUID> = []
 
     init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         store = LumenStore(root: support.appendingPathComponent("Lumen", isDirectory: true))
-        if LaunchOptions.resetState { store.removeAll() }
+        if LaunchOptions.resetState {
+            store.removeAll()
+            ProxyPasswords.removeAll()
+        }
         catalog = SessionCatalog(store: store)
         refresh()
-        if LaunchOptions.resetState {
-            Task {
+        Task {
+            if LaunchOptions.resetState {
                 for id in await WKWebsiteDataStore.allDataStoreIdentifiers {
                     try? await WKWebsiteDataStore.remove(forIdentifier: id)
                 }
-                ready = true
             }
+            // A session with a proxy gets its content rules from its first page on.
+            await ContentRules.prepare()
+            ready = true
         }
     }
 
     func refresh() {
         sessions = catalog.sessions
-        proxies = store.loadProxies()
+        if proxies.isEmpty { proxies = store.loadProxies() }
     }
 
     // MARK: Sessions
@@ -71,6 +78,52 @@ final class AppModel: ObservableObject {
     func setProxy(_ id: UUID, proxyID: UUID?) {
         catalog.setProxy(id, proxyID: proxyID)
         refresh()
+        refreshRuntimes()
+    }
+
+    // MARK: Proxies
+
+    /// Adds or changes an entry (the password goes to the Keychain), then checks it.
+    func saveProxy(_ entry: ProxyEntry, password: String?) {
+        var entry = entry
+        entry.hasPassword = !(password ?? "").isEmpty
+        entry.check = nil
+        ProxyPasswords.set(password, for: entry.id)
+        if let index = proxies.firstIndex(where: { $0.id == entry.id }) { proxies[index] = entry } else { proxies.append(entry) }
+        store.saveProxies(proxies)
+        refreshRuntimes()
+        check(entry.id)
+    }
+
+    func check(_ id: UUID) {
+        guard let entry = proxies.first(where: { $0.id == id }), !checking.contains(id) else { return }
+        checking.insert(id)
+        Task {
+            let result = await ProxyChecker.check(entry, password: ProxyPasswords.get(id))
+            checking.remove(id)
+            guard let index = proxies.firstIndex(where: { $0.id == id }) else { return }
+            proxies[index].check = result
+            store.saveProxies(proxies)
+            refreshRuntimes()
+        }
+    }
+
+    func deleteProxy(_ id: UUID) {
+        proxies.removeAll { $0.id == id }
+        store.saveProxies(proxies)
+        ProxyPasswords.remove(id)
+        catalog.forgetProxy(id)
+        refresh()
+        refreshRuntimes()
+    }
+
+    func password(for id: UUID) -> String? { ProxyPasswords.get(id) }
+
+    /// Open sessions take a new or changed proxy at once (no relaunch).
+    private func refreshRuntimes() {
+        for session in sessions {
+            SessionRuntimes.shared.existing(session.id)?.update(session: session, proxy: proxy(session.proxyID))
+        }
     }
 
     func markOpened(_ id: UUID) {
