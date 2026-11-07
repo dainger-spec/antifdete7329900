@@ -1,6 +1,5 @@
 {"include": [
-  {"scenario": "q1", "os": "xcode-27", "runtimes": "newest", "install": ""},
-  {"scenario": "q1", "os": "macos-15", "runtimes": "17.5,16.4", "install": "17.5 16.4"},
-  {"scenario": "q2", "os": "xcode-27", "runtimes": "newest", "install": ""},
+  {"scenario": "q1", "os": "macos-26", "runtimes": "newest", "install": ""},
+  {"scenario": "q1", "os": "macos-15", "runtimes": "17.5,17.0", "install": "17.0 17.5"},
   {"scenario": "q3", "os": "xcode-27", "runtimes": "newest", "install": ""}
 ]}

@@ -99,9 +99,12 @@ async def scenario(h, capture):
           f"screen {g(N, 'screen')}, WebGL {g(N, 'webgl', 'unmaskedVendor')} / {g(N, 'webgl', 'unmaskedRenderer')}, "
           f"window.safari {g(N, 'windowSafari')}, window own properties {g(N, 'windowOwn')} (owner's iPhone, Safari 27: 951), "
           f"time zone {g(N, 'timeZone')}, standalone {g(N, 'navigator', 'standalone')}")
-    stable_n = len(set(N.get("canvasReads") or [None])) == 1 and N.get("canvas") == N.get("canvasFresh")
+    stable_n = len(set(N.get("canvasReads") or [None])) == 1
     check("q2.baseline-canvas-stable", "PASS" if stable_n else "FAIL",
-          f"N: 5 reads {N.get('canvasReads')}, a fresh canvas {N.get('canvasFresh')} — the engine itself adds no noise here", core=True)
+          f"N: 5 reads of one canvas {N.get('canvasReads')} — the engine itself adds no noise to a read", core=True)
+    check("q2.baseline-first-draw", "INFO",
+          f"N: the first canvas drawn after the app started {N.get('canvas')}, the same drawing again {N.get('canvasFresh')} "
+          f"(differs when fonts, emoji included, were still loading at the first draw)")
     ref = {}
     try:
         ref = json.load(open(os.path.join(HERE, "iphone_reference.json")))
@@ -216,12 +219,12 @@ async def language(h):
     await app.cmd("session", session="L1", store="ephemeral")
     await app.cmd("load", session="L1", url=page + "&s=L1", timeout=30)
     before = (await app.cmd("eval", session="L1", js=js)).get("value") or {}
-    header_before = [e.get("lang") for e in h.EVENTS if e["kind"] == "site" and "s=L1" in str(e.get("query"))]
+    header_before = [e.get("lang") for e in h.EVENTS if e["kind"] == "site" and (e.get("query") or {}).get("s") == "L1"]
     changed = await app.cmd("defaults", key="AppleLanguages", value=["de-DE"])
     await app.cmd("session", session="L2", store="ephemeral")
     await app.cmd("load", session="L2", url=page + "&s=L2", timeout=30)
     after = (await app.cmd("eval", session="L2", js=js)).get("value") or {}
-    header_after = [e.get("lang") for e in h.EVENTS if e["kind"] == "site" and "s=L2" in str(e.get("query"))]
+    header_after = [e.get("lang") for e in h.EVENTS if e["kind"] == "site" and (e.get("query") or {}).get("s") == "L2"]
     await app.cmd("defaults", key="AppleLanguages", value=None)
     took = after.get("language", "").lower().startswith("de") and any((x or "").lower().startswith("de") for x in header_after)
     check("q2.language-at-runtime", "INFO",

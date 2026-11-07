@@ -20,7 +20,12 @@ say "== $(xcodebuild -version | tr '\n' ' ')"
 # Older iOS runtimes this image does not carry, downloaded from Apple (INSTALL_RUNTIMES="17.5 16.4").
 for v in ${INSTALL_RUNTIMES:-}; do
     T0=$(date +%s)
-    if xcodebuild -downloadPlatform iOS -buildVersion "$v" >>"$OUT/runtime-download.txt" 2>&1; then
+    ok=0
+    for attempt in 1 2 3; do
+        xcodebuild -downloadPlatform iOS -buildVersion "$v" >>"$OUT/runtime-download.txt" 2>&1 && { ok=1; break; }
+        sleep 20
+    done
+    if [[ $ok -eq 1 ]]; then
         say "downloaded the iOS $v runtime in $(( $(date +%s) - T0 ))s"
     else
         say "could not download the iOS $v runtime: $(tail -2 "$OUT/runtime-download.txt" | tr '\n' ' ')"

@@ -153,10 +153,10 @@ final class Driver: NSObject {
             return try await makeSession(c)
         case "load":
             let session = try find(c)
-            return await session.load(c["url"] as? String ?? "about:blank", timeout: c["timeout"] as? Double ?? 20)
+            return await session.load(c["url"] as? String ?? "about:blank", timeout: (c["timeout"] as? NSNumber)?.doubleValue ?? 20)
         case "html":
             let session = try find(c)
-            return await session.loadHTML(c["html"] as? String ?? "", base: c["base"] as? String, timeout: c["timeout"] as? Double ?? 20)
+            return await session.loadHTML(c["html"] as? String ?? "", base: c["base"] as? String, timeout: (c["timeout"] as? NSNumber)?.doubleValue ?? 20)
         case "eval":
             let session = try find(c)
             return await session.evaluate(c["js"] as? String ?? "null", world: c["world"] as? String ?? "page",
@@ -185,7 +185,7 @@ final class Driver: NSObject {
             return ["key": key, "now": UserDefaults.standard.object(forKey: key).map { String(describing: $0) } ?? NSNull(),
                     "preferredLanguages": Locale.preferredLanguages, "timeZone": TimeZone.current.identifier]
         case "sleep":
-            try await Task.sleep(nanoseconds: UInt64((c["seconds"] as? Double ?? 1) * 1e9))
+            try await Task.sleep(nanoseconds: UInt64(((c["seconds"] as? NSNumber)?.doubleValue ?? 1) * 1e9))
             return ["slept": true]
         case "exit":
             return ["bye": true]
