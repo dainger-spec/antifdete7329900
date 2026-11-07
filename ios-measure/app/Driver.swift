@@ -180,7 +180,7 @@ final class Driver: NSObject {
             // The app's own preferences, e.g. AppleLanguages: does a web view made afterwards speak
             // another language without the app being relaunched?
             let key = c["key"] as? String ?? ""
-            if let value = c["value"] { UserDefaults.standard.set(value, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
+            if let value = c["value"], !(value is NSNull) { UserDefaults.standard.set(value, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
             UserDefaults.standard.synchronize()
             return ["key": key, "now": UserDefaults.standard.object(forKey: key).map { String(describing: $0) } ?? NSNull(),
                     "preferredLanguages": Locale.preferredLanguages, "timeZone": TimeZone.current.identifier]

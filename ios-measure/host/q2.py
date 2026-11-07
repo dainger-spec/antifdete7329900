@@ -79,6 +79,10 @@ async def scenario(h, capture):
     await app.cmd("load", session="M", url=page + "&sid=M&view=2", timeout=30)
     newview = (await app.cmd("eval", session="M", js=probe("M-newview"), timeout=90)).get("value") or {}
 
+    try:
+        await language(h)
+    except Exception as error:
+        check("q2.language-at-runtime", "INCONCLUSIVE", f"stopped: {error!r}")
     N, K, M, M2 = (results[k] for k in ("N", "K", "M", "M2"))
     with open(os.path.join(h.ARGS.out, "q2-probes.json"), "w") as f:
         json.dump({"N": N, "K": K, "M": M, "M2": M2, "M-reload": again, "M-newview": newview}, f, indent=1)
@@ -201,3 +205,26 @@ async def scenario(h, capture):
         check("q2.webview-vs-safari", "INFO",
               f"this web view has {N.get('windowOwn')} own window properties; the owner's iPhone Safari 27 has 951 "
               f"(no name list in the repository to compare: ios-measure/DEVICE.md asks for one)")
+
+
+async def language(h):
+    """Language per session: WKWebView has no public setting for it. Does changing the app's
+    AppleLanguages at run time reach a web view made afterwards (header and navigator)?"""
+    app, check = h.APP, h.check
+    page = f"http://127.0.0.1:{h.ARGS.http_port}/whoami?q2=lang"
+    js = "return { language: navigator.language, languages: Array.from(navigator.languages), header: (await (await fetch('/whoami?k=lang')).json()) };"
+    await app.cmd("session", session="L1", store="ephemeral")
+    await app.cmd("load", session="L1", url=page + "&s=L1", timeout=30)
+    before = (await app.cmd("eval", session="L1", js=js)).get("value") or {}
+    header_before = [e.get("lang") for e in h.EVENTS if e["kind"] == "site" and "s=L1" in str(e.get("query"))]
+    changed = await app.cmd("defaults", key="AppleLanguages", value=["de-DE"])
+    await app.cmd("session", session="L2", store="ephemeral")
+    await app.cmd("load", session="L2", url=page + "&s=L2", timeout=30)
+    after = (await app.cmd("eval", session="L2", js=js)).get("value") or {}
+    header_after = [e.get("lang") for e in h.EVENTS if e["kind"] == "site" and "s=L2" in str(e.get("query"))]
+    await app.cmd("defaults", key="AppleLanguages", value=None)
+    took = after.get("language", "").lower().startswith("de") and any((x or "").lower().startswith("de") for x in header_after)
+    check("q2.language-at-runtime", "INFO",
+          f"before: navigator {before.get('language')} {before.get('languages')}, Accept-Language {header_before}; AppleLanguages set to de-DE "
+          f"({changed.get('preferredLanguages')}); a new web view: navigator {after.get('language')} {after.get('languages')}, "
+          f"Accept-Language {header_after} — {'follows without a relaunch' if took else 'does not follow without a relaunch'}")

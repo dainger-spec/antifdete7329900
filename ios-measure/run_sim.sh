@@ -103,8 +103,13 @@ types = [t for t in json.load(sys.stdin)["devicetypes"] if t.get("productFamily"
 rt = json.loads(subprocess.run(["xcrun", "simctl", "list", "-j", "runtimes"], capture_output=True, text=True).stdout)
 ok = {t["identifier"] for r in rt["runtimes"] if r["identifier"] == sys.argv[1] for t in r.get("supportedDeviceTypes", [])}
 cands = [t for t in types if not ok or t["identifier"] in ok]
-pro = [t for t in cands if "Pro" in t["name"] and "Max" not in t["name"]]
-print((pro or cands)[-1]["identifier"])' "$RUNTIME")"
+# The owner reference is 402x874 points: iPhone 17 Pro / 16 Pro. Otherwise the newest plain Pro.
+for name in ("iPhone 17 Pro", "iPhone 16 Pro", "iPhone 15 Pro"):
+    hit = [t for t in cands if t["name"] == name]
+    if hit: print(hit[0]["identifier"]); break
+else:
+    pro = [t for t in cands if t["name"].endswith(" Pro")]
+    print((pro or cands)[-1]["identifier"])' "$RUNTIME")"
     UDID="$(xcrun simctl create "Lumen measure $VERSION" "$TYPE" "$RUNTIME")" || { say "cannot create a device on $RUNTIME"; continue; }
     say "== iOS $VERSION: device $UDID ($TYPE)"
     T0=$(date +%s); xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b >/dev/null 2>&1; say "booted in $(( $(date +%s) - T0 ))s"
