@@ -32,7 +32,7 @@ one) is closed without an answer: neither is a request served.
 Pages also report the request's `Accept-Language` header (`accept-language=...`), the path
 `/pb-geo.json` answers like a geolocation service (`{"ip": "203.0.113.7", "timezone":
 "Europe/Berlin", "country": "DE", "city": "Berlin", "org": "AS64500 Example Networks"}`; `?ip=`,
-`?tz=` and `?delay=<seconds>` change the answer) for the proxy-location checks, and `/pb-served.json` lists the paths served so far (so the self-test
+`?tz=`, `?country=` and `?delay=<seconds>` change the answer) for the proxy-location checks, and `/pb-served.json` lists the paths served so far (so the self-test
 can tell which requests reached the proxy, e.g. that a beacon did not).
 
 `/pb-login` is a sign-in form for the password AutoFill checks (`?signup=1`: a new password and
@@ -501,6 +501,7 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
         answer_json = json.loads(GEO_ANSWER)
         answer_json["ip"] = params.get("ip", answer_json["ip"])
         answer_json["timezone"] = params.get("tz", answer_json["timezone"])
+        answer_json["country"] = params.get("country", answer_json["country"])
         time.sleep(min(float(params.get("delay", "0")), 30))
         body, content_type = json.dumps(answer_json).encode(), "application/json"
     elif plain_path == "/pb-served.json":

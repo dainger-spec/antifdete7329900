@@ -261,12 +261,17 @@ final class ProfileManager: ObservableObject {
         // (`decideWebRTC`, docs/TUNNEL.md).
         if ProfileProcess.isEnabled, !runsInProfileProcess {
             var stored = stored
-            // Its languages and time zone are fixed when the process starts. With no location
-            // remembered for the proxy yet — a first launch, or a new proxy — they are looked up
-            // here first, as briefly as a launch in this process waits, rather than the process
-            // starting with this Mac's own languages and learning the proxy's only for next time.
+            // Its languages and time zone are fixed when the process starts: WebKit reads the
+            // language list from the process's command line before anything in it can change it.
+            // So where the proxy exits is looked up here first, at every launch — not only when
+            // nothing is remembered: a proxy that exited in Finland last time and exits in the
+            // United States now must not start a process that speaks Finnish to every site until it
+            // is quit (the lead, 7 November; the self-test's "languages per profile"). It waits as
+            // long as a first launch does, since what it starts with stays; a lookup slower than
+            // that leaves the remembered location, and the profile's process looks again and says
+            // when the country changed.
             var foundNow = false
-            if stored.needsProxyLocation, stored.rememberedProxyLocation == nil, (try? stored.proxy?.validate()) != nil {
+            if stored.needsProxyLocation, (try? stored.proxy?.validate()) != nil {
                 let lookup = Task { await self.lookUpProxyLocation(stored) }
                 if let result = await Self.value(of: lookup, within: Self.firstLookupWait), result.location != nil {
                     proxyLookupFinished(result, for: id, name: summary.name, stored: stored)
@@ -342,7 +347,14 @@ final class ProfileManager: ObservableObject {
         // Before the first web view of the run: WebKit reads its language list only once. The
         // profile's own language when one is set, else its proxy country's.
         let language = stored.webLanguage(for: location)
-        WebContentLanguage.decide(language)
+        if runsInProfileProcess {
+            // A profile's own process: WebKit took the list on its command line, which the app
+            // chose (`startInOwnProcess`). Recorded as it is, so that a late answer is compared
+            // with what pages really see — not with a list this process could no longer give them.
+            WebContentLanguage.adoptCommandLine()
+        } else {
+            WebContentLanguage.decide(language)
+        }
         noteLanguageMismatch(for: id, wanted: language)
         let session: BrowserSession
         do {
