@@ -10,7 +10,13 @@ MainActor.assumeIsolated {
     let arguments = CommandLine.arguments
     // A profile's process: started with the websites' languages, its interface's language fixed
     // before anything asks a bundle for its own (Localization.pinInterfaceLanguage).
-    if arguments.contains("--profile-session") { Localization.pinInterfaceLanguage() }
+    // A profile's process: Safari's menus and the browser's own words in the websites' language
+    // unless the profile asks for the app's (the owner, 7 November: a profile's window is the window
+    // of the person it stands for; ProfileConfiguration.menusInAppLanguage).
+    if arguments.contains("--profile-session"),
+       ProcessInfo.processInfo.environment[ProfileProcess.menusInAppLanguageVariable] == "1" {
+        Localization.pinInterfaceLanguage()
+    }
     // The core's errors in the person's language wherever one is shown (Localization.swift).
     installErrorTranslation()
     if arguments.contains("--sdk-check") {

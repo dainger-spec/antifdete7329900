@@ -99,7 +99,8 @@ final class ProfileProcess {
                       timeZone: String?,
                       forWarmUpOnly: Bool = false,
                       proxyLocationFound: Bool = false,
-                      preferences: BrowsingPreferences = BrowsingPreferences()) throws -> ProfileProcess {
+                      preferences: BrowsingPreferences = BrowsingPreferences(),
+                      menusInAppLanguage: Bool = false) throws -> ProfileProcess {
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
 
         let process = Process()
@@ -115,7 +116,7 @@ final class ProfileProcess {
         process.environment = try childEnvironment(inheriting: ProcessInfo.processInfo.environment, home: home,
                                                    vaultRoot: vaultRoot, timeZone: timeZone, forWarmUpOnly: forWarmUpOnly,
                                                    proxyLocationFound: proxyLocationFound,
-                                                   preferences: preferences)
+                                                   preferences: preferences, menusInAppLanguage: menusInAppLanguage)
 
         let keyPipe = Pipe()
         process.standardInput = keyPipe
@@ -168,6 +169,9 @@ final class ProfileProcess {
     /// Everything else stays here — a shell's or CI's variables, debug switches, the self-test's
     /// own (`PB_SELFTEST_*`), `PB_PROFILE_PROCESS` — so that what a profile's process does does
     /// not depend on how the manager happened to be started.
+    /// Set when Safari's menus in a profile's window are to be in the app's language.
+    static let menusInAppLanguageVariable = "PB_MENUS_IN_APP_LANGUAGE"
+
     static let inheritedEnvironment: Set<String> = [
         "USER", "LOGNAME", "SHELL", "__CF_USER_TEXT_ENCODING", "COMMAND_MODE",
         "APP_SANDBOX_CONTAINER_ID", "PRIVACYBROWSER_LANG", "PB_SAFARI_CHROME", "PB_GEO_SERVICES_OFF",
@@ -176,6 +180,7 @@ final class ProfileProcess {
     /// Every name a profile's process can find in its environment (the self-test checks it).
     static let environmentNames = inheritedEnvironment.union([
         "HOME", "TMPDIR", "PATH", "CFFIXED_USER_HOME", "PRIVACYBROWSER_VAULT_DIR", "TZ", "__XPC_TZ", "PB_WARM_UP_ONLY",
+        menusInAppLanguageVariable,
         browsingPreferencesVariable,
     ])
 
@@ -200,7 +205,8 @@ final class ProfileProcess {
     /// The environment of a profile's process, built from `inheritedEnvironment` and the profile.
     static func childEnvironment(inheriting parent: [String: String], home: URL, vaultRoot: URL,
                                  timeZone: String?, forWarmUpOnly: Bool, proxyLocationFound: Bool = false,
-                                 preferences: BrowsingPreferences = BrowsingPreferences()) throws -> [String: String] {
+                                 preferences: BrowsingPreferences = BrowsingPreferences(),
+                                 menusInAppLanguage: Bool = false) throws -> [String: String] {
         var environment = parent.filter { inheritedEnvironment.contains($0.key) }
         // The interface's language, by name: the child's `-AppleLanguages` is the websites' list,
         // and the two never decide each other (`InterfaceLanguage`; the child fixes it first thing,
@@ -229,6 +235,11 @@ final class ProfileProcess {
         // quits when the run ends, which is what seals what the run collected.
         if forWarmUpOnly { environment["PB_WARM_UP_ONLY"] = "1" }
         if proxyLocationFound { environment[proxyLocationFoundVariable] = "1" }
+        // Safari's menus and panel in the app's language (the profile's setting): the process pins
+        // its bundles to the interface's language (`Localization.pinInterfaceLanguage`). Otherwise
+        // they follow the websites' list on the command line, and with them the browser's own words
+        // a page can read (`ProfileConfiguration.menusInAppLanguage`).
+        if menusInAppLanguage { environment[menusInAppLanguageVariable] = "1" }
         if let json = try? JSONEncoder().encode(preferences) {
             environment[browsingPreferencesVariable] = String(decoding: json, as: UTF8.self)
         }

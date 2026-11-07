@@ -53,6 +53,7 @@ struct ProfileDraft {
     /// Carried through unchanged (a cache for launching; see ProfileConfiguration).
     var lastProxyLocation: ProxyLocation?
     var warnOnProxyIPChange = false
+    var menusInAppLanguage = false
     var webRTC: WebRTCPolicy = .disabled
     var ephemeral = false
     var safeBrowsing = false
@@ -167,6 +168,7 @@ struct ProfileDraft {
         if localeMode == .connection && !c.matchProxyLocation && c.proxy != nil { localeMode = .manual }
         lastProxyLocation = c.lastProxyLocation
         warnOnProxyIPChange = c.warnOnProxyIPChange
+        menusInAppLanguage = c.menusInAppLanguage
         webRTC = c.webRTCPolicy
         ephemeral = c.ephemeral
         safeBrowsing = c.safeBrowsingEnabled
@@ -324,6 +326,7 @@ struct ProfileDraft {
         configuration.localeSource = localeMode == .random ? .random : nil
         configuration.lastProxyLocation = lastProxyLocation
         configuration.warnOnProxyIPChange = warnOnProxyIPChange
+        configuration.menusInAppLanguage = menusInAppLanguage
         configuration.webRTCPolicy = webRTC
         configuration.ephemeral = ephemeral
         configuration.safeBrowsingEnabled = safeBrowsing

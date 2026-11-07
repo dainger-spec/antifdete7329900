@@ -183,7 +183,7 @@
 "editor.locale.manual" = "Manual";
 "editor.locale.random" = "Random";
 "editor.locale.connection.proxy" = "Those of where the proxy comes out, looked up through it at each launch (the last one found is used when the lookup is slow).";
-"editor.locale.connection.direct" = "Without a proxy: this Mac's time zone and languages.";
+"editor.locale.connection.direct" = "With no proxy, the time zone and language of the country the profile exits in; looked up at every launch (with no answer, the last found, else this Mac's).";
 "editor.language" = "Language";
 "editor.language.thisMac" = "This Mac's languages";
 "editor.locale.randomChosen" = "Picked at random, kept until you pick another:";
@@ -196,6 +196,9 @@
 "editor.cookies.error" = "The profile was saved, but its cookies were not imported: %@";
 "editor.locale.mismatch" = "%@ is not where the proxy was last seen to come out (%@): a page that compares the time zone with the IP address's location sees that they differ.";
 "editor.language.note" = "WebKit takes the language once per run: profiles that share the app's process all get the one of the first profile started (Settings → Behavior → each profile its own app gives each its own).";
+"editor.menusInAppLanguage" = "Profile menus in the app's language";
+"editor.menusInAppLanguage.detail" = "Off: Safari's menus and panel in the profile's window are in the language of the country the profile presents itself from, as a local's would be. Lumen's own windows are always in the app's language.";
+"editor.menusInAppLanguage.on" = "The menus will be in your language, but the browser will then use it in its own words to sites too — for example in messages about a wrongly filled form. A site can read them and see that they differ from the language the profile claims.";
 "editor.window.size" = "Window size";
 "editor.window.app" = "As it is (real device)";
 "editor.window.custom" = "Custom size";

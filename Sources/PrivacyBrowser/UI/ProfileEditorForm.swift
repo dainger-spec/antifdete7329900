@@ -674,6 +674,10 @@ struct ProfileEditorForm: View {
             EditorNote(mismatch, tone: .warning)
         }
         EditorNote(L("editor.language.note"))
+        EditorToggle(L("editor.menusInAppLanguage"), detail: L("editor.menusInAppLanguage.detail"), isOn: $draft.menusInAppLanguage)
+        if draft.menusInAppLanguage {
+            EditorNote(L("editor.menusInAppLanguage.on"), tone: .warning)
+        }
     }
 
     /// Switching to Random picks a place at once.

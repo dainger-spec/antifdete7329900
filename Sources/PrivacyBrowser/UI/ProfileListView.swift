@@ -1861,9 +1861,11 @@ struct ExitLabel: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Theme.textTertiary)
                     .frame(width: flagSize)
+                // No country yet: "Direct" and why on hover — never an empty cell, never a guess.
                 Text(L("profiles.exit.direct"))
                     .font(.lumenBody)
                     .foregroundStyle(Theme.textSecondary)
+                    .help(note ?? L("inspector.exit.directNotYet"))
             case let .proxy(endpoint, code?):
                 // The flag to find it by eye, the words to say what it is — a flag alone tells the
                 // Netherlands from France poorly, and nothing to VoiceOver (the owner, 1 November).

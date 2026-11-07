@@ -5472,10 +5472,15 @@ final class SelfTest {
         defer {
             if let given { setenv("PRIVACYBROWSER_LANG", given, 1) } else { unsetenv("PRIVACYBROWSER_LANG") }
         }
-        for (interface, websites) in [("ru", "de-DE"), ("en", "ru-RU")] {
-            let pair = "interface \(interface), the profile's language \(websites)"
+        // The owner, 7 November: Safari's chrome and the process's bundles (AppKit) take the websites'
+        // language unless "Profile menus in the app's language" is on; Lumen's own words are the
+        // interface's either way.
+        for (interface, websites, menusInAppLanguage) in [("ru", "de-DE", false), ("en", "ru-RU", false), ("ru", "de-DE", true)] {
+            let pair = "interface \(interface), the profile's language \(websites)\(menusInAppLanguage ? ", menus in the app's language" : "")"
+            let menus = menusInAppLanguage ? interface : String(websites.prefix(2))
             var configuration = ProfileConfiguration(ephemeral: true)
             configuration.languageOverride = websites
+            configuration.menusInAppLanguage = menusInAppLanguage
             let profile = try repository.create(name: "Languages \(interface) \(websites)", configuration: configuration)
             defer { try? repository.delete(profile.id) }
             let manager = ProfileManager(repository: repository)
@@ -5505,13 +5510,13 @@ final class SelfTest {
                   ownProcess && primary(language) == wanted && primary(languages) == wanted && primary(accept) == wanted,
                   "own process \(ownProcess), navigator.language \(language), navigator.languages \(languages), "
                   + "Accept-Language \(accept), step \(snapshot.step)\(launchError.isEmpty ? "" : ", launch \(launchError)")")
-            check("languages: \(pair) — its process took the interface's: its words and its bundles' (AppKit) \(interface)",
-                  reported?.code == interface && reported?.bundles == interface,
+            check("languages: \(pair) — its process: Lumen's words \(interface), its bundles' (AppKit) \(menus)",
+                  reported?.code == interface && reported?.bundles == menus,
                   reported.map { "words \($0.code), bundles \($0.bundles)" } ?? "the process did not say")
             if let chrome = reported?.chrome {
-                check("languages: \(pair) — Safari's chrome in its window \(interface)", chrome == interface, chrome)
+                check("languages: \(pair) — Safari's chrome in its window \(menus)", chrome == menus, chrome)
             } else {
-                skip("languages: \(pair) — Safari's chrome in its window \(interface)",
+                skip("languages: \(pair) — Safari's chrome in its window \(menus)",
                      reported == nil ? "the process did not say" : "Safari's chrome is not hosted in this process")
             }
             try? await manager.stop(profile.id)
@@ -5637,27 +5642,46 @@ final class SelfTest {
         info("\(prefix): the interface Russian, English, Russian, websites en-US: \(keys.count) values read; "
              + "\(noise.count) differ between the two Russian runs (\(noise.sorted().prefix(12).joined(separator: ", ")))")
         for key in leaks { info("\(prefix): differs with the interface's language: \(key): ru \(ru1[key] ?? "nil") | en \(en[key] ?? "nil")") }
-        // Known (claude/measure-lang-red, 7 November): the browser's own words for an invalid form
-        // field (`validationMessage`) follow the process's bundles — the interface's language, the
-        // menus' — and a page reads them. Measured on claude/measure-localization: without the
-        // interface pinned they follow the websites' list, and the menus with them. Said apart, as a
-        // skip that CI names (PB_SELFTEST_EXPECTED_SKIPS) until the lead chooses; any other value
-        // that follows the interface fails here.
-        let known = "probe.validationMessages"
-        let others = leaks.filter { $0 != known }
+        // The owner's decision (7 November): a profile's window speaks the language its websites
+        // see — Safari's menus and the browser's own words a page reads (an invalid form field's
+        // message) with it — unless "Profile menus in the app's language" is on. Any value that
+        // follows the interface's language with it off fails here.
+        let formWords = "probe.validationMessages"
         if ru1.isEmpty || en.isEmpty || ru2.isEmpty {
             check("\(prefix): the interface's language (Russian, English) shows in nothing a page reads", false,
                   "a run read nothing: ru \(ru1.count), en \(en.count), ru \(ru2.count) values")
         } else {
-            check("\(prefix): the interface's language (Russian, English) shows in nothing a page reads but the form's own words — \(keys.count) values, \(noise.count) of them differing between two runs alike",
-                  others.isEmpty, others.map { "\($0): ru \(ru1[$0] ?? "nil") | en \(en[$0] ?? "nil")" }.joined(separator: "; "))
-            let name = "\(prefix): the browser's own words for an invalid form field are in the websites' language, not the interface's"
-            if leaks.contains(known) {
-                skip(name, "they follow the interface's language (the menus'): ru \(ru1[known] ?? "nil") | en \(en[known] ?? "nil") — known since 7 November, the lead's choice pending")
-            } else {
-                check(name, ru1[known] == en[known] && ru1[known] != nil, ru1[known] ?? "nil")
-            }
+            check("\(prefix): the interface's language (Russian, English) shows in nothing a page reads — \(keys.count) values, \(noise.count) of them differing between two runs alike",
+                  leaks.isEmpty, leaks.map { "\($0): ru \(ru1[$0] ?? "nil") | en \(en[$0] ?? "nil")" }.joined(separator: "; "))
+            check("\(prefix): a United States profile, menus in the app's language off — the form's own words are English, the interface Russian",
+                  ru1[formWords]?.contains("Fill out this field") == true, ru1[formWords] ?? "nil")
         }
+        // A Japanese one: the form's words Japanese, not English (the bundle has no Japanese of
+        // Lumen's own, only the folder that lets the process take Japanese) nor Russian.
+        var japanese = try repository.loadConfiguration(fixed)
+        japanese.languageOverride = "ja-JP"
+        try repository.saveConfiguration(japanese, for: fixed)
+        setenv("PRIVACYBROWSER_LANG", "ru", 1)
+        let jaSeen = await look(fixed)
+        try? await manager.stop(fixed)
+        let jaWords = jaSeen.values[formWords] ?? ""
+        info("\(prefix): a Japanese profile, the interface Russian: the form's words \(jaWords); language \(jaSeen.values["probe.language"] ?? "nil")")
+        check("\(prefix): a Japanese profile, menus in the app's language off — the form's own words are Japanese, neither English nor Russian",
+              !jaWords.isEmpty && !jaWords.contains("Fill out") && !jaWords.contains("Заполните")
+                  && jaWords.unicodeScalars.contains { (0x3040...0x30FF).contains($0.value) || (0x4E00...0x9FFF).contains($0.value) },
+              jaWords.isEmpty ? "nil" : jaWords)
+        // The setting on: the form's words in the app's language — the price the editor states,
+        // checked as intended, not as a leak.
+        var inAppLanguage = try repository.loadConfiguration(fixed)
+        inAppLanguage.languageOverride = "en-US"
+        inAppLanguage.menusInAppLanguage = true
+        try repository.saveConfiguration(inAppLanguage, for: fixed)
+        let onSeen = await look(fixed)
+        try? await manager.stop(fixed)
+        let onWords = onSeen.values[formWords] ?? ""
+        info("\(prefix): menus in the app's language on, the interface Russian, websites en-US: the form's words \(onWords)")
+        check("\(prefix): menus in the app's language on — the form's own words are the app's (Russian), as the setting says they will be",
+              onWords.contains("Заполните") && onSeen.values["probe.language"] == "en-US", onWords.isEmpty ? "nil" : onWords)
     }
 
     /// A profile with no proxy learns where it exits as one with a proxy does (the lead, 7 November):

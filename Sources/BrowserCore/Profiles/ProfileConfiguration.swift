@@ -134,6 +134,12 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// random choice is written (`LocaleSource.random`).
     public var localeSource: LocaleSource?
 
+    /// Safari's menus and panel in the profile's window in the app's language rather than the one
+    /// websites see (the owner, 7 November). Off: the window speaks the profile's language — the
+    /// browser's own words a page can read (an invalid form field's message) with it. On: those
+    /// words are in the app's language too, and differ from the language the profile claims.
+    public var menusInAppLanguage: Bool
+
     /// Where the time zone and language come from.
     public var effectiveLocaleSource: LocaleSource {
         localeSource ?? (timeZoneIdentifier != nil || languageOverride != nil ? .manual : .connection)
@@ -177,7 +183,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 safariVersion: String? = nil,
                 localRequests: LocalRequests = .protected,
                 languageOverride: String? = nil,
-                localeSource: LocaleSource? = nil) {
+                localeSource: LocaleSource? = nil,
+                menusInAppLanguage: Bool = false) {
         self.startURL = startURL
         self.userAgent = userAgent
         self.proxy = proxy
@@ -205,6 +212,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.localRequests = localRequests
         self.languageOverride = languageOverride
         self.localeSource = localeSource
+        self.menusInAppLanguage = menusInAppLanguage
     }
 
     /// Whether this profile's cookies take part in sync (never for an ephemeral profile).
@@ -342,7 +350,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
              safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID,
              matchProxyLocation, lastProxyLocation, warnOnProxyIPChange, passwordAutoFill, passwordNeverSaveSites,
              syncCookies, settingsModifiedAt, searchEngine, tags, notes, avatar, windowSize, safariVersion,
-             localRequests, languageOverride, localeSource
+             localRequests, languageOverride, localeSource, menusInAppLanguage
     }
 
     /// Tolerant decoding: fields added in later versions fall back to their defaults, so
@@ -389,6 +397,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         languageOverride = (try? c.decodeIfPresent(String.self, forKey: .languageOverride))
             .flatMap { LocalePlaces.isLanguageTag($0) ? $0 : nil }
         localeSource = try? c.decodeIfPresent(LocaleSource.self, forKey: .localeSource)
+        menusInAppLanguage = (try? c.decodeIfPresent(Bool.self, forKey: .menusInAppLanguage)) ?? false
     }
 
     /// Explicit so that `historyRetentionDays: nil` ("keep forever") is written as JSON null
@@ -423,6 +432,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         if localRequests != .protected { try c.encode(localRequests, forKey: .localRequests) }
         try c.encodeIfPresent(languageOverride, forKey: .languageOverride)
         try c.encodeIfPresent(localeSource, forKey: .localeSource)
+        try c.encode(menusInAppLanguage, forKey: .menusInAppLanguage)
     }
 
     public var historyPolicy: HistoryStore.Policy {

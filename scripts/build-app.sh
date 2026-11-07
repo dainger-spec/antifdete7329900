@@ -181,6 +181,21 @@ for lang in en ru; do
   cp -R "Resources/$lang.lproj" "$APP/Contents/Resources/$lang.lproj"
   plutil -lint "$APP/Contents/Resources/$lang.lproj/Localizable.strings" >/dev/null
 done
+# A profile's window speaks the language its websites see (the owner, 7 November): Safari's menus
+# and the browser's own words a page reads (an invalid form field's message) follow this bundle's
+# localization, which a process picks from its languages among those the bundle has (CI's
+# claude/measure-l10n-*: ja-JP and de-DE got English words with only en and ru here). So the bundle
+# has every language a profile can take (ProxyLocation.webLanguages, the editor's list): an empty
+# folder each, with the list in CFBundleLocalizations. The app's own words stay in en.lproj and
+# ru.lproj, which Localization reads by name, whatever the process's language.
+profile_langs="$(grep -oE '"[a-z]{2,3}-[A-Z]{2}"' Sources/BrowserCore/Profiles/ProxyLocation.swift | tr -d '"' | cut -d- -f1 | sort -u)"
+profile_langs="$profile_langs zh-Hans zh-Hant pt-BR pt-PT"
+for lang in $profile_langs; do
+  [[ "$lang" == en || "$lang" == ru || "$lang" == zh || "$lang" == pt ]] && continue
+  mkdir -p "$APP/Contents/Resources/$lang.lproj"
+  printf '/* No strings of Lumen own in this language: a profile window localized in it. */\n' > "$APP/Contents/Resources/$lang.lproj/Profile.strings"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleLocalizations: string $lang" "$APP/Contents/Info.plist"
+done
 if [[ "$SANDBOX" == "1" ]]; then
   sed "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" Resources/container-migration.plist > "$APP/Contents/Resources/container-migration.plist"
   plutil -lint "$APP/Contents/Resources/container-migration.plist" >/dev/null

@@ -454,7 +454,8 @@ final class ProfileManager: ObservableObject {
             timeZone: stored.timeZoneIdentifier ?? location?.timeZoneIdentifier,
             forWarmUpOnly: forWarmUpOnly,
             proxyLocationFound: proxyLocationFound,
-            preferences: BrowsingPreferences.current.forProfileProcess)
+            preferences: BrowsingPreferences.current.forProfileProcess,
+            menusInAppLanguage: stored.menusInAppLanguage)
         child.onEvent = { [weak self] event in
             guard let self else { return }
             switch event {

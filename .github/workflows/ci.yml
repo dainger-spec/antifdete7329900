@@ -23,10 +23,7 @@ env:
   # No geolocation service is asked unless a check sets one (ProxyGeoLookup.services): a profile
   # with no proxy follows where it exits, and the runners keep GMT while their address is elsewhere.
   PB_GEO_SERVICES_OFF: "1"
-  # The browser's own words for an invalid form field follow the interface's language (the
-  # menus'), and a page reads them: known since 7 November, the lead's choice pending (SelfTest's
-  # "languages per profile").
-  PB_SELFTEST_EXPECTED_SKIPS: "languages per profile: the browser's own words for an invalid form field|passwords: a person's own clicks and keys|ended page: an iPhone view's page, loaded: the page gets a click|ended page: after Reload, the cover hidden again: the page gets a click|Safari chrome: its touch icon|Safari chrome: its OpenSearch description|keychain between profiles"
+  PB_SELFTEST_EXPECTED_SKIPS: "passwords: a person's own clicks and keys|ended page: an iPhone view's page, loaded: the page gets a click|ended page: after Reload, the cover hidden again: the page gets a click|Safari chrome: its touch icon|Safari chrome: its OpenSearch description|keychain between profiles"
 
 
 jobs:
