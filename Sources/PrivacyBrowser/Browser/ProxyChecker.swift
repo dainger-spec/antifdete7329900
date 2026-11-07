@@ -67,7 +67,7 @@ enum ProxyChecker {
             if kind == .socks5 { found.tlsToProxy = false }
         }
         // A SOCKS5 proxy's UDP, tried for real while the lookup runs: what WebRTC through it would get.
-        let triesUDP = found.kind == .socks5
+        let triesUDP = false  // MEASUREMENT: no UDP tried, as before this change
         async let udp: ProxyUDPSupport? = triesUDP ? await self.udp(found) : nil
         var result = self.result(of: await lookUp(found), at: time)
         result.diagnosis = diagnosis
