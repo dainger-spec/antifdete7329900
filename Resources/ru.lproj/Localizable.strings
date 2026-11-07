@@ -652,6 +652,13 @@
 "proxies.menu.edit" = "Изменить…";
 "proxies.origin.service" = "Выдан сервисом Lumen";
 "proxies.origin.service.short" = "Из сервиса";
+"proxies.udp.supported" = "UDP работает";
+"proxies.udp.unsupported" = "Нет UDP";
+"proxies.udp.unchecked" = "UDP не проверен";
+"proxies.udp.supported.help" = "Прокси передаёт UDP, и с того же адреса, что и страницы: WebRTC в профилях с ним идёт через прокси, пока работает сетевая защита.";
+"proxies.udp.unsupported.help" = "Прокси не передаёт UDP: в профилях с этим прокси WebRTC работать не будет.";
+"proxies.udp.elsewhere.help" = "UDP этого прокси выходит с другого адреса, чем страницы: в профилях с ним WebRTC работать не будет — иначе сайты увидели бы два разных адреса.";
+"proxies.udp.unchecked.help" = "Проверить UDP не удалось: не получилось узнать, с какого адреса через этот прокси выходят страницы. Проверьте прокси ещё раз.";
 "proxies.origin.service.since" = "Выдан сервисом Lumen %@";
 "proxies.origin.user" = "Добавлен вами";
 "proxies.origin.user.since" = "Добавлен вами %@";
@@ -1357,6 +1364,7 @@
 "inspector.exitIP" = "Внешний IP";
 "inspector.proxy" = "Прокси";
 "inspector.latency" = "Задержка";
+"inspector.udp" = "UDP";
 "inspector.latency.value" = "%ld мс";
 "inspector.latency.checked" = "По проверке прокси: %@";
 "inspector.timeZone" = "Часовой пояс";

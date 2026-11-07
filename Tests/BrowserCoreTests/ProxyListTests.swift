@@ -514,3 +514,35 @@ final class ProxyAssignmentTests: XCTestCase {
         XCTAssertEqual(try repository.summary(for: c.id).revision, 1)
     }
 }
+
+final class ProxyUDPLabelTests: XCTestCase {
+    /// Three things said, each from what the check really found; nothing for a dead proxy or one
+    /// whose UDP was not tried.
+    func testTheLabelFollowsWhatTheCheckFound() {
+        let expected: [ProxyUDPSupport: ProxyUDPLabel] = [
+            .supported: .supported, .unsupported: .unsupported, .elsewhere: .unsupported,
+            .unknown: .unchecked, .exitUnknown: .unchecked,
+        ]
+        for udp in ProxyUDPSupport.allCases {
+            var alive = ProxyCheckResult.alive(location: nil, latency: 0.1)
+            alive.udp = udp
+            XCTAssertEqual(alive.udpLabel, expected[udp], "\(udp)")
+            var dead = ProxyCheckResult.dead(.noAnswer)
+            dead.udp = udp
+            XCTAssertNil(dead.udpLabel, "a dead proxy says nothing of its UDP: \(udp)")
+        }
+        XCTAssertNil(ProxyCheckResult.alive(location: nil, latency: 0.1).udpLabel, "not tried: nothing said")
+        XCTAssertEqual(Set(expected.values), Set(ProxyUDPLabel.allCases))
+    }
+
+    /// A check kept by a build before this one reads back without the UDP; one with it keeps it.
+    func testAKeptCheckReadsWithAndWithoutTheUDP() throws {
+        var result = ProxyCheckResult.alive(location: nil, latency: 0.2, at: Date(timeIntervalSince1970: 1_800_000_000))
+        let old = try JSONEncoder().encode(result)
+        XCTAssertFalse(String(decoding: old, as: UTF8.self).contains("udp"))
+        XCTAssertNil(try JSONDecoder().decode(ProxyCheckResult.self, from: old).udp)
+        result.udp = .unsupported
+        let new = try JSONEncoder().encode(result)
+        XCTAssertEqual(try JSONDecoder().decode(ProxyCheckResult.self, from: new).udp, .unsupported)
+    }
+}

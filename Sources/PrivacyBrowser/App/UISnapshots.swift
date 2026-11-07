@@ -621,7 +621,8 @@ enum UISnapshots {
 
     /// A check that found the proxy working, `checkedAt` 12 minutes ago.
     static func sampleWorks(_ kind: ProxySettings.Kind, _ ip: String, _ country: String, _ zone: String, _ city: String,
-                            _ latencies: [Int], asn: String? = nil, organization: String? = nil) -> ProxyCheckResult {
+                            _ latencies: [Int], asn: String? = nil, organization: String? = nil,
+                            udp: ProxyUDPSupport? = nil) -> ProxyCheckResult {
         var result = ProxyCheckResult(checkedAt: Date().addingTimeInterval(-12 * 60), exitIP: ip, countryCode: country,
                                       timeZoneIdentifier: zone,
                                       diagnosis: ProxyDiagnosis(verdict: .works, kinds: [kind], authentication: .accepted,
@@ -629,6 +630,7 @@ enum UISnapshots {
                                                                 latencyAttempts: latencies.count),
                                       city: city, asn: asn, organization: organization)
         result.latencyMilliseconds = result.diagnosis?.medianLatency
+        result.udp = udp
         return result
     }
 
@@ -650,7 +652,7 @@ enum UISnapshots {
             ProxyListEntry(label: "Berlin 1", proxy: ProxySettings(kind: .socks5, host: "203.0.113.10", port: 1080,
                                                                    username: "northwind", password: "sample"),
                            lastCheck: sampleWorks(.socks5, "203.0.113.10", "DE", "Europe/Berlin", "Berlin", [80, 84, 97],
-                                                  asn: "AS64500", organization: "Example Networks")),
+                                                  asn: "AS64500", organization: "Example Networks", udp: .supported)),
             ProxyListEntry(proxy: ProxySettings(kind: .httpConnect, host: "proxy.example.net", port: 3128),
                            lastCheck: sampleWorks(.httpConnect, "198.51.100.23", "NL", "Europe/Amsterdam", "Amsterdam", [138, 142, 160])),
             ProxyListEntry(label: "Tokyo", proxy: ProxySettings(kind: .httpConnect, host: "192.0.2.44", port: 8443, tlsToProxy: true),
@@ -1243,9 +1245,10 @@ enum UISnapshots {
         configuration.languageOverride = "de-DE" // l10n: not text
         configuration.windowSize = .custom(width: 1440, height: 900)
         configuration.tags = ["ads", "DE"] // l10n: not text
-        let check = ProxyCheckResult(checkedAt: Date().addingTimeInterval(-40 * 60), exitIP: "203.0.113.47", countryCode: "DE",
+        var check = ProxyCheckResult(checkedAt: Date().addingTimeInterval(-40 * 60), exitIP: "203.0.113.47", countryCode: "DE",
                                      timeZoneIdentifier: "Europe/Berlin", latencyMilliseconds: 84,
                                      city: "Frankfurt am Main") // l10n: not text
+        check.udp = .unsupported
         return InspectorInfo(details: ProfileDetails(configuration),
                              counts: ProfileCounts(logins: 6, bookmarks: 41, historyEntries: 271, syncedCookies: 1_284),
                              proxyCheck: check)

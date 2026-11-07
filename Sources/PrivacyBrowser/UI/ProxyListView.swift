@@ -461,6 +461,14 @@ private struct ProxyRow: View {
                             .foregroundStyle(Theme.textTertiary)
                             .lineLimit(1)
                     }
+                    if let check = entry.lastCheck, let label = check.udpLabel {
+                        Text(ProxyUDPText.short(label))
+                            .font(.lumenCaption)
+                            .foregroundStyle(label == .unsupported ? Theme.warning : Theme.textTertiary)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .help(ProxyUDPText.help(check))
+                    }
                 }
                 if !subline.isEmpty {
                     Text(subline)
@@ -629,6 +637,27 @@ extension ProxyListEntry {
 }
 
 @MainActor
+/// What the list and a profile's card say of a proxy's UDP (`ProxyCheckResult.udpLabel`): a
+/// word beside it, and on hover what it means for WebRTC in profiles with it.
+enum ProxyUDPText {
+    static func short(_ label: ProxyUDPLabel) -> String {
+        switch label {
+        case .supported: return L("proxies.udp.supported")
+        case .unsupported: return L("proxies.udp.unsupported")
+        case .unchecked: return L("proxies.udp.unchecked")
+        }
+    }
+
+    static func help(_ check: ProxyCheckResult) -> String {
+        switch check.udp {
+        case .supported: return L("proxies.udp.supported.help")
+        case .elsewhere: return L("proxies.udp.elsewhere.help")
+        case .unsupported: return L("proxies.udp.unsupported.help")
+        case .unknown, .exitUnknown, nil: return L("proxies.udp.unchecked.help")
+        }
+    }
+}
+
 enum ProxyCheckText {
     /// "120 ms"; empty without one, and for a proxy that does not work.
     static func latency(_ check: ProxyCheckResult?) -> String {

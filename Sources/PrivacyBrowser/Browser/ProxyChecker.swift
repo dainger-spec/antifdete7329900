@@ -1,5 +1,7 @@
 import BrowserCore
 import Foundation
+import TunnelCore
+import TunnelTransport
 
 /// Checks proxies of the list: does it work — and when it does not, why — where does it exit, how
 /// slow is it.
@@ -21,6 +23,9 @@ import Foundation
 /// resolves and reaches it); the lookup is a request to a third-party service through the proxy.
 /// Both only when the user asks for a check (the Proxies section), and the probe when a profile with a
 /// proxy starts (`ProfileManager`), to say why it would load nothing.
+/// A SOCKS5 proxy's UDP is tried too (`udp`): a UDP association and a STUN request, both to the
+/// proxy, and only when its UDP answers, where its pages leave from — Cloudflare's trace through
+/// the proxy (`ProxyExitLookup`), as a launch asks.
 @MainActor
 enum ProxyChecker {
     /// Checks running at once: enough to get through a provider's list quickly, few enough not to
@@ -61,10 +66,29 @@ enum ProxyChecker {
             found.kind = kind
             if kind == .socks5 { found.tlsToProxy = false }
         }
+        // A SOCKS5 proxy's UDP, tried for real while the lookup runs: what WebRTC through it would get.
+        let triesUDP = found.kind == .socks5
+        async let udp: ProxyUDPSupport? = triesUDP ? await self.udp(found) : nil
         var result = self.result(of: await lookUp(found), at: time)
         result.diagnosis = diagnosis
         if let median = diagnosis.medianLatency { result.latencyMilliseconds = median }
+        let tried = await udp
+        if result.isAlive { result.udp = tried }
         return result
+    }
+
+    /// Whether a SOCKS5 proxy carries WebRTC, found as a launch finds it (`ProfileManager.proxyUDP`):
+    /// one UDP association and a STUN request through it (`ProxyUDPCheck`); when it answers, where
+    /// the proxy's TCP leaves from (`ProxyExitLookup`, through the proxy), which its UDP must leave
+    /// from too. Only the proxy is talked to; the exit is asked only of a proxy whose UDP answered.
+    static func udp(_ proxy: ProxySettings) async -> ProxyUDPSupport {
+        guard proxy.kind == .socks5, let port = UInt16(exactly: proxy.port) else { return .unsupported }
+        let outcome = await ProxyUDPCheck.run(proxy: SOCKSProxy(host: proxy.host, port: port,
+                                                                username: proxy.username, password: proxy.password))
+        guard case let .supported(egress) = outcome else { return .unsupported }
+        let userAgent = ProfileConfiguration().userAgent(hostSafariVersion: HostSafari.version)
+        guard let exit = await ProxyExitLookup.lookUp(proxy: proxy, userAgent: userAgent) else { return .exitUnknown }
+        return egress.ip == exit ? .supported : .elsewhere
     }
 
     /// The lookup through `proxy` a check makes; nil when its settings cannot be applied, and then

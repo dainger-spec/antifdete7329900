@@ -652,6 +652,13 @@
 "proxies.menu.edit" = "Edit…";
 "proxies.origin.service" = "Given by Lumen's service";
 "proxies.origin.service.short" = "From the service";
+"proxies.udp.supported" = "UDP works";
+"proxies.udp.unsupported" = "No UDP";
+"proxies.udp.unchecked" = "UDP not checked";
+"proxies.udp.supported.help" = "The proxy carries UDP, from the same address as the pages: WebRTC in profiles with it goes through the proxy while the network guard works.";
+"proxies.udp.unsupported.help" = "The proxy does not carry UDP: WebRTC will not work in profiles with this proxy.";
+"proxies.udp.elsewhere.help" = "This proxy’s UDP leaves from another address than the pages: WebRTC will not work in profiles with it — sites would otherwise see two different addresses.";
+"proxies.udp.unchecked.help" = "The UDP could not be checked: where the pages leave this proxy from could not be found out. Check the proxy again.";
 "proxies.origin.service.since" = "Given by Lumen's service on %@";
 "proxies.origin.user" = "Added by you";
 "proxies.origin.user.since" = "Added by you on %@";
@@ -1357,6 +1364,7 @@
 "inspector.exitIP" = "Exit IP";
 "inspector.proxy" = "Proxy";
 "inspector.latency" = "Latency";
+"inspector.udp" = "UDP";
 "inspector.latency.value" = "%ld ms";
 "inspector.latency.checked" = "From the proxy's check: %@";
 "inspector.timeZone" = "Time zone";
