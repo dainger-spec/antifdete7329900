@@ -812,6 +812,38 @@ async def scenario_q1(capture):
           f"HTTP proxy with applyCredential and the app cancelling every proxy challenge: ok={rj.get('ok')} "
           f"({rj.get('error')}), challenges {rj.get('challenges')}")
 
+    # 7b. WebRTC off by script (no public WKWebView switch exists): PrivacyScripts' own shim with
+    # webRTC "disabled", in the page and in an about:blank frame the page makes. STUN must hear nothing.
+    try:
+        import q2 as fixtures
+        swift_body = fixtures.shim_body()
+        shim = "(function install(CONFIG) {\n" + swift_body + "\n})(" + json.dumps(
+            {"timeZone": None, "geolocation": {"mode": "deny"}, "webRTC": "disabled", "safariObject": False, "storageQuota": None}) + ");"
+        await APP.cmd("session", session="W", store=f"persistent:{uuid.uuid4()}", proxies=[proxy_a],
+                      userScripts=[{"source": shim, "mainFrameOnly": False}])
+        await APP.cmd("load", session="W", url=f"http://{tok('p', 'W')}.lumentest:{hp}/page?sid=W", timeout=30)
+        stun_before = len([e for e in EVENTS if e["kind"] == "stun"])
+        rtc = await APP.cmd("eval", session="W", js=f"""
+            const tryRTC = async (w) => {{
+              const PC = w.RTCPeerConnection || w.webkitRTCPeerConnection;
+              if (typeof PC !== 'function') return 'absent';
+              try {{ const pc = new PC({{ iceServers: [{{ urls: 'stun:{lan}:{ARGS.stun_port}' }}] }}); const c = [];
+                pc.onicecandidate = (e) => {{ if (e.candidate) c.push(e.candidate.candidate); }};
+                pc.createDataChannel('x'); await pc.setLocalDescription(await pc.createOffer());
+                await new Promise((r) => setTimeout(r, 4000)); pc.close(); return c; }} catch (e) {{ return 'error ' + e.message; }} }};
+            const f = document.createElement('iframe'); document.body.appendChild(f);
+            return {{ page: await tryRTC(window), blankFrame: await tryRTC(f.contentWindow),
+                      names: Object.getOwnPropertyNames(window).filter((n) => /RTC/.test(n)).length }};""", timeout=40)
+        await asyncio.sleep(1)
+        stun_after = len([e for e in EVENTS if e["kind"] == "stun"])
+        v = rtc.get("value") or {}
+        check("q1.webrtc-off-by-script", "PASS" if stun_after == stun_before and lan else ("LEAK" if lan else "INCONCLUSIVE"),
+              f"PrivacyScripts webRTC=disabled: page {v.get('page') if isinstance(v.get('page'), str) else str(len(v.get('page') or [])) + ' candidates'}, "
+              f"about:blank frame {v.get('blankFrame') if isinstance(v.get('blankFrame'), str) else str(len(v.get('blankFrame') or [])) + ' candidates'}, "
+              f"RTC names left on window {v.get('names')}; STUN binding requests during it: {stun_after - stun_before}")
+    except Exception as error:
+        check("q1.webrtc-off-by-script", "INCONCLUSIVE", f"stopped: {error!r}")
+
     # 8. Leaks the page cannot see: DNS and WebRTC.
     await asyncio.sleep(2)
     stuns = [e for e in EVENTS if e["kind"] == "stun"]
