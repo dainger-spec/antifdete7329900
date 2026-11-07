@@ -5622,6 +5622,39 @@ final class SelfTest {
         // (3) The interface's language: invisible to pages?
         let fixed = try profile("Languages: interface", language: "en-US", proxied: false)
         defer { try? repository.delete(fixed) }
+        // Measurement (claude/measure-localization): whose language WebKit's web process takes for
+        // its own words, and which SPI names a language or a localization.
+        for cls in ["WKProcessPool", "_WKProcessPoolConfiguration", "WKWebsiteDataStore", "_WKWebsiteDataStoreConfiguration",
+                    "WKWebViewConfiguration", "WKPreferences", "WKWebView"] {
+            var names: [String] = []
+            for meta in [false, true] {
+                guard var c: AnyClass = NSClassFromString(cls) else { continue }
+                if meta, let m = object_getClass(c) { c = m }
+                var count: UInt32 = 0
+                if let list = class_copyMethodList(c, &count) {
+                    for i in 0..<Int(count) {
+                        let n = NSStringFromSelector(method_getName(list[i]))
+                        let l = n.lowercased()
+                        if l.contains("language") || l.contains("localiz") || l.contains("locale") { names.append((meta ? "+" : "-") + n) }
+                    }
+                    free(list)
+                }
+            }
+            info("MEASURE-L10N \(cls): \(names.sorted().joined(separator: " "))")
+        }
+        var reported: (code: String, bundles: String, chrome: String?)?
+        manager.onInterfaceLanguage = { _, code, bundles, chrome in reported = (code, bundles, chrome) }
+        for (interface, pin) in [("ru", true), ("ru", false), ("en", true), ("de", true)] {
+            setenv("PRIVACYBROWSER_LANG", interface, 1)
+            if pin { unsetenv("PB_MEASURE_NO_PIN") } else { setenv("PB_MEASURE_NO_PIN", "1", 1) }
+            reported = nil
+            let seen = await look(fixed)
+            _ = await waitUntil(timeout: 10) { reported != nil }
+            info("MEASURE-L10N interface \(interface), pinned \(pin): validation \(seen.values["probe.validationMessages"] ?? "nil"); "
+                 + "language \(seen.values["probe.language"] ?? "nil"); process: \(reported.map { "words \($0.code), bundles \($0.bundles), chrome \($0.chrome ?? "not hosted")" } ?? "said nothing")")
+            try? await manager.stop(fixed)
+        }
+        unsetenv("PB_MEASURE_NO_PIN")
         var runs: [(String, [String: String])] = []
         for interface in ["ru", "en", "ru"] {
             setenv("PRIVACYBROWSER_LANG", interface, 1)

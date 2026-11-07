@@ -10,7 +10,7 @@ MainActor.assumeIsolated {
     let arguments = CommandLine.arguments
     // A profile's process: started with the websites' languages, its interface's language fixed
     // before anything asks a bundle for its own (Localization.pinInterfaceLanguage).
-    if arguments.contains("--profile-session") { Localization.pinInterfaceLanguage() }
+    if arguments.contains("--profile-session"), ProcessInfo.processInfo.environment["PB_MEASURE_NO_PIN"] != "1" { Localization.pinInterfaceLanguage() }
     // The core's errors in the person's language wherever one is shown (Localization.swift).
     installErrorTranslation()
     if arguments.contains("--sdk-check") {
