@@ -5475,8 +5475,12 @@ final class SelfTest {
         // The owner, 7 November: Safari's chrome and the process's bundles (AppKit) take the websites'
         // language unless "Profile menus in the app's language" is on; Lumen's own words are the
         // interface's either way.
-        for (interface, websites, menusInAppLanguage) in [("ru", "de-DE", false), ("en", "ru-RU", false), ("ru", "de-DE", true)] {
-            let pair = "interface \(interface), the profile's language \(websites)\(menusInAppLanguage ? ", menus in the app's language" : "")"
+        var firstValidation: String?
+        for (interface, websites, menusInAppLanguage, variant3) in [("ru", "de-DE", false, false), ("en", "ru-RU", false, false),
+                                                                    ("ru", "de-DE", true, false), ("ru", "de-DE", true, true)] {
+            if variant3 { setenv("PB_MEASURE_VARIANT3", "1", 1) } else { unsetenv("PB_MEASURE_VARIANT3") }
+            defer { unsetenv("PB_MEASURE_VARIANT3") }
+            let pair = "interface \(interface), the profile's language \(websites)\(menusInAppLanguage ? ", menus in the app's language" : "")\(variant3 ? " (VARIANT 3: frameworks only)" : "")"
             let menus = menusInAppLanguage ? interface : String(websites.prefix(2))
             var configuration = ProfileConfiguration(ephemeral: true)
             configuration.languageOverride = websites
@@ -5504,8 +5508,20 @@ final class SelfTest {
             // (CI run 580), as Safari does for the same list.
             func primary(_ tag: String) -> String { String(tag.lowercased().prefix { $0.isLetter }) }
             let wanted = primary(websites)
+            let validation = values["probe.validationMessages"] ?? "nil"
+            if firstValidation == nil { firstValidation = validation }
             info("languages: \(pair): pages see navigator.language \(language), navigator.languages \(languages), "
-                 + "Accept-Language \(accept); its process: \(reported.map { "words \($0.code), bundles \($0.bundles), chrome \($0.chrome ?? "not hosted")" } ?? "said nothing")")
+                 + "Accept-Language \(accept); form words \(validation); its process: \(reported.map { "words \($0.code), bundles \($0.bundles), chrome \($0.chrome ?? "not hosted")" } ?? "said nothing")")
+            if variant3 {
+                check("MEASUREMENT variant 3: \(pair) — the main bundle in the websites' language", reported?.bundles == String(websites.prefix(2)),
+                      reported.map { "bundles \($0.bundles)" } ?? "the process did not say")
+                check("MEASUREMENT variant 3: \(pair) — Safari's chrome in the app's language", reported?.chrome == interface,
+                      reported.map { "chrome \($0.chrome ?? "not hosted")" } ?? "the process did not say")
+                check("MEASUREMENT variant 3: \(pair) — the form words a page reads as with the menus in the websites' language",
+                      validation == firstValidation, "this run \(validation); menus in the websites' language \(firstValidation ?? "nil")")
+                try? await manager.stop(profile.id)
+                continue
+            }
             check("languages: \(pair) — its pages see \(websites) (navigator.language, navigator.languages, Accept-Language)",
                   ownProcess && primary(language) == wanted && primary(languages) == wanted && primary(accept) == wanted,
                   "own process \(ownProcess), navigator.language \(language), navigator.languages \(languages), "

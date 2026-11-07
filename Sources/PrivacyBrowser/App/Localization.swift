@@ -118,6 +118,30 @@ enum Localization {
         UserDefaults.standard.setVolatileDomain(commandLine, forName: UserDefaults.argumentDomain)
     }
 
+    /// MEASUREMENT (variant 3): AppKit's and Safari's frameworks pinned to the interface's language,
+    /// the main bundle left to the websites' list on the command line. With
+    /// CFBundleAllowMixedLocalizations each framework picks for itself; its choice is cached on its
+    /// first lookup, made here while the process's languages are the interface's.
+    static func pinFrameworksOnly() {
+        let commandLine = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        var pinned = commandLine
+        pinned["AppleLanguages"] = [languageCode]
+        UserDefaults.standard.setVolatileDomain(pinned, forName: UserDefaults.argumentDomain)
+        let paths = ["/System/Library/Frameworks/AppKit.framework",
+                     "/System/Library/PrivateFrameworks/Safari.framework",
+                     "/System/Library/PrivateFrameworks/SafariShared.framework",
+                     "/System/Library/PrivateFrameworks/SafariSharedUI.framework",
+                     "/System/Library/PrivateFrameworks/SafariCore.framework",
+                     "/System/Library/PrivateFrameworks/SafariFoundation.framework"]
+        for path in paths {
+            guard let bundle = Bundle(path: path) else { continue }
+            _ = bundle.preferredLocalizations
+            _ = bundle.localizedString(forKey: "PBMeasure", value: nil, table: nil)
+            _ = bundle.path(forResource: "Localizable", ofType: "strings")
+        }
+        UserDefaults.standard.setVolatileDomain(commandLine, forName: UserDefaults.argumentDomain)
+    }
+
     /// The language this process's bundles took (the main bundle's; the frameworks follow it):
     /// what AppKit's and Safari's own words are in. Reported by a profile's process
     /// (`ProfileEvent.interfaceLanguage`), checked by the self-test.

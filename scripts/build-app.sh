@@ -196,6 +196,9 @@ for lang in $profile_langs; do
   printf '/* No strings of Lumen own in this language: a profile window localized in it. */\n' > "$APP/Contents/Resources/$lang.lproj/Profile.strings"
   /usr/libexec/PlistBuddy -c "Add :CFBundleLocalizations: string $lang" "$APP/Contents/Info.plist"
 done
+# MEASUREMENT (claude/measure-lang-variant3, never merged): each framework picks its own
+# localization from the process's languages instead of following the main bundle's.
+/usr/libexec/PlistBuddy -c "Add :CFBundleAllowMixedLocalizations bool true" "$APP/Contents/Info.plist"
 if [[ "$SANDBOX" == "1" ]]; then
   sed "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" Resources/container-migration.plist > "$APP/Contents/Resources/container-migration.plist"
   plutil -lint "$APP/Contents/Resources/container-migration.plist" >/dev/null

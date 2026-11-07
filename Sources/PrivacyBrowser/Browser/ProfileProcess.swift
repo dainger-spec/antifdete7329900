@@ -239,7 +239,7 @@ final class ProfileProcess {
         // its bundles to the interface's language (`Localization.pinInterfaceLanguage`). Otherwise
         // they follow the websites' list on the command line, and with them the browser's own words
         // a page can read (`ProfileConfiguration.menusInAppLanguage`).
-        if menusInAppLanguage { environment[menusInAppLanguageVariable] = "1" }
+        if menusInAppLanguage { environment[menusInAppLanguageVariable] = parent["PB_MEASURE_VARIANT3"] == "1" ? "3" : "1" }
         if let json = try? JSONEncoder().encode(preferences) {
             environment[browsingPreferencesVariable] = String(decoding: json, as: UTF8.self)
         }

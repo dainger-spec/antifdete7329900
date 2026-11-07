@@ -17,6 +17,10 @@ MainActor.assumeIsolated {
        ProcessInfo.processInfo.environment[ProfileProcess.menusInAppLanguageVariable] == "1" {
         Localization.pinInterfaceLanguage()
     }
+    if arguments.contains("--profile-session"),
+       ProcessInfo.processInfo.environment[ProfileProcess.menusInAppLanguageVariable] == "3" {
+        Localization.pinFrameworksOnly()
+    }
     // The core's errors in the person's language wherever one is shown (Localization.swift).
     installErrorTranslation()
     if arguments.contains("--sdk-check") {
