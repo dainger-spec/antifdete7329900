@@ -116,6 +116,33 @@ enum UpdateSelfTest {
             check("downgrade: a feed of this build and an older one offers nothing", settled, "\(updater.state)")
             check("downgrade: nothing was downloaded", !archiveStaged(configuration))
 
+            // A launch soon after the last check (the owner: 0.1.2 → 0.1.3 and 0.1.3 → 0.1.4 were
+            // never offered — the app had asked the feed less than the interval before it was
+            // started again): a new launch asks the feed within its first check's delay, and finds
+            // the release. Its own defaults (the last check a minute ago, "only tell me", so that
+            // nothing is downloaded) leave the scenarios below as they were.
+            try await serve("valid")
+            let beforeRelaunch = try await feedRequests()
+            let suite = "PBUpdateRelaunch-\(UUID().uuidString)"
+            if let relaunchDefaults = UserDefaults(suiteName: suite) {
+                relaunchDefaults.set(Date().addingTimeInterval(-60), forKey: "PBUpdateLastCheck")
+                relaunchDefaults.set(UpdateInstallPolicy.notifyOnly.rawValue, forKey: "PBUpdateInstallPolicy")
+                let relaunched = AppUpdater(configuration: configuration, defaults: relaunchDefaults)
+                relaunched.start()
+                let offered = await waitUntil(20) {
+                    if case .available = relaunched.state { return true }
+                    return false
+                }
+                let requests = ((try? await feedRequests()) ?? beforeRelaunch) - beforeRelaunch
+                relaunched.automaticChecks = false
+                relaunchDefaults.removePersistentDomain(forName: suite)
+                check("a launch a minute after the last check asks the feed at once and finds the newer release",
+                      offered, "\(requests) request(s) in 20 s, state \(relaunched.state)")
+            } else {
+                check("a launch a minute after the last check asks the feed at once and finds the newer release", false,
+                      "no defaults of its own")
+            }
+
             try await serve("stale")
             await updater.checkNow()
             check("stale: a validly signed appcast older than the one accepted is refused", failed(updater) { if case .staleAppcast = $0 { return true } else { return false } }, "\(updater.state)")
