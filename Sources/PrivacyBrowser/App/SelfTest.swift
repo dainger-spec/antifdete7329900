@@ -2648,7 +2648,7 @@ final class SelfTest {
                           + "typeof trustedTypes, MutationEvent: \(seen ?? "nil")")
             }
             // Safari's quota (82 463 372 084 on any Mac), not the 1000 MiB WebKit gives an app that is not a browser.
-            let quota = try await js(tab.webView, "return (await navigator.storage.estimate()).quota;") as? NSNumber
+            let quota = (try? await js(tab.webView, "return (await navigator.storage.estimate()).quota;")) as? NSNumber  // measurement: over http there is no navigator.storage
             let safariQuota = PrivacyScripts.safariStorageQuota.rounded(.up)
             check("surface (\(generationID)): storage quota is Safari's",
                   quota?.doubleValue == safariQuota, "\(quota?.stringValue ?? "nil") vs \(String(format: "%.0f", safariQuota))")
