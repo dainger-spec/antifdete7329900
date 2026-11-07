@@ -5644,7 +5644,28 @@ final class SelfTest {
         }
         var reported: (code: String, bundles: String, chrome: String?)?
         manager.onInterfaceLanguage = { _, code, bundles, chrome in reported = (code, bundles, chrome) }
-        for (interface, pin) in [("ru", true), ("ru", false), ("en", true), ("de", true)] {
+        info("MEASURE-L10N CFBundleAllowMixedLocalizations \(Bundle.main.object(forInfoDictionaryKey: "CFBundleAllowMixedLocalizations").map { "\($0)" } ?? "absent")")
+        for site in ["ja-JP", "de-DE", "en-US"] {
+            for pin in [true, false] {
+                setenv("PRIVACYBROWSER_LANG", "ru", 1)
+                if pin { unsetenv("PB_MEASURE_NO_PIN") } else { setenv("PB_MEASURE_NO_PIN", "1", 1) }
+                var c = try repository.loadConfiguration(fixed)
+                c.languageOverride = site
+                try repository.saveConfiguration(c, for: fixed)
+                reported = nil
+                let seen = await look(fixed)
+                _ = await waitUntil(timeout: 10) { reported != nil }
+                info("MEASURE-L10N site \(site), interface ru, pinned \(pin): validation \(seen.values["probe.validationMessages"] ?? "nil"); "
+                     + "language \(seen.values["probe.language"] ?? "nil"); widths \(seen.values["probe.controlWidths"] ?? "nil"); process: \(reported.map { "words \($0.code), bundles \($0.bundles), chrome \($0.chrome ?? "not hosted")" } ?? "said nothing")")
+                try? await manager.stop(fixed)
+            }
+        }
+        do {
+            var c = try repository.loadConfiguration(fixed)
+            c.languageOverride = "en-US"
+            try repository.saveConfiguration(c, for: fixed)
+        }
+        for (interface, pin) in [("ru", true)] {
             setenv("PRIVACYBROWSER_LANG", interface, 1)
             if pin { unsetenv("PB_MEASURE_NO_PIN") } else { setenv("PB_MEASURE_NO_PIN", "1", 1) }
             reported = nil

@@ -155,6 +155,9 @@ for link in "WEBSITE_URL:PBWebsiteURL" "SUPPORT_URL:PBSupportURL"; do
   [[ "$value" == https://* ]] || { echo "error: $variable must be https" >&2; exit 1; }
   /usr/libexec/PlistBuddy -c "Add :$key string $value" "$PLIST"
 done
+# Measurement (claude/measure-l10n-*, never merged): frameworks localized by the user's languages
+# rather than by the main bundle's.
+[[ "${MEASURE_ALLOW_MIXED:-0}" != "1" ]] || /usr/libexec/PlistBuddy -c "Add :CFBundleAllowMixedLocalizations bool true" "$PLIST"
 plutil -lint "$PLIST" >/dev/null
 
 # The installer helper (docs/UPDATES.md §3): an app of its own, outside the sandbox, that the app
