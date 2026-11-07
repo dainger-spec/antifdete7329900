@@ -1,0 +1,43 @@
+name: Processor count (measurement)
+
+# Measurement only (claude/measure-cores-*, never merged): the self-test's "processor count" group
+# alone, on both macOS, with the self-test proxy that serves its page (/pb-cores).
+on:
+  push:
+    branches: ['claude/measure-cores-*']
+  workflow_dispatch:
+
+jobs:
+  measure:
+    name: Processor count (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, xcode-27]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build unsandboxed app
+        run: NE=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: The group, with the self-test proxy
+        run: |
+          mkdir -p build/cores
+          { sw_vers; sysctl -n hw.ncpu machdep.cpu.brand_string; } | tee build/cores/machine.txt
+          python3 scripts/selftest_proxy.py --http 18080 --socks 18081 > build/cores/proxy.log 2>&1 &
+          for attempt in $(seq 1 40); do nc -z 127.0.0.1 18080 && break; sleep 0.5; done
+          # The WebKit processes' own environment while a profile runs: the count they were given.
+          ( for i in $(seq 1 100); do
+              ps -wwEx -o pid=,command= | grep 'com.apple.WebKit.WebContent' | grep -v grep \
+                | awk '{ v = "none"; for (f = 1; f <= NF; f++) if ($f ~ /^WTF_numberOfProcessorCores=/) v = $f; print $1, v }' \
+                >> build/cores/webcontent-env.txt
+              sleep 2; done ) &
+          PB_SELFTEST_ONLY="processor count" PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 \
+            build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --self-test | tee build/cores/selftest.txt || true
+          echo "== WebContent processes and the count in their environment (sampled every 3 s)"
+          sort -u build/cores/webcontent-env.txt | head -40
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cores-${{ matrix.os }}
+          path: build/cores

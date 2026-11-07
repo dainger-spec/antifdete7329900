@@ -182,11 +182,11 @@ public enum DeviceGenerations {
         DeviceGeneration(
             id: "ios-27", nameKey: "gen.ios27", platform: .iOS, osVersionLabel: "27",
             userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Mobile/15E148 Safari/604.1",
-            matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior, processorCores: 6),
+            matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior),
         DeviceGeneration(
             id: "ios-26", nameKey: "gen.ios26", platform: .iOS, osVersionLabel: "26",
             userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Mobile/15E148 Safari/604.1",
-            matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior, processorCores: 6),
+            matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior),
         DeviceGeneration(
             id: "ipados-26", nameKey: "gen.ipados26", platform: .iPadOS, osVersionLabel: "26",
             // Safari's default on an iPad: the desktop website, with the Mac's UA.
