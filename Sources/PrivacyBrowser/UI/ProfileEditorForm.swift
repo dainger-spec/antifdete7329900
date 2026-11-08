@@ -395,6 +395,17 @@ struct ProfileEditorForm: View {
                 EditorNote(generation.platform == .iPadOS ? L("editor.generation.ipad") : L("editor.generation.inconsistent"),
                            tone: .warning)
             }
+            // An iPhone's full disguise (the owner, 8 November: on by default; off is "leave no
+            // traces of the substitution" — only what WebKit itself answers as a phone).
+            if let phone = generation.phone {
+                EditorToggle(L("editor.phoneDisguise"),
+                             detail: String(format: L("editor.phoneDisguise.detail"), phone.screenWidth, phone.screenHeight,
+                                            Int(phone.scale), phone.maxTouchPoints),
+                             isOn: $draft.phoneFullDisguise)
+                if !draft.phoneFullDisguise {
+                    EditorNote(L("editor.phoneDisguise.off"), tone: .warning)
+                }
+            }
             if generation.matchesEngine && !draft.customUserAgent {
                 safariVersionChoice
             }
