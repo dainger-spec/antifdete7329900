@@ -20,17 +20,17 @@ public enum Fault: String, CaseIterable, Sendable {
     case forwardIgnored          // the forward button does nothing
     case reloadIgnored           // the reload button does nothing
     // Proxies
-    case proxyNotApplied         // a session's proxy is never given to its data store
+    case proxyNotApplied         // a session's proxy never reaches its relay: the session goes direct
     case proxyChangeNotLive      // one proxy changed for another takes effect only after a relaunch
-    case proxyChangeKeepsConnections // a live change only re-points the data store: open connections keep the old route
-    case restartWithoutRelease   // the network restart does not wait for WebKit to let go of the old store
+    case proxyChangeKeepsConnections // a proxy change leaves the relay's open connections on their old route
+    case proxyChangeDropsTabs    // a proxy change closes the session's tabs and opens one empty tab
     case proxyPasswordNotSaved   // the password is not kept
     case passwordAutofill        // the proxy form closes with its login and password still in it: iOS offers to save them
     // A dead proxy: the most dangerous breakage is a session quietly going direct
     case deadHTTPDropped         // an HTTP proxy whose check failed is left off: its session goes direct
     case deadSOCKSDropped        // the same for a SOCKS5 proxy
     case recheckDropsProxy       // a re-check that finds a proxy dead takes it off its sessions
-    case failoverOn              // a session's proxy with allowFailover = true: the system may fall back to direct
+    case failoverOn              // the relay falls back to a direct connection when the proxy cannot carry one
     // Session settings
     case settingsNotSaved        // a session's settings are not written
     case userAgentIgnored        // the chosen User-Agent is not given to the web view

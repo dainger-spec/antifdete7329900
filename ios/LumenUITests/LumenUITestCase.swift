@@ -110,21 +110,17 @@ class LumenUITestCase: XCTestCase {
         waitForBrowser(session: name, file: file, line: line)
     }
 
-    /// Waits until the session's browser is back. A proxy changed on a session that has loaded pages
-    /// takes effect only after the app starts again (its open connections cannot be moved, CI runs
-    /// 14–16): then the session says so, and the person — this test — closes the app and opens it.
+    /// Waits until the session's browser is there: its address bar.
     func waitForBrowser(session name: String, file: StaticString = #filePath, line: UInt = #line) {
-        let bar = app.textFields["addressBar"]
-        let relaunchNotice = app.descendants(matching: .any)["proxyNeedsRelaunch"]
-        let either = NSPredicate { _, _ in bar.exists || relaunchNotice.exists }
-        _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: either, object: nil)], timeout: 30)
-        if relaunchNotice.exists {
-            shot("the session asks for a relaunch (\(name))")
-            relaunch()
-            wait(sessionCard(name), "after the relaunch the session \(name) is in the list", file: file, line: line).tap()
-        }
-        wait(bar, "the session \(name) browses\(relaunchNotice.exists ? " (still: " + relaunchNotice.label + ")" : "")",
-             timeout: 30, file: file, line: line)
+        wait(app.textFields["addressBar"], "the session \(name) browses", timeout: 30, file: file, line: line)
+    }
+
+    /// The selected tab still shows the page at `target`: a proxy change keeps the tabs as they are
+    /// (no new web view, no relaunch — the session's relay takes the change).
+    func assertTabKept(_ target: String, file: StaticString = #filePath, line: UInt = #line) {
+        let shown = app.webViews.staticTexts.matching(NSPredicate(format: "label == %@", "at: " + target)).firstMatch
+        XCTAssertTrue(shown.waitForExistence(timeout: 5), "the tab kept its page through the proxy change (at: \(target))",
+                      file: file, line: line)
     }
 
     func backToList() {
@@ -278,7 +274,6 @@ class LumenUITestCase: XCTestCase {
         wait(app.buttons["settingsDone"], "the settings open")
         reveal(app.buttons[name], "the settings list the proxy \(name)").tap()
         app.buttons["settingsDone"].tap()
-        // A change on an open session restarts its network, or waits for the app to start again.
         waitForBrowser(session: session, file: file, line: line)
     }
 

@@ -1,7 +1,7 @@
 import XCTest
 
 /// Proxies the way a person handles them: add, see the check, give one to a session, change it while
-/// the session is open, quit and start again.
+/// the session is open (at once, tabs kept), quit and start again.
 final class ProxyTests: LumenUITestCase {
     func testProxyPersonPath() {
         let run = String(UUID().uuidString.prefix(6)).lowercased()   // host names of this run only
@@ -26,14 +26,16 @@ final class ProxyTests: LumenUITestCase {
         leaveProxies()
 
         // A session without a proxy reaches the site directly (the testbed resolves .lumentest for this
-        // Mac too). Then it gets the Berlin proxy while open: the next page to the same site goes
-        // through proxy A — not on a direct connection left open from before (CI run 14: open
-        // connections kept their old route after a live change).
+        // Mac too). Then it gets the Berlin proxy while open: at once, with no relaunch and its tab as it
+        // was, the next page to the same site goes through proxy A — not on the direct connection
+        // WebKit keeps open from before (stage 2, CI run 14: WebKit's open connections kept their old
+        // route after a change; now they are the relay's, and it closes them).
         createSession(name: "Счета")
         openSession("Счета")
         openPage("http://pre-\(run).lumentest:28380/whoami?before=proxy")
         page("via: напрямую")
         chooseProxy("Берлин", in: "Счета")
+        assertTabKept("/whoami?before=proxy")
         // The same site again — the page a person refreshes after setting a proxy — through A.
         openPage("http://pre-\(run).lumentest:28380/whoami?again=1")
         page("via: прокси A")
@@ -41,8 +43,7 @@ final class ProxyTests: LumenUITestCase {
         page("via: прокси A")
         page("ip: 127.0.0.2")
         // The testbed's own count: the first site was reached directly once — the visit before the
-        // proxy — and never after it (the restored tab reloads it, through A; CI run 15 found it
-        // going out directly again on a connection left open).
+        // proxy — and never after it.
         openPage("http://site.lumentest:28380/__seen?token=pre-\(run)")
         let pre = pageLine("route pre-\(run): ")
         XCTAssertTrue(pre.contains("direct=1 "), "nothing went direct after the proxy was set: \(pre)")
@@ -51,6 +52,7 @@ final class ProxyTests: LumenUITestCase {
         // Another proxy while the session is open: the next page, to the same site, goes through it,
         // and nothing more of that site through A (its connection is kept alive, as real sites do).
         chooseProxy("Нью-Йорк", in: "Счета")
+        assertTabKept("/__seen?token=pre-\(run)")
         openPage("http://a-\(run).lumentest:28380/whoami?after=change")
         page("via: прокси B")
         openPage("http://site.lumentest:28380/__seen?token=a-\(run)")

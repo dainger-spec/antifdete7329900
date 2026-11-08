@@ -24,15 +24,6 @@ struct BrowserView: View {
                 }
                 BottomBar(tab: tab, tabCount: runtime.tabs.count) { sheet = $0 }
                     .id("bar-\(tab.id)")
-            } else if runtime.needsRelaunch {
-                ContentUnavailableView("Новый прокси — после перезапуска", systemImage: "arrow.clockwise.circle",
-                    description: Text("Открытые соединения сессии нельзя перевести на другой прокси на ходу: сайт увидел бы прежний адрес. Закройте приложение и откройте снова — сессия откроется уже через новый прокси. До тех пор она ничего не загружает."))
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("proxyNeedsRelaunch")
-            } else if let notice = runtime.networkNotice {
-                ProgressView(notice)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .accessibilityIdentifier("networkRestarting")
             }
         }
         .navigationTitle(runtime.session.name)
