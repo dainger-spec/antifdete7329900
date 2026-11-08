@@ -485,13 +485,26 @@ function patchTouch(w) {
     return event;
   };
   const primary = (event) => event.isPrimary && pointerTypeOf(event) === 'mouse';
+  // A touchstart whose default was prevented takes the press's mouse events and its click away
+  // (and so the focus a press gives), as on a phone; a prevented touchend takes the click.
+  let swallowMouse = false;
   w.addEventListener('pointerdown', (event) => {
     if (!primary(event) || event.button !== 0) return;
     const touch = touchOf(event, event.target);
     active = { target: event.target };
     swallowClick = false;
-    send(event.target, 'touchstart', [touch], [touch]);
+    swallowMouse = false;
+    const started = send(event.target, 'touchstart', [touch], [touch]);
+    if (started.defaultPrevented) { swallowMouse = true; swallowClick = true; }
   }, true);
+  for (const type of ['mousedown', 'mouseup']) {
+    w.addEventListener(type, (event) => {
+      if (!swallowMouse || event.button !== 0) return;
+      if (type === 'mouseup') swallowMouse = false;
+      event.stopImmediatePropagation();
+      event.preventDefault();
+    }, true);
+  }
   w.addEventListener('pointermove', (event) => {
     if (!active || !primary(event) || !(event.buttons & 1)) return;
     const touch = touchOf(event, active.target);
@@ -510,7 +523,6 @@ function patchTouch(w) {
     active = null;
     send(target, 'touchcancel', [], [touchOf(event, target)]);
   }, true);
-  // A touchend whose default was prevented takes the click away, as on a phone.
   w.addEventListener('click', (event) => {
     if (!swallowClick) return;
     swallowClick = false;
