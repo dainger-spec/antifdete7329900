@@ -7,7 +7,8 @@
 #
 # scenario: q1 (default) — red runs first (noproxy, swap, sharestore, failover: each must FAIL; failover
 #           only counts if the dead-proxy check itself saw the direct connection), then green.
-#           Any other value is a module under ios-measure/host (q2, q3): green only.
+#           q2: red first (q2unreachable: a probe page that cannot load must stop the scenario), then
+#           green. Any other value is a module under ios-measure/host (q3): green only.
 # runtimes: "newest" (default), "all", or a comma list of versions (27.1,18.6).
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -103,6 +104,14 @@ run_mode() { # udid version mode [label]
     grep -E "^(PASS|FAIL|LEAK|INFO|INCONCLUSIVE|SUMMARY)" "$dir/harness.txt" | cut -c1-400 | sed "s/^/[iOS $version $mode] /" | tee -a "$LOG"
     if [[ "$mode" == "none" ]]; then
         [[ $code -eq 0 ]] && say "GREEN iOS $version: every core check passed" || { say "NOT GREEN iOS $version (exit $code)"; STATUS=1; }
+    elif [[ "$mode" == "q2unreachable" ]]; then
+        # It counts only if the check that the page loaded is what failed (the owner's iPhone run:
+        # the probes measured an empty document and reported its values as the spoof's failures).
+        if grep -q "^FAIL *q2.page-loaded" "$dir/harness.txt" && ! grep -q "q2.M.canvas-changed" "$dir/harness.txt"; then
+            say "RED OK iOS $version q2unreachable: an unloadable probe page fails q2.page-loaded and nothing is measured on it"
+        else
+            say "RED DID NOT FAIL iOS $version q2unreachable: $(grep -m1 -E 'q2.page-loaded|SUMMARY' "$dir/harness.txt" | cut -c1-300)"; STATUS=1
+        fi
     elif [[ "$mode" == "failover" ]]; then
         # Falling back to direct switched on: it counts only if the dead-proxy check itself saw it.
         if grep -q "^LEAK *q1.dead-proxy-failover-off" "$dir/harness.txt"; then
@@ -141,6 +150,9 @@ else:
     else
         if [[ "$SCENARIO" == "q1" && $FIRST -eq 1 ]]; then
             for mode in noproxy swap sharestore failover; do run_mode "$UDID" "$VERSION" "$mode"; done
+        fi
+        if [[ "$SCENARIO" == "q2" && $FIRST -eq 1 ]]; then
+            run_mode "$UDID" "$VERSION" q2unreachable   # a probe page that cannot load must stop q2
         fi
         run_mode "$UDID" "$VERSION" none
         if [[ "$SCENARIO" == "q3" && -d "$BUILD/bound/LumenMeasure.app" ]] && xcrun simctl install "$UDID" "$BUILD/bound/LumenMeasure.app" >>"$LOG" 2>&1; then

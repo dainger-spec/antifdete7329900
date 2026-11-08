@@ -13,6 +13,13 @@ on:
       - "ios-measure/device_pick.py"
       - "ios-measure/test_device_pick.py"
       - "ios-measure/run_device.sh"
+      - "ios-measure/check_app.py"
+      - "ios-measure/ports_free.py"
+      - "ios-measure/test_tools.py"
+      - "ios-measure/control_stub.py"
+      - "ios-measure/build_sim_app.sh"
+      - "ios-measure/app/**"
+      - "ios-measure/host/harness.py"
   workflow_dispatch:
 
 jobs:
@@ -68,6 +75,56 @@ jobs:
           true
       - name: device_pick's tests (the owner's case, and the list measured above)
         run: python3 ios-measure/test_device_pick.py out/devices.json
+      - name: The tools' own checks — red on the tree before the owner's fixes, green on this one
+        run: |
+          mkdir -p old && git fetch -q --depth=1 origin 15c7ffeb942340b3938aa1b70c4707ab2a121297 && git archive FETCH_HEAD ios-measure | tar -x -C old
+          if python3 ios-measure/test_tools.py old/ios-measure; then echo "RED DID NOT FAIL: the checks pass on the tree before the fixes"; exit 1; fi
+          echo "RED OK: the checks fail on the tree before the fixes"
+          python3 ios-measure/test_tools.py ios-measure
+      - name: The bundle id — the iPhone build's Info.plist against the id the script launches
+        run: |
+          set -u
+          command -v xcodegen >/dev/null || brew install xcodegen >/dev/null
+          build() { # plist-source label -> exit of check_app.py
+            rm -rf "bid-$2" && mkdir -p "bid-$2" && cp -R ios-measure/device ios-measure/app "bid-$2/"
+            cp "$1" "bid-$2/app/Info.plist"
+            (cd "bid-$2/device" && xcodegen generate --quiet && xcodebuild -project LumenMeasure.xcodeproj -scheme LumenMeasure \
+               -configuration Debug -destination "generic/platform=iOS" -derivedDataPath ../dd CODE_SIGNING_ALLOWED=NO \
+               PRODUCT_BUNDLE_IDENTIFIER=io.lumenbrowser.measure.TEAMTEST build >../build.txt 2>&1) || { tail -20 "bid-$2/build.txt"; return 2; }
+            python3 ios-measure/check_app.py "$(find "bid-$2/dd/Build/Products" -maxdepth 2 -name LumenMeasure.app | head -1)" io.lumenbrowser.measure.TEAMTEST
+          }
+          if build old/ios-measure/app/Info.plist old; then echo "RED DID NOT FAIL: the old Info.plist passes"; exit 1; fi
+          echo "RED OK: with the old Info.plist the built app is not the one the script launches"
+          build ios-measure/app/Info.plist new
+      - name: The driver on a simulator calling this Mac's network address — App Transport Security and its status screen
+        run: |
+          set -u
+          LAN="$(ipconfig getifaddr en0 || ipconfig getifaddr en1)"; echo "this Mac: $LAN"
+          udid=$(xcrun simctl list devices booted -j | python3 -c 'import json,sys; print(next(d["udid"] for ds in json.load(sys.stdin)["devices"].values() for d in ds))')
+          trial() { # label plist driver -> "hello: yes|no" and the status file
+            local dir="ats-$1"; rm -rf "$dir"; mkdir -p "$dir/src/app"
+            cp ios-measure/build_sim_app.sh "$dir/src/"; cp "$2" "$dir/src/app/Info.plist"; cp "$3" "$dir/src/app/Driver.swift"; cp ios-measure/app/main.swift "$dir/src/app/"
+            "$dir/src/build_sim_app.sh" "$dir/build" 17.0 >"$dir/build.txt" 2>&1 || { tail -20 "$dir/build.txt"; return 2; }
+            xcrun simctl uninstall "$udid" io.lumenbrowser.measure >/dev/null 2>&1; xcrun simctl install "$udid" "$dir/build/LumenMeasure.app"
+            python3 ios-measure/control_stub.py 28310 30 >"$dir/stub.txt" &
+            local stub=$!; sleep 1
+            SIMCTL_CHILD_LUMEN_CONTROL="http://$LAN:28310" xcrun simctl launch "$udid" io.lumenbrowser.measure >/dev/null
+            wait $stub
+            local data; data="$(xcrun simctl get_app_container "$udid" io.lumenbrowser.measure data)"
+            cat "$dir/stub.txt"; echo "status file: $(tr '\n' '|' <"$data/Documents/control-status.txt" 2>/dev/null || echo none)"
+            xcrun simctl terminate "$udid" io.lumenbrowser.measure >/dev/null 2>&1
+          }
+          echo "== ATS red: the old Info.plist (no NSAllowsLocalNetworking), this driver"
+          out="$(trial atsred old/ios-measure/app/Info.plist ios-measure/app/Driver.swift)"; echo "$out"
+          if echo "$out" | grep -q "hello: yes"; then echo "RED DID NOT FAIL: the old Info.plist got through (ATS does not stop it on the simulator)"; else echo "RED OK: the old Info.plist does not get through"; fi
+          echo "== status red: this Info.plist, the old driver (it has no status screen)"
+          out="$(trial statusred ios-measure/app/Info.plist old/ios-measure/app/Driver.swift)"; echo "$out"
+          if echo "$out" | grep -q "status file: none"; then echo "RED OK: the old driver shows nothing"; else echo "RED DID NOT FAIL: the old driver wrote a status"; fi
+          echo "== green: this Info.plist, this driver"
+          out="$(trial green ios-measure/app/Info.plist ios-measure/app/Driver.swift)"; echo "$out"
+          echo "$out" | grep -q "hello: yes" || { echo "NOT GREEN: the driver did not get through to $LAN"; exit 1; }
+          echo "$out" | grep -q "состояние: связь есть" || { echo "NOT GREEN: the status screen does not say it is connected"; exit 1; }
+          echo "GREEN: the driver gets through to this Mac's network address and says so"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

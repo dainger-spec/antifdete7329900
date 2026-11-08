@@ -20,6 +20,8 @@ xcrun --sdk iphonesimulator swiftc -swift-version 5 -O \
     -module-name LumenMeasure \
     -o "$APP/LumenMeasure" "$HERE/app/Driver.swift" "$HERE/app/main.swift"
 cp "$HERE/app/Info.plist" "$APP/Info.plist"
+# Xcode fills in $(PRODUCT_BUNDLE_IDENTIFIER) for the iPhone build; this build has no Xcode project.
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${BUNDLE_ID:-io.lumenbrowser.measure}" "$APP/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string $MIN_IOS" "$APP/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :DTPlatformName string iphonesimulator" "$APP/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleSupportedPlatforms array" -c "Add :CFBundleSupportedPlatforms:0 string iPhoneSimulator" "$APP/Info.plist"

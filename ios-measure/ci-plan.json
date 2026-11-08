@@ -1,4 +1,5 @@
 {"include": [
   {"scenario": "q1", "os": "xcode-27", "runtimes": "newest"},
-  {"scenario": "q1", "os": "macos-15", "runtimes": "18.0", "install": "18.0"}
+  {"scenario": "q1", "os": "macos-15", "runtimes": "18.0", "install": "18.0"},
+  {"scenario": "q2", "os": "xcode-27", "runtimes": "newest"}
 ]}

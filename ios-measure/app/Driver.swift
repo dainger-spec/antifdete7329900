@@ -38,11 +38,15 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         let window = UIWindow(windowScene: windowScene)
         let root = UIViewController()
         root.view.backgroundColor = .black
-        let label = UILabel(frame: CGRect(x: 12, y: 60, width: 380, height: 60))
+        // What the person sees while waiting: where the driver calls, and whether it gets through
+        // (the owner's first run: a white screen for five minutes while every call failed unseen).
+        let label = UILabel(frame: CGRect(x: 12, y: 60, width: 380, height: 160))
         label.numberOfLines = 0
         label.textColor = .white
-        label.text = "Lumen measure driver\n" + Driver.shared.controlURL.absoluteString
+        label.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        label.accessibilityIdentifier = "controlStatus"
         root.view.addSubview(label)
+        Driver.shared.statusLabel = label
         window.rootViewController = root
         window.makeKeyAndVisible()
         self.window = window
@@ -84,8 +88,26 @@ final class Driver: NSObject {
 
     func attach(to view: UIView) { container = view }
 
+    /// The control channel's state, on the screen and in Documents/control-status.txt (which a test
+    /// reads from the simulator's app container).
+    weak var statusLabel: UILabel?
+    private var calls = 0, failures = 0, commands = 0
+    private var connected = false
+    private var lastError = "—"
+
+    private func showStatus() {
+        let state = connected ? "связь есть, команд получено \(commands)"
+                              : "связи нет: попыток \(calls), неудачных \(failures)"
+        let text = "Lumen measure driver\nканал: \(controlURL.absoluteString)\nсостояние: \(state)\nпоследняя ошибка: \(lastError)"
+        statusLabel?.text = text
+        if let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            try? text.write(to: documents.appendingPathComponent("control-status.txt"), atomically: true, encoding: .utf8)
+        }
+    }
+
     func start() {
         log("driver up, control \(controlURL.absoluteString)")
+        showStatus()
         Task { await self.loop() }
     }
 
@@ -99,17 +121,28 @@ final class Driver: NSObject {
                 var request = URLRequest(url: controlURL.appendingPathComponent(hello ? "hello" : "next"))
                 request.httpMethod = "POST"
                 request.httpBody = try JSONSerialization.data(withJSONObject: hello ? Self.info() : [:])
-                hello = false
+                calls += 1
                 let (data, response) = try await control.data(for: request)
+                // Only an answered hello counts: one lost to a refusal (App Transport Security, the
+                // local network prompt) is sent again, or the harness waits for it forever.
+                hello = false
+                if !connected { connected = true; showStatus() }
                 guard let http = response as? HTTPURLResponse, http.statusCode == 200, !data.isEmpty else {
                     try await Task.sleep(nanoseconds: 300_000_000)
                     continue
                 }
                 guard let command = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+                commands += 1
+                if commands % 5 == 1 { showStatus() }
                 // Each command runs on its own: a load that waits does not hold the next command
                 // (two sessions load at the same moment when the harness asks for it).
                 Task { await self.handle(command) }
             } catch {
+                let nsError = error as NSError
+                failures += 1
+                connected = false
+                lastError = "\(nsError.domain) \(nsError.code): \(nsError.localizedDescription)"
+                showStatus()
                 log("control error: \(error)")
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }

@@ -456,6 +456,7 @@ async def control_handler(reader, writer):
         length = int(header(headers, "Content-Length") or 0)
         body = await reader.readexactly(length) if length else b""
         path = urllib.parse.urlsplit(target).path
+        CALLS[path] = CALLS.get(path, 0) + 1
         if path == "/result":
             result = json.loads(body or b"{}")
             future = APP.results.pop(result.get("id"), None)
@@ -838,8 +839,25 @@ async def scenario_q1(capture):
                     pc.createDataChannel('x'); await pc.setLocalDescription(await pc.createOffer());
                     await new Promise((r) => setTimeout(r, 4000)); pc.close(); return c; }} catch (e) {{ return 'error ' + e.message; }} }};
                 const f = document.createElement('iframe'); document.body.appendChild(f);
-                return {{ page: await tryRTC(window), blankFrame: await tryRTC(f.contentWindow),
-                          names: Object.getOwnPropertyNames(window).filter((n) => /RTC/.test(n)).length, href: location.href }};""", timeout=40)
+                // Frames the page cannot reach into: they try themselves and post what they found.
+                const inner = (tag) => `<script>(async () => {{ const PC = window.RTCPeerConnection || window.webkitRTCPeerConnection;
+                  let r = 'absent'; if (typeof PC === 'function') {{ try {{ const pc = new PC({{ iceServers: [{{ urls: 'stun:{lan}:{ARGS.stun_port}' }}] }});
+                  const c = []; pc.onicecandidate = (e) => {{ if (e.candidate) c.push(e.candidate.candidate); }}; pc.createDataChannel('x');
+                  await pc.setLocalDescription(await pc.createOffer()); await new Promise((q) => setTimeout(q, 3000)); pc.close(); r = c.length + ' candidates'; }}
+                  catch (e) {{ r = 'error ' + e.message; }} }} parent.postMessage({{ lumenFrame: '${{tag}}', r }}, '*'); }})();<\\/script>`;
+                const heard = {{}};
+                addEventListener('message', (e) => {{ if (e.data && e.data.lumenFrame) heard[e.data.lumenFrame] = e.data.r; }});
+                const sandboxed = document.createElement('iframe'); sandboxed.setAttribute('sandbox', 'allow-scripts');
+                sandboxed.srcdoc = inner('sandboxedSrcdoc'); document.body.appendChild(sandboxed);
+                const dataFrame = document.createElement('iframe'); dataFrame.src = 'data:text/html,' + encodeURIComponent(inner('dataFrame'));
+                document.body.appendChild(dataFrame);
+                const worker = await new Promise((done) => {{ try {{
+                  const w = new Worker(URL.createObjectURL(new Blob(["postMessage(typeof RTCPeerConnection)"], {{ type: 'text/javascript' }})));
+                  w.onmessage = (e) => done(e.data); setTimeout(() => done('no answer'), 3000); }} catch (e) {{ done('error ' + e.message); }} }});
+                const page = await tryRTC(window), blankFrame = await tryRTC(f.contentWindow);
+                await new Promise((q) => setTimeout(q, 2500));
+                return {{ page, blankFrame, worker, sandboxedSrcdoc: heard.sandboxedSrcdoc || 'no answer', dataFrame: heard.dataFrame || 'no answer',
+                          names: Object.getOwnPropertyNames(window).filter((n) => /RTC/.test(n)).length, href: location.href }};""", timeout=50)
             await asyncio.sleep(1)
             stun_after = len([e for e in EVENTS if e["kind"] == "stun"])
             v = rtc.get("value") or {}
@@ -848,7 +866,8 @@ async def scenario_q1(capture):
                   f"PrivacyScripts webRTC=disabled, through {proxy['type']}: page load ok={lw.get('ok')} ({lw.get('error')}), at {v.get('href')}; "
                   f"page {v.get('page') if isinstance(v.get('page'), str) else str(len(v.get('page') or [])) + ' candidates'}, "
                   f"about:blank frame {v.get('blankFrame') if isinstance(v.get('blankFrame'), str) else str(len(v.get('blankFrame') or [])) + ' candidates'}, "
-                  f"RTC names left on window {v.get('names')}; STUN binding requests during it: {stun_after - stun_before}")
+                  f"RTC names left on window {v.get('names')}; a sandboxed srcdoc frame {v.get('sandboxedSrcdoc')}, a data: frame "
+                  f"{v.get('dataFrame')}, a worker: typeof RTCPeerConnection {v.get('worker')}; STUN binding requests during it: {stun_after - stun_before}")
         except Exception as error:
             check(name, "INCONCLUSIVE", f"stopped: {error!r}")
 
@@ -874,6 +893,47 @@ async def scenario_q1(capture):
               f"through {proxy['type']}: rule list {made_p.get('contentRules')}; page ok={lp.get('ok')}; fetches {pv}; the site got loopback requests {len(p_lo)}; "
               f"dns-prefetch name in the capture: {p_pf if p_pf is not None else 'no capture'}")
 
+    # 7d. Can a content rule list close WebRTC, without the script? Every kind of load but the page
+    # itself blocked; the page still makes an RTCPeerConnection. STUN hearing it means: no.
+    for suffix, proxy, sid in (("", proxy_a, "R"),):
+        try:
+            kinds = ["image", "style-sheet", "script", "font", "raw", "svg-document", "media", "popup", "ping", "fetch", "websocket", "other"]
+            block_all = [{"trigger": {"url-filter": ".*", "resource-type": kinds}, "action": {"type": "block"}},
+                         {"trigger": {"url-filter": "^stun:"}, "action": {"type": "block"}}]
+            made_r = await APP.cmd("session", session=sid, store=f"persistent:{uuid.uuid4()}", proxies=[proxy], contentRules=json.dumps(block_all))
+            lr = await APP.cmd("load", session=sid, url=f"http://{tok('p', sid)}.lumentest:{hp}/page?sid={sid}", timeout=30)
+            stun_before = len([e for e in EVENTS if e["kind"] == "stun"])
+            rr = (await APP.cmd("eval", session=sid, js=f"""
+                const PC = window.RTCPeerConnection; if (typeof PC !== 'function') return 'absent';
+                const pc = new PC({{ iceServers: [{{ urls: 'stun:{lan}:{ARGS.stun_port}' }}] }}); const c = [];
+                pc.onicecandidate = (e) => {{ if (e.candidate) c.push(e.candidate.candidate); }};
+                pc.createDataChannel('x'); await pc.setLocalDescription(await pc.createOffer());
+                await new Promise((r) => setTimeout(r, 4000)); pc.close();
+                const img = await new Promise((r) => {{ const i = new Image(); i.onload = () => r('loaded'); i.onerror = () => r('blocked'); i.src = '/px?sid={sid}&k=rules-img'; }});
+                return {{ candidates: c, img }};""", timeout=30)).get("value") or {}
+            await asyncio.sleep(1)
+            stun_after = len([e for e in EVENTS if e["kind"] == "stun"])
+            srflx = [c for c in (rr.get("candidates") or []) if " srflx " in c] if isinstance(rr, dict) else []
+            heard = stun_after - stun_before
+            rules_work = isinstance(rr, dict) and rr.get("img") == "blocked"
+            check("q1.webrtc-rules-only" + suffix,
+                  ("LEAK" if heard or srflx else "PASS") if lr.get("ok") and lan and rules_work else "INCONCLUSIVE",
+                  f"a rule list blocking every load but the page ({made_r.get('contentRules')}; an image on the page: "
+                  f"{rr.get('img') if isinstance(rr, dict) else rr}), no script: srflx {srflx[:1]}, STUN binding requests {heard} — "
+                  f"{'the rule list does not reach WebRTC' if heard or srflx else 'nothing went out'}")
+        except Exception as error:
+            check("q1.webrtc-rules-only" + suffix, "INCONCLUSIVE", f"stopped: {error!r}")
+
+    # 7e. The control for dns-prefetch: the session without a proxy loads a page by this Mac's
+    # address (no name to look up for the page itself), with the same prefetch, preconnect and link
+    # names. If WebKit asks the resolver for them there, it would for A and B too — the check below
+    # can tell; if it asks nothing even there, it cannot (the owner's run: INCONCLUSIVE, no control).
+    prefetch_control_ok = None
+    if lan:
+        rc = await APP.cmd("load", session="C", url=f"http://{lan}:{hp}/page?sid=C2", timeout=30)
+        prefetch_control_ok = rc.get("ok")
+        await asyncio.sleep(4)
+
     # 8. Leaks the page cannot see: DNS and WebRTC.
     await asyncio.sleep(2)
     stuns = [e for e in EVENTS if e["kind"] == "stun"]
@@ -894,10 +954,13 @@ async def scenario_q1(capture):
         await asyncio.sleep(2)
         self_seen = capture.seen(f"selfcheck-{run}")
         control_seen = capture.seen(tok("p", "C"))
-        detector = bool(self_seen) and bool(control_seen)
+        # The session without a proxy asking for its page's name is what proves the capture sees the
+        # app's DNS — on the simulator (pktap) and on an iPhone (rvi0) alike. This Mac's own question
+        # (selfcheck) never crosses rvi0, so it only says whether the Mac's capture works.
+        detector = bool(control_seen)
         check("q1.dns.detector-sees-a-leak", "PASS" if detector else "INCONCLUSIVE",
-              f"this Mac's own question for selfcheck-{run}: {len(self_seen)} lines; the session without a proxy (C): "
-              f"{len(control_seen)} lines {control_seen[:1]}", core=False)
+              f"the session without a proxy (C): {len(control_seen)} lines {control_seen[:1]}; this Mac's own question for "
+              f"selfcheck-{run}: {len(self_seen)} lines (seen only where the capture is the Mac's own)", core=False)
         leaks = {}
         for sid in "AB":
             for prefix in ("p", "s", "x", "ws", "wk", "bc", "fr", "an", "pc", "pf"):
@@ -908,8 +971,21 @@ async def scenario_q1(capture):
         loads_leak = {k: v for k, v in leaks.items() if k not in prefetch}
         check("q1.dns.page-names", ("FAIL" if loads_leak else "PASS") if detector else "INCONCLUSIVE",
               f"names of A's and B's loads asked of this Mac's resolver: {loads_leak or 'none'}", core=detector)
-        check("q1.dns.prefetch", ("LEAK" if prefetch else "PASS") if detector else "INCONCLUSIVE",
-              f"<link rel=dns-prefetch>, preconnect, <a href> names asked of this Mac's resolver: {prefetch or 'none'}")
+        control_prefetch = {}
+        for prefix in ("pf", "pc", "an"):
+            lines = capture.seen(tok(prefix, "C2"))
+            if lines:
+                control_prefetch[tok(prefix, "C2")] = lines[:1]
+        if prefetch:
+            status = "LEAK"
+        elif control_prefetch:
+            status = "PASS"
+        else:
+            status = "INCONCLUSIVE"
+        check("q1.dns.prefetch", status,
+              f"<link rel=dns-prefetch>, preconnect, <a href> names of A and B asked of the resolver: {prefetch or 'none'}; "
+              f"the control (no proxy, page by address, load ok={prefetch_control_ok}): {control_prefetch or 'none'}"
+              + ("" if prefetch or control_prefetch else " — WebKit asked nothing for them even without a proxy, so absence proves nothing"))
     else:
         check("q1.dns", "INCONCLUSIVE", f"no DNS capture ({capture.state})")
 
@@ -917,13 +993,14 @@ async def scenario_q1(capture):
 # ---------------------------------------------------------------- main
 
 SERVERS = {}
+CALLS = {}   # control-channel requests by path: does the app call at all, and does it say hello
 
 
 async def main():
     global ARGS
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--scenario", default="q1")
-    parser.add_argument("--brk", choices=["none", "noproxy", "swap", "sharestore", "failover"], default="none")
+    parser.add_argument("--brk", choices=["none", "noproxy", "swap", "sharestore", "failover", "q2unreachable"], default="none")
     parser.add_argument("--out", default="out")
     parser.add_argument("--listen", default="127.0.0.1", help="0.0.0.0 for a real iPhone")
     parser.add_argument("--proxy-host", default="127.0.0.1", help="the proxies' address as the app sees it")
@@ -951,25 +1028,20 @@ async def main():
     os.makedirs(ARGS.out, exist_ok=True)
     listen = ARGS.listen
     loop = asyncio.get_running_loop()
-    SERVERS["control"] = await asyncio.start_server(control_handler, listen, ARGS.control_port)
-    SERVERS["http"] = await asyncio.start_server(lambda r, w: site_handler(r, w, "http"), "0.0.0.0", ARGS.http_port)
-    if ARGS.cert:
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.load_cert_chain(ARGS.cert, ARGS.key)
-        context.set_alpn_protocols(["http/1.1"])
-        SERVERS["https"] = await asyncio.start_server(lambda r, w: site_handler(r, w, "https"), "0.0.0.0", ARGS.https_port, ssl=context)
-    SERVERS["A"] = await asyncio.start_server(http_proxy("A", "ua:pa", ARGS.bind_a), listen, ARGS.port_a)
-    SERVERS["B"] = await asyncio.start_server(socks_proxy("B", None if ARGS.socks_no_auth else "ub:pb", ARGS.bind_b), listen, ARGS.port_b)
-    SERVERS["F"] = await asyncio.start_server(http_proxy("F", None, ""), listen, ARGS.port_f)
-    await loop.create_datagram_endpoint(Stun, local_addr=("0.0.0.0", ARGS.stun_port))
+    try:
+        await start_servers(listen, loop)
+    except OSError as error:
+        # The owner's run: a harness left from a failed run held 28310, and this one died with a
+        # traceback after the build, the install and sudo. ios-measure/ports_free.py checks first.
+        print(f"PORT IN USE: {error} — most likely a harness from an earlier run still holds it: "
+              f"pkill -f ios-measure/host/harness.py, then run again (python3 ios-measure/ports_free.py checks them)", flush=True)
+        return 2
     capture = Capture(os.path.join(ARGS.out, "dns.txt"), ARGS.capture)
     capture.start()
     print(f"harness up: run {ARGS.run}, scenario {ARGS.scenario}, break {ARGS.brk}, control {listen}:{ARGS.control_port}, "
           f"capture {capture.state}", flush=True)
-    try:
-        await asyncio.wait_for(APP.hello.wait(), ARGS.wait_app)
-    except asyncio.TimeoutError:
-        check("app", "FAIL", f"the app did not call in within {ARGS.wait_app}s", core=True)
+    if not await wait_for_app(listen):
+        check("app", "FAIL", f"the app did not call in within {ARGS.wait_app:.0f}s (control calls: {CALLS or 'none'})", core=True)
     else:
         print("app:", json.dumps(APP.info), flush=True)
         try:
@@ -984,6 +1056,44 @@ async def main():
             traceback.print_exc()
             check("scenario", "FAIL", f"the scenario stopped: {error!r}", core=True)
         await APP.cmd("exit", timeout=10)
+    return finish(capture)
+
+
+async def start_servers(listen, loop):
+    SERVERS["control"] = await asyncio.start_server(control_handler, listen, ARGS.control_port)
+    SERVERS["http"] = await asyncio.start_server(lambda r, w: site_handler(r, w, "http"), "0.0.0.0", ARGS.http_port)
+    if ARGS.cert:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(ARGS.cert, ARGS.key)
+        context.set_alpn_protocols(["http/1.1"])
+        SERVERS["https"] = await asyncio.start_server(lambda r, w: site_handler(r, w, "https"), "0.0.0.0", ARGS.https_port, ssl=context)
+    SERVERS["A"] = await asyncio.start_server(http_proxy("A", "ua:pa", ARGS.bind_a), listen, ARGS.port_a)
+    SERVERS["B"] = await asyncio.start_server(socks_proxy("B", None if ARGS.socks_no_auth else "ub:pb", ARGS.bind_b), listen, ARGS.port_b)
+    SERVERS["F"] = await asyncio.start_server(http_proxy("F", None, ""), listen, ARGS.port_f)
+    await loop.create_datagram_endpoint(Stun, local_addr=("0.0.0.0", ARGS.stun_port))
+
+
+async def wait_for_app(listen):
+    """Waits for the app's hello, saying every 15 s that it waits, how long is left, and whether the
+    app has called at all (the owner's run: five silent minutes while the app could not get through)."""
+    started = time.time()
+    while True:
+        left = ARGS.wait_app - (time.time() - started)
+        if left <= 0:
+            return False
+        try:
+            await asyncio.wait_for(APP.hello.wait(), min(15, left))
+            return True
+        except asyncio.TimeoutError:
+            pass
+        left = max(0, ARGS.wait_app - (time.time() - started))
+        heard = ", ".join(f"{k} ×{v}" for k, v in sorted(CALLS.items())) or "none yet"
+        print(f"waiting for the app: {time.time() - started:.0f}s of {ARGS.wait_app:.0f}s, {left:.0f}s left; "
+              f"its calls on {listen}:{ARGS.control_port}: {heard}"
+              + ("" if CALLS else " — is the iPhone on this Mac's network, and does the app's screen show an error?"), flush=True)
+
+
+def finish(capture):
     capture.stop()
     with open(os.path.join(ARGS.out, "events.jsonl"), "w") as f:
         for e in EVENTS:

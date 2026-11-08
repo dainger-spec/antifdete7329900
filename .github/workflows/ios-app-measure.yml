@@ -14,6 +14,10 @@ on:
       - "!ios-measure/run_device.sh"
       - "!ios-measure/device_pick.py"
       - "!ios-measure/test_device_pick.py"
+      - "!ios-measure/check_app.py"
+      - "!ios-measure/ports_free.py"
+      - "!ios-measure/test_tools.py"
+      - "!ios-measure/control_stub.py"
       - "!ios-measure/**/*.md"
   workflow_dispatch:
     inputs:

@@ -57,7 +57,16 @@ def probe(label):
 
 async def scenario(h, capture):
     app, check = h.APP, h.check
-    page = f"http://127.0.0.1:{h.ARGS.http_port}/blank?q2=1"
+    # The probe page is the harness's, on this Mac. 127.0.0.1 is this Mac only for a simulator: on an
+    # iPhone it is the iPhone itself, where nothing listens (the owner's run, 8 November: every probe
+    # page failed to load, and the probes measured an empty document no script had ever run in).
+    on_simulator = bool(app.info.get("simulator") or app.info.get("simulatorRuntime"))
+    host = "127.0.0.1" if on_simulator or not h.ARGS.lan_ip else h.ARGS.lan_ip
+    port = h.ARGS.http_port
+    if h.ARGS.brk == "q2unreachable":   # the red run: a page that cannot load must stop the scenario
+        host, port = "127.0.0.1", 9
+    page = f"http://{host}:{port}/blank?q2=1"
+    unloaded = []
     scripts = {
         "N": [],
         "K": [{"source": naive_source("s1"), "mainFrameOnly": False}],
@@ -69,9 +78,20 @@ async def scenario(h, capture):
     for sid, user_scripts in scripts.items():
         await app.cmd("session", session=sid, store=stores[sid], userScripts=user_scripts)
         loaded = await app.cmd("load", session=sid, url=page + f"&sid={sid}", timeout=30)
+        if not loaded.get("ok"):
+            unloaded.append(f"{sid}: {loaded.get('error') or loaded.get('code')}")
+            print(f"probe {sid}: the page did not load ({loaded.get('error')}) — not probed", flush=True)
+            continue
         result = await app.cmd("eval", session=sid, js=probe(sid), timeout=90)
         results[sid] = result.get("value") if isinstance(result.get("value"), dict) else {"error": result}
         print(f"probe {sid}: load ok={loaded.get('ok')}", json.dumps(results[sid])[:3000], flush=True)
+    # A probe of a page that did not load reads the web view's empty first document, where no user
+    # script ever ran: every comparison after that would be a false FAIL or a false PASS.
+    check("q2.page-loaded", "FAIL" if unloaded else "PASS",
+          f"the probe page {page}: " + (f"did not load in {unloaded} — nothing below can be measured" if unloaded
+                                       else "loaded in N, K, M and M2"), core=True)
+    if unloaded:
+        return
     # M after a reload, and in a new web view on the same store.
     await app.cmd("load", session="M", url=page + "&sid=M&again=1", timeout=30)
     again = (await app.cmd("eval", session="M", js=probe("M-reload"), timeout=90)).get("value") or {}
