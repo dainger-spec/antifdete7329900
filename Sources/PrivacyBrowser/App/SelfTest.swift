@@ -2676,10 +2676,14 @@ final class SelfTest {
                       "User-Agent \(ua); Safari.app \(app ?? "?") build \(HostSafari.app?.build ?? "?"), this app's WebKit \(WebKitBuild.version), "
                           + "named \(HostSafari.version)\(HostSafari.declared.sharesEngine ? "" : " (Safari runs a WebKit of its own)")")
             }
-            // Safari the app exposes window.safari on the Mac — in an iPhone view too, which is
-            // Safari on this Mac under an iPhone's User-Agent (the owner's decision, 31 October).
-            check("surface (\(name)): window.safari present, as in Safari on the Mac",
-                  string(probed, "features.safari") == "object", string(probed, "safariShape"))
+            // window.safari: a macOS profile has it exactly when the Safari it names gives pages one
+            // (up to 27.1); an iPhone view never — no iPhone has it, and there it was a mark of
+            // ours alone (the owner's iPhone and Mac, 8 November).
+            let wantsSafari = generationID == DeviceGenerations.defaultID && SafariVersions.givesWindowSafari(HostSafari.version)
+            check("surface (\(name)): window.safari \(wantsSafari ? "present" : "absent"), as in "
+                    + (generationID == DeviceGenerations.defaultID ? "Safari \(HostSafari.version) on the Mac" : "Safari on an iPhone"),
+                  string(probed, "features.safari") == (wantsSafari ? "object" : "undefined"),
+                  "features.safari \(string(probed, "features.safari")), \(string(probed, "safariShape"))")
             // No generation changes what a page measures of this Mac: the touch points, the
             // platform and the screen of a phone, said without touch, broke sites and gave the
             // profile away all the same.

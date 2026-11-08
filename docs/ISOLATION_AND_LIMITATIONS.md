@@ -29,7 +29,7 @@ since):
 | Crash-recovery sealing | leftover website data from a crashed run is archived and deleted WITHOUT `WKWebsiteDataStore.remove(forIdentifier:)` (which aborted on an unknown id), then restores cleanly |
 | Device generation → UA | a profile's generation UA reaches `navigator.userAgent`; an explicit custom UA overrides it |
 | Container migration | an unsandboxed vault is moved into the container on the sandboxed build's first launch (separate CI step) |
-| Fingerprint surface | a macOS profile measures the same as a plain WKWebView on the same Mac (navigator, screen, canvas, WebGL, audio, fonts, feature list) except for `window.safari` and the Fullscreen API, which Safari has and a bare WKWebView lacks; an iPhone or iPad view measures the same, under its device's User-Agent; user-installed fonts are hidden from pages, as in Safari. CI also compares the macOS profile with the runner's real Safari (§2) |
+| Fingerprint surface | a macOS profile measures the same as a plain WKWebView on the same Mac (navigator, screen, canvas, WebGL, audio, fonts, feature list) except for the Fullscreen API, which Safari has and a bare WKWebView lacks, and `window.safari` where the Safari it names has one (up to Safari 27.1; Safari 27.2 has none); an iPhone or iPad view measures the same, under its device's User-Agent, and never has `window.safari` — no iPhone or iPad does; user-installed fonts are hidden from pages, as in Safari. CI also compares the macOS profile with the runner's real Safari (§2) |
 | Shims in workers and frames | a worker made from a blob runs in the profile's zone, stays strict and keeps its line numbers; a frame reached as `window[i]` right after insertion is patched; `permissions.query({name:'geolocation'})` returns the engine's own `PermissionStatus`, 'prompt' until the page asks |
 | Proxy: IPv6, unresolvable host | an HTTP proxy on `[::1]` tunnels the load; a proxy whose host does not resolve fails closed |
 | Proxy: WebRTC | a proxied profile whose stored setting is "unrestricted" has no `RTCPeerConnection` or `RTCDataChannel` while the network guard is not ready (§5), and says why; with the self-test standing in for the guard, the same profile makes a video call through the relay and its proxy, inside the capture of every packet ([TUNNEL.md](TUNNEL.md)) |
@@ -179,8 +179,11 @@ decision before anything changes):
 - `window.safari`: a macOS profile's privacy script makes Safari's `window.safari` — its
   `pushNotification` object, `permission()` and `requestPermission()` — in JavaScript when a page
   has none (`patchSafariObject` in `PrivacyScripts`): a stand-in for an object of Safari's, and one
-  of the window's own properties (rules 1 and 4). The count of a profile's own properties measured
-  so far includes it.
+  of the window's own properties (rules 1 and 4). Only where the Safari the profile names gives
+  pages one: measured in a plain Safari window, Safari 27.0.1 does and Safari 27.2 does not
+  (`scripts/window_safari_check.py`; 27.1 unmeasured, counted with 27.0). Until 8 November every
+  profile had it, the iPhone and iPad views too — a mark no real browser gave: the owner's iPhone
+  has none, nor his Mac's Safari.
 - The storage quota of an ephemeral profile: the same script wraps `navigator.storage.estimate()`
   to answer Safari's quota (`patchStorageQuota`) where WebKit answers an app's 1000 MiB (rule 1).
   A persistent profile no longer needs it: its store is made with a browser's ratios and WebKit
@@ -361,7 +364,7 @@ GREASE left out (`TLSClientHello`) — and closes the connection: a ClientHello 
 server sees before anything is encrypted, and reading it takes no certificate. The page posts its
 report to the listener, and the two reports are listed signal by signal, grouped as navigator,
 screen, window, request headers, TLS, APIs and rendering: **same**, or **differs** with both
-values and, for known differences, what they mean (`window.safari` and the Apple Pay interfaces
+values and, for known differences, what they mean (`window.safari`, which Safari up to 27.1 has, and the Apple Pay interfaces
 only Safari has, the height of the window's bars, a built-in function that a profile's wrapper
 changes). The window's own size and place are shown and not compared — each browser's window has
 its own; what the bars take of it ("chrome") is compared.

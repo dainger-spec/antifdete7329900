@@ -155,6 +155,18 @@ public enum SafariVersions {
         return number
     }
 
+    /// Whether Safari of `version` on a Mac gives pages `window.safari` (its legacy
+    /// `pushNotification` object), measured in a plain Safari window (scripts/window_safari_check.py,
+    /// run 42471690410, 8 November): Safari 26.6.2 and 27.0.1 do, Safari 27.2 does not — nor the owner's
+    /// Safari on his Mac (8 November). Safari 27.1 was not measured; it is counted with 27.0.
+    /// No iPhone or iPad Safari has it.
+    public static func givesWindowSafari(_ version: String) -> Bool {
+        let parts = version.split(separator: ".").compactMap { Int($0) }
+        guard let major = parts.first else { return false }
+        let minor = parts.dropFirst().first ?? 0
+        return major < 27 || (major == 27 && minor < 2)
+    }
+
     /// How far `version` is from `host` (this Mac's Safari, e.g. "26.0.1").
     public static func distance(of version: String, fromHost host: String) -> Distance {
         func parts(_ text: String) -> [Int] { text.split(separator: ".").compactMap { Int($0) } }

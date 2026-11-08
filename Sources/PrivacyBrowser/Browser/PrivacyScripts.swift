@@ -39,9 +39,10 @@ enum PrivacyScripts {
         var webRTC: String
         /// The app's TURN relay for this launch (`ProfileConfiguration.webRTCRouting`).
         var webRTCRelay: Relay?
-        /// Safari the app exposes `window.safari` (`pushNotification`) on the Mac, a WKWebView does
-        /// not; a page that checks it is told the same as by Safari — in an iPhone or iPad view too,
-        /// which is Safari on this Mac under that device's User-Agent.
+        /// `window.safari` (`pushNotification`): only a macOS profile, and only when the Safari it
+        /// names gives pages one (`SafariVersions.givesWindowSafari`: up to 27.1, not from 27.2). An
+        /// iPhone or iPad has none (the owner's iPhone, 8 November), so an iPhone or iPad view never
+        /// gets one: there it was a mark of ours that no real browser shows.
         var safariObject: Bool
         /// The per-origin storage quota Safari reports (`safariStorageQuota`), before rounding.
         var storageQuota: Double?
@@ -80,9 +81,9 @@ enum PrivacyScripts {
         }
         return ShimConfiguration(timeZone: configuration.timeZoneIdentifier, geolocation: geolocation,
                                  webRTC: webRTC, webRTCRelay: relay,
-                                 // Every generation is Safari on this Mac: an iPhone or iPad view
-                                 // changes the User-Agent and the window's size, nothing a page measures.
-                                 safariObject: true, storageQuota: safariStorageQuota)
+                                 safariObject: configuration.deviceGeneration.platform == .macOS
+                                     && SafariVersions.givesWindowSafari(HostSafari.version),
+                                 storageQuota: safariStorageQuota)
     }
 
     /// navigator.storage.estimate().quota in Safari on a Mac, before WebKit rounds it up: a
@@ -446,8 +447,9 @@ function patchStorageQuota(w, quota) {
 }
 
 // ---- Safari the app -----------------------------------------------------------------------------
-// Safari exposes window.safari, a plain object holding a SafariRemoteNotification (website push
-// permission API); a page that looks for it to recognise Safari finds what Safari would give it.
+// Safari up to 27.1 on a Mac exposes window.safari, a plain object holding a SafariRemoteNotification
+// (website push permission API); a macOS profile naming such a Safari gives a page what that Safari
+// would. Never in an iPhone or iPad view, and not from Safari 27.2, which has none.
 function patchSafariObject(w) {
   if ('safari' in w) return;
   const proto = {};
