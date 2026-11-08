@@ -119,16 +119,22 @@ jobs:
             cp ios-measure/build_sim_app.sh "$dir/src/"; cp "$2" "$dir/src/app/Info.plist"; cp "$3" "$dir/src/app/Driver.swift"; cp ios-measure/app/main.swift "$dir/src/app/"
             "$dir/src/build_sim_app.sh" "$dir/build" 17.0 >"$dir/build.txt" 2>&1 || { tail -20 "$dir/build.txt"; return 2; }
             xcrun simctl uninstall "$udid" io.lumenbrowser.measure >/dev/null 2>&1; xcrun simctl install "$udid" "$dir/build/LumenMeasure.app"
-            python3 ios-measure/control_stub.py 28310 30 >"$dir/stub.txt" &
+            python3 ios-measure/control_stub.py 28310 60 >"$dir/stub.txt" &
             local stub=$!; sleep 1
             SIMCTL_CHILD_LUMEN_CONTROL="http://$LAN:28310" xcrun simctl launch "$udid" io.lumenbrowser.measure >/dev/null
-            # The status is read while the stand-in still answers (run 6: read after it had stopped, it
-            # rightly said "no connection").
-            sleep 20
-            local data; data="$(xcrun simctl get_app_container "$udid" io.lumenbrowser.measure data)"
-            local status; status="$(tr '\n' '|' <"$data/Documents/control-status.txt" 2>/dev/null || echo none)"
+            # The status is read every 2 s while the stand-in answers, until it says connected. Run 6
+            # read it after the stand-in had stopped; run 7, once at 20 s after the launch: a launch on a
+            # fresh simulator takes as long as it takes (one read caught the first status, written
+            # before any call; another came after the stand-in had stopped).
+            local status="none" waited=0 data
+            while (( waited < 50 )); do
+              sleep 2; waited=$((waited + 2))
+              data="$(xcrun simctl get_app_container "$udid" io.lumenbrowser.measure data 2>/dev/null)"
+              status="$({ tr '\n' '|' <"$data/Documents/control-status.txt"; } 2>/dev/null || echo none)"
+              [[ "$status" == *"связь есть"* ]] && break
+            done
             wait $stub
-            cat "$dir/stub.txt"; echo "status file: $status"
+            cat "$dir/stub.txt"; echo "status file ($waited s after the launch): $status"
             xcrun simctl terminate "$udid" io.lumenbrowser.measure >/dev/null 2>&1
           }
           echo "== ATS red: the old Info.plist (no NSAllowsLocalNetworking), this driver"
@@ -139,7 +145,7 @@ jobs:
           if echo "$out" | grep -q "hello: yes"; then echo "INFO: on the simulator ATS does not stop the old Info.plist — the ATS fix is measured on the iPhone only"; else echo "RED OK: the old Info.plist does not get through"; fi
           echo "== status red: this Info.plist, the old driver (it has no status screen)"
           out="$(trial statusred ios-measure/app/Info.plist old/ios-measure/app/Driver.swift)"; echo "$out"
-          if echo "$out" | grep -q "status file: none"; then echo "RED OK: the old driver shows nothing"; else echo "RED DID NOT FAIL: the old driver wrote a status"; fi
+          if echo "$out" | grep -q "status file (.*): none"; then echo "RED OK: the old driver shows nothing"; else echo "RED DID NOT FAIL: the old driver wrote a status"; fi
           echo "== green: this Info.plist, this driver"
           out="$(trial green ios-measure/app/Info.plist ios-measure/app/Driver.swift)"; echo "$out"
           echo "$out" | grep -q "hello: yes" || { echo "NOT GREEN: the driver did not get through to $LAN"; exit 1; }
