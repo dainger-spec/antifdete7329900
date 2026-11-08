@@ -291,10 +291,6 @@ final class BrowserSession {
         // page sees as document.fullscreenEnabled === undefined).
         webConfiguration.preferences.isElementFullscreenEnabled = true
         applyPrivacyPreferences(to: webConfiguration.preferences)
-<<<<<<< HEAD
-        // An iPhone view: what WebKit itself answers as an iPhone (the platform, Apple Pay, no
-        // Notification); the pixel density per web view (`BrowserTab`).
-=======
         // Apple Pay's interfaces, as a profile in Safari's window has them from Safari's own code
         // and an iPhone's Safari has them: WebKit's `ApplePayEnabled`, off for an app that is not
         // Safari. Their calls then answer as Safari's do on the same Mac — no card: false, a session
@@ -303,7 +299,6 @@ final class BrowserSession {
         WebKitPreferences.setBool(webConfiguration.preferences, "_setApplePayEnabled:", true)
         // An iPhone view: what WebKit itself answers as an iPhone (the platform, no Notification);
         // the pixel density per web view (`BrowserTab`).
->>>>>>> 8e34bda
         PhoneEngine.apply(to: webConfiguration, for: configuration)
         return webConfiguration
     }
