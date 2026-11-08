@@ -7,9 +7,10 @@ name: iOS app — does not install below iOS 18
 on:
   push:
     branches: [claude/ios-app]
-    paths:
-      - "ios/**"
-      - ".github/workflows/ios-floor.yml"
+    paths:   # what can change its answer: the minimum, the floor script, the core package's own minimum
+      - "ios/project.yml"
+      - "ios/LumenCore/Package.swift"
+      - "ios/scripts/install-floor.sh"
   workflow_dispatch:
 
 jobs:

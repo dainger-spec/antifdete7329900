@@ -21,18 +21,29 @@ on:
 
 jobs:
   app:
-    name: Lumen iOS on ${{ inputs.os || 'xcode-27' }} (iOS ${{ inputs.ios || 'newest' }})
+    # Four jobs side by side, each with its own simulator and testbed; each keeps the order — the
+    # reds of its suite first, then its green run.
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ["core,SessionsTests", "BrowserTests", "ProxyTests", "SettingsTests"]
+    name: Lumen iOS — ${{ matrix.suite }} (${{ inputs.os || 'xcode-27' }}, iOS ${{ inputs.ios || 'newest' }})
     runs-on: ${{ inputs.os || 'xcode-27' }}
-    timeout-minutes: 180
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - name: Build and test (red runs first)
+        env:
+          SUITE: ${{ matrix.suite }}
         run: ios/scripts/ci.sh build/ios-app "${{ inputs.ios || 'newest' }}"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ios-app-${{ github.run_number }}
+          # What a person needs to see why a check failed: the logs, the testbed's events and the
+          # screenshots — not the result bundles (over a gigabyte).
+          name: ios-app-${{ github.run_number }}-${{ strategy.job-index }}
           path: |
-            build/ios-app
-            !build/ios-app/dd
+            build/ios-app/*.txt
+            build/ios-app/testbed
+            build/ios-app/screens
           if-no-files-found: warn

@@ -76,20 +76,28 @@ class LumenUITestCase: XCTestCase {
 
     /// Replaces a text field's whole content: touch it, then its clear button (CI run 10: deleting
     /// backwards from where the touch put the cursor left the tail of a long address in place).
-    func replaceText(_ field: XCUIElement, with text: String) {
+    /// Then it checks the field holds exactly `text` (CI run 11: after a relaunch the first keyboard was
+    /// slow, no clear button came in time, and the new address was spliced into the old one).
+    func replaceText(_ field: XCUIElement, with text: String, file: StaticString = #filePath, line: UInt = #line) {
         field.tap()
-        let clear = field.buttons["Clear text"]
-        if clear.waitForExistence(timeout: 2), clear.isHittable {
-            clear.tap()
-        } else {
-            let placeholder = field.placeholderValue ?? ""
-            var current = (field.value as? String) ?? ""
-            if current == placeholder { current = "" }
-            if !current.isEmpty {
+        _ = app.keyboards.firstMatch.waitForExistence(timeout: 10)
+        let placeholder = field.placeholderValue ?? ""
+        var current = (field.value as? String) ?? ""
+        if current == placeholder { current = "" }
+        if !current.isEmpty {
+            let clear = field.buttons["Clear text"]
+            if clear.waitForExistence(timeout: 8), clear.isHittable {
+                clear.tap()
+            } else {
+                // No clear button: the cursor to the far end, then delete it all.
+                field.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: 0.5)).tap()
                 field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count + 2))
             }
         }
         field.typeText(text)
+        var now = (field.value as? String) ?? ""
+        if now == (field.placeholderValue ?? "") { now = "" }
+        XCTAssertEqual(now, text, "the field holds what was typed", file: file, line: line)
     }
 
     // MARK: Browser
@@ -108,9 +116,10 @@ class LumenUITestCase: XCTestCase {
     }
 
     /// Types into the address bar and goes.
-    func go(_ text: String) {
-        let bar = wait(app.textFields["addressBar"], "the address bar is there")
-        replaceText(bar, with: text + "\n")
+    func go(_ text: String, file: StaticString = #filePath, line: UInt = #line) {
+        let bar = wait(app.textFields["addressBar"], "the address bar is there", file: file, line: line)
+        replaceText(bar, with: text, file: file, line: line)
+        bar.typeText("\n")
     }
 
     /// Goes to a testbed page and waits until the screen shows that page, not the one before it: the
@@ -187,7 +196,7 @@ class LumenUITestCase: XCTestCase {
             if add.isHittable { add.tap() }
             _ = field.waitForExistence(timeout: 5)
         }
-        wait(field, "the new proxy form opens")
+        wait(field, "the new proxy form opens (for \(name))")
         field.tap()
         field.typeText(name)
         app.segmentedControls["proxyKind"].buttons[kind].tap()
@@ -200,7 +209,7 @@ class LumenUITestCase: XCTestCase {
         app.secureTextFields["proxyPassword"].tap()
         app.secureTextFields["proxyPassword"].typeText(password)
         app.buttons["saveProxy"].tap()
-        waitGone(field, "the proxy form closes")
+        waitGone(field, "the proxy form closes (\(name))")
         wait(proxyRow(name), "the proxy \(name) is in the list")
     }
 
@@ -213,10 +222,17 @@ class LumenUITestCase: XCTestCase {
 
     /// From the proxy list back to the sessions (CI run 10: the bar's first button is not always
     /// the back button there — the list's "+" is in the same bar).
-    func leaveProxies() {
+    func leaveProxies(file: StaticString = #filePath, line: UInt = #line) {
+        let sessions = app.navigationBars["Сессии"]
         let bar = app.navigationBars["Прокси"]
-        bar.buttons.matching(NSPredicate(format: "identifier != %@", "newProxy")).firstMatch.tap()
-        wait(app.navigationBars["Сессии"], "back on the session list")
+        let back = bar.buttons.matching(NSPredicate(format: "identifier != %@", "newProxy")).firstMatch
+        if back.exists, back.isHittable { back.tap() }
+        if !sessions.waitForExistence(timeout: 4) {
+            // CI run 11: the button did not take it back. A person's other way: swipe from the left edge.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
+                .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)))
+        }
+        wait(sessions, "back on the session list", file: file, line: line)
     }
 
     func chooseProxy(_ name: String) {

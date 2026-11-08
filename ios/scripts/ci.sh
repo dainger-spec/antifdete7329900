@@ -12,6 +12,15 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"          # ios/
 OUT="${1:?out dir}"; WANT="${2:-newest}"
+# SUITE: "all" (default), or a comma list of "core" and end-to-end test classes (SessionsTests, ...):
+# the workflow runs them as parallel jobs. Each job keeps the order — its reds first, then its green.
+SUITE="${SUITE:-all}"
+in_suite() { [[ "$SUITE" == "all" || ",$SUITE," == *",$1,"* ]]; }   # core | a test class
+ONLY=()
+if [[ "$SUITE" != "all" ]]; then
+    IFS=',' read -ra PARTS <<<"$SUITE"
+    for part in "${PARTS[@]}"; do [[ "$part" == "core" ]] || ONLY+=("-only-testing:LumenUITests/$part"); done
+fi
 mkdir -p "$OUT"; OUT="$(cd "$OUT" && pwd)"
 LOG="$OUT/ci.txt"
 say() { echo "$@" | tee -a "$LOG"; }
@@ -30,7 +39,7 @@ python3 "$HERE/scripts/build-shim.py" --check | tee -a "$LOG" || { say "page-shi
 REDS=()
 verdicts() { # kind, green output: the final word on that kind's reds
     local kind="$1" green="$2" entry fault test id
-    for entry in "${REDS[@]}"; do
+    for entry in ${REDS[@]+"${REDS[@]}"}; do
         IFS="|" read -r k fault test <<<"$entry"
         [[ "$k" == "$kind" ]] || continue
         id="$(echo "$test" | sed -E 's#^([A-Za-z]+)[./]([A-Za-z]+)/(.*)$#\1.\2 \3#')"   # Module.Class test
@@ -43,6 +52,7 @@ verdicts() { # kind, green output: the final word on that kind's reds
 }
 
 # ---- 1. The core (swift test): reds, then green.
+if in_suite core; then
 CORE="$HERE/LumenCore"
 swift build --package-path "$CORE" --build-tests >"$OUT/core-build.txt" 2>&1 || { tail -40 "$OUT/core-build.txt"; say "CORE BUILD FAILED"; exit 2; }
 while IFS=$'\t' read -r fault kind test; do
@@ -61,6 +71,8 @@ else
     grep -E "error|failed" "$OUT/core-green.txt" | head -20 | tee -a "$LOG"; say "NOT GREEN core"; STATUS=1
 fi
 verdicts core "$OUT/core-green.txt"
+fi
+if [[ "$SUITE" != "all" && ${#ONLY[@]} -eq 0 ]]; then say "== status $STATUS (core only)"; exit $STATUS; fi
 
 # ---- 2. A simulated iPhone: the reference's screen (iPhone 17 Pro, else 16 Pro), on the iOS asked for.
 read -r RUNTIME_ID RUNTIME_VERSION TYPE <<<"$(xcrun simctl list -j | python3 -c '
@@ -111,6 +123,27 @@ if [[ -f "$HERE/testbed/testbed.py" ]]; then
     say "this Mac resolves *.lumentest to: ${R:-NOTHING — the dead-proxy test cannot see a direct connection} ($(tr '\n' ' ' <"$OUT/resolver.txt" | tr -s ' ' | cut -c1-200))"
 fi
 
+# The simulator itself: does Safari there reach a .lumentest name directly, and did the testbed get
+# the DNS question and the request? (The dead-proxy test's detector depends on it.)
+if [[ -n "${TESTBED:-}" ]]; then
+    probe="probe-$RANDOM.lumentest"
+    xcrun simctl openurl "$UDID" "http://$probe:28380/whoami?t=probe" >/dev/null 2>&1
+    sleep 12
+    xcrun simctl terminate "$UDID" com.apple.mobilesafari >/dev/null 2>&1
+    say "the simulator, Safari to http://$probe: $(python3 - "$OUT/testbed/events.json" "$probe" <<'PY'
+import json, sys
+try:
+    events = json.load(open(sys.argv[1]))
+except Exception as e:
+    print("no events file", e); sys.exit()
+name = sys.argv[2]
+dns = [e for e in events if e.get("kind") == "dns" and name in e.get("name", "")]
+site = [e for e in events if e.get("kind") == "site" and name in (e.get("host") or "")]
+print(f"DNS questions {len(dns)} {[e.get('qtype') for e in dns]}, requests at the site {len(site)} {[e.get('via') for e in site]}")
+PY
+)"
+fi
+
 # ---- 4. Build once, then the end-to-end tests: reds, then green.
 DEST="id=$UDID"
 COMMON=(-project "$HERE/Lumen.xcodeproj" -scheme Lumen -destination "$DEST" -derivedDataPath "$OUT/dd")
@@ -133,6 +166,7 @@ run_ui() { # result-name, fault ('' for none), -only-testing args...
 while IFS=$'\t' read -r fault kind test; do
     [[ "$fault" =~ ^#|^$ ]] && continue
     [[ "$kind" == "ui" ]] || continue
+    class="$(echo "$test" | cut -d/ -f2)"; in_suite "$class" || continue
     if run_ui "red-$fault" "$fault" "-only-testing:$test"; then
         say "RED DID NOT FAIL ui $fault: $test passed with the fault"; STATUS=1
     elif grep -q -E "crashed|Lost connection to the application|Failed to get matching snapshots|Failed to launch" "$OUT/red-$fault.txt"; then
@@ -143,7 +177,7 @@ while IFS=$'\t' read -r fault kind test; do
         REDS+=("ui|$fault|$test")
     fi
 done < "$HERE/scripts/faults.tsv"
-if run_ui green ""; then
+if run_ui green "" ${ONLY[@]+"${ONLY[@]}"}; then
     say "GREEN ui: $(grep -E 'Executed [0-9]+ test' "$OUT/green.txt" | tail -1)"
 else
     grep -E "error: -\[|failed -|Test Case .* failed" "$OUT/green.txt" | head -20 | tee -a "$LOG"; say "NOT GREEN ui"; STATUS=1
@@ -152,5 +186,15 @@ verdicts ui "$OUT/green.txt"
 # What the person saw: the screenshots the tests attached.
 xcrun xcresulttool export attachments --path "$OUT/green.xcresult" --output-path "$OUT/screens" >/dev/null 2>&1 \
     && say "screenshots: $(ls "$OUT/screens" | wc -l | tr -d ' ') files" || say "no screenshots exported"
+python3 - "$OUT/testbed/events.json" <<'PY' | tee -a "$LOG"
+import json, sys, collections
+try:
+    events = json.load(open(sys.argv[1]))
+except Exception as e:
+    print("testbed events: none", e); sys.exit()
+dns = collections.Counter(e.get("name", "").split(".")[0].rsplit("-", 1)[0] for e in events if e.get("kind") == "dns")
+direct = [e.get("host") for e in events if e.get("kind") == "site" and e.get("via") == "direct" and ".lumentest" in (e.get("host") or "")]
+print(f"testbed: DNS questions by name {dict(dns.most_common(12))}; .lumentest pages served directly: {len(direct)} {direct[:6]}")
+PY
 say "== status $STATUS"
 exit $STATUS
