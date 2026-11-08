@@ -37,6 +37,11 @@ final class AppModel: ObservableObject {
         }
         catalog = SessionCatalog(store: store)
         refresh()
+        // WebKit's data-store calls finish on WebKit's main run loop, which exists only once WebKit is
+        // initialized: before that, fetching the store identifiers crashes (CI run 3: SIGSEGV in
+        // WebsiteDataStore::fetchAllDataStoreIdentifiers → RunLoop::dispatch). The macOS app does
+        // the same (WebDataStoreVault.ensureWebKitInitialized).
+        _ = WKWebViewConfiguration().processPool
         Task {
             if LaunchOptions.resetState {
                 for id in await WKWebsiteDataStore.allDataStoreIdentifiers {

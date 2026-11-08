@@ -89,6 +89,9 @@ while IFS=$'\t' read -r fault kind test; do
     [[ "$kind" == "ui" ]] || continue
     if run_ui "red-$fault" "$fault" "-only-testing:$test"; then
         say "RED DID NOT FAIL ui $fault: $test passed with the fault"; STATUS=1
+    elif grep -q -E "crashed|Lost connection to the application|Failed to get matching snapshots|Failed to launch" "$OUT/red-$fault.txt"; then
+        # A crash fails every test whatever the fault: it proves nothing about the check.
+        say "RED INVALID ui $fault: the app crashed or was lost, not the check — $(grep -m1 -E 'crashed|Lost connection|Failed to' "$OUT/red-$fault.txt" | sed 's/.*error: //' | cut -c1-160)"; STATUS=1
     else
         say "RED OK ui $fault: $test failed with the fault — $(grep -m1 -E 'error: -\[|XCTAssert|failed -' "$OUT/red-$fault.txt" | sed 's/.*error: //' | cut -c1-200)"
     fi
