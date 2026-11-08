@@ -1,0 +1,22 @@
+# claude/measure-share — never merged: which sharing services a page's address can go to, and which
+# fetch it on their own, outside a profile's proxy (scripts/share_check.py).
+name: Share services (measurement)
+on:
+  push:
+    branches: ['claude/measure-share']
+jobs:
+  measure:
+    name: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: The services and what they fetch
+        run: |
+          sw_vers
+          mkdir -p build && swiftc -o build/share-probe scripts/share_probe.swift
+          python3 scripts/share_check.py
