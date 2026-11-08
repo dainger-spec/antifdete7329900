@@ -92,6 +92,17 @@ class LumenUITestCase: XCTestCase {
         replaceText(bar, with: text + "\n")
     }
 
+    /// Goes to a testbed page and waits until the screen shows that page, not the one before it: the
+    /// page says which request it answers ("at: /env?changed=1"), so every visit needs its own query.
+    func openPage(_ url: String, file: StaticString = #filePath, line: UInt = #line) {
+        go(url)
+        var rest = url
+        if let scheme = rest.range(of: "://") { rest = String(rest[scheme.upperBound...]) }
+        let target = rest.firstIndex(of: "/").map { String(rest[$0...]) } ?? "/"
+        let shown = app.webViews.staticTexts.matching(NSPredicate(format: "label == %@", "at: " + target)).firstMatch
+        XCTAssertTrue(shown.waitForExistence(timeout: 20), "the page at \(target) is shown", file: file, line: line)
+    }
+
     /// Text the page shows (a static text of the web view whose label contains `text`).
     @discardableResult
     func page(_ text: String, timeout: TimeInterval = 20, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
@@ -122,6 +133,13 @@ class LumenUITestCase: XCTestCase {
         let predicate = NSPredicate(format: "value CONTAINS %@", text)
         let result = XCTWaiter.wait(for: [expectation(for: predicate, evaluatedWith: app.textFields["addressBar"])], timeout: timeout)
         XCTAssertEqual(result, .completed, "the address bar shows \(text) (it shows \(address))", file: file, line: line)
+    }
+
+    /// The address bar's value ends with `text` (an exact end: "/page/beta" is not "/page/beta-next").
+    func waitForAddress(endingWith text: String, timeout: TimeInterval = 20, file: StaticString = #filePath, line: UInt = #line) {
+        let predicate = NSPredicate(format: "value ENDSWITH %@", text)
+        let result = XCTWaiter.wait(for: [expectation(for: predicate, evaluatedWith: app.textFields["addressBar"])], timeout: timeout)
+        XCTAssertEqual(result, .completed, "the address bar ends with \(text) (it shows \(address))", file: file, line: line)
     }
 
     func openTabs() {

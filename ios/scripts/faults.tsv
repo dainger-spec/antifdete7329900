@@ -15,6 +15,9 @@ historyNotRecorded	ui	LumenUITests/BrowserTests/testBrowserPersonPath
 searchEngineIgnored	ui	LumenUITests/BrowserTests/testBrowserPersonPath
 settingsNotSaved	ui	LumenUITests/BrowserTests/testBrowserPersonPath
 newTabNotOpened	ui	LumenUITests/BrowserTests/testBrowserPersonPath
+backIgnored	ui	LumenUITests/BrowserTests/testBrowserPersonPath
+forwardIgnored	ui	LumenUITests/BrowserTests/testBrowserPersonPath
+reloadIgnored	ui	LumenUITests/BrowserTests/testBrowserPersonPath
 sharedStore	ui	LumenUITests/BrowserTests/testSessionsAreIsolated
 proxyNotApplied	ui	LumenUITests/ProxyTests/testProxyPersonPath
 proxyChangeNotLive	ui	LumenUITests/ProxyTests/testProxyPersonPath

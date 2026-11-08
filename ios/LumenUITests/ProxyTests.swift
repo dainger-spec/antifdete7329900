@@ -28,14 +28,14 @@ final class ProxyTests: LumenUITestCase {
         createSession(name: "Счета")
         openSession("Счета")
         chooseProxy("Берлин")
-        go("http://site.lumentest:28380/whoami")
+        openPage("http://site.lumentest:28380/whoami?first=1")
         page("via: прокси A")
         page("ip: 127.0.0.2")
         shot("31 through Berlin")
 
         // Another proxy while the session is open: the next page goes through it, no relaunch.
         chooseProxy("Нью-Йорк")
-        go("http://site.lumentest:28380/whoami?after=change")
+        openPage("http://site.lumentest:28380/whoami?after=change")
         page("via: прокси B")
         shot("32 switched to New York")
         backToList()
@@ -46,7 +46,7 @@ final class ProxyTests: LumenUITestCase {
         relaunch()
         XCTAssertTrue(sessionCard("Счета").label.contains("Нью-Йорк"), "after a relaunch the card names the proxy")
         openSession("Счета")
-        go("http://site.lumentest:28380/whoami?after=relaunch")
+        openPage("http://site.lumentest:28380/whoami?after=relaunch")
         page("via: прокси B")
         shot("33 after relaunch")
     }
@@ -83,7 +83,7 @@ final class ProxyTests: LumenUITestCase {
         // The same session through SOCKS5: it loads, the notice is gone.
         chooseProxy("Нью-Йорк")
         waitGone(refused, "with SOCKS5 the notice is gone")
-        go("http://site.lumentest:28380/whoami?socks")
+        openPage("http://site.lumentest:28380/whoami?socks=1")
         page("via: прокси B")
 
         // Back to the HTTP proxy, quit and start again: the restored tab (its last page was the

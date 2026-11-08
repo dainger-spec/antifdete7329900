@@ -14,7 +14,7 @@ final class SettingsTests: LumenUITestCase {
         openSession("Профиль")
 
         // As it comes: Safari's User-Agent, nothing replaced.
-        go("\(site)/env")
+        openPage("\(site)/env?first=1")
         let ua = pageLine("ua: ")
         XCTAssertTrue(ua.contains("Version/") && ua.hasSuffix("Safari/604.1"), "a new session reads as Safari: \(ua)")
         let realCanvas = pageLine("canvas: ")
@@ -24,7 +24,7 @@ final class SettingsTests: LumenUITestCase {
 
         // Through the Berlin proxy: Berlin's time zone and German, from the proxy's check.
         chooseProxy("Берлин")
-        go("http://env.lumentest:28380/env")
+        openPage("http://env.lumentest:28380/env?proxy=berlin")
         XCTAssertEqual(pageLine("tz: "), "tz: Europe/Berlin", "the time zone of the proxy's country")
         XCTAssertEqual(pageLine("lang: "), "lang: de-DE", "the language of the proxy's country")
         shot("40 Berlin's time zone and language")
@@ -37,7 +37,7 @@ final class SettingsTests: LumenUITestCase {
         app.segmentedControls["audioMode"].buttons["Шум"].tap()
         shot("41 settings")
         app.buttons["settingsDone"].tap()
-        go("http://env.lumentest:28380/env?changed=1")
+        openPage("http://env.lumentest:28380/env?changed=1")
         XCTAssertTrue(pageLine("ua: ").contains("Version/26.0"), "the page reads iOS 26's Safari: \(pageLine("ua: "))")
         page("server ua: Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0")
         let noised = pageLine("canvas: ")
@@ -47,8 +47,11 @@ final class SettingsTests: LumenUITestCase {
         XCTAssertNotEqual(pageLine("audio: "), realAudio, "the audio is noised")
         XCTAssertEqual(pageLine("lies: "), "lies: 0", "the natives check finds none of the replacements")
         shot("42 what the page reads")
+        // A reload: the page counts its loads, so the check reads the new one, not the old.
+        let before = pageNumber("load: ")
         app.buttons["reload"].tap()
-        sleep(1)
+        let reloaded = app.webViews.staticTexts.matching(NSPredicate(format: "label MATCHES %@ AND label != %@", "load: [0-9]+", before)).firstMatch
+        XCTAssertTrue(reloaded.waitForExistence(timeout: 20), "the page was loaded again (it said \(before))")
         XCTAssertEqual(pageLine("canvas: "), noised, "the same noise after a reload")
 
         // A User-Agent of one's own.
@@ -58,13 +61,13 @@ final class SettingsTests: LumenUITestCase {
         field.tap()
         field.typeText("LumenTest/1.0")
         app.buttons["settingsDone"].tap()
-        go("http://env.lumentest:28380/env?custom=1")
+        openPage("http://env.lumentest:28380/env?custom=1")
         XCTAssertEqual(pageLine("ua: "), "ua: LumenTest/1.0")
 
         // Quit and start again: everything as it was set, the same noise.
         relaunch()
         openSession("Профиль")
-        go("http://env.lumentest:28380/env?relaunch=1")
+        openPage("http://env.lumentest:28380/env?relaunch=1")
         XCTAssertEqual(pageLine("ua: "), "ua: LumenTest/1.0", "the custom string survives a relaunch")
         XCTAssertEqual(pageLine("tz: "), "tz: Europe/Berlin")
         XCTAssertEqual(pageLine("canvas: "), noised, "the session's noise is the same after a relaunch")

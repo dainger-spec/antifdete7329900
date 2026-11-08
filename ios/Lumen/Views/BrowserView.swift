@@ -102,13 +102,13 @@ struct BottomBar: View {
 
     var body: some View {
         HStack {
-            Button { tab.webView.goBack() } label: { Image(systemName: "chevron.backward") }
+            Button { if !Faults.isActive(.backIgnored) { tab.webView.goBack() } } label: { Image(systemName: "chevron.backward") }
                 .disabled(!tab.canGoBack).accessibilityIdentifier("back").accessibilityLabel("Назад")
             Spacer()
-            Button { tab.webView.goForward() } label: { Image(systemName: "chevron.forward") }
+            Button { if !Faults.isActive(.forwardIgnored) { tab.webView.goForward() } } label: { Image(systemName: "chevron.forward") }
                 .disabled(!tab.canGoForward).accessibilityIdentifier("forward").accessibilityLabel("Вперёд")
             Spacer()
-            Button { tab.webView.reload() } label: { Image(systemName: "arrow.clockwise") }
+            Button { if !Faults.isActive(.reloadIgnored) { tab.webView.reload() } } label: { Image(systemName: "arrow.clockwise") }
                 .disabled(tab.url == nil).accessibilityIdentifier("reload").accessibilityLabel("Обновить")
             Spacer()
             Button { show(.tabs) } label: {

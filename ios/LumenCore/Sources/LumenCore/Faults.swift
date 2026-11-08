@@ -16,6 +16,9 @@ public enum Fault: String, CaseIterable, Sendable {
     case searchEngineIgnored     // the address bar always searches with Google
     case sharedStore             // every session on WebKit's default store: no isolation
     case newTabNotOpened         // "new tab" selects the current one instead
+    case backIgnored             // the back button does nothing
+    case forwardIgnored          // the forward button does nothing
+    case reloadIgnored           // the reload button does nothing
     // Proxies
     case proxyNotApplied         // a session's proxy is never given to its data store
     case proxyChangeNotLive      // a new proxy takes effect only after a relaunch

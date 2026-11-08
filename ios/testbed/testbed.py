@@ -8,6 +8,8 @@ this Mac, so a test sees on the screen what the pages say about how they were re
                            and the Cookie header the server got
             /cache         shows the value of /cache.js, which the server counts and lets be cached
             /whoami        shows the address the site saw and which proxy that is
+            /served        "served: N", N counting the times the server sent this page (never cached)
+            /whoami and /env also say which request they answer ("at: /env?x=1"), and /env counts its loads
             /env           what a page reads: User-Agent (and the one the server got), time zone,
                            language, canvas (two reads), WebGL, audio, and the natives check
                            (scripts/test-shims.mjs's probeLies) over every function the app may replace
@@ -23,6 +25,7 @@ this Mac, so a test sees on the screen what the pages say about how they were re
 import argparse
 import asyncio
 import base64
+import html
 import json
 import os
 import socket
@@ -33,6 +36,8 @@ import urllib.parse
 EVENTS = []
 UPSTREAM = {}          # (ip, port) of a proxy's upstream socket -> proxy name
 CACHE_COUNTER = [0]
+SERVED_COUNTER = [0]
+ENV_COUNTER = [0]
 EXITS = {"127.0.0.2": ("A", "DE", "Europe/Berlin", "203.0.113.10"),
          "127.0.0.3": ("B", "US", "America/New_York", "203.0.113.20")}
 
@@ -160,14 +165,22 @@ async def site(reader, writer, scheme="http"):
             CACHE_COUNTER[0] += 1
             out = reply("200 OK", f"window.lumenCache = {CACHE_COUNTER[0]};", "text/javascript",
                         ["Cache-Control: public, max-age=3600"])
+        elif path == "/served":
+            SERVED_COUNTER[0] += 1
+            out = reply("200 OK", page("served", f"<h1>Счётчик</h1><p id=n>served: {SERVED_COUNTER[0]}</p>"),
+                        extra=["Cache-Control: no-store"])
         elif path == "/whoami":
             name = {"A": "прокси A", "B": "прокси B"}.get(via, "напрямую")
-            out = reply("200 OK", page("whoami", f"<h1>Адрес</h1><p id=ip>ip: {peer[0]}</p><p id=via>via: {name}</p>"))
+            out = reply("200 OK", page("whoami", f"<h1>Адрес</h1><p id=ip>ip: {peer[0]}</p><p id=via>via: {name}</p>"
+                                                 f"<p>at: {html.escape(target)}</p>"), extra=["Cache-Control: no-store"])
         elif path == "/env":
             lines = "".join(f"<p id={i}>{i}: …</p>" for i in ("ua", "tz", "lang", "canvas", "canvas2", "webgl", "audio", "lies"))
-            served = f"<p>server ua: {header(headers, 'User-Agent')}</p><p>server lang: {header(headers, 'Accept-Language')}</p>"
+            ENV_COUNTER[0] += 1
+            served = (f"<p>server ua: {header(headers, 'User-Agent')}</p><p>server lang: {header(headers, 'Accept-Language')}</p>"
+                      f"<p>at: {html.escape(target)}</p><p>load: {ENV_COUNTER[0]}</p>")
             out = reply("200 OK", page("env", "<h1>Среда</h1>" + lines + served,
-                                       "const PROBE_LIES = " + json.dumps(probe_lies()) + ";" + ENV_SCRIPT))
+                                       "const PROBE_LIES = " + json.dumps(probe_lies()) + ";" + ENV_SCRIPT),
+                        extra=["Cache-Control: no-store"])
         elif path == "/geo.json":
             _, country, zone, ip = EXITS.get(peer[0], ("direct", "ZZ", "UTC", "198.51.100.1"))
             out = reply("200 OK", json.dumps({"ip": ip, "country": country, "timezone": zone}), "application/json")

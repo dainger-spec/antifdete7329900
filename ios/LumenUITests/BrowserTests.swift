@@ -25,13 +25,14 @@ final class BrowserTests: LumenUITestCase {
         page("Страница beta")
 
         // Follow a link on the page, then back and forward.
+        // Exact ends: "/page/beta" is also how "/page/beta-next" begins.
         app.webViews.links["Дальше"].tap()
         page("Страница beta-next")
-        waitForAddress(containing: "/page/beta-next")
+        waitForAddress(endingWith: "/page/beta-next")
         app.buttons["back"].tap()
-        page("Страница beta")
-        waitForAddress(containing: "/page/beta")
+        waitForAddress(endingWith: "/page/beta")
         app.buttons["forward"].tap()
+        waitForAddress(endingWith: "/page/beta-next")
         page("Страница beta-next")
         shot("11 second tab after a link")
 
@@ -106,6 +107,14 @@ final class BrowserTests: LumenUITestCase {
         waitGone(app.buttons["tab-1"], "the closed tab's card is gone")
         app.buttons["tabsDone"].tap()
         XCTAssertEqual(app.buttons["tabsButton"].label, "Вкладки: 1")
+
+        // Reload brings the page again from the server, which counts the times it sent it.
+        go("\(site)/served")
+        let served = pageNumber("served: ")
+        app.buttons["reload"].tap()
+        let again = app.webViews.staticTexts.matching(NSPredicate(format: "label MATCHES %@ AND label != %@", "served: [0-9]+", served)).firstMatch
+        XCTAssertTrue(again.waitForExistence(timeout: 20), "reload brought the page again (it said \(served))")
+        shot("17 reloaded")
     }
 
     /// Two sessions on the same site: cookies, local storage, IndexedDB, the cache and the history of
