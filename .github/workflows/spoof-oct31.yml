@@ -1,0 +1,39 @@
+# claude/measure-spoof-oct31 — a measurement branch, never merged: what broke when an iPhone view
+# told pages it was a phone (until 31 October, 7baa672^): the same mouse clicks in a mobile view as it
+# is now (the iPhone's User-Agent only), the mobile view with the 31 October script restored
+# (platform iPhone, five touch points, 390×844 at 3×, the window as the screen), and a Mac profile;
+# per site, the input listeners the page adds, what each click brings it, and whether it acts.
+name: Spoof of 31 October (measurement)
+on:
+  push:
+    branches: ['claude/measure-spoof-oct31']
+jobs:
+  input:
+    name: Input — ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: The machine
+        run: |
+          sw_vers
+          defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString || true
+      - name: Build the app without the App Sandbox (profiles in processes of their own)
+        timeout-minutes: 30
+        run: NE=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: Clicks — the check's page, tiktok.com, Google, m.youtube.com — now, with the 31 October script, and in a Mac profile
+        timeout-minutes: 80
+        run: |
+          python3 scripts/input_check.py --app build/unsandboxed/Lumen.app --out build/input \
+            --profiles mobile,mobile-oldshim,mac \
+            --sites 'pb-test:touch,https://www.tiktok.com/,https://www.google.com/search?q=lumen,https://m.youtube.com/'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spoof-oct31-${{ matrix.runner }}
+          path: build/input
+          if-no-files-found: warn

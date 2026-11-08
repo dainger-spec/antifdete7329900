@@ -9,7 +9,7 @@ name: CI
 # scripts/check_ci_split.py keeps it so.
 on:
   push:
-    branches: ['**']
+    branches-ignore: ['claude/measure-spoof-*']
 
 env:
   # The self-test's checks a GitHub runner cannot make, by the beginnings of their names: no real

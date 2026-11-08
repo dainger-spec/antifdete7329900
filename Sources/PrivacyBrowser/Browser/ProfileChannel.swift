@@ -56,6 +56,14 @@ enum ProfileCommand: Codable {
     /// Do `action` to the profile's window as a person would and say what the window then shows
     /// (`WindowProbe`). Sent by the self-test only, never by the app.
     case lookAtWindow(WindowProbeAction)
+    /// Answer from the main thread with whether the front page answers a script within three
+    /// seconds (`ProfileEvent.pong`). Sent by the input check only (a measurement, `InputCheck`).
+    case ping(Int)
+    /// Open `url` in the front window (`pb-test:touch`: the input check's own page), write down the
+    /// page's input listeners, choose its elements one by one with the mouse as AppKit delivers a
+    /// click, and say what each brought the page (`ProfileEvent.inputReport` lines, the last one
+    /// `"step":"done"`). Sent by the input check only (a measurement, `InputCheck`).
+    case inputProbe(Int, String)
 }
 
 /// What the manager decided for a launch's WebRTC. With `relay`, the profile's pages are given that
@@ -118,6 +126,10 @@ enum ProfileEvent: Codable {
     case historyLook(HistoryWindowLook)
     /// The answer to `lookAtWindow`.
     case windowLook(WindowLook)
+    /// The answer to `ping`: sent from the main thread; `page` says whether the front page answered.
+    case pong(Int, page: String)
+    /// A line of the answer to `inputProbe`, as JSON.
+    case inputReport(Int, String)
 }
 
 /// How a profile's WebKit data was sealed as its process quit: whether WebKit let the store go
