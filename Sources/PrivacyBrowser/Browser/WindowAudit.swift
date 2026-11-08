@@ -13,7 +13,11 @@ enum WindowAudit {
     static func run(_ window: NSWindow, controller: BrowserWindowController?, withoutMenu: Bool,
                     addressField: NSTextField?) async -> String {
         var lines: [String] = []
-        func say(_ text: String) { lines.append(text) }
+        // Each line also goes to the process's standard error as it is said, and each key before it
+        // is pressed: an action that never comes back (CI 759, 760: the whole audit gave no answer, the
+        // main thread idle) is the last one named there.
+        func trace(_ text: String) { FileHandle.standardError.write(Data("WINDOW-AUDIT \(text)\n".utf8)) }
+        func say(_ text: String) { lines.append(text); trace(text) }
         let savedMenu = NSApp.mainMenu
         if withoutMenu { NSApp.mainMenu = NSMenu(title: "none") } // l10n: not text
         defer { if withoutMenu { NSApp.mainMenu = savedMenu } }
@@ -44,6 +48,7 @@ enum WindowAudit {
         /// Presses ⌘key (with `extra`) as AppKit routes a key press; says who took it.
         func press(_ key: String, _ extra: NSEvent.ModifierFlags = []) async -> String {
             let modifiers = NSEvent.ModifierFlags.command.union(extra)
+            trace("pressing ⌘\(extra.contains(.shift) ? "⇧" : "")\(extra.contains(.option) ? "⌥" : "")\(extra.contains(.control) ? "⌃" : "")\(key)")
             let item = menuItem(key, modifiers)
             let shown = item.map { "menu item \"\($0.title)\"\($0.isEnabled ? "" : " (disabled)")" } ?? "no menu item"
             guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers,
@@ -71,11 +76,22 @@ enum WindowAudit {
         let webView = controller?.selectedTab?.webView ?? webViews(window.contentView).first { !$0.isHidden && $0.window != nil }
         func js(_ source: String) async -> Any? {
             guard let webView else { return nil }
+            // At most ten seconds: a page that never answers is said, not waited on for ever.
+            let waiter = ScriptWaiter()
             return await withCheckedContinuation { (done: CheckedContinuation<Any?, Never>) in
+                waiter.continuation = done
                 webView.callAsyncJavaScript(source, arguments: [:], in: nil, in: .page) { result in
                     switch result {
-                    case .success(let value): done.resume(returning: value)
-                    case .failure(let error): done.resume(returning: "error: \(error.localizedDescription)")
+                    case .success(let value): waiter.finish(value)
+                    case .failure(let error): waiter.finish("error: \(error.localizedDescription)")
+                    }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+                    MainActor.assumeIsolated {
+                        if waiter.continuation != nil {
+                            FileHandle.standardError.write(Data("WINDOW-AUDIT the page did not answer a script in 10 s\n".utf8))
+                        }
+                        waiter.finish("timeout")
                     }
                 }
             }
@@ -302,5 +318,15 @@ enum WindowAudit {
         say("long press on the page's text: \(longPress)")
         say("drag and drop: not measured (an AppKit drag session cannot be driven by events made here)")
         return lines.joined(separator: "\n")
+    }
+}
+
+/// One script's answer, given once: by WebKit, or by the audit's time limit.
+@MainActor
+private final class ScriptWaiter {
+    var continuation: CheckedContinuation<Any?, Never>?
+    func finish(_ value: Any?) {
+        continuation?.resume(returning: value)
+        continuation = nil
     }
 }
