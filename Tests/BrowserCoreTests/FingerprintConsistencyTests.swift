@@ -77,6 +77,12 @@ final class SafariUserAgentTests: XCTestCase {
         let iPhone = ProfileConfiguration(deviceGenerationID: "ios-26", safariVersion: "18.6")
         XCTAssertEqual(iPhone.userAgent(hostSafariVersion: "27.0"), DeviceGenerations.generation(id: "ios-26")?.userAgent)
 
+        XCTAssertTrue(SafariVersions.givesWindowSafari("26.6.2"))
+        XCTAssertTrue(SafariVersions.givesWindowSafari("27.0.1"))
+        XCTAssertFalse(SafariVersions.givesWindowSafari("27.2"))
+        XCTAssertFalse(SafariVersions.givesWindowSafari("27.2.1"))
+        XCTAssertFalse(SafariVersions.givesWindowSafari("28.0"))
+        XCTAssertFalse(SafariVersions.givesWindowSafari("?"))
         XCTAssertEqual(SafariVersions.distance(of: "27.0", fromHost: "27.0.1"), .same)
         XCTAssertEqual(SafariVersions.distance(of: "27.1", fromHost: "27.0"), .close)
         XCTAssertEqual(SafariVersions.distance(of: "26.6", fromHost: "27.0"), .far)
