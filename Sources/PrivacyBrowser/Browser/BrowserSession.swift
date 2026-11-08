@@ -170,6 +170,8 @@ final class BrowserSession {
     /// here, which is why this is a method of the session and not a copy loop somewhere else.
     func applyProfile(to webConfiguration: WKWebViewConfiguration) {
         webConfiguration.websiteDataStore = dataStore ?? ProfileNetworkGuard.closedStore
+        // Safari's chrome brings its own controller where it has one; where not, ours (`webPageNamespace`).
+        giveWebPageNamespace(to: webConfiguration)
         applyPrivacyPreferences(to: webConfiguration.preferences)
         applyContent(to: webConfiguration.userContentController)
     }
@@ -281,8 +283,29 @@ final class BrowserSession {
         }
     }
 
+    /// `window.browser` in every page, as Safari gives it (the Mac's Safari 27.0.1 and 27.2, the
+    /// owner's iPhone; claude/measure-canvas-browser, 8 November): WebKit's own WebPageNamespace —
+    /// `runtime.sendMessage` and `runtime.connect`, for pages to reach an extension — which WebKit
+    /// puts in the main world of every frame of a web view whose configuration has an extension
+    /// controller, with no extension loaded. Measured: the object, its runtime, the property and
+    /// what sendMessage does are Safari's own. One per profile's process, no extension in it ever,
+    /// and kept nowhere (a non-persistent controller configuration).
+    /// (macOS 15.4's API; the package builds for less, every Mac the app runs on has it.)
+    private lazy var webPageNamespace: AnyObject? = {
+        if #available(macOS 15.4, *) { return WKWebExtensionController(configuration: .nonPersistent()) }
+        return nil
+    }()
+
+    /// Puts `webPageNamespace` on `webConfiguration` unless it has a controller of its own.
+    private func giveWebPageNamespace(to webConfiguration: WKWebViewConfiguration) {
+        guard #available(macOS 15.4, *), webConfiguration.webExtensionController == nil,
+              let controller = webPageNamespace as? WKWebExtensionController else { return }
+        webConfiguration.webExtensionController = controller
+    }
+
     func makeWebViewConfiguration() -> WKWebViewConfiguration {
         let webConfiguration = WKWebViewConfiguration()
+        giveWebPageNamespace(to: webConfiguration)
         // Never the default store: it has no proxy (a session that is shutting down has no store).
         webConfiguration.websiteDataStore = dataStore ?? ProfileNetworkGuard.closedStore
         webConfiguration.userContentController = userContentController
