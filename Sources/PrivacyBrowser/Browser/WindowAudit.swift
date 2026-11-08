@@ -214,7 +214,17 @@ enum WindowAudit {
         var printSeen = "none"
         if let sheet = window.attachedSheet {
             printSeen = "a sheet (\(String(describing: type(of: sheet))))"
-            window.endSheet(sheet, returnCode: .cancel)
+            // Every sheet the print operation puts up after the first is closed too (its progress
+            // panel): one left attached disables the window's menu items, and every action after
+            // it read as not working (claude/measure-disguise-red2, run 42491543782).
+            var closed = 0
+            while let open = window.attachedSheet, closed < 10 {
+                window.endSheet(open, returnCode: .cancel)
+                open.orderOut(nil)
+                closed += 1
+                await pause(0.5)
+            }
+            if window.attachedSheet != nil { say("⌘P: a sheet is still attached after \(closed) closed") }
         } else if let panel = NSApp.windows.first(where: { $0.isVisible && String(describing: type(of: $0)).contains("Print") }) {
             printSeen = "a panel (\(String(describing: type(of: panel))))"
             panel.close()
