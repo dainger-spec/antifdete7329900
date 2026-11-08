@@ -180,7 +180,16 @@ function patchWindow(w) {
   try { patchToString(w); } catch (e) {}
   if (CONFIG.timeZone) { try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {} }
   if (CONFIG.phone) { try { patchPhone(w, CONFIG.phone); } catch (e) {} }
-  if (CONFIG.timeZone || CONFIG.phone) { try { hookWorkers(w); } catch (e) {} }
+  // Workers made from a blob run this same function with the same CONFIG (hookWorkers): every
+  // substitution above `if (IS_WORKER) return` reaches them — the time zone, an iPhone's
+  // platform, the storage quota, and the iOS app's fingerprint (ios/shim/fingerprint.js, put in
+  // this function by ios/scripts/build-shim.py). So they are hooked whenever any of those is on,
+  // and only then (substitutesInWorkers): a worker left unhooked beside a substituted page answers
+  // what the page does not (the lead, 8 November: the hook stood on the time zone alone, and a
+  // profile with this Mac's time zone gave its workers the app's quota beside Safari's on the
+  // page), and a hook with nothing to carry is a wrapper of ours with no reason. A worker loaded
+  // from a URL runs none of it: a limit of its own (docs/ISOLATION_AND_LIMITATIONS.md).
+  if (substitutesInWorkers(CONFIG)) { try { hookWorkers(w); } catch (e) {} }
   if (CONFIG.storageQuota) { try { patchStorageQuota(w, CONFIG.storageQuota); } catch (e) {} }
   if (IS_WORKER) return; // no window, geolocation, WebRTC or frames in a worker
   if (CONFIG.safariObject) { try { patchSafariObject(w); } catch (e) {} }
@@ -1309,6 +1318,16 @@ function hookChildWindows(w) {
 // URLs and its CSP. The script is one line (an indirect eval of its text), so the page's code keeps
 // its line numbers. Workers loaded from a URL are left alone: rewriting them would change their
 // location and how their relative URLs resolve. Service workers cannot be reached.
+// Whether anything the page is given differs in a worker unless the worker runs the shim too. The
+// iOS app always sends a fingerprint object (ios/Lumen/Browser/PageSettings.swift): it counts only
+// with a canvas, WebGL or audio mode other than 'real' (each is 'off', 'real' or 'noise') or a
+// language set — what ios/shim/fingerprint.js changes.
+function substitutesInWorkers(config) {
+  const fp = config.fingerprint;
+  const fingerprint = !!fp && (!!fp.language || ['canvas', 'webgl', 'audio'].some((k) => !!fp[k] && fp[k] !== 'real'));
+  return !!(config.timeZone || config.phone || config.storageQuota) || fingerprint;
+}
+
 function hookWorkers(w) {
   const URLClass = w.URL;
   const nativeCreate = URLClass && URLClass.createObjectURL;

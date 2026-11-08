@@ -39,6 +39,12 @@ function makeWindow(config, parentContext) {
     globalThis.Geolocation = Geolocation; globalThis.Permissions = Permissions;
     globalThis.Event = class Event { constructor(type) { this.type = type; } };
     globalThis.WeakRef = WeakRef;
+    // Blob workers, as far as hookWorkers reaches them: a Blob, URL.createObjectURL and a Worker
+    // that keeps the URL it was given.
+    globalThis.Blob = class Blob { constructor(parts, options) { this.parts = parts; this.type = (options && options.type) || ''; } };
+    let blobCount = 0;
+    globalThis.URL = class URL { static createObjectURL(blob) { return 'blob:test/' + (++blobCount); } };
+    globalThis.Worker = class Worker { constructor(url) { this.url = String(url); } };
     class Navigator {
       get platform() { illegal(this, Navigator); return 'MacIntel'; } get maxTouchPoints() { illegal(this, Navigator); return 0; }
       get hardwareConcurrency() { illegal(this, Navigator); return 8; }
@@ -480,6 +486,23 @@ test('geolocation deny: prompt until asked, then a real-looking denial', async (
   assert.throws(() => run(w, `navigator.geolocation.getCurrentPosition(1)`), (e) => e.name === 'TypeError');
   // Receivers that are not ours still get the native getter's TypeError.
   assert.throws(() => run(w, `Object.getOwnPropertyDescriptor(GeolocationPositionError.prototype, 'code').get.call({})`), (e) => e.name === 'TypeError');
+});
+
+test('workers made from a blob are hooked whenever a substitution reaches them, and only then', () => {
+  // The worker runs the shim (its URL is replaced by one whose script starts with it) exactly when
+  // the page has something a worker would otherwise answer differently.
+  const hooked = (config) => run(makeWindow(config), `(() => { const url = URL.createObjectURL(new Blob(['postMessage(1)'])); return new Worker(url).url !== url; })()`);
+  assert.equal(hooked(base), false, 'no substitution: no hook');
+  assert.equal(hooked({ ...base, storageQuota: 0.6 * 128 * 2 ** 30 }), true, 'the storage quota alone, this Mac\'s time zone');
+  assert.equal(hooked({ ...base, timeZone: 'Asia/Tokyo' }), true, 'a time zone');
+  assert.equal(hooked({ ...base, phone: { platform: 'iPhone', width: 402, height: 874, maxTouchPoints: 5 } }), true, 'an iPhone');
+  // The iOS app always sends a fingerprint: only a mode that changes something, or a language, counts.
+  const real = { seed: 's', canvas: 'real', webgl: 'real', audio: 'real', language: null, unstable: false, naive: false };
+  assert.equal(hooked({ ...base, fingerprint: real }), false, 'the iOS app\'s fingerprint with everything real');
+  assert.equal(hooked({ ...base, fingerprint: { ...real, canvas: 'noise' } }), true, 'canvas noise, this device\'s time zone');
+  assert.equal(hooked({ ...base, fingerprint: { ...real, webgl: 'off' } }), true, 'WebGL off');
+  assert.equal(hooked({ ...base, fingerprint: { ...real, audio: 'noise' } }), true, 'audio noise');
+  assert.equal(hooked({ ...base, fingerprint: { ...real, language: 'de-DE' } }), true, 'a language');
 });
 
 test('storage quota: Safari\'s instead of the app default', async () => {
