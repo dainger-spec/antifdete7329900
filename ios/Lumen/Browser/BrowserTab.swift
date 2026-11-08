@@ -86,6 +86,11 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
+        // An HTTP proxy on iOS 17: nothing loads, a restored tab (a back/forward navigation) included.
+        if runtime?.refusal != nil, !Faults.isActive(.ios17LoadsAnyway),
+           !(Faults.isActive(.refusalSkipsBackForward) && navigationAction.navigationType == .backForward) {
+            return .cancel
+        }
         // Schemes a web view cannot load (tg:, mailto:, …) are not handed to other apps here: a
         // session's link must not leave its proxy and its data for another app.
         guard let scheme = navigationAction.request.url?.scheme?.lowercased() else { return .allow }

@@ -20,6 +20,10 @@ public enum Fault: String, CaseIterable, Sendable {
     case proxyNotApplied         // a session's proxy is never given to its data store
     case proxyChangeNotLive      // a new proxy takes effect only after a relaunch
     case proxyPasswordNotSaved   // the password is not kept
+    case ios17GuardOff           // an HTTP proxy is used on iOS 17, where plain-http pages go around it
+    case ios17LoadsAnyway        // the session is said to load nothing on iOS 17, yet its pages load
+    case refusalHidden           // the session loads nothing on iOS 17 and does not say why
+    case refusalSkipsBackForward // back/forward navigations (a restored tab is one) go through anyway
     // Session settings
     case settingsNotSaved        // a session's settings are not written
     case userAgentIgnored        // the chosen User-Agent is not given to the web view

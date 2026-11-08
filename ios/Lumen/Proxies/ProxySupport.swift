@@ -4,6 +4,28 @@ import Network
 import Security
 import WebKit
 
+/// What iOS cannot do safely. Measured on the iOS 17.5 simulator (claude/ios-app-measure, runs
+/// 42425478177 and 42427910534): with an HTTP CONNECT proxy in a data store's proxyConfigurations,
+/// plain-http pages resolve and connect directly (the proxy sees nothing), and a dead HTTP proxy lets
+/// pages go direct despite allowFailover = false; https went through the proxy, SOCKS5 worked fully.
+/// iOS 18.6, 26.x and 27.x: both kinds work, nothing goes around them.
+enum PlatformLimits {
+    static var httpProxiesWork: Bool {
+        #if DEBUG
+        // A test of the guard on a newer simulator: behave as iOS 17 does.
+        if ProcessInfo.processInfo.environment["LUMEN_TEST_AS_IOS17"] == "1" { return Faults.isActive(.ios17GuardOff) }
+        #endif
+        if Faults.isActive(.ios17GuardOff) { return true }
+        return ProcessInfo.processInfo.isOperatingSystemAtLeast(OperatingSystemVersion(majorVersion: 18, minorVersion: 0, patchVersion: 0))
+    }
+
+    /// Why a session with this proxy must not load anything here, or nil.
+    static func refusal(for proxy: ProxyEntry?) -> String? {
+        guard let proxy, proxy.kind == .http, !httpProxiesWork else { return nil }
+        return "HTTP-прокси на iOS 17 пропускает страницы мимо себя: обычные http-страницы идут напрямую, а при недоступном прокси — все. Эта сессия ничего не загружает. Нужен iOS 18 или SOCKS5-прокси."
+    }
+}
+
 /// Proxy passwords, in the Keychain (this device only, after the first unlock).
 enum ProxyPasswords {
     static let service = "io.lumenbrowser.ios.proxy"
@@ -90,6 +112,9 @@ enum ProxyChecker {
     }
 
     static func check(_ entry: ProxyEntry, password: String?) async -> ProxyCheck {
+        if PlatformLimits.refusal(for: entry) != nil {
+            return ProxyCheck(alive: false, udp: .unchecked, error: "HTTP-прокси на iOS 17 не поддерживается")
+        }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.proxyConfigurations = ProxyFactory.make(entry, password: password)
         configuration.timeoutIntervalForRequest = 10
