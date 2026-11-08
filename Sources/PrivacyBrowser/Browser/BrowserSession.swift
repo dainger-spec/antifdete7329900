@@ -170,6 +170,8 @@ final class BrowserSession {
     /// here, which is why this is a method of the session and not a copy loop somewhere else.
     func applyProfile(to webConfiguration: WKWebViewConfiguration) {
         webConfiguration.websiteDataStore = dataStore ?? ProfileNetworkGuard.closedStore
+        // Safari's chrome brings its own controller where it has one; where not, ours (`webPageNamespace`).
+        if webConfiguration.webExtensionController == nil { webConfiguration.webExtensionController = webPageNamespace }
         applyPrivacyPreferences(to: webConfiguration.preferences)
         applyContent(to: webConfiguration.userContentController)
     }
@@ -281,8 +283,18 @@ final class BrowserSession {
         }
     }
 
+    /// `window.browser` in every page, as Safari gives it (the Mac's Safari 27.0.1 and 27.2, the
+    /// owner's iPhone; claude/measure-canvas-browser, 8 November): WebKit's own WebPageNamespace —
+    /// `runtime.sendMessage` and `runtime.connect`, for pages to reach an extension — which WebKit
+    /// puts in the main world of every frame of a web view whose configuration has an extension
+    /// controller, with no extension loaded. Measured: the object, its runtime, the property and
+    /// what sendMessage does are Safari's own. One per profile's process, no extension in it ever,
+    /// and kept nowhere (a non-persistent controller configuration).
+    private lazy var webPageNamespace = WKWebExtensionController(configuration: .nonPersistent())
+
     func makeWebViewConfiguration() -> WKWebViewConfiguration {
         let webConfiguration = WKWebViewConfiguration()
+        webConfiguration.webExtensionController = webPageNamespace
         // Never the default store: it has no proxy (a session that is shutting down has no store).
         webConfiguration.websiteDataStore = dataStore ?? ProfileNetworkGuard.closedStore
         webConfiguration.userContentController = userContentController
