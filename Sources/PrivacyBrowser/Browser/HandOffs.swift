@@ -12,8 +12,13 @@ import WebKit
 ///     a click on the preview opens it in the default browser — the real Safari.
 ///   * The Services menu and "Search with Google" hand the selection to another app (the real
 ///     Safari searches it with the owner's own cookies).
-///   * Share and Quick Note hand the address to Messages, Mail, AirDrop or Notes, which fetch it
-///     for a preview, as this Mac, and keep it in the owner's iCloud.
+///   * Share and Quick Note hand the address to the system's services. Measured (claude/measure-share,
+///     run 42476723090, macOS 26.7.2 and 27.0.1): the share picker, only shown with an address,
+///     fetches the page and its icons itself, with no proxy (LinkPresentation's
+///     "facebookexternalhit" agent, and WebKit's networking process); Add to Reading List has the
+///     real Safari fetch it; AirDrop, Freeform, Journal and Reminders fetch it for their preview;
+///     Open in News hands it to Apple News; Messages, Mail and Notes fetched nothing on a runner
+///     with no account in them, which says nothing of a Mac with one. Only Copy Link (ours) stays.
 ///   * In a profile's own process (Safari's chrome): opening an address in another app (a link
 ///     from a PDF, `webcal:`, "open in default browser"), Safari opening downloads by itself,
 ///     Universal Clipboard (a copy reaches the owner's iPhone), the recent-documents list (shared
