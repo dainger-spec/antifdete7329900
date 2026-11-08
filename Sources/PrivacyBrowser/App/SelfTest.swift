@@ -2570,6 +2570,9 @@ final class SelfTest {
     /// in its User-Agent only — and none may add noise or Chromium-only properties. Compared against a web view without any profile script. The probe is
     /// Resources/fingerprint_probe.js, the one scripts/safari_reference.py runs in real Safari;
     /// with PB_SELFTEST_SURFACE_OUT set, every result is written there as JSON for that comparison.
+    /// window.browser as Safari 27.0.1 and 27.2 give it, the probe's "browserShape" (claude/measure-canvas-browser).
+    static let safariBrowserShape = "[object WebPageNamespace] runtime [object WebPageRuntime] connect,sendMessage own,true,true,true,object"
+
     private func fingerprintSurface(_ repository: ProfileRepository) async throws {
         guard let probe = Self.loadProbe() else {
             check("surface: fingerprint_probe.js found (app bundle or PB_SELFTEST_PROBE)", false)
@@ -2611,7 +2614,8 @@ final class SelfTest {
             ["plugins", "mimeTypes", "pdfViewerEnabled", "language", "languages", "deviceMemory", "ownNavigator", "ownScreen",
              "navigatorProtoCount", "colorDepth", "canvas.colors", "canvas.urlLength", "canvas.url", "canvasText", "fonts",
              "webkitObject", "webdriver", "doNotTrack"].contains(key) || key.hasPrefix("webgl.")
-                || (key.hasPrefix("features.") && key != "features.safari") // window.safari is added on purpose (macOS)
+                // window.safari is added on purpose (macOS); window.browser too, as Safari has it (below)
+                || (key.hasPrefix("features.") && key != "features.safari" && key != "features.browser")
         }.sorted()
         // An iPhone view twice: with the full disguise (the default) and leaving no script's trace.
         for (generationID, disguise) in [(DeviceGenerations.defaultID, PhoneDisguise.full), ("ios-26", .full), ("ios-26", .engineOnly)] {
@@ -2759,6 +2763,11 @@ final class SelfTest {
                 check("surface (\(name)): a blob worker answers the storage quota and the time zone as the page does (no substitution left behind in workers)",
                       halves.count == 2 && halves[0] == halves[1], "page / worker: \(pageAndWorker)")
             }
+            // window.browser: WebKit's own WebPageNamespace, as Safari gives every page on the Mac and
+            // on an iPhone (the lead, 8 November: the one difference between an iPhone view's 949 names
+            // and the owner's iPhone's 950); in both iPhone disguises — the engine's, not a script's.
+            check("surface (\(name)): window.browser is WebKit's own, as in Safari (WebPageNamespace: runtime.connect, runtime.sendMessage)",
+                  string(probed, "browserShape") == Self.safariBrowserShape, string(probed, "browserShape"))
             // window.safari: a macOS profile has it exactly when the Safari it names gives pages one
             // (up to 27.1); an iPhone view never — no iPhone has it, and there it was a mark of
             // ours alone (the owner's iPhone and Mac, 8 November).
