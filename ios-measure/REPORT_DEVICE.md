@@ -107,14 +107,18 @@
 
 - **Скриптом — да, и это уже замерено на iPhone.** `q1.webrtc-off-by-script` (HTTP и SOCKS5): 0 запросов STUN.
   Приложение делает то же для каждой сессии с прокси.
-- **Списком правил контента (`WKContentRuleList`) — по устройству правил нет.** Правило сопоставляется с адресом
-  загрузки (`url-filter`) и её типом. Типы по документации Apple: `document`, `top-document`, `child-document`,
-  `image`, `style-sheet`, `script`, `font`, `raw`, `svg-document`, `media`, `popup`, `ping`, `fetch`, `websocket`,
+- **Списком правил контента (`WKContentRuleList`) — нет, замерено.** Правило сопоставляется с адресом загрузки
+  (`url-filter`) и её типом. Типы по документации Apple: `document`, `top-document`, `child-document`, `image`,
+  `style-sheet`, `script`, `font`, `raw`, `svg-document`, `media`, `popup`, `ping`, `fetch`, `websocket`,
   `csp-report`, `other`. У ICE/STUN нет ни адреса загрузки, ни такого типа [из документации: «Creating a content
-  blocker»]. Замер добавлен: `q1.webrtc-rules-only` — правило блокирует всё, кроме самой страницы, скрипта
-  нет. Он должен показать, дошёл ли STUN. Результат будет в прогоне CI (симулятор), затем на iPhone.
-- **Где скрипт может не достать.** Проверка расширена: фрейм `srcdoc` в песочнице, фрейм `data:` и воркер
-  (`typeof RTCPeerConnection`). Фрейм about:blank уже проверен на iPhone: RTC нет.
+  blocker»].
+
+  Замер `q1.webrtc-rules-only`: правило блокирует любую загрузку, кроме самой страницы (картинка на странице и
+  правда заблокирована), скрипта нет. STUN всё равно получил запросы, и страница получила srflx-кандидата —
+  LEAK [замерено на симуляторе: iOS 27.2 и 18.0, этап 1, прогон 9]. На iPhone — в следующем прогоне q1.
+- **Где скрипт может не достать.** Проверено [замерено на симуляторе: iOS 27.2 и 18.0, прогон 9]: фрейм
+  `srcdoc` в песочнице, фрейм `data:`, воркер (`typeof RTCPeerConnection` — undefined). Во всех RTC нет, STUN — 0.
+  Фрейм about:blank проверен ещё и на iPhone.
 - **Что ещё остаётся, если скрипт обойдут.** Публичного переключателя WebRTC у WKWebView нет. Остаются:
   - закрытый ключ настроек WebKit — частный API, риск отказа в App Store;
   - собственный VPN-туннель (`NEPacketTunnelProvider`) на всё устройство — тяжело, требует согласия человека на
