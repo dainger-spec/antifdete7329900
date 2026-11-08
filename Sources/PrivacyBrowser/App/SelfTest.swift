@@ -5611,6 +5611,11 @@ final class SelfTest {
             manager.onWindowLook = { _, answer in look = answer }
             guard manager.lookAtWindow(id, action) else { return WindowLook(action: "\(action)", detail: "no process") }
             _ = await waitUntil(timeout: timeout) { look != nil }
+            if look == nil, let pid = manager.processIdentifier(of: id) {
+                // No answer: where the profile's main thread is (CI 759 — the window's actions without a
+                // menu bar never came back, and nothing said why).
+                for line in await Self.mainThreadStack(of: pid) { info("\(prefix): no answer to \(action), main thread: \(line)") }
+            }
             let seen = look ?? WindowLook(action: "\(action)", detail: "no answer")
             info("\(prefix): \(seen.action) → found \(seen.found), tabs \(seen.tabs), selected \(seen.selected), "
                  + "overview \(seen.overviewShown), controls \(seen.controls.filter { $0.hasPrefix("mobile") }.joined(separator: " ")), "
@@ -5730,6 +5735,39 @@ final class SelfTest {
                  hosts == nil ? "the profile's process did not report its window" : "Safari's chrome is not hosted here")
         }
         try? await desk.stop(deskID)
+    }
+
+    /// The main thread of a process that does not answer, as `sample` sees it over two seconds: the
+    /// frames of its heaviest path, innermost last, at most 40.
+    static func mainThreadStack(of pid: Int32) async -> [String] {
+        await Task.detached { () -> [String] in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/sample")
+            process.arguments = [String(pid), "2", "-mayDie"]
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = Pipe()
+            guard (try? process.run()) != nil else { return ["sample could not run"] }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            let lines = String(decoding: data, as: UTF8.self).split(separator: "\n").map(String.init)
+            guard let start = lines.firstIndex(where: { $0.contains("com.apple.main-thread") }) else {
+                return ["no main thread in sample's output (\(lines.count) lines)"]
+            }
+            // The first path down the call graph (sample lists the heaviest child first): each line
+            // kept is deeper than the one before.
+            var frames: [String] = []
+            var depth = -1
+            for line in lines[(start + 1)...] {
+                guard line.hasPrefix("    ") else { break }
+                let indent = line.prefix { " +!:|".contains($0) }.count
+                let rest = line.dropFirst(indent)
+                guard rest.first?.isNumber == true, indent > depth else { continue }
+                depth = indent
+                frames.append(String(rest.drop { $0.isNumber || $0 == " " }.prefix(170)))
+            }
+            return Array(frames.suffix(40))
+        }.value
     }
 
     /// The interface's language and the language websites see are apart, both ways (the owner, 1
