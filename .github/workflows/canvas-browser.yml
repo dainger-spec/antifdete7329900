@@ -34,8 +34,12 @@ jobs:
       - name: WebKit in a web view — the canvas and window.browser
         timeout-minutes: 20
         run: |
-          swiftc -o build/cb-probe measure/canvas_browser/probe.swift
-          build/cb-probe build/cb measure/canvas_browser/extensions > build/cb/probe.txt 2>&1 || echo "probe exited $?"
+          # As an app bundle with an identity (a bare executable's canvas raised InvalidStateError, run 42518506887)
+          mkdir -p build/CBProbe.app/Contents/MacOS
+          swiftc -o build/CBProbe.app/Contents/MacOS/cb-probe measure/canvas_browser/probe.swift
+          printf '%s' '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>io.lumenbrowser.measure.cbprobe</string><key>CFBundleExecutable</key><string>cb-probe</string><key>CFBundleName</key><string>CBProbe</string><key>CFBundlePackageType</key><string>APPL</string><key>NSPrincipalClass</key><string>NSApplication</string></dict></plist>' > build/CBProbe.app/Contents/Info.plist
+          codesign -s - --force build/CBProbe.app
+          build/CBProbe.app/Contents/MacOS/cb-probe build/cb measure/canvas_browser/extensions > build/cb/probe.txt 2>&1 || echo "probe exited $?"
           python3 measure/canvas_browser/analyse.py build/cb/probe.txt
           grep -E "^BROWSER" build/cb/probe.txt | cut -c1-3000
       - name: This Mac's Safari — window.browser with no extension
@@ -43,11 +47,11 @@ jobs:
         timeout-minutes: 10
         run: python3 measure/canvas_browser/safari_browser.py | cut -c1-3000
       - name: Build the app without the App Sandbox
-        if: always()
+        if: false
         timeout-minutes: 30
         run: NE=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
       - name: Our profiles — window.browser and the window's own names (the fingerprint surface)
-        if: always()
+        if: false
         timeout-minutes: 20
         env:
           PB_SELFTEST_ONLY: "fingerprint surface"

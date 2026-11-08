@@ -97,7 +97,7 @@ def main():
         print(f"TABLE missing: {n.get('error')}")
     for label, r in runs.items():
         if "error" in r:
-            print(f"RUN {label}: error {r['error']}")
+            print(f"RUN {label}: error {r['error']} {r.get('stack', '')}")
             continue
         read = base64.b64decode(r["read"])
         decoded, note = png_rgba(r["png"])

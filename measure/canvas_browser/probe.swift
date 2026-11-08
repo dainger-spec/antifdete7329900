@@ -58,6 +58,7 @@ Task { @MainActor in
     let plain = WKWebViewConfiguration()
     plain.websiteDataStore = .nonPersistent()
     print("CANVAS N \(await run(plain, "const CFG = {table: true};\n" + canvasProbe))")
+    print("CANVAS N-soft \(await run(plain, "const CFG = {table: true, soft: true};\n" + canvasProbe))")
     for variant in ["old", "new"] {
         for seed in ["s1", "s2", "s3"] {
             let configuration = WKWebViewConfiguration()
@@ -75,21 +76,6 @@ Task { @MainActor in
         empty.websiteDataStore = .nonPersistent()
         empty.webExtensionController = WKWebExtensionController(configuration: .nonPersistent())
         print("BROWSER controller-no-extension \(await run(empty, browserProbe))")
-        for name in ["plain-extension", "externally-connectable"] {
-            let configuration = WKWebViewConfiguration()
-            configuration.websiteDataStore = .nonPersistent()
-            let controller = WKWebExtensionController(configuration: .nonPersistent())
-            configuration.webExtensionController = controller
-            do {
-                let webExtension = try await WKWebExtension(resourceBaseURL: extensionsDirectory.appendingPathComponent(name, isDirectory: true))
-                let context = WKWebExtensionContext(for: webExtension)
-                try controller.load(context)
-                print("BROWSER-NOTE \(name): loaded, errors \(webExtension.errors.map { String(describing: $0) }), contexts \(controller.extensionContexts.count)")
-            } catch {
-                print("BROWSER-NOTE \(name): not loaded: \(error)")
-            }
-            print("BROWSER controller-\(name) \(await run(configuration, browserProbe))")
-        }
     } else {
         print("BROWSER-NOTE WKWebExtensionController needs macOS 15.4")
     }
