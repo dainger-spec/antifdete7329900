@@ -237,8 +237,11 @@ async def site(reader, writer, scheme="http"):
                             extra=["Cache-Control: no-store"])
             elif path == "/whoami":
                 name = {"A": "прокси A", "B": "прокси B", "D": "прокси D"}.get(via, "напрямую")
+                # A direct request says so on its "at:" line too: the line a test finds the page by (CI runs
+                # 20, 21: the page loaded directly, and the "via:" paragraph was not found on the screen).
+                direct = " — напрямую" if via == "direct" else ""
                 out = reply("200 OK", page("whoami", f"<h1>Адрес</h1><p id=ip>ip: {peer[0]}</p><p id=via>via: {name}</p>"
-                                                     f"<p>at: {html.escape(target)}</p>"), extra=["Cache-Control: no-store"])
+                                                     f"<p>at: {html.escape(target)}{direct}</p>"), extra=["Cache-Control: no-store"])
             elif path == "/env":
                 lines = "".join(f"<p id={i}>{i}: …</p>" for i in ("ua", "tz", "lang", "canvas", "canvas2", "webgl", "audio", "lies"))
                 ENV_COUNTER[0] += 1

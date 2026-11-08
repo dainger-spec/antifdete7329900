@@ -120,7 +120,7 @@ class LumenUITestCase: XCTestCase {
     /// The selected tab still shows the page at `target`: a proxy change keeps the tabs as they are
     /// (no new web view, no relaunch — the session's relay takes the change).
     func assertTabKept(_ target: String, file: StaticString = #filePath, line: UInt = #line) {
-        let shown = app.webViews.staticTexts.matching(NSPredicate(format: "label == %@", "at: " + target)).firstMatch
+        let shown = app.webViews.staticTexts.matching(atLine(target)).firstMatch
         XCTAssertTrue(shown.waitForExistence(timeout: 5), "the tab kept its page through the proxy change (at: \(target))",
                       file: file, line: line)
     }
@@ -144,7 +144,7 @@ class LumenUITestCase: XCTestCase {
         var rest = url
         if let scheme = rest.range(of: "://") { rest = String(rest[scheme.upperBound...]) }
         let target = rest.firstIndex(of: "/").map { String(rest[$0...]) } ?? "/"
-        let shown = app.webViews.staticTexts.matching(NSPredicate(format: "label == %@", "at: " + target)).firstMatch
+        let shown = app.webViews.staticTexts.matching(atLine(target)).firstMatch
         XCTAssertTrue(shown.waitForExistence(timeout: 20), "the page at \(target) is shown", file: file, line: line)
     }
 
@@ -203,10 +203,21 @@ class LumenUITestCase: XCTestCase {
     /// "via: напрямую" (what a page that went around its proxy shows here).
     func assertNothingLoaded(_ name: String, file: StaticString = #filePath, line: UInt = #line) {
         sleep(8)
-        XCTAssertNil(webText("напрямую"), "\(name): the page did not go direct", file: file, line: line)
+        // The page's own "at:" line says "напрямую" when it came directly (the testbed): found where the
+        // "via:" paragraph sometimes is not (CI runs 20, 21).
         let shown = webText("?t=\(name)")
-        XCTAssertNil(shown, "\(name): the page did not load (\(shown ?? ""))", file: file, line: line)
+        let direct = webText("напрямую") ?? (shown?.contains("напрямую") == true ? shown : nil)
+        XCTAssertTrue(direct == nil, "\(name): the page did not go direct (\(oneLine(direct)))", file: file, line: line)
+        XCTAssertTrue(shown == nil, "\(name): the page did not load (\(oneLine(shown)))", file: file, line: line)
     }
+
+    /// A testbed page's "at:" line for `target`: exactly, or with the testbed's " — напрямую".
+    func atLine(_ target: String) -> NSPredicate {
+        NSPredicate(format: "label == %@ OR label BEGINSWITH %@", "at: " + target, "at: " + target + " — ")
+    }
+
+    /// One line, for a failure message: the first line of a failure is the one ci.sh reads.
+    func oneLine(_ text: String?) -> String { (text ?? "").replacingOccurrences(of: "\n", with: " ") }
 
     /// The page's text that contains `fragment`, by either query: WebKit puts a paragraph's text on the
     /// element itself or on a child (CI run 20: "via: напрямую" on the screen, and `containing` alone

@@ -172,14 +172,28 @@ run_ui() { # result-name, fault ('' for none), -only-testing args...
     rm -rf "$OUT/$name.xcresult"
     TEST_RUNNER_LUMEN_FAULTS="$fault" xcodebuild test-without-building "${COMMON[@]}" "$@" \
         -resultBundlePath "$OUT/$name.xcresult" >"$OUT/$name.txt" 2>&1
+    local code=$?
+    # The relays' own lines (Documents/relay.log, DEBUG builds): where a slow page spent its time.
+    local data; data="$(xcrun simctl get_app_container "$UDID" io.lumenbrowser.ios data 2>/dev/null)"
+    [[ -n "$data" && -f "$data/Documents/relay.log" ]] && cp "$data/Documents/relay.log" "$OUT/$name-relay.log"
+    return $code
 }
+lost() { grep -q -E "crashed|Lost connection to the application|Failed to get matching snapshots|Failed to launch|does not have a process ID|is not running|Failed to terminate" "$1"; }
 while IFS=$'\t' read -r fault kind test expect; do
     [[ "$fault" =~ ^#|^$ ]] && continue
     [[ "$kind" == "ui" ]] || continue
     class="$(echo "$test" | cut -d/ -f2)"; in_suite "$class" || continue
-    if run_ui "red-$fault" "$fault" "-only-testing:$test"; then
+    run_ui "red-$fault" "$fault" "-only-testing:$test"; code=$?
+    if [[ $code -ne 0 ]] && lost "$OUT/red-$fault.txt"; then
+        # The app crashed or was lost (CI run 21: "does not have a process ID" at launch): that says
+        # nothing about the check, so the red runs once more; its second run is the one that counts.
+        mv "$OUT/red-$fault.txt" "$OUT/red-$fault-lost.txt"
+        say "again ui $fault: the app was lost in the first try — $(grep -m1 -E 'crashed|Lost connection|Failed to|process ID' "$OUT/red-$fault-lost.txt" | sed 's/.*error: //' | cut -c1-120)"
+        run_ui "red-$fault" "$fault" "-only-testing:$test"; code=$?
+    fi
+    if [[ $code -eq 0 ]]; then
         say "RED DID NOT FAIL ui $fault: $test passed with the fault"; STATUS=1
-    elif grep -q -E "crashed|Lost connection to the application|Failed to get matching snapshots|Failed to launch|does not have a process ID|is not running|Failed to terminate" "$OUT/red-$fault.txt"; then
+    elif lost "$OUT/red-$fault.txt"; then
         # Not "Unable to monitor animations": XCTest prints it right after a test's own relaunch
         # terminates the app (CI run 20, reloadIgnored: the red failed in its own check, and was
         # counted invalid for those lines). A crash or a lost app says so in the words above.

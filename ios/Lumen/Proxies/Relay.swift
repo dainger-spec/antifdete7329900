@@ -310,13 +310,39 @@ final class Relay: @unchecked Sendable {
 
     static func log(_ message: @autoclosure () -> String) {
         #if DEBUG
-        NSLog("Lumen relay: %@", message())
+        let text = message()
+        NSLog("Lumen relay: %@", text)
+        // For the tests: the same lines in Documents/relay.log, which ci.sh keeps with each run (CI run
+        // 21: a page took 41 s to reach the testbed, and nothing said where the time went).
+        if TestHooks.enabled { RelayLogFile.shared.append(text) }
         #endif
     }
 
     static let headEnd = Data("\r\n\r\n".utf8)
     static let headLimit = 16 * 1024
 }
+
+#if DEBUG
+/// Documents/relay.log, for the tests (TestHooks): every relay's lines, with the time.
+final class RelayLogFile: @unchecked Sendable {
+    static let shared = RelayLogFile()
+    private let queue = DispatchQueue(label: "lumen.relay.log")
+    private var handle: FileHandle?
+
+    func append(_ line: String) {
+        let stamp = ISO8601DateFormatter.string(from: Date(), timeZone: .gmt, formatOptions: [.withTime, .withFractionalSeconds])
+        queue.async {
+            if self.handle == nil, let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                let url = documents.appendingPathComponent("relay.log")
+                if !FileManager.default.fileExists(atPath: url.path) { FileManager.default.createFile(atPath: url.path, contents: nil) }
+                self.handle = try? FileHandle(forWritingTo: url)
+                _ = try? self.handle?.seekToEnd()
+            }
+            try? self.handle?.write(contentsOf: Data("\(stamp) \(line)\n".utf8))
+        }
+    }
+}
+#endif
 
 /// The site a CONNECT asks for: its name (or address) and port, as WebKit wrote them.
 struct RelayTarget: Equatable {

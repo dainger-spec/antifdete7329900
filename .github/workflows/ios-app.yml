@@ -45,6 +45,7 @@ jobs:
           name: ios-app-${{ github.run_number }}-${{ strategy.job-index }}
           path: |
             build/ios-app/*.txt
+            build/ios-app/*.log
             build/ios-app/testbed
             build/ios-app/screens
           if-no-files-found: warn
