@@ -1,0 +1,79 @@
+name: DMG path bar (measurement, never merged)
+
+# The owner's 0.1.3 release check: "NOT SHOWN — 2678 of 3008 points of its backdrop (89.0%) and 660
+# of 779 of its plates, mark and name (84.7%) … capture at 2x". A capture laid out as Finder draws
+# the image's own pages at 2x reproduces 660 of 779 exactly (every miss on an edge of the 1x page)
+# and 3006 of 3008; the other 328 are the backdrop's four lowest rows of points: a band about 30
+# points high along the window's bottom. The image hides the toolbar and the status bar (bwsp)
+# and says nothing of the path bar, which Finder shows in every window when "Show Path Bar" is on.
+# Here: the published 0.1.3 image captured with Finder's path bar off, on, the status bar on, and an
+# image whose window hides its path bar, captured with the path bar on.
+on:
+  push:
+    branches: ['claude/measure-dmg-pathbar']
+
+jobs:
+  measure:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - run: sw_vers
+      - name: The published image
+        run: |
+          mkdir -p build/m
+          curl -fsSL --retry 3 -o build/m/image.dmg https://dl.lumenbrowser.io/Lumen-0.1.3.dmg
+          shasum -a 256 build/m/image.dmg
+      - name: An image whose window hides its path bar (the published one, its window told so by Finder)
+        run: |
+          hdiutil convert build/m/image.dmg -format UDRW -o build/m/rw.dmg -quiet
+          mount="$(hdiutil attach build/m/rw.dmg -readwrite -noverify -noautoopen | awk -F'\t' '/\/Volumes\// { print $NF; exit }')"
+          disk="$(basename "$mount")"
+          echo "mounted at $mount"
+          osascript -e "tell application \"Finder\"
+            tell disk \"$disk\"
+              open
+              delay 2
+              set pathbar visible of container window to false
+              set statusbar visible of container window to false
+              set toolbar visible of container window to false
+              set the bounds of container window to {200, 120, 860, 520}
+              delay 1
+              close
+              open
+              delay 2
+              close
+            end tell
+          end tell" || echo "Finder refused the path bar's setting (above)"
+          sync; sleep 3
+          python3 -I scripts/dmg_facts.py "$mount" || true
+          python3 -I scripts/dmg_bwsp.py "$mount/.DS_Store" || true
+          hdiutil detach "$mount" -force -quiet
+          hdiutil convert build/m/rw.dmg -format UDZO -o build/m/hidden.dmg -quiet
+      - name: Captures
+        run: |
+          finder() { defaults write com.apple.finder ShowPathbar -bool "$1"; defaults write com.apple.finder ShowStatusBar -bool "$2"; killall Finder 2>/dev/null; sleep 4; }
+          shoot() {
+            local name="$1" image="$2"
+            echo "=== $name (ShowPathbar=$(defaults read com.apple.finder ShowPathbar) ShowStatusBar=$(defaults read com.apple.finder ShowStatusBar))"
+            scripts/dmg_window_shot.sh "$image" "build/m/$name" 2>&1 | grep -E "window picture|Finder's window|no window" || true
+            if [[ -f build/m/$name/dmg-window-light.png ]]; then
+              python3 -I scripts/dmg_miss_map.py --shot build/m/$name/dmg-window-light.png \
+                --geometry build/m/$name/dmg-window-light.json --picture build/m/$name/picture.png
+            fi
+          }
+          finder false false; shoot plain build/m/image.dmg
+          finder true false;  shoot pathbar build/m/image.dmg
+          finder false true;  shoot statusbar build/m/image.dmg
+          finder true false;  shoot pathbar-hidden-image build/m/hidden.dmg
+          finder false false; shoot plain-hidden-image build/m/hidden.dmg
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dmg-pathbar-${{ matrix.runner }}
+          path: build/m/*/
+          if-no-files-found: ignore
