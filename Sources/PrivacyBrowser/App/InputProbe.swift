@@ -171,7 +171,12 @@ enum InputProbe {
         // process cannot become the active app, and our own window then never gets the click
         // through the window (run 42429698672: no event reached a mobile view's page that way).
         for type in [NSEvent.EventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
-            if let event = mouseEvent(type, at: location, in: window) {
+            // In the window's own coordinates: a Quartz event's place is read against the screen,
+            // and for a window of a process that is not active it landed elsewhere (run 42430991651).
+            if let event = NSEvent.mouseEvent(with: type, location: location, modifierFlags: [],
+                                              timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                              context: nil, eventNumber: 0, clickCount: type == .mouseMoved ? 0 : 1,
+                                              pressure: type == .leftMouseDown ? 1 : 0) {
                 switch type {
                 case .leftMouseDown: webView.mouseDown(with: event)
                 case .leftMouseUp: webView.mouseUp(with: event)
