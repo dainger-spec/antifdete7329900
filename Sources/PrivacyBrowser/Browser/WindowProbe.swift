@@ -25,6 +25,11 @@ enum WindowProbeAction: Codable, Equatable {
     /// presses it, and what came of it, one line each in `detail` (`WindowAudit`). `withoutMenu`:
     /// with the menu bar emptied first, as a process had none before d4cb4ed (0.1.4) — the control.
     case audit(withoutMenu: Bool)
+    /// Taps on the selected tab's page: fields and a button laid over it, each pressed with the
+    /// mouse at its middle — the events handed straight to the web view, in the window's
+    /// coordinates (a runner's process cannot be the active app, run 42429698672) — and what the
+    /// page heard, as JSON in `detail` (`TapProbe`).
+    case tap
 }
 
 struct WindowLook: Codable, Equatable {
@@ -110,6 +115,12 @@ enum WindowProbe {
                 look.detail = await WindowAudit.run(window, controller: controller, withoutMenu: withoutMenu,
                                                     addressField: addressField(in: window))
                 look.found = true
+            }
+        case .tap:
+            look.action = "tap"
+            if let window, let webView = controller?.selectedTab?.webView {
+                look.detail = await TapProbe.run(webView, in: window)
+                look.found = !look.detail.isEmpty
             }
         case .search(let text):
             look.action = "search"
