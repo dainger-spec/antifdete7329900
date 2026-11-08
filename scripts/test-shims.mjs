@@ -419,12 +419,31 @@ test('macOS profile: navigator, screen and window keep their native values', () 
   assert.equal(run(w, `Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform').get.toString().includes("illegal(this, Navigator)")`), true);
 });
 
-test('an iPhone or iPad view replaces no navigator, screen or window value: it is Safari on the Mac', () => {
-  // Only the User-Agent (WebKit's own) and the window's size (the app's) differ; the script has no
-  // device values to give, and nothing in it touches the touch points, the platform or the screen.
+test('a profile without the full phone disguise replaces no navigator, screen or window value', () => {
+  // A Mac profile, the iPad view, and an iPhone view that leaves no script's trace (engineOnly):
+  // the script has no phone to give, and touches none of the touch points, the platform or the screen.
   const w = makeWindow(everything);
   assert.equal(run(w, surface), JSON.stringify(['MacIntel', 0, 8, 'en-US', ['en-US'], 'undefined', 1728, 1117, 1728, 1079, 2, 1200, 820]));
-  assert.doesNotMatch(body, /maxTouchPoints|standalone|availWidth|devicePixelRatio/);
+  assert.equal(run(w, `'orientation' in window`), false);
+});
+
+const phone = { platform: 'iPhone', width: 402, height: 874, maxTouchPoints: 5 };
+test('an iPhone view with the full disguise: the phone in the navigator, the screen and the window, through accessors as the engine makes them', () => {
+  const w = makeWindow({ ...everything, safariObject: false, phone });
+  // The pixel density is WebKit's own (PhoneEngine), not the script's: the realm's 2 stays.
+  assert.equal(run(w, surface), JSON.stringify(['iPhone', 5, 8, 'en-US', ['en-US'], 'undefined', 402, 874, 402, 874, 2, 402, 874]));
+  for (const [proto, name] of [['Navigator.prototype', 'platform'], ['Navigator.prototype', 'maxTouchPoints'], ['Screen.prototype', 'width'],
+                               ['Screen.prototype', 'availHeight']]) {
+    assert.equal(run(w, `Object.getOwnPropertyDescriptor(${proto}, '${name}').get.toString()`), nativeText(name), `${proto}.${name}`);
+    assert.equal(run(w, `Object.getOwnPropertyNames(Object.getOwnPropertyDescriptor(${proto}, '${name}').get).join()`), 'length,name');
+  }
+  // The engine's receiver check is kept: the wrong receiver throws the engine's error.
+  assert.equal(run(w, `try { Object.getOwnPropertyDescriptor(Navigator.prototype, 'maxTouchPoints').get.call({}); 'no error' } catch (e) { e.message }`),
+               'illegal invocation');
+  assert.equal(run(w, `Object.getOwnPropertyDescriptor(window, 'outerWidth').get.toString()`), nativeText('outerWidth'));
+  // Held upright, as iOS says: window.orientation 0, with its event handler.
+  assert.equal(run(w, `[window.orientation, 'onorientationchange' in window, Object.getOwnPropertyDescriptor(window, 'orientation').get.toString()].join('|')`),
+               `0|true|${nativeText('orientation')}`);
 });
 
 test('no rendering patches: canvas, audio and fonts stay native', () => {

@@ -2613,11 +2613,12 @@ final class SelfTest {
              "webkitObject", "webdriver", "doNotTrack"].contains(key) || key.hasPrefix("webgl.")
                 || (key.hasPrefix("features.") && key != "features.safari") // window.safari is added on purpose (macOS)
         }.sorted()
-        for generationID in [DeviceGenerations.defaultID, "ios-26"] {
+        // An iPhone view twice: with the full disguise (the default) and leaving no script's trace.
+        for (generationID, disguise) in [(DeviceGenerations.defaultID, PhoneDisguise.full), ("ios-26", .full), ("ios-26", .engineOnly)] {
             // WebRTC left as the engine has it: its removal (the default policy) is checked by the
             // shim checks and would otherwise be the one deliberate difference here.
             let profile = try repository.create(name: "Surface \(generationID)", configuration: ProfileConfiguration(
-                webRTCPolicy: .unrestricted, ephemeral: true, deviceGenerationID: generationID))
+                webRTCPolicy: .unrestricted, ephemeral: true, deviceGenerationID: generationID, phoneDisguise: disguise))
             let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
             let tabConfiguration = session.makeWebViewConfiguration()
             check("surface (\(generationID)): user-installed fonts hidden from pages, as in Safari",
@@ -2658,35 +2659,55 @@ final class SelfTest {
             session.shutDown()
             try repository.delete(profile.id)
 
-            let name = generationID == DeviceGenerations.defaultID ? "macOS" : "iPhone view"
-            writeSurface(probed, name: generationID == DeviceGenerations.defaultID ? "macos" : "iphone")
+            let isPhone = generationID != DeviceGenerations.defaultID
+            let fullPhone = isPhone && disguise == .full
+            let name = !isPhone ? "macOS" : fullPhone ? "iPhone view" : "iPhone view, no script's trace"
+            writeSurface(probed, name: !isPhone ? "macos" : fullPhone ? "iphone" : "iphone-engine")
             // An iPhone view turns on what an iPhone's Safari has and a web view lacks (Apple Pay)
             // and off what it has not (Notification), with WebKit's own switches (`PhoneEngine`):
             // those are checked below, not against the plain web view.
+            // The full disguise's own (touch, orientation) are checked below as an iPhone's.
             let phoneKeys: (String) -> Bool = { key in
                 ["ApplePay", "Payment", "MerchantValidation", "Notification"].contains { key.contains($0) }
+                    || (fullPhone && ["touch", "Touch", "orientation"].contains { key.contains($0) })
             }
             let compared = generationID == DeviceGenerations.defaultID ? engineKeys : engineKeys.filter { !phoneKeys($0) }
             let differing = compared.filter { string(probed, $0) != string(reference, $0) }
             check("surface (\(name)): engine and hardware signals as in a plain web view (\(compared.count) keys)",
                   differing.isEmpty, differing.map { "\($0): \(string(probed, $0)) vs \(string(reference, $0))" }.joined(separator: "; "))
-            if generationID != DeviceGenerations.defaultID {
-                // What WebKit answers as an iPhone (the owner's iPhone, 8 November), not a script.
-                check("surface (iPhone view): navigator.platform is an iPhone's, the engine's own getter",
+            if isPhone {
+                // What WebKit answers as an iPhone (the owner's iPhone, 8 November), not a script:
+                // in both disguises.
+                check("surface (\(name)): navigator.platform is an iPhone's, the engine's own getter",
                       // The getter as a plain web view prints its own (the probe's "native-text" is built from
                       // the function's name, which for a getter is "get platform": never a getter's text).
                       string(probed, "platform") == "iPhone"
                         && string(probed, "natives.Navigator.platform getter") == string(reference, "natives.Navigator.platform getter"),
                       "\(string(probed, "platform")); getter \(string(probed, "natives.Navigator.platform getter")) vs "
                         + string(reference, "natives.Navigator.platform getter"))
-                check("surface (iPhone view): a frame loaded by its own navigation says the iPhone's platform, and the page lives",
+                check("surface (\(name)): a frame loaded by its own navigation says the iPhone's platform, and the page lives",
                       framePlatform == "iPhone", framePlatform)
-                check("surface (iPhone view): devicePixelRatio is an iPhone's 3",
+                check("surface (\(name)): devicePixelRatio is an iPhone's 3",
                       string(probed, "screen").hasSuffix("x3"), string(probed, "screen"))
-                check("surface (iPhone view): ApplePaySession is there, as in an iPhone's Safari",
+                check("surface (\(name)): ApplePaySession is there, as in an iPhone's Safari",
                       string(probed, "features.ApplePaySession") == "function", string(probed, "features.ApplePaySession"))
-                check("surface (iPhone view): no Notification, as in an iPhone's Safari outside a home-screen web app",
+                check("surface (\(name)): no Notification, as in an iPhone's Safari outside a home-screen web app",
                       string(probed, "features.Notification") == "undefined", string(probed, "features.Notification"))
+            }
+            if fullPhone {
+                // The full disguise's script: the owner's iPhone's screen (402×874, the window as
+                // large), five touch points, touch events, a coarse pointer without hover — each
+                // accessor printed as the engine prints its own.
+                let phoneValues: [(String, String)] = [("maxTouchPoints", "5"), ("screen", "402x874x402x874x3"),
+                                                        ("pointer", "false,false,true"), ("touch", "true,function,function")]
+                for (key, wanted) in phoneValues {
+                    check("surface (\(name)): \(key) is the iPhone's", string(probed, key) == wanted, "\(string(probed, key)), wanted \(wanted)")
+                }
+                for native in ["Navigator.maxTouchPoints getter", "Screen.width getter", "window.outerWidth getter"] {
+                    check("surface (\(name)): \(native) reads as the engine's own (as a plain web view prints it)",
+                          string(probed, "natives.\(native)") == string(reference, "natives.\(native)"),
+                          "\(string(probed, "natives.\(native)")) vs \(string(reference, "natives.\(native)"))")
+                }
             }
             // The shim adds no noise and no visible wrappers: toString, length and own properties
             // of the rendering functions are the engine's own.
@@ -2724,9 +2745,10 @@ final class SelfTest {
             // The rest of what a page measures of this Mac: the iPhone view's platform and pixel
             // density are the phone's (above), and the rest of its screen and touch come with the
             // full disguise's script (not yet).
+            let phoneOwn = fullPhone ? ["platform", "screen", "maxTouchPoints", "pointer", "touch"] : isPhone ? ["platform", "screen"] : []
             let nativeKeys = ["platform", "maxTouchPoints", "hardwareConcurrency", "screen", "standalone", "pointer", "touch",
                               "timeZone", "tzOffset", "dateString"]
-                .filter { generationID == DeviceGenerations.defaultID || !["platform", "screen"].contains($0) }
+                .filter { !phoneOwn.contains($0) }
             for key in nativeKeys {
                 check("surface (\(name)): native \(key)", string(probed, key) == string(reference, key),
                       "\(string(probed, key)) vs \(string(reference, key))")
