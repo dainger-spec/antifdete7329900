@@ -23,7 +23,9 @@ In the simulator each proxy also opens its upstream connections from an address 
 Every check prints PASS, FAIL, LEAK, INFO or INCONCLUSIVE. The exit code is 0 only when every core
 check passed. --break makes the app misconfigure on purpose, to show the checks can fail:
   noproxy — sessions A and B get no proxy at all;  swap — A gets B's proxy and B gets A's;
-  sharestore — A and B share one data store (the isolation check must fail).
+  sharestore — A and B share one data store (the isolation check must fail);
+  failover — the dead proxy and the one that dies mid-session get allowFailover = true: falling back
+  to a direct connection is switched on, and the fail-closed checks must see it (LEAK).
 """
 import argparse
 import asyncio
@@ -759,7 +761,8 @@ async def scenario_q1(capture):
         return capture.seen(address + ".") if capturing else None
 
     dead = {"type": "http", "host": ARGS.proxy_host, "port": ARGS.port_dead}
-    await APP.cmd("session", session="D", store=stores["D"], proxies=[dict(dead, allowFailover=False)])
+    fallback = ARGS.brk == "failover"   # the red run: falling back to direct switched on
+    await APP.cmd("session", session="D", store=stores["D"], proxies=[dict(dead, allowFailover=fallback)])
     await APP.cmd("session", session="E", store=stores["E"], proxies=[dead])
     t0 = time.time()
     rd = await APP.cmd("load", session="D", url=f"http://{NET_D}:{hp}/fo?sid=D", timeout=25)
@@ -769,14 +772,14 @@ async def scenario_q1(capture):
     e_rows = site_events(lambda e: e["path"] == "/fo" and e["query"].get("sid") == "E")
     d_direct, e_direct = direct_attempts(NET_D), direct_attempts(NET_E)
     check("q1.dead-proxy-failover-off", ("PASS" if not d_rows and not d_direct else "LEAK") if capturing else "INCONCLUSIVE",
-          f"proxy port with nothing on it, allowFailover=false: load ok={rd.get('ok')} ({rd.get('error')}); the site saw "
+          f"proxy port with nothing on it, allowFailover={str(fallback).lower()}: load ok={rd.get('ok')} ({rd.get('error')}); the site saw "
           f"{[(e['via'], e['peer']) for e in d_rows]}; direct packets to {NET_D}: {len(d_direct or [])} {(d_direct or [])[:1]}",
           core=capturing)
     check("q1.dead-proxy-failover-default", ("LEAK" if e_rows or e_direct else "PASS") if capturing else "INCONCLUSIVE",
           f"same, allowFailover at its default ({info.get('proxyConfigurationDefaultAllowFailover')}): load ok={re_.get('ok')}; "
           f"the site saw {[(e['via'], e['peer']) for e in e_rows]}; direct packets: {len(e_direct or [])}")
     await APP.cmd("session", session="F", store=stores["F"],
-                  proxies=[{"type": "http", "host": ARGS.proxy_host, "port": ARGS.port_f, "allowFailover": False}])
+                  proxies=[{"type": "http", "host": ARGS.proxy_host, "port": ARGS.port_f, "allowFailover": fallback}])
     r1 = await APP.cmd("load", session="F", url=f"http://{NET_F}:{hp}/whoami?sid=F&k=before", timeout=25)
     await kill_proxy("F", SERVERS["F"])
     t3 = time.time()
@@ -790,7 +793,7 @@ async def scenario_q1(capture):
     check("q1.proxy-dies-mid-session",
           ("PASS" if ok_before and not f_rows and not f_direct else ("LEAK" if f_rows or f_direct else "INCONCLUSIVE"))
           if capturing else "INCONCLUSIVE",
-          f"through F first: ok={r1.get('ok')} via {[e['via'] for e in before]}; F stopped with its connections; next load "
+          f"allowFailover={str(fallback).lower()}; through F first: ok={r1.get('ok')} via {[e['via'] for e in before]}; F stopped with its connections; next load "
           f"ok={r2.get('ok')} ({r2.get('error')}), a fetch {r3.get('value')}; the site saw {[(e['via'], e['peer']) for e in f_rows]}; "
           f"direct packets to {NET_F}: {len(f_direct or [])} {(f_direct or [])[:1]}", core=capturing)
 
@@ -920,7 +923,7 @@ async def main():
     global ARGS
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--scenario", default="q1")
-    parser.add_argument("--brk", choices=["none", "noproxy", "swap", "sharestore"], default="none")
+    parser.add_argument("--brk", choices=["none", "noproxy", "swap", "sharestore", "failover"], default="none")
     parser.add_argument("--out", default="out")
     parser.add_argument("--listen", default="127.0.0.1", help="0.0.0.0 for a real iPhone")
     parser.add_argument("--proxy-host", default="127.0.0.1", help="the proxies' address as the app sees it")

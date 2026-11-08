@@ -5,7 +5,8 @@
 #
 #   ios-measure/run_sim.sh <out-dir> [scenario] [runtimes]
 #
-# scenario: q1 (default) — red runs first (noproxy, swap, sharestore: each must FAIL), then green.
+# scenario: q1 (default) — red runs first (noproxy, swap, sharestore, failover: each must FAIL; failover
+#           only counts if the dead-proxy check itself saw the direct connection), then green.
 #           Any other value is a module under ios-measure/host (q2, q3): green only.
 # runtimes: "newest" (default), "all", or a comma list of versions (27.1,18.6).
 set -uo pipefail
@@ -102,6 +103,14 @@ run_mode() { # udid version mode [label]
     grep -E "^(PASS|FAIL|LEAK|INFO|INCONCLUSIVE|SUMMARY)" "$dir/harness.txt" | cut -c1-400 | sed "s/^/[iOS $version $mode] /" | tee -a "$LOG"
     if [[ "$mode" == "none" ]]; then
         [[ $code -eq 0 ]] && say "GREEN iOS $version: every core check passed" || { say "NOT GREEN iOS $version (exit $code)"; STATUS=1; }
+    elif [[ "$mode" == "failover" ]]; then
+        # Falling back to direct switched on: it counts only if the dead-proxy check itself saw it.
+        if grep -q "^LEAK *q1.dead-proxy-failover-off" "$dir/harness.txt"; then
+            say "RED OK iOS $version failover: with allowFailover = true the dead-proxy check saw the direct connection" \
+                "(dying proxy: $(grep -o -m1 '^[A-Z]* *q1.proxy-dies-mid-session' "$dir/harness.txt" | cut -d' ' -f1))"
+        else
+            say "RED DID NOT FAIL iOS $version failover: $(grep -m1 'q1.dead-proxy-failover-off' "$dir/harness.txt" | cut -c1-300)"; STATUS=1
+        fi
     else
         [[ $code -ne 0 ]] && say "RED OK iOS $version $mode: the checks failed on the broken setup, as they must" \
                           || { say "RED DID NOT FAIL iOS $version $mode: the checks cannot tell"; STATUS=1; }
@@ -131,7 +140,7 @@ else:
         say "install failed on iOS $VERSION (the build's minimum is above this runtime?)"
     else
         if [[ "$SCENARIO" == "q1" && $FIRST -eq 1 ]]; then
-            for mode in noproxy swap sharestore; do run_mode "$UDID" "$VERSION" "$mode"; done
+            for mode in noproxy swap sharestore failover; do run_mode "$UDID" "$VERSION" "$mode"; done
         fi
         run_mode "$UDID" "$VERSION" none
         if [[ "$SCENARIO" == "q3" && -d "$BUILD/bound/LumenMeasure.app" ]] && xcrun simctl install "$UDID" "$BUILD/bound/LumenMeasure.app" >>"$LOG" 2>&1; then
