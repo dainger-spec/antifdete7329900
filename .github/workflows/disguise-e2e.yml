@@ -31,6 +31,17 @@ jobs:
           python3 scripts/input_check.py --app build/unsandboxed/Lumen.app --out build/input \
             --profiles mobile,mobile-engine,mac \
             --sites 'pb-test:touch,https://www.tiktok.com/,https://www.google.com/search?q=lumen,https://m.youtube.com/'
+      - name: What crashed (crash reports of the app's and WebKit's processes)
+        if: always()
+        run: |
+          mkdir -p build/input/crashes
+          shopt -s nullglob
+          for report in ~/Library/Logs/DiagnosticReports/*Lumen*.ips ~/Library/Logs/DiagnosticReports/*com.apple.WebKit*.ips \
+                        /Library/Logs/DiagnosticReports/*Lumen*.ips /Library/Logs/DiagnosticReports/*com.apple.WebKit*.ips; do
+            cp "$report" build/input/crashes/ 2>/dev/null || sudo cp "$report" build/input/crashes/
+          done
+          sudo chmod -R a+r build/input/crashes 2>/dev/null || true
+          python3 scripts/crash_summary.py build/input/crashes/*.ips | tee build/input/crashes/summary.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
