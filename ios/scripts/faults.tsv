@@ -38,5 +38,6 @@ pathChangeKeepsConnections	ui	LumenUITests/RelayTests/testNetworkChangeClosesCon
 userAgentIgnored	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	iOS 26's Safari
 timeZoneIgnored	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	the time zone of the proxy's country
 noiseUnstable	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	two reads give the same noise
+canvasNoiseLowBit	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	the noised canvas's PNG
 unmaskedReplacement	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	the natives check finds
 settingsNotSaved	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	iOS 26's Safari

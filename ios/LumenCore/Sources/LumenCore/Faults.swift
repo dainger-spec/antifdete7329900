@@ -43,6 +43,7 @@ public enum Fault: String, CaseIterable, Sendable {
     case userAgentIgnored        // the chosen User-Agent is not given to the web view
     case timeZoneIgnored         // the page keeps the device's time zone
     case noiseUnstable           // the canvas noise seed changes on every read
+    case canvasNoiseLowBit       // the canvas noise flips a colour's low bit, which a canvas cannot hold at partial alpha: its PNG reads back otherwise
     case unmaskedReplacement     // one replacement made plainly, as most scripts do: the natives check must see it
 }
 

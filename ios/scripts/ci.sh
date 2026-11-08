@@ -33,6 +33,8 @@ command -v xcodegen >/dev/null || brew install xcodegen >/dev/null 2>&1 || { say
 
 # ---- 0. The page shim is what its sources make (the macOS app's PrivacyScripts + ios/shim/fingerprint.js).
 python3 "$HERE/scripts/build-shim.py" --check | tee -a "$LOG" || { say "page-shim.js is stale"; STATUS=1; }
+# The canvas noise is one a canvas can hold (and its control, the old noise, is not).
+node "$HERE/shim/test-fingerprint.mjs" | tee -a "$LOG"; [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "canvas noise check failed"; STATUS=1; }
 
 # A red run counts only if its test passes without the fault: a test that fails anyway proves nothing
 # by failing with it (CI run 5: most reds "failed" where the green run failed too). Reds are therefore

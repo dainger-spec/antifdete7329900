@@ -19,6 +19,8 @@ final class SettingsTests: LumenUITestCase {
         XCTAssertTrue(ua.contains("Version/") && ua.hasSuffix("Safari/604.1"), "a new session reads as Safari: \(ua)")
         let realCanvas = pageLine("canvas: ")
         let realAudio = pageLine("audio: ")
+        XCTAssertEqual(pageLine("png: "), "png: 0", "the canvas's PNG drawn back reads as getImageData (nothing replaced)")
+        XCTAssertEqual(pageLine("pngbytes: "), "pngbytes: 0", "the canvas's PNG holds what getImageData reads (nothing replaced)")
         XCTAssertFalse(pageLine("webgl: ").contains("none"), "WebGL is there by default")
         XCTAssertEqual(pageLine("lies: "), "lies: 0", "the natives check finds nothing (nothing replaced yet)")
 
@@ -44,6 +46,10 @@ final class SettingsTests: LumenUITestCase {
         let noised = pageLine("canvas: ")
         XCTAssertNotEqual(noised.replacingOccurrences(of: "canvas: ", with: ""), realCanvas.replacingOccurrences(of: "canvas: ", with: ""), "the canvas is noised")
         XCTAssertEqual(pageLine("canvas2: ").replacingOccurrences(of: "canvas2: ", with: ""), noised.replacingOccurrences(of: "canvas: ", with: ""), "two reads give the same noise")
+        // The noise is one the canvas can hold: its PNG reads back as getImageData, as a native one does
+        // (the owner's iPhone, 8 November: 18 bytes apart with a noise that flipped a colour's low bit).
+        XCTAssertEqual(pageLine("png: "), "png: 0", "the noised canvas's PNG drawn back reads as getImageData")
+        XCTAssertEqual(pageLine("pngbytes: "), "pngbytes: 0", "the noised canvas's PNG holds what getImageData reads")
         XCTAssertEqual(pageLine("webgl: "), "webgl: none", "WebGL is off")
         XCTAssertNotEqual(pageLine("audio: "), realAudio, "the audio is noised")
         XCTAssertEqual(pageLine("lies: "), "lies: 0", "the natives check finds none of the replacements")

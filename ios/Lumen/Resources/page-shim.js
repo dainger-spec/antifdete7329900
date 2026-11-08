@@ -991,10 +991,40 @@ function fpMix(seed, index, value) {
   return h >>> 0;
 }
 
-// Only partly transparent pixels (antialiased edges of text and shapes) are touched, and the noise
-// is idempotent: what decides a pixel ignores the bit that is set. Solid fills and opaque patterns
-// stay exact (measured: 0 bytes changed).
+// WebKit on Apple platforms keeps a 2D canvas premultiplied and converts with Accelerate
+// (PixelBufferConversion.cpp: vImagePremultiplyData / vImageUnpremultiplyData_RGBA8888).
+// Measured (claude/measure-canvas-browser, run 42520097316): the engine's own put/get of all
+// 65,536 (value, alpha) pairs gives exactly these, macOS 26.7.2 and 27.0.1; on macOS 26.7.2 the
+// PNG drawn back differed from getImageData in 15–26 bytes with the noise before (its own bytes
+// in 95–129), in 0 with this one, as with none.
+const fpPremul = (v, a) => ((v * a + 127) / 255) | 0;
+const fpUnpremul = (p, a) => ((Math.min(p, a) * 255 + (a >> 1)) / a) | 0;
+
+// Only partly transparent pixels (antialiased edges of text and shapes) are touched, and only their
+// coverage: the seed and the pixel's alpha without its low bit decide whether that bit is set; the
+// colour is then what the canvas would hold at the new alpha, as the engine rounds it. So every
+// value is one getImageData can return, the PNG made from it reads back the same (a flipped colour
+// bit at partial alpha did not survive premultiplication: 18 bytes apart on the owner's iPhone,
+// ios-measure/canvas-alpha on claude/ios-app-measure), noising again changes nothing, black and
+// white stay black and white, and a pixel's noise does not depend on where it is read from.
+// Solid fills and opaque patterns stay exact.
 function fpNoisePixels(data, seed) {
+  for (let i = 0; i < data.length; i += 4) {
+    const a = data[i + 3];
+    if (a === 0 || a === 255) continue;
+    const h = fpMix(seed, 0, a >> 1);
+    if (h % 5 !== 0) continue;
+    const b = (a & 0xfe) | ((h >>> 16) & 1);
+    if (b === a || b === 0 || b === 255) continue;
+    for (let k = i; k < i + 3; k++) data[k] = fpUnpremul(fpPremul(data[k], b), b);
+    data[i + 3] = b;
+  }
+  return data;
+}
+
+// The noise before 8 November, kept only for the fault canvasNoiseLowBit (the red run): a colour's
+// low bit flipped at its place, which a premultiplied canvas cannot hold at partial alpha.
+function fpNoisePixelsLowBit(data, seed) {
   for (let i = 0; i < data.length; i += 4) {
     const a = data[i + 3];
     if (a === 0 || a === 255) continue;
@@ -1059,7 +1089,8 @@ function patchFingerprint(w, fp) {
       return copy;
     } catch (e) { return null; }
   };
-  const noiseFill = (data) => fpNoisePixels(data, fp.unstable ? (seed ^ Math.floor(Math.random() * 0xffffffff)) >>> 0 : seed);
+  const noisePixels = fp.lowBit ? fpNoisePixelsLowBit : fpNoisePixels;
+  const noiseFill = (data) => noisePixels(data, fp.unstable ? (seed ^ Math.floor(Math.random() * 0xffffffff)) >>> 0 : seed);
 
   // Canvas: what a page reads back of a 2D canvas.
   if (fp.canvas === 'noise' || fp.canvas === 'off') {

@@ -111,6 +111,34 @@ const draw = () => { const c = document.createElement('canvas'); c.width = 240; 
   draw(); // the first drawing after a launch can differ while fonts load (measured): read the ones after
   show('canvas', 'canvas: ' + fnv(draw().toDataURL()));
   show('canvas2', 'canvas2: ' + fnv(draw().toDataURL()));
+  // getImageData against the canvas's PNG: drawn back into a canvas (png:, the stand q2's
+  // dataURLvsImageData) and the PNG's own bytes, inflated here (pngbytes:). A native canvas gives 0
+  // for both; a noise the canvas cannot hold gives more (18 and ~100 bytes, ios-measure/canvas-alpha).
+  try {
+    const pc = draw(); const read = pc.getContext('2d').getImageData(0, 0, 240, 60).data; const url = pc.toDataURL();
+    const img = new Image(); img.src = url; await img.decode();
+    const back = document.createElement('canvas'); back.width = 240; back.height = 60; const bx = back.getContext('2d'); bx.drawImage(img, 0, 0);
+    const drawn = bx.getImageData(0, 0, 240, 60).data; let png = 0; for (let i = 0; i < drawn.length; i++) if (drawn[i] !== read[i]) png++;
+    show('png', 'png: ' + png);
+    const bin = atob(url.split(',')[1]); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const u32 = (o) => ((bytes[o] << 24) | (bytes[o + 1] << 16) | (bytes[o + 2] << 8) | bytes[o + 3]) >>> 0;
+    let pos = 8, width = 0, height = 0, colour = 0, depth = 0; const idat = [];
+    while (pos < bytes.length) { const len = u32(pos), kind = String.fromCharCode(...bytes.subarray(pos + 4, pos + 8));
+      if (kind === 'IHDR') { width = u32(pos + 8); height = u32(pos + 12); depth = bytes[pos + 16]; colour = bytes[pos + 17]; }
+      if (kind === 'IDAT') idat.push(bytes.subarray(pos + 8, pos + 8 + len)); pos += 12 + len; }
+    if (depth !== 8 || colour !== 6) show('pngbytes', 'pngbytes: PNG depth ' + depth + ' colour type ' + colour);
+    else {
+      const raw = new Uint8Array(await new Response(new Blob(idat).stream().pipeThrough(new DecompressionStream('deflate'))).arrayBuffer());
+      const stride = width * 4; const out = new Uint8Array(stride * height); let prev = new Uint8Array(stride);
+      for (let y = 0; y < height; y++) { const f = raw[y * (stride + 1)]; const line = raw.slice(y * (stride + 1) + 1, (y + 1) * (stride + 1));
+        for (let i = 0; i < stride; i++) { const l = i >= 4 ? line[i - 4] : 0, u = prev[i], c = i >= 4 ? prev[i - 4] : 0;
+          const p = l + u - c, pa = Math.abs(p - l), pb = Math.abs(p - u), pc2 = Math.abs(p - c);
+          line[i] = (line[i] + (f === 1 ? l : f === 2 ? u : f === 3 ? (l + u) >> 1 : f === 4 ? (pa <= pb && pa <= pc2 ? l : pb <= pc2 ? u : c) : 0)) & 255; }
+        out.set(line, y * stride); prev = line; }
+      let differ = 0; for (let i = 0; i < out.length; i++) if (out[i] !== read[i]) differ++;
+      show('pngbytes', 'pngbytes: ' + differ);
+    }
+  } catch (e) { show('png', 'png: error ' + e.message); show('pngbytes', 'pngbytes: error'); }
   const gl = document.createElement('canvas').getContext('webgl');
   if (!gl) show('webgl', 'webgl: none');
   else { const e = gl.getExtension('WEBGL_debug_renderer_info'); show('webgl', 'webgl: ' + (e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : 'yes')); }
@@ -243,7 +271,7 @@ async def site(reader, writer, scheme="http"):
                 out = reply("200 OK", page("whoami", f"<h1>Адрес</h1><p id=ip>ip: {peer[0]}</p><p id=via>via: {name}</p>"
                                                      f"<p>at: {html.escape(target)}{direct}</p>"), extra=["Cache-Control: no-store"])
             elif path == "/env":
-                lines = "".join(f"<p id={i}>{i}: …</p>" for i in ("ua", "tz", "lang", "canvas", "canvas2", "webgl", "audio", "lies"))
+                lines = "".join(f"<p id={i}>{i}: …</p>" for i in ("ua", "tz", "lang", "canvas", "canvas2", "png", "pngbytes", "webgl", "audio", "lies"))
                 ENV_COUNTER[0] += 1
                 served = (f"<p>server ua: {header(headers, 'User-Agent')}</p><p>server lang: {header(headers, 'Accept-Language')}</p>"
                           f"<p>at: {html.escape(target)}</p><p>load: {ENV_COUNTER[0]}</p>")

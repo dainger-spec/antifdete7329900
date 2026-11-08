@@ -23,6 +23,7 @@ enum PageSettings {
             var language: String?
             var unstable: Bool
             var naive: Bool
+            var lowBit: Bool
         }
         var timeZone: String?
         var geolocation = Geolocation()
@@ -56,7 +57,8 @@ enum PageSettings {
             webRTC: proxy == nil ? "unrestricted" : "disabled",
             fingerprint: .init(seed: settings.noiseSeed, canvas: settings.canvas.rawValue, webgl: settings.webGL.rawValue,
                                audio: settings.audio.rawValue, language: locale.language,
-                               unstable: Faults.isActive(.noiseUnstable), naive: Faults.isActive(.unmaskedReplacement)))
+                               unstable: Faults.isActive(.noiseUnstable), naive: Faults.isActive(.unmaskedReplacement),
+                               lowBit: Faults.isActive(.canvasNoiseLowBit)))
     }
 
     static func script(for session: Session, proxy: ProxyEntry?) -> WKUserScript {
