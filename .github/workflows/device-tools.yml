@@ -121,14 +121,21 @@ jobs:
             python3 ios-measure/control_stub.py 28310 30 >"$dir/stub.txt" &
             local stub=$!; sleep 1
             SIMCTL_CHILD_LUMEN_CONTROL="http://$LAN:28310" xcrun simctl launch "$udid" io.lumenbrowser.measure >/dev/null
-            wait $stub
+            # The status is read while the stand-in still answers (run 6: read after it had stopped, it
+            # rightly said "no connection").
+            sleep 20
             local data; data="$(xcrun simctl get_app_container "$udid" io.lumenbrowser.measure data)"
-            cat "$dir/stub.txt"; echo "status file: $(tr '\n' '|' <"$data/Documents/control-status.txt" 2>/dev/null || echo none)"
+            local status; status="$(tr '\n' '|' <"$data/Documents/control-status.txt" 2>/dev/null || echo none)"
+            wait $stub
+            cat "$dir/stub.txt"; echo "status file: $status"
             xcrun simctl terminate "$udid" io.lumenbrowser.measure >/dev/null 2>&1
           }
           echo "== ATS red: the old Info.plist (no NSAllowsLocalNetworking), this driver"
           out="$(trial atsred old/ios-measure/app/Info.plist ios-measure/app/Driver.swift)"; echo "$out"
-          if echo "$out" | grep -q "hello: yes"; then echo "RED DID NOT FAIL: the old Info.plist got through (ATS does not stop it on the simulator)"; else echo "RED OK: the old Info.plist does not get through"; fi
+          # Run 6: on the simulator App Transport Security lets the old Info.plist through to this Mac's
+          # address; on the owner's iPhone it did not (silent until NSAllowsLocalNetworking was added by
+          # hand; the second run, with it in the repository, called in at once). Said here, not failed.
+          if echo "$out" | grep -q "hello: yes"; then echo "INFO: on the simulator ATS does not stop the old Info.plist — the ATS fix is measured on the iPhone only"; else echo "RED OK: the old Info.plist does not get through"; fi
           echo "== status red: this Info.plist, the old driver (it has no status screen)"
           out="$(trial statusred ios-measure/app/Info.plist old/ios-measure/app/Driver.swift)"; echo "$out"
           if echo "$out" | grep -q "status file: none"; then echo "RED OK: the old driver shows nothing"; else echo "RED DID NOT FAIL: the old driver wrote a status"; fi
