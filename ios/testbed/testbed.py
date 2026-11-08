@@ -17,6 +17,12 @@ this Mac, so a test sees on the screen what the pages say about how they were re
   proxy A   HTTP, Basic auth ua:pa, port 28381, exits from 127.0.0.2 (Germany in /geo.json)
   proxy B   SOCKS5, user/password ub:pb, port 28382, exits from 127.0.0.3 (USA in /geo.json); refuses UDP
   proxy C   SOCKS5, user/password uc:pc, port 28383, relays UDP (UDP ASSOCIATE)
+  proxy D   HTTP, Basic auth ud:pd, port 28384; /__proxy?name=D&state=off stops it (and its open
+            connections), state=on starts it again. Nothing listens on 28389 and 28390 (dead proxies).
+  DNS       UDP 127.0.0.1:28353 answers *.lumentest with 127.0.0.1 for this Mac's own resolver
+            (/etc/resolver/lumentest, set up by ci.sh): a page that goes around its proxy then
+            reaches the site directly, and says "via: напрямую"
+  /__seen?token=T  how many site requests (by Host) and DNS questions this testbed got with T in them
   STUN      UDP 127.0.0.1:3478 (stun.lumentest through a proxy), answers Binding requests
   /__events everything the site and the proxies saw, as JSON (for the tests' own bookkeeping)
 
@@ -165,12 +171,23 @@ async def site(reader, writer, scheme="http"):
             CACHE_COUNTER[0] += 1
             out = reply("200 OK", f"window.lumenCache = {CACHE_COUNTER[0]};", "text/javascript",
                         ["Cache-Control: public, max-age=3600"])
+        elif path == "/__proxy":
+            on = query.get("state") == "on"
+            await switch(query.get("name", ""), on)
+            out = reply("200 OK", page("proxy", f"<p>proxy {html.escape(query.get('name', ''))}: {'on' if on else 'off'}</p>"
+                                                f"<p>at: {html.escape(target)}</p>"), extra=["Cache-Control: no-store"])
+        elif path == "/__seen":
+            token = query.get("token", "")
+            hits = sum(1 for e in EVENTS if e["kind"] == "site" and token and token in (e.get("host") or ""))
+            asked = sum(1 for e in EVENTS if e["kind"] == "dns" and token and token in e.get("name", ""))
+            out = reply("200 OK", page("seen", f"<p>site {html.escape(token)}: {hits}</p><p>dns {html.escape(token)}: {asked}</p>"
+                                               f"<p>at: {html.escape(target)}</p>"), extra=["Cache-Control: no-store"])
         elif path == "/served":
             SERVED_COUNTER[0] += 1
             out = reply("200 OK", page("served", f"<h1>Счётчик</h1><p id=n>served: {SERVED_COUNTER[0]}</p>"),
                         extra=["Cache-Control: no-store"])
         elif path == "/whoami":
-            name = {"A": "прокси A", "B": "прокси B"}.get(via, "напрямую")
+            name = {"A": "прокси A", "B": "прокси B", "D": "прокси D"}.get(via, "напрямую")
             out = reply("200 OK", page("whoami", f"<h1>Адрес</h1><p id=ip>ip: {peer[0]}</p><p id=via>via: {name}</p>"
                                                  f"<p>at: {html.escape(target)}</p>"), extra=["Cache-Control: no-store"])
         elif path == "/env":
@@ -283,6 +300,62 @@ class UDPRelay(asyncio.DatagramProtocol):
             self.transport.sendto(header + data, self.client)
 
 
+class LumentestDNS(asyncio.DatagramProtocol):
+    """*.lumentest for this Mac's own resolver: A 127.0.0.1, nothing else. Every question is an event."""
+    def connection_made(self, transport):
+        self.transport = transport
+
+    def datagram_received(self, data, addr):
+        try:
+            tid = struct.unpack(">H", data[:2])[0]
+            i, labels = 12, []
+            while data[i] != 0:
+                n = data[i]
+                labels.append(data[i + 1:i + 1 + n].decode("latin-1"))
+                i += 1 + n
+            i += 1
+            qtype = struct.unpack(">H", data[i:i + 2])[0]
+            question = data[12:i + 4]
+        except Exception:
+            return
+        name = ".".join(labels).lower()
+        event("dns", name=name, qtype=qtype)
+        ours = name == "lumentest" or name.endswith(".lumentest")
+        answer = b""
+        if ours and qtype == 1:
+            answer = b"\xc0\x0c" + struct.pack(">HHIH", 1, 1, 5, 4) + socket.inet_aton("127.0.0.1")
+        flags = 0x8580 if ours else 0x8583          # an answer, authoritative; NXDOMAIN for other names
+        self.transport.sendto(struct.pack(">HHHHHH", tid, flags, 1, 1 if answer else 0, 0, 0) + question + answer, addr)
+
+
+SWITCHABLE = {}   # name -> {"port", "handler", "server", "conns"}: proxies a test can stop and start
+
+
+def switchable(name, port, handler):
+    SWITCHABLE[name] = {"port": port, "handler": handler, "server": None, "conns": set()}
+
+
+async def switch(name, on):
+    entry = SWITCHABLE.get(name)
+    if not entry:
+        return
+    if on and entry["server"] is None:
+        async def handle(reader, writer):
+            entry["conns"].add(writer)
+            try:
+                await entry["handler"](reader, writer)
+            finally:
+                entry["conns"].discard(writer)
+        entry["server"] = await asyncio.start_server(handle, "127.0.0.1", entry["port"])
+        event("switch", proxy=name, state="on")
+    elif not on and entry["server"] is not None:
+        entry["server"].close()           # no new connections: the port refuses
+        for writer in list(entry["conns"]):
+            writer.close()                # and the open ones (a kept tunnel) end with it
+        entry["server"] = None
+        event("switch", proxy=name, state="off")
+
+
 class Stun(asyncio.DatagramProtocol):
     def connection_made(self, transport):
         self.transport = transport
@@ -362,7 +435,10 @@ async def main():
     await asyncio.start_server(http_proxy("A", "ua:pa", "127.0.0.2"), "127.0.0.1", 28381)
     await asyncio.start_server(socks_proxy("B", "ub:pb", "127.0.0.3"), "127.0.0.1", 28382)
     await asyncio.start_server(socks_proxy("C", "uc:pc", "", udp=True), "127.0.0.1", 28383)
+    switchable("D", 28384, http_proxy("D", "ud:pd", ""))
+    await switch("D", True)
     await asyncio.get_running_loop().create_datagram_endpoint(Stun, local_addr=("127.0.0.1", 3478))
+    await asyncio.get_running_loop().create_datagram_endpoint(LumentestDNS, local_addr=("127.0.0.1", 28353))
     print("testbed up: site 28380, proxy A (HTTP) 28381, proxy B (SOCKS5) 28382", flush=True)
     try:
         while True:

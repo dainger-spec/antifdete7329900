@@ -107,6 +107,11 @@ final class AppModel: ObservableObject {
             let result = await ProxyChecker.check(entry, password: ProxyPasswords.get(id))
             checking.remove(id)
             guard let index = proxies.firstIndex(where: { $0.id == id }) else { return }
+            if Faults.isActive(.recheckDropsProxy), proxies[index].check?.alive == true, !result.alive {
+                // The planted fault: a proxy found dead is taken off its sessions, which then go direct.
+                for session in sessions where session.proxyID == id { catalog.setProxy(session.id, proxyID: nil) }
+                refresh()
+            }
             proxies[index].check = result
             store.saveProxies(proxies)
             refreshRuntimes()

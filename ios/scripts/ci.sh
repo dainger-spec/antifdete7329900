@@ -61,14 +61,19 @@ for r in rs:
 UDID="$(xcrun simctl create "Lumen CI" "$TYPE" "$RUNTIME_ID")" || { say "cannot create a simulator"; exit 2; }
 xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b >/dev/null 2>&1
 say "== simulator $UDID: $TYPE, iOS $RUNTIME_VERSION"
-trap 'xcrun simctl shutdown "$UDID" >/dev/null 2>&1; xcrun simctl delete "$UDID" >/dev/null 2>&1; [[ -n "${TESTBED:-}" ]] && kill "$TESTBED" 2>/dev/null' EXIT
+trap 'xcrun simctl shutdown "$UDID" >/dev/null 2>&1; xcrun simctl delete "$UDID" >/dev/null 2>&1; [[ -n "${TESTBED:-}" ]] && kill "$TESTBED" 2>/dev/null; sudo -n rm -f /etc/resolver/lumentest 2>/dev/null' EXIT
 
-# ---- 3. The testbed on this Mac: pages, proxies, a geolocation service (steps 2 and 3 use it).
+# ---- 3. The testbed on this Mac: pages, proxies, a geolocation service, and a DNS server that
+# answers *.lumentest for this Mac's own resolver too — so a page that goes around its proxy loads
+# directly and says so (the dead-proxy test), instead of failing unseen at DNS.
 if [[ -f "$HERE/testbed/testbed.py" ]]; then
     for a in 127.0.0.2 127.0.0.3; do sudo -n ifconfig lo0 alias "$a" up 2>/dev/null || true; done
     python3 "$HERE/testbed/testbed.py" --out "$OUT/testbed" >"$OUT/testbed.txt" 2>&1 &
     TESTBED=$!
+    sudo -n mkdir -p /etc/resolver && printf 'nameserver 127.0.0.1\nport 28353\n' | sudo -n tee /etc/resolver/lumentest >/dev/null \
+        || say "cannot write /etc/resolver/lumentest (sudo?)"
     sleep 2
+    say "this Mac resolves resolver-check.lumentest to: $(dscacheutil -q host -a name resolver-check.lumentest | awk '/ip_address/ {print $2}' | head -1)"
 fi
 
 # ---- 4. Build once, then the end-to-end tests: reds, then green.

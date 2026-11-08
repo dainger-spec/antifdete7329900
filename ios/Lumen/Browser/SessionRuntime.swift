@@ -114,11 +114,20 @@ final class SessionRuntime: ObservableObject {
     /// request goes through the new proxy (measured on iOS 18.6–27.2: no new web view needed).
     private func applyProxy() {
         guard !Faults.isActive(.proxyNotApplied) else { return }
+        var proxy = self.proxy
+        if let entry = proxy, entry.check?.alive == false,
+           Faults.isActive(entry.kind == .http ? .deadHTTPDropped : .deadSOCKSDropped) {
+            proxy = nil   // the planted fault: a proxy known to be dead is left off
+        }
         let password = proxy.flatMap { ProxyPasswords.get($0.id) }
         let key = proxy.map { "\($0.kind.rawValue)://\($0.username):\(password ?? "")@\($0.host):\($0.port)" } ?? "direct"
         guard key != appliedProxy else { return }
         if appliedProxy != nil, Faults.isActive(.proxyChangeNotLive) { return }
-        dataStore.proxyConfigurations = proxy.map { ProxyFactory.make($0, password: password) } ?? []
+        var configurations = proxy.map { ProxyFactory.make($0, password: password) } ?? []
+        if Faults.isActive(.failoverOn) {   // the planted fault: the system may fall back to direct
+            for index in configurations.indices { configurations[index].allowFailover = true }
+        }
+        dataStore.proxyConfigurations = configurations
         appliedProxy = key
         if let rules = ContentRules.proxied {
             for tab in tabs {

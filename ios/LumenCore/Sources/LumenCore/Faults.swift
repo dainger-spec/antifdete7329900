@@ -23,6 +23,11 @@ public enum Fault: String, CaseIterable, Sendable {
     case proxyNotApplied         // a session's proxy is never given to its data store
     case proxyChangeNotLive      // a new proxy takes effect only after a relaunch
     case proxyPasswordNotSaved   // the password is not kept
+    // A dead proxy: the most dangerous breakage is a session quietly going direct
+    case deadHTTPDropped         // an HTTP proxy whose check failed is left off: its session goes direct
+    case deadSOCKSDropped        // the same for a SOCKS5 proxy
+    case recheckDropsProxy       // a re-check that finds a proxy dead takes it off its sessions
+    case failoverOn              // a session's proxy with allowFailover = true: the system may fall back to direct
     // Session settings
     case settingsNotSaved        // a session's settings are not written
     case userAgentIgnored        // the chosen User-Agent is not given to the web view
