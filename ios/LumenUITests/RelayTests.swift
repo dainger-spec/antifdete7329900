@@ -96,23 +96,23 @@ final class RelayTests: LumenUITestCase {
         page("via: прокси B")
         let first = relayPort()
 
-        // The relay dies for 25 s; a page asked for meanwhile goes nowhere.
+        // The relay dies for 40 s; a page asked for meanwhile goes nowhere.
         app.buttons["debugRelayDeath"].tap()
         go("http://deadrelay-\(run).lumentest:28380/whoami?t=deadrelay")
         assertNothingLoaded("deadrelay")
         shot("42 the relay is dead: nothing loads")
         // Back, on a new port: through the proxy again.
-        let second = relayPort(other: first, timeout: 40)
+        let second = relayPort(other: first, timeout: 55)
         openPage("http://relay-\(run).lumentest:28380/whoami?t=back")
         page("via: прокси B")
 
-        // The relay starts again, its listener down for 25 s (the data store given a port nothing
+        // The relay starts again, its listener down for 40 s (the data store given a port nothing
         // answers on); a page asked for meanwhile goes nowhere either.
         app.buttons["debugRelayRestart"].tap()
         wait(app.staticTexts.matching(NSPredicate(format: "label == %@", "relay down")).firstMatch, "the session says its relay is down")
         go("http://gap-\(run).lumentest:28380/whoami?t=gap")
         assertNothingLoaded("gap")
-        _ = relayPort(other: second, timeout: 40)
+        _ = relayPort(other: second, timeout: 55)
         openPage("http://relay-\(run).lumentest:28380/whoami?t=after")
         page("via: прокси B")
         shot("43 the relay is back: through the proxy")
@@ -141,20 +141,18 @@ final class RelayTests: LumenUITestCase {
         openSession("Сеть")
         chooseProxy("Нью-Йорк", in: "Сеть")
         let token = "net-\(run)"
-        openPage("http://\(token).lumentest:28380/whoami?t=before")
+        // A connection that stays open (a WebSocket, as real sites keep): made before the change, it
+        // must not live on after it. (CI run 20: an idle keep-alive one closed by itself, either way.)
+        openPage("http://\(token).lumentest:28380/hold?t=before")
         page("via: прокси B")
-        // The site keeps the connection that page came on open (keep-alive, as real sites do).
-        openPage("http://site.lumentest:28380/__seen?token=\(token)&when=before")
-        XCTAssertNotEqual(pageLine("open \(token): "), "open \(token): 0", "the testbed sees the connection the page came on, still open")
+        page("ws: open")
         app.buttons["debugNetworkChange"].tap()
-        sleep(2)
-        openPage("http://site.lumentest:28380/__seen?token=\(token)&when=after")
-        XCTAssertEqual(pageLine("open \(token): "), "open \(token): 0", "a network change closes the connections made before it")
+        assertWebSocketClosed("a network change closes the connections made before it (a WebSocket)")
         openPage("http://\(token).lumentest:28380/whoami?t=after")
         page("via: прокси B")
         openPage("http://site.lumentest:28380/__seen?token=\(token)&when=last")
         let route = pageLine("route \(token): ")
-        XCTAssertTrue(route.contains("direct=0 ") && route.contains("B=2 "), "both pages went through the proxy, none directly: \(route)")
+        XCTAssertTrue(route.contains("direct=0 ") && !route.contains("B=0 "), "every request went through the proxy, none directly: \(route)")
         shot("44 after a network change: through the proxy")
     }
 

@@ -203,10 +203,27 @@ class LumenUITestCase: XCTestCase {
     /// "via: напрямую" (what a page that went around its proxy shows here).
     func assertNothingLoaded(_ name: String, file: StaticString = #filePath, line: UInt = #line) {
         sleep(8)
-        let direct = app.webViews.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "напрямую")).firstMatch
-        XCTAssertFalse(direct.exists, "\(name): the page did not go direct", file: file, line: line)
-        let shown = app.webViews.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "?t=\(name)")).firstMatch
-        XCTAssertFalse(shown.exists, "\(name): the page did not load (\(shown.exists ? shown.label : ""))", file: file, line: line)
+        XCTAssertNil(webText("напрямую"), "\(name): the page did not go direct", file: file, line: line)
+        let shown = webText("?t=\(name)")
+        XCTAssertNil(shown, "\(name): the page did not load (\(shown ?? ""))", file: file, line: line)
+    }
+
+    /// The page's text that contains `fragment`, by either query: WebKit puts a paragraph's text on the
+    /// element itself or on a child (CI run 20: "via: напрямую" on the screen, and `containing` alone
+    /// did not find it, while it found the "at:" line of the same page).
+    func webText(_ fragment: String) -> String? {
+        let predicate = NSPredicate(format: "label CONTAINS %@", fragment)
+        let own = app.webViews.staticTexts.matching(predicate).firstMatch
+        if own.exists { return own.label }
+        let inner = app.webViews.staticTexts.containing(predicate).firstMatch
+        return inner.exists ? inner.label : nil
+    }
+
+    /// The /hold page's WebSocket was closed (within 10 s).
+    func assertWebSocketClosed(_ what: String, file: StaticString = #filePath, line: UInt = #line) {
+        let deadline = Date().addingTimeInterval(10)
+        while webText("ws: closed") == nil && Date() < deadline { Thread.sleep(forTimeInterval: 0.5) }
+        XCTAssertNotNil(webText("ws: closed"), "\(what): the page still says \(webText("ws: ") ?? "nothing")", file: file, line: line)
     }
 
     // MARK: Proxies
@@ -296,16 +313,11 @@ class LumenUITestCase: XCTestCase {
     func createSession(name: String, notes: String = "", tags: String = "") {
         app.buttons["newSession"].tap()
         let nameField = wait(app.textFields["sessionName"], "the new session form opens")
-        nameField.tap()
-        nameField.typeText(name)
-        if !notes.isEmpty {
-            app.textFields["sessionNotes"].tap()
-            app.textFields["sessionNotes"].typeText(notes)
-        }
-        if !tags.isEmpty {
-            app.textFields["sessionTags"].tap()
-            app.textFields["sessionTags"].typeText(tags)
-        }
+        // Typed once the field has the keyboard (CI run 20: "Neither element nor any descendant has
+        // keyboard focus" typing the name right after the touch).
+        typeInto(nameField, name)
+        if !notes.isEmpty { typeInto(app.textFields["sessionNotes"], notes) }
+        if !tags.isEmpty { typeInto(app.textFields["sessionTags"], tags) }
         app.buttons["saveSession"].tap()
         wait(sessionCard(name), "the card of \(name) is in the list")
     }

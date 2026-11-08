@@ -34,8 +34,14 @@ final class ProxyTests: LumenUITestCase {
         openSession("Счета")
         openPage("http://pre-\(run).lumentest:28380/whoami?before=proxy")
         page("via: напрямую")
+        // A connection that stays open, as a site's WebSocket does: the proxy change must close it, or
+        // it goes on the old way. (An idle keep-alive connection WebKit may or may not keep — CI run 20:
+        // with the change leaving connections open, the next page happened to take a new one.)
+        openPage("http://hold-\(run).lumentest:28380/hold?before=proxy")
+        page("ws: open")
         chooseProxy("Берлин", in: "Счета")
-        assertTabKept("/whoami?before=proxy")
+        assertTabKept("/hold?before=proxy")
+        assertWebSocketClosed("the proxy change closed the connection opened before it (a WebSocket)")
         // The same site again — the page a person refreshes after setting a proxy — through A.
         openPage("http://pre-\(run).lumentest:28380/whoami?again=1")
         page("via: прокси A")

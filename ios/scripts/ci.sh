@@ -179,7 +179,10 @@ while IFS=$'\t' read -r fault kind test expect; do
     class="$(echo "$test" | cut -d/ -f2)"; in_suite "$class" || continue
     if run_ui "red-$fault" "$fault" "-only-testing:$test"; then
         say "RED DID NOT FAIL ui $fault: $test passed with the fault"; STATUS=1
-    elif grep -q -E "crashed|Lost connection to the application|Failed to get matching snapshots|Failed to launch|does not have a process ID|is not running|Failed to terminate|Unable to monitor" "$OUT/red-$fault.txt"; then
+    elif grep -q -E "crashed|Lost connection to the application|Failed to get matching snapshots|Failed to launch|does not have a process ID|is not running|Failed to terminate" "$OUT/red-$fault.txt"; then
+        # Not "Unable to monitor animations": XCTest prints it right after a test's own relaunch
+        # terminates the app (CI run 20, reloadIgnored: the red failed in its own check, and was
+        # counted invalid for those lines). A crash or a lost app says so in the words above.
         # A crash fails every test whatever the fault: it proves nothing about the check.
         say "RED INVALID ui $fault: the app crashed or was lost, not the check — $(grep -m1 -E 'crashed|Lost connection|Failed to' "$OUT/red-$fault.txt" | sed 's/.*error: //' | cut -c1-160)"; STATUS=1
     else

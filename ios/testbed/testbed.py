@@ -14,6 +14,9 @@ this Mac, so a test sees on the screen what the pages say about how they were re
                            language, canvas (two reads), WebGL, audio, and the natives check
                            (scripts/test-shims.mjs's probeLies) over every function the app may replace
             /geo.json      a geolocation service: the country and time zone of the proxy it came through
+            /hold          a page that keeps a WebSocket to /ws open and says so ("ws: open", then
+                           "ws: closed" once anything closes it), and which proxy it came through
+            /ws            a WebSocket that stays open, saying nothing, until its client goes
   proxy A   HTTP, Basic auth ua:pa, port 28381, exits from 127.0.0.2 (Germany in /geo.json)
   proxy B   SOCKS5, user/password ub:pb, port 28382, exits from 127.0.0.3 (USA in /geo.json); refuses UDP
   proxy C   SOCKS5, user/password uc:pc, port 28383, relays UDP (UDP ASSOCIATE)
@@ -36,6 +39,7 @@ this Mac, so a test sees on the screen what the pages say about how they were re
 import argparse
 import asyncio
 import base64
+import hashlib
 import html
 import json
 import os
@@ -177,6 +181,17 @@ async def site(reader, writer, scheme="http"):
             event("site", path=url.path, query=query, host=header(headers, "Host"), peer=peer[0], via=via,
                   cookie=header(headers, "Cookie"), ua=header(headers, "User-Agent"), lang=header(headers, "Accept-Language"))
             path = url.path
+            if path == "/ws" and (header(headers, "Upgrade") or "").lower() == "websocket":
+                # A connection that stays open for as long as the client keeps it: what a proxy change
+                # or a network change must close (an idle keep-alive one WebKit may close by itself).
+                accept = base64.b64encode(hashlib.sha1(((header(headers, "Sec-WebSocket-Key") or "")
+                                                         + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
+                writer.write(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                              f"Sec-WebSocket-Accept: {accept}\r\n\r\n").encode())
+                await writer.drain()
+                while await reader.read(4096):
+                    pass
+                break
             if path.startswith("/page/"):
                 name = urllib.parse.unquote(path[len("/page/"):]) or "page"
                 out = reply("200 OK", page(name, f"<h1>Страница {name}</h1><p><a id=next href='/page/{name}-next'>Дальше</a></p>"))
@@ -210,6 +225,15 @@ async def site(reader, writer, scheme="http"):
             elif path == "/served":
                 SERVED_COUNTER[0] += 1
                 out = reply("200 OK", page("served", f"<h1>Счётчик</h1><p id=n>served: {SERVED_COUNTER[0]}</p>"),
+                            extra=["Cache-Control: no-store"])
+            elif path == "/hold":
+                name = {"A": "прокси A", "B": "прокси B", "D": "прокси D"}.get(via, "напрямую")
+                out = reply("200 OK", page("hold", f"<h1>Держит</h1><p id=via>via: {name}</p><p id=ws>ws: …</p>"
+                                                   f"<p>at: {html.escape(target)}</p>",
+                                           "const w = document.getElementById('ws');"
+                                           "const s = new WebSocket('ws://' + location.host + '/ws');"
+                                           "s.onopen = () => { w.textContent = 'ws: open'; };"
+                                           "s.onclose = () => { w.textContent = 'ws: closed'; };"),
                             extra=["Cache-Control: no-store"])
             elif path == "/whoami":
                 name = {"A": "прокси A", "B": "прокси B", "D": "прокси D"}.get(via, "напрямую")

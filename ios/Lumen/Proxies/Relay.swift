@@ -205,9 +205,9 @@ final class Relay: @unchecked Sendable {
     enum Drill {
         /// A change of network, as NWPathMonitor reports one (a simulator never switches).
         case networkChange
-        /// The relay dies for 25 s: its listener gone, the data store still pointing at its port.
+        /// The relay dies for 40 s: its listener gone, the data store still pointing at its port.
         case death
-        /// The relay starts again with its listener down for 25 s, the data store told (as after the
+        /// The relay starts again with its listener down for 40 s, the data store told (as after the
         /// system stopped the listener of a suspended app).
         case restart
     }
@@ -222,9 +222,9 @@ final class Relay: @unchecked Sendable {
                 self.listener?.cancel()
                 self.listener = nil
                 self.closeAll()
-                self.queue.asyncAfter(deadline: .now() + 25) { self.listen() }
+                self.queue.asyncAfter(deadline: .now() + 40) { self.listen() }
             case .restart:
-                self.restartListener(after: 25)
+                self.restartListener(after: 40)
             }
         }
     }
