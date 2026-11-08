@@ -167,15 +167,24 @@ enum InputProbe {
             say(number, ["step": "click", "site": address, "index": index, "error": "no place in the window for the point"])
             return false
         }
+        // Straight to the web view, as AppKit hands a click to the view under it: a runner's
+        // process cannot become the active app, and our own window then never gets the click
+        // through the window (run 42429698672: no event reached a mobile view's page that way).
         for type in [NSEvent.EventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
-            if let event = mouseEvent(type, at: location, in: window) { window.sendEvent(event) }
+            if let event = mouseEvent(type, at: location, in: window) {
+                switch type {
+                case .leftMouseDown: webView.mouseDown(with: event)
+                case .leftMouseUp: webView.mouseUp(with: event)
+                default: webView.mouseMoved(with: event)
+                }
+            }
             try? await Task.sleep(nanoseconds: type == .leftMouseDown ? 90_000_000 : 40_000_000)
         }
         try? await Task.sleep(nanoseconds: 2_000_000_000)
         let read = await script("return JSON.stringify(window.__pbRead())", in: webView, world: .page) as? String
         let after = webView.url?.absoluteString ?? ""
         var fields: [String: Any] = ["step": "click", "site": address, "index": index, "target": armed["target"] ?? NSNull(),
-                                     "point": [Int(x), Int(y)], "urlBefore": short(before), "urlAfter": short(after),
+                                     "point": [Int(x), Int(y)], "delivery": "to the web view", "urlBefore": short(before), "urlAfter": short(after),
                                      "isLoading": webView.isLoading]
         if let read, let data = read.data(using: .utf8), let got = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
             for (key, value) in got { fields[key] = value }
