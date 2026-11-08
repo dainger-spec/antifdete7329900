@@ -69,7 +69,8 @@ enum InputCheck {
         for kind in kinds {
             let configuration = ProfileConfiguration(startURL: URL(string: "about:blank"), proxy: nil,
                                                      deviceGenerationID: kind.hasPrefix("mobile") ? mobileID : DeviceGenerations.defaultID,
-                                                     matchProxyLocation: false)
+                                                     matchProxyLocation: false,
+                                                     phoneDisguise: kind == "mobile-engine" ? .engineOnly : .full)
             do {
                 profiles.append((kind, try repository.create(name: kind.hasPrefix("mobile") ? "Mobile view" : "Mac", configuration: configuration).id))
             } catch {
