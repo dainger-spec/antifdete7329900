@@ -19,6 +19,9 @@ say "== $(sw_vers -productName) $(sw_vers -productVersion), $(xcodebuild -versio
 command -v xcodegen >/dev/null || brew install xcodegen >/dev/null 2>&1 || { say "no xcodegen"; exit 2; }
 (cd "$HERE" && xcodegen generate --quiet) || { say "xcodegen failed"; exit 2; }
 
+# ---- 0. The page shim is what its sources make (the macOS app's PrivacyScripts + ios/shim/fingerprint.js).
+python3 "$HERE/scripts/build-shim.py" --check | tee -a "$LOG" || { say "page-shim.js is stale"; STATUS=1; }
+
 # ---- 1. The core (swift test): reds, then green.
 CORE="$HERE/LumenCore"
 swift build --package-path "$CORE" --build-tests >"$OUT/core-build.txt" 2>&1 || { tail -40 "$OUT/core-build.txt"; say "CORE BUILD FAILED"; exit 2; }

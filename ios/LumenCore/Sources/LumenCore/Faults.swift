@@ -24,7 +24,8 @@ public enum Fault: String, CaseIterable, Sendable {
     case settingsNotSaved        // a session's settings are not written
     case userAgentIgnored        // the chosen User-Agent is not given to the web view
     case timeZoneIgnored         // the page keeps the device's time zone
-    case noiseUnstable           // the canvas noise seed changes on every page
+    case noiseUnstable           // the canvas noise seed changes on every read
+    case unmaskedReplacement     // one replacement made plainly, as most scripts do: the natives check must see it
 }
 
 public enum Faults {

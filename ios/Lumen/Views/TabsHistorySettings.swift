@@ -103,14 +103,58 @@ struct HistoryView: View {
     }
 }
 
-/// A session's settings: its proxy and its search engine. Every change is saved and applied at once.
+/// A session's settings: proxy, User-Agent, time zone and language, canvas/WebGL/audio, search engine.
+/// Every change is saved and reaches the open tabs at once (from their next page on).
 struct SessionSettingsView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
     let sessionID: UUID
     @State private var settings = SessionSettings()
     @State private var proxyID: UUID?
+    @State private var customUserAgent = ""
     @State private var loaded = false
+
+    private var userAgentTag: Binding<String> {
+        Binding(get: {
+            switch settings.userAgent {
+            case .thisDevice: return "device"
+            case let .preset(id): return id
+            case .custom: return "custom"
+            }
+        }, set: { tag in
+            switch tag {
+            case "device": settings.userAgent = .thisDevice
+            case "custom": settings.userAgent = .custom(customUserAgent)
+            default: settings.userAgent = .preset(tag)
+            }
+        })
+    }
+
+    private var localeTag: Binding<String> {
+        Binding(get: { if case .device = settings.locale { return "device" } else { return "proxy" } },
+                set: { settings.locale = $0 == "device" ? .device : .proxyCountry })
+    }
+
+    private var localeSummary: String {
+        guard let session = model.session(sessionID) else { return "" }
+        var current = session
+        current.settings = settings
+        let locale = PageSettings.locale(of: current, proxy: model.proxy(proxyID))
+        if locale.timeZone == nil && locale.language == nil {
+            return settings.locale == .device ? "Как у устройства" : "Нет проверенного прокси: как у устройства"
+        }
+        return [locale.timeZone, locale.language].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private func modePicker(_ title: String, _ value: Binding<FingerprintMode>, id: String) -> some View {
+        Picker(title, selection: value) {
+            Text("Выкл").tag(FingerprintMode.off)
+            Text("Настоящий").tag(FingerprintMode.real)
+            Text("Шум").tag(FingerprintMode.noise)
+        }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier(id)
+    }
 
     var body: some View {
         NavigationStack {
@@ -125,6 +169,41 @@ struct SessionSettingsView: View {
                     .pickerStyle(.inline)
                     .labelsHidden()
                     .accessibilityIdentifier("proxyPicker")
+                }
+                Section("Браузер (строка User-Agent)") {
+                    Picker("Строка браузера", selection: userAgentTag) {
+                        Text("Как Safari этого iPhone").tag("device")
+                        ForEach(UserAgentPreset.all) { preset in Text(preset.title).tag(preset.id) }
+                        Text("Своя").tag("custom")
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                    .accessibilityIdentifier("userAgentPicker")
+                    if case .custom = settings.userAgent {
+                        TextField("Своя строка", text: $customUserAgent)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .onSubmit { settings.userAgent = .custom(customUserAgent) }
+                            .onChange(of: customUserAgent) { _, text in settings.userAgent = .custom(text) }
+                            .accessibilityIdentifier("customUA")
+                    }
+                }
+                Section {
+                    Picker("Часовой пояс и язык", selection: localeTag) {
+                        Text("По стране прокси").tag("proxy")
+                        Text("Как у устройства").tag("device")
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("localeMode")
+                    Text(localeSummary).font(.footnote).foregroundStyle(.secondary).accessibilityIdentifier("localeSummary")
+                } header: {
+                    Text("Часовой пояс и язык")
+                } footer: {
+                    Text("Язык страницы меняется только в navigator.language: заголовок Accept-Language WebKit на iPhone задаёт один на всё приложение.")
+                }
+                Section("Отпечаток") {
+                    modePicker("Канвас", $settings.canvas, id: "canvasMode")
+                    modePicker("WebGL", $settings.webGL, id: "webglMode")
+                    modePicker("Звук", $settings.audio, id: "audioMode")
                 }
                 Section("Поисковик") {
                     Picker("Поисковик", selection: $settings.searchEngine) {
@@ -146,6 +225,7 @@ struct SessionSettingsView: View {
                 if let session = model.session(sessionID) {
                     settings = session.settings
                     proxyID = session.proxyID
+                    if case let .custom(text) = session.settings.userAgent { customUserAgent = text }
                 }
                 loaded = true
             }
