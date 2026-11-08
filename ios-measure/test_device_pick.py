@@ -34,10 +34,13 @@ def check(what, ok):
     failures += 0 if ok else 1
 
 
+# The owner's list on 8 November (devices.json of their q1-q3 runs), field by field, identifiers
+# replaced: simulators are "simulated", paired, tunnel "disconnected", transport "sameMachine".
 owner = {"result": {"devices": [
-    device("Profile 18", "virtual", tunnel="connected", transport="-", udid="A1B2C3D4-0000-0000-0000-000000000018"),
-    device("Profile 27", "virtual", tunnel="disconnected", transport="-", udid="A1B2C3D4-0000-0000-0000-000000000027"),
-    device("iPhone владельца", "physical"),
+    device("Profile 18", "simulated", tunnel="disconnected", transport="sameMachine", udid="A1B2C3D4-0000-0000-0000-000000000018", devmode=None),
+    device("Profile 24", "simulated", tunnel="disconnected", transport="sameMachine", udid="A1B2C3D4-0000-0000-0000-000000000024", devmode=None),
+    device("iPad Pro 13-inch (M5)", "simulated", tunnel="disconnected", transport="sameMachine", udid="A1B2C3D4-0000-0000-0000-0000000000AD", devmode=None),
+    device("iPhone владельца", "physical", devmode="enabled"),
 ]}}
 check("the old rule picks the simulator in the owner's case (the bug, reproduced)", old_rule(owner) == "Profile 18")
 picked, problem = pick(owner)
