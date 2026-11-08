@@ -143,7 +143,7 @@ enum PrivacyScripts {
     @MainActor
     static func source(for configuration: ProfileConfiguration) -> String {
         let json = (try? String(data: JSONEncoder().encode(shimConfiguration(for: configuration)), encoding: .utf8)) ?? "{}"
-        return "(function install(CONFIG) {\n" + shimBody + "\n})(" + json + ");"
+        return "(function install(CONFIG) {\n" + MeasureBreak.apply(shimBody) + "\n})(" + json + ");"
     }
 
     static let shimBody = #"""
