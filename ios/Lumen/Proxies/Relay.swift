@@ -2,6 +2,19 @@ import Foundation
 import LumenCore
 import Network
 
+/// What only the end-to-end tests see, in a DEBUG build they start with LUMEN_TEST_HOOKS=1: the
+/// relay's port (so that a test, from its own process, can knock on the relay's door as another app
+/// would). A release build has none.
+enum TestHooks {
+    static let enabled: Bool = {
+        #if DEBUG
+        return ProcessInfo.processInfo.environment["LUMEN_TEST_HOOKS"] == "1"
+        #else
+        return false
+        #endif
+    }()
+}
+
 /// Where a session's connections leave the device.
 enum RelayRoute: Equatable {
     /// Nothing leaves: every connection is refused (until the session's route is set).
@@ -105,8 +118,10 @@ final class Relay: @unchecked Sendable {
     private func listen() {
         guard !stopped, listener == nil else { return }
         let parameters = NWParameters.tcp
-        // 127.0.0.1 only: nothing on a network reaches the relay.
-        parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: .any)
+        // 127.0.0.1 only: nothing on a network reaches the relay. (The planted fault: every interface.)
+        if !Faults.isActive(.relayOnNetwork) {
+            parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: .any)
+        }
         parameters.allowLocalEndpointReuse = true
         let listener: NWListener
         do {
@@ -150,7 +165,7 @@ final class Relay: @unchecked Sendable {
 
     private func accept(_ connection: NWConnection) {
         // From this device only (the listener is on 127.0.0.1; this is the second lock on that door).
-        guard case let .hostPort(host, _) = connection.endpoint, Relay.isLoopback(host) else {
+        guard case let .hostPort(host, _) = connection.endpoint, Relay.isLoopback(host) || Faults.isActive(.relayOnNetwork) else {
             connection.cancel()
             return
         }
@@ -192,6 +207,26 @@ final class Relay: @unchecked Sendable {
         let parameters = NWParameters(tls: nil, tcp: tcp)
         parameters.preferNoProxies = true
         return parameters
+    }
+
+    /// A name's IPv4 address by this device's own resolver. Only the planted fault relayResolvesLocally
+    /// uses it: a proxied session's names are the proxy's to look up.
+    static func lookUp(_ name: String) -> String? {
+        var hints = addrinfo()
+        hints.ai_family = AF_INET
+        hints.ai_socktype = SOCK_STREAM
+        var result: UnsafeMutablePointer<addrinfo>?
+        guard getaddrinfo(name, nil, &hints, &result) == 0, let first = result else { return nil }
+        defer { freeaddrinfo(result) }
+        var text = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+        guard getnameinfo(first.pointee.ai_addr, first.pointee.ai_addrlen, &text, socklen_t(text.count), nil, 0, NI_NUMERICHOST) == 0 else {
+            return nil
+        }
+        return String(cString: text)
+    }
+
+    static func resolvedHere(_ target: RelayTarget) -> RelayTarget {
+        lookUp(target.host).flatMap { RelayTarget(authority: "\($0):\(target.port)") } ?? target
     }
 
     static func describe(_ route: RelayRoute) -> String {
@@ -318,7 +353,8 @@ private final class RelayLink {
         let authorization = lines.dropFirst()
             .first { $0.lowercased().hasPrefix("proxy-authorization:") }
             .map { line in String(line[line.index(after: line.firstIndex(of: ":")!)...]).trimmingCharacters(in: .whitespaces) }
-        guard authorization == relay.expectedAuthorization else {
+        // (The planted fault: the door is open to anyone.)
+        guard authorization == relay.expectedAuthorization || Faults.isActive(.relayOpen) else {
             return refuse("407 Proxy Authentication Required", extra: "Proxy-Authenticate: Basic realm=\"Lumen\"\r\n")
         }
         guard request.count >= 2, request[0] == "CONNECT", let target = RelayTarget(authority: String(request[1])) else {
@@ -347,6 +383,9 @@ private final class RelayLink {
                 self.established(server, early: early, leftover: Data())
             }
         case let .proxy(kind, host, port, username, password):
+            // What the proxy is asked for: the site's name as WebKit gave it. (The planted fault: the
+            // name looked up here, and its address handed on.)
+            let asked = Faults.isActive(.relayResolvesLocally) ? Relay.resolvedHere(target) : target
             dial(host, port) { [weak self] server in
                 guard let self else { return }
                 guard let server else { return self.proxyFailed(target, early: early) }
@@ -360,9 +399,9 @@ private final class RelayLink {
                     self.established(server, early: early, leftover: leftover)
                 }
                 if kind == .socks5 {
-                    self.socks(server, target, username: username, password: password, then: done)
+                    self.socks(server, asked, username: username, password: password, then: done)
                 } else {
-                    self.httpConnect(server, target, username: username, password: password, then: done)
+                    self.httpConnect(server, asked, username: username, password: password, then: done)
                 }
             }
         }

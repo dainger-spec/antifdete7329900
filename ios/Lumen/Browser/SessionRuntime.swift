@@ -44,6 +44,8 @@ final class SessionRuntime: ObservableObject {
     @Published private(set) var tabs: [BrowserTab] = []
     @Published private(set) var selectedID: UUID?
     @Published private(set) var history: [HistoryEntry]
+    /// The port the relay listens on (nil: not listening). Shown only to the tests (TestHooks).
+    @Published private(set) var relayPort: UInt16?
     /// The tabs as they were left are loaded once the relay listens: before that nothing could leave.
     private var tabsRestored = false
     private var foreground: NSObjectProtocol?
@@ -78,6 +80,7 @@ final class SessionRuntime: ObservableObject {
     /// The relay listens on `port` (nil: it stopped, and is starting again): the data store is given
     /// that port — or none, and then nothing leaves until it is back.
     private func relayListens(on port: UInt16?) {
+        relayPort = port
         dataStore.proxyConfigurations = Relay.configurations(port: port, password: relay.password)
         if port != nil && !tabsRestored {
             tabsRestored = true

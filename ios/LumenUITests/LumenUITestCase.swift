@@ -21,6 +21,8 @@ class LumenUITestCase: XCTestCase {
         // The proxy check asks the testbed's geolocation service and STUN server (through the proxy).
         app.launchEnvironment["LUMEN_TEST_GEO_URL"] = "http://geo.lumentest:28380/geo.json"
         app.launchEnvironment["LUMEN_TEST_STUN"] = "stun.lumentest:3478"
+        // The relay's port on the screen (DEBUG builds only), for the relay's own checks.
+        app.launchEnvironment["LUMEN_TEST_HOOKS"] = "1"
         app.launch()
         self.app = app
         XCTAssertTrue(app.navigationBars["Сессии"].waitForExistence(timeout: 30), "the sessions list comes up")

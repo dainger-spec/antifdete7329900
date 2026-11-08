@@ -25,6 +25,11 @@ struct BrowserView: View {
                 BottomBar(tab: tab, tabCount: runtime.tabs.count) { sheet = $0 }
                     .id("bar-\(tab.id)")
             }
+            if TestHooks.enabled, let port = runtime.relayPort {
+                Text(verbatim: "relay \(port)")
+                    .font(.caption2)
+                    .accessibilityIdentifier("debugRelayPort")
+            }
         }
         .navigationTitle(runtime.session.name)
         .navigationBarTitleDisplayMode(.inline)

@@ -109,6 +109,7 @@ trap 'xcrun simctl shutdown "$UDID" >/dev/null 2>&1; xcrun simctl delete "$UDID"
 if [[ -f "$HERE/testbed/testbed.py" ]]; then
     for a in 127.0.0.2 127.0.0.3; do sudo -n ifconfig lo0 alias "$a" up 2>/dev/null || true; done
     LAN="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo 127.0.0.1)"
+    export TEST_RUNNER_LUMEN_LAN="$LAN"   # the relay's check knocks from this Mac's network address too
     python3 "$HERE/testbed/testbed.py" --out "$OUT/testbed" --lan-address "$LAN" >"$OUT/testbed.txt" 2>&1 &
     TESTBED=$!
     sudo -n mkdir -p /etc/resolver && printf 'nameserver 127.0.0.1\nport 28353\n' | sudo -n tee /etc/resolver/lumentest >/dev/null \

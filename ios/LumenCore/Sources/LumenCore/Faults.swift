@@ -31,6 +31,10 @@ public enum Fault: String, CaseIterable, Sendable {
     case deadSOCKSDropped        // the same for a SOCKS5 proxy
     case recheckDropsProxy       // a re-check that finds a proxy dead takes it off its sessions
     case failoverOn              // the relay falls back to a direct connection when the proxy cannot carry one
+    // The relay must not become a new hole
+    case relayOpen               // the relay takes connections without its password: any app on the device can use it
+    case relayOnNetwork          // the relay listens on every interface and takes connections from anywhere
+    case relayResolvesLocally    // the relay looks a site's name up on the device and hands the proxy its address
     // Session settings
     case settingsNotSaved        // a session's settings are not written
     case userAgentIgnored        // the chosen User-Agent is not given to the web view

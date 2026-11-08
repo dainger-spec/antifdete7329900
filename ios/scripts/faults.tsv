@@ -29,6 +29,9 @@ deadHTTPDropped	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect	dead-htt
 deadSOCKSDropped	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect	dead-socks: the page did not go direct
 recheckDropsProxy	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect	rechecked: the page did not go direct
 failoverOn	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect	the page did not go direct
+relayOpen	ui	LumenUITests/RelayTests/testRelayDoorIsShut	another app without its password
+relayOnNetwork	ui	LumenUITests/RelayTests/testRelayDoorIsShut	the relay from a network: nothing answers
+relayResolvesLocally	ui	LumenUITests/RelayTests/testNamesAreNotLookedUpHere	names are not looked up here
 userAgentIgnored	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	iOS 26's Safari
 timeZoneIgnored	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	the time zone of the proxy's country
 noiseUnstable	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	two reads give the same noise
