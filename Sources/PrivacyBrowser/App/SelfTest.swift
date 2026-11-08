@@ -2651,9 +2651,28 @@ final class SelfTest {
 
             let name = generationID == DeviceGenerations.defaultID ? "macOS" : "iPhone view"
             writeSurface(probed, name: generationID == DeviceGenerations.defaultID ? "macos" : "iphone")
-            let differing = engineKeys.filter { string(probed, $0) != string(reference, $0) }
-            check("surface (\(name)): engine and hardware signals as in a plain web view (\(engineKeys.count) keys)",
+            // An iPhone view turns on what an iPhone's Safari has and a web view lacks (Apple Pay)
+            // and off what it has not (Notification), with WebKit's own switches (`PhoneEngine`):
+            // those are checked below, not against the plain web view.
+            let phoneKeys: (String) -> Bool = { key in
+                ["ApplePay", "Payment", "MerchantValidation", "Notification"].contains { key.contains($0) }
+            }
+            let compared = generationID == DeviceGenerations.defaultID ? engineKeys : engineKeys.filter { !phoneKeys($0) }
+            let differing = compared.filter { string(probed, $0) != string(reference, $0) }
+            check("surface (\(name)): engine and hardware signals as in a plain web view (\(compared.count) keys)",
                   differing.isEmpty, differing.map { "\($0): \(string(probed, $0)) vs \(string(reference, $0))" }.joined(separator: "; "))
+            if generationID != DeviceGenerations.defaultID {
+                // What WebKit answers as an iPhone (the owner's iPhone, 8 November), not a script.
+                check("surface (iPhone view): navigator.platform is an iPhone's, the engine's own getter",
+                      string(probed, "platform") == "iPhone" && string(probed, "natives.Navigator.platform getter").hasPrefix("native-text"),
+                      "\(string(probed, "platform")); getter \(string(probed, "natives.Navigator.platform getter"))")
+                check("surface (iPhone view): devicePixelRatio is an iPhone's 3",
+                      string(probed, "screen").hasSuffix("x3"), string(probed, "screen"))
+                check("surface (iPhone view): ApplePaySession is there, as in an iPhone's Safari",
+                      string(probed, "features.ApplePaySession") == "function", string(probed, "features.ApplePaySession"))
+                check("surface (iPhone view): no Notification, as in an iPhone's Safari outside a home-screen web app",
+                      string(probed, "features.Notification") == "undefined", string(probed, "features.Notification"))
+            }
             // The shim adds no noise and no visible wrappers: toString, length and own properties
             // of the rendering functions are the engine's own.
             let renderingNatives = probed.filter { $0.key.hasPrefix("natives.") && ($0.key.contains("Canvas") || $0.key.contains("WebGL")
@@ -2687,8 +2706,13 @@ final class SelfTest {
             // No generation changes what a page measures of this Mac: the touch points, the
             // platform and the screen of a phone, said without touch, broke sites and gave the
             // profile away all the same.
-            for key in ["platform", "maxTouchPoints", "hardwareConcurrency", "screen", "standalone", "pointer", "touch",
-                        "timeZone", "tzOffset", "dateString"] {
+            // The rest of what a page measures of this Mac: the iPhone view's platform and pixel
+            // density are the phone's (above), and the rest of its screen and touch come with the
+            // full disguise's script (not yet).
+            let nativeKeys = ["platform", "maxTouchPoints", "hardwareConcurrency", "screen", "standalone", "pointer", "touch",
+                              "timeZone", "tzOffset", "dateString"]
+                .filter { generationID == DeviceGenerations.defaultID || !["platform", "screen"].contains($0) }
+            for key in nativeKeys {
                 check("surface (\(name)): native \(key)", string(probed, key) == string(reference, key),
                       "\(string(probed, key)) vs \(string(reference, key))")
             }
@@ -5606,11 +5630,11 @@ final class SelfTest {
         setenv("PB_PROFILE_PROCESS", "1", 1)
         let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(10)).lowercased()
 
-        func act(_ manager: ProfileManager, _ id: UUID, _ action: WindowProbeAction) async -> WindowLook {
+        func act(_ manager: ProfileManager, _ id: UUID, _ action: WindowProbeAction, timeout: TimeInterval = 25) async -> WindowLook {
             var look: WindowLook?
             manager.onWindowLook = { _, answer in look = answer }
             guard manager.lookAtWindow(id, action) else { return WindowLook(action: "\(action)", detail: "no process") }
-            _ = await waitUntil(timeout: 25) { look != nil }
+            _ = await waitUntil(timeout: timeout) { look != nil }
             let seen = look ?? WindowLook(action: "\(action)", detail: "no answer")
             info("\(prefix): \(seen.action) → found \(seen.found), tabs \(seen.tabs), selected \(seen.selected), "
                  + "overview \(seen.overviewShown), controls \(seen.controls.filter { $0.hasPrefix("mobile") }.joined(separator: " ")), "
@@ -5640,6 +5664,22 @@ final class SelfTest {
             deviceGenerationID: "ios-27", matchProxyLocation: false, searchEngine: .duckDuckGo), "Phone window")
         defer { try? repository.delete(phoneID) }
         let start = await act(phone, phoneID, .describe)
+        // Every action a person takes in the window (the owner, 8 November: text would not paste in
+        // an iPhone view). The control first: the same keys with the menu bar emptied, as 0.1.4's
+        // process had none — paste must not work there, or the check sees nothing.
+        let bare = await act(phone, phoneID, .audit(withoutMenu: true), timeout: 150)
+        let barePaste = bare.detail.split(separator: "\n").first { $0.hasPrefix("address bar ⌘V") }.map(String.init) ?? "no answer"
+        check("\(prefix) actions: the control — without a menu bar (0.1.4), ⌘V does not paste into the address bar",
+              barePaste.hasSuffix("DOES NOT WORK"), barePaste)
+        let audit = await act(phone, phoneID, .audit(withoutMenu: false), timeout: 150)
+        let auditLines = audit.detail.split(separator: "\n").map(String.init)
+        let judged = auditLines.filter { $0.hasSuffix("— WORKS") || $0.hasSuffix("— DOES NOT WORK") }
+        for line in auditLines where !judged.contains(line) { info("\(prefix) actions: \(line)") }
+        let verdicts = judged.count
+        for line in judged {
+            check("\(prefix) actions: \(String(line.prefix { $0 != ":" }))", line.hasSuffix("— WORKS"), line)
+        }
+        check("\(prefix) actions: the window's actions were all pressed (at least 24 answered)", verdicts >= 24, "\(verdicts) answered")
         let firstPicture = await act(phone, phoneID, .picture)
         if let base64 = firstPicture.picture, let data = Data(base64Encoded: base64),
            let folder = ProcessInfo.processInfo.environment["PB_SELFTEST_SHOTS"] {

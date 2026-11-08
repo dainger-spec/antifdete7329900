@@ -21,6 +21,10 @@ enum WindowProbeAction: Codable, Equatable {
     case dragBottomBar(Double)
     /// A picture of the window's content as it is drawn now (PNG, base64), for a person to look at.
     case picture
+    /// Every editing and browsing action a person takes in a browser window, done as the key
+    /// presses it, and what came of it, one line each in `detail` (`WindowAudit`). `withoutMenu`:
+    /// with the menu bar emptied first, as a process had none before d4cb4ed (0.1.4) — the control.
+    case audit(withoutMenu: Bool)
 }
 
 struct WindowLook: Codable, Equatable {
@@ -99,6 +103,13 @@ enum WindowProbe {
                 view.cacheDisplay(in: view.bounds, to: rep)
                 look.picture = rep.representation(using: .png, properties: [:])?.base64EncodedString()
                 look.found = look.picture != nil
+            }
+        case .audit(let withoutMenu):
+            look.action = "audit" + (withoutMenu ? " without a menu bar" : "")
+            if let window {
+                look.detail = await WindowAudit.run(window, controller: controller, withoutMenu: withoutMenu,
+                                                    addressField: addressField(in: window))
+                look.found = true
             }
         case .search(let text):
             look.action = "search"
