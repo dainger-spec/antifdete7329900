@@ -12,13 +12,19 @@ let base = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "http://
 let application = NSApplication.shared
 application.setActivationPolicy(.regular)
 
+func nameOf(_ service: NSSharingService) -> String {
+    let selector = NSSelectorFromString("name")
+    guard service.responds(to: selector), let value = service.perform(selector)?.takeUnretainedValue() else { return "?" }
+    return String(describing: value)
+}
+
 func wait(_ seconds: Double) async { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
 
 Task { @MainActor in
     print("SHARE macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
     let listed = NSSharingService.sharingServices(forItems: [URL(string: base + "list")!])
     for (index, service) in listed.enumerated() {
-        let name = (service.value(forKey: "name") as? String) ?? "?"
+        let name = nameOf(service)
         print("SHARE service \(index): title \"\(service.title)\", name \(name)")
     }
     // The picker, shown over a window, as a Share button shows it: does it fetch for its header?
@@ -34,7 +40,7 @@ Task { @MainActor in
     await wait(2)
     // Each service performed with the address, as choosing it in the picker performs it.
     for (index, service) in listed.enumerated() {
-        let name = (service.value(forKey: "name") as? String) ?? "?"
+        let name = nameOf(service)
         let item = URL(string: base + "perform/\(index)")!
         let can = service.canPerform(withItems: [item])
         print("SHARE perform \(index) (\(name)): can \(can) — start")
