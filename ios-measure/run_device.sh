@@ -57,6 +57,28 @@ if [[ "$ready" != "yes" ]]; then
 fi
 echo "the iPhone can install and launch apps"
 
+# The iPhone's own packets, DNS included, through the Remote Virtual Interface — before anything slow.
+# The owner's runs (8 November): the first had the iPhone's fake-IP VPN in the chain (198.18.0.1), the
+# second recorded 0 packets on rvi0 (taken for granted, whatever rvictl had made) and still read as
+# passed. Now the interface is read back from `rvictl -l`, and a first look must see the iPhone's
+# packets and no VPN, or the run stops here. NO_CAPTURE=1 runs without it: the checks that need the
+# recording then say NOT MEASURED in the summary.
+CAPTURE=""
+if [[ "${NO_CAPTURE:-}" == "1" ]]; then
+    echo "NO_CAPTURE=1: no recording — DNS and direct connections will be NOT MEASURED"
+elif [[ "$UDID" == "-" ]]; then
+    echo "devicectl gives no hardware UDID for this iPhone, rvictl cannot record it: connect it by cable (or NO_CAPTURE=1)."
+    exit 1
+else
+    echo "sudo: rvictl and tcpdump record the iPhone's packets (after the build, the lo0 aliases too)"
+    CAPTURE="$(sudo python3 "$HERE/capture_look.py" start "$UDID")" || exit 1
+    echo "recording on $CAPTURE. A first look, 30 s: unlock the iPhone and open any page in Safari now."
+    if ! sudo python3 "$HERE/capture_look.py" look "$CAPTURE" 30; then
+        sudo rvictl -x "$UDID" >/dev/null 2>&1 || true
+        exit 1
+    fi
+fi
+
 cd "$HERE/device"
 xcodegen generate --quiet
 xcodebuild -project LumenMeasure.xcodeproj -scheme LumenMeasure -configuration Debug -destination "generic/platform=iOS" \
@@ -71,35 +93,6 @@ xcrun devicectl device install app --device "$CORE" "$APP" >/dev/null && echo "i
 LAN="$(ipconfig getifaddr en0 || ipconfig getifaddr en1)"
 echo "this Mac on the network: $LAN"
 for a in 127.0.0.2 127.0.0.3; do sudo ifconfig lo0 alias "$a" up; done
-# The iPhone's own packets, DNS included, through the Remote Virtual Interface. The owner's second run
-# (8 November): the capture on rvi0 got 0 packets for the whole run — the script took rvi0 for granted,
-# whatever interface rvictl had made. Now an old interface of this iPhone is stopped first, the one
-# rvictl makes is read back from `rvictl -l`, and it must show the iPhone's packets before the run.
-CAPTURE=""
-if [[ "$UDID" != "-" ]]; then
-    sudo rvictl -x "$UDID" >/dev/null 2>&1 || true
-    sudo rvictl -s "$UDID" >"$OUT/rvictl.txt" 2>&1 || true
-    CAPTURE="$(rvictl -l 2>/dev/null | grep -i "$UDID" | grep -o 'rvi[0-9]*' | head -1)"
-    if [[ -n "$CAPTURE" ]]; then
-        seen="$(sudo python3 - "$CAPTURE" <<'PY'
-import subprocess, sys
-try:
-    out = subprocess.run(["/usr/sbin/tcpdump", "-i", sys.argv[1], "-n", "-c", "5"], capture_output=True, text=True, timeout=20).stdout
-except subprocess.TimeoutExpired as e:
-    out = (e.stdout or b"").decode(errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
-print(len([l for l in out.splitlines() if l.strip()]))
-PY
-)"
-        if [[ "${seen:-0}" -gt 0 ]]; then
-            echo "capturing the iPhone's packets on $CAPTURE ($seen seen in a first look)"
-        else
-            echo "THE CAPTURE ON $CAPTURE SEES NOTHING FROM THE iPHONE in 20 s: the DNS and direct-connection checks will say"
-            echo "INCONCLUSIVE. Unlock the iPhone and use it a moment; 'rvictl -l' should list it. ($(tr '\n' ' ' <"$OUT/rvictl.txt"))"
-        fi
-    else
-        echo "rvictl made no interface for this iPhone ($(tr '\n' ' ' <"$OUT/rvictl.txt")): no capture, those checks will say INCONCLUSIVE"
-    fi
-fi
 cat > "$OUT/cert.cnf" <<'CNF'
 [req]
 distinguished_name = dn

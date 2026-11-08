@@ -1116,8 +1116,12 @@ def finish(capture):
         json.dump({"run": ARGS.run, "break": ARGS.brk, "app": APP.info, "checks": CHECKS}, f, indent=1)
     core = [c for c in CHECKS if c["core"]]
     failed = [c["name"] for c in core if c["status"] != "PASS"]
+    # What was not measured is said beside the count, never folded into it: an INCONCLUSIVE check is
+    # not a passed one (the lead, 8 November).
+    unmeasured = [c["name"] for c in CHECKS if c["status"] == "INCONCLUSIVE"]
     print(f"\nSUMMARY scenario={ARGS.scenario} break={ARGS.brk} os={APP.info.get('os')}: "
-          f"{len(core) - len(failed)}/{len(core)} core checks passed" + (f"; failed: {failed}" if failed else ""), flush=True)
+          f"{len(core) - len(failed)}/{len(core)} core checks passed" + (f"; failed: {failed}" if failed else "")
+          + (f"; NOT MEASURED: {unmeasured}" if unmeasured else ""), flush=True)
     for c in CHECKS:
         if c["status"] in ("LEAK",):
             print(f"LEAK-SUMMARY {c['name']}: {c['detail']}")

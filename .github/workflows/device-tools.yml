@@ -15,6 +15,7 @@ on:
       - "ios-measure/run_device.sh"
       - "ios-measure/check_app.py"
       - "ios-measure/ports_free.py"
+      - "ios-measure/capture_look.py"
       - "ios-measure/test_tools.py"
       - "ios-measure/control_stub.py"
       - "ios-measure/build_sim_app.sh"
