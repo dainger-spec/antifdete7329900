@@ -62,6 +62,7 @@ enum PrivacyScripts {
 
     }
 
+    @MainActor
     static func shimConfiguration(for configuration: ProfileConfiguration) -> ShimConfiguration {
         let webRTC: String
         var relay: ShimConfiguration.Relay?
@@ -79,10 +80,13 @@ enum PrivacyScripts {
         case let .fixed(latitude, longitude, accuracy):
             geolocation = .init(mode: "fixed", latitude: latitude, longitude: longitude, accuracy: accuracy)
         }
+        // window.safari: a macOS profile whose named Safari gives one; never an iPhone or iPad view.
+        let namedSafariVersion = HostSafari.version
+        let namedSafariGivesOne = configuration.deviceGeneration.platform == .macOS
+            && SafariVersions.givesWindowSafari(namedSafariVersion)
         return ShimConfiguration(timeZone: configuration.timeZoneIdentifier, geolocation: geolocation,
                                  webRTC: webRTC, webRTCRelay: relay,
-                                 safariObject: configuration.deviceGeneration.platform == .macOS
-                                     && SafariVersions.givesWindowSafari(HostSafari.version),
+                                 safariObject: namedSafariGivesOne,
                                  storageQuota: safariStorageQuota)
     }
 
@@ -105,6 +109,7 @@ enum PrivacyScripts {
         }
     }
 
+    @MainActor
     static func makeUserContentController(for configuration: ProfileConfiguration) -> WKUserContentController {
         let controller = WKUserContentController()
         controller.addUserScript(WKUserScript(source: source(for: configuration),
@@ -114,6 +119,7 @@ enum PrivacyScripts {
         return controller
     }
 
+    @MainActor
     static func source(for configuration: ProfileConfiguration) -> String {
         let json = (try? String(data: JSONEncoder().encode(shimConfiguration(for: configuration)), encoding: .utf8)) ?? "{}"
         return "(function install(CONFIG) {\n" + shimBody + "\n})(" + json + ");"
