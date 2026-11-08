@@ -1,6 +1,7 @@
 import AppKit
 import BrowserCore
 import Combine
+import ObjCExceptions
 import os
 import SwiftUI
 import UniformTypeIdentifiers
@@ -418,7 +419,13 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         let carrier = NSMenuItem()
         carrier.tag = action.rawValue
         if action == .showFindInterface { window?.makeFirstResponder(webView) }
-        webView.performTextFinderAction(carrier)
+        // WebKit raises for some actions with no find bar up (⌘G before ⌘F, hiding a bar never shown);
+        // caught here, where it is called: one that unwound through a Swift task left the main actor's
+        // record pointing into a stack that was gone (CI 758: a crash in the next main-actor check;
+        // CI 761: the task never went on).
+        if let thrown = PBCatchException({ webView.performTextFinderAction(carrier) }) {
+            log.notice("Find action \(action.rawValue, privacy: .public) raised \(thrown.name.rawValue, privacy: .public)")
+        }
     }
 
     /// Safari's zoom steps.

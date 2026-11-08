@@ -1,4 +1,5 @@
 import AppKit
+import ObjCExceptions
 import WebKit
 
 /// What each action a person takes in a browser window does in this profile's window (the owner, 8
@@ -56,15 +57,20 @@ enum WindowAudit {
                                                context: nil, characters: extra.contains(.shift) ? key.uppercased() : key,
                                                charactersIgnoringModifiers: key.lowercased(),
                                                isARepeat: false, keyCode: 0) else { return "\(shown); no event" }
-            var taker: String
-            if NSApp.mainMenu?.performKeyEquivalent(with: event) == true {
-                taker = "taken by the menu bar"
-            } else if window.performKeyEquivalent(with: event) {
-                taker = "taken by a view (\(window.firstResponder.map { String(describing: type(of: $0)) } ?? "-"))"
-            } else {
-                window.firstResponder?.keyDown(with: event)
-                taker = "given to \(window.firstResponder.map { String(describing: type(of: $0)) } ?? "nothing") as a key press"
+            var taker = ""
+            // An exception an action raises is caught here, where the key is pressed: unwound through
+            // this task, it left it never going on (CI 761, ⌘F's find bar hidden when none was shown).
+            let thrown = PBCatchException {
+                if NSApp.mainMenu?.performKeyEquivalent(with: event) == true {
+                    taker = "taken by the menu bar"
+                } else if window.performKeyEquivalent(with: event) {
+                    taker = "taken by a view (\(window.firstResponder.map { String(describing: type(of: $0)) } ?? "-"))"
+                } else {
+                    window.firstResponder?.keyDown(with: event)
+                    taker = "given to \(window.firstResponder.map { String(describing: type(of: $0)) } ?? "nothing") as a key press"
+                }
             }
+            if let thrown { taker += ", raised \(thrown.name.rawValue)" }
             await pause()
             return "\(shown); \(taker)"
         }
@@ -179,7 +185,9 @@ enum WindowAudit {
         say("⌘F (find on the page): \(find) → a find bar in the window: \(findShown ? "yes" : "no") — \(findShown ? "WORKS" : "DOES NOT WORK")")
         let hide = NSMenuItem()
         hide.tag = NSTextFinder.Action.hideFindInterface.rawValue
-        webView.performTextFinderAction(hide)
+        if let thrown = PBCatchException({ webView.performTextFinderAction(hide) }) {
+            say("hiding the find bar raised \(thrown.name.rawValue)")
+        }
         await pause()
         let zoomBefore = webView.pageZoom
         let zoomIn = await press("+")
