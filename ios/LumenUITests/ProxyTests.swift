@@ -134,8 +134,14 @@ final class ProxyTests: LumenUITestCase {
         assertNothingLoaded("dying")
         backToList()
         app.buttons["proxiesButton"].tap()
-        wait(proxyRow("Умирающий"), "the proxy list opens").swipeLeft()
-        wait(app.buttons["Проверить"], "the row offers a re-check").tap()
+        // A swipe while the list still settles is lost (CI run 24): swipe again until the action shows.
+        let dying = wait(proxyRow("Умирающий"), "the proxy list opens")
+        let recheck = app.buttons["Проверить"]
+        for _ in 0..<3 where !recheck.exists {
+            dying.swipeLeft()
+            _ = recheck.waitForExistence(timeout: 5)
+        }
+        wait(recheck, "the row offers a re-check").tap()
         waitRow("Умирающий", says: "Недоступен")
         leaveProxies()
         openSession("Без отката")

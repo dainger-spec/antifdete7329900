@@ -121,7 +121,9 @@ class LumenUITestCase: XCTestCase {
     /// (no new web view, no relaunch — the session's relay takes the change).
     func assertTabKept(_ target: String, file: StaticString = #filePath, line: UInt = #line) {
         let shown = app.webViews.staticTexts.matching(atLine(target)).firstMatch
-        XCTAssertTrue(shown.waitForExistence(timeout: 5), "the tab kept its page through the proxy change (at: \(target))",
+        // 15 s, not 5 (CI run 24: a kept page not yet back in the accessibility tree after the settings
+        // closed); a tab the change dropped does not come back in any time.
+        XCTAssertTrue(shown.waitForExistence(timeout: 15), "the tab kept its page through the proxy change (at: \(target))",
                       file: file, line: line)
     }
 
