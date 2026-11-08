@@ -6,7 +6,7 @@
 name: iPhone full disguise, a person's path (measurement)
 on:
   push:
-    branches: ['claude/measure-disguise-e2e']
+    branches: ['claude/measure-disguise-e2e2']
 jobs:
   input:
     name: Input — ${{ matrix.runner }}
