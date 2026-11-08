@@ -116,6 +116,10 @@ MainActor.assumeIsolated {
         // quitting with them running (CI; ScaleCheck; scripts/scale_check.py makes the report).
         Localization.applyProcessLanguage()
         ScaleCheck.start(arguments: arguments)
+    } else if arguments.contains("--input-check") {
+        // What a click brings a page in a mobile view and in a Mac profile, and whether a profile's
+        // process stops answering on the way (a measurement on claude/measure-touch; InputCheck).
+        InputCheck.start(arguments: arguments)
     } else if arguments.contains("--menu-walk") {
         // Every item of Safari's menu bar chosen in a profile's own process, and what each did:
         // windows, panels, exceptions, crashes, services started, files written (CI;

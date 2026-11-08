@@ -60,6 +60,9 @@ final class ProfileManager: ObservableObject {
     var onHistoryLook: ((UUID, HistoryWindowLook) -> Void)?
     /// What a profile's window showed after the self-test acted on it (`lookAtWindow`).
     var onWindowLook: ((UUID, WindowLook) -> Void)?
+    /// The input check's answers (`ping`, `inputProbe`): a measurement only.
+    var onPong: ((UUID, Int, String) -> Void)?
+    var onInputReport: ((UUID, Int, String) -> Void)?
     /// A profile's process ended on its own (a quit of its own, or a crash: `status` is not 0),
     /// after its home was sealed. Not called for a stop asked for from here (`--menu-walk`).
     var onChildExited: ((UUID, Int32) -> Void)?
@@ -514,6 +517,10 @@ final class ProfileManager: ObservableObject {
                 self.onHistoryLook?(id, look)
             case .windowLook(let look):
                 self.onWindowLook?(id, look)
+            case .pong(let number, let page):
+                self.onPong?(id, number, page)
+            case .inputReport(let number, let report):
+                self.onInputReport?(id, number, report)
             }
         }
         child.onExit = { [weak self] status in
@@ -985,6 +992,14 @@ final class ProfileManager: ObservableObject {
 
     /// The process a profile runs in, when it runs in one of its own.
     func processIdentifier(of id: UUID) -> Int32? { children[id]?.processIdentifier }
+
+    /// The input check's questions to a profile in a process of its own (a measurement).
+    @discardableResult
+    func sendProbe(_ id: UUID, _ command: ProfileCommand) -> Bool {
+        guard let child = children[id] else { return false }
+        child.send(command)
+        return true
+    }
 
     /// Opens another window in an already running profile.
     func openNewWindow(_ id: UUID) {
