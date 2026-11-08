@@ -302,6 +302,10 @@ enum ProfileSessionHost {
                 Task { @MainActor in
                     ProfileSessionHost.send(.historyLook(await HistoryWindowReader.look()))
                 }
+            case .ping(let number):
+                InputProbe.pong(number)
+            case .inputProbe(let number, let url):
+                InputProbe.probe(number, url)
             case .walkMenu(let from):
                 SafariMenuWalk.start(from: from, session: manager?.session(for: profileID)) { line in
                     ProfileSessionHost.send(.menuWalk(line))
