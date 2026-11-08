@@ -18,18 +18,17 @@ BUNDLE="${BUNDLE_ID:-io.lumenbrowser.measure.$TEAM}"
 OUT="$HOME/lumen-measure-device/$SCENARIO"; mkdir -p "$OUT"
 command -v xcodegen >/dev/null || brew install xcodegen
 
-# The connected iPhone: CoreDevice identifier (devicectl) and hardware UDID (rvictl).
+# The iPhone: devicectl's identifier and the hardware UDID (rvictl). devicectl lists simulators as iOS
+# too (the owner, 8 November: the script picked "Profile 18"): device_pick.py takes a real, paired
+# iPhone only. Several, or one it would not take: DEVICE=<name or UDID> ios-measure/run_device.sh q1
 xcrun devicectl list devices --json-output "$OUT/devices.json" >/dev/null
-read -r CORE UDID NAME < <(python3 - "$OUT/devices.json" <<'PY'
-import json, sys
-for d in json.load(open(sys.argv[1]))["result"]["devices"]:
-    hw = d.get("hardwareProperties", {})
-    if hw.get("platform") == "iOS" and d.get("connectionProperties", {}).get("tunnelState") != "unavailable":
-        print(d["identifier"], hw.get("udid", ""), d.get("deviceProperties", {}).get("name", "iPhone").replace(" ", "_")); break
-PY
-)
-[[ -n "${CORE:-}" ]] || { echo "No iPhone found by devicectl: connect it, unlock it, trust this Mac."; exit 1; }
-echo "iPhone: $NAME ($UDID)"
+PICK="$(python3 "$HERE/device_pick.py" "$OUT/devices.json" "${DEVICE:-}")" || exit 1
+read -r CORE UDID TRANSPORT DEVMODE NAME <<<"$PICK"
+echo "iPhone: $NAME ($UDID), $TRANSPORT, Developer Mode: $DEVMODE"
+if [[ "$DEVMODE" == "disabled" ]]; then
+    echo "Developer Mode is off on this iPhone: nothing can be installed until it is on (ios-measure/DEVICE.md, section 0)."
+    exit 1
+fi
 
 cd "$HERE/device"
 xcodegen generate --quiet
@@ -44,7 +43,7 @@ echo "this Mac on the network: $LAN"
 for a in 127.0.0.2 127.0.0.3; do sudo ifconfig lo0 alias "$a" up; done
 # The iPhone's own packets, DNS included, through the Remote Virtual Interface.
 CAPTURE=""
-if [[ -n "$UDID" ]] && sudo rvictl -s "$UDID" >/dev/null 2>&1; then CAPTURE="rvi0"; echo "capturing the iPhone's DNS on rvi0"; fi
+if [[ "$UDID" != "-" ]] && sudo rvictl -s "$UDID" >/dev/null 2>&1; then CAPTURE="rvi0"; echo "capturing the iPhone's DNS on rvi0"; fi
 cat > "$OUT/cert.cnf" <<'CNF'
 [req]
 distinguished_name = dn
@@ -62,7 +61,10 @@ python3 "$HERE/host/harness.py" --scenario "$SCENARIO" --listen 0.0.0.0 --proxy-
     --static-dir "$HERE/host/static" --out "$OUT" --wait-app 300 2>&1 | tee "$OUT/harness.txt" &
 HARNESS=$!
 sleep 2
-xcrun devicectl device process launch --device "$CORE" --terminate-existing "$BUNDLE" -control "http://$LAN:28310" >/dev/null \
+# The harness's address goes in the environment (the driver reads LUMEN_CONTROL): an argument after
+# the bundle id is parsed by devicectl itself — "-control" was read as "-t", its timeout (the owner).
+xcrun devicectl device process launch --device "$CORE" --terminate-existing \
+    --environment-variables "{\"LUMEN_CONTROL\": \"http://$LAN:28310\"}" "$BUNDLE" >/dev/null \
     || echo "devicectl could not launch it: tap Lumen Measure on the iPhone (it keeps the Mac's address from its last launch)."
 wait $HARNESS || true
 [[ "$CAPTURE" == "rvi0" ]] && sudo rvictl -x "$UDID" >/dev/null 2>&1 || true

@@ -1,0 +1,75 @@
+name: iOS device tools (measurement)
+
+# Measurement only (claude/ios-app-measure, never merged), for the owner's blocked real-iPhone runs
+# (8 November): what Xcode 27's devicectl and macOS's devmodectl offer on the image the owner's Xcode
+# matches, how devicectl lists simulators (run_device.sh picked one), and how it parses the launch
+# arguments (run_device.sh's -control was read as -t, the timeout). Report-only: the log and the
+# artifact; it fails only if device_pick.py's own tests fail.
+on:
+  push:
+    branches: [claude/ios-app-measure]
+    paths:
+      - ".github/workflows/device-tools.yml"
+      - "ios-measure/device_pick.py"
+      - "ios-measure/test_device_pick.py"
+      - "ios-measure/run_device.sh"
+  workflow_dispatch:
+
+jobs:
+  tools:
+    name: devicectl and devmodectl on xcode-27
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: The machine
+        run: sw_vers; xcodebuild -version; mkdir -p out
+      - name: devmodectl — is it on macOS 27, and what it says
+        run: |
+          set +e
+          ls -l /usr/sbin/devmodectl /usr/bin/devmodectl /usr/libexec/devmodectl 2>&1
+          echo "== devmodectl (no arguments)"; devmodectl 2>&1 | head -40
+          echo "== devmodectl help"; devmodectl help 2>&1 | head -40
+          echo "== man devmodectl"; man -P cat devmodectl 2>/dev/null | col -b | head -150
+          true
+      - name: devicectl — its commands, and what it says about Developer Mode and pairing
+        run: |
+          set +e
+          xcrun devicectl --version
+          echo "== devicectl help"; xcrun devicectl help 2>&1 | head -80
+          for c in "list devices" "manage" "manage pair" "manage ddis" "device" "device info" "device info details" "device install app" "device process launch"; do
+            echo; echo "== devicectl $c --help"; xcrun devicectl $c --help 2>&1 | head -80
+          done
+          true
+      - name: The device list with simulators running (what run_device.sh tripped on)
+        run: |
+          set +e
+          for name in "iPhone 17 Pro" "iPhone 16 Pro"; do
+            udid=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; n=sys.argv[1]; print(next((d["udid"] for r,ds in json.load(sys.stdin)["devices"].items() for d in ds if d["name"]==n), ""))' "$name")
+            [[ -n "$udid" ]] && xcrun simctl boot "$udid" && xcrun simctl bootstatus "$udid" -b >/dev/null 2>&1
+          done
+          xcrun simctl list devices booted
+          echo "== devicectl list devices"; xcrun devicectl list devices 2>&1
+          xcrun devicectl list devices --json-output out/devices.json >/dev/null 2>&1
+          python3 -c 'import json; d=json.load(open("out/devices.json")); [print(json.dumps({k: x.get(k) for k in ("identifier","deviceProperties","hardwareProperties","connectionProperties")}, ensure_ascii=False)[:1500]) for x in d.get("result",{}).get("devices",[])]'
+          echo "== device_pick on it"; python3 ios-measure/device_pick.py out/devices.json; echo "exit $?"
+          true
+      - name: Launch arguments — run_device.sh's form, then the two fixes
+        run: |
+          set +e
+          bogus=00000000-0000-0000-0000-000000000000
+          url=http://192.0.2.1:28310
+          echo "== as run_device.sh had it: … io.lumenbrowser.measure -control URL"
+          xcrun devicectl device process launch --device $bogus --terminate-existing io.lumenbrowser.measure -control $url 2>&1 | tail -6
+          echo "== the address in the environment: --environment-variables {\"LUMEN_CONTROL\": URL}"
+          xcrun devicectl device process launch --device $bogus --terminate-existing --environment-variables "{\"LUMEN_CONTROL\": \"$url\"}" io.lumenbrowser.measure 2>&1 | tail -6
+          echo "== after --: … io.lumenbrowser.measure -- -control URL"
+          xcrun devicectl device process launch --device $bogus --terminate-existing io.lumenbrowser.measure -- -control $url 2>&1 | tail -6
+          true
+      - name: device_pick's tests (the owner's case, and the list measured above)
+        run: python3 ios-measure/test_device_pick.py out/devices.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: device-tools-${{ github.run_number }}
+          path: out
