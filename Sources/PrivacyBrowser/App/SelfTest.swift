@@ -7403,9 +7403,15 @@ private final class PageLoader: NSObject, WKNavigationDelegate {
         try await PageLoader().run(webView) { $0.load(URLRequest(url: url)) }
     }
 
+    /// The tab's own delegate (a `BrowserTab`), which decides each navigation as it does for a
+    /// person — an iPhone view's platform is set there (CI 764: with this loader in its place the
+    /// page said MacIntel) — and gets the web view back once the page has loaded.
+    private weak var tabDelegate: WKNavigationDelegate?
+
     private func run(_ webView: WKWebView, start: (WKWebView) -> Void) async throws {
+        tabDelegate = webView.navigationDelegate
         webView.navigationDelegate = self
-        defer { webView.navigationDelegate = nil }
+        defer { webView.navigationDelegate = tabDelegate }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             self.continuation = continuation
             start(webView)
@@ -7420,6 +7426,15 @@ private final class PageLoader: NSObject, WKNavigationDelegate {
         guard let continuation else { return }
         self.continuation = nil
         continuation.resume(with: result)
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, preferences: WKWebpagePreferences,
+                 decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void) {
+        guard let tab = tabDelegate, tab.responds(to: #selector(WKNavigationDelegate.webView(_:decidePolicyFor:preferences:decisionHandler:))) else {
+            decisionHandler(.allow, preferences)
+            return
+        }
+        tab.webView?(webView, decidePolicyFor: navigationAction, preferences: preferences, decisionHandler: decisionHandler)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
