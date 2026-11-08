@@ -36,9 +36,11 @@ python3 "$HERE/scripts/build-shim.py" --check | tee -a "$LOG" || { say "page-shi
 # The canvas noise is one a canvas can hold (and its control, the old noise, is not).
 node "$HERE/shim/test-fingerprint.mjs" | tee -a "$LOG"; [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "canvas noise check failed"; STATUS=1; }
 # The real-iPhone script's own pieces (run-device.sh): each test reproduces the owner's case with the
-# old rule (its red) beside the new one — the device it picks, and a recording that saw nothing.
+# old rule (its red) beside the new one — the device it picks, and a recording that saw nothing. And the
+# owner's rules for the App Store build (release_rules.py: none of the positioning words, no App-Bound
+# Domains), each red a planted breach.
 if in_suite core; then
-    for t in test_device_pick.py test_capture_look.py; do
+    for t in test_device_pick.py test_capture_look.py test_release_rules.py; do
         python3 "$HERE/scripts/$t" 2>&1 | tee -a "$LOG"; [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "$t failed"; STATUS=1; }
     done
 fi
@@ -171,6 +173,11 @@ if ! xcodebuild build-for-testing "${COMMON[@]}" >"$OUT/build.txt" 2>&1; then
 fi
 say "built"
 BUILT_APP="$(find "$OUT/dd/Build/Products" -maxdepth 2 -name Lumen.app -type d | head -1)"
+# The owner's rules in what was built, not only in the sources (a build phase could add a key).
+if in_suite core; then
+    python3 "$HERE/scripts/release_rules.py" "$HERE" --app "$BUILT_APP" 2>&1 | tee -a "$LOG"
+    [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "release rules broken in the built app"; STATUS=1; }
+fi
 if /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity:NSExceptionDomains:geo.lumentest:NSExceptionAllowsInsecureHTTPLoads" "$BUILT_APP/Info.plist" 2>/dev/null | grep -q true; then
     say "the test build lets the proxy check reach http://geo.lumentest"
 else

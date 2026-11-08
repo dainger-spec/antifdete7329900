@@ -200,7 +200,7 @@ struct SessionSettingsView: View {
                 } footer: {
                     Text("Язык страницы меняется только в navigator.language: заголовок Accept-Language WebKit на iPhone задаёт один на всё приложение.")
                 }
-                Section("Отпечаток") {
+                Section("Профиль устройства") {
                     modePicker("Канвас", $settings.canvas, id: "canvasMode")
                     modePicker("WebGL", $settings.webGL, id: "webglMode")
                     modePicker("Звук", $settings.audio, id: "audioMode")
