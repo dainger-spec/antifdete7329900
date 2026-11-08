@@ -100,7 +100,19 @@ jobs:
         run: |
           set -u
           LAN="$(ipconfig getifaddr en0 || ipconfig getifaddr en1)"; echo "this Mac: $LAN"
-          udid=$(xcrun simctl list devices booted -j | python3 -c 'import json,sys; print(next(d["udid"] for ds in json.load(sys.stdin)["devices"].values() for d in ds))')
+          # The image has runtimes but no simulators made: make one on the newest iOS and boot it.
+          read -r runtime type <<<"$(xcrun simctl list -j | python3 -c '
+          import json, sys
+          d = json.load(sys.stdin)
+          rs = sorted((r for r in d["runtimes"] if r.get("platform", "iOS") == "iOS" and r.get("isAvailable", True)),
+                      key=lambda r: tuple(int(x) for x in r["version"].split(".")), reverse=True)
+          r = rs[0]; names = {t["identifier"]: t["name"] for t in d["devicetypes"]}
+          ok = [t["identifier"] for t in r.get("supportedDeviceTypes", [])] or list(names)
+          pick = next((i for n in ("iPhone 17 Pro", "iPhone 16 Pro") for i in ok if names.get(i) == n), [i for i in ok if "iPhone" in names.get(i, "")][-1])
+          print(r["identifier"], pick)')"
+          udid="$(xcrun simctl create "Lumen tools" "$type" "$runtime")"
+          xcrun simctl boot "$udid"; xcrun simctl bootstatus "$udid" -b >/dev/null 2>&1
+          echo "simulator $udid ($type, $runtime)"
           trial() { # label plist driver -> "hello: yes|no" and the status file
             local dir="ats-$1"; rm -rf "$dir"; mkdir -p "$dir/src/app"
             cp ios-measure/build_sim_app.sh "$dir/src/"; cp "$2" "$dir/src/app/Info.plist"; cp "$3" "$dir/src/app/Driver.swift"; cp ios-measure/app/main.swift "$dir/src/app/"
