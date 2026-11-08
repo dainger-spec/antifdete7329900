@@ -17,6 +17,7 @@ this Mac, so a test sees on the screen what the pages say about how they were re
             /hold          a page that keeps a WebSocket to /ws open and says so ("ws: open", then
                            "ws: closed" once anything closes it), and which proxy it came through
             /ws            a WebSocket that stays open, saying nothing, until its client goes
+            /ip.json       an address echo ({"ip": the address the site saw}), open to any page (CORS)
   proxy A   HTTP, Basic auth ua:pa, port 28381, exits from 127.0.0.2 (Germany in /geo.json)
   proxy B   SOCKS5, user/password ub:pb, port 28382, exits from 127.0.0.3 (USA in /geo.json); refuses UDP
   proxy C   SOCKS5, user/password uc:pc, port 28383, relays UDP (UDP ASSOCIATE)
@@ -291,6 +292,10 @@ async def site(reader, writer, scheme="http"):
             elif path == "/geo.json":
                 _, country, zone, ip = EXITS.get(peer[0], ("direct", "ZZ", "UTC", "198.51.100.1"))
                 out = reply("200 OK", json.dumps({"ip": ip, "country": country, "timezone": zone}), "application/json")
+            elif path == "/ip.json":
+                # The address echo the network probe asks (ios/Lumen/Debug/NetProbe.swift), from a page and directly.
+                out = reply("200 OK", json.dumps({"ip": peer[0]}), "application/json",
+                            ["Access-Control-Allow-Origin: *", "Cache-Control: no-store"])
             elif path == "/__events":
                 out = reply("200 OK", json.dumps(EVENTS), "application/json")
             else:

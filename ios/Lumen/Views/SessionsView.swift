@@ -55,6 +55,7 @@ struct SessionsView: View {
                     NavigationLink { ProxiesView() } label: { Label("Прокси", systemImage: "network") }
                         .accessibilityIdentifier("proxiesButton")
                 }
+                ToolbarItem(placement: .topBarTrailing) { DebugProbeLink() }
             }
             .navigationDestination(for: UUID.self) { id in
                 SessionScreen(sessionID: id)

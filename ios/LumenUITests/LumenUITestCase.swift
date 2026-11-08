@@ -23,6 +23,8 @@ class LumenUITestCase: XCTestCase {
         app.launchEnvironment["LUMEN_TEST_STUN"] = "stun.lumentest:3478"
         // The relay's port on the screen (DEBUG builds only), for the relay's own checks.
         app.launchEnvironment["LUMEN_TEST_HOOKS"] = "1"
+        // The network probe's address echo: the testbed's.
+        app.launchEnvironment["LUMEN_TEST_ECHO"] = "http://echo.lumentest:28380/ip.json"
         app.launch()
         self.app = app
         XCTAssertTrue(app.navigationBars["Сессии"].waitForExistence(timeout: 30), "the sessions list comes up")

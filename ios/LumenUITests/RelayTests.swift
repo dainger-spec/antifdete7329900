@@ -156,6 +156,49 @@ final class RelayTests: LumenUITestCase {
         shot("44 after a network change: through the proxy")
     }
 
+    /// The instrument for the real iPhone's network switch (ios/DEVICE.md, q4), checked here first: in
+    /// a session without a proxy it sees the device's own address — the leak it is there to catch —
+    /// and through a proxy, with a network change and a relay restart under it, it sees none.
+    func testNetworkProbe() {
+        launch(reset: true)
+        app.buttons["proxiesButton"].tap()
+        wait(app.navigationBars["Прокси"], "the proxy list opens")
+        addProxy(name: "Нью-Йорк", kind: "SOCKS5", port: "28382", user: "ub", password: "pb")
+        waitRow("Нью-Йорк", says: "Работает")
+        leaveProxies()
+        createSession(name: "Контроль")
+        createSession(name: "Замер")
+        openSession("Замер")
+        chooseProxy("Нью-Йорк", in: "Замер")
+        backToList()
+        wait(app.buttons["netProbeButton"], "the session list leads to the network probe (DEBUG)").tap()
+        wait(app.navigationBars["Замер сети"], "the probe opens")
+        let verdict = app.staticTexts["probeVerdict"]
+
+        // The detector first: a session without a proxy goes out from the device's own address.
+        app.buttons["probe-Контроль"].tap()
+        app.buttons["probeStart"].tap()
+        let leak = NSPredicate(format: "label BEGINSWITH %@", "УТЕЧКА")
+        let seen = XCTWaiter.wait(for: [expectation(for: leak, evaluatedWith: verdict)], timeout: 25)
+        XCTAssertEqual(seen, .completed, "the probe sees the device's own address in a session without a proxy: \(verdict.label)")
+        shot("45 the probe: a session without a proxy is a leak")
+        app.buttons["probeStart"].tap()
+
+        // Through the proxy, a network change and a relay restart (40 s down) under it, and 10 s after the
+        // relay is back: its answers come through the proxy again.
+        app.buttons["probe-Замер"].tap()
+        app.buttons["probeStart"].tap()
+        sleep(6)
+        wait(app.buttons["probeDrillNetwork"], "the probe offers the drills").tap()
+        sleep(4)
+        app.buttons["probeDrillRestart"].tap()
+        sleep(50)
+        app.buttons["probeStart"].tap()
+        XCTAssertTrue(verdict.label.hasPrefix("Утечек нет"),
+                      "the probe sees no leak through the proxy, a network change and a relay restart: \(verdict.label)")
+        shot("46 the probe: through the proxy, no leak")
+    }
+
     /// The relay's port, as the session's screen shows it to the tests (DEBUG builds only); with
     /// `other`, waits until it is a different one (the relay back on a new port).
     func relayPort(other: UInt16? = nil, timeout: TimeInterval = 15, file: StaticString = #filePath, line: UInt = #line) -> UInt16 {
