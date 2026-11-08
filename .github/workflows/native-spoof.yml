@@ -15,4 +15,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sw_vers
-      - run: swift scripts/native_spoof_probe.swift
+      - run: mkdir -p build && swiftc -o build/native-probe scripts/native_spoof_probe.swift
+      - run: perl -e 'alarm 150; exec @ARGV' build/native-probe

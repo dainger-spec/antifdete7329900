@@ -6,7 +6,7 @@
 // together, a plain web view in a 390×844 window loads one page and prints what its page, a worker
 // and the stylesheet's own @media rules say, and whether the accessors still read as native.
 //
-//     swift scripts/native_spoof_probe.swift
+//     swiftc -o build/native-probe scripts/native_spoof_probe.swift && build/native-probe
 import AppKit
 import WebKit
 
@@ -66,12 +66,14 @@ func measure(_ name: String, platform: String?, scale: CGFloat?) async {
             said.append("_overrideDeviceScaleFactor=\(scale) (reads back \(view.value(forKey: "_overrideDeviceScaleFactor") ?? "nil"))")
         } else { said.append("_setOverrideDeviceScaleFactor: NOT ANSWERED") }
     }
+    print("NATIVE \(name): loading")
     let run = Run()
     view.navigationDelegate = run
     await withCheckedContinuation { (finished: CheckedContinuation<Void, Never>) in
         run.done = { finished.resume() }
         view.loadHTMLString(page, baseURL: URL(string: "https://probe.invalid/"))
     }
+    print("NATIVE \(name): loaded")
     do {
         let result = try await view.callAsyncJavaScript(probe, contentWorld: .page)
         print("NATIVE \(name) [\(said.joined(separator: ", "))] \(result ?? "nil")")
@@ -81,6 +83,8 @@ func measure(_ name: String, platform: String?, scale: CGFloat?) async {
     window.orderOut(nil)
 }
 
+setvbuf(stdout, nil, _IOLBF, 0)
+print("NATIVE start")
 let application = NSApplication.shared
 application.setActivationPolicy(.accessory)
 Task { @MainActor in
