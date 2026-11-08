@@ -66,7 +66,7 @@ async def scenario(h, capture):
     if h.ARGS.brk == "q2unreachable":   # the red run: a page that cannot load must stop the scenario
         host, port = "127.0.0.1", 9
     page = f"http://{host}:{port}/blank?q2=1"
-    unloaded = []
+    unloaded, unanswered = [], []
     scripts = {
         "N": [],
         "K": [{"source": naive_source("s1"), "mainFrameOnly": False}],
@@ -83,7 +83,15 @@ async def scenario(h, capture):
             print(f"probe {sid}: the page did not load ({loaded.get('error')}) — not probed", flush=True)
             continue
         result = await app.cmd("eval", session=sid, js=probe(sid), timeout=90)
+        if not isinstance(result.get("value"), dict):
+            # Stage-1 run 10: M's probe did not answer in 90 s once, and every M check then compared
+            # nothing. Once more on a fresh load; still nothing stops the scenario below.
+            print(f"probe {sid}: no answer ({result.get('error')}) — loading the page again", flush=True)
+            await app.cmd("load", session=sid, url=page + f"&sid={sid}&again=probe", timeout=30)
+            result = await app.cmd("eval", session=sid, js=probe(sid), timeout=90)
         results[sid] = result.get("value") if isinstance(result.get("value"), dict) else {"error": result}
+        if "error" in results[sid]:
+            unanswered.append(f"{sid}: {result.get('error')}")
         print(f"probe {sid}: load ok={loaded.get('ok')}", json.dumps(results[sid])[:3000], flush=True)
     # A probe of a page that did not load reads the web view's empty first document, where no user
     # script ever ran: every comparison after that would be a false FAIL or a false PASS.
@@ -91,6 +99,11 @@ async def scenario(h, capture):
           f"the probe page {page}: " + (f"did not load in {unloaded} — nothing below can be measured" if unloaded
                                        else "loaded in N, K, M and M2"), core=True)
     if unloaded:
+        return
+    check("q2.probes-answered", "FAIL" if unanswered else "PASS",
+          f"the probes of N, K, M and M2: " + (f"no answer from {unanswered} — nothing can be compared" if unanswered else "all answered"),
+          core=True)
+    if unanswered:
         return
     # M after a reload, and in a new web view on the same store.
     await app.cmd("load", session="M", url=page + "&sid=M&again=1", timeout=30)
