@@ -2661,6 +2661,18 @@ final class SelfTest {
                   const w = new Worker(URL.createObjectURL(new Blob(['postMessage(navigator.platform)'], { type: 'text/javascript' })));
                   w.onmessage = (e) => done(String(e.data)); w.onerror = () => done('error'); setTimeout(() => done('timeout'), 5000); });
                 """) as? String ?? "nil"
+            // What the page's substitutions say there and in a worker made from a blob (the lead, 8
+            // November: a worker that answers unsubstituted beside a substituted page is a sign we
+            // make ourselves). The storage quota is substituted in every profile; the time zone only
+            // where one is set — here none is, the case that left workers unhooked.
+            let pageAndWorker = try await js(tab.webView, """
+                const page = [String((await navigator.storage.estimate()).quota), Intl.DateTimeFormat().resolvedOptions().timeZone].join('|');
+                const worker = await new Promise((done) => {
+                  const source = 'navigator.storage && navigator.storage.estimate ? navigator.storage.estimate().then((e) => postMessage(String(e.quota) + "|" + Intl.DateTimeFormat().resolvedOptions().timeZone), () => postMessage("error")) : postMessage("absent")';
+                  const w = new Worker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
+                  w.onmessage = (e) => done(String(e.data)); w.onerror = () => done('error'); setTimeout(() => done('timeout'), 5000); });
+                return page + ' / ' + worker;
+                """) as? String ?? "nil"
             tab.tearDown()
             session.shutDown()
             try repository.delete(profile.id)
@@ -2738,6 +2750,14 @@ final class SelfTest {
                 check("surface (macOS): the profile names the Safari of the engine it runs", named && consistent,
                       "User-Agent \(ua); Safari.app \(app ?? "?") build \(HostSafari.app?.build ?? "?"), this app's WebKit \(WebKitBuild.version), "
                           + "named \(HostSafari.version)\(HostSafari.declared.sharesEngine ? "" : " (Safari runs a WebKit of its own)")")
+            }
+            let halves = pageAndWorker.components(separatedBy: " / ")
+            if halves.count == 2, halves[1] == "absent" {
+                skip("surface (\(name)): a blob worker answers the storage quota and the time zone as the page does",
+                     "this WebKit gives a worker no navigator.storage")
+            } else {
+                check("surface (\(name)): a blob worker answers the storage quota and the time zone as the page does (no substitution left behind in workers)",
+                      halves.count == 2 && halves[0] == halves[1], "page / worker: \(pageAndWorker)")
             }
             // window.safari: a macOS profile has it exactly when the Safari it names gives pages one
             // (up to 27.1); an iPhone view never — no iPhone has it, and there it was a mark of
