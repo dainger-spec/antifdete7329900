@@ -77,6 +77,19 @@ struct ProxyRow: View {
 struct ProxyEditor: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
+
+    /// Closes the form with its login and password emptied first. A proxy's credentials are not the
+    /// person's own login: iOS takes a form that leaves the screen with a login and a password in it
+    /// for a sign-in and offers to keep them in the person's Passwords (iCloud Keychain) — CI runs 12
+    /// and 13: "Save Password?" after every proxy, also with the password marked as a one-time code.
+    /// The password is kept in this app's own Keychain item only (ProxyPasswords).
+    private func close() {
+        if !Faults.isActive(.passwordAutofill) {
+            username = ""
+            password = ""
+        }
+        DispatchQueue.main.async { dismiss() }   // after the emptied fields are on screen
+    }
     let entry: ProxyEntry?
     @State private var name = ""
     @State private var kind = ProxyKind.socks5
@@ -101,26 +114,20 @@ struct ProxyEditor: View {
                     TextField("Порт", text: $port).accessibilityIdentifier("proxyPort").keyboardType(.numberPad)
                 }
                 Section("Вход") {
-                    // Not a login of the person's: iOS must not offer to keep it in their Passwords
-                    // (CI run 12: "Save Password?" after every proxy, the proxy's password bound for
-                    // iCloud Keychain). The password is kept in this app's own Keychain item only.
                     TextField("Логин", text: $username).accessibilityIdentifier("proxyUser")
-                        .textContentType(Faults.isActive(.passwordAutofill) ? .username : nil)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                     SecureField("Пароль", text: $password).accessibilityIdentifier("proxyPassword")
-                        .textContentType(Faults.isActive(.passwordAutofill) ? .password : .oneTimeCode)
                 }
                 if let entry {
                     Section {
-                        Button("Удалить прокси", role: .destructive) { model.deleteProxy(entry.id); dismiss() }
+                        Button("Удалить прокси", role: .destructive) { model.deleteProxy(entry.id); close() }
                     }
                 }
             }
             .navigationTitle(entry == nil ? "Новый прокси" : "Прокси")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Отмена") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Отмена") { close() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Сохранить") {
                         var saved = entry ?? ProxyEntry(kind: kind, host: host, port: 0)
@@ -130,7 +137,7 @@ struct ProxyEditor: View {
                         saved.port = Int(port) ?? 0
                         saved.username = username
                         model.saveProxy(saved, password: password)
-                        dismiss()
+                        close()
                     }
                     .disabled(host.trimmingCharacters(in: .whitespaces).isEmpty || !(1...65535).contains(Int(port) ?? 0))
                     .accessibilityIdentifier("saveProxy")

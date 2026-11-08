@@ -23,7 +23,7 @@ public enum Fault: String, CaseIterable, Sendable {
     case proxyNotApplied         // a session's proxy is never given to its data store
     case proxyChangeNotLive      // a new proxy takes effect only after a relaunch
     case proxyPasswordNotSaved   // the password is not kept
-    case passwordAutofill        // the proxy form reads as a login: iOS offers to save its password in Passwords
+    case passwordAutofill        // the proxy form closes with its login and password still in it: iOS offers to save them
     // A dead proxy: the most dangerous breakage is a session quietly going direct
     case deadHTTPDropped         // an HTTP proxy whose check failed is left off: its session goes direct
     case deadSOCKSDropped        // the same for a SOCKS5 proxy

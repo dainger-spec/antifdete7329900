@@ -1,34 +1,34 @@
-# fault	kind	test that must fail with it (the red run); kind: core = swift test --filter, ui = xcodebuild -only-testing
-sessionsNotSaved	core	LumenCoreTests.CatalogTests/testSessionsSurviveARelaunch
-renameIgnored	core	LumenCoreTests.CatalogTests/testRename
-notesNotSaved	core	LumenCoreTests.CatalogTests/testNotesAndTags
-searchIgnoresTags	core	LumenCoreTests.CatalogTests/testSearchByNameNotesTagsAndProxy
-tabsNotRestored	core	LumenCoreTests.CatalogTests/testTabsAndHistorySurviveARelaunch
-settingsNotSaved	core	LumenCoreTests.CatalogTests/testSettingsSurviveARelaunch
-searchEngineIgnored	core	LumenCoreTests.AddressTests/testAddressesAndSearches
-sessionsNotSaved	ui	LumenUITests/SessionsTests/testSessionListPersonPath
-renameIgnored	ui	LumenUITests/SessionsTests/testSessionListPersonPath
-notesNotSaved	ui	LumenUITests/SessionsTests/testSessionListPersonPath
-searchIgnoresTags	ui	LumenUITests/SessionsTests/testSessionListPersonPath
-tabsNotRestored	ui	LumenUITests/BrowserTests/testBrowserPersonPath
-historyNotRecorded	ui	LumenUITests/BrowserTests/testBrowserPersonPath
-searchEngineIgnored	ui	LumenUITests/BrowserTests/testBrowserPersonPath
-settingsNotSaved	ui	LumenUITests/BrowserTests/testBrowserPersonPath
-newTabNotOpened	ui	LumenUITests/BrowserTests/testBrowserPersonPath
-backIgnored	ui	LumenUITests/BrowserTests/testBrowserPersonPath
-forwardIgnored	ui	LumenUITests/BrowserTests/testBrowserPersonPath
-reloadIgnored	ui	LumenUITests/BrowserTests/testBrowserPersonPath
-sharedStore	ui	LumenUITests/BrowserTests/testSessionsAreIsolated
-proxyNotApplied	ui	LumenUITests/ProxyTests/testProxyPersonPath
-proxyChangeNotLive	ui	LumenUITests/ProxyTests/testProxyPersonPath
-proxyPasswordNotSaved	ui	LumenUITests/ProxyTests/testProxyPersonPath
-passwordAutofill	ui	LumenUITests/ProxyTests/testProxyPersonPath
-deadHTTPDropped	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect
-deadSOCKSDropped	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect
-recheckDropsProxy	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect
-failoverOn	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect
-userAgentIgnored	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath
-timeZoneIgnored	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath
-noiseUnstable	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath
-unmaskedReplacement	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath
-settingsNotSaved	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath
+# fault	kind	test that must fail with it (the red run)	the check that must catch it (a piece of its failure message; empty: any)	— kind: core = swift test --filter, ui = xcodebuild -only-testing
+sessionsNotSaved	core	LumenCoreTests.CatalogTests/testSessionsSurviveARelaunch	
+renameIgnored	core	LumenCoreTests.CatalogTests/testRename	
+notesNotSaved	core	LumenCoreTests.CatalogTests/testNotesAndTags	
+searchIgnoresTags	core	LumenCoreTests.CatalogTests/testSearchByNameNotesTagsAndProxy	
+tabsNotRestored	core	LumenCoreTests.CatalogTests/testTabsAndHistorySurviveARelaunch	
+settingsNotSaved	core	LumenCoreTests.CatalogTests/testSettingsSurviveARelaunch	
+searchEngineIgnored	core	LumenCoreTests.AddressTests/testAddressesAndSearches	
+sessionsNotSaved	ui	LumenUITests/SessionsTests/testSessionListPersonPath	after a relaunch the renamed session is there
+renameIgnored	ui	LumenUITests/SessionsTests/testSessionListPersonPath	the renamed card is shown
+notesNotSaved	ui	LumenUITests/SessionsTests/testSessionListPersonPath	the card shows the new description
+searchIgnoresTags	ui	LumenUITests/SessionsTests/testSessionListPersonPath	the tag finds its session
+tabsNotRestored	ui	LumenUITests/BrowserTests/testBrowserPersonPath	both tabs came back
+historyNotRecorded	ui	LumenUITests/BrowserTests/testBrowserPersonPath	the history lists
+searchEngineIgnored	ui	LumenUITests/BrowserTests/testBrowserPersonPath	duckduckgo.com
+settingsNotSaved	ui	LumenUITests/BrowserTests/testBrowserPersonPath	duckduckgo.com
+newTabNotOpened	ui	LumenUITests/BrowserTests/testBrowserPersonPath	the new tab is empty
+backIgnored	ui	LumenUITests/BrowserTests/testBrowserPersonPath	ends with /page/beta
+forwardIgnored	ui	LumenUITests/BrowserTests/testBrowserPersonPath	ends with /page/beta-ne
+reloadIgnored	ui	LumenUITests/BrowserTests/testBrowserPersonPath	reload brought the page again
+sharedStore	ui	LumenUITests/BrowserTests/testSessionsAreIsolated	cookie: none
+proxyNotApplied	ui	LumenUITests/ProxyTests/testProxyPersonPath	via: прокси A
+proxyChangeNotLive	ui	LumenUITests/ProxyTests/testProxyPersonPath	via: прокси B
+proxyPasswordNotSaved	ui	LumenUITests/ProxyTests/testProxyPersonPath	the row of Берлин says Работает
+passwordAutofill	ui	LumenUITests/ProxyTests/testProxyPersonPath	the password prompt
+deadHTTPDropped	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect	dead-http: the page did not go direct
+deadSOCKSDropped	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect	dead-socks: the page did not go direct
+recheckDropsProxy	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect	rechecked: the page did not go direct
+failoverOn	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect	the page did not go direct
+userAgentIgnored	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	iOS 26's Safari
+timeZoneIgnored	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	the time zone of the proxy's country
+noiseUnstable	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	two reads give the same noise
+unmaskedReplacement	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	the natives check finds none
+settingsNotSaved	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	iOS 26's Safari

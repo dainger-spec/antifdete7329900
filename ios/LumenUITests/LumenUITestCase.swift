@@ -205,10 +205,14 @@ class LumenUITestCase: XCTestCase {
         typeInto(app.secureTextFields["proxyPassword"], password)
         app.buttons["saveProxy"].tap()
         waitGone(field, "the proxy form closes (\(name))")
-        // iOS must not offer to keep the proxy's password among the person's own (CI run 12: its
-        // "Save Password?" alert came after every proxy and blocked the screen).
-        XCTAssertFalse(app.alerts.firstMatch.waitForExistence(timeout: 3),
-                       "no alert after saving the proxy \(name): \(app.alerts.firstMatch.label)")
+        // iOS must not offer to keep the proxy's password among the person's own (CI runs 12, 13: its
+        // "Save Password?" came a moment after the form closed, as a remote view app.alerts does
+        // not list, and blocked the screen). After a moment the list must still take a touch.
+        sleep(5)
+        let offer = app.descendants(matching: .any).matching(NSPredicate(format:
+            "label CONTAINS[c] 'Save Password' OR label CONTAINS[c] 'Сохранить пароль' OR label == 'Not Now' OR label == 'Не сейчас'")).firstMatch
+        XCTAssertFalse(offer.exists, "the password prompt: nothing offers to save the password of \(name): \(offer.exists ? offer.label : "")")
+        XCTAssertTrue(add.isHittable, "the password prompt: the proxy list stays usable after saving \(name) (nothing covers it)")
         wait(proxyRow(name), "the proxy \(name) is in the list")
     }
 

@@ -6,9 +6,10 @@
 #
 # Every line of ios/scripts/faults.tsv is a planted fault and the test it must break: that test is
 # run with the fault (it must fail), then everything runs without faults (it must pass: "GREEN").
-# A red counts ("RED OK") only if its test failed with the fault and passes in the green run; a fault
-# its test does not catch, or a test that fails anyway, fails the job ("RED DID NOT FAIL",
-# "RED UNPROVEN"), as does a red that crashed ("RED INVALID").
+# A red counts ("RED OK") only if its test failed with the fault, in the check named for that fault
+# (faults.tsv, 4th column), and passes in the green run. A fault its test does not catch, a test that
+# fails elsewhere or anyway, a red that crashed — each fails the job ("RED DID NOT FAIL",
+# "RED OTHER CHECK", "RED UNPROVEN", "RED INVALID").
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"          # ios/
 OUT="${1:?out dir}"; WANT="${2:-newest}"
@@ -55,14 +56,19 @@ verdicts() { # kind, green output: the final word on that kind's reds
 if in_suite core; then
 CORE="$HERE/LumenCore"
 swift build --package-path "$CORE" --build-tests >"$OUT/core-build.txt" 2>&1 || { tail -40 "$OUT/core-build.txt"; say "CORE BUILD FAILED"; exit 2; }
-while IFS=$'\t' read -r fault kind test; do
+while IFS=$'\t' read -r fault kind test expect; do
     [[ "$fault" =~ ^#|^$ ]] && continue
     [[ "$kind" == "core" ]] || continue
     if LUMEN_FAULTS="$fault" swift test --package-path "$CORE" --skip-build --filter "$test" >"$OUT/core-red-$fault.txt" 2>&1; then
         say "RED DID NOT FAIL core $fault: $test passed with the fault"; STATUS=1
     else
-        say "red   core $fault: $test failed with the fault — $(grep -m1 -o 'error: .*' "$OUT/core-red-$fault.txt" | cut -c1-160)"
-        REDS+=("core|$fault|$test")
+        first="$(grep -m1 -E 'error: -\[' "$OUT/core-red-$fault.txt" | sed 's/.*error: //')"
+        if [[ -n "${expect:-}" && "$first" != *"$expect"* ]]; then
+            say "RED OTHER CHECK core $fault: $test failed, but not in the check that must catch it ($expect) — $(echo "$first" | cut -c1-200)"; STATUS=1
+        else
+            say "red   core $fault: $test failed with the fault — $(echo "$first" | cut -c1-160)"
+            REDS+=("core|$fault|$test")
+        fi
     fi
 done < "$HERE/scripts/faults.tsv"
 if swift test --package-path "$CORE" --skip-build >"$OUT/core-green.txt" 2>&1; then
@@ -166,18 +172,25 @@ run_ui() { # result-name, fault ('' for none), -only-testing args...
     TEST_RUNNER_LUMEN_FAULTS="$fault" xcodebuild test-without-building "${COMMON[@]}" "$@" \
         -resultBundlePath "$OUT/$name.xcresult" >"$OUT/$name.txt" 2>&1
 }
-while IFS=$'\t' read -r fault kind test; do
+while IFS=$'\t' read -r fault kind test expect; do
     [[ "$fault" =~ ^#|^$ ]] && continue
     [[ "$kind" == "ui" ]] || continue
     class="$(echo "$test" | cut -d/ -f2)"; in_suite "$class" || continue
     if run_ui "red-$fault" "$fault" "-only-testing:$test"; then
         say "RED DID NOT FAIL ui $fault: $test passed with the fault"; STATUS=1
-    elif grep -q -E "crashed|Lost connection to the application|Failed to get matching snapshots|Failed to launch" "$OUT/red-$fault.txt"; then
+    elif grep -q -E "crashed|Lost connection to the application|Failed to get matching snapshots|Failed to launch|does not have a process ID|is not running|Failed to terminate|Unable to monitor" "$OUT/red-$fault.txt"; then
         # A crash fails every test whatever the fault: it proves nothing about the check.
         say "RED INVALID ui $fault: the app crashed or was lost, not the check — $(grep -m1 -E 'crashed|Lost connection|Failed to' "$OUT/red-$fault.txt" | sed 's/.*error: //' | cut -c1-160)"; STATUS=1
     else
-        say "red   ui $fault: $test failed with the fault — $(grep -m1 -E 'error: -\[|XCTAssert|failed -' "$OUT/red-$fault.txt" | sed 's/.*error: //' | cut -c1-200)"
-        REDS+=("ui|$fault|$test")
+        # It counts only if the check named for this fault is the one that failed (the first failure:
+        # the test stops there), not any other — CI run 12: newTabNotOpened "failed" with the app gone.
+        first="$(grep -m1 -E 'error: -\[' "$OUT/red-$fault.txt" | sed 's/.*error: //')"
+        if [[ -n "${expect:-}" && "$first" != *"$expect"* ]]; then
+            say "RED OTHER CHECK ui $fault: $test failed, but not in the check that must catch it ($expect) — $(echo "$first" | cut -c1-200)"; STATUS=1
+        else
+            say "red   ui $fault: $test failed with the fault — $(echo "$first" | cut -c1-200)"
+            REDS+=("ui|$fault|$test")
+        fi
     fi
 done < "$HERE/scripts/faults.tsv"
 if run_ui green "" ${ONLY[@]+"${ONLY[@]}"}; then
