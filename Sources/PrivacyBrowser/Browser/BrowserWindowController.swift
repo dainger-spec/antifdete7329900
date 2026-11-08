@@ -3,6 +3,7 @@ import BrowserCore
 import Combine
 import os
 import SwiftUI
+import UniformTypeIdentifiers
 import WebKit
 
 /// Window subclass so that File ▸ Close (⌘W) closes the current tab while the window's
@@ -85,7 +86,11 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         let window = BrowserWindow(contentRect: NSRect(origin: .zero, size: contentSize),
                                    styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                    backing: .buffered, defer: false)
-        if let deviceScreen { window.contentMaxSize = deviceScreen }
+        if let deviceScreen {
+            window.contentMaxSize = deviceScreen
+            // Neither the green button nor ⌃⌘F: an iPhone has no full screen.
+            window.collectionBehavior.insert(.fullScreenNone)
+        }
         window.isReleasedWhenClosed = false
         // Never saved as restorable state at quit: AppKit would write the title — the profile's
         // name — to ~/Library/Saved Application State in plaintext.
@@ -400,6 +405,107 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     @objc func previousTabCommand(_ sender: Any?) { selectPreviousTab() }
     @objc func showAllTabsCommand(_ sender: Any?) {
         if isPhoneLayout { showTabOverview() }
+    }
+
+    // Find on the page: WebKit's own find bar in the web view (NSTextFinder), as AppKit's Find menu
+    // asks it — the action is the menu item's tag.
+    @objc func findCommand(_ sender: Any?) { textFinder(.showFindInterface) }
+    @objc func findNextCommand(_ sender: Any?) { textFinder(.nextMatch) }
+    @objc func findPreviousCommand(_ sender: Any?) { textFinder(.previousMatch) }
+    @objc func useSelectionForFindCommand(_ sender: Any?) { textFinder(.setSearchString) }
+    private func textFinder(_ action: NSTextFinder.Action) {
+        guard let webView = selectedTab?.webView else { return }
+        let carrier = NSMenuItem()
+        carrier.tag = action.rawValue
+        if action == .showFindInterface { window?.makeFirstResponder(webView) }
+        webView.performTextFinderAction(carrier)
+    }
+
+    /// Safari's zoom steps.
+    private static let zoomSteps: [CGFloat] = [0.5, 0.75, 0.85, 1, 1.15, 1.25, 1.5, 1.75, 2, 2.5, 3]
+    @objc func zoomInCommand(_ sender: Any?) { zoom(towardsLarger: true) }
+    @objc func zoomOutCommand(_ sender: Any?) { zoom(towardsLarger: false) }
+    @objc func actualSizeCommand(_ sender: Any?) { selectedTab?.webView.pageZoom = 1 }
+    private func zoom(towardsLarger: Bool) {
+        guard let webView = selectedTab?.webView else { return }
+        let now = webView.pageZoom, steps = Self.zoomSteps
+        webView.pageZoom = towardsLarger ? (steps.first { $0 > now + 0.001 } ?? steps[steps.count - 1])
+                                         : (steps.last { $0 < now - 0.001 } ?? steps[0])
+    }
+
+    @objc func printCommand(_ sender: Any?) {
+        guard let webView = selectedTab?.webView, let window else { return }
+        let operation = webView.printOperation(with: NSPrintInfo.shared)
+        operation.view?.frame = webView.bounds
+        operation.showsPrintPanel = true
+        operation.showsProgressPanel = true
+        operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+    }
+
+    /// The page as a web archive, where the person says (the save panel's choice is theirs).
+    @objc func saveAsCommand(_ sender: Any?) {
+        guard let webView = selectedTab?.webView, webView.url != nil, let window else { return }
+        let panel = NSSavePanel()
+        let title = (webView.title ?? "").isEmpty ? (webView.url?.host ?? "page") : (webView.title ?? "page")
+        panel.nameFieldStringValue = BrowserTab.safeDownloadName(title) + ".webarchive"
+        panel.allowedContentTypes = [.webArchive]
+        panel.canCreateDirectories = true
+        panel.beginSheetModal(for: window) { answer in
+            guard answer == .OK, let destination = panel.url else { return }
+            webView.createWebArchiveData { result in
+                do {
+                    try result.get().write(to: destination, options: .atomic)
+                } catch {
+                    NSAlert(error: error).beginSheetModal(for: window)
+                }
+            }
+        }
+    }
+
+    /// Share: the page's address onto this Mac's pasteboard. Nothing else yet — Mail, Messages and
+    /// AirDrop fetch an address they are given for its preview, as this Mac, outside the profile's
+    /// proxy (`HandOffs`), which is measured before any of them is offered.
+    @objc func copyLinkCommand(_ sender: Any?) {
+        guard let url = selectedTab?.url else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url.absoluteString, forType: .string)
+    }
+
+    @objc func closeWindowCommand(_ sender: Any?) { window?.performClose(nil) }
+    @objc func showHistoryCommand(_ sender: Any?) { showHistory() }
+    @objc func showBookmarksCommand(_ sender: Any?) { showBookmarks() }
+    @objc func bookmarkPageCommand(_ sender: Any?) { toggleBookmark() }
+    /// What this profile downloaded, and where it went — listed in the window: a profile's process
+    /// opens nothing in the Finder (`SystemOpen`).
+    @objc func showDownloadsCommand(_ sender: Any?) {
+        guard let window else { return }
+        let folder = BrowsingPreferences.current.downloadFolderURL.path
+        let files = BrowserTab.finishedDownloads.suffix(20).reversed()
+        let alert = NSAlert()
+        alert.messageText = L("downloads.title")
+        alert.informativeText = files.isEmpty ? String(format: L("downloads.none"), folder)
+            : String(format: L("downloads.list"), folder) + "\n" + files.map(\.lastPathComponent).joined(separator: "\n")
+        alert.beginSheetModal(for: window)
+    }
+
+    @objc func fullScreenCommand(_ sender: Any?) {
+        guard !isPhoneLayout else { return }
+        window?.toggleFullScreen(sender)
+    }
+
+    /// An iPhone has no full screen and its view is the phone's screen: off there. Find, print,
+    /// save, share and a bookmark need a page.
+    @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        switch item.action {
+        case #selector(fullScreenCommand(_:)):
+            return !isPhoneLayout
+        case #selector(printCommand(_:)), #selector(saveAsCommand(_:)), #selector(copyLinkCommand(_:)),
+             #selector(findCommand(_:)), #selector(findNextCommand(_:)), #selector(findPreviousCommand(_:)),
+             #selector(useSelectionForFindCommand(_:)), #selector(bookmarkPageCommand(_:)):
+            return selectedTab?.url != nil
+        default:
+            return true
+        }
     }
 
     /// NSToolbar gives the address field its preferred width and sends the items that no longer

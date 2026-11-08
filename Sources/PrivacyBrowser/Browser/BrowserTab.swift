@@ -595,8 +595,13 @@ extension BrowserTab: WKDownloadDelegate {
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
                   suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
         let preferences = BrowsingPreferences.current
+        let key = ObjectIdentifier(download)
+        let decide: (URL?) -> Void = { destination in
+            if let destination { Self.pendingDownloads[key] = destination }
+            completionHandler(destination)
+        }
         guard preferences.askWhereToSave, let window = webView.window, window.isVisible else {
-            completionHandler(Self.uniqueDownloadURL(suggestedFilename: suggestedFilename, in: preferences.downloadFolderURL))
+            decide(Self.uniqueDownloadURL(suggestedFilename: suggestedFilename, in: preferences.downloadFolderURL))
             return
         }
         let panel = NSSavePanel()
@@ -604,7 +609,7 @@ extension BrowserTab: WKDownloadDelegate {
         panel.directoryURL = preferences.downloadFolderURL
         panel.canCreateDirectories = true
         // No destination: WebKit cancels the download, and nothing is written.
-        panel.beginSheetModal(for: window) { answer in completionHandler(answer == .OK ? panel.url : nil) }
+        panel.beginSheetModal(for: window) { answer in decide(answer == .OK ? panel.url : nil) }
     }
 
     /// A download's challenges: its certificate as a page's (`ServerTrust`), the proxy's own with
@@ -617,7 +622,19 @@ extension BrowserTab: WKDownloadDelegate {
         }
     }
 
+    /// The files this process downloaded, newest last: the window's Show Downloads (⌥⌘L) lists
+    /// them — the profile's process opens nothing in the Finder (`SystemOpen`).
+    static private(set) var finishedDownloads: [URL] = []
+    private static var pendingDownloads: [ObjectIdentifier: URL] = [:]
+
+    func downloadDidFinish(_ download: WKDownload) {
+        if let destination = Self.pendingDownloads.removeValue(forKey: ObjectIdentifier(download)) {
+            Self.finishedDownloads.append(destination)
+        }
+    }
+
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        Self.pendingDownloads[ObjectIdentifier(download)] = nil
         // Cancelled in the save panel: nothing failed.
         if (error as NSError).domain == NSURLErrorDomain, (error as NSError).code == NSURLErrorCancelled { return }
         showMessage(String(format: L("download.failed"), error.localizedDescription))

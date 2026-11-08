@@ -5606,11 +5606,11 @@ final class SelfTest {
         setenv("PB_PROFILE_PROCESS", "1", 1)
         let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(10)).lowercased()
 
-        func act(_ manager: ProfileManager, _ id: UUID, _ action: WindowProbeAction) async -> WindowLook {
+        func act(_ manager: ProfileManager, _ id: UUID, _ action: WindowProbeAction, timeout: TimeInterval = 25) async -> WindowLook {
             var look: WindowLook?
             manager.onWindowLook = { _, answer in look = answer }
             guard manager.lookAtWindow(id, action) else { return WindowLook(action: "\(action)", detail: "no process") }
-            _ = await waitUntil(timeout: 25) { look != nil }
+            _ = await waitUntil(timeout: timeout) { look != nil }
             let seen = look ?? WindowLook(action: "\(action)", detail: "no answer")
             info("\(prefix): \(seen.action) → found \(seen.found), tabs \(seen.tabs), selected \(seen.selected), "
                  + "overview \(seen.overviewShown), controls \(seen.controls.filter { $0.hasPrefix("mobile") }.joined(separator: " ")), "
@@ -5640,6 +5640,22 @@ final class SelfTest {
             deviceGenerationID: "ios-27", matchProxyLocation: false, searchEngine: .duckDuckGo), "Phone window")
         defer { try? repository.delete(phoneID) }
         let start = await act(phone, phoneID, .describe)
+        // Every action a person takes in the window (the owner, 8 November: text would not paste in
+        // an iPhone view). The control first: the same keys with the menu bar emptied, as 0.1.4's
+        // process had none — paste must not work there, or the check sees nothing.
+        let bare = await act(phone, phoneID, .audit(withoutMenu: true), timeout: 150)
+        let barePaste = bare.detail.split(separator: "\n").first { $0.hasPrefix("address bar ⌘V") }.map(String.init) ?? "no answer"
+        check("\(prefix) actions: the control — without a menu bar (0.1.4), ⌘V does not paste into the address bar",
+              barePaste.hasSuffix("DOES NOT WORK"), barePaste)
+        let audit = await act(phone, phoneID, .audit(withoutMenu: false), timeout: 150)
+        let auditLines = audit.detail.split(separator: "\n").map(String.init)
+        let judged = auditLines.filter { $0.hasSuffix("— WORKS") || $0.hasSuffix("— DOES NOT WORK") }
+        for line in auditLines where !judged.contains(line) { info("\(prefix) actions: \(line)") }
+        let verdicts = judged.count
+        for line in judged {
+            check("\(prefix) actions: \(String(line.prefix { $0 != ":" }))", line.hasSuffix("— WORKS"), line)
+        }
+        check("\(prefix) actions: the window's actions were all pressed (at least 24 answered)", verdicts >= 24, "\(verdicts) answered")
         let firstPicture = await act(phone, phoneID, .picture)
         if let base64 = firstPicture.picture, let data = Data(base64Encoded: base64),
            let folder = ProcessInfo.processInfo.environment["PB_SELFTEST_SHOTS"] {
