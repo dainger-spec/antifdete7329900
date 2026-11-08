@@ -1,0 +1,60 @@
+# claude/measure-disguise-red — never merged: an iPhone view's full disguise with one part broken
+# at a time (PB_MEASURE_BREAK, Sources/PrivacyBrowser/Browser/MeasureBreak.swift), and the whole
+# set, so each of the self-test's checks for it is seen to fail; "none" is the same build unbroken,
+# which must pass them all.
+name: iPhone full disguise red run (measurement)
+on:
+  push:
+    branches: ['claude/measure-disguise-red']
+jobs:
+  measure:
+    name: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - name: The machine
+        run: |
+          sw_vers
+          defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString || true
+      - name: Build the app without the App Sandbox (profiles in processes of their own)
+        timeout-minutes: 30
+        run: NE=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: Each part broken in turn
+        timeout-minutes: 110
+        env:
+          PRIVACYBROWSER_LANG: ru
+        run: |
+          python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085 \
+            --tls-control 18086 --canary 18087 --silent 18088 --socks-udp 18089 --aia-tag "d$(date +%s)" &
+          for attempt in $(seq 1 40); do nc -z 127.0.0.1 18081 && break; sleep 0.5; done
+          export PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 PB_SELFTEST_HTTP_AUTH_PROXY_PORT=18082 PB_SELFTEST_HTTP6_PROXY_PORT=18083
+          export PB_SELFTEST_SOCKS2_PROXY_PORT=18084 PB_SELFTEST_SOCKS_AUTH_PROXY_PORT=18085
+          export PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087 PB_SELFTEST_SILENT_PROXY_PORT=18088 PB_SELFTEST_SOCKS_UDP_PROXY_PORT=18089
+          mkdir -p build/red
+          for part in none screen touchPoints orientation pointer workers touch tapEvents cancel all; do
+            case "$part" in
+              none|touch|tapEvents|cancel|all) groups="fingerprint surface,a phone's window" ;;
+              *) groups="fingerprint surface" ;;
+            esac
+            echo "::group::$part"
+            PB_MEASURE_BREAK="$part" PB_SELFTEST_ONLY="$groups" PB_SELFTEST_SHOTS="$PWD/build/red/shots-$part" \
+              timeout 1200 build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --self-test > "build/red/$part.txt" 2>&1 || true
+            grep -E '^(PASS|FAIL|SKIP)' "build/red/$part.txt" | grep -Ei 'iphone|phone window|tap' || true
+            echo "::endgroup::"
+          done
+          for part in none screen touchPoints orientation pointer workers touch tapEvents cancel all; do
+            echo "=== $part: $(grep -c '^PASS' build/red/$part.txt) passed, $(grep -c '^FAIL' build/red/$part.txt) failed"
+            grep '^FAIL' "build/red/$part.txt" | cut -c1-260 || true
+            grep -m1 -E 'MEASURE BREAK|Fatal error' "build/red/$part.txt" || true
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: disguise-red-${{ matrix.runner }}
+          path: build/red
+          if-no-files-found: warn
