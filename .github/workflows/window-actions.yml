@@ -1,0 +1,56 @@
+# claude/measure-window-actions — a measurement branch, never merged (the owner, 8 November):
+# 1. does this Mac's real Safari give a page window.safari, at a secure and at a plain http address
+#    (scripts/window_safari_check.py);
+# 2. every action a person takes in a mobile view's window (our window) — as 0.1.4 had it, without a
+#    menu bar in that process, and as it is now — and in a profile in Safari's window
+#    (WindowAudit.swift, the self-test's "a phone's window" group); with the processor-count group,
+#    which says what the iPhone view's pages are told now.
+name: Window actions (measurement)
+on:
+  push:
+    branches: ['claude/measure-window-actions']
+jobs:
+  measure:
+    name: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: The machine
+        run: |
+          sw_vers
+          defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString || true
+      - name: window.safari in this Mac's real Safari
+        timeout-minutes: 10
+        run: |
+          sudo safaridriver --enable || echo "safaridriver --enable failed"
+          python3 scripts/window_safari_check.py
+      - name: Build the app without the App Sandbox (profiles in processes of their own)
+        timeout-minutes: 30
+        run: NE=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: The window's actions, and the processor count
+        timeout-minutes: 30
+        env:
+          PB_SELFTEST_ONLY: "processor count,a phone's window"
+          PRIVACYBROWSER_LANG: ru
+        run: |
+          python3 scripts/selftest_proxy.py --http 18080 --socks 18081 --http-auth 18082 --http6 18083 --socks2 18084 --socks-auth 18085 \
+            --tls-control 18086 --canary 18087 --silent 18088 --socks-udp 18089 --aia-tag "w$(date +%s)" &
+          for attempt in $(seq 1 40); do nc -z 127.0.0.1 18081 && break; sleep 0.5; done
+          export PB_SELFTEST_HTTP_PROXY_PORT=18080 PB_SELFTEST_SOCKS_PROXY_PORT=18081 PB_SELFTEST_HTTP_AUTH_PROXY_PORT=18082 PB_SELFTEST_HTTP6_PROXY_PORT=18083
+          export PB_SELFTEST_SOCKS2_PROXY_PORT=18084 PB_SELFTEST_SOCKS_AUTH_PROXY_PORT=18085
+          export PB_SELFTEST_TLS_CONTROL_PORT=18086 PB_SELFTEST_CANARY_PORT=18087 PB_SELFTEST_SILENT_PROXY_PORT=18088 PB_SELFTEST_SOCKS_UDP_PROXY_PORT=18089
+          export PB_SELFTEST_SHOTS="$PWD/build/shots"
+          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --self-test | tee build/selftest.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: window-actions-${{ matrix.runner }}
+          path: |
+            build/selftest.txt
+            build/shots
+          if-no-files-found: warn
