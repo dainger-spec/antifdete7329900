@@ -2660,6 +2660,7 @@ final class SelfTest {
             let fullPhone = isPhone && disguise == .full
             let name = !isPhone ? "macOS" : fullPhone ? "iPhone view" : "iPhone view, no script's trace"
             writeSurface(probed, name: !isPhone ? "macos" : fullPhone ? "iphone" : "iphone-engine")
+<<<<<<< HEAD
             // An iPhone view turns on what an iPhone's Safari has and a web view lacks (Apple Pay)
             // and off what it has not (Notification), with WebKit's own switches (`PhoneEngine`):
             // those are checked below, not against the plain web view.
@@ -2670,6 +2671,20 @@ final class SelfTest {
             let differing = compared.filter { string(probed, $0) != string(reference, $0) }
             check("surface (\(name)): engine and hardware signals as in a plain web view (\(compared.count) keys)",
                   differing.isEmpty, differing.map { "\($0): \(string(probed, $0)) vs \(string(reference, $0))" }.joined(separator: "; "))
+=======
+            // Every profile turns on what Safari has and a plain web view lacks (Apple Pay, WebKit's
+            // own switch), and an iPhone view off what an iPhone's Safari has not (Notification,
+            // `PhoneEngine`): those are checked below, not against the plain web view.
+            let safariKeys: (String) -> Bool = { key in
+                ["ApplePay", "Payment", "MerchantValidation"].contains { key.contains($0) } || (isPhone && key.contains("Notification"))
+            }
+            let compared = engineKeys.filter { !safariKeys($0) }
+            let differing = compared.filter { string(probed, $0) != string(reference, $0) }
+            check("surface (\(name)): engine and hardware signals as in a plain web view (\(compared.count) keys)",
+                  differing.isEmpty, differing.map { "\($0): \(string(probed, $0)) vs \(string(reference, $0))" }.joined(separator: "; "))
+            check("surface (\(name)): ApplePaySession is there, as in Safari (\(isPhone ? "an iPhone's" : "Safari's window on the Mac"))",
+                  string(probed, "features.ApplePaySession") == "function", string(probed, "features.ApplePaySession"))
+>>>>>>> 8e34bda
             if isPhone {
                 // What WebKit answers as an iPhone (the owner's iPhone, 8 November), not a script:
                 // in both disguises.
@@ -2678,8 +2693,11 @@ final class SelfTest {
                       "\(string(probed, "platform")); getter \(string(probed, "natives.Navigator.platform getter"))")
                 check("surface (\(name)): devicePixelRatio is an iPhone's 3",
                       string(probed, "screen").hasSuffix("x3"), string(probed, "screen"))
+<<<<<<< HEAD
                 check("surface (\(name)): ApplePaySession is there, as in an iPhone's Safari",
                       string(probed, "features.ApplePaySession") == "function", string(probed, "features.ApplePaySession"))
+=======
+>>>>>>> 8e34bda
                 check("surface (\(name)): no Notification, as in an iPhone's Safari outside a home-screen web app",
                       string(probed, "features.Notification") == "undefined", string(probed, "features.Notification"))
             }

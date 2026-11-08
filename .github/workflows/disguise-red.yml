@@ -43,7 +43,7 @@ jobs:
             esac
             echo "::group::$part"
             PB_MEASURE_BREAK="$part" PB_SELFTEST_ONLY="$groups" PB_SELFTEST_SHOTS="$PWD/build/red/shots-$part" \
-              timeout 1200 build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --self-test > "build/red/$part.txt" 2>&1 || true
+              perl -e 'alarm shift; exec @ARGV' 1200 build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --self-test > "build/red/$part.txt" 2>&1 || true
             grep -E '^(PASS|FAIL|SKIP)' "build/red/$part.txt" | grep -Ei 'iphone|phone window|tap' || true
             echo "::endgroup::"
           done

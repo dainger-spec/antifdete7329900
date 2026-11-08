@@ -88,8 +88,12 @@ enum ExceptionLog {
             }
             ExceptionLog.write(exception, when: "caught by the run loop, which goes on", frames: exception.callStackSymbols)
             // What the user was doing, read now (on the main thread, in the event that threw); what
-            // to tell them, after this event is over.
-            let event = MainActor.assumeIsolated { NSApplication.shared.currentEvent?.type }
+            // to tell them, after this event is over. Read through the runtime from the application
+            // AppKit hands us, not under `MainActor.assumeIsolated`: on the main thread in AppKit's
+            // run loop that check trapped all the same (CI 758, an iPhone view's process under the
+            // window's actions: SIGTRAP in this closure, so every exception there became a crash).
+            let current = (application as? NSObject)?.value(forKey: "currentEvent") as? NSObject
+            let event = (current?.value(forKey: "type") as? UInt).flatMap { NSEvent.EventType(rawValue: $0) }
             DispatchQueue.main.async { ExceptionLog.onCaughtInRunLoop?(exception, event) }
             if isAppKits {
                 original(application, selector, exception)
@@ -276,7 +280,7 @@ enum ExceptionLog {
     }
 
     /// This process's own log lines of this file that mention `text`.
-    private static func loggedLines(containing text: String) -> [String] {
+    static func loggedLines(containing text: String) -> [String] {
         guard let store = try? OSLogStore(scope: .currentProcessIdentifier),
               let entries = try? store.getEntries(matching: NSPredicate(format: "subsystem == %@ AND category == %@",
                                                                         "PrivacyBrowser", "Exception")) else { return [] }
