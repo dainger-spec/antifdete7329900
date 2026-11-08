@@ -1,0 +1,76 @@
+name: Safari's window.browser (measurement)
+
+# Measurement only (claude/ios-app-measure, never merged). The owner's Safari has a window property
+# `browser` that the app's web view has not (8 November). Safari on a fresh simulator has no extension
+# installed: its answer says whether `browser` is Safari's own or came with an extension. Report-only.
+on:
+  push:
+    branches: [claude/ios-app-measure]
+    paths:
+      - ".github/workflows/safari-browser.yml"
+      - "ios-measure/safari_probe.py"
+  workflow_dispatch:
+
+jobs:
+  safari:
+    name: window.browser in a fresh simulator's Safari (xcode-27)
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: The machine
+        run: sw_vers; xcodebuild -version; mkdir -p out
+      - name: Safari on a fresh simulator, the page over plain http on this Mac's network address (as the owner's)
+        run: |
+          set -u
+          LAN="$(ipconfig getifaddr en0 || ipconfig getifaddr en1)"; echo "this Mac: $LAN"
+          read -r runtime type <<<"$(xcrun simctl list -j | python3 -c '
+          import json, sys
+          d = json.load(sys.stdin)
+          rs = sorted((r for r in d["runtimes"] if r.get("platform", "iOS") == "iOS" and r.get("isAvailable", True)),
+                      key=lambda r: tuple(int(x) for x in r["version"].split(".")), reverse=True)
+          r = rs[0]; names = {t["identifier"]: t["name"] for t in d["devicetypes"]}
+          ok = [t["identifier"] for t in r.get("supportedDeviceTypes", [])] or list(names)
+          pick = next((i for n in ("iPhone 17 Pro", "iPhone 16 Pro") for i in ok if names.get(i) == n), [i for i in ok if "iPhone" in names.get(i, "")][-1])
+          print(r["identifier"], pick)')"
+          udid="$(xcrun simctl create "Lumen safari" "$type" "$runtime")"
+          xcrun simctl boot "$udid"; xcrun simctl bootstatus "$udid" -b >/dev/null 2>&1
+          echo "simulator $udid ($type, $runtime)"
+          python3 ios-measure/safari_probe.py 0.0.0.0 28399 out >out/server.txt 2>&1 &
+          sleep 1
+          for tag in lan-1 loopback-1 lan-2; do
+            case $tag in loopback-*) host=127.0.0.1;; *) host=$LAN;; esac
+            for attempt in 1 2 3; do
+              xcrun simctl openurl "$udid" "http://$host:28399/?tag=$tag" || true
+              for i in $(seq 1 20); do [[ -f out/report-$tag.json ]] && break; sleep 1; done
+              [[ -f out/report-$tag.json ]] && break
+              xcrun simctl io "$udid" screenshot "out/screen-$tag-$attempt.png" >/dev/null 2>&1 || true
+            done
+            [[ -f out/report-$tag.json ]] && echo "$tag: reported" || echo "$tag: NO REPORT"
+          done
+          cat out/server.txt
+      - name: What it says, against the owner's Safari
+        run: |
+          python3 - <<'PY'
+          import glob, json, os
+          ref = json.load(open("ios-measure/host/iphone_reference.json"))
+          owner = set(ref["windowNames"]) - set(ref.get("pageGlobals", []))
+          for path in sorted(glob.glob("out/report-*.json")):
+              r = json.load(open(path))
+              names = set(r["windowNames"])
+              print(f"== {os.path.basename(path)}: {r['ua']}")
+              print(f"   secure context: {r['secure']}; window own names: {r['windowOwnCount']}")
+              print(f"   'browser' in window: {r['hasBrowser']}; typeof browser: {r['typeofBrowser']}; chrome: {r['typeofChrome']}; "
+                    f"safari: {r['typeofSafari']}; HTMLModelElement: {r['typeofModel']}")
+              print(f"   browser descriptor: {r.get('browserDescriptor')}")
+              for k in ("browserTag", "browserChain", "runtimeChain", "runtimeId", "browserError"):
+                  if k in r:
+                      print(f"   {k}: {json.dumps(r[k])[:1500]}")
+              print(f"   only the owner's Safari has: {sorted(owner - names)}")
+              print(f"   only this Safari has: {sorted(names - owner)}")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: safari-browser-${{ github.run_number }}
+          path: out

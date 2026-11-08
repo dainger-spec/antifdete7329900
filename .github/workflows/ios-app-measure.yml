@@ -17,6 +17,7 @@ on:
       - "!ios-measure/check_app.py"
       - "!ios-measure/ports_free.py"
       - "!ios-measure/capture_look.py"
+      - "!ios-measure/safari_probe.py"
       - "!ios-measure/test_tools.py"
       - "!ios-measure/control_stub.py"
       - "!ios-measure/**/*.md"
