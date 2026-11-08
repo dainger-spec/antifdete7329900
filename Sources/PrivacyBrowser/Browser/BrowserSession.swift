@@ -144,6 +144,7 @@ final class BrowserSession {
         BrowserTabContext(profileName: profileName, userAgent: configuration.userAgent(hostSafariVersion: HostSafari.version),
                           passwordVault: passwordVault, passwordSettings: passwordSettings, library: library,
                           hasProxy: configuration.proxy != nil,
+                          phoneScale: PhoneEngine.phone(of: configuration)?.scale,
                           proxyCredential: configuration.proxy.flatMap { proxy in
                               proxy.username.map { URLCredential(user: $0, password: proxy.password ?? "", persistence: .forSession) }
                           })
@@ -290,6 +291,9 @@ final class BrowserSession {
         // page sees as document.fullscreenEnabled === undefined).
         webConfiguration.preferences.isElementFullscreenEnabled = true
         applyPrivacyPreferences(to: webConfiguration.preferences)
+        // An iPhone view: what WebKit itself answers as an iPhone (the platform, Apple Pay, no
+        // Notification); the pixel density per web view (`BrowserTab`).
+        PhoneEngine.apply(to: webConfiguration, for: configuration)
         return webConfiguration
     }
 
