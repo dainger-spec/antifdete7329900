@@ -10,6 +10,11 @@ on:
     paths:
       - "ios-measure/**"
       - ".github/workflows/ios-app-measure.yml"
+      # The real-iPhone script and its device choice: device-tools.yml measures and tests those.
+      - "!ios-measure/run_device.sh"
+      - "!ios-measure/device_pick.py"
+      - "!ios-measure/test_device_pick.py"
+      - "!ios-measure/**/*.md"
   workflow_dispatch:
     inputs:
       scenario:
