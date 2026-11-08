@@ -813,55 +813,63 @@ async def scenario_q1(capture):
 
     # 7b. WebRTC off by script (no public WKWebView switch exists): PrivacyScripts' own shim with
     # webRTC "disabled", in the page and in an about:blank frame the page makes. STUN must hear nothing.
-    try:
-        import q2 as fixtures
-        swift_body = fixtures.shim_body()
-        shim = "(function install(CONFIG) {\n" + swift_body + "\n})(" + json.dumps(
-            {"timeZone": None, "geolocation": {"mode": "deny"}, "webRTC": "disabled", "safariObject": False, "storageQuota": None}) + ");"
-        await APP.cmd("session", session="W", store=f"persistent:{uuid.uuid4()}", proxies=[proxy_a],
-                      userScripts=[{"source": shim, "mainFrameOnly": False}])
-        await APP.cmd("load", session="W", url=f"http://{tok('p', 'W')}.lumentest:{hp}/page?sid=W", timeout=30)
-        stun_before = len([e for e in EVENTS if e["kind"] == "stun"])
-        rtc = await APP.cmd("eval", session="W", js=f"""
-            const tryRTC = async (w) => {{
-              const PC = w.RTCPeerConnection || w.webkitRTCPeerConnection;
-              if (typeof PC !== 'function') return 'absent';
-              try {{ const pc = new PC({{ iceServers: [{{ urls: 'stun:{lan}:{ARGS.stun_port}' }}] }}); const c = [];
-                pc.onicecandidate = (e) => {{ if (e.candidate) c.push(e.candidate.candidate); }};
-                pc.createDataChannel('x'); await pc.setLocalDescription(await pc.createOffer());
-                await new Promise((r) => setTimeout(r, 4000)); pc.close(); return c; }} catch (e) {{ return 'error ' + e.message; }} }};
-            const f = document.createElement('iframe'); document.body.appendChild(f);
-            return {{ page: await tryRTC(window), blankFrame: await tryRTC(f.contentWindow),
-                      names: Object.getOwnPropertyNames(window).filter((n) => /RTC/.test(n)).length }};""", timeout=40)
-        await asyncio.sleep(1)
-        stun_after = len([e for e in EVENTS if e["kind"] == "stun"])
-        v = rtc.get("value") or {}
-        check("q1.webrtc-off-by-script", "PASS" if stun_after == stun_before and lan else ("LEAK" if lan else "INCONCLUSIVE"),
-              f"PrivacyScripts webRTC=disabled: page {v.get('page') if isinstance(v.get('page'), str) else str(len(v.get('page') or [])) + ' candidates'}, "
-              f"about:blank frame {v.get('blankFrame') if isinstance(v.get('blankFrame'), str) else str(len(v.get('blankFrame') or [])) + ' candidates'}, "
-              f"RTC names left on window {v.get('names')}; STUN binding requests during it: {stun_after - stun_before}")
-    except Exception as error:
-        check("q1.webrtc-off-by-script", "INCONCLUSIVE", f"stopped: {error!r}")
+    # Through A (HTTP) and through B (SOCKS5): on iOS 17.5 A does not carry plain-http pages, so there
+    # only B's page loads. A page that did not load proves nothing (the shim runs in pages only).
+    import q2 as fixtures
+    for suffix, proxy, sid in (("", proxy_a, "W"), (".socks", proxy_b, "W2")):
+        name = "q1.webrtc-off-by-script" + suffix
+        try:
+            swift_body = fixtures.shim_body()
+            shim = "(function install(CONFIG) {\n" + swift_body + "\n})(" + json.dumps(
+                {"timeZone": None, "geolocation": {"mode": "deny"}, "webRTC": "disabled", "safariObject": False, "storageQuota": None}) + ");"
+            await APP.cmd("session", session=sid, store=f"persistent:{uuid.uuid4()}", proxies=[proxy],
+                          userScripts=[{"source": shim, "mainFrameOnly": False}])
+            lw = await APP.cmd("load", session=sid, url=f"http://{tok('p', sid)}.lumentest:{hp}/page?sid={sid}", timeout=30)
+            stun_before = len([e for e in EVENTS if e["kind"] == "stun"])
+            rtc = await APP.cmd("eval", session=sid, js=f"""
+                const tryRTC = async (w) => {{
+                  const PC = w.RTCPeerConnection || w.webkitRTCPeerConnection;
+                  if (typeof PC !== 'function') return 'absent';
+                  try {{ const pc = new PC({{ iceServers: [{{ urls: 'stun:{lan}:{ARGS.stun_port}' }}] }}); const c = [];
+                    pc.onicecandidate = (e) => {{ if (e.candidate) c.push(e.candidate.candidate); }};
+                    pc.createDataChannel('x'); await pc.setLocalDescription(await pc.createOffer());
+                    await new Promise((r) => setTimeout(r, 4000)); pc.close(); return c; }} catch (e) {{ return 'error ' + e.message; }} }};
+                const f = document.createElement('iframe'); document.body.appendChild(f);
+                return {{ page: await tryRTC(window), blankFrame: await tryRTC(f.contentWindow),
+                          names: Object.getOwnPropertyNames(window).filter((n) => /RTC/.test(n)).length, href: location.href }};""", timeout=40)
+            await asyncio.sleep(1)
+            stun_after = len([e for e in EVENTS if e["kind"] == "stun"])
+            v = rtc.get("value") or {}
+            status = ("PASS" if stun_after == stun_before else "LEAK") if lw.get("ok") and lan else "INCONCLUSIVE"
+            check(name, status,
+                  f"PrivacyScripts webRTC=disabled, through {proxy['type']}: page load ok={lw.get('ok')} ({lw.get('error')}), at {v.get('href')}; "
+                  f"page {v.get('page') if isinstance(v.get('page'), str) else str(len(v.get('page') or [])) + ' candidates'}, "
+                  f"about:blank frame {v.get('blankFrame') if isinstance(v.get('blankFrame'), str) else str(len(v.get('blankFrame') or [])) + ' candidates'}, "
+                  f"RTC names left on window {v.get('names')}; STUN binding requests during it: {stun_after - stun_before}")
+        except Exception as error:
+            check(name, "INCONCLUSIVE", f"stopped: {error!r}")
 
     # 7c. The macOS fix for dns-prefetch and loopback, with public API only: ProxiedContentRules'
     # list (a ping-type block, which WebKit 7621+ applies to dns-prefetch; this device's addresses).
+    # Through A and through B, for the same reason as 7b.
     this_device = [r"^[a-z]+://127\.[0-9]+\.[0-9]+\.[0-9]+[:/]", r"^[a-z]+://0\.0\.0\.0[:/]", r"^[a-z]+://localhost\.?[:/]",
                    r"^[a-z]+://[a-z0-9.-]*\.localhost\.?[:/]", r"^[a-z]+://\[::1\]", r"^[a-z]+://\[::\]", r"^[a-z]+://\[::ffff:7f"]
     rules = [{"trigger": {"url-filter": ".*", "resource-type": ["ping"]}, "action": {"type": "block"}}]
     rules += [{"trigger": {"url-filter": p, "unless-top-url": this_device}, "action": {"type": "block"}} for p in this_device]
-    made_p = await APP.cmd("session", session="P", store=f"persistent:{uuid.uuid4()}", proxies=[proxy_a], contentRules=json.dumps(rules))
-    lp = await APP.cmd("load", session="P", url=f"http://{tok('p', 'P')}.lumentest:{hp}/page?sid=P", timeout=30)
-    pv = (await APP.cmd("eval", session="P", js=f"""
-        const t = (u) => fetch(u, {{ mode: 'no-cors' }}).then(() => 'loaded', (e) => String(e));
-        return {{ lo4: await t('http://127.0.0.1:{hp}/lo?sid=P&k=lo4'), lohost: await t('http://localhost:{hp}/lo?sid=P&k=lohost'),
-                  site: await t('/whoami?sid=P&k=same') }};""")).get("value") or {}
-    await asyncio.sleep(2)
-    p_lo = site_events(lambda e: e["query"].get("sid") == "P" and e["query"].get("k") in ("lo4", "lohost"))
-    p_pf = capture.seen(tok("pf", "P")) if capture.state.startswith("running") else None
-    check("q1.rules-close-prefetch-and-loopback",
-          "PASS" if lp.get("ok") and not p_lo and p_pf == [] else ("LEAK" if p_lo or p_pf else "INCONCLUSIVE"),
-          f"rule list {made_p.get('contentRules')}; page ok={lp.get('ok')}; fetches {pv}; the site got loopback requests {len(p_lo)}; "
-          f"dns-prefetch name in the capture: {p_pf if p_pf is not None else 'no capture'}")
+    for suffix, proxy, sid in (("", proxy_a, "P"), (".socks", proxy_b, "P2")):
+        made_p = await APP.cmd("session", session=sid, store=f"persistent:{uuid.uuid4()}", proxies=[proxy], contentRules=json.dumps(rules))
+        lp = await APP.cmd("load", session=sid, url=f"http://{tok('p', sid)}.lumentest:{hp}/page?sid={sid}", timeout=30)
+        pv = (await APP.cmd("eval", session=sid, js=f"""
+            const t = (u) => fetch(u, {{ mode: 'no-cors' }}).then(() => 'loaded', (e) => String(e));
+            return {{ lo4: await t('http://127.0.0.1:{hp}/lo?sid={sid}&k=lo4'), lohost: await t('http://localhost:{hp}/lo?sid={sid}&k=lohost'),
+                      site: await t('/whoami?sid={sid}&k=same') }};""")).get("value") or {}
+        await asyncio.sleep(2)
+        p_lo = site_events(lambda e, sid=sid: e["query"].get("sid") == sid and e["query"].get("k") in ("lo4", "lohost"))
+        p_pf = capture.seen(tok("pf", sid)) if capture.state.startswith("running") else None
+        check("q1.rules-close-prefetch-and-loopback" + suffix,
+              "INCONCLUSIVE" if not lp.get("ok") else ("PASS" if not p_lo and p_pf == [] else ("LEAK" if p_lo or p_pf else "INCONCLUSIVE")),
+              f"through {proxy['type']}: rule list {made_p.get('contentRules')}; page ok={lp.get('ok')}; fetches {pv}; the site got loopback requests {len(p_lo)}; "
+              f"dns-prefetch name in the capture: {p_pf if p_pf is not None else 'no capture'}")
 
     # 8. Leaks the page cannot see: DNS and WebRTC.
     await asyncio.sleep(2)
