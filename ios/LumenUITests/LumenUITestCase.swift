@@ -197,20 +197,31 @@ class LumenUITestCase: XCTestCase {
             _ = field.waitForExistence(timeout: 5)
         }
         wait(field, "the new proxy form opens (for \(name))")
-        field.tap()
-        field.typeText(name)
+        typeInto(field, name)
         app.segmentedControls["proxyKind"].buttons[kind].tap()
-        app.textFields["proxyHost"].tap()
-        app.textFields["proxyHost"].typeText(host)
-        app.textFields["proxyPort"].tap()
-        app.textFields["proxyPort"].typeText(port)
-        app.textFields["proxyUser"].tap()
-        app.textFields["proxyUser"].typeText(user)
-        app.secureTextFields["proxyPassword"].tap()
-        app.secureTextFields["proxyPassword"].typeText(password)
+        typeInto(app.textFields["proxyHost"], host)
+        typeInto(app.textFields["proxyPort"], port)
+        typeInto(app.textFields["proxyUser"], user)
+        typeInto(app.secureTextFields["proxyPassword"], password)
         app.buttons["saveProxy"].tap()
         waitGone(field, "the proxy form closes (\(name))")
+        // iOS must not offer to keep the proxy's password among the person's own (CI run 12: its
+        // "Save Password?" alert came after every proxy and blocked the screen).
+        XCTAssertFalse(app.alerts.firstMatch.waitForExistence(timeout: 3),
+                       "no alert after saving the proxy \(name): \(app.alerts.firstMatch.label)")
         wait(proxyRow(name), "the proxy \(name) is in the list")
+    }
+
+    /// Touches a field and types once it has the keyboard (CI run 12: "Neither element nor any
+    /// descendant has keyboard focus" when typing right after the touch).
+    func typeInto(_ field: XCUIElement, _ text: String, file: StaticString = #filePath, line: UInt = #line) {
+        reveal(field, "the field is there", file: file, line: line).tap()
+        let focused = NSPredicate(format: "hasKeyboardFocus == true")
+        if XCTWaiter.wait(for: [expectation(for: focused, evaluatedWith: field)], timeout: 5) != .completed {
+            field.tap()
+            _ = XCTWaiter.wait(for: [expectation(for: focused, evaluatedWith: field)], timeout: 5)
+        }
+        field.typeText(text)
     }
 
     /// Waits until a proxy's row says `text` (its check is done).

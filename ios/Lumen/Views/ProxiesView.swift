@@ -101,9 +101,15 @@ struct ProxyEditor: View {
                     TextField("Порт", text: $port).accessibilityIdentifier("proxyPort").keyboardType(.numberPad)
                 }
                 Section("Вход") {
+                    // Not a login of the person's: iOS must not offer to keep it in their Passwords
+                    // (CI run 12: "Save Password?" after every proxy, the proxy's password bound for
+                    // iCloud Keychain). The password is kept in this app's own Keychain item only.
                     TextField("Логин", text: $username).accessibilityIdentifier("proxyUser")
+                        .textContentType(Faults.isActive(.passwordAutofill) ? .username : nil)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                     SecureField("Пароль", text: $password).accessibilityIdentifier("proxyPassword")
+                        .textContentType(Faults.isActive(.passwordAutofill) ? .password : .oneTimeCode)
                 }
                 if let entry {
                     Section {

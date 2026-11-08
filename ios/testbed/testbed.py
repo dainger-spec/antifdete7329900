@@ -21,7 +21,9 @@ this Mac, so a test sees on the screen what the pages say about how they were re
             connections), state=on starts it again. Nothing listens on 28389 and 28390 (dead proxies).
   DNS       UDP 127.0.0.1:28353 answers *.lumentest with 127.0.0.1 for this Mac's own resolver
             (/etc/resolver/lumentest, set up by ci.sh): a page that goes around its proxy then
-            reaches the site directly, and says "via: напрямую"
+            reaches the site directly, and says "via: напрямую" (CI run 12: the app's web view does;
+            the simulator's Safari did not). lan-* names get this Mac's network address
+            (--lan-address), for the CI probe that compares the two.
   /__seen?token=T  how many site requests (by Host) and DNS questions this testbed got with T in them
   STUN      UDP 127.0.0.1:3478 (stun.lumentest through a proxy), answers Binding requests
   /__events everything the site and the proxies saw, as JSON (for the tests' own bookkeeping)
@@ -321,14 +323,16 @@ class LumentestDNS(asyncio.DatagramProtocol):
         name = ".".join(labels).lower()
         event("dns", name=name, qtype=qtype)
         ours = name == "lumentest" or name.endswith(".lumentest")
+        address = LAN_ADDRESS[0] if name.startswith("lan-") else "127.0.0.1"
         answer = b""
         if ours and qtype == 1:
-            answer = b"\xc0\x0c" + struct.pack(">HHIH", 1, 1, 5, 4) + socket.inet_aton("127.0.0.1")
+            answer = b"\xc0\x0c" + struct.pack(">HHIH", 1, 1, 5, 4) + socket.inet_aton(address)
         flags = 0x8580 if ours else 0x8583          # an answer, authoritative; NXDOMAIN for other names
         self.transport.sendto(struct.pack(">HHHHHH", tid, flags, 1, 1 if answer else 0, 0, 0) + question + answer, addr)
 
 
 SWITCHABLE = {}   # name -> {"port", "handler", "server", "conns"}: proxies a test can stop and start
+LAN_ADDRESS = ["127.0.0.1"]   # what lan-*.lumentest resolves to (--lan-address: this Mac's network address)
 
 
 def switchable(name, port, handler):
@@ -429,7 +433,9 @@ def socks_proxy(name, auth, bind, udp=False):
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", default="testbed")
+    parser.add_argument("--lan-address", default="127.0.0.1", help="what lan-*.lumentest resolves to")
     args = parser.parse_args()
+    LAN_ADDRESS[0] = args.lan_address
     os.makedirs(args.out, exist_ok=True)
     await asyncio.start_server(site, "0.0.0.0", 28380)
     await asyncio.start_server(http_proxy("A", "ua:pa", "127.0.0.2"), "127.0.0.1", 28381)

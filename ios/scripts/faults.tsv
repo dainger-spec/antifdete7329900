@@ -22,6 +22,7 @@ sharedStore	ui	LumenUITests/BrowserTests/testSessionsAreIsolated
 proxyNotApplied	ui	LumenUITests/ProxyTests/testProxyPersonPath
 proxyChangeNotLive	ui	LumenUITests/ProxyTests/testProxyPersonPath
 proxyPasswordNotSaved	ui	LumenUITests/ProxyTests/testProxyPersonPath
+passwordAutofill	ui	LumenUITests/ProxyTests/testProxyPersonPath
 deadHTTPDropped	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect
 deadSOCKSDropped	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect
 recheckDropsProxy	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect

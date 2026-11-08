@@ -102,7 +102,8 @@ trap 'xcrun simctl shutdown "$UDID" >/dev/null 2>&1; xcrun simctl delete "$UDID"
 # directly and says so (the dead-proxy test), instead of failing unseen at DNS.
 if [[ -f "$HERE/testbed/testbed.py" ]]; then
     for a in 127.0.0.2 127.0.0.3; do sudo -n ifconfig lo0 alias "$a" up 2>/dev/null || true; done
-    python3 "$HERE/testbed/testbed.py" --out "$OUT/testbed" >"$OUT/testbed.txt" 2>&1 &
+    LAN="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo 127.0.0.1)"
+    python3 "$HERE/testbed/testbed.py" --out "$OUT/testbed" --lan-address "$LAN" >"$OUT/testbed.txt" 2>&1 &
     TESTBED=$!
     sudo -n mkdir -p /etc/resolver && printf 'nameserver 127.0.0.1\nport 28353\n' | sudo -n tee /etc/resolver/lumentest >/dev/null \
         || say "cannot write /etc/resolver/lumentest (sudo?)"
@@ -126,11 +127,12 @@ fi
 # The simulator itself: does Safari there reach a .lumentest name directly, and did the testbed get
 # the DNS question and the request? (The dead-proxy test's detector depends on it.)
 if [[ -n "${TESTBED:-}" ]]; then
-    probe="probe-$RANDOM.lumentest"
-    xcrun simctl openurl "$UDID" "http://$probe:28380/whoami?t=probe" >/dev/null 2>&1
-    sleep 12
-    xcrun simctl terminate "$UDID" com.apple.mobilesafari >/dev/null 2>&1
-    say "the simulator, Safari to http://$probe: $(python3 - "$OUT/testbed/events.json" "$probe" <<'PY'
+    for kind in lo lan; do   # answered with 127.0.0.1 (what the tests use), and with this Mac's address
+        probe="probe-$RANDOM.lumentest"; [[ "$kind" == "lan" ]] && probe="lan-$probe"
+        xcrun simctl openurl "$UDID" "http://$probe:28380/whoami?t=probe" >/dev/null 2>&1
+        sleep 12
+        xcrun simctl terminate "$UDID" com.apple.mobilesafari >/dev/null 2>&1
+        say "the simulator, Safari to http://$probe (answered with $([[ "$kind" == "lo" ]] && echo 127.0.0.1 || echo "$LAN")): $(python3 - "$OUT/testbed/events.json" "$probe" <<'PY'
 import json, sys
 try:
     events = json.load(open(sys.argv[1]))
@@ -139,9 +141,10 @@ except Exception as e:
 name = sys.argv[2]
 dns = [e for e in events if e.get("kind") == "dns" and name in e.get("name", "")]
 site = [e for e in events if e.get("kind") == "site" and name in (e.get("host") or "")]
-print(f"DNS questions {len(dns)} {[e.get('qtype') for e in dns]}, requests at the site {len(site)} {[e.get('via') for e in site]}")
+print(f"DNS questions {len(dns)} {[e.get('qtype') for e in dns]}, requests at the site {len(site)} {[(e.get('via'), e.get('peer')) for e in site]}")
 PY
 )"
+    done
 fi
 
 # ---- 4. Build once, then the end-to-end tests: reds, then green.
