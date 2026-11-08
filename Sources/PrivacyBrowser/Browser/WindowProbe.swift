@@ -107,8 +107,15 @@ enum WindowProbe {
         case .audit(let withoutMenu):
             look.action = "audit" + (withoutMenu ? " without a menu bar" : "")
             if let window {
+                let before = ExceptionLog.reported
                 look.detail = await WindowAudit.run(window, controller: controller, withoutMenu: withoutMenu,
                                                     addressField: addressField(in: window))
+                // An exception an action threw, which the run loop caught and lived through: named,
+                // so the self-test says which action threw what (CI 758 lost it in a crash).
+                if ExceptionLog.reported > before {
+                    let thrown = ExceptionLog.loggedLines(containing: "caught by the run loop").suffix(ExceptionLog.reported - before)
+                    look.detail += thrown.map { "\nexception during the actions: \($0.prefix(300))" }.joined()
+                }
                 look.found = true
             }
         case .search(let text):
