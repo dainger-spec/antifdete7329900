@@ -555,17 +555,17 @@ What a profile changed to get there (each was a difference before):
 What still differs, and why it cannot be changed from the app:
 
 - **Apple Pay and Web Push.** `ApplePaySession`, `ApplePaySetup`, `MerchantValidationEvent`,
-  `PaymentRequest` and `PushManager` exist only in Safari. WebKit enables them for an embedder only
-  through private preferences (`ApplePayEnabled`, `PushAPIEnabled`), and they need Safari's
-  entitlements to work. Under the rule above (*Parity with Safari*) they could be turned on only
-  that way, and only if every call then answers as a real Safari does; what the calls answer in a
-  profile, and whether WebKit keeps the interfaces and their calls in a page that has the
-  profile's scripts, is not measured yet. Until it is, they stay off. CI measures it
-  (`scripts/payments_check.py`): one HTTPS page of the runner, whose own script is the only one
-  measuring, in Safari and in new profiles with a proxy — as they ship, in this app's window and
-  in Safari's, and with the two switches on and the profile's scripts in the page's world, in a
-  world of their own, or none — call by call, with the window's own property names that only one
-  side has.
+  `PaymentRequest` and `PushManager` are Safari's: WebKit turns them on for an app only through
+  private preferences (`ApplePayEnabled`, `PushAPIEnabled`). A profile in Safari's window has them
+  from Safari's own code, and every call answers as Safari's (`scripts/payments_check.py`, full
+  run 17: 17 of 17). In this app's own window (an iPhone view, the simplified mode) Apple Pay is
+  turned on the same way (`BrowserSession`, the owner's decision of 8 November: the interface is
+  there and its calls refuse as Safari's do — on a Mac without a card `canMakePayments()` false, a
+  session without a user gesture refused; the "on-page" variant: all six Apple Pay and Payment
+  Request calls as Safari's). What `canMakePayments()` answers on a Mac whose Wallet has a card is
+  not measured yet: it needs the owner's Mac. Push stays off there: with it on, two calls answer
+  otherwise (`permissions.query` for notifications and push throws `NotSupportedError` where Safari
+  answers). CI measures it call by call in the variants of `scripts/payments_check.py`.
   `Object.getOwnPropertyNames(window).length` follows (1044 in Safari, 1029 in a profile with
   WebRTC on, 1022 with the default policy that removes it).
 - **WebRTC** is switched off by the default policy, and with a proxy unless it goes through the
