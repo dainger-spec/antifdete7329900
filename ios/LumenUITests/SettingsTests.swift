@@ -85,4 +85,29 @@ final class SettingsTests: LumenUITestCase {
         XCTAssertEqual(pageLine("webgl: "), "webgl: none")
         shot("43 after relaunch")
     }
+
+    /// Canvas noise with the device's own time zone: a worker made from a blob must read the page's
+    /// canvas. Until the mac app's fix of 8 November (claude/redesign 7fac7fd) PrivacyScripts'
+    /// patchWindow hooked blob workers only with a replaced time zone, so here the worker read the real
+    /// canvas beside a noised page. The red runs that old condition (workerHookTimeZoneOnly).
+    func testBlobWorkerReadsThePageCanvasWithTheDevicesTimeZone() {
+        launch(reset: true)
+        createSession(name: "Воркер")
+        openSession("Воркер")
+        // The control: nothing replaced, the worker reads what the page reads — the comparison works.
+        openPage("\(site)/env?worker=real")
+        let real = pageLine("canvas: ")
+        XCTAssertTrue(pageLine("worker: ").hasPrefix("worker: same"), "with nothing replaced a blob worker reads the page's canvas: \(pageLine("worker: "))")
+
+        app.buttons["settingsButton"].tap()
+        wait(app.buttons["settingsDone"], "the settings open")
+        reveal(app.segmentedControls["canvasMode"], "the canvas mode is there").buttons["Шум"].tap()
+        app.buttons["settingsDone"].tap()
+        openPage("\(site)/env?worker=noise")
+        XCTAssertNotEqual(pageLine("canvas: "), real, "the page's canvas is noised")
+        let worker = pageLine("worker: ")
+        shot("44 a blob worker, canvas noise, the device's time zone")
+        XCTAssertTrue(worker.hasPrefix("worker: same"),
+                      "canvas noise with the device's own time zone: a blob worker reads the page's canvas (\(worker))")
+    }
 }

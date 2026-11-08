@@ -13,6 +13,7 @@ this Mac, so a test sees on the screen what the pages say about how they were re
             /env           what a page reads: User-Agent (and the one the server got), time zone,
                            language, canvas (two reads), WebGL, audio, and the natives check
                            (scripts/test-shims.mjs's probeLies) over every function the app may replace
+                           and whether a worker made from a blob reads the page's canvas ("worker: same …")
             /geo.json      a geolocation service: the country and time zone of the proxy it came through
             /hold          a page that keeps a WebSocket to /ws open and says so ("ws: open", then
                            "ws: closed" once anything closes it), and which proxy it came through
@@ -176,6 +177,28 @@ const draw = () => { const c = document.createElement('canvas'); c.width = 240; 
   }
   show('lies', 'lies: ' + lies + (which.length ? ' ' + which.slice(0, 2).join('; ') : ''));
   document.title = 'env';
+  // A worker made from a blob draws the same on an OffscreenCanvas: does it read what the page reads?
+  // (PrivacyScripts' hookWorkers is installed only with a replaced time zone, so with the device's own
+  // zone a noised session's worker read the real canvas — the mac app's fix, 8 November.)
+  const paint = (c) => { const x = c.getContext('2d'); x.textBaseline = 'top'; x.font = '14px Arial'; x.fillStyle = '#f60';
+    x.fillRect(125, 1, 62, 20); x.fillStyle = '#069'; x.fillText('Lumen \u2713 Cwm fjordbank glyphs vext quiz', 2, 15);
+    x.fillStyle = 'rgba(102, 204, 0, 0.7)'; x.fillText('Lumen \u2713', 4, 35);
+    const d = x.getImageData(0, 0, c.width, c.height).data; let h = 0x811c9dc5;
+    for (let i = 0; i < d.length; i++) { h ^= d[i]; h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(16).padStart(8, '0'); };
+  try {
+    paint(new OffscreenCanvas(240, 60));
+    const mine = paint(new OffscreenCanvas(240, 60));
+    const source = 'const paint = ' + paint.toString() + '; paint(new OffscreenCanvas(240, 60));'
+      + ' postMessage({ hash: paint(new OffscreenCanvas(240, 60)), tz: Intl.DateTimeFormat().resolvedOptions().timeZone });';
+    const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
+    const theirs = await new Promise((done) => {
+      const worker = new Worker(url);
+      const timer = setTimeout(() => done({ hash: 'no answer in 10 s' }), 10000);
+      worker.onmessage = (e) => { clearTimeout(timer); done(e.data); worker.terminate(); };
+      worker.onerror = (e) => { clearTimeout(timer); done({ hash: 'error ' + (e.message || e) }); };
+    });
+    show('worker', 'worker: ' + (theirs.hash === mine ? 'same ' + mine : 'differs: page ' + mine + ', worker ' + theirs.hash));
+  } catch (e) { show('worker', 'worker: error ' + e); }
 })();
 """
 
@@ -282,7 +305,7 @@ async def site(reader, writer, scheme="http"):
                 out = reply("200 OK", page("whoami", f"<h1>Адрес</h1><p id=ip>ip: {peer[0]}</p><p id=via>via: {name}</p>"
                                                      f"<p>at: {html.escape(target)}{direct}</p>"), extra=["Cache-Control: no-store"])
             elif path == "/env":
-                lines = "".join(f"<p id={i}>{i}: …</p>" for i in ("ua", "tz", "lang", "webpagens", "canvas", "canvas2", "png", "pngbytes", "webgl", "audio", "lies"))
+                lines = "".join(f"<p id={i}>{i}: …</p>" for i in ("ua", "tz", "lang", "webpagens", "canvas", "canvas2", "png", "pngbytes", "webgl", "audio", "lies", "worker"))
                 ENV_COUNTER[0] += 1
                 served = (f"<p>server ua: {header(headers, 'User-Agent')}</p><p>server lang: {header(headers, 'Accept-Language')}</p>"
                           f"<p>at: {html.escape(target)}</p><p>load: {ENV_COUNTER[0]}</p>")

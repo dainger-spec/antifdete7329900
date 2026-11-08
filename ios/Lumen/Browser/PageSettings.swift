@@ -63,8 +63,13 @@ enum PageSettings {
 
     static func script(for session: Session, proxy: ProxyEntry?) -> WKUserScript {
         let json = (try? String(data: JSONEncoder().encode(config(for: session, proxy: proxy)), encoding: .utf8)) ?? "{}"
+        // The planted fault: the blob-worker hook on its old condition, the time zone alone — the shim as
+        // it was before the mac app's fix of 8 November (a noised page, a worker with the real canvas).
+        let body = Faults.isActive(.workerHookTimeZoneOnly)
+            ? shimBody.replacingOccurrences(of: "if (substitutesInWorkers(CONFIG)) {", with: "if (CONFIG.timeZone) {")
+            : shimBody
         // Wrapped as PrivacyScripts.source wraps it: the function must be named `install`.
-        let source = "(function install(CONFIG) {\n" + shimBody + "\n})(" + json + ");"
+        let source = "(function install(CONFIG) {\n" + body + "\n})(" + json + ");"
         return WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)
     }
 

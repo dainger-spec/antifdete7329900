@@ -31,6 +31,10 @@ final class NetProbe: NSObject, ObservableObject, WKScriptMessageHandler {
     /// device's "own" address is the VPN's and a network switch is hidden from the app (the owner's
     /// runs of 8 November had a fake-IP VPN on).
     @Published private(set) var tunnel: String?
+    /// The device's side of the worker check (SettingsTests checks it on the simulator): does a worker
+    /// made from a blob read this session's canvas as its page does? With canvas noise it does only
+    /// with the worker hook of the mac app's fix (8 November).
+    @Published private(set) var workerCheck = ""
     @Published private(set) var timeline: [String] = []
     @Published private(set) var webView: WKWebView?
     private var monitor: NWPathMonitor?
@@ -61,6 +65,7 @@ final class NetProbe: NSObject, ObservableObject, WKScriptMessageHandler {
         timeline = []
         ownAddresses = []
         tunnel = nil
+        workerCheck = ""
         started = Date()
         running = true
         subject = "сессия «\(runtime.session.name)», " + (runtime.proxy.map { "прокси \($0.kind.rawValue.uppercased())" } ?? "без прокси")
@@ -93,6 +98,14 @@ final class NetProbe: NSObject, ObservableObject, WKScriptMessageHandler {
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard running, let body = message.body as? [String: Any] else { return }
+        if body["kind"] as? String == "worker" {
+            let page = body["page"] as? String ?? "", worker = body["worker"] as? String ?? ""
+            workerCheck = !page.isEmpty && page == worker
+                ? "воркер из blob: тот же канвас, что у страницы (\(page))"
+                : "воркер из blob: ДРУГОЙ канвас — страница \(page.isEmpty ? "?" : page), воркер \(worker)"
+            note(workerCheck)
+            return
+        }
         answers.append(Answer(time: Date(), url: body["url"] as? String ?? "", ip: body["ip"] as? String,
                               error: body["error"] as? String, network: network))
     }
@@ -124,7 +137,8 @@ final class NetProbe: NSObject, ObservableObject, WKScriptMessageHandler {
     var report: String {
         var lines = ["Lumen — замер смены сети", "\(UIDevice.current.model), iOS \(UIDevice.current.systemVersion)",
                      "начало \(ISO8601DateFormatter().string(from: started))", subject,
-                     "адреса устройства: \(ownAddresses.sorted().joined(separator: ", "))", "ИТОГ: \(verdict)", ""]
+                     "адреса устройства: \(ownAddresses.sorted().joined(separator: ", "))", "ИТОГ: \(verdict)",
+                     workerCheck.isEmpty ? "воркер из blob: не проверен" : workerCheck, ""]
         lines += timeline
         lines.append("")
         for answer in answers {
@@ -226,6 +240,26 @@ final class NetProbe: NSObject, ObservableObject, WKScriptMessageHandler {
         }
         once();
         setInterval(once, 500);
+        // The worker check: the same drawing on an OffscreenCanvas, here and in a worker made from a blob.
+        const paint = (c) => { const x = c.getContext('2d'); x.textBaseline = 'top'; x.font = '14px Arial';
+          x.fillStyle = '#f60'; x.fillRect(125, 1, 62, 20); x.fillStyle = '#069'; x.fillText('Lumen probe Cwm fjordbank glyphs vext quiz', 2, 15);
+          x.fillStyle = 'rgba(102, 204, 0, 0.7)'; x.fillText('Lumen probe', 4, 35);
+          const d = x.getImageData(0, 0, c.width, c.height).data; let h = 0x811c9dc5;
+          for (let i = 0; i < d.length; i++) { h ^= d[i]; h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(16); };
+        (async () => {
+          try {
+            paint(new OffscreenCanvas(240, 60));
+            const mine = paint(new OffscreenCanvas(240, 60));
+            const src = 'const paint = ' + paint.toString() + '; paint(new OffscreenCanvas(240, 60)); postMessage(paint(new OffscreenCanvas(240, 60)));';
+            const worker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+            const theirs = await new Promise((done) => {
+              const timer = setTimeout(() => done('нет ответа за 10 с'), 10000);
+              worker.onmessage = (e) => { clearTimeout(timer); done(String(e.data)); worker.terminate(); };
+              worker.onerror = (e) => { clearTimeout(timer); done('ошибка ' + (e.message || e)); };
+            });
+            post({ kind: 'worker', page: mine, worker: theirs });
+          } catch (e) { post({ kind: 'worker', page: '', worker: 'ошибка ' + e }); }
+        })();
         </script></body></html>
         """
     }
@@ -350,6 +384,9 @@ struct NetProbeView: View {
                 Text("Сеть: \(probe.network)")
                 Text("Адреса устройства: \(probe.ownAddresses.sorted().joined(separator: ", "))")
                     .accessibilityIdentifier("probeOwn")
+                if !probe.workerCheck.isEmpty {
+                    Text(probe.workerCheck).accessibilityIdentifier("probeWorker")
+                }
                 Button(probe.running ? "Остановить" : "Начать") {
                     if probe.running {
                         probe.stop()
