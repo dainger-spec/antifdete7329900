@@ -5,8 +5,10 @@
 #   ios/scripts/ci.sh <out-dir> [ios-version|newest]
 #
 # Every line of ios/scripts/faults.tsv is a planted fault and the test it must break: that test is
-# run with the fault (it must FAIL: "RED OK"), then everything runs without faults (it must pass:
-# "GREEN"). A fault its test does not catch fails the job ("RED DID NOT FAIL").
+# run with the fault (it must fail), then everything runs without faults (it must pass: "GREEN").
+# A red counts ("RED OK") only if its test failed with the fault and passes in the green run; a fault
+# its test does not catch, or a test that fails anyway, fails the job ("RED DID NOT FAIL",
+# "RED UNPROVEN"), as does a red that crashed ("RED INVALID").
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"          # ios/
 OUT="${1:?out dir}"; WANT="${2:-newest}"
@@ -22,6 +24,24 @@ command -v xcodegen >/dev/null || brew install xcodegen >/dev/null 2>&1 || { say
 # ---- 0. The page shim is what its sources make (the macOS app's PrivacyScripts + ios/shim/fingerprint.js).
 python3 "$HERE/scripts/build-shim.py" --check | tee -a "$LOG" || { say "page-shim.js is stale"; STATUS=1; }
 
+# A red run counts only if its test passes without the fault: a test that fails anyway proves nothing
+# by failing with it (CI run 5: most reds "failed" where the green run failed too). Reds are therefore
+# provisional ("red") until the green run; then each is RED OK or RED UNPROVEN.
+REDS=()
+verdicts() { # kind, green output: the final word on that kind's reds
+    local kind="$1" green="$2" entry fault test id
+    for entry in "${REDS[@]}"; do
+        IFS="|" read -r k fault test <<<"$entry"
+        [[ "$k" == "$kind" ]] || continue
+        id="$(echo "$test" | sed -E 's#^([A-Za-z]+)[./]([A-Za-z]+)/(.*)$#\1.\2 \3#')"   # Module.Class test
+        if grep -q "Test Case '-\[$id\]' passed" "$green"; then
+            say "RED OK $kind $fault: $test failed with the fault and passes without it"
+        else
+            say "RED UNPROVEN $kind $fault: $test did not pass without the fault either, so failing with it proves nothing"; STATUS=1
+        fi
+    done
+}
+
 # ---- 1. The core (swift test): reds, then green.
 CORE="$HERE/LumenCore"
 swift build --package-path "$CORE" --build-tests >"$OUT/core-build.txt" 2>&1 || { tail -40 "$OUT/core-build.txt"; say "CORE BUILD FAILED"; exit 2; }
@@ -31,7 +51,8 @@ while IFS=$'\t' read -r fault kind test; do
     if LUMEN_FAULTS="$fault" swift test --package-path "$CORE" --skip-build --filter "$test" >"$OUT/core-red-$fault.txt" 2>&1; then
         say "RED DID NOT FAIL core $fault: $test passed with the fault"; STATUS=1
     else
-        say "RED OK core $fault: $test failed with the fault — $(grep -m1 -o 'error: .*' "$OUT/core-red-$fault.txt" | cut -c1-160)"
+        say "red   core $fault: $test failed with the fault — $(grep -m1 -o 'error: .*' "$OUT/core-red-$fault.txt" | cut -c1-160)"
+        REDS+=("core|$fault|$test")
     fi
 done < "$HERE/scripts/faults.tsv"
 if swift test --package-path "$CORE" --skip-build >"$OUT/core-green.txt" 2>&1; then
@@ -39,6 +60,7 @@ if swift test --package-path "$CORE" --skip-build >"$OUT/core-green.txt" 2>&1; t
 else
     grep -E "error|failed" "$OUT/core-green.txt" | head -20 | tee -a "$LOG"; say "NOT GREEN core"; STATUS=1
 fi
+verdicts core "$OUT/core-green.txt"
 
 # ---- 2. A simulated iPhone: the reference's screen (iPhone 17 Pro, else 16 Pro), on the iOS asked for.
 read -r RUNTIME_ID RUNTIME_VERSION TYPE <<<"$(xcrun simctl list -j | python3 -c '
@@ -83,6 +105,12 @@ if ! xcodebuild build-for-testing "${COMMON[@]}" >"$OUT/build.txt" 2>&1; then
     grep -E "error:|warning: .*nearly matches" "$OUT/build.txt" | head -40 | tee -a "$LOG"; say "BUILD FAILED"; exit 2
 fi
 say "built"
+BUILT_APP="$(find "$OUT/dd/Build/Products" -maxdepth 2 -name Lumen.app -type d | head -1)"
+if /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity:NSExceptionDomains:geo.lumentest:NSExceptionAllowsInsecureHTTPLoads" "$BUILT_APP/Info.plist" 2>/dev/null | grep -q true; then
+    say "the test build lets the proxy check reach http://geo.lumentest"
+else
+    say "BUILD WRONG: the test build has no ATS exception for geo.lumentest — every proxy check would fail"; exit 2
+fi
 run_ui() { # result-name, fault ('' for none), -only-testing args...
     local name="$1" fault="$2"; shift 2
     rm -rf "$OUT/$name.xcresult"
@@ -98,7 +126,8 @@ while IFS=$'\t' read -r fault kind test; do
         # A crash fails every test whatever the fault: it proves nothing about the check.
         say "RED INVALID ui $fault: the app crashed or was lost, not the check — $(grep -m1 -E 'crashed|Lost connection|Failed to' "$OUT/red-$fault.txt" | sed 's/.*error: //' | cut -c1-160)"; STATUS=1
     else
-        say "RED OK ui $fault: $test failed with the fault — $(grep -m1 -E 'error: -\[|XCTAssert|failed -' "$OUT/red-$fault.txt" | sed 's/.*error: //' | cut -c1-200)"
+        say "red   ui $fault: $test failed with the fault — $(grep -m1 -E 'error: -\[|XCTAssert|failed -' "$OUT/red-$fault.txt" | sed 's/.*error: //' | cut -c1-200)"
+        REDS+=("ui|$fault|$test")
     fi
 done < "$HERE/scripts/faults.tsv"
 if run_ui green ""; then
@@ -106,6 +135,7 @@ if run_ui green ""; then
 else
     grep -E "error: -\[|failed -|Test Case .* failed" "$OUT/green.txt" | head -20 | tee -a "$LOG"; say "NOT GREEN ui"; STATUS=1
 fi
+verdicts ui "$OUT/green.txt"
 # What the person saw: the screenshots the tests attached.
 xcrun xcresulttool export attachments --path "$OUT/green.xcresult" --output-path "$OUT/screens" >/dev/null 2>&1 \
     && say "screenshots: $(ls "$OUT/screens" | wc -l | tr -d ' ') files" || say "no screenshots exported"

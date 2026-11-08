@@ -48,6 +48,23 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.lumenbrowser.ios
         TARGETED_DEVICE_FAMILY: "1"
+    postBuildScripts:
+      # Debug builds (the tests') only: the proxy check asks the testbed's geolocation service,
+      # http://geo.lumentest, through the proxy — plain http, which App Transport Security refuses an
+      # app's own URLSession (CI run 5). Release keeps ATS whole for the app's requests; web pages
+      # are NSAllowsArbitraryLoadsInWebContent in both.
+      - name: "Debug only: the testbed's geolocation service over http"
+        basedOnDependencyAnalysis: false
+        inputFiles:
+          - $(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)
+        script: |
+          [ "$CONFIGURATION" = "Debug" ] || exit 0
+          plist="$TARGET_BUILD_DIR/$INFOPLIST_PATH"
+          pb() { /usr/libexec/PlistBuddy -c "$1" "$plist"; }
+          pb "Delete :NSAppTransportSecurity:NSExceptionDomains" 2>/dev/null || true
+          pb "Add :NSAppTransportSecurity:NSExceptionDomains dict"
+          pb "Add :NSAppTransportSecurity:NSExceptionDomains:geo.lumentest dict"
+          pb "Add :NSAppTransportSecurity:NSExceptionDomains:geo.lumentest:NSExceptionAllowsInsecureHTTPLoads bool true"
   LumenUITests:
     type: bundle.ui-testing
     platform: iOS

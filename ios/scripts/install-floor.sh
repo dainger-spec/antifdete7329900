@@ -76,6 +76,7 @@ build() { # name [build settings...] -> path of Lumen.app
     find "$OUT/dd-$name/Build/Products" -maxdepth 2 -name Lumen.app -type d | head -1
 }
 minimum() { /usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$1/Info.plist" 2>/dev/null; }
+installed() { xcrun simctl get_app_container "$1" "$BUNDLE" >/dev/null 2>&1; }   # device -> is the app on it
 
 # ---- Red: built for iOS 17.0, the same app installs on the old simulator. (The core package keeps
 # its own minimum, iOS 17: the app's floor is the app target's, and Xcode refuses an app whose minimum
@@ -84,8 +85,13 @@ RED_APP="$(build red IPHONEOS_DEPLOYMENT_TARGET=17.0)" || { say "RED INVALID: th
 if xcrun simctl install "$OLD_DEV" "$RED_APP" >"$OUT/install-red.txt" 2>&1; then
     say "RED OK: built for iOS $(minimum "$RED_APP"), the app installs on iOS $OLD_VERSION — the check would see an app that installs there"
     xcrun simctl launch "$OLD_DEV" "$BUNDLE" >>"$OUT/install-red.txt" 2>&1 && say "   (and it starts there: $(tail -1 "$OUT/install-red.txt"))"
-    xcrun simctl terminate "$OLD_DEV" "$BUNDLE" >/dev/null 2>&1
-    xcrun simctl uninstall "$OLD_DEV" "$BUNDLE" >/dev/null 2>&1
+    for attempt in 1 2 3; do
+        xcrun simctl terminate "$OLD_DEV" "$BUNDLE" >/dev/null 2>&1; sleep 2
+        xcrun simctl uninstall "$OLD_DEV" "$BUNDLE" >>"$OUT/install-red.txt" 2>&1
+        installed "$OLD_DEV" || break
+    done
+    # The green check below asks whether the app is on that simulator: it must start from nothing.
+    if installed "$OLD_DEV"; then say "RED INVALID: the red build could not be removed from iOS $OLD_VERSION"; exit 1; fi
 else
     say "RED INVALID: even the iOS 17.0 build does not install on iOS $OLD_VERSION, so a refusal proves nothing — $(tail -3 "$OUT/install-red.txt" | tr '\n' ' ')"
     exit 1
@@ -107,6 +113,6 @@ elif grep -q -i -E "minimum|newer|requires|MinimumOSVersion|version" "$OUT/insta
 else
     say "NOT GREEN: iOS $OLD_VERSION refuses it, but not for its version — $(tail -3 "$OUT/install-green.txt" | tr '\n' ' ')"; STATUS=1
 fi
-if xcrun simctl listapps "$OLD_DEV" 2>/dev/null | grep -q "$BUNDLE"; then say "NOT GREEN: $BUNDLE is on the iOS $OLD_VERSION simulator"; STATUS=1; fi
+if installed "$OLD_DEV"; then say "NOT GREEN: $BUNDLE is on the iOS $OLD_VERSION simulator"; STATUS=1; else say "and it is not on that simulator"; fi
 say "== status $STATUS"
 exit $STATUS

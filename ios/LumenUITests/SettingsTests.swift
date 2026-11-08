@@ -31,10 +31,11 @@ final class SettingsTests: LumenUITestCase {
 
         // iOS 26's Safari, canvas noise, WebGL off, audio noise.
         app.buttons["settingsButton"].tap()
-        wait(app.buttons["iOS 26 — Safari 26"], "the presets are listed").tap()
-        app.segmentedControls["canvasMode"].buttons["Шум"].tap()
-        app.segmentedControls["webglMode"].buttons["Выкл"].tap()
-        app.segmentedControls["audioMode"].buttons["Шум"].tap()
+        wait(app.buttons["settingsDone"], "the settings open")
+        reveal(app.buttons["iOS 26 — Safari 26"], "the presets are listed").tap()
+        reveal(app.segmentedControls["canvasMode"], "the canvas mode is there").buttons["Шум"].tap()
+        reveal(app.segmentedControls["webglMode"], "the WebGL mode is there").buttons["Выкл"].tap()
+        reveal(app.segmentedControls["audioMode"], "the audio mode is there").buttons["Шум"].tap()
         shot("41 settings")
         app.buttons["settingsDone"].tap()
         openPage("http://env.lumentest:28380/env?changed=1")
@@ -56,8 +57,9 @@ final class SettingsTests: LumenUITestCase {
 
         // A User-Agent of one's own.
         app.buttons["settingsButton"].tap()
-        wait(app.buttons["Своя"], "a custom string can be chosen").tap()
-        let field = wait(app.textFields["customUA"], "the custom string's field appears")
+        wait(app.buttons["settingsDone"], "the settings open")
+        reveal(app.buttons["Своя"], "a custom string can be chosen").tap()
+        let field = reveal(app.textFields["customUA"], "the custom string's field appears")
         field.tap()
         field.typeText("LumenTest/1.0")
         app.buttons["settingsDone"].tap()

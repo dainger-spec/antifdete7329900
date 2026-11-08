@@ -54,6 +54,26 @@ class LumenUITestCase: XCTestCase {
         XCTAssertEqual(result, .completed, what, file: file, line: line)
     }
 
+    /// Scrolls the open form until `element` can be touched, as a person scrolls to a row: a long
+    /// form (a session's settings) keeps rows below the screen out of reach (CI run 5: "DuckDuckGo").
+    @discardableResult
+    func reveal(_ element: XCUIElement, _ what: String, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
+        for _ in 0..<12 {
+            if element.exists && element.isHittable { return element }
+            app.swipeUp(velocity: .slow)
+        }
+        XCTAssertTrue(element.exists && element.isHittable, what, file: file, line: line)
+        return element
+    }
+
+    /// The one of the matching buttons a person can touch (iOS 27 shows a dialog's button twice in
+    /// the accessibility tree: CI run 5, "confirmDelete").
+    func touchable(_ identifier: String, _ what: String, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
+        let all = app.buttons.matching(identifier: identifier)
+        XCTAssertTrue(all.firstMatch.waitForExistence(timeout: 15), what, file: file, line: line)
+        return all.allElementsBoundByIndex.first { $0.isHittable } ?? all.firstMatch
+    }
+
     /// Replaces a text field's whole content.
     func replaceText(_ field: XCUIElement, with text: String) {
         // The cursor goes where the field is touched: touch its far end, then delete backwards.
@@ -181,7 +201,8 @@ class LumenUITestCase: XCTestCase {
 
     func chooseProxy(_ name: String) {
         app.buttons["settingsButton"].tap()
-        wait(app.buttons[name], "the settings list the proxy \(name)").tap()
+        wait(app.buttons["settingsDone"], "the settings open")
+        reveal(app.buttons[name], "the settings list the proxy \(name)").tap()
         app.buttons["settingsDone"].tap()
     }
 

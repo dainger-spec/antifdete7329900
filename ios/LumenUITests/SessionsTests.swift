@@ -54,7 +54,7 @@ final class SessionsTests: LumenUITestCase {
         // Delete, and it stays deleted.
         openEditor(of: "Почта")
         app.buttons["deleteSession"].tap()
-        wait(app.buttons["confirmDelete"], "deleting asks first").tap()
+        touchable("confirmDelete", "deleting asks first").tap()
         waitGone(sessionCard("Почта"), "the deleted session leaves the list")
         relaunch()
         wait(sessionCard("Реклама"), "the other session is still there")
