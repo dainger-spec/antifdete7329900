@@ -25,11 +25,22 @@ struct BrowserView: View {
                 BottomBar(tab: tab, tabCount: runtime.tabs.count) { sheet = $0 }
                     .id("bar-\(tab.id)")
             }
-            if TestHooks.enabled, let port = runtime.relayPort {
-                Text(verbatim: "relay \(port)")
-                    .font(.caption2)
-                    .accessibilityIdentifier("debugRelayPort")
+            #if DEBUG
+            if TestHooks.enabled {
+                // The tests' view of the session's relay, and their drills on it.
+                HStack(spacing: 16) {
+                    Text(verbatim: runtime.relayPort.map { "relay \($0)" } ?? "relay down")
+                        .accessibilityIdentifier("debugRelayPort")
+                    Button("сеть") { runtime.drill(.networkChange) }
+                        .accessibilityIdentifier("debugNetworkChange")
+                    Button("смерть") { runtime.drill(.death) }
+                        .accessibilityIdentifier("debugRelayDeath")
+                    Button("перезапуск") { runtime.drill(.restart) }
+                        .accessibilityIdentifier("debugRelayRestart")
+                }
+                .font(.caption2)
             }
+            #endif
         }
         .navigationTitle(runtime.session.name)
         .navigationBarTitleDisplayMode(.inline)

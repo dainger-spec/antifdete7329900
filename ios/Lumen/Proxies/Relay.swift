@@ -49,6 +49,9 @@ final class Relay: @unchecked Sendable {
 
     // Everything below: on `queue` only.
     private var listener: NWListener?
+    private var monitor: NWPathMonitor?
+    /// The network as last seen: its status and the interface it goes out on.
+    private var network: String?
     private var stopped = false
     fileprivate private(set) var route: RelayRoute = .closed
     private var links: [ObjectIdentifier: RelayLink] = [:]
@@ -68,12 +71,17 @@ final class Relay: @unchecked Sendable {
         let endpoint = NWEndpoint.hostPort(host: .ipv4(.loopback), port: NWEndpoint.Port(rawValue: port ?? 1) ?? 1)
         var configuration = ProxyConfiguration(httpCONNECTProxy: endpoint, tlsOptions: nil)
         configuration.applyCredential(username: Relay.username, password: password)
-        configuration.allowFailover = false
+        // No fallback: a relay that does not answer means nothing leaves. (The planted fault: the
+        // system may then go around it, straight out.)
+        configuration.allowFailover = Faults.isActive(.relayFailoverOn)
         return [configuration]
     }
 
     func start() {
-        queue.async { self.listen() }
+        queue.async {
+            self.listen()
+            self.watchNetwork()
+        }
     }
 
     func stop() {
@@ -81,6 +89,8 @@ final class Relay: @unchecked Sendable {
             self.stopped = true
             self.listener?.cancel()
             self.listener = nil
+            self.monitor?.cancel()
+            self.monitor = nil
             self.closeAll()
         }
     }
@@ -150,14 +160,75 @@ final class Relay: @unchecked Sendable {
         listener.start(queue: queue)
     }
 
-    private func restartListener() {
+    /// The listener stopped (or is stopped): every connection closes, the data store is told there
+    /// is no relay (its proxy becomes a port nothing answers on), and a new listener starts.
+    private func restartListener(after delay: TimeInterval = 0.5) {
         listener?.cancel()
         listener = nil
         closeAll()
         report(nil)
         guard !stopped else { return }
-        queue.asyncAfter(deadline: .now() + 0.5) { self.listen() }
+        queue.asyncAfter(deadline: .now() + delay) { self.listen() }
     }
+
+    // MARK: The network under the session
+
+    private func watchNetwork() {
+        guard monitor == nil, !stopped else { return }
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in self?.pathChanged(path) }
+        monitor.start(queue: queue)
+        self.monitor = monitor
+    }
+
+    private func pathChanged(_ path: NWPath) {
+        let primary = path.availableInterfaces.first.map { "\($0.type) \($0.name)" } ?? "none"
+        let now = "\(path.status), \(primary)"
+        defer { network = now }
+        guard let before = network, before != now else { return }
+        networkChanged("\(before) → \(now)")
+    }
+
+    /// The network under the session changed — Wi-Fi to cellular or back, or gone: every connection
+    /// the relay carries is closed, so none goes on over the old network, and each new one is made
+    /// again, through the proxy, on the new one. (The relay itself never goes around the proxy: a
+    /// connection it cannot make through the proxy is a 502.)
+    private func networkChanged(_ why: String) {
+        Relay.log("the network changed: \(why)")
+        // The planted fault: the connections made on the old network stay open.
+        guard !Faults.isActive(.pathChangeKeepsConnections) else { return }
+        closeAll()
+    }
+
+    #if DEBUG
+    /// What the end-to-end tests make happen to the relay (TestHooks).
+    enum Drill {
+        /// A change of network, as NWPathMonitor reports one (a simulator never switches).
+        case networkChange
+        /// The relay dies for 25 s: its listener gone, the data store still pointing at its port.
+        case death
+        /// The relay starts again with its listener down for 25 s, the data store told (as after the
+        /// system stopped the listener of a suspended app).
+        case restart
+    }
+
+    func drill(_ drill: Drill) {
+        queue.async {
+            Relay.log("drill: \(drill)")
+            switch drill {
+            case .networkChange:
+                self.networkChanged("a drill")
+            case .death:
+                self.listener?.cancel()
+                self.listener = nil
+                self.closeAll()
+                self.queue.asyncAfter(deadline: .now() + 25) { self.listen() }
+            case .restart:
+                self.restartListener(after: 25)
+            }
+        }
+    }
+    #endif
 
     private func report(_ port: UInt16?) {
         DispatchQueue.main.async { self.onPort?(port) }

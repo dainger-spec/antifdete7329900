@@ -32,6 +32,9 @@ failoverOn	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect	the page did 
 relayOpen	ui	LumenUITests/RelayTests/testRelayDoorIsShut	another app without its password
 relayOnNetwork	ui	LumenUITests/RelayTests/testRelayDoorIsShut	the relay from a network: nothing answers
 relayResolvesLocally	ui	LumenUITests/RelayTests/testNamesAreNotLookedUpHere	names are not looked up here
+relayFailoverOn	ui	LumenUITests/RelayTests/testRelayDownLetsNothingOut	deadrelay: the page did not go direct
+relayGapDirect	ui	LumenUITests/RelayTests/testRelayDownLetsNothingOut	gap: the page did not go direct
+pathChangeKeepsConnections	ui	LumenUITests/RelayTests/testNetworkChangeClosesConnections	a network change closes the connections made before it
 userAgentIgnored	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	iOS 26's Safari
 timeZoneIgnored	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	the time zone of the proxy's country
 noiseUnstable	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	two reads give the same noise

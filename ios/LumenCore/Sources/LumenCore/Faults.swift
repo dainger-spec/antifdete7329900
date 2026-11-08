@@ -35,6 +35,9 @@ public enum Fault: String, CaseIterable, Sendable {
     case relayOpen               // the relay takes connections without its password: any app on the device can use it
     case relayOnNetwork          // the relay listens on every interface and takes connections from anywhere
     case relayResolvesLocally    // the relay looks a site's name up on the device and hands the proxy its address
+    case relayFailoverOn         // the data store's relay with allowFailover = true: a dead relay lets the system go direct
+    case relayGapDirect          // while the relay starts again, the data store is left with no proxy at all
+    case pathChangeKeepsConnections // a network change leaves the relay's connections open on the old network
     // Session settings
     case settingsNotSaved        // a session's settings are not written
     case userAgentIgnored        // the chosen User-Agent is not given to the web view

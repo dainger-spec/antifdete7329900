@@ -199,6 +199,16 @@ class LumenUITestCase: XCTestCase {
         return labels
     }
 
+    /// Nothing of the page `name` is on the screen a while later: not its "at:" line, and no
+    /// "via: напрямую" (what a page that went around its proxy shows here).
+    func assertNothingLoaded(_ name: String, file: StaticString = #filePath, line: UInt = #line) {
+        sleep(8)
+        let direct = app.webViews.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "напрямую")).firstMatch
+        XCTAssertFalse(direct.exists, "\(name): the page did not go direct", file: file, line: line)
+        let shown = app.webViews.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "?t=\(name)")).firstMatch
+        XCTAssertFalse(shown.exists, "\(name): the page did not load (\(shown.exists ? shown.label : ""))", file: file, line: line)
+    }
+
     // MARK: Proxies
 
     func proxyRow(_ name: String) -> XCUIElement { app.descendants(matching: .any)["proxy-\(name)"] }

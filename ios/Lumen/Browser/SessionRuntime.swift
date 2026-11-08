@@ -81,12 +81,19 @@ final class SessionRuntime: ObservableObject {
     /// that port — or none, and then nothing leaves until it is back.
     private func relayListens(on port: UInt16?) {
         relayPort = port
-        dataStore.proxyConfigurations = Relay.configurations(port: port, password: relay.password)
+        // The planted fault: while the relay starts again, the data store is left with no proxy at all.
+        dataStore.proxyConfigurations = port == nil && Faults.isActive(.relayGapDirect)
+            ? [] : Relay.configurations(port: port, password: relay.password)
         if port != nil && !tabsRestored {
             tabsRestored = true
             for tab in tabs { tab.restore() }
         }
     }
+
+    #if DEBUG
+    /// The tests' drills on the session's relay (TestHooks).
+    func drill(_ drill: Relay.Drill) { relay.drill(drill) }
+    #endif
 
     var selected: BrowserTab? { tabs.first { $0.id == selectedID } ?? tabs.last }
 

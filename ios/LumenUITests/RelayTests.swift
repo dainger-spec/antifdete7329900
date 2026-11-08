@@ -2,8 +2,9 @@ import Network
 import XCTest
 
 /// The relay — every session's way out — must not become a new hole: only the session gets through
-/// its door (not another app on this device, not anything on a network), and the names of the
-/// sites a proxied session opens are the proxy's to look up, never this device's.
+/// its door (not another app on this device, not anything on a network), the names of the sites a
+/// proxied session opens are the proxy's to look up, never this device's, and when the relay itself
+/// is down, or the network under it changes, nothing goes around it.
 final class RelayTests: LumenUITestCase {
     /// Another app knocks on the relay of an open session: without the password, with a wrong one,
     /// and from this Mac's network address instead of 127.0.0.1. Only the session itself gets through.
@@ -77,11 +78,101 @@ final class RelayTests: LumenUITestCase {
         }
     }
 
-    /// The relay's port, as the session's screen shows it to the tests (DEBUG builds only).
-    func relayPort(file: StaticString = #filePath, line: UInt = #line) -> UInt16 {
-        let label = wait(app.staticTexts["debugRelayPort"], "the session shows its relay's port (test hooks)", file: file, line: line).label
-        let port = UInt16(label.replacingOccurrences(of: "relay ", with: "")) ?? 0
-        XCTAssertNotEqual(port, 0, "the relay's port is a number: \(label)", file: file, line: line)
+    /// The relay dies — nothing answers on its port, and the session's data store, not told, still
+    /// points there — and later starts again with a gap, the data store told. In neither moment does
+    /// a page go around it; once it is back, the session browses through its proxy again.
+    func testRelayDownLetsNothingOut() {
+        let run = String(UUID().uuidString.prefix(6)).lowercased()
+        launch(reset: true)
+        app.buttons["proxiesButton"].tap()
+        wait(app.navigationBars["Прокси"], "the proxy list opens")
+        addProxy(name: "Нью-Йорк", kind: "SOCKS5", port: "28382", user: "ub", password: "pb")
+        waitRow("Нью-Йорк", says: "Работает")
+        leaveProxies()
+        createSession(name: "Обрыв")
+        openSession("Обрыв")
+        chooseProxy("Нью-Йорк", in: "Обрыв")
+        openPage("http://relay-\(run).lumentest:28380/whoami?t=before")
+        page("via: прокси B")
+        let first = relayPort()
+
+        // The relay dies for 25 s; a page asked for meanwhile goes nowhere.
+        app.buttons["debugRelayDeath"].tap()
+        go("http://deadrelay-\(run).lumentest:28380/whoami?t=deadrelay")
+        assertNothingLoaded("deadrelay")
+        shot("42 the relay is dead: nothing loads")
+        // Back, on a new port: through the proxy again.
+        let second = relayPort(other: first, timeout: 40)
+        openPage("http://relay-\(run).lumentest:28380/whoami?t=back")
+        page("via: прокси B")
+
+        // The relay starts again, its listener down for 25 s (the data store given a port nothing
+        // answers on); a page asked for meanwhile goes nowhere either.
+        app.buttons["debugRelayRestart"].tap()
+        wait(app.staticTexts.matching(NSPredicate(format: "label == %@", "relay down")).firstMatch, "the session says its relay is down")
+        go("http://gap-\(run).lumentest:28380/whoami?t=gap")
+        assertNothingLoaded("gap")
+        _ = relayPort(other: second, timeout: 40)
+        openPage("http://relay-\(run).lumentest:28380/whoami?t=after")
+        page("via: прокси B")
+        shot("43 the relay is back: through the proxy")
+
+        // The testbed got nothing of those two pages, not even a DNS question.
+        for name in ["deadrelay", "gap"] {
+            let token = "\(name)-\(run)"
+            openPage("http://site.lumentest:28380/__seen?token=\(token)")
+            XCTAssertEqual(pageLine("site \(token): "), "site \(token): 0", "no request of \(name) reached the site")
+            XCTAssertEqual(pageLine("dns \(token): "), "dns \(token): 0", "no DNS question for \(name) was asked of this Mac")
+        }
+    }
+
+    /// The network under the session changes (a drill: a simulator never switches between Wi-Fi and
+    /// cellular — that is measured on a real iPhone): every connection made before the change is
+    /// closed, and the next page goes through the proxy again, nothing of it directly.
+    func testNetworkChangeClosesConnections() {
+        let run = String(UUID().uuidString.prefix(6)).lowercased()
+        launch(reset: true)
+        app.buttons["proxiesButton"].tap()
+        wait(app.navigationBars["Прокси"], "the proxy list opens")
+        addProxy(name: "Нью-Йорк", kind: "SOCKS5", port: "28382", user: "ub", password: "pb")
+        waitRow("Нью-Йорк", says: "Работает")
+        leaveProxies()
+        createSession(name: "Сеть")
+        openSession("Сеть")
+        chooseProxy("Нью-Йорк", in: "Сеть")
+        let token = "net-\(run)"
+        openPage("http://\(token).lumentest:28380/whoami?t=before")
+        page("via: прокси B")
+        // The site keeps the connection that page came on open (keep-alive, as real sites do).
+        openPage("http://site.lumentest:28380/__seen?token=\(token)&when=before")
+        XCTAssertNotEqual(pageLine("open \(token): "), "open \(token): 0", "the testbed sees the connection the page came on, still open")
+        app.buttons["debugNetworkChange"].tap()
+        sleep(2)
+        openPage("http://site.lumentest:28380/__seen?token=\(token)&when=after")
+        XCTAssertEqual(pageLine("open \(token): "), "open \(token): 0", "a network change closes the connections made before it")
+        openPage("http://\(token).lumentest:28380/whoami?t=after")
+        page("via: прокси B")
+        openPage("http://site.lumentest:28380/__seen?token=\(token)&when=last")
+        let route = pageLine("route \(token): ")
+        XCTAssertTrue(route.contains("direct=0 ") && route.contains("B=2 "), "both pages went through the proxy, none directly: \(route)")
+        shot("44 after a network change: through the proxy")
+    }
+
+    /// The relay's port, as the session's screen shows it to the tests (DEBUG builds only); with
+    /// `other`, waits until it is a different one (the relay back on a new port).
+    func relayPort(other: UInt16? = nil, timeout: TimeInterval = 15, file: StaticString = #filePath, line: UInt = #line) -> UInt16 {
+        let element = app.staticTexts["debugRelayPort"]
+        let deadline = Date().addingTimeInterval(timeout)
+        var port: UInt16 = 0
+        repeat {
+            if element.exists, element.label.hasPrefix("relay "), let number = UInt16(element.label.dropFirst(6)), number != other {
+                port = number
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.5)
+        } while Date() < deadline
+        XCTAssertNotEqual(port, 0, "the session shows its relay's port\(other.map { " (a new one, not \($0))" } ?? "") — \(element.exists ? element.label : "nothing")",
+                          file: file, line: line)
         return port
     }
 

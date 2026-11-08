@@ -25,7 +25,8 @@ this Mac, so a test sees on the screen what the pages say about how they were re
             the simulator's Safari did not). lan-* names get this Mac's network address
             (--lan-address), for the CI probe that compares the two.
   /__seen?token=T  how many site requests (by Host) and DNS questions this testbed got with T in them,
-                   and by which route ("route T: direct=1 A=0 B=2 D=0 ")
+                   by which route ("route T: direct=1 A=0 B=2 D=0 "), and how many site connections
+                   that served such a request are open now ("open T: 1")
   Site connections are kept alive between requests (60 s), as real sites keep them.
   STUN      UDP 127.0.0.1:3478 (stun.lumentest through a proxy), answers Binding requests
   /__events everything the site and the proxies saw, as JSON (for the tests' own bookkeeping)
@@ -48,6 +49,7 @@ KEEP_ALIVE = 60   # seconds a site connection may stay idle between requests
 UPSTREAM = {}          # (ip, port) of a proxy's upstream socket -> proxy name
 CACHE_COUNTER = [0]
 SERVED_COUNTER = [0]
+OPEN = {}              # Host -> site connections open now that have served a request for it
 ENV_COUNTER = [0]
 EXITS = {"127.0.0.2": ("A", "DE", "Europe/Berlin", "203.0.113.10"),
          "127.0.0.3": ("B", "US", "America/New_York", "203.0.113.20")}
@@ -154,6 +156,7 @@ const show = (id, text) => { document.getElementById(id).textContent = text; };
 
 async def site(reader, writer, scheme="http"):
     peer = writer.get_extra_info("peername")[:2]
+    hosts = set()   # the Hosts this connection has served
     try:
         # Keep-alive, as real sites do: a connection serves request after request until it has been
         # idle for KEEP_ALIVE seconds or the client asks to close. (CI runs 14, 15: after a live proxy
@@ -167,6 +170,10 @@ async def site(reader, writer, scheme="http"):
             url = urllib.parse.urlsplit(target)
             query = dict(urllib.parse.parse_qsl(url.query))
             via = UPSTREAM.get((peer[0], peer[1]), "direct")
+            host = header(headers, "Host") or ""
+            if host not in hosts:
+                hosts.add(host)
+                OPEN[host] = OPEN.get(host, 0) + 1
             event("site", path=url.path, query=query, host=header(headers, "Host"), peer=peer[0], via=via,
                   cookie=header(headers, "Cookie"), ua=header(headers, "User-Agent"), lang=header(headers, "Accept-Language"))
             path = url.path
@@ -196,8 +203,9 @@ async def site(reader, writer, scheme="http"):
                 routes = {v: sum(1 for e in EVENTS if e["kind"] == "site" and token and token in (e.get("host") or "") and e.get("via") == v)
                           for v in ("direct", "A", "B", "D")}
                 route = " ".join(f"{k}={n}" for k, n in routes.items())
+                still = sum(n for h, n in OPEN.items() if token and token in h)
                 out = reply("200 OK", page("seen", f"<p>site {html.escape(token)}: {hits}</p><p>dns {html.escape(token)}: {asked}</p>"
-                                                   f"<p>route {html.escape(token)}: {route} </p>"
+                                                   f"<p>route {html.escape(token)}: {route} </p><p>open {html.escape(token)}: {still}</p>"
                                                    f"<p>at: {html.escape(target)}</p>"), extra=["Cache-Control: no-store"])
             elif path == "/served":
                 SERVED_COUNTER[0] += 1
@@ -232,6 +240,8 @@ async def site(reader, writer, scheme="http"):
     except (asyncio.IncompleteReadError, ConnectionError, ValueError):
         pass
     finally:
+        for host in hosts:
+            OPEN[host] -= 1
         writer.close()
 
 
