@@ -171,7 +171,7 @@ final class BrowserSession {
     func applyProfile(to webConfiguration: WKWebViewConfiguration) {
         webConfiguration.websiteDataStore = dataStore ?? ProfileNetworkGuard.closedStore
         // Safari's chrome brings its own controller where it has one; where not, ours (`webPageNamespace`).
-        if webConfiguration.webExtensionController == nil { webConfiguration.webExtensionController = webPageNamespace }
+        giveWebPageNamespace(to: webConfiguration)
         applyPrivacyPreferences(to: webConfiguration.preferences)
         applyContent(to: webConfiguration.userContentController)
     }
@@ -290,11 +290,22 @@ final class BrowserSession {
     /// controller, with no extension loaded. Measured: the object, its runtime, the property and
     /// what sendMessage does are Safari's own. One per profile's process, no extension in it ever,
     /// and kept nowhere (a non-persistent controller configuration).
-    private lazy var webPageNamespace = WKWebExtensionController(configuration: .nonPersistent())
+    /// (macOS 15.4's API; the package builds for less, every Mac the app runs on has it.)
+    private lazy var webPageNamespace: AnyObject? = {
+        if #available(macOS 15.4, *) { return WKWebExtensionController(configuration: .nonPersistent()) }
+        return nil
+    }()
+
+    /// Puts `webPageNamespace` on `webConfiguration` unless it has a controller of its own.
+    private func giveWebPageNamespace(to webConfiguration: WKWebViewConfiguration) {
+        guard #available(macOS 15.4, *), webConfiguration.webExtensionController == nil,
+              let controller = webPageNamespace as? WKWebExtensionController else { return }
+        webConfiguration.webExtensionController = controller
+    }
 
     func makeWebViewConfiguration() -> WKWebViewConfiguration {
         let webConfiguration = WKWebViewConfiguration()
-        webConfiguration.webExtensionController = webPageNamespace
+        giveWebPageNamespace(to: webConfiguration)
         // Never the default store: it has no proxy (a session that is shutting down has no store).
         webConfiguration.websiteDataStore = dataStore ?? ProfileNetworkGuard.closedStore
         webConfiguration.userContentController = userContentController
