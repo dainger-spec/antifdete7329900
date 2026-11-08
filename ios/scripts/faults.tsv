@@ -22,7 +22,7 @@ sharedStore	ui	LumenUITests/BrowserTests/testSessionsAreIsolated	cookie: none
 proxyNotApplied	ui	LumenUITests/ProxyTests/testProxyPersonPath	via: прокси A
 proxyChangeNotLive	ui	LumenUITests/ProxyTests/testProxyPersonPath	via: прокси B
 proxyChangeKeepsConnections	ui	LumenUITests/ProxyTests/testProxyPersonPath	via: прокси
-restartWithoutRelease	ui	LumenUITests/ProxyTests/testProxyPersonPath	nothing went direct after the proxy was set
+restartWithoutRelease	ui	LumenUITests/ProxyTests/testProxyPersonPath	via: прокси
 proxyPasswordNotSaved	ui	LumenUITests/ProxyTests/testProxyPersonPath	the row of Берлин says Работает
 passwordAutofill	ui	LumenUITests/ProxyTests/testProxyPersonPath	the password prompt
 deadHTTPDropped	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect	dead-http: the page did not go direct

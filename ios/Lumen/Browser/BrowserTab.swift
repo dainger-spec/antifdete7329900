@@ -89,7 +89,13 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         // Schemes a web view cannot load (tg:, mailto:, …) are not handed to other apps here: a
         // session's link must not leave its proxy and its data for another app.
         guard let scheme = navigationAction.request.url?.scheme?.lowercased() else { return .allow }
-        return ["http", "https", "about", "blob", "data", "file"].contains(scheme) ? .allow : .cancel
+        guard ["http", "https", "about", "blob", "data", "file"].contains(scheme) else { return .cancel }
+        if scheme == "http" || scheme == "https" {
+            // Nothing while the session's network restarts or waits for a relaunch for its new proxy.
+            guard runtime?.canBrowse != false else { return .cancel }
+            runtime?.noteNetworkUse()
+        }
+        return .allow
     }
 
     // MARK: WKUIDelegate

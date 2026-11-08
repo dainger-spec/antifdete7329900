@@ -105,9 +105,26 @@ class LumenUITestCase: XCTestCase {
     /// The testbed's site on this Mac (ios/testbed/testbed.py), reached directly.
     let site = "127.0.0.1:28380"
 
-    func openSession(_ name: String) {
-        wait(sessionCard(name), "the session \(name) is in the list").tap()
-        wait(app.textFields["addressBar"], "the session \(name) opens in its browser")
+    func openSession(_ name: String, file: StaticString = #filePath, line: UInt = #line) {
+        wait(sessionCard(name), "the session \(name) is in the list", file: file, line: line).tap()
+        waitForBrowser(session: name, file: file, line: line)
+    }
+
+    /// Waits until the session's browser is back. A proxy changed on a session that has loaded pages
+    /// takes effect only after the app starts again (its open connections cannot be moved, CI runs
+    /// 14–16): then the session says so, and the person — this test — closes the app and opens it.
+    func waitForBrowser(session name: String, file: StaticString = #filePath, line: UInt = #line) {
+        let bar = app.textFields["addressBar"]
+        let relaunchNotice = app.descendants(matching: .any)["proxyNeedsRelaunch"]
+        let either = NSPredicate { _, _ in bar.exists || relaunchNotice.exists }
+        _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: either, object: nil)], timeout: 30)
+        if relaunchNotice.exists {
+            shot("the session asks for a relaunch (\(name))")
+            relaunch()
+            wait(sessionCard(name), "after the relaunch the session \(name) is in the list", file: file, line: line).tap()
+        }
+        wait(bar, "the session \(name) browses\(relaunchNotice.exists ? " (still: " + relaunchNotice.label + ")" : "")",
+             timeout: 30, file: file, line: line)
     }
 
     func backToList() {
@@ -256,15 +273,13 @@ class LumenUITestCase: XCTestCase {
         wait(sessions, "back on the session list", file: file, line: line)
     }
 
-    func chooseProxy(_ name: String, file: StaticString = #filePath, line: UInt = #line) {
+    func chooseProxy(_ name: String, in session: String, file: StaticString = #filePath, line: UInt = #line) {
         app.buttons["settingsButton"].tap()
         wait(app.buttons["settingsDone"], "the settings open")
         reveal(app.buttons[name], "the settings list the proxy \(name)").tap()
         app.buttons["settingsDone"].tap()
-        // A change on an open session restarts its network; the browser is back once it has.
-        let restarting = app.descendants(matching: .any)["networkRestarting"]
-        wait(app.textFields["addressBar"], "the session's network restarted for \(name)\(restarting.exists ? ": " + restarting.label : "")",
-             timeout: 45, file: file, line: line)
+        // A change on an open session restarts its network, or waits for the app to start again.
+        waitForBrowser(session: session, file: file, line: line)
     }
 
     // MARK: Sessions

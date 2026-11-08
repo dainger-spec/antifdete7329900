@@ -33,7 +33,10 @@ final class ProxyTests: LumenUITestCase {
         openSession("Счета")
         openPage("http://pre-\(run).lumentest:28380/whoami?before=proxy")
         page("via: напрямую")
-        chooseProxy("Берлин")
+        chooseProxy("Берлин", in: "Счета")
+        // The same site again — the page a person refreshes after setting a proxy — through A.
+        openPage("http://pre-\(run).lumentest:28380/whoami?again=1")
+        page("via: прокси A")
         openPage("http://a-\(run).lumentest:28380/whoami?first=1")
         page("via: прокси A")
         page("ip: 127.0.0.2")
@@ -47,7 +50,7 @@ final class ProxyTests: LumenUITestCase {
 
         // Another proxy while the session is open: the next page, to the same site, goes through it,
         // and nothing more of that site through A (its connection is kept alive, as real sites do).
-        chooseProxy("Нью-Йорк")
+        chooseProxy("Нью-Йорк", in: "Счета")
         openPage("http://a-\(run).lumentest:28380/whoami?after=change")
         page("via: прокси B")
         openPage("http://site.lumentest:28380/__seen?token=a-\(run)")
@@ -99,14 +102,14 @@ final class ProxyTests: LumenUITestCase {
         createSession(name: "Без отката")
         openSession("Без отката")
         for (proxy, name) in [("Мёртвый HTTP", "dead-http"), ("Мёртвый SOCKS5", "dead-socks")] {
-            chooseProxy(proxy)
+            chooseProxy(proxy, in: "Без отката")
             go("http://\(name)-\(run).lumentest:28380/whoami?t=\(name)")
             assertNothingLoaded(name)
         }
         shot("38 a dead proxy: nothing loads")
 
         // Alive, then dead: nothing loads after it, and nothing once a re-check has found it dead.
-        chooseProxy("Умирающий")
+        chooseProxy("Умирающий", in: "Без отката")
         openPage("http://alive-\(run).lumentest:28380/whoami?t=alive")
         page("via: прокси D")
         backToList()

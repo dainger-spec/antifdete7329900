@@ -43,6 +43,18 @@ final class SessionRuntime: ObservableObject {
     @Published private(set) var history: [HistoryEntry]
     /// Said over the browser while the session's network restarts for a new proxy.
     @Published private(set) var networkNotice: String?
+    /// Set when a new proxy can take effect only after the app is started again: until then the
+    /// session loads nothing at all.
+    @Published private(set) var needsRelaunch = false
+    /// Whether this session has let a page load since its data store was made: until then it has no
+    /// connection, and a proxy can be changed in place.
+    private var networkUsed = false
+
+    /// A page of this session is about to load (BrowserTab's navigation policy).
+    func noteNetworkUse() { networkUsed = true }
+
+    /// Whether the session may load anything now (not while its network restarts or waits for a relaunch).
+    var canBrowse: Bool { networkNotice == nil && !needsRelaunch }
 
     init(session: Session, proxy: ProxyEntry?, store: LumenStore) {
         sessionID = session.id
@@ -131,8 +143,11 @@ final class SessionRuntime: ObservableObject {
         if Faults.isActive(.failoverOn) {   // the planted fault: the system may fall back to direct
             for index in configurations.indices { configurations[index].allowFailover = true }
         }
-        let live = appliedProxy != nil && !tabs.isEmpty
+        // A change once a page has loaded: open connections would keep their old route (CI runs 14–16).
+        let live = appliedProxy != nil && networkUsed
         appliedProxy = key
+        // Already waiting for a relaunch: the old store may still live; nothing is made until then.
+        if needsRelaunch { return }
         if live && !Faults.isActive(.proxyChangeKeepsConnections) {
             restartNetwork(with: configurations)
             return
@@ -169,16 +184,24 @@ final class SessionRuntime: ObservableObject {
         dataStore = .nonPersistent()   // holds the place; the session's own store must be let go of
         networkNotice = "Сеть сессии перезапускается под новый прокси…"
         Task { @MainActor [weak self] in
-            // Until WebKit has let go of the old store object, however long that takes: one made for
-            // the same identifier while the old one lives is that same store, with its open
-            // connections (CI run 15: after a 5-second limit, the restored tab's page went out
-            // directly on such a connection). Nothing is restored on it — the session waits.
-            while released != nil, !Faults.isActive(.restartWithoutRelease) {
+            // Until WebKit lets go of the old store object: one made for the same identifier while
+            // the old one lives is that same store, with its open connections (CI run 16, planted
+            // fault restartWithoutRelease: the restored page went out directly). WebKit often keeps
+            // it — run 16: none let go within 45 s — and no public API closes its connections. So
+            // after 10 s the new proxy waits for the app to start again, and the session loads
+            // nothing until then; a new process has a new network session.
+            for _ in 0..<100 where released != nil && !Faults.isActive(.restartWithoutRelease) {
                 try? await Task.sleep(nanoseconds: 100_000_000)
                 guard let self, generation == self.networkGeneration else { return }
             }
             guard let self, generation == self.networkGeneration else { return }
+            if released != nil && !Faults.isActive(.restartWithoutRelease) {
+                self.networkNotice = nil
+                self.needsRelaunch = true
+                return
+            }
             self.networkNotice = nil
+            self.networkUsed = false
             self.dataStore = WKWebsiteDataStore(forIdentifier: self.session.storeID)
             self.dataStore.proxyConfigurations = configurations
             self.tabs = records.map { self.makeTab($0, configuration: nil) }
@@ -191,7 +214,7 @@ final class SessionRuntime: ObservableObject {
     // MARK: Tabs
 
     func newTab() {
-        guard !Faults.isActive(.newTabNotOpened) else { return }
+        guard canBrowse, !Faults.isActive(.newTabNotOpened) else { return }
         let tab = makeTab(TabRecord(), configuration: nil)
         tabs.append(tab)
         selectedID = tab.id
@@ -199,7 +222,8 @@ final class SessionRuntime: ObservableObject {
     }
 
     /// A page's window.open / target=_blank: a tab of this session, on the configuration WebKit gives.
-    func adoptTab(configuration: WKWebViewConfiguration) -> WKWebView {
+    func adoptTab(configuration: WKWebViewConfiguration) -> WKWebView? {
+        guard canBrowse else { return nil }
         let tab = makeTab(TabRecord(), configuration: configuration)
         tabs.append(tab)
         selectedID = tab.id
@@ -225,11 +249,14 @@ final class SessionRuntime: ObservableObject {
 
     /// What the address bar does: an address opens, anything else is searched with the session's engine.
     func open(_ text: String) {
+        guard canBrowse else { return }
         guard let url = AddressInput.resolve(text, engine: session.settings.searchEngine) else { return }
         selected?.load(url)
     }
 
     func saveTabs() {
+        // While the network restarts the tabs are closed, not gone: what was saved stays.
+        guard canBrowse || !tabs.isEmpty else { return }
         store.saveTabs(SessionTabs(tabs: tabs.map(\.record), selected: selectedID), of: sessionID)
     }
 

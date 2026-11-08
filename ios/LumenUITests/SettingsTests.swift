@@ -23,7 +23,7 @@ final class SettingsTests: LumenUITestCase {
         XCTAssertEqual(pageLine("lies: "), "lies: 0", "the natives check finds nothing (nothing replaced yet)")
 
         // Through the Berlin proxy: Berlin's time zone and German, from the proxy's check.
-        chooseProxy("Берлин")
+        chooseProxy("Берлин", in: "Профиль")
         openPage("http://env.lumentest:28380/env?proxy=berlin")
         XCTAssertEqual(pageLine("tz: "), "tz: Europe/Berlin", "the time zone of the proxy's country")
         XCTAssertEqual(pageLine("lang: "), "lang: de-DE", "the language of the proxy's country")
