@@ -1095,6 +1095,15 @@ async def wait_for_app(listen):
 
 def finish(capture):
     capture.stop()
+    # A capture that got nothing at all — not one packet through its filter for the whole run — was
+    # on the wrong interface (the owner's second iPhone run: rvi0, 0 packets; rvictl had made another).
+    try:
+        received = re.search(r"(\d+) packets received by filter", open(capture.path + ".err").read())
+        if received and received.group(1) == "0":
+            print(f"CAPTURE SAW NOTHING on {capture.interface}: 0 packets for the whole run — every check that "
+                  f"needs it says INCONCLUSIVE; run_device.sh now reads the interface from rvictl -l", flush=True)
+    except OSError:
+        pass
     with open(os.path.join(ARGS.out, "events.jsonl"), "w") as f:
         for e in EVENTS:
             f.write(json.dumps(e) + "\n")
