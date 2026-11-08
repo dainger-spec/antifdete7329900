@@ -18,6 +18,7 @@ on:
       - "!ios-measure/ports_free.py"
       - "!ios-measure/capture_look.py"
       - "!ios-measure/safari_probe.py"
+      - "!ios-measure/canvas-alpha/**"
       - "!ios-measure/test_tools.py"
       - "!ios-measure/control_stub.py"
       - "!ios-measure/**/*.md"
