@@ -1,5 +1,6 @@
 import Foundation
 import LumenCore
+import Network
 import UIKit
 import WebKit
 
@@ -35,7 +36,7 @@ final class SessionRuntime: ObservableObject {
     let sessionID: UUID
     private(set) var session: Session
     private(set) var proxy: ProxyEntry?
-    let dataStore: WKWebsiteDataStore
+    private(set) var dataStore: WKWebsiteDataStore
     private let store: LumenStore
     @Published private(set) var tabs: [BrowserTab] = []
     @Published private(set) var selectedID: UUID?
@@ -122,19 +123,59 @@ final class SessionRuntime: ObservableObject {
         let password = proxy.flatMap { ProxyPasswords.get($0.id) }
         let key = proxy.map { "\($0.kind.rawValue)://\($0.username):\(password ?? "")@\($0.host):\($0.port)" } ?? "direct"
         guard key != appliedProxy else { return }
-        if appliedProxy != nil, Faults.isActive(.proxyChangeNotLive) { return }
+        // The planted fault: one proxy changed for another takes effect only after a relaunch.
+        if let applied = appliedProxy, applied != "direct", key != "direct", Faults.isActive(.proxyChangeNotLive) { return }
         var configurations = proxy.map { ProxyFactory.make($0, password: password) } ?? []
         if Faults.isActive(.failoverOn) {   // the planted fault: the system may fall back to direct
             for index in configurations.indices { configurations[index].allowFailover = true }
         }
-        dataStore.proxyConfigurations = configurations
+        let live = appliedProxy != nil && !tabs.isEmpty
         appliedProxy = key
+        if live && !Faults.isActive(.proxyChangeKeepsConnections) {
+            restartNetwork(with: configurations)
+            return
+        }
+        dataStore.proxyConfigurations = configurations
         if let rules = ContentRules.proxied {
             for tab in tabs {
                 let controller = tab.webView.configuration.userContentController
                 controller.remove(rules)
                 if proxy != nil { controller.add(rules) }
             }
+        }
+    }
+
+    /// Each restart of the network; a later one supersedes an earlier one still waiting.
+    private var networkGeneration = 0
+
+    /// A proxy changed while the session is open. Setting proxyConfigurations on the data store
+    /// reaches new connections only: the ones already open — WebKit opens an extra one ahead and keeps
+    /// it idle — go on through the old proxy, or with no proxy before, straight out (CI run 14: the
+    /// next page to the same site came through the old proxy, on a connection opened before the
+    /// change). So the session's network starts again: its tabs are saved, its web views closed, its
+    /// data store object released and made again for the same identifier — the same cookies and
+    /// storage, a new network session without a single connection — and the tabs restored on it.
+    private func restartNetwork(with configurations: [ProxyConfiguration]) {
+        saveTabs()
+        let records = tabs.map(\.record)
+        let selected = selectedID
+        for tab in tabs { tab.tearDown() }
+        tabs = []
+        networkGeneration += 1
+        let generation = networkGeneration
+        weak var released = dataStore
+        dataStore = .nonPersistent()   // holds the place; the session's own store must be let go of
+        Task { @MainActor [weak self] in
+            // Until WebKit has let go of the old store object: one made for the same identifier
+            // while the old one lives would be the same store, with the same connections.
+            for _ in 0..<50 where released != nil { try? await Task.sleep(nanoseconds: 100_000_000) }
+            guard let self, generation == self.networkGeneration else { return }
+            self.dataStore = WKWebsiteDataStore(forIdentifier: self.session.storeID)
+            self.dataStore.proxyConfigurations = configurations
+            self.tabs = records.map { self.makeTab($0, configuration: nil) }
+            if self.tabs.isEmpty { self.tabs = [self.makeTab(TabRecord(), configuration: nil)] }
+            self.selectedID = selected.flatMap { id in self.tabs.contains { $0.id == id } ? id : nil } ?? self.tabs.last?.id
+            for tab in self.tabs { tab.restore() }
         }
     }
 

@@ -20,7 +20,7 @@ final class SettingsTests: LumenUITestCase {
         let realCanvas = pageLine("canvas: ")
         let realAudio = pageLine("audio: ")
         XCTAssertFalse(pageLine("webgl: ").contains("none"), "WebGL is there by default")
-        XCTAssertEqual(pageLine("lies: "), "lies: 0", "nothing replaced, nothing found")
+        XCTAssertEqual(pageLine("lies: "), "lies: 0", "the natives check finds nothing (nothing replaced yet)")
 
         // Through the Berlin proxy: Berlin's time zone and German, from the proxy's check.
         chooseProxy("Берлин")

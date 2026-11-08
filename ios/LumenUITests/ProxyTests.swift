@@ -24,16 +24,21 @@ final class ProxyTests: LumenUITestCase {
         shot("30 proxy list checked")
         leaveProxies()
 
-        // A session through the Berlin proxy: the site sees proxy A (a .lumentest name resolves only there).
+        // A session without a proxy reaches the site directly (the testbed resolves .lumentest for this
+        // Mac too). Then it gets the Berlin proxy while open: the next page to the same site goes
+        // through proxy A — not on a direct connection left open from before (CI run 14: open
+        // connections kept their old route after a live change).
         createSession(name: "Счета")
         openSession("Счета")
+        openPage("http://site.lumentest:28380/whoami?before=proxy")
+        page("via: напрямую")
         chooseProxy("Берлин")
         openPage("http://site.lumentest:28380/whoami?first=1")
         page("via: прокси A")
         page("ip: 127.0.0.2")
         shot("31 through Berlin")
 
-        // Another proxy while the session is open: the next page goes through it, no relaunch.
+        // Another proxy while the session is open: the next page, to the same site, goes through it.
         chooseProxy("Нью-Йорк")
         openPage("http://site.lumentest:28380/whoami?after=change")
         page("via: прокси B")

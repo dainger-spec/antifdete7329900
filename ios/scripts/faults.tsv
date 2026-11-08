@@ -21,6 +21,7 @@ reloadIgnored	ui	LumenUITests/BrowserTests/testBrowserPersonPath	reload brought 
 sharedStore	ui	LumenUITests/BrowserTests/testSessionsAreIsolated	cookie: none
 proxyNotApplied	ui	LumenUITests/ProxyTests/testProxyPersonPath	via: прокси A
 proxyChangeNotLive	ui	LumenUITests/ProxyTests/testProxyPersonPath	via: прокси B
+proxyChangeKeepsConnections	ui	LumenUITests/ProxyTests/testProxyPersonPath	via: прокси
 proxyPasswordNotSaved	ui	LumenUITests/ProxyTests/testProxyPersonPath	the row of Берлин says Работает
 passwordAutofill	ui	LumenUITests/ProxyTests/testProxyPersonPath	the password prompt
 deadHTTPDropped	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect	dead-http: the page did not go direct
@@ -30,5 +31,5 @@ failoverOn	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect	the page did 
 userAgentIgnored	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	iOS 26's Safari
 timeZoneIgnored	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	the time zone of the proxy's country
 noiseUnstable	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	two reads give the same noise
-unmaskedReplacement	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	the natives check finds none
+unmaskedReplacement	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	the natives check finds
 settingsNotSaved	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	iOS 26's Safari
