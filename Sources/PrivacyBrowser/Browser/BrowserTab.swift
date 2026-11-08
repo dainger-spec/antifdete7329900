@@ -30,6 +30,8 @@ struct BrowserTabContext {
     /// The profile has a proxy: a server's certificate is checked without this Mac fetching for
     /// it (`ServerTrust`).
     let hasProxy: Bool
+    /// An iPhone view: the phone's pixel density, which WebKit then renders and answers (`PhoneEngine`).
+    let phoneScale: Double?
     /// The profile proxy's user name and password, answered to the proxy's own auth challenges.
     let proxyCredential: URLCredential?
 }
@@ -119,6 +121,7 @@ final class BrowserTab: NSObject, PasswordAutoFillHost, AnswersProfileChallenges
         webView.customUserAgent = context.userAgent
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true
+        PhoneEngine.apply(to: webView, scale: context.phoneScale)
         // A link preview is fetched by Quick Look, outside the profile's store and proxy, and a
         // click on it opens the link in the default browser (`HandOffs`).
         webView.allowsLinkPreview = false
