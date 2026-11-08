@@ -2645,15 +2645,49 @@ final class SelfTest {
             let safariQuota = PrivacyScripts.safariStorageQuota.rounded(.up)
             check("surface (\(generationID)): storage quota is Safari's",
                   quota?.doubleValue == safariQuota, "\(quota?.stringValue ?? "nil") vs \(String(format: "%.0f", safariQuota))")
+            // A frame loaded by a navigation of its own (run 42479119796: an iPhone view's platform on
+            // every navigation, a frame's included, made WebKit raise and ended the profile's process
+            // on the first page with an iframe): the page lives, and the frame answers as the page.
+            let framePlatform = try await js(tab.webView, """
+                return await new Promise((done) => {
+                  const f = document.createElement('iframe'); f.srcdoc = '<p>frame</p>';
+                  f.onload = () => { try { done(String(f.contentWindow.navigator.platform)); } catch (e) { done('error'); } };
+                  document.body.appendChild(f); setTimeout(() => done('timeout'), 5000); });
+                """) as? String ?? "nil"
             tab.tearDown()
             session.shutDown()
             try repository.delete(profile.id)
 
             let name = generationID == DeviceGenerations.defaultID ? "macOS" : "iPhone view"
             writeSurface(probed, name: generationID == DeviceGenerations.defaultID ? "macos" : "iphone")
-            let differing = engineKeys.filter { string(probed, $0) != string(reference, $0) }
-            check("surface (\(name)): engine and hardware signals as in a plain web view (\(engineKeys.count) keys)",
+            // An iPhone view turns on what an iPhone's Safari has and a web view lacks (Apple Pay)
+            // and off what it has not (Notification), with WebKit's own switches (`PhoneEngine`):
+            // those are checked below, not against the plain web view.
+            let phoneKeys: (String) -> Bool = { key in
+                ["ApplePay", "Payment", "MerchantValidation", "Notification"].contains { key.contains($0) }
+            }
+            let compared = generationID == DeviceGenerations.defaultID ? engineKeys : engineKeys.filter { !phoneKeys($0) }
+            let differing = compared.filter { string(probed, $0) != string(reference, $0) }
+            check("surface (\(name)): engine and hardware signals as in a plain web view (\(compared.count) keys)",
                   differing.isEmpty, differing.map { "\($0): \(string(probed, $0)) vs \(string(reference, $0))" }.joined(separator: "; "))
+            if generationID != DeviceGenerations.defaultID {
+                // What WebKit answers as an iPhone (the owner's iPhone, 8 November), not a script.
+                check("surface (iPhone view): navigator.platform is an iPhone's, the engine's own getter",
+                      // The getter as a plain web view prints its own (the probe's "native-text" is built from
+                      // the function's name, which for a getter is "get platform": never a getter's text).
+                      string(probed, "platform") == "iPhone"
+                        && string(probed, "natives.Navigator.platform getter") == string(reference, "natives.Navigator.platform getter"),
+                      "\(string(probed, "platform")); getter \(string(probed, "natives.Navigator.platform getter")) vs "
+                        + string(reference, "natives.Navigator.platform getter"))
+                check("surface (iPhone view): a frame loaded by its own navigation says the iPhone's platform, and the page lives",
+                      framePlatform == "iPhone", framePlatform)
+                check("surface (iPhone view): devicePixelRatio is an iPhone's 3",
+                      string(probed, "screen").hasSuffix("x3"), string(probed, "screen"))
+                check("surface (iPhone view): ApplePaySession is there, as in an iPhone's Safari",
+                      string(probed, "features.ApplePaySession") == "function", string(probed, "features.ApplePaySession"))
+                check("surface (iPhone view): no Notification, as in an iPhone's Safari outside a home-screen web app",
+                      string(probed, "features.Notification") == "undefined", string(probed, "features.Notification"))
+            }
             // The shim adds no noise and no visible wrappers: toString, length and own properties
             // of the rendering functions are the engine's own.
             let renderingNatives = probed.filter { $0.key.hasPrefix("natives.") && ($0.key.contains("Canvas") || $0.key.contains("WebGL")
@@ -2687,8 +2721,13 @@ final class SelfTest {
             // No generation changes what a page measures of this Mac: the touch points, the
             // platform and the screen of a phone, said without touch, broke sites and gave the
             // profile away all the same.
-            for key in ["platform", "maxTouchPoints", "hardwareConcurrency", "screen", "standalone", "pointer", "touch",
-                        "timeZone", "tzOffset", "dateString"] {
+            // The rest of what a page measures of this Mac: the iPhone view's platform and pixel
+            // density are the phone's (above), and the rest of its screen and touch come with the
+            // full disguise's script (not yet).
+            let nativeKeys = ["platform", "maxTouchPoints", "hardwareConcurrency", "screen", "standalone", "pointer", "touch",
+                              "timeZone", "tzOffset", "dateString"]
+                .filter { generationID == DeviceGenerations.defaultID || !["platform", "screen"].contains($0) }
+            for key in nativeKeys {
                 check("surface (\(name)): native \(key)", string(probed, key) == string(reference, key),
                       "\(string(probed, key)) vs \(string(reference, key))")
             }
