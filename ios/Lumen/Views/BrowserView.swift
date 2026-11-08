@@ -24,6 +24,10 @@ struct BrowserView: View {
                 }
                 BottomBar(tab: tab, tabCount: runtime.tabs.count) { sheet = $0 }
                     .id("bar-\(tab.id)")
+            } else if let notice = runtime.networkNotice {
+                ProgressView(notice)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityIdentifier("networkRestarting")
             }
         }
         .navigationTitle(runtime.session.name)

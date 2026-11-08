@@ -24,7 +24,9 @@ this Mac, so a test sees on the screen what the pages say about how they were re
             reaches the site directly, and says "via: напрямую" (CI run 12: the app's web view does;
             the simulator's Safari did not). lan-* names get this Mac's network address
             (--lan-address), for the CI probe that compares the two.
-  /__seen?token=T  how many site requests (by Host) and DNS questions this testbed got with T in them
+  /__seen?token=T  how many site requests (by Host) and DNS questions this testbed got with T in them,
+                   and by which route ("route T: direct=1 A=0 B=2 D=0 ")
+  Site connections are kept alive between requests (60 s), as real sites keep them.
   STUN      UDP 127.0.0.1:3478 (stun.lumentest through a proxy), answers Binding requests
   /__events everything the site and the proxies saw, as JSON (for the tests' own bookkeeping)
 
@@ -42,6 +44,7 @@ import time
 import urllib.parse
 
 EVENTS = []
+KEEP_ALIVE = 60   # seconds a site connection may stay idle between requests
 UPSTREAM = {}          # (ip, port) of a proxy's upstream socket -> proxy name
 CACHE_COUNTER = [0]
 SERVED_COUNTER = [0]
@@ -152,63 +155,80 @@ const show = (id, text) => { document.getElementById(id).textContent = text; };
 async def site(reader, writer, scheme="http"):
     peer = writer.get_extra_info("peername")[:2]
     try:
-        method, target, _, headers = await read_head(reader)
-        url = urllib.parse.urlsplit(target)
-        query = dict(urllib.parse.parse_qsl(url.query))
-        via = UPSTREAM.get((peer[0], peer[1]), "direct")
-        event("site", path=url.path, query=query, host=header(headers, "Host"), peer=peer[0], via=via,
-              cookie=header(headers, "Cookie"), ua=header(headers, "User-Agent"), lang=header(headers, "Accept-Language"))
-        path = url.path
-        if path.startswith("/page/"):
-            name = urllib.parse.unquote(path[len("/page/"):]) or "page"
-            out = reply("200 OK", page(name, f"<h1>Страница {name}</h1><p><a id=next href='/page/{name}-next'>Дальше</a></p>"))
-        elif path == "/state":
-            server_cookie = header(headers, "Cookie") or "none"
-            out = reply("200 OK", page("state", f"<h1>Состояние</h1><p id=cookie>cookie: …</p><p id=local>local: …</p>"
-                                                f"<p id=idb>idb: …</p><p>server cookie: {server_cookie}</p>", STATE_SCRIPT))
-        elif path == "/cache":
-            out = reply("200 OK", page("cache", "<h1>Кэш</h1><p id=v>cache: …</p><script src='/cache.js'></script>",
-                                       "document.getElementById('v').textContent = 'cache: ' + window.lumenCache;"))
-        elif path == "/cache.js":
-            CACHE_COUNTER[0] += 1
-            out = reply("200 OK", f"window.lumenCache = {CACHE_COUNTER[0]};", "text/javascript",
-                        ["Cache-Control: public, max-age=3600"])
-        elif path == "/__proxy":
-            on = query.get("state") == "on"
-            await switch(query.get("name", ""), on)
-            out = reply("200 OK", page("proxy", f"<p>proxy {html.escape(query.get('name', ''))}: {'on' if on else 'off'}</p>"
-                                                f"<p>at: {html.escape(target)}</p>"), extra=["Cache-Control: no-store"])
-        elif path == "/__seen":
-            token = query.get("token", "")
-            hits = sum(1 for e in EVENTS if e["kind"] == "site" and token and token in (e.get("host") or ""))
-            asked = sum(1 for e in EVENTS if e["kind"] == "dns" and token and token in e.get("name", ""))
-            out = reply("200 OK", page("seen", f"<p>site {html.escape(token)}: {hits}</p><p>dns {html.escape(token)}: {asked}</p>"
-                                               f"<p>at: {html.escape(target)}</p>"), extra=["Cache-Control: no-store"])
-        elif path == "/served":
-            SERVED_COUNTER[0] += 1
-            out = reply("200 OK", page("served", f"<h1>Счётчик</h1><p id=n>served: {SERVED_COUNTER[0]}</p>"),
-                        extra=["Cache-Control: no-store"])
-        elif path == "/whoami":
-            name = {"A": "прокси A", "B": "прокси B", "D": "прокси D"}.get(via, "напрямую")
-            out = reply("200 OK", page("whoami", f"<h1>Адрес</h1><p id=ip>ip: {peer[0]}</p><p id=via>via: {name}</p>"
-                                                 f"<p>at: {html.escape(target)}</p>"), extra=["Cache-Control: no-store"])
-        elif path == "/env":
-            lines = "".join(f"<p id={i}>{i}: …</p>" for i in ("ua", "tz", "lang", "canvas", "canvas2", "webgl", "audio", "lies"))
-            ENV_COUNTER[0] += 1
-            served = (f"<p>server ua: {header(headers, 'User-Agent')}</p><p>server lang: {header(headers, 'Accept-Language')}</p>"
-                      f"<p>at: {html.escape(target)}</p><p>load: {ENV_COUNTER[0]}</p>")
-            out = reply("200 OK", page("env", "<h1>Среда</h1>" + lines + served,
-                                       "const PROBE_LIES = " + json.dumps(probe_lies()) + ";" + ENV_SCRIPT),
-                        extra=["Cache-Control: no-store"])
-        elif path == "/geo.json":
-            _, country, zone, ip = EXITS.get(peer[0], ("direct", "ZZ", "UTC", "198.51.100.1"))
-            out = reply("200 OK", json.dumps({"ip": ip, "country": country, "timezone": zone}), "application/json")
-        elif path == "/__events":
-            out = reply("200 OK", json.dumps(EVENTS), "application/json")
-        else:
-            out = reply("200 OK", page("ok", "<h1>ok</h1>"))
-        writer.write(out)
-        await writer.drain()
+        # Keep-alive, as real sites do: a connection serves request after request until it has been
+        # idle for KEEP_ALIVE seconds or the client asks to close. (CI runs 14, 15: after a live proxy
+        # change WebKit reused a connection already open; with every response closing its connection
+        # that happened only by chance, on a connection WebKit had opened ahead.)
+        while True:
+            try:
+                method, target, _, headers = await asyncio.wait_for(read_head(reader), KEEP_ALIVE)
+            except asyncio.TimeoutError:
+                break
+            url = urllib.parse.urlsplit(target)
+            query = dict(urllib.parse.parse_qsl(url.query))
+            via = UPSTREAM.get((peer[0], peer[1]), "direct")
+            event("site", path=url.path, query=query, host=header(headers, "Host"), peer=peer[0], via=via,
+                  cookie=header(headers, "Cookie"), ua=header(headers, "User-Agent"), lang=header(headers, "Accept-Language"))
+            path = url.path
+            if path.startswith("/page/"):
+                name = urllib.parse.unquote(path[len("/page/"):]) or "page"
+                out = reply("200 OK", page(name, f"<h1>Страница {name}</h1><p><a id=next href='/page/{name}-next'>Дальше</a></p>"))
+            elif path == "/state":
+                server_cookie = header(headers, "Cookie") or "none"
+                out = reply("200 OK", page("state", f"<h1>Состояние</h1><p id=cookie>cookie: …</p><p id=local>local: …</p>"
+                                                    f"<p id=idb>idb: …</p><p>server cookie: {server_cookie}</p>", STATE_SCRIPT))
+            elif path == "/cache":
+                out = reply("200 OK", page("cache", "<h1>Кэш</h1><p id=v>cache: …</p><script src='/cache.js'></script>",
+                                           "document.getElementById('v').textContent = 'cache: ' + window.lumenCache;"))
+            elif path == "/cache.js":
+                CACHE_COUNTER[0] += 1
+                out = reply("200 OK", f"window.lumenCache = {CACHE_COUNTER[0]};", "text/javascript",
+                            ["Cache-Control: public, max-age=3600"])
+            elif path == "/__proxy":
+                on = query.get("state") == "on"
+                await switch(query.get("name", ""), on)
+                out = reply("200 OK", page("proxy", f"<p>proxy {html.escape(query.get('name', ''))}: {'on' if on else 'off'}</p>"
+                                                    f"<p>at: {html.escape(target)}</p>"), extra=["Cache-Control: no-store"])
+            elif path == "/__seen":
+                token = query.get("token", "")
+                hits = sum(1 for e in EVENTS if e["kind"] == "site" and token and token in (e.get("host") or ""))
+                asked = sum(1 for e in EVENTS if e["kind"] == "dns" and token and token in e.get("name", ""))
+                routes = {v: sum(1 for e in EVENTS if e["kind"] == "site" and token and token in (e.get("host") or "") and e.get("via") == v)
+                          for v in ("direct", "A", "B", "D")}
+                route = " ".join(f"{k}={n}" for k, n in routes.items())
+                out = reply("200 OK", page("seen", f"<p>site {html.escape(token)}: {hits}</p><p>dns {html.escape(token)}: {asked}</p>"
+                                                   f"<p>route {html.escape(token)}: {route} </p>"
+                                                   f"<p>at: {html.escape(target)}</p>"), extra=["Cache-Control: no-store"])
+            elif path == "/served":
+                SERVED_COUNTER[0] += 1
+                out = reply("200 OK", page("served", f"<h1>Счётчик</h1><p id=n>served: {SERVED_COUNTER[0]}</p>"),
+                            extra=["Cache-Control: no-store"])
+            elif path == "/whoami":
+                name = {"A": "прокси A", "B": "прокси B", "D": "прокси D"}.get(via, "напрямую")
+                out = reply("200 OK", page("whoami", f"<h1>Адрес</h1><p id=ip>ip: {peer[0]}</p><p id=via>via: {name}</p>"
+                                                     f"<p>at: {html.escape(target)}</p>"), extra=["Cache-Control: no-store"])
+            elif path == "/env":
+                lines = "".join(f"<p id={i}>{i}: …</p>" for i in ("ua", "tz", "lang", "canvas", "canvas2", "webgl", "audio", "lies"))
+                ENV_COUNTER[0] += 1
+                served = (f"<p>server ua: {header(headers, 'User-Agent')}</p><p>server lang: {header(headers, 'Accept-Language')}</p>"
+                          f"<p>at: {html.escape(target)}</p><p>load: {ENV_COUNTER[0]}</p>")
+                out = reply("200 OK", page("env", "<h1>Среда</h1>" + lines + served,
+                                           "const PROBE_LIES = " + json.dumps(probe_lies()) + ";" + ENV_SCRIPT),
+                            extra=["Cache-Control: no-store"])
+            elif path == "/geo.json":
+                _, country, zone, ip = EXITS.get(peer[0], ("direct", "ZZ", "UTC", "198.51.100.1"))
+                out = reply("200 OK", json.dumps({"ip": ip, "country": country, "timezone": zone}), "application/json")
+            elif path == "/__events":
+                out = reply("200 OK", json.dumps(EVENTS), "application/json")
+            else:
+                out = reply("200 OK", page("ok", "<h1>ok</h1>"))
+            keep = (header(headers, "Connection") or "").lower() != "close"
+            if keep:
+                out = out.replace(b"Connection: close\r\n", b"Connection: keep-alive\r\nKeep-Alive: timeout=60\r\n", 1)
+            writer.write(out)
+            await writer.drain()
+            if not keep:
+                break
     except (asyncio.IncompleteReadError, ConnectionError, ValueError):
         pass
     finally:

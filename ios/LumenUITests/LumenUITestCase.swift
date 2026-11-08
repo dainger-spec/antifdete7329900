@@ -189,6 +189,8 @@ class LumenUITestCase: XCTestCase {
     func proxyRow(_ name: String) -> XCUIElement { app.descendants(matching: .any)["proxy-\(name)"] }
 
     func addProxy(name: String, kind: String, host: String = "127.0.0.1", port: String, user: String, password: String) {
+        // An offer that came late, after the previous form (CI run 15), is caught here.
+        XCTAssertFalse(passwordOffer.exists, "the password prompt: an offer to save a password is on the screen before adding \(name)")
         // A touch while the previous form is still closing is lost (CI run 10): touch again until it opens.
         let add = wait(app.buttons["newProxy"], "the list offers a new proxy")
         let field = app.textFields["proxyName"]
@@ -208,12 +210,16 @@ class LumenUITestCase: XCTestCase {
         // iOS must not offer to keep the proxy's password among the person's own (CI runs 12, 13: its
         // "Save Password?" came a moment after the form closed, as a remote view app.alerts does
         // not list, and blocked the screen). After a moment the list must still take a touch.
-        sleep(5)
-        let offer = app.descendants(matching: .any).matching(NSPredicate(format:
-            "label CONTAINS[c] 'Save Password' OR label CONTAINS[c] 'Сохранить пароль' OR label == 'Not Now' OR label == 'Не сейчас'")).firstMatch
-        XCTAssertFalse(offer.exists, "the password prompt: nothing offers to save the password of \(name): \(offer.exists ? offer.label : "")")
+        let offer = passwordOffer
+        XCTAssertFalse(offer.waitForExistence(timeout: 10), "the password prompt: nothing offers to save the password of \(name): \(offer.exists ? offer.label : "")")
         XCTAssertTrue(add.isHittable, "the password prompt: the proxy list stays usable after saving \(name) (nothing covers it)")
         wait(proxyRow(name), "the proxy \(name) is in the list")
+    }
+
+    /// iOS's offer to keep a password among the person's own (a remote view: by its words).
+    var passwordOffer: XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format:
+            "label CONTAINS[c] 'Save Password' OR label CONTAINS[c] 'Сохранить пароль' OR label == 'Not Now' OR label == 'Не сейчас'")).firstMatch
     }
 
     /// Touches a field and types once it has the keyboard (CI run 12: "Neither element nor any
@@ -250,11 +256,15 @@ class LumenUITestCase: XCTestCase {
         wait(sessions, "back on the session list", file: file, line: line)
     }
 
-    func chooseProxy(_ name: String) {
+    func chooseProxy(_ name: String, file: StaticString = #filePath, line: UInt = #line) {
         app.buttons["settingsButton"].tap()
         wait(app.buttons["settingsDone"], "the settings open")
         reveal(app.buttons[name], "the settings list the proxy \(name)").tap()
         app.buttons["settingsDone"].tap()
+        // A change on an open session restarts its network; the browser is back once it has.
+        let restarting = app.descendants(matching: .any)["networkRestarting"]
+        wait(app.textFields["addressBar"], "the session's network restarted for \(name)\(restarting.exists ? ": " + restarting.label : "")",
+             timeout: 45, file: file, line: line)
     }
 
     // MARK: Sessions

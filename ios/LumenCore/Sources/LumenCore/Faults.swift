@@ -23,6 +23,7 @@ public enum Fault: String, CaseIterable, Sendable {
     case proxyNotApplied         // a session's proxy is never given to its data store
     case proxyChangeNotLive      // one proxy changed for another takes effect only after a relaunch
     case proxyChangeKeepsConnections // a live change only re-points the data store: open connections keep the old route
+    case restartWithoutRelease   // the network restart does not wait for WebKit to let go of the old store
     case proxyPasswordNotSaved   // the password is not kept
     case passwordAutofill        // the proxy form closes with its login and password still in it: iOS offers to save them
     // A dead proxy: the most dangerous breakage is a session quietly going direct

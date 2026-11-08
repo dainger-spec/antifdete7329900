@@ -4,6 +4,7 @@ import XCTest
 /// the session is open, quit and start again.
 final class ProxyTests: LumenUITestCase {
     func testProxyPersonPath() {
+        let run = String(UUID().uuidString.prefix(6)).lowercased()   // host names of this run only
         launch(reset: true)
         app.buttons["proxiesButton"].tap()
         wait(app.navigationBars["Прокси"], "the proxy list opens")
@@ -30,18 +31,28 @@ final class ProxyTests: LumenUITestCase {
         // connections kept their old route after a live change).
         createSession(name: "Счета")
         openSession("Счета")
-        openPage("http://site.lumentest:28380/whoami?before=proxy")
+        openPage("http://pre-\(run).lumentest:28380/whoami?before=proxy")
         page("via: напрямую")
         chooseProxy("Берлин")
-        openPage("http://site.lumentest:28380/whoami?first=1")
+        openPage("http://a-\(run).lumentest:28380/whoami?first=1")
         page("via: прокси A")
         page("ip: 127.0.0.2")
+        // The testbed's own count: the first site was reached directly once — the visit before the
+        // proxy — and never after it (the restored tab reloads it, through A; CI run 15 found it
+        // going out directly again on a connection left open).
+        openPage("http://site.lumentest:28380/__seen?token=pre-\(run)")
+        let pre = pageLine("route pre-\(run): ")
+        XCTAssertTrue(pre.contains("direct=1 "), "nothing went direct after the proxy was set: \(pre)")
         shot("31 through Berlin")
 
-        // Another proxy while the session is open: the next page, to the same site, goes through it.
+        // Another proxy while the session is open: the next page, to the same site, goes through it,
+        // and nothing more of that site through A (its connection is kept alive, as real sites do).
         chooseProxy("Нью-Йорк")
-        openPage("http://site.lumentest:28380/whoami?after=change")
+        openPage("http://a-\(run).lumentest:28380/whoami?after=change")
         page("via: прокси B")
+        openPage("http://site.lumentest:28380/__seen?token=a-\(run)")
+        let a = pageLine("route a-\(run): ")
+        XCTAssertTrue(a.contains("A=1 ") && !a.contains("B=0 "), "nothing more went through A after the change: \(a)")
         shot("32 switched to New York")
         backToList()
         XCTAssertTrue(sessionCard("Счета").label.contains("Нью-Йорк"), "the card names the proxy: \(sessionCard("Счета").label)")
@@ -51,7 +62,7 @@ final class ProxyTests: LumenUITestCase {
         relaunch()
         XCTAssertTrue(sessionCard("Счета").label.contains("Нью-Йорк"), "after a relaunch the card names the proxy")
         openSession("Счета")
-        openPage("http://site.lumentest:28380/whoami?after=relaunch")
+        openPage("http://a-\(run).lumentest:28380/whoami?after=relaunch")
         page("via: прокси B")
         shot("33 after relaunch")
     }

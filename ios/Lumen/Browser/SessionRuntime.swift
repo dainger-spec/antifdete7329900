@@ -41,6 +41,8 @@ final class SessionRuntime: ObservableObject {
     @Published private(set) var tabs: [BrowserTab] = []
     @Published private(set) var selectedID: UUID?
     @Published private(set) var history: [HistoryEntry]
+    /// Said over the browser while the session's network restarts for a new proxy.
+    @Published private(set) var networkNotice: String?
 
     init(session: Session, proxy: ProxyEntry?, store: LumenStore) {
         sessionID = session.id
@@ -165,11 +167,18 @@ final class SessionRuntime: ObservableObject {
         let generation = networkGeneration
         weak var released = dataStore
         dataStore = .nonPersistent()   // holds the place; the session's own store must be let go of
+        networkNotice = "Сеть сессии перезапускается под новый прокси…"
         Task { @MainActor [weak self] in
-            // Until WebKit has let go of the old store object: one made for the same identifier
-            // while the old one lives would be the same store, with the same connections.
-            for _ in 0..<50 where released != nil { try? await Task.sleep(nanoseconds: 100_000_000) }
+            // Until WebKit has let go of the old store object, however long that takes: one made for
+            // the same identifier while the old one lives is that same store, with its open
+            // connections (CI run 15: after a 5-second limit, the restored tab's page went out
+            // directly on such a connection). Nothing is restored on it — the session waits.
+            while released != nil, !Faults.isActive(.restartWithoutRelease) {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                guard let self, generation == self.networkGeneration else { return }
+            }
             guard let self, generation == self.networkGeneration else { return }
+            self.networkNotice = nil
             self.dataStore = WKWebsiteDataStore(forIdentifier: self.session.storeID)
             self.dataStore.proxyConfigurations = configurations
             self.tabs = records.map { self.makeTab($0, configuration: nil) }
