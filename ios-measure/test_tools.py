@@ -89,5 +89,23 @@ if os.path.exists(ca):
 else:
     check("check_app.py refuses the owner's case", False, "no check_app.py")
 
+# A capture that saw nothing makes the run fail, whatever else passed (the owner's second run: rvi0 got
+# 0 packets, the detectors said INCONCLUSIVE, and the summary still read "16/16 core checks passed").
+probe = r"""
+import os, sys, tempfile, types
+sys.path.insert(0, sys.argv[1])
+import harness
+tmp = tempfile.mkdtemp()
+harness.ARGS = types.SimpleNamespace(out=tmp, run="t", brk="none", scenario="q1", capture="rvi0")
+harness.CHECKS[:] = [{"name": "a", "status": "PASS", "detail": "", "core": True}]
+cap = harness.Capture(os.path.join(tmp, "dns.txt"), "rvi0")
+open(cap.path, "w").close()
+open(cap.path + ".err", "w").write("0 packets captured\n0 packets received by filter\n0 packets dropped by kernel\n")
+sys.exit(harness.finish(cap) if hasattr(harness, "finish") else 0)
+"""
+r = subprocess.run([sys.executable, "-c", probe, HOST], capture_output=True, text=True, cwd=HOST)
+check("a run whose capture saw nothing is not a success (exit 1, CAPTURE SAW NOTHING)",
+      r.returncode == 1 and "CAPTURE SAW NOTHING" in r.stdout and "'capture'" in r.stdout, f"exit {r.returncode}: {r.stdout[-300:]!r} {r.stderr[-200:]!r}")
+
 print(f"{failures} failed")
 sys.exit(1 if failures else 0)

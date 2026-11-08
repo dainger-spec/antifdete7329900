@@ -753,8 +753,10 @@ async def scenario_q1(capture):
         await APP.cmd("load", session="C", url=f"http://{NET_C}:{hp}/ctl?sid=C", timeout=8)
         await asyncio.sleep(1.5)
         control = capture.between(NET_C + ".", tc, time.time() + 60)
+        # A capture asked for and blind is not a success: with it the dead-proxy checks below drop out
+        # of the count (the owner's second run: 16/16 "passed" with no packet seen at all).
         check("q1.direct-detector-sees-a-direct-attempt", "PASS" if control else "INCONCLUSIVE",
-              f"the session without a proxy, a load of {NET_C}: {len(control)} packets seen {control[:1]}")
+              f"the session without a proxy, a load of {NET_C}: {len(control)} packets seen {control[:1]}", core=True)
         capturing = bool(control)
 
     def direct_attempts(address):
@@ -960,7 +962,7 @@ async def scenario_q1(capture):
         detector = bool(control_seen)
         check("q1.dns.detector-sees-a-leak", "PASS" if detector else "INCONCLUSIVE",
               f"the session without a proxy (C): {len(control_seen)} lines {control_seen[:1]}; this Mac's own question for "
-              f"selfcheck-{run}: {len(self_seen)} lines (seen only where the capture is the Mac's own)", core=False)
+              f"selfcheck-{run}: {len(self_seen)} lines (seen only where the capture is the Mac's own)", core=True)
         leaks = {}
         for sid in "AB":
             for prefix in ("p", "s", "x", "ws", "wk", "bc", "fr", "an", "pc", "pf"):
@@ -1102,6 +1104,9 @@ def finish(capture):
         if received and received.group(1) == "0":
             print(f"CAPTURE SAW NOTHING on {capture.interface}: 0 packets for the whole run — every check that "
                   f"needs it says INCONCLUSIVE; run_device.sh now reads the interface from rvictl -l", flush=True)
+            # And the run is not a success, whatever else passed.
+            check("capture", "FAIL", f"the capture on {capture.interface} got 0 packets: what it should have seen is unmeasured",
+                  core=True)
     except OSError:
         pass
     with open(os.path.join(ARGS.out, "events.jsonl"), "w") as f:
