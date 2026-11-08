@@ -41,13 +41,18 @@ final class ProxyTests: LumenUITestCase {
         page("ws: open")
         chooseProxy("Берлин", in: "Счета")
         assertTabKept("/hold?before=proxy")
-        assertWebSocketClosed("the proxy change closed the connection opened before it (a WebSocket)")
-        // The same site again — the page a person refreshes after setting a proxy — through A.
-        openPage("http://pre-\(run).lumentest:28380/whoami?again=1")
-        page("via: прокси A")
+        // The socket's state is read now, before the next page leaves the hold page, and judged after a
+        // page of a site not visited before (a new connection, through the relay's route at that moment):
+        // a proxy not applied at all shows first there, not through A; a proxy applied with the old
+        // connection left open shows at the socket (CI run 22: the socket came first and caught both).
+        let socket = webSocketState()
         openPage("http://a-\(run).lumentest:28380/whoami?first=1")
         page("via: прокси A")
         page("ip: 127.0.0.2")
+        XCTAssertEqual(socket, "ws: closed", "the proxy change closed the connection opened before it (a WebSocket): the page still says \(socket)")
+        // The same site again — the page a person refreshes after setting a proxy — through A.
+        openPage("http://pre-\(run).lumentest:28380/whoami?again=1")
+        page("via: прокси A")
         // The testbed's own count: the first site was reached directly once — the visit before the
         // proxy — and never after it.
         openPage("http://site.lumentest:28380/__seen?token=pre-\(run)")

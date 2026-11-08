@@ -232,9 +232,16 @@ class LumenUITestCase: XCTestCase {
 
     /// The /hold page's WebSocket was closed (within 10 s).
     func assertWebSocketClosed(_ what: String, file: StaticString = #filePath, line: UInt = #line) {
+        let state = webSocketState()
+        XCTAssertEqual(state, "ws: closed", "\(what): the page still says \(state)", file: file, line: line)
+    }
+
+    /// What a /hold page says of its WebSocket: "ws: closed" once it is (waiting up to 10 s), else what
+    /// it says now.
+    func webSocketState() -> String {
         let deadline = Date().addingTimeInterval(10)
         while webText("ws: closed") == nil && Date() < deadline { Thread.sleep(forTimeInterval: 0.5) }
-        XCTAssertNotNil(webText("ws: closed"), "\(what): the page still says \(webText("ws: ") ?? "nothing")", file: file, line: line)
+        return webText("ws: closed") ?? webText("ws: ") ?? "nothing"
     }
 
     // MARK: Proxies
