@@ -9,15 +9,11 @@ class LumenUITestCase: XCTestCase {
         continueAfterFailure = false
     }
 
-    /// Environment a test adds to every launch of the app, relaunches included.
-    var extraEnvironment: [String: String] = [:]
-
     /// `reset`: the app starts with no sessions, proxies or WebKit data at all.
     @discardableResult
     func launch(reset: Bool) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = reset ? ["-LumenResetState"] : []
-        app.launchEnvironment.merge(extraEnvironment) { _, new in new }
         // xcodebuild hands TEST_RUNNER_LUMEN_FAULTS to this process as LUMEN_FAULTS.
         if let faults = ProcessInfo.processInfo.environment["LUMEN_FAULTS"], !faults.isEmpty {
             app.launchEnvironment["LUMEN_FAULTS"] = faults

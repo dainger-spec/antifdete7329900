@@ -21,13 +21,6 @@ struct BrowserView: View {
                 ZStack {
                     WebViewContainer(webView: tab.webView)
                     StartPage(tab: tab)
-                    if let refusal = runtime.refusal, !Faults.isActive(.refusalHidden) {
-                        ContentUnavailableView("Сессия не загружает страницы", systemImage: "exclamationmark.shield",
-                                               description: Text(refusal))
-                            .background(Color(.systemBackground))
-                            .accessibilityElement(children: .combine)
-                            .accessibilityIdentifier("proxyRefused")
-                    }
                 }
                 BottomBar(tab: tab, tabCount: runtime.tabs.count) { sheet = $0 }
                     .id("bar-\(tab.id)")

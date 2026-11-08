@@ -34,8 +34,7 @@ final class SessionRuntimes {
 final class SessionRuntime: ObservableObject {
     let sessionID: UUID
     private(set) var session: Session
-    /// Published: what the browser says (a refused HTTP proxy on iOS 17) follows a change at once.
-    @Published private(set) var proxy: ProxyEntry?
+    private(set) var proxy: ProxyEntry?
     let dataStore: WKWebsiteDataStore
     private let store: LumenStore
     @Published private(set) var tabs: [BrowserTab] = []
@@ -60,10 +59,6 @@ final class SessionRuntime: ObservableObject {
     }
 
     var selected: BrowserTab? { tabs.first { $0.id == selectedID } ?? tabs.last }
-
-    /// Set when this session must load nothing at all (an HTTP proxy on iOS 17): every navigation is
-    /// cancelled and the browser says why.
-    var refusal: String? { PlatformLimits.refusal(for: proxy) }
 
     /// What a new web view of this session is built with.
     func makeConfiguration() -> WKWebViewConfiguration {

@@ -3,6 +3,7 @@ name: iOS app (stage 2)
 # Lumen for iPhone (claude/ios-app, never merged): the core's tests, then the end-to-end tests of a
 # person's path on the iOS Simulator — every planted fault in ios/scripts/faults.tsv first (each must
 # make its test fail), then the green run. Screenshots of what the tests saw are in the artifact.
+# Job "floor": on iOS 17.5 the app does not install at all (the minimum is iOS 18), red run first.
 on:
   push:
     branches: [claude/ios-app]
@@ -34,4 +35,21 @@ jobs:
           path: |
             build/ios-app
             !build/ios-app/dd
+          if-no-files-found: warn
+  floor:
+    name: Does not install below iOS 18 (iOS 17.5 simulator, macos-26)
+    if: ${{ !inputs.os }}
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Red (built for 17.0, installs), then green (refused)
+        run: ios/scripts/install-floor.sh build/ios-floor 17.5
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-floor-${{ github.run_number }}
+          path: |
+            build/ios-floor
+            !build/ios-floor/dd-*
           if-no-files-found: warn
