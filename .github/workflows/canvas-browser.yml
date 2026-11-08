@@ -1,0 +1,75 @@
+# claude/measure-canvas-browser — never merged. Two findings of the iPhone agent (8 November):
+#  1. canvas noise and premultiplied alpha: on this Mac's WebKit, the engine's own put/get against
+#     the formulas of ios-measure/canvas-alpha/README.md (claude/ios-app-measure), and the iOS app's
+#     shim (as it is, and with the proposed noise) against the detectors D1 (q2's), D2 (the PNG's
+#     bytes), D4, D5, D6, D7, D10;
+#  2. window.browser: in this Mac's Safari (no extension installed), in a WKWebView with and without
+#     a WKWebExtensionController (and one holding a loaded extension), and in our profiles.
+name: Canvas alpha and window.browser (measurement)
+on:
+  push:
+    branches: ['claude/measure-canvas-browser']
+jobs:
+  measure:
+    name: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: The machine
+        run: sw_vers; xcodebuild -version; mkdir -p build/cb
+      - name: The iOS app's shim, as it is and with the proposed noise (claude/ios-app's own build script)
+        run: |
+          git fetch --depth=1 origin claude/ios-app
+          mkdir -p ios/shim ios/scripts
+          git show FETCH_HEAD:ios/shim/fingerprint.js > ios/shim/fingerprint.js
+          git show FETCH_HEAD:ios/scripts/build-shim.py > ios/scripts/build-shim.py
+          echo "claude/ios-app at $(git rev-parse --short FETCH_HEAD)"
+          python3 measure/canvas_browser/make_shims.py build/cb
+          cp measure/canvas_browser/canvas_probe.js measure/canvas_browser/browser_probe.js build/cb/
+      - name: WebKit in a web view — the canvas and window.browser
+        timeout-minutes: 20
+        run: |
+          swiftc -o build/cb-probe measure/canvas_browser/probe.swift
+          build/cb-probe build/cb measure/canvas_browser/extensions > build/cb/probe.txt 2>&1 || echo "probe exited $?"
+          python3 measure/canvas_browser/analyse.py build/cb/probe.txt
+          grep -E "^BROWSER" build/cb/probe.txt | cut -c1-3000
+      - name: This Mac's Safari — window.browser with no extension
+        if: always()
+        timeout-minutes: 10
+        run: python3 measure/canvas_browser/safari_browser.py | cut -c1-3000
+      - name: Build the app without the App Sandbox
+        if: always()
+        timeout-minutes: 30
+        run: NE=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: Our profiles — window.browser and the window's own names (the fingerprint surface)
+        if: always()
+        timeout-minutes: 20
+        env:
+          PB_SELFTEST_ONLY: "fingerprint surface"
+        run: |
+          export PB_SELFTEST_SURFACE_OUT="$PWD/build/cb/surface"
+          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --self-test > build/cb/selftest.txt 2>&1 || true
+          grep -E "^SELFTEST [A-Z]+:" build/cb/selftest.txt || tail -20 build/cb/selftest.txt
+          python3 - <<'PY'
+          import glob, json, os
+          for path in sorted(glob.glob("build/cb/surface/*.json")):
+              s = json.load(open(path))
+              flat = s.get("values", s) if isinstance(s, dict) else {}
+              def find(key):
+                  if key in flat: return flat[key]
+                  for v in flat.values() if isinstance(flat, dict) else []:
+                      if isinstance(v, dict) and key in v: return v[key]
+                  return None
+              names = str(find("windowOwnNames") or "")
+              print(f"PROFILE {os.path.basename(path)}: windowOwnCount {find('windowOwnCount')}, 'browser' among own names: {'browser' in names.split()}")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: canvas-browser-${{ matrix.runner }}
+          path: build/cb
