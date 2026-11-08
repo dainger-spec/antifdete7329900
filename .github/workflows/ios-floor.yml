@@ -1,0 +1,31 @@
+name: iOS app — does not install below iOS 18
+
+# Lumen for iPhone (claude/ios-app, never merged): the minimum is iOS 18 (the owner's decision after
+# the iOS 17.5 measurement). On an iOS 17.5 simulator: red first — the same app built for iOS 17.0
+# installs there; then green — the app as the project builds it is refused, and nothing of it can
+# start there. ios/scripts/install-floor.sh says what each step saw.
+on:
+  push:
+    branches: [claude/ios-app]
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-floor.yml"
+  workflow_dispatch:
+
+jobs:
+  floor:
+    name: Does not install below iOS 18 (iOS 17.5 simulator, macos-26)
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Red (built for 17.0, installs), then green (refused, cannot start)
+        run: ios/scripts/install-floor.sh build/ios-floor 17.5
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-floor-${{ github.run_number }}
+          path: |
+            build/ios-floor
+            !build/ios-floor/dd-*
+          if-no-files-found: warn

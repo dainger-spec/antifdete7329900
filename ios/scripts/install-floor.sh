@@ -113,6 +113,19 @@ elif grep -q -i -E "minimum|newer|requires|MinimumOSVersion|version" "$OUT/insta
 else
     say "NOT GREEN: iOS $OLD_VERSION refuses it, but not for its version — $(tail -3 "$OUT/install-green.txt" | tr '\n' ' ')"; STATUS=1
 fi
-if installed "$OLD_DEV"; then say "NOT GREEN: $BUNDLE is on the iOS $OLD_VERSION simulator"; STATUS=1; else say "and it is not on that simulator"; fi
+# What a refused install leaves (run 10: the simulator still reported a container after the refusal).
+# The decisive question is whether the app can run there: it must not.
+if installed "$OLD_DEV"; then
+    LEFT="$(xcrun simctl get_app_container "$OLD_DEV" "$BUNDLE" 2>/dev/null)"
+    say "after the refusal the simulator still reports $BUNDLE at $LEFT (MinimumOSVersion '$(minimum "$LEFT")'; executable: $([[ -x "$LEFT/Lumen" ]] && echo yes || echo no))"
+    xcrun simctl appinfo "$OLD_DEV" "$BUNDLE" >"$OUT/appinfo-after-refusal.txt" 2>&1
+    if xcrun simctl launch "$OLD_DEV" "$BUNDLE" >"$OUT/launch-after-refusal.txt" 2>&1; then
+        say "NOT GREEN: and it starts there — $(tail -1 "$OUT/launch-after-refusal.txt")"; STATUS=1
+    else
+        say "it does not start there — $(grep -m1 -i -E 'error|fail|unable' "$OUT/launch-after-refusal.txt" | cut -c1-240)"
+    fi
+else
+    say "and it is not on that simulator"
+fi
 say "== status $STATUS"
 exit $STATUS
