@@ -476,6 +476,9 @@
 "menu.window" = "Окно";
 "menu.minimize" = "Свернуть";
 "menu.findOnPage" = "Найти…";
+"find.placeholder" = "Найти на странице";
+"find.notFound" = "Не найдено";
+"find.done" = "Готово";
 "menu.findNext" = "Найти далее";
 "menu.findPrevious" = "Найти ранее";
 "menu.useSelectionForFind" = "Искать выделенное";

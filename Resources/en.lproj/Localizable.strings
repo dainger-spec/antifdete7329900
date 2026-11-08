@@ -476,6 +476,9 @@
 "menu.window" = "Window";
 "menu.minimize" = "Minimize";
 "menu.findOnPage" = "Find…";
+"find.placeholder" = "Find on page";
+"find.notFound" = "Not found";
+"find.done" = "Done";
 "menu.findNext" = "Find Next";
 "menu.findPrevious" = "Find Previous";
 "menu.useSelectionForFind" = "Use Selection for Find";

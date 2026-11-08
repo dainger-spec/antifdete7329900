@@ -1,7 +1,6 @@
 import AppKit
 import BrowserCore
 import Combine
-import ObjCExceptions
 import os
 import SwiftUI
 import UniformTypeIdentifiers
@@ -47,6 +46,8 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     /// The address field's width: what the other toolbar items leave, up to 680 pt (`fitAddressField`).
     private var addressWidth: NSLayoutConstraint!
     private let webContainer = NSView()
+    /// Find on the page (⌘F), over the page's top edge.
+    private(set) lazy var findBar = PageFindBar { [weak self] in self?.selectedTab?.webView }
     private let addressField = AddressBarField()
     private var backButton: NSButton!
     private var forwardButton: NSButton!
@@ -251,6 +252,13 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         } else {
             webContainer.bottomAnchor.constraint(equalTo: container.bottomAnchor).isActive = true
         }
+        findBar.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(findBar, positioned: .above, relativeTo: stoppedPage)
+        NSLayoutConstraint.activate([
+            findBar.topAnchor.constraint(equalTo: webContainer.topAnchor),
+            findBar.leadingAnchor.constraint(equalTo: webContainer.leadingAnchor),
+            findBar.trailingAnchor.constraint(equalTo: webContainer.trailingAnchor),
+        ])
         window.contentView = container
         fitAddressField()
     }
@@ -408,25 +416,11 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         if isPhoneLayout { showTabOverview() }
     }
 
-    // Find on the page: WebKit's own find bar in the web view (NSTextFinder), as AppKit's Find menu
-    // asks it — the action is the menu item's tag.
-    @objc func findCommand(_ sender: Any?) { textFinder(.showFindInterface) }
-    @objc func findNextCommand(_ sender: Any?) { textFinder(.nextMatch) }
-    @objc func findPreviousCommand(_ sender: Any?) { textFinder(.previousMatch) }
-    @objc func useSelectionForFindCommand(_ sender: Any?) { textFinder(.setSearchString) }
-    private func textFinder(_ action: NSTextFinder.Action) {
-        guard let webView = selectedTab?.webView else { return }
-        let carrier = NSMenuItem()
-        carrier.tag = action.rawValue
-        if action == .showFindInterface { window?.makeFirstResponder(webView) }
-        // WebKit raises for some actions with no find bar up (⌘G before ⌘F, hiding a bar never shown);
-        // caught here, where it is called: one that unwound through a Swift task left the main actor's
-        // record pointing into a stack that was gone (CI 758: a crash in the next main-actor check;
-        // CI 761: the task never went on).
-        if let thrown = PBCatchException({ webView.performTextFinderAction(carrier) }) {
-            log.notice("Find action \(action.rawValue, privacy: .public) raised \(thrown.name.rawValue, privacy: .public)")
-        }
-    }
+    // Find on the page: our bar over the page, WebKit's own search (`PageFindBar`).
+    @objc func findCommand(_ sender: Any?) { findBar.show() }
+    @objc func findNextCommand(_ sender: Any?) { findBar.search(backwards: false) }
+    @objc func findPreviousCommand(_ sender: Any?) { findBar.search(backwards: true) }
+    @objc func useSelectionForFindCommand(_ sender: Any?) { findBar.useSelection() }
 
     /// Safari's zoom steps.
     private static let zoomSteps: [CGFloat] = [0.5, 0.75, 0.85, 1, 1.15, 1.25, 1.5, 1.75, 2, 2.5, 3]
@@ -589,6 +583,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     }
 
     func selectTab(at index: Int) {
+        if !findBar.isHidden { findBar.close() }
         guard tabs.indices.contains(index) else { return }
         if index != selectedIndex { takeSnapshot(of: selectedTab) }
         selectedTab?.passwords.closeSuggestions()

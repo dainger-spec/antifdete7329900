@@ -177,16 +177,23 @@ enum WindowAudit {
         _ = await js("getSelection().removeAllRanges(); return true;")
 
         // Find, zoom, print, save, and the rest Safari has a key for.
+        // A word the page holds, to be found.
+        _ = await js("document.body.insertAdjacentHTML('beforeend', '<p id=pbfind>pbfindword</p>'); getSelection().removeAllRanges(); return true;")
         let find = await press("f")
-        let findShown = window.contentView.map { view -> Bool in
+        // Our window's bar (`PageFindBar`), shown; in Safari's window, any find bar in the window.
+        let findShown = controller.map { !$0.findBar.isHidden } ?? (window.contentView.map { view -> Bool in
             func has(_ v: NSView) -> Bool { String(describing: type(of: v)).localizedCaseInsensitiveContains("find") || v.subviews.contains(where: has) }
             return has(view)
-        } ?? false
+        } ?? false)
         say("⌘F (find on the page): \(find) → a find bar in the window: \(findShown ? "yes" : "no") — \(findShown ? "WORKS" : "DOES NOT WORK")")
-        let hide = NSMenuItem()
-        hide.tag = NSTextFinder.Action.hideFindInterface.rawValue
-        if let thrown = PBCatchException({ webView.performTextFinderAction(hide) }) {
-            say("hiding the find bar raised \(thrown.name.rawValue)")
+        if let bar = controller?.findBar, !bar.isHidden {
+            // What is typed is found: ⌘G selects the match on the page.
+            bar.field.stringValue = "pbfindword"
+            let next = await press("g")
+            await pause()
+            let selected = (await js("return String(getSelection());") as? String) ?? "?"
+            say("⌘G (find next): \(next) → the page's selection \"\(selected)\" — \(selected == "pbfindword" ? "WORKS" : "DOES NOT WORK")")
+            bar.close()
         }
         await pause()
         let zoomBefore = webView.pageZoom
