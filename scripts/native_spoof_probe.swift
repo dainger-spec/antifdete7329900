@@ -56,14 +56,19 @@ func measure(_ name: String, platform: String?, scale: CGFloat?) async {
         else { said.append("_setCustomNavigatorPlatform: NOT ANSWERED") }
     }
     configuration.defaultWebpagePreferences = preferences
+    print("NATIVE \(name): making the view")
     let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 390, height: 844), styleMask: [.titled], backing: .buffered, defer: false)
     let view = WKWebView(frame: window.contentView!.bounds, configuration: configuration)
     window.contentView = view
     window.orderFrontRegardless()
     if let scale {
-        if view.responds(to: NSSelectorFromString("_setOverrideDeviceScaleFactor:")) {
-            view.setValue(scale, forKey: "_overrideDeviceScaleFactor")
-            said.append("_overrideDeviceScaleFactor=\(scale) (reads back \(view.value(forKey: "_overrideDeviceScaleFactor") ?? "nil"))")
+        let setter = NSSelectorFromString("_setOverrideDeviceScaleFactor:")
+        if view.responds(to: setter), let method = class_getInstanceMethod(type(of: view), setter) {
+            typealias Set = @convention(c) (AnyObject, Selector, CGFloat) -> Void
+            print("NATIVE \(name): setting the scale")
+            unsafeBitCast(method_getImplementation(method), to: Set.self)(view, setter, scale)
+            print("NATIVE \(name): scale set")
+            said.append("_overrideDeviceScaleFactor=\(scale)")
         } else { said.append("_setOverrideDeviceScaleFactor: NOT ANSWERED") }
     }
     print("NATIVE \(name): loading")
