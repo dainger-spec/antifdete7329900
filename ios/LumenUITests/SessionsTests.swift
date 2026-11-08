@@ -25,12 +25,14 @@ final class SessionsTests: LumenUITestCase {
         clearSearch()
         wait(sessionCard("Почта"), "a cleared search shows everything again")
 
-        // Rename through the editor.
+        // Rename and a new description, through the editor.
         openEditor(of: "Работа")
         replaceText(app.textFields["sessionName"], with: "Реклама")
+        replaceText(app.textFields["sessionNotes"], with: "Кабинет и счета")
         app.buttons["saveSession"].tap()
         wait(sessionCard("Реклама"), "the renamed card is shown")
         XCTAssertFalse(sessionCard("Работа").exists, "the old name is gone")
+        XCTAssertTrue(sessionCard("Реклама").label.contains("Кабинет и счета"), "the card shows the new description: \(sessionCard("Реклама").label)")
 
         // Opening a session is what "last opened" shows.
         sessionCard("Реклама").tap()
@@ -44,7 +46,7 @@ final class SessionsTests: LumenUITestCase {
         relaunch()
         wait(sessionCard("Реклама"), "after a relaunch the renamed session is there")
         wait(sessionCard("Почта"), "after a relaunch the other session is there")
-        XCTAssertTrue(sessionCard("Реклама").label.contains("Рекламный кабинет"), "the description survives a relaunch: \(sessionCard("Реклама").label)")
+        XCTAssertTrue(sessionCard("Реклама").label.contains("Кабинет и счета"), "the new description survives a relaunch: \(sessionCard("Реклама").label)")
         XCTAssertTrue(sessionCard("Реклама").label.contains("Открывали"), "when it was opened survives a relaunch")
         search("ads")
         wait(sessionCard("Реклама"), "after a relaunch the tag still finds it")

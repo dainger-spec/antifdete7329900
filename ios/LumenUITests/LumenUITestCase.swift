@@ -74,15 +74,20 @@ class LumenUITestCase: XCTestCase {
         return all.allElementsBoundByIndex.first { $0.isHittable } ?? all.firstMatch
     }
 
-    /// Replaces a text field's whole content.
+    /// Replaces a text field's whole content: touch it, then its clear button (CI run 10: deleting
+    /// backwards from where the touch put the cursor left the tail of a long address in place).
     func replaceText(_ field: XCUIElement, with text: String) {
-        // The cursor goes where the field is touched: touch its far end, then delete backwards.
-        field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
-        let placeholder = field.placeholderValue ?? ""
-        var current = (field.value as? String) ?? ""
-        if current == placeholder { current = "" }
-        if !current.isEmpty {
-            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count + 2))
+        field.tap()
+        let clear = field.buttons["Clear text"]
+        if clear.waitForExistence(timeout: 2), clear.isHittable {
+            clear.tap()
+        } else {
+            let placeholder = field.placeholderValue ?? ""
+            var current = (field.value as? String) ?? ""
+            if current == placeholder { current = "" }
+            if !current.isEmpty {
+                field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count + 2))
+            }
         }
         field.typeText(text)
     }
@@ -175,8 +180,14 @@ class LumenUITestCase: XCTestCase {
     func proxyRow(_ name: String) -> XCUIElement { app.descendants(matching: .any)["proxy-\(name)"] }
 
     func addProxy(name: String, kind: String, host: String = "127.0.0.1", port: String, user: String, password: String) {
-        app.buttons["newProxy"].tap()
-        let field = wait(app.textFields["proxyName"], "the new proxy form opens")
+        // A touch while the previous form is still closing is lost (CI run 10): touch again until it opens.
+        let add = wait(app.buttons["newProxy"], "the list offers a new proxy")
+        let field = app.textFields["proxyName"]
+        for _ in 0..<3 where !field.exists {
+            if add.isHittable { add.tap() }
+            _ = field.waitForExistence(timeout: 5)
+        }
+        wait(field, "the new proxy form opens")
         field.tap()
         field.typeText(name)
         app.segmentedControls["proxyKind"].buttons[kind].tap()
@@ -189,6 +200,7 @@ class LumenUITestCase: XCTestCase {
         app.secureTextFields["proxyPassword"].tap()
         app.secureTextFields["proxyPassword"].typeText(password)
         app.buttons["saveProxy"].tap()
+        waitGone(field, "the proxy form closes")
         wait(proxyRow(name), "the proxy \(name) is in the list")
     }
 
@@ -197,6 +209,14 @@ class LumenUITestCase: XCTestCase {
         let predicate = NSPredicate(format: "label CONTAINS %@", text)
         let result = XCTWaiter.wait(for: [expectation(for: predicate, evaluatedWith: proxyRow(name))], timeout: timeout)
         XCTAssertEqual(result, .completed, "the row of \(name) says \(text): \(proxyRow(name).label)", file: file, line: line)
+    }
+
+    /// From the proxy list back to the sessions (CI run 10: the bar's first button is not always
+    /// the back button there — the list's "+" is in the same bar).
+    func leaveProxies() {
+        let bar = app.navigationBars["Прокси"]
+        bar.buttons.matching(NSPredicate(format: "identifier != %@", "newProxy")).firstMatch.tap()
+        wait(app.navigationBars["Сессии"], "back on the session list")
     }
 
     func chooseProxy(_ name: String) {

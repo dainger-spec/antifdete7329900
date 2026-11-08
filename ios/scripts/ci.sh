@@ -83,7 +83,7 @@ for r in rs:
 UDID="$(xcrun simctl create "Lumen CI" "$TYPE" "$RUNTIME_ID")" || { say "cannot create a simulator"; exit 2; }
 xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b >/dev/null 2>&1
 say "== simulator $UDID: $TYPE, iOS $RUNTIME_VERSION"
-trap 'xcrun simctl shutdown "$UDID" >/dev/null 2>&1; xcrun simctl delete "$UDID" >/dev/null 2>&1; [[ -n "${TESTBED:-}" ]] && kill "$TESTBED" 2>/dev/null; sudo -n rm -f /etc/resolver/lumentest 2>/dev/null' EXIT
+trap 'xcrun simctl shutdown "$UDID" >/dev/null 2>&1; xcrun simctl delete "$UDID" >/dev/null 2>&1; [[ -n "${TESTBED:-}" ]] && kill "$TESTBED" 2>/dev/null; sudo -n rm -f /etc/resolver/lumentest 2>/dev/null; sudo -n pkill -f testbed/dns53.py 2>/dev/null' EXIT
 
 # ---- 3. The testbed on this Mac: pages, proxies, a geolocation service, and a DNS server that
 # answers *.lumentest for this Mac's own resolver too — so a page that goes around its proxy loads
@@ -95,7 +95,20 @@ if [[ -f "$HERE/testbed/testbed.py" ]]; then
     sudo -n mkdir -p /etc/resolver && printf 'nameserver 127.0.0.1\nport 28353\n' | sudo -n tee /etc/resolver/lumentest >/dev/null \
         || say "cannot write /etc/resolver/lumentest (sudo?)"
     sleep 2
-    say "this Mac resolves resolver-check.lumentest to: $(dscacheutil -q host -a name resolver-check.lumentest | awk '/ip_address/ {print $2}' | head -1)"
+    resolve() { dscacheutil -q host -a name "$1" | awk '/ip_address/ {print $2}' | head -1; }   # a new name each time: no cached answer
+    say "the testbed's DNS asked directly: $(dig +short +time=2 +tries=1 @127.0.0.1 -p 28353 dig-check.lumentest A 2>&1 | head -1)"
+    R="$(resolve resolver-check-1.lumentest)"
+    if [[ -z "$R" ]]; then   # CI run 10: nothing — mDNSResponder may not have read the new file yet
+        sudo -n killall -HUP mDNSResponder 2>/dev/null; sleep 3; R="$(resolve resolver-check-2.lumentest)"
+    fi
+    if [[ -z "$R" ]]; then   # the standard port: a forwarder (root) on 127.0.0.1:53 to the testbed's DNS
+        sudo -n python3 "$HERE/testbed/dns53.py" 28353 >"$OUT/dns53.txt" 2>&1 &
+        printf 'nameserver 127.0.0.1\n' | sudo -n tee /etc/resolver/lumentest >/dev/null
+        sudo -n killall -HUP mDNSResponder 2>/dev/null; sleep 3; R="$(resolve resolver-check-3.lumentest)"
+        say "port 28353 not taken; with a forwarder on port 53: ${R:-still nothing}"
+    fi
+    scutil --dns | grep -B2 -A5 "lumentest" | head -12 >"$OUT/resolver.txt"
+    say "this Mac resolves *.lumentest to: ${R:-NOTHING — the dead-proxy test cannot see a direct connection} ($(tr '\n' ' ' <"$OUT/resolver.txt" | tr -s ' ' | cut -c1-200))"
 fi
 
 # ---- 4. Build once, then the end-to-end tests: reds, then green.

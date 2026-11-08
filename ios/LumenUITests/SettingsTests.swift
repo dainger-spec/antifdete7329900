@@ -9,7 +9,7 @@ final class SettingsTests: LumenUITestCase {
         app.buttons["proxiesButton"].tap()
         addProxy(name: "Берлин", kind: "HTTP", port: "28381", user: "ua", password: "pa")
         waitRow("Берлин", says: "DE")
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        leaveProxies()
         createSession(name: "Профиль")
         openSession("Профиль")
 

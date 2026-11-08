@@ -22,7 +22,7 @@ final class ProxyTests: LumenUITestCase {
         addProxy(name: "Чужой пароль", kind: "HTTP", port: "28381", user: "ua", password: "wrong")
         waitRow("Чужой пароль", says: "Недоступен")
         shot("30 proxy list checked")
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        leaveProxies()
 
         // A session through the Berlin proxy: the site sees proxy A (a .lumentest name resolves only there).
         createSession(name: "Счета")
@@ -77,7 +77,7 @@ final class ProxyTests: LumenUITestCase {
         addProxy(name: "Умирающий", kind: "HTTP", port: "28384", user: "ud", password: "pd")
         waitRow("Умирающий", says: "Работает")
         shot("37 dead proxies")
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        leaveProxies()
 
         // Dead from the start, of each kind: nothing loads.
         createSession(name: "Без отката")
@@ -105,7 +105,7 @@ final class ProxyTests: LumenUITestCase {
         wait(proxyRow("Умирающий"), "the proxy list opens").swipeLeft()
         wait(app.buttons["Проверить"], "the row offers a re-check").tap()
         waitRow("Умирающий", says: "Недоступен")
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        leaveProxies()
         openSession("Без отката")
         go("http://rechecked-\(run).lumentest:28380/whoami?t=rechecked")
         assertNothingLoaded("rechecked")
