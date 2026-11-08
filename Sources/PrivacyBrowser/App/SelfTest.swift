@@ -2655,6 +2655,12 @@ final class SelfTest {
                   f.onload = () => { try { done(String(f.contentWindow.navigator.platform)); } catch (e) { done('error'); } };
                   document.body.appendChild(f); setTimeout(() => done('timeout'), 5000); });
                 """) as? String ?? "nil"
+            // A worker made from a blob, as pages make them: what its navigator says.
+            let workerPlatform = try await js(tab.webView, """
+                return await new Promise((done) => {
+                  const w = new Worker(URL.createObjectURL(new Blob(['postMessage(navigator.platform)'], { type: 'text/javascript' })));
+                  w.onmessage = (e) => done(String(e.data)); w.onerror = () => done('error'); setTimeout(() => done('timeout'), 5000); });
+                """) as? String ?? "nil"
             tab.tearDown()
             session.shutDown()
             try repository.delete(profile.id)
@@ -2693,10 +2699,12 @@ final class SelfTest {
                 // large), five touch points, touch events, a coarse pointer without hover — each
                 // accessor printed as the engine prints its own.
                 let phoneValues: [(String, String)] = [("maxTouchPoints", "5"), ("screen", "402x874x402x874x3"),
-                                                        ("pointer", "false,false,true"), ("touch", "true,function,function")]
+                                                        ("pointer", "false,false,true"), ("touch", "true,function,function"),
+                                                        ("orientation", "portrait-primary")]
                 for (key, wanted) in phoneValues {
                     check("surface (\(name)): \(key) is the iPhone's", string(probed, key) == wanted, "\(string(probed, key)), wanted \(wanted)")
                 }
+                check("surface (\(name)): a blob worker's navigator.platform is the iPhone's too", workerPlatform == "iPhone", workerPlatform)
                 for native in ["Navigator.maxTouchPoints getter", "Screen.width getter", "window.outerWidth getter"] {
                     check("surface (\(name)): \(native) reads as the engine's own",
                           string(probed, "natives.\(native)").hasPrefix("native-text"), string(probed, "natives.\(native)"))
@@ -2732,15 +2740,18 @@ final class SelfTest {
                     + (generationID == DeviceGenerations.defaultID ? "Safari \(HostSafari.version) on the Mac" : "Safari on an iPhone"),
                   string(probed, "features.safari") == (wantsSafari ? "object" : "undefined"),
                   "features.safari \(string(probed, "features.safari")), \(string(probed, "safariShape"))")
-            // No generation changes what a page measures of this Mac: the touch points, the
-            // platform and the screen of a phone, said without touch, broke sites and gave the
-            // profile away all the same.
-            // The rest of what a page measures of this Mac: the iPhone view's platform and pixel
-            // density are the phone's (above), and the rest of its screen and touch come with the
-            // full disguise's script (not yet).
-            let phoneOwn = fullPhone ? ["platform", "screen", "maxTouchPoints", "pointer", "touch"] : isPhone ? ["platform", "screen"] : []
+            // The rest of what a page measures of this Mac: an iPhone view's platform and pixel
+            // density are the phone's (above) in both disguises; its screen, touch, pointer and
+            // orientation with the full disguise's script only — without it they are this Mac's,
+            // and so is a worker's platform (no script's trace).
+            if isPhone && !fullPhone {
+                check("surface (\(name)): a blob worker's navigator.platform stays this Mac's (WebKit's setting does not reach workers)",
+                      workerPlatform == "MacIntel", workerPlatform)
+            }
+            let phoneOwn = fullPhone ? ["platform", "screen", "maxTouchPoints", "pointer", "touch", "orientation"]
+                : isPhone ? ["platform", "screen"] : []
             let nativeKeys = ["platform", "maxTouchPoints", "hardwareConcurrency", "screen", "standalone", "pointer", "touch",
-                              "timeZone", "tzOffset", "dateString"]
+                              "orientation", "timeZone", "tzOffset", "dateString"]
                 .filter { !phoneOwn.contains($0) }
             for key in nativeKeys {
                 check("surface (\(name)): native \(key)", string(probed, key) == string(reference, key),
@@ -5715,6 +5726,10 @@ final class SelfTest {
             check("\(prefix) actions: \(String(line.prefix { $0 != ":" }))", line.hasSuffix("— WORKS"), line)
         }
         check("\(prefix) actions: the window's actions were all pressed (at least 24 answered)", verdicts >= 24, "\(verdicts) answered")
+        // A press with the mouse is a phone's tap (the full disguise, on by default): a field takes
+        // it, a page that cancels touchstart gets no mouse events, click or focus from it.
+        let taps = tapsHeard(await act(phone, phoneID, .tap))
+        tapChecks(taps, prefix: prefix, disguised: true)
         let firstPicture = await act(phone, phoneID, .picture)
         if let base64 = firstPicture.picture, let data = Data(base64Encoded: base64),
            let folder = ProcessInfo.processInfo.environment["PB_SELFTEST_SHOTS"] {
@@ -5770,6 +5785,15 @@ final class SelfTest {
               "requests after the search: \(after.hosts.joined(separator: " ")), tabs \(searched.urls.joined(separator: " "))")
         try? await phone.stop(phoneID)
 
+        // The control: an iPhone view without the full disguise hears a press as a Mac's click —
+        // the tap check above would see nothing if the press never reached the page.
+        let (plain, plainID, _) = try await launch(ProfileConfiguration(
+            startURL: URL(string: "http://proxied.selftest.invalid/one?plain=\(run)"), proxy: proxy, ephemeral: true,
+            deviceGenerationID: "ios-27", matchProxyLocation: false, phoneDisguise: .engineOnly), "Phone window, no script's trace")
+        defer { try? repository.delete(plainID) }
+        tapChecks(tapsHeard(await act(plain, plainID, .tap)), prefix: "\(prefix), no script's trace", disguised: false)
+        try? await plain.stop(plainID)
+
         // A profile in Safari's window: Safari's address bar, the profile's engine.
         let (desk, deskID, hosts) = try await launch(ProfileConfiguration(
             startURL: URL(string: "http://proxied.selftest.invalid/one?desk=\(run)"), proxy: proxy, ephemeral: true,
@@ -5822,6 +5846,68 @@ final class SelfTest {
             }
             return Array(frames.suffix(40))
         }.value
+    }
+
+    /// What `WindowProbeAction.tap` brought back: for each thing pressed, the events in the order
+    /// the page heard them and what had the focus.
+    private struct TapsHeard {
+        var events: [String: [[String: Any]]] = [:]
+        var focused: [String: String] = [:]
+        var pressed: [String: [Int]] = [:]
+        var raw = ""
+        func types(_ name: String) -> [String] { (events[name] ?? []).compactMap { $0["type"] as? String } }
+        func count(_ name: String, _ type: String) -> Int { types(name).filter { $0 == type }.count }
+    }
+
+    private func tapsHeard(_ look: WindowLook) -> TapsHeard {
+        var heard = TapsHeard()
+        heard.raw = look.detail
+        guard let object = (try? JSONSerialization.jsonObject(with: Data(look.detail.utf8))) as? [String: Any] else { return heard }
+        for (name, value) in object {
+            guard let entry = value as? [String: Any] else { continue }
+            heard.pressed[name] = entry["pressed"] as? [Int]
+            let page = entry["heard"] as? [String: Any]
+            heard.events[name] = page?["taps"] as? [[String: Any]] ?? []
+            heard.focused[name] = page?["focused"] as? String ?? ""
+        }
+        return heard
+    }
+
+    private func tapChecks(_ taps: TapsHeard, prefix: String, disguised: Bool) {
+        let field = taps.types("field")
+        info("\(prefix) tap: a field heard \(field.joined(separator: ", ")); focus \(taps.focused["field"] ?? "?")")
+        info("\(prefix) tap: touchstart cancelled — a button heard \(taps.types("cancel").joined(separator: ", ")), "
+             + "a field heard \(taps.types("guarded").joined(separator: ", ")); focus \(taps.focused["guarded"] ?? "?")")
+        let pointerTypes = Set((taps.events["field"] ?? []).filter { ($0["type"] as? String)?.hasPrefix("pointer") == true }
+            .compactMap { $0["pointerType"] as? String })
+        guard disguised else {
+            check("\(prefix) tap: the control — a press is a Mac's click: no touch events, the click and the focus",
+                  taps.count("field", "touchstart") == 0 && taps.count("field", "touchend") == 0 && taps.count("field", "click") == 1
+                    && taps.focused["field"] == "pb-tap-field" && pointerTypes == ["mouse"],
+                  "heard \(field.joined(separator: ", ")); pointer \(pointerTypes.sorted().joined(separator: ",")); "
+                    + "focus \(taps.focused["field"] ?? "?"); \(taps.raw.prefix(300))")
+            return
+        }
+        let start = (taps.events["field"] ?? []).first { $0["type"] as? String == "touchstart" }
+        let at = start?["at"] as? [Int] ?? []
+        let pressed = taps.pressed["field"] ?? []
+        let near = at.count == 2 && pressed.count == 2 && abs(at[0] - pressed[0]) <= 3 && abs(at[1] - pressed[1]) <= 3
+        check("\(prefix) tap: a press on a field is a phone's tap — touchstart and touchend once, where it was pressed, one touch",
+              taps.count("field", "touchstart") == 1 && taps.count("field", "touchend") == 1 && near
+                && start?["touches"] as? Int == 1 && start?["cancelable"] as? Bool == true,
+              "heard \(field.joined(separator: ", ")); touch at \(at), pressed at \(pressed)")
+        check("\(prefix) tap: then the click, once, and the field takes the focus (a search box can be typed into)",
+              taps.count("field", "click") == 1 && taps.focused["field"] == "pb-tap-field",
+              "clicks \(taps.count("field", "click")), focus \(taps.focused["field"] ?? "?")")
+        check("\(prefix) tap: the pointer events say touch", pointerTypes == ["touch"], pointerTypes.sorted().joined(separator: ","))
+        let cancelled = taps.types("cancel")
+        check("\(prefix) tap: a cancelled touchstart takes the mouse events and the click away, as on a phone",
+              taps.count("cancel", "touchstart") == 1 && !cancelled.contains("mousedown") && !cancelled.contains("mouseup")
+                && !cancelled.contains("click"),
+              "heard \(cancelled.joined(separator: ", "))")
+        check("\(prefix) tap: a field whose touchstart is cancelled does not take the focus",
+              taps.count("guarded", "touchstart") == 1 && taps.focused["guarded"] != "pb-tap-guarded",
+              "heard \(taps.types("guarded").joined(separator: ", ")); focus \(taps.focused["guarded"] ?? "?")")
     }
 
     /// The interface's language and the language websites see are apart, both ways (the owner, 1
