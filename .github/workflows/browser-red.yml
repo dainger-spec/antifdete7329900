@@ -1,0 +1,27 @@
+# claude/measure-browser-red — never merged: the window.browser check on the code before its fix
+# (no extension controller) — red expected in a Mac profile and both iPhone views.
+name: window.browser red run (measurement)
+on:
+  push:
+    branches: ['claude/measure-browser-red']
+jobs:
+  measure:
+    name: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the app without the App Sandbox
+        timeout-minutes: 30
+        run: NE=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: The fingerprint surface
+        timeout-minutes: 20
+        env:
+          PB_SELFTEST_ONLY: "fingerprint surface"
+        run: |
+          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --self-test > build/selftest.txt 2>&1 || true
+          grep -E "^(PASS|FAIL|SKIP).*(window.browser|blob worker)|^SELFTEST [A-Z]+:" build/selftest.txt
