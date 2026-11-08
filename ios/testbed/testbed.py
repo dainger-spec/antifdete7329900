@@ -109,11 +109,15 @@ const draw = () => { const c = document.createElement('canvas'); c.width = 240; 
   show('tz', 'tz: ' + Intl.DateTimeFormat().resolvedOptions().timeZone);
   show('lang', 'lang: ' + navigator.language);
   // window.browser as Safari has it (WebKit's WebPageNamespace): its class, runtime's, the property.
-  show('browser', 'browser: ' + (() => { const b = window.browser; if (!b) return 'absent';
-    const d = Object.getOwnPropertyDescriptor(window, 'browser'); const r = b.runtime;
+  // Its line's element is not named "browser": an element's id is a window property too, and
+  // without the namespace window.browser would be that element.
+  show('webpagens', 'browser: ' + (() => { try {
+    if (!Object.prototype.hasOwnProperty.call(window, 'browser')) return 'absent';
+    const b = window.browser, d = Object.getOwnPropertyDescriptor(window, 'browser'), r = b && b.runtime;
     return [Object.prototype.toString.call(b), Object.getOwnPropertyNames(b).sort().join(','), Object.prototype.toString.call(r),
-      Object.getOwnPropertyNames(Object.getPrototypeOf(r)).sort().join(','),
-      d ? ['own', d.enumerable, d.configurable, d.writable, typeof d.value].join(',') : 'inherited'].join(' '); })());
+      r ? Object.getOwnPropertyNames(Object.getPrototypeOf(r)).sort().join(',') : '-',
+      ['own', d.enumerable, d.configurable, d.writable, typeof d.value].join(',')].join(' ');
+  } catch (e) { return 'error ' + e.message; } })());
   draw(); // the first drawing after a launch can differ while fonts load (measured): read the ones after
   show('canvas', 'canvas: ' + fnv(draw().toDataURL()));
   show('canvas2', 'canvas2: ' + fnv(draw().toDataURL()));
@@ -277,7 +281,7 @@ async def site(reader, writer, scheme="http"):
                 out = reply("200 OK", page("whoami", f"<h1>Адрес</h1><p id=ip>ip: {peer[0]}</p><p id=via>via: {name}</p>"
                                                      f"<p>at: {html.escape(target)}{direct}</p>"), extra=["Cache-Control: no-store"])
             elif path == "/env":
-                lines = "".join(f"<p id={i}>{i}: …</p>" for i in ("ua", "tz", "lang", "browser", "canvas", "canvas2", "png", "pngbytes", "webgl", "audio", "lies"))
+                lines = "".join(f"<p id={i}>{i}: …</p>" for i in ("ua", "tz", "lang", "webpagens", "canvas", "canvas2", "png", "pngbytes", "webgl", "audio", "lies"))
                 ENV_COUNTER[0] += 1
                 served = (f"<p>server ua: {header(headers, 'User-Agent')}</p><p>server lang: {header(headers, 'Accept-Language')}</p>"
                           f"<p>at: {html.escape(target)}</p><p>load: {ENV_COUNTER[0]}</p>")
