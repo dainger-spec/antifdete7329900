@@ -1,0 +1,18 @@
+# claude/measure-native-spoof — a measurement branch, never merged: which of an iPhone's values the
+# Mac's WebKit gives a page through its own settings (scripts/native_spoof_probe.swift).
+name: Native spoof (measurement)
+on:
+  push:
+    branches: ['claude/measure-native-spoof']
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: sw_vers
+      - run: swift scripts/native_spoof_probe.swift
