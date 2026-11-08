@@ -1,0 +1,28 @@
+# claude/measure-worker-hook-red — never merged: the new check (a blob worker answers as its page)
+# on the shim before its fix — red expected for the Mac profile and the iPhone view without the
+# full disguise, whose time zone is this Mac's and whose workers were left unhooked.
+name: Worker hook red run (measurement)
+on:
+  push:
+    branches: ['claude/measure-worker-hook-red']
+jobs:
+  measure:
+    name: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the app without the App Sandbox
+        timeout-minutes: 30
+        run: NE=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: The fingerprint surface
+        timeout-minutes: 20
+        env:
+          PB_SELFTEST_ONLY: "fingerprint surface"
+        run: |
+          build/unsandboxed/Lumen.app/Contents/MacOS/Lumen --self-test > build/selftest.txt 2>&1 || true
+          grep -E "^(PASS|FAIL|SKIP).*(blob worker|storage quota)|^SELFTEST [A-Z]+:" build/selftest.txt
