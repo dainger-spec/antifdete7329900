@@ -41,3 +41,4 @@ noiseUnstable	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	two re
 canvasNoiseLowBit	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	the noised canvas's PNG
 unmaskedReplacement	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	the natives check finds
 settingsNotSaved	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	iOS 26's Safari
+noWebPageNamespace	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	window.browser is WebKit's own

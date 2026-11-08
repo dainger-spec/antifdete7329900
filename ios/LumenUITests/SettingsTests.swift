@@ -22,6 +22,9 @@ final class SettingsTests: LumenUITestCase {
         XCTAssertEqual(pageLine("png: "), "png: 0", "the canvas's PNG drawn back reads as getImageData (nothing replaced)")
         XCTAssertEqual(pageLine("pngbytes: "), "pngbytes: 0", "the canvas's PNG holds what getImageData reads (nothing replaced)")
         XCTAssertFalse(pageLine("webgl: ").contains("none"), "WebGL is there by default")
+        // As Safari on an iPhone (iOS 27.2) and on the Mac: WebKit's own window.browser.
+        XCTAssertEqual(pageLine("browser: "), "browser: [object WebPageNamespace] runtime [object WebPageRuntime] connect,sendMessage own,true,true,true,object",
+                       "window.browser is WebKit's own, as in Safari")
         XCTAssertEqual(pageLine("lies: "), "lies: 0", "the natives check finds nothing (nothing replaced yet)")
 
         // Through the Berlin proxy: Berlin's time zone and German, from the proxy's check.

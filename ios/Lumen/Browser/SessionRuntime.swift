@@ -97,10 +97,24 @@ final class SessionRuntime: ObservableObject {
 
     var selected: BrowserTab? { tabs.first { $0.id == selectedID } ?? tabs.last }
 
+    /// `window.browser` in every page, as Safari gives it (iOS 27.2's Safari, the owner's iPhone: 950
+    /// names against 949 here; the Mac's Safari 27.0.1 and 27.2 too — claude/measure-canvas-browser):
+    /// WebKit's own WebPageNamespace, runtime.connect and runtime.sendMessage, which WebKit puts in
+    /// every frame's main world of a web view whose configuration has an extension controller, no
+    /// extension needed. One per session, never an extension in it, kept nowhere (non-persistent).
+    /// iOS 18.4's API; an older iOS has no Safari that gives it either.
+    private lazy var webPageNamespace: AnyObject? = {
+        if #available(iOS 18.4, *) { return WKWebExtensionController(configuration: .nonPersistent()) }
+        return nil
+    }()
+
     /// What a new web view of this session is built with.
     func makeConfiguration() -> WKWebViewConfiguration {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = dataStore
+        if #available(iOS 18.4, *), !Faults.isActive(.noWebPageNamespace), let controller = webPageNamespace as? WKWebExtensionController {
+            configuration.webExtensionController = controller
+        }
         configuration.allowsInlineMediaPlayback = true
         // Safari's application name after WebKit's own string: the User-Agent Safari on this iPhone sends.
         configuration.applicationNameForUserAgent = UserAgentPreset.safariApplicationName(systemVersion: UIDevice.current.systemVersion)
