@@ -72,12 +72,14 @@ build() { # name [build settings...] -> path of Lumen.app
     local name="$1"; shift
     xcodebuild build -project "$HERE/Lumen.xcodeproj" -scheme Lumen -sdk iphonesimulator \
         -destination "generic/platform=iOS Simulator" -derivedDataPath "$OUT/dd-$name" "$@" >"$OUT/build-$name.txt" 2>&1 \
-        || { grep -E "error:" "$OUT/build-$name.txt" | head -10 | tee -a "$LOG"; return 1; }
+        || { grep -E "error:" "$OUT/build-$name.txt" | head -10 | tee -a "$LOG" >&2; return 1; }
     find "$OUT/dd-$name/Build/Products" -maxdepth 2 -name Lumen.app -type d | head -1
 }
 minimum() { /usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$1/Info.plist" 2>/dev/null; }
 
-# ---- Red: built for iOS 17.0, the same app installs on the old simulator.
+# ---- Red: built for iOS 17.0, the same app installs on the old simulator. (The core package keeps
+# its own minimum, iOS 17: the app's floor is the app target's, and Xcode refuses an app whose minimum
+# is below a package's, which would make this build impossible.)
 RED_APP="$(build red IPHONEOS_DEPLOYMENT_TARGET=17.0)" || { say "RED INVALID: the iOS 17.0 build failed"; exit 2; }
 if xcrun simctl install "$OLD_DEV" "$RED_APP" >"$OUT/install-red.txt" 2>&1; then
     say "RED OK: built for iOS $(minimum "$RED_APP"), the app installs on iOS $OLD_VERSION — the check would see an app that installs there"
