@@ -13,15 +13,18 @@ import sys
 
 
 def busy(port, kind):
-    s = socket.socket(socket.AF_INET, kind)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    try:
-        s.bind(("0.0.0.0", port))
-        return False
-    except OSError:
-        return True
-    finally:
-        s.close()
+    # Both the wildcard and loopback: on macOS a listener on 127.0.0.1 alone leaves 0.0.0.0 bindable
+    # (and the other way round), and the harness binds one or the other (--listen).
+    for address in ("0.0.0.0", "127.0.0.1"):
+        s = socket.socket(socket.AF_INET, kind)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((address, port))
+        except OSError:
+            return True
+        finally:
+            s.close()
+    return False
 
 
 def holder(port):

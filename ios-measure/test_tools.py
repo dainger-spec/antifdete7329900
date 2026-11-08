@@ -33,7 +33,8 @@ def check(what, ok, detail=""):
 
 def harness(*args, timeout=60):
     out = tempfile.mkdtemp()
-    r = subprocess.run([sys.executable, "harness.py", "--out", out, *PORTS, *args], cwd=HOST,
+    # On a real iPhone the harness listens on every address (run_device.sh: --listen 0.0.0.0).
+    r = subprocess.run([sys.executable, "harness.py", "--out", out, "--listen", "0.0.0.0", *PORTS, *args], cwd=HOST,
                        capture_output=True, text=True, timeout=timeout)
     return r.returncode, r.stdout + r.stderr
 
@@ -44,9 +45,9 @@ waits = [line for line in text.splitlines() if line.startswith("waiting for the 
 check("the harness says every 15 s that it waits for the app, and how long is left", len(waits) >= 2 and "left" in (waits or [""])[0],
       f"{len(waits)} such lines; output ends {text[-200:]!r}")
 
-# A busy port: a clear word, no traceback.
+# A busy port: a clear word, no traceback. Held as the owner's leftover harness held it: listening on
+# 0.0.0.0 (CI: a holder on another address let the harness bind on macOS — not the owner's case).
 held = socket.socket()
-held.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 held.bind(("0.0.0.0", 38310))
 held.listen()
 try:
@@ -64,6 +65,14 @@ finally:
 if os.path.exists(os.path.join(ROOT, "ports_free.py")):
     r = subprocess.run([sys.executable, os.path.join(ROOT, "ports_free.py"), "38310", "38380", "33478/udp"], capture_output=True, text=True)
     check("ports_free.py passes free ports", r.returncode == 0, r.stderr)
+    loop = socket.socket()
+    loop.bind(("127.0.0.1", 38310))
+    loop.listen()
+    try:
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "ports_free.py"), "38310"], capture_output=True, text=True)
+        check("ports_free.py names a port held on 127.0.0.1 only", r.returncode == 1 and "38310" in r.stderr, f"exit {r.returncode}")
+    finally:
+        loop.close()
 
 # The built app's identity.
 ca = os.path.join(ROOT, "check_app.py")
