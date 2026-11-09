@@ -6998,22 +6998,29 @@ final class SelfTest {
         }
         let downs = events.filter { kind($0) == "mousedown" }, presses = events.filter { kind($0) == "pointerdown" }
         let wheels = events.filter { kind($0) == "wheel" }
-        let offset = presses.first.map { [(number($0, "screenX") ?? 0) - (number($0, "clientX") ?? 0), (number($0, "screenY") ?? 0) - (number($0, "clientY") ?? 0)] } ?? [0, 0]
-        let wheelsInPlace = !wheels.isEmpty && wheels.allSatisfy { wheel in
-            (number(wheel, "t") ?? 0) > 0
-                && abs((number(wheel, "screenX") ?? 0) - (number(wheel, "clientX") ?? 0) - offset[0]) <= 1
-                && abs((number(wheel, "screenY") ?? 0) - (number(wheel, "clientY") ?? 0) - offset[1]) <= 1
+        func apart(_ event: [String: Any]) -> (x: Double, y: Double) {
+            let screenX: Double = number(event, "screenX") ?? 0, clientX: Double = number(event, "clientX") ?? 0
+            let screenY: Double = number(event, "screenY") ?? 0, clientY: Double = number(event, "clientY") ?? 0
+            return (screenX - clientX, screenY - clientY)
         }
+        let offset: (x: Double, y: Double) = presses.first.map(apart) ?? (0, 0)
+        func wheelInPlace(_ wheel: [String: Any]) -> Bool {
+            let time: Double = number(wheel, "t") ?? 0
+            let place = apart(wheel)
+            return time > 0 && abs(place.x - offset.x) <= 1 && abs(place.y - offset.y) <= 1
+        }
+        let wheelsInPlace = !wheels.isEmpty && wheels.allSatisfy(wheelInPlace)
         let focused = events.filter { ["pointerdown", "keydown", "wheel"].contains(kind($0)) }.allSatisfy { $0["hasFocus"] as? Bool == true }
         let keys = events.filter { kind($0) == "keydown" }.map { $0["key"] as? String ?? "?" }
         let doubleClick = events.contains { kind($0) == "dblclick" && $0["trusted"] as? Bool == true }
+        let pressesAfterMoves = movesBeforeFirstPresses.count >= 4 && movesBeforeFirstPresses.allSatisfy { $0 >= 3 }
+        let buttonsHeld = downs.allSatisfy { number($0, "buttons") == 1 } && presses.allSatisfy { number($0, "pressure") == 0.5 }
+        let expectedKeys = ["Shift", "H", "e", "l", "l", "o", " ", "Shift", "W", "o", "r", "l", "d"]
+        let activated = record["active"] as? Bool == true
+        var recordPasses = !events.isEmpty && untrusted.isEmpty && pressesAfterMoves && buttonsHeld
+        recordPasses = recordPasses && wheelsInPlace && focused && doubleClick && keys == expectedKeys && activated
         check("automation commands: the page cannot tell — every event trusted, pointer moves before every press, the button held, wheel time and place as a mouse's, focus throughout, keys with Shift around capitals, a real double click",
-              !events.isEmpty && untrusted.isEmpty
-                  && movesBeforeFirstPresses.count >= 4 && movesBeforeFirstPresses.allSatisfy { $0 >= 3 }
-                  && downs.allSatisfy { number($0, "buttons") == 1 } && presses.allSatisfy { number($0, "pressure") == 0.5 }
-                  && wheelsInPlace && focused && doubleClick
-                  && keys == ["Shift", "H", "e", "l", "l", "o", " ", "Shift", "W", "o", "r", "l", "d"]
-                  && record["active"] as? Bool == true,
+              recordPasses,
               "\(events.count) events, untrusted \(untrusted), moves before presses \(movesBeforeFirstPresses), buttons \(downs.map { number($0, "buttons") ?? -1 }), pressure \(presses.map { number($0, "pressure") ?? -1 }), \(wheels.count) wheels in place \(wheelsInPlace), focus \(focused), dblclick \(doubleClick), keys \(keys), activation \(String(describing: record["active"]))")
 
         // The run left the page as it was; a script in the page's own world does not.
