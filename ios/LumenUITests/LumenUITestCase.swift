@@ -155,14 +155,30 @@ class LumenUITestCase: XCTestCase {
         if let scheme = rest.range(of: "://") { rest = String(rest[scheme.upperBound...]) }
         let target = rest.firstIndex(of: "/").map { String(rest[$0...]) } ?? "/"
         let shown = app.webViews.staticTexts.matching(atLine(target)).firstMatch
-        XCTAssertTrue(shown.waitForExistence(timeout: 20), "the page at \(target) is shown", file: file, line: line)
+        if shown.waitForExistence(timeout: 20) { return }
+        let wanted = "at: " + target
+        let found = screenLabels().contains { $0 == wanted || $0.hasPrefix(wanted + " — ") }
+        XCTAssertTrue(found, "the page at \(target) is shown", file: file, line: line)
+    }
+
+    /// Every label on the screen, from the whole accessibility snapshot of the app. A query of the
+    /// web view's texts sometimes finds nothing for its whole wait while the page is there: CI run
+    /// 37 (the testbed had served the page 3 s after it was asked for) and run 42 (the snapshot
+    /// taken for the failure, a second after the 20 s wait, had the very line the query had looked
+    /// for). The page helpers below ask this snapshot before they say a page is not shown.
+    func screenLabels() -> [String] {
+        let tree = app.debugDescription
+        guard let regex = try? NSRegularExpression(pattern: "label: '([^']*)'") else { return [] }
+        let matches = regex.matches(in: tree, range: NSRange(tree.startIndex..., in: tree))
+        return matches.compactMap { match in Range(match.range(at: 1), in: tree).map { String(tree[$0]) } }
     }
 
     /// Text the page shows (a static text of the web view whose label contains `text`).
     @discardableResult
     func page(_ text: String, timeout: TimeInterval = 20, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
         let element = app.webViews.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
-        XCTAssertTrue(element.waitForExistence(timeout: timeout), "the page shows \"\(text)\"", file: file, line: line)
+        if element.waitForExistence(timeout: timeout) { return element }
+        XCTAssertTrue(screenLabels().contains { $0.contains(text) }, "the page shows \"\(text)\"", file: file, line: line)
         return element
     }
 
@@ -177,8 +193,10 @@ class LumenUITestCase: XCTestCase {
     func pageLine(_ prefix: String, file: StaticString = #filePath, line: UInt = #line) -> String {
         let predicate = NSPredicate(format: "label BEGINSWITH %@ AND NOT (label ENDSWITH %@)", prefix, "…")
         let element = app.webViews.staticTexts.matching(predicate).firstMatch
-        XCTAssertTrue(element.waitForExistence(timeout: 20), "the page shows \(prefix)…", file: file, line: line)
-        return element.label
+        if element.waitForExistence(timeout: 20) { return element.label }
+        let label = screenLabels().first { $0.hasPrefix(prefix) && !$0.hasSuffix("…") }
+        XCTAssertNotNil(label, "the page shows \(prefix)…", file: file, line: line)
+        return label ?? ""
     }
 
     /// What the address bar shows.
