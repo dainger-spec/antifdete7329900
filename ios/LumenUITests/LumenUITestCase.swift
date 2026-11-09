@@ -11,9 +11,11 @@ class LumenUITestCase: XCTestCase {
 
     /// `reset`: the app starts with no sessions, proxies or WebKit data at all.
     @discardableResult
-    func launch(reset: Bool) -> XCUIApplication {
+    func launch(reset: Bool, access: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = reset ? ["-LumenResetState"] : []
+        // The rights the app starts with ("none": no proxies — the access lost), DEBUG builds only.
+        if let access { app.launchEnvironment["LUMEN_TEST_ACCESS"] = access }
         // xcodebuild hands TEST_RUNNER_LUMEN_FAULTS to this process as LUMEN_FAULTS.
         if let faults = ProcessInfo.processInfo.environment["LUMEN_FAULTS"], !faults.isEmpty {
             app.launchEnvironment["LUMEN_FAULTS"] = faults
@@ -32,9 +34,9 @@ class LumenUITestCase: XCTestCase {
     }
 
     /// Quit the app the way the system does and start it again on what it saved.
-    func relaunch() {
+    func relaunch(access: String? = nil) {
         app.terminate()
-        launch(reset: false)
+        launch(reset: false, access: access)
     }
 
     func shot(_ name: String) {

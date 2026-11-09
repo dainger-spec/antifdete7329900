@@ -63,4 +63,65 @@ final class SessionsTests: LumenUITestCase {
         XCTAssertFalse(sessionCard("Почта").exists, "the deleted session does not come back")
         shot("06 after delete and relaunch")
     }
+
+    /// The owner (8 November): a profile that lived behind a proxy never opens directly when its proxy
+    /// may not be used — the access lost, its proxy deleted. Not one page, not one request from the
+    /// device's own address: judged by the testbed's own count, then by the screen.
+    func testLockedProfileNeverOpensDirect() {
+        let run = String(UUID().uuidString.prefix(6)).lowercased()
+        launch(reset: true)
+        app.buttons["proxiesButton"].tap()
+        wait(app.navigationBars["Прокси"], "the proxy list opens")
+        addProxy(name: "Берлин", kind: "HTTP", port: "28381", user: "ua", password: "pa")
+        waitRow("Берлин", says: "Работает")
+        leaveProxies()
+        createSession(name: "Чистый")   // never had a proxy: it reads the testbed's count
+        createSession(name: "Счета")
+        openSession("Счета")
+        chooseProxy("Берлин", in: "Счета")
+        openPage("http://lock-\(run).lumentest:28380/whoami?t=before")
+        page("via: прокси A")
+        backToList()
+
+        // The access lost: the profile's tab, restored, would load its page again — from where?
+        relaunch(access: "none")
+        openLockedOrNot("Счета")
+        assertNothingDirect(run, "the access lost")
+        XCTAssertTrue(sessionCard("Счета").label.contains("Заперт"), "the card says the profile is locked: \(sessionCard("Счета").label)")
+        sessionCard("Счета").tap()
+        wait(app.descendants(matching: .any)["lockedSession"], "the profile says why it does not open")
+        shot("50 a locked profile")
+        backToList()
+
+        // The access back, the profile's proxy deleted: still locked, still nothing direct.
+        relaunch()
+        app.buttons["proxiesButton"].tap()
+        wait(proxyRow("Берлин"), "the proxy list opens").swipeLeft()
+        wait(app.buttons["Удалить"], "the row offers to delete it").tap()
+        waitGone(proxyRow("Берлин"), "the proxy is gone")
+        leaveProxies()
+        openLockedOrNot("Счета")
+        assertNothingDirect(run, "its proxy deleted")
+        sessionCard("Счета").tap()
+        wait(app.descendants(matching: .any)["lockedSession"], "the profile with its proxy deleted stays locked")
+        backToList()
+    }
+
+    /// Opens a session's screen whatever it shows, waits as long as its tab would take to load, leaves.
+    private func openLockedOrNot(_ name: String) {
+        wait(sessionCard(name), "the session \(name) is in the list").tap()
+        sleep(10)
+        backToList()
+    }
+
+    /// The testbed saw the profile's site through proxy A once (the visit before) and never directly.
+    private func assertNothingDirect(_ run: String, _ when: String, file: StaticString = #filePath, line: UInt = #line) {
+        openSession("Чистый")
+        openPage("http://127.0.0.1:28380/__seen?token=lock-\(run)&when=\(when.hashValue)")
+        let route = pageLine("route lock-\(run): ")
+        XCTAssertTrue(route.contains("direct=0 "), "\(when): a locked profile reached the site from the device's address — \(route)",
+                      file: file, line: line)
+        XCTAssertTrue(route.contains("A=1 "), "\(when): the one visit is the one before, through the proxy — \(route)", file: file, line: line)
+        backToList()
+    }
 }

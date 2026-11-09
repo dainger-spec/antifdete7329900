@@ -45,3 +45,5 @@ canvasNoiseLowBit	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	th
 unmaskedReplacement	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	the natives check finds
 settingsNotSaved	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	iOS 26's Safari
 noWebPageNamespace	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	window.browser is WebKit's own
+lockedOpensDirect	core	LumenCoreTests.LockTests/testLockRule	
+lockedOpensDirect	ui	LumenUITests/SessionsTests/testLockedProfileNeverOpensDirect	a locked profile reached the site from the device's address

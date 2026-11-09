@@ -12,10 +12,14 @@ public struct Session: Codable, Identifiable, Equatable, Sendable {
     public var settings: SessionSettings
     public var createdAt: Date
     public var lastOpenedAt: Date?
+    /// The session has lived behind a proxy: from then on it opens only through a proxy it may use,
+    /// never directly (the owner, 8 November — one direct visit after a life behind a proxy burns the
+    /// person's account). Set when a proxy is first given to it; cleared only by the person, on purpose.
+    public var boundToProxy: Bool
 
     public init(id: UUID = UUID(), storeID: UUID = UUID(), name: String, notes: String = "", tags: [String] = [],
                 proxyID: UUID? = nil, settings: SessionSettings = SessionSettings(), createdAt: Date = Date(),
-                lastOpenedAt: Date? = nil) {
+                lastOpenedAt: Date? = nil, boundToProxy: Bool? = nil) {
         self.id = id
         self.storeID = storeID
         self.name = name
@@ -25,6 +29,26 @@ public struct Session: Codable, Identifiable, Equatable, Sendable {
         self.settings = settings
         self.createdAt = createdAt
         self.lastOpenedAt = lastOpenedAt
+        self.boundToProxy = boundToProxy ?? (proxyID != nil)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, storeID, name, notes, tags, proxyID, settings, createdAt, lastOpenedAt, boundToProxy
+    }
+
+    /// A session saved before `boundToProxy` existed is bound if it has a proxy.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        storeID = try c.decode(UUID.self, forKey: .storeID)
+        name = try c.decode(String.self, forKey: .name)
+        notes = try c.decode(String.self, forKey: .notes)
+        tags = try c.decode([String].self, forKey: .tags)
+        proxyID = try c.decodeIfPresent(UUID.self, forKey: .proxyID)
+        settings = try c.decode(SessionSettings.self, forKey: .settings)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        lastOpenedAt = try c.decodeIfPresent(Date.self, forKey: .lastOpenedAt)
+        boundToProxy = try c.decodeIfPresent(Bool.self, forKey: .boundToProxy) ?? (proxyID != nil)
     }
 }
 

@@ -30,7 +30,7 @@ struct SessionsView: View {
                 }
                 ForEach(shown) { session in
                     NavigationLink(value: session.id) {
-                        SessionCard(session: session, proxy: model.proxy(session.proxyID))
+                        SessionCard(session: session, proxy: model.proxy(session.proxyID), locked: model.lock(session).isLocked)
                     }
                     .accessibilityIdentifier("session-\(session.name)")
                     .contextMenu {
@@ -74,6 +74,7 @@ struct SessionsView: View {
 struct SessionCard: View {
     let session: Session
     let proxy: ProxyEntry?
+    var locked = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -82,8 +83,11 @@ struct SessionCard: View {
                 Spacer()
                 Text(exitText).font(.subheadline).foregroundStyle(.secondary)
             }
-            Text(proxy.map { "Прокси: \($0.displayName)" } ?? "Без прокси")
+            Text(proxy.map { "Прокси: \($0.displayName)" } ?? (session.boundToProxy ? "Прокси удалён" : "Без прокси"))
                 .font(.subheadline).foregroundStyle(.secondary)
+            if locked {
+                Label("Заперт: без прокси не откроется", systemImage: "lock.fill").font(.caption).foregroundStyle(.orange)
+            }
             Text(openedText).font(.caption).foregroundStyle(.secondary)
             if !session.notes.isEmpty {
                 Text(session.notes).font(.caption).lineLimit(1)

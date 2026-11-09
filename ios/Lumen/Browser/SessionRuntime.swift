@@ -12,11 +12,12 @@ final class SessionRuntimes {
     private var runtimes: [UUID: SessionRuntime] = [:]
 
     func runtime(for session: Session, model: AppModel) -> SessionRuntime {
+        let locked = model.lock(session).isLocked
         if let runtime = runtimes[session.id] {
-            runtime.update(session: session, proxy: model.proxy(session.proxyID))
+            runtime.update(session: session, proxy: model.usableProxy(session), locked: locked)
             return runtime
         }
-        let runtime = SessionRuntime(session: session, proxy: model.proxy(session.proxyID), store: model.store)
+        let runtime = SessionRuntime(session: session, proxy: model.usableProxy(session), locked: locked, store: model.store)
         runtimes[session.id] = runtime
         return runtime
     }
@@ -37,6 +38,10 @@ final class SessionRuntime: ObservableObject {
     let sessionID: UUID
     private(set) var session: Session
     private(set) var proxy: ProxyEntry?
+    /// A session that lived behind a proxy and may not use one now (SessionLock): its relay lets
+    /// nothing out. Its screen shows why instead of its tabs; this is the second lock, for anything
+    /// that reaches the session another way.
+    private(set) var locked: Bool
     let dataStore: WKWebsiteDataStore
     private let store: LumenStore
     /// The session's relay: its data store's only proxy (Relay.swift).
@@ -50,10 +55,11 @@ final class SessionRuntime: ObservableObject {
     private var tabsRestored = false
     private var foreground: NSObjectProtocol?
 
-    init(session: Session, proxy: ProxyEntry?, store: LumenStore) {
+    init(session: Session, proxy: ProxyEntry?, locked: Bool = false, store: LumenStore) {
         sessionID = session.id
         self.session = session
         self.proxy = proxy
+        self.locked = locked
         self.store = store
         // The session's own store; the planted fault puts every session on WebKit's default one.
         dataStore = Faults.isActive(.sharedStore) ? .default() : WKWebsiteDataStore(forIdentifier: session.storeID)
@@ -129,9 +135,10 @@ final class SessionRuntime: ObservableObject {
         return tab
     }
 
-    func update(session: Session, proxy: ProxyEntry?) {
+    func update(session: Session, proxy: ProxyEntry?, locked: Bool = false) {
         self.session = session
         self.proxy = proxy
+        self.locked = locked
         applyProxy()
         applyPageSettings()
     }
@@ -172,13 +179,14 @@ final class SessionRuntime: ObservableObject {
             proxy = nil   // the planted fault: a proxy known to be dead is left off
         }
         let password = proxy.flatMap { ProxyPasswords.get($0.id) } ?? ""
-        let key = proxy.map { "\($0.kind.rawValue)://\($0.username):\(password)@\($0.host):\($0.port)" } ?? "direct"
+        let key = locked ? "closed" : proxy.map { "\($0.kind.rawValue)://\($0.username):\(password)@\($0.host):\($0.port)" } ?? "direct"
         guard key != appliedProxy else { return }
         // The planted fault: one proxy changed for another takes effect only after a relaunch.
         if let applied = appliedProxy, applied != "direct", key != "direct", Faults.isActive(.proxyChangeNotLive) { return }
         let live = appliedProxy != nil
         appliedProxy = key
-        let route: RelayRoute = proxy.map {
+        // A locked session's relay lets nothing out — never "direct" for one that lived behind a proxy.
+        let route: RelayRoute = locked ? .closed : proxy.map {
             RelayRoute.proxy(kind: $0.kind, host: $0.host, port: UInt16(clamping: $0.port), username: $0.username, password: password)
         } ?? .direct
         relay.setRoute(route)

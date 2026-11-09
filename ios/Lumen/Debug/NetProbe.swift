@@ -371,7 +371,7 @@ struct NetProbeView: View {
                         }
                     }
                     .accessibilityIdentifier("probe-\(session.name)")
-                    .disabled(probe.running)
+                    .disabled(probe.running || model.lock(session).isLocked)
                 }
             } header: {
                 Text("Сессия")

@@ -38,6 +38,7 @@ public enum Fault: String, CaseIterable, Sendable {
     case relayFailoverOn         // the data store's relay with allowFailover = true: a dead relay lets the system go direct
     case relayGapDirect          // while the relay starts again, the data store is left with no proxy at all
     case pathChangeKeepsConnections // a network change leaves the relay's connections open on the old network
+    case lockedOpensDirect       // a profile that lived behind a proxy opens directly when its proxy may not be used
     // The network-switch probe (the instrument for the real iPhone)
     case probeBlind              // the probe never learns the device's own addresses: it can see no leak
     // Session settings

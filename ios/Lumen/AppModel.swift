@@ -15,6 +15,20 @@ enum LaunchOptions {
     }
 }
 
+/// Where the app's rights come from (`Access`). Until the account server's document of rights fills
+/// it (the next step), everything is allowed; a test takes the proxies away (LUMEN_TEST_ACCESS=none,
+/// DEBUG builds only).
+enum AccessSource {
+    static func current() -> Access {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["LUMEN_TEST_ACCESS"] == "none" {
+            return Access(proxies: false, reason: "Доступ к прокси закончился.")
+        }
+        #endif
+        return .full
+    }
+}
+
 /// The app's state: the session catalogue and the proxy list, saved as they change.
 @MainActor
 final class AppModel: ObservableObject {
@@ -27,6 +41,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var ready = false
     /// Proxies being checked right now (their rows show it).
     @Published private(set) var checking: Set<UUID> = []
+    /// What this iPhone may do now (the one place rights come from).
+    @Published private(set) var access = AccessSource.current()
 
     init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -80,10 +96,23 @@ final class AppModel: ObservableObject {
         refresh()
     }
 
-    func setProxy(_ id: UUID, proxyID: UUID?) {
-        catalog.setProxy(id, proxyID: proxyID)
+    /// A proxy given to a session binds it to proxies; `unbind` — the person's own choice, confirmed —
+    /// lets a session that had one go without it.
+    func setProxy(_ id: UUID, proxyID: UUID?, unbind: Bool = false) {
+        catalog.setProxy(id, proxyID: proxyID, unbind: unbind)
         refresh()
         refreshRuntimes()
+    }
+
+    /// The proxy `session` may go through now: its own, if the rights allow proxies at all. Without them
+    /// a session would have none — which, for one that lived behind a proxy, the lock below forbids.
+    func usableProxy(_ session: Session) -> ProxyEntry? {
+        access.proxies ? proxy(session.proxyID) : nil
+    }
+
+    /// Whether `session` may open now: one that lived behind a proxy never opens without one it may use.
+    func lock(_ session: Session) -> SessionLock {
+        SessionLock.of(session, proxyExists: proxy(session.proxyID) != nil, access: access)
     }
 
     // MARK: Proxies
@@ -132,7 +161,8 @@ final class AppModel: ObservableObject {
     /// Open sessions take a new or changed proxy at once (no relaunch).
     private func refreshRuntimes() {
         for session in sessions {
-            SessionRuntimes.shared.existing(session.id)?.update(session: session, proxy: proxy(session.proxyID))
+            SessionRuntimes.shared.existing(session.id)?.update(session: session, proxy: usableProxy(session),
+                                                                locked: lock(session).isLocked)
         }
     }
 

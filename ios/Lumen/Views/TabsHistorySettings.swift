@@ -111,6 +111,8 @@ struct SessionSettingsView: View {
     let sessionID: UUID
     @State private var settings = SessionSettings()
     @State private var proxyID: UUID?
+    /// "Без прокси" chosen for a session that lived behind one: asked first (it would go directly).
+    @State private var confirmUnbind = false
     @State private var customUserAgent = ""
     @State private var loaded = false
 
@@ -160,7 +162,16 @@ struct SessionSettingsView: View {
         NavigationStack {
             Form {
                 Section("Прокси") {
-                    Picker("Прокси", selection: Binding(get: { proxyID }, set: { proxyID = $0; model.setProxy(sessionID, proxyID: $0) })) {
+                    Picker("Прокси", selection: Binding(get: { proxyID }, set: { chosen in
+                        // A session that lived behind a proxy goes without one only when the person
+                        // says so, knowing what it means; otherwise it stays bound (and locked).
+                        if chosen == nil, model.session(sessionID)?.boundToProxy == true {
+                            confirmUnbind = true
+                            return
+                        }
+                        proxyID = chosen
+                        model.setProxy(sessionID, proxyID: chosen)
+                    })) {
                         Text("Без прокси").tag(UUID?.none)
                         ForEach(model.proxies) { entry in
                             Text(entry.displayName).tag(UUID?.some(entry.id))
@@ -169,6 +180,16 @@ struct SessionSettingsView: View {
                     .pickerStyle(.inline)
                     .labelsHidden()
                     .accessibilityIdentifier("proxyPicker")
+                    .confirmationDialog("Профиль работал через прокси", isPresented: $confirmUnbind, titleVisibility: .visible) {
+                        Button("Открывать без прокси", role: .destructive) {
+                            proxyID = nil
+                            model.setProxy(sessionID, proxyID: nil, unbind: true)
+                        }
+                        .accessibilityIdentifier("confirmUnbind")
+                        Button("Оставить прокси", role: .cancel) {}
+                    } message: {
+                        Text("Без прокси сайты этого профиля увидят настоящий адрес устройства.")
+                    }
                 }
                 Section("Браузер (строка User-Agent)") {
                     Picker("Строка браузера", selection: userAgentTag) {

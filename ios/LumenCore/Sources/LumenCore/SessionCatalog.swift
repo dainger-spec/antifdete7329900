@@ -36,8 +36,13 @@ public final class SessionCatalog {
         update(id) { $0.tags = Self.normalizedTags(tags) }
     }
 
-    public func setProxy(_ id: UUID, proxyID: UUID?) {
-        update(id) { $0.proxyID = proxyID }
+    /// A proxy given to a session binds it to proxies for good; taking it away leaves it bound (locked)
+    /// unless the person asked for that on purpose (`unbind`).
+    public func setProxy(_ id: UUID, proxyID: UUID?, unbind: Bool = false) {
+        update(id) {
+            $0.proxyID = proxyID
+            if proxyID != nil { $0.boundToProxy = true } else if unbind { $0.boundToProxy = false }
+        }
     }
 
     public func setSettings(_ id: UUID, _ settings: SessionSettings) {
