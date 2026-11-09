@@ -89,11 +89,52 @@ enum ProxyChecker {
         return ("stun.l.google.com", 19302)
     }
 
+    /// How long a check may take before it says the proxy did not answer (the owner's iPhone,
+    /// 9 November: the row said "Проверяется…" and nothing else, however long it was left). A test
+    /// shortens it (DEBUG builds only).
+    static var deadline: TimeInterval {
+        #if DEBUG
+        if let value = ProcessInfo.processInfo.environment["LUMEN_TEST_CHECK_DEADLINE"], let seconds = TimeInterval(value) { return seconds }
+        #endif
+        return 20
+    }
+
+    /// Alive or not, within `deadline` whatever the proxy and the services behind it do: the check's
+    /// own clock, which relies neither on URLSession's timers nor on anything stopping when it is
+    /// cancelled. Past it the answer is "did not answer", with what the check was waiting for. The
+    /// UDP probe that follows a live answer has its own clock (8 s).
     static func check(_ entry: ProxyEntry, password: String?) async -> ProxyCheck {
+        let waiting = Waiting()
+        let limit = deadline
+        let found: ProxyCheck?
+        if Faults.isActive(.checkWithoutDeadline) {
+            // The planted fault: the check as it was until 9 November, with no clock of its own.
+            found = await locate(entry, password: password, waiting: waiting)
+        } else {
+            found = await within(limit) { await locate(entry, password: password, waiting: waiting) }
+        }
+        guard var result = found else {
+            NSLog("%@", "Lumen: the check of proxy \(entry.host):\(entry.port) got no answer in \(Int(limit)) s, waiting for \(waiting.now)")
+            return ProxyCheck(alive: false, udp: .unchecked, error: "прокси не ответил за \(Int(limit)) с (ждали \(waiting.now))")
+        }
+        if result.alive { result.udp = await udpSupport(entry, password: password) }
+        return result
+    }
+
+    /// Where the proxy exits: the geolocation services asked through it in turn.
+    static func locate(_ entry: ProxyEntry, password: String?, waiting: Waiting) async -> ProxyCheck {
+        #if DEBUG
+        // A check that never gets an answer and does not stop when cancelled — what the owner's
+        // iPhone showed — for the test of the deadline (ProxyCheckTests).
+        if ProcessInfo.processInfo.environment["LUMEN_TEST_CHECK_HANG"] == "1" {
+            waiting.now = "LUMEN_TEST_CHECK_HANG"
+            await Hang.forever()
+        }
+        #endif
         let configuration = URLSessionConfiguration.ephemeral
         configuration.proxyConfigurations = ProxyFactory.make(entry, password: password)
-        configuration.timeoutIntervalForRequest = 10
-        configuration.timeoutIntervalForResource = 15
+        configuration.timeoutIntervalForRequest = 6
+        configuration.timeoutIntervalForResource = 8
         configuration.httpCookieStorage = nil
         configuration.urlCache = nil
         configuration.waitsForConnectivity = false
@@ -102,6 +143,7 @@ enum ProxyChecker {
         defer { session.invalidateAndCancel() }
         var lastError = "нет ответа"
         for url in geoURLs {
+            waiting.now = url.host ?? url.absoluteString
             do {
                 let (data, response) = try await session.data(from: url)
                 guard (response as? HTTPURLResponse)?.statusCode == 200,
@@ -111,8 +153,7 @@ enum ProxyChecker {
                 }
                 let country = ((json["country"] as? String) ?? (json["country_code"] as? String))?.uppercased()
                 let zone = (json["timezone"] as? String) ?? ((json["timezone"] as? [String: Any])?["id"] as? String)
-                let udp = await udpSupport(entry, password: password)
-                return ProxyCheck(alive: true, exitIP: json["ip"] as? String, country: country, timeZone: zone, udp: udp)
+                return ProxyCheck(alive: true, exitIP: json["ip"] as? String, country: country, timeZone: zone, udp: .unchecked)
             } catch {
                 lastError = (error as NSError).localizedDescription
             }
@@ -128,6 +169,67 @@ enum ProxyChecker {
         return await probe.run(timeout: 8)
     }
 }
+
+/// What a proxy check is waiting for now (a service's host name), said when its time runs out.
+final class Waiting: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = "ответа прокси"
+
+    var now: String {
+        get { lock.lock(); defer { lock.unlock() }; return value }
+        set { lock.lock(); value = newValue; lock.unlock() }
+    }
+}
+
+/// True for the first caller only.
+final class Once: @unchecked Sendable {
+    private let lock = NSLock()
+    private var claimed = false
+
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if claimed { return false }
+        claimed = true
+        return true
+    }
+}
+
+/// `work`'s answer, or nil once `seconds` have passed: the work is then cancelled and whatever it
+/// answers later is dropped. The caller is never held by work that does not stop when cancelled.
+func within<T: Sendable>(_ seconds: TimeInterval, _ work: @escaping @Sendable () async -> T) async -> T? {
+    let once = Once()
+    return await withCheckedContinuation { (continuation: CheckedContinuation<T?, Never>) in
+        let job = Task {
+            let value = await work()
+            if once.claim() { continuation.resume(returning: value) }
+        }
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+            if once.claim() {
+                job.cancel()
+                continuation.resume(returning: nil)
+            }
+        }
+    }
+}
+
+#if DEBUG
+/// Never returns, cancelled or not (the test hook LUMEN_TEST_CHECK_HANG): the continuations are kept
+/// and never resumed.
+enum Hang {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var held: [CheckedContinuation<Void, Never>] = []
+
+    static func forever() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            held.append(continuation)
+            lock.unlock()
+        }
+    }
+}
+#endif
 
 /// Answers a proxy's 407 with the entry's credentials, once.
 final class ProxyAuthAnswer: NSObject, URLSessionTaskDelegate {

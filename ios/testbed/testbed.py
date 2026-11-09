@@ -24,6 +24,7 @@ this Mac, so a test sees on the screen what the pages say about how they were re
   proxy C   SOCKS5, user/password uc:pc, port 28383, relays UDP (UDP ASSOCIATE)
   proxy D   HTTP, Basic auth ud:pd, port 28384; /__proxy?name=D&state=off stops it (and its open
             connections), state=on starts it again. Nothing listens on 28389 and 28390 (dead proxies).
+  proxy E   port 28391: takes the connection and never answers a byte (a proxy that hangs)
   DNS       UDP 127.0.0.1:28353 answers *.lumentest with 127.0.0.1 for this Mac's own resolver
             (/etc/resolver/lumentest, set up by ci.sh): a page that goes around its proxy then
             reaches the site directly, and says "via: напрямую" (CI run 12: the app's web view does;
@@ -553,6 +554,18 @@ def socks_proxy(name, auth, bind, udp=False):
     return handle
 
 
+async def silent_proxy(reader, writer):
+    """Proxy E: reads whatever comes and never answers, until the client gives up."""
+    event("proxy", proxy="E", silent=True)
+    try:
+        while await reader.read(4096):
+            pass
+    except Exception:
+        pass
+    finally:
+        writer.close()
+
+
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", default="testbed")
@@ -565,6 +578,7 @@ async def main():
     await asyncio.start_server(socks_proxy("B", "ub:pb", "127.0.0.3"), "127.0.0.1", 28382)
     await asyncio.start_server(socks_proxy("C", "uc:pc", "", udp=True), "127.0.0.1", 28383)
     switchable("D", 28384, http_proxy("D", "ud:pd", ""))
+    await asyncio.start_server(silent_proxy, "127.0.0.1", 28391)
     await switch("D", True)
     await asyncio.get_running_loop().create_datagram_endpoint(Stun, local_addr=("127.0.0.1", 3478))
     await asyncio.get_running_loop().create_datagram_endpoint(LumentestDNS, local_addr=("127.0.0.1", 28353))

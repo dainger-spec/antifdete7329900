@@ -25,6 +25,7 @@ proxyChangeKeepsConnections	ui	LumenUITests/ProxyTests/testProxyPersonPath	the p
 proxyChangeDropsTabs	ui	LumenUITests/ProxyTests/testProxyPersonPath	the tab kept its page through the proxy change
 proxyPasswordNotSaved	ui	LumenUITests/ProxyTests/testProxyPersonPath	the row of Берлин says Работает
 passwordAutofill	ui	LumenUITests/ProxyTests/testProxyPersonPath	the password prompt
+checkWithoutDeadline	ui	LumenUITests/ProxyCheckTests/testACheckEndsWithAnAnswer	the row of Зависший says прокси не ответил
 deadHTTPDropped	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect	dead-http: the page did not go direct
 deadSOCKSDropped	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect	dead-socks: the page did not go direct
 recheckDropsProxy	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect	rechecked: the page did not go direct

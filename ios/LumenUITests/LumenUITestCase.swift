@@ -9,9 +9,10 @@ class LumenUITestCase: XCTestCase {
         continueAfterFailure = false
     }
 
-    /// `reset`: the app starts with no sessions, proxies or WebKit data at all.
+    /// `reset`: the app starts with no sessions, proxies or WebKit data at all. `environment`: test
+    /// hooks of a DEBUG build, for this launch only.
     @discardableResult
-    func launch(reset: Bool, access: String? = nil) -> XCUIApplication {
+    func launch(reset: Bool, access: String? = nil, environment: [String: String] = [:]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = reset ? ["-LumenResetState"] : []
         // The rights the app starts with ("none": no proxies — the access lost), DEBUG builds only.
@@ -27,6 +28,7 @@ class LumenUITestCase: XCTestCase {
         app.launchEnvironment["LUMEN_TEST_HOOKS"] = "1"
         // The network probe's address echo: the testbed's.
         app.launchEnvironment["LUMEN_TEST_ECHO"] = "http://echo.lumentest:28380/ip.json"
+        for (name, value) in environment { app.launchEnvironment[name] = value }
         app.launch()
         self.app = app
         XCTAssertTrue(app.navigationBars["Сессии"].waitForExistence(timeout: 30), "the sessions list comes up")
@@ -34,9 +36,9 @@ class LumenUITestCase: XCTestCase {
     }
 
     /// Quit the app the way the system does and start it again on what it saved.
-    func relaunch(access: String? = nil) {
+    func relaunch(access: String? = nil, environment: [String: String] = [:]) {
         app.terminate()
-        launch(reset: false, access: access)
+        launch(reset: false, access: access, environment: environment)
     }
 
     func shot(_ name: String) {
