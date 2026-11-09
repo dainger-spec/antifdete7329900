@@ -167,10 +167,15 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         let badge = NSHostingView(rootView: ProfileChipView(model: chrome))
         badge.setContentCompressionResistancePriority(.required, for: .horizontal)
         // This window is not Safari's: said where the person looks, with why (SimplifiedModeNotice).
-        // In the toolbar, whose height a page measures and which this leaves as it is.
+        // In the toolbar, whose height a page measures and which this leaves as it is. Not for an
+        // iPhone or iPad view: its window is ours by design, not a fallback (the owner, 9 November).
         let reason = ownWindowReason
-        let simplified = NSHostingView(rootView: SimplifiedModeChip(reason: reason) { [weak self] in self?.showSimplifiedMode() })
-        simplified.setContentCompressionResistancePriority(.required, for: .horizontal)
+        var simplified: NSView?
+        if reason != .deviceProfile {
+            let chip = NSHostingView(rootView: SimplifiedModeChip(reason: reason) { [weak self] in self?.showSimplifiedMode() })
+            chip.setContentCompressionResistancePriority(.required, for: .horizontal)
+            simplified = chip
+        }
         simplifiedChip = simplified
         // The app's mark, where Safari has its sidebar button.
         let mark = NSHostingView(rootView: LumenMark(size: 20))
@@ -193,9 +198,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
             (.init("reload"), "Reload", reloadButton!), (.init("address"), "Address", addressField),
             (.init("bookmark"), "Bookmark", bookmarkButton!), (.init("bookmarks"), "Bookmarks", bookmarksMenuButton),
             (.init("history"), "History", historyButton), (.init("fill"), "Fill Password", fillButton),
-            (.init("save"), "Save Password", saveButton), (.init("simplified"), L("simplified.chip"), simplified),
-            (.init("profile"), profileName, badge),
+            (.init("save"), "Save Password", saveButton),
         ]
+        if let simplified { toolbarViews.append((.init("simplified"), L("simplified.chip"), simplified)) }
+        toolbarViews.append((.init("profile"), profileName, badge))
         if isPhoneLayout {
             // The phone has no bar at the top: only what says whose window this is stays there.
             toolbarViews = toolbarViews.filter { ["simplified", "profile"].contains($0.0.rawValue) }

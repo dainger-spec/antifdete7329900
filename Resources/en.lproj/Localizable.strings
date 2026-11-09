@@ -126,11 +126,9 @@
 "editor.footer.note" = "Changes apply at the next launch.";
 "editor.generation" = "View for websites";
 "editor.generation.footer" = "Mac is Safari on this Mac as it is. A mobile view changes what the profile calls itself to websites (the User-Agent) and the size of its window; an iPhone view also answers as an iPhone where WebKit itself can (the platform, the screen's density) and, with the full disguise, in the screen, touch and pointer. The engine, fonts and hardware stay this Mac's — see docs/ISOLATION_AND_LIMITATIONS.md §2.";
-"editor.generation.inconsistent" = "An iPhone in a window on a Mac is Safari on the Mac calling itself an iPhone: the engine is the Mac's WebKit, and the fonts, graphics and audio are this Mac's; a careful site can tell.";
 "editor.generation.ipad" = "An iPad view in a window on a Mac is Safari on the Mac in an iPad-sized window (an iPad calls itself a Mac anyway): there is no touch, and the fonts, graphics and audio are this Mac's; a site that checks for touch will see it.";
 "editor.phoneDisguise" = "Full iPhone disguise";
 "editor.phoneDisguise.detail" = "On: a page sees an iPhone's screen (%ld×%ld at %ldx), %ld touch points, touch events from a press, a coarse pointer without hover, portrait. Part of it is a script, and a careful site can find the script's traces. Off: no traces of a substitution — only what WebKit itself answers as an iPhone (the platform, the density); the screen, touch and pointer stay this Mac's.";
-"editor.phoneDisguise.off" = "Without the full disguise a site that checks for touch, the pointer or the screen sees a Mac calling itself an iPhone.";
 "editor.geo" = "Geolocation";
 "editor.geo.accuracy" = "Accuracy (m)";
 "editor.geo.deny" = "Deny";

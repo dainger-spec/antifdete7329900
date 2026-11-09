@@ -922,7 +922,9 @@ without Safari's frameworks hosting the window it is plain WebKit to a site, and
 Safari. That window says so, never only the log (`SimplifiedModeNotice`): a "Simplified mode" chip
 in its toolbar — the toolbar, whose height a page measures, keeps its height — whose tooltip gives
 the reason and whose popover, opened by itself once when the app's first such window becomes key,
-says what the mode is and why. The reasons, each in words of its own: an iPhone or iPad profile; the
+says what the mode is and why. An iPhone or iPad profile's window has no chip since 9 November (the
+owner): its window is ours by design, not a fallback, and its limits are in this document instead
+(its reason is still kept and named). The reasons a chip gives, each in words of its own: the
 sandboxed build; Safari's window turned off
 (`PB_SAFARI_CHROME=0`); profiles kept in the manager's process (`PB_PROFILE_PROCESS`,
 `PBProfileProcess`); and, in a profile's own process, what failed — Safari's frameworks not loading,

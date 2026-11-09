@@ -391,9 +391,9 @@ struct ProfileEditorForm: View {
                 .labelsHidden()
                 .fixedSize()
             }
-            if !generation.matchesEngine {
-                EditorNote(generation.platform == .iPadOS ? L("editor.generation.ipad") : L("editor.generation.inconsistent"),
-                           tone: .warning)
+            // An iPad's own note stays; an iPhone's warning went (the owner, 9 November).
+            if !generation.matchesEngine && generation.platform == .iPadOS {
+                EditorNote(L("editor.generation.ipad"), tone: .warning)
             }
             // An iPhone's full disguise (the owner, 8 November: on by default; off is "leave no
             // traces of the substitution" — only what WebKit itself answers as a phone).
@@ -402,9 +402,6 @@ struct ProfileEditorForm: View {
                              detail: String(format: L("editor.phoneDisguise.detail"), phone.screenWidth, phone.screenHeight,
                                             Int(phone.scale), phone.maxTouchPoints),
                              isOn: $draft.phoneFullDisguise)
-                if !draft.phoneFullDisguise {
-                    EditorNote(L("editor.phoneDisguise.off"), tone: .warning)
-                }
             }
             if generation.matchesEngine && !draft.customUserAgent {
                 safariVersionChoice

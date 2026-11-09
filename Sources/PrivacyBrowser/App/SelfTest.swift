@@ -5106,7 +5106,8 @@ final class SelfTest {
     // MARK: Simplified mode (a profile's window that is not Safari's)
 
     /// A profile whose window is the app's own and not Safari's runs in a simplified mode, and that
-    /// window says so with why (`SimplifiedModeNotice`): its toolbar has the chip, in the toolbar —
+    /// window says so with why (`SimplifiedModeNotice`) — an iPhone or iPad view's, ours by design,
+    /// does not (the owner, 9 November): its toolbar has the chip, in the toolbar —
     /// whose height a page measures — and no taller than what is already there; its reason is the
     /// one the window was opened for; and the chip's popover opens and closes. Every session here
     /// is in this process: a Mac profile's window is ours because the App Sandbox is on (the
@@ -5127,6 +5128,20 @@ final class SelfTest {
                 controller.close()
                 session.shutDown()
                 try? repository.delete(profile.id)
+            }
+            if expected == .deviceProfile {
+                // An iPhone or iPad view's window is ours by design, not a fallback: no chip (the
+                // owner, 9 November). Asked once the toolbar has its profile chip, so not too early.
+                let ready = await waitUntil(timeout: 5) {
+                    controller.window?.toolbar?.items.contains { $0.itemIdentifier.rawValue == "profile" } == true
+                }
+                let chipless = controller.simplifiedChip == nil
+                    && controller.window?.toolbar?.items.contains { $0.itemIdentifier.rawValue == "simplified" } != true
+                check("simplified mode: a \(name) profile's window, ours by design, has no simplified-mode chip",
+                      ready && chipless, "toolbar ready \(ready), chip \(controller.simplifiedChip == nil ? "none" : "there")")
+                check("simplified mode: a \(name) profile's window gives the reason it is not Safari's (\(expected))",
+                      controller.ownWindowReason == expected, "\(controller.ownWindowReason)")
+                continue
             }
             let shown = await waitUntil(timeout: 5) {
                 controller.window?.toolbar?.items.contains { $0.itemIdentifier.rawValue == "simplified" && $0.view === controller.simplifiedChip } == true
