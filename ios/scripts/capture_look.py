@@ -70,21 +70,34 @@ def start(udid):
     subprocess.run(["rvictl", "-x", udid], capture_output=True, text=True)
     made = subprocess.run(["rvictl", "-s", udid], capture_output=True, text=True)
     listed = subprocess.run(["rvictl", "-l"], capture_output=True, text=True).stdout
-    interface = interface_for(listed, udid)
+    present = [f"rvi{n}" for n in range(10)
+               if subprocess.run(["ifconfig", f"rvi{n}"], capture_output=True, text=True).returncode == 0]
+    interface = interface_for(listed, udid, made.stdout + made.stderr, present)
     if not interface:
-        print(f"rvictl made no interface for {udid}: {(made.stdout + made.stderr).strip()!r}; rvictl -l: {listed.strip()!r}",
-              file=sys.stderr)
+        print(f"rvictl made no interface for {udid}: {(made.stdout + made.stderr).strip()!r}; rvictl -l: {listed.strip()!r}; "
+              f"rvi interfaces on this Mac: {', '.join(present) or 'none'}", file=sys.stderr)
         return 1
     print(interface)
     return 0
 
 
-def interface_for(listed, udid):
-    for line in listed.splitlines():
-        if udid.lower() in line.lower():
+def interface_for(listed, udid, started="", present=()):
+    """The rvi interface rvictl made for this iPhone. From `rvictl -l`; when that names none — the
+    owner's macOS, 9 November: "with interface (null)" while rvi0 worked (ifconfig rvi0, tcpdump) —
+    from what `rvictl -s` said ("… [SUCCEEDED] with interface rvi0"); else, the iPhone being listed or
+    started, the one rvi interface this Mac has (`ifconfig rviN`). Never a guess among several."""
+    mine = [line for line in listed.splitlines() if udid.lower() in line.lower()]
+    for line in mine:
+        found = re.search(r"\brvi\d+\b", line)
+        if found:
+            return found.group(0)
+    for line in started.splitlines():
+        if udid.lower() in line.lower() and "SUCCEEDED" in line:
             found = re.search(r"\brvi\d+\b", line)
             if found:
                 return found.group(0)
+    if (mine or "SUCCEEDED" in started) and len(present) == 1:
+        return present[0]
     return ""
 
 

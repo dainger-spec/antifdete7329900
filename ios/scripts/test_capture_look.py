@@ -8,6 +8,7 @@ saw nothing (the owner's second run, rvi0: 0 packets) that reads as clean. Repro
 capture_look.py says NOT MEASURED instead (green).
 """
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -76,6 +77,22 @@ listed = ("\nCould not get list of devices\nCurrent Active Devices:\n\n"
           "\t[1] 00008110-000A1B2C3D4E5F6A with interface rvi0\n\t[2] 00008120-0011223344556677 with interface rvi1\n")
 check("rvictl -l: the interface of this iPhone", interface_for(listed, "00008120-0011223344556677") == "rvi1")
 check("rvictl -l: none for an iPhone it does not list", interface_for(listed, "00008130-0000000000000000") == "")
+# The owner's macOS (9 November): `rvictl -l` lists the iPhone "with interface (null)" while rvi0 is
+# there and records (ifconfig rvi0, tcpdump). The old rule read the interface from that list only.
+UDID = "00008120-0011223344556677"
+null_listed = f"\nCould not get list of devices\nCurrent Active Devices:\n\n\t[1] {UDID} with interface (null)\n"
+old_rule = lambda listed, udid: next((m.group(0) for line in listed.splitlines() if udid.lower() in line.lower()
+                                      for m in [re.search(r"\brvi\d+\b", line)] if m), "")
+check("rvictl -l (null): the old rule finds no interface and the run stops — the bug, reproduced",
+      old_rule(null_listed, UDID) == "" and old_rule(listed, UDID) == "rvi1")
+check("rvictl -l (null): the one rvi interface the Mac has (ifconfig rvi0) is taken",
+      interface_for(null_listed, UDID, "", ["rvi0"]) == "rvi0")
+check("rvictl -l (null): what rvictl -s said comes first",
+      interface_for(null_listed, UDID, f"Starting device {UDID} [SUCCEEDED] with interface rvi2\n", ["rvi0", "rvi2"]) == "rvi2")
+check("rvictl -l (null) and several rvi interfaces: no guess", interface_for(null_listed, UDID, "", ["rvi0", "rvi1"]) == "")
+check("an iPhone neither listed nor started: not another one's rvi0",
+      interface_for(null_listed, "00008130-0000000000000000", "", ["rvi0"]) == "")
+check("rvictl -l naming the interface still wins over ifconfig", interface_for(listed, UDID, "", ["rvi0"]) == "rvi1")
 
 # q4's summary after the run.
 check("old summary: a recording that saw nothing reads as clean (\"none\", \"none\") — the bug, reproduced",
