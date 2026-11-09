@@ -45,3 +45,25 @@ its own; it never acts on the page from a script. Clicks, typing and scrolling a
   user activation); the run changes nothing of the fingerprint surface (`fingerprint_probe.js`,
   `navigator.webdriver` false) or the page's globals; `evaluate` in the driver's world is not seen
   by the page, while the same in the page's world — the control — is.
+
+## Scenarios (`ScenarioRunner`)
+
+A scenario is JavaScript. It runs in a JavaScriptCore of its own, on a thread of its own — never in
+the page — with:
+
+- `page`: the core commands above, each returning a promise (`await page.click('#login')`);
+  `page.evaluate(fn, arg, {world: 'page'})` takes a function or a function body;
+  `page.url()` and `page.title()` are promises too (in Playwright they are not);
+- `log(...)` for the run's log, `sleep(ms)`, `params` (the run's parameters, read-only).
+
+A command that fails rejects its promise with the reason (the script may `try`/`catch` it); one left
+uncaught ends the run with it. Stop ends the run at once: a command under way finishes first (a
+pressed button is let go). A script that loops without ever awaiting keeps its thread busy after
+Stop until the profile stops — the app and the page are not held up.
+
+The plan's `features` must name `automation` (docs: the document of rights, format 1; absent —
+off). It is asked before each command: a plan that loses it mid-run lets the step under way finish,
+runs no other, and the log says why.
+
+The scenarios are kept in `scenarios.bin` at the vault's root under its own key; this Mac's only
+(not synced in this version).

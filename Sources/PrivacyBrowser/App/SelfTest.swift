@@ -384,6 +384,7 @@ final class SelfTest {
         await group("warm-up queue") { try await warmUpQueue(repository) }
         await group("the page cannot tell") { try await pageCannotTell(repository) }
         await group("automation commands") { try await automationCommands(repository) }
+        await group("scenario runs") { try await scenarioRuns(repository) }
         await group("Safari chrome") { try await safariChromeThroughTheProxy(repository) }
         await group("WebRTC through the proxy") { try await webRTCThroughTheProxy(repository) }
         await group("keychain between profiles") { try await keychainBetweenProfiles(repository) }
@@ -6883,6 +6884,110 @@ final class SelfTest {
     /// cookies, User-Agent), stays on each, scrolls, follows only the plain link of the same site,
     /// leaves nothing in the page world, and stops when asked, when its tab closes, when a page
     /// shows a dialog and when the profile stops (whose data then seals as usual).
+    // MARK: Scenario runs (ScenarioRunner)
+
+    /// A scenario's JavaScript run through `ScenarioRunner` on a profile's page: it does what it
+    /// says and logs it; an error ends the run with its reason; Stop ends a waiting script and one
+    /// that loops without end (the app answering meanwhile); a plan that loses automation lets the
+    /// step under way finish and runs no other.
+    private func scenarioRuns(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("scenario runs: a scenario runs, fails, stops as it should", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the pages)")
+            return
+        }
+        var configuration = ProfileConfiguration(ephemeral: true)
+        configuration.proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        configuration.matchProxyLocation = false
+        let profile = try repository.create(name: "Scenario", configuration: configuration)
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        let controller = session.openWindow(url: nil)
+        let policy = NSApp.activationPolicy()
+        NSApp.setActivationPolicy(.accessory)
+        defer {
+            NSApp.setActivationPolicy(policy)
+            controller.close()
+            session.shutDown()
+            try? repository.delete(profile.id)
+        }
+        guard let tab = controller.selectedTab else {
+            check("scenario runs: a profile window to run in", false)
+            return
+        }
+        let base = "http://automation.selftest.invalid/pb-automation/"
+        func run(_ source: String, allowed: @escaping () -> Bool = { true }, stopAfter: TimeInterval? = nil,
+                 timeout: TimeInterval = 60) async -> (ScenarioRunner.Outcome?, [ScenarioRunner.Line], TimeInterval) {
+            let driver = PageDriver(webView: tab.webView) { url in _ = tab.load(url) }
+            driver.timeout = 15
+            let runner = ScenarioRunner(driver: driver)
+            runner.allowed = allowed
+            let started = Date()
+            runner.start(source, parameters: ["base": base, "word": "Hello"])
+            if let stopAfter {
+                try? await Task.sleep(nanoseconds: UInt64(stopAfter * 1_000_000_000))
+                runner.stop()
+            }
+            _ = await waitUntil(timeout: timeout) { runner.outcome != nil }
+            return (runner.outcome, runner.lines, Date().timeIntervalSince(started))
+        }
+
+        // A whole scenario.
+        let (done, lines, _) = await run("""
+            await page.goto(params.base + 'form');
+            await page.waitFor('#late');
+            await page.click('#button');
+            await page.type('#field', params.word);
+            const value = await page.inputValue('#field');
+            const items = await page.count('.item');
+            const title = await page.evaluate(() => document.title);
+            log('read', value, items, title);
+            if (value !== 'Hello' || items !== 5) throw new Error('wrong values ' + value + ' ' + items);
+            """)
+        let texts = lines.map(\.text)
+        check("scenario runs: a scenario's commands run in order, its log has each and the script's own lines, and it finishes",
+              done == .finished && texts.contains("click #button") && texts.contains("type 5 characters into #field")
+                  && texts.contains("read Hello 5 PB automation form") && !texts.filter { $0.hasPrefix("type") }.joined().contains("Hello"),
+              "\(String(describing: done)) \(texts)")
+
+        // An error: an element that never comes, and a mistake in the script.
+        let (failed, failedLines, _) = await run("""
+            await page.goto(params.base + 'form');
+            await page.click('#nothing-like-it', {timeout: 1000});
+            log('never here');
+            """)
+        let (broken, _, _) = await run("this is not javascript ((")
+        if case .failed(let message)? = failed, case .failed? = broken {
+            check("scenario runs: a command that fails ends the run with its reason; a script that does not parse does not run",
+                  message.contains("#nothing-like-it") && !failedLines.map(\.text).contains("never here"), message)
+        } else {
+            check("scenario runs: a command that fails ends the run with its reason; a script that does not parse does not run", false,
+                  "\(String(describing: failed)) / \(String(describing: broken))")
+        }
+
+        // Stop: a script waiting between commands, and one that loops without end.
+        let (waiting, _, waitingTime) = await run("while (true) { await page.pause(200); }", stopAfter: 1.0, timeout: 10)
+        var ticks = 0
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in ticks += 1 }
+        let (looping, _, loopingTime) = await run("for (;;) {}", stopAfter: 1.0, timeout: 10)
+        timer.invalidate()
+        check("scenario runs: Stop ends a waiting script and one that loops without end, and the app answers meanwhile",
+              waiting == .stopped(.byUser) && waitingTime < 4 && looping == .stopped(.byUser) && loopingTime < 4 && ticks >= 10,
+              "waiting \(String(describing: waiting)) in \(String(format: "%.1f", waitingTime)) s; looping \(String(describing: looping)) in \(String(format: "%.1f", loopingTime)) s; main-thread ticks \(ticks)")
+
+        // The plan loses automation after two commands: the third never runs.
+        var commands = 0
+        let (ended, endedLines, _) = await run("""
+            await page.goto(params.base + 'form');
+            await page.click('#button');
+            await page.click('#button');
+            log('after the third');
+            """, allowed: { commands += 1; return commands <= 3 })
+        let clicks = (try? await PageDriver(webView: tab.webView).textContent("#clicked")) ?? "nil"
+        check("scenario runs: a plan that loses automation lets the step under way finish, runs no other, and says why",
+              ended == .stopped(.rightsEnded) && clicks == "clicked 1" && !endedLines.map(\.text).contains("after the third")
+                  && endedLines.last?.text.contains("automation is no longer in this plan") == true,
+              "\(String(describing: ended)) \(clicks) \(endedLines.map(\.text))")
+    }
+
     // MARK: Automation commands (PageDriver)
 
     /// The core commands of a scenario (`PageDriver`) on pages of the self-test proxy: each does
