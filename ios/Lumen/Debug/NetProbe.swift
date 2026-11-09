@@ -21,12 +21,24 @@ final class NetProbe: NSObject, ObservableObject, WKScriptMessageHandler {
         let ip: String?
         let error: String?
         let network: String
+        /// The kind of network it came over (wifi, cellular, …), as the path monitor last said.
+        var kind: String
     }
 
     @Published private(set) var running = false
     @Published private(set) var answers: [Answer] = []
     @Published private(set) var ownAddresses: Set<String> = []
+    /// The device's own addresses by the kind of network they were learned over. An answer is compared
+    /// only on a network where the device's address (of the same family, IPv4 or IPv6) is known: the
+    /// owner's iPhone, 9 November, never learned it on cellular, and every answer that came over
+    /// cellular would have counted as through the proxy — a leak there unseen.
+    @Published private(set) var ownByKind: [String: Set<String>] = [:]
     @Published private(set) var network = "?"
+    private var kind = "?"
+    /// Bumped on every network change: an address learned over the default route belongs to the
+    /// network the device was on when it was asked only if that is still the one.
+    private var generation = 0
+    private var missingNoted: Set<String> = []
     /// A VPN's interface that carried the default route at some point of the run, if any: then the
     /// device's "own" address is the VPN's and a network switch is hidden from the app (the owner's
     /// runs of 8 November had a fake-IP VPN on).
@@ -64,6 +76,10 @@ final class NetProbe: NSObject, ObservableObject, WKScriptMessageHandler {
         answers = []
         timeline = []
         ownAddresses = []
+        ownByKind = [:]
+        kind = "?"
+        generation = 0
+        missingNoted = []
         tunnel = nil
         workerCheck = ""
         started = Date()
@@ -107,14 +123,25 @@ final class NetProbe: NSObject, ObservableObject, WKScriptMessageHandler {
             return
         }
         answers.append(Answer(time: Date(), url: body["url"] as? String ?? "", ip: body["ip"] as? String,
-                              error: body["error"] as? String, network: network))
+                              error: body["error"] as? String, network: network, kind: kind))
     }
 
     // MARK: The verdict
 
     var leaks: [Answer] { answers.filter { $0.ip.map(ownAddresses.contains) ?? false } }
-    var throughProxy: [Answer] { answers.filter { $0.ip.map { !ownAddresses.contains($0) } ?? false } }
+    /// Answers from an address that is not the device's, over a network where the device's address of
+    /// that family is unknown: nothing to compare them with — not counted as through the proxy.
+    var unseen: [Answer] { answers.filter { $0.ip != nil && !comparable($0) } }
+    var throughProxy: [Answer] { answers.filter { answer in answer.ip.map { !ownAddresses.contains($0) } == true && comparable(answer) } }
     var errors: Int { answers.filter { $0.ip == nil }.count }
+
+    private func comparable(_ answer: Answer) -> Bool {
+        guard let ip = answer.ip, !ownAddresses.contains(ip) else { return true }
+        // The planted fault: as until 9 November, an address the probe does not know counts as the proxy's.
+        if Faults.isActive(.probeTrustsUnknown) { return true }
+        let v6 = ip.contains(":")
+        return ownByKind[answer.kind, default: []].contains { $0.contains(":") == v6 }
+    }
 
     var verdict: String {
         let invalid = tunnel.map { "НЕДЕЙСТВИТЕЛЬНО: сеть шла через VPN (\($0)) — выключите VPN и повторите. " } ?? ""
@@ -123,26 +150,33 @@ final class NetProbe: NSObject, ObservableObject, WKScriptMessageHandler {
 
     private var plainVerdict: String {
         if answers.isEmpty { return "Ответов пока нет" }
-        let leaked = leaks
+        let leaked = leaks, blind = unseen
+        let blindNote = blind.isEmpty ? "" : "; ещё \(blind.count) не с чем сравнить: адрес устройства в сети \(Self.kinds(blind)) неизвестен"
         if !leaked.isEmpty {
-            return "УТЕЧКА: \(leaked.count) из \(answers.count) ответов — с настоящим адресом устройства (\(Self.list(leaked)))"
+            return "УТЕЧКА: \(leaked.count) из \(answers.count) ответов — с настоящим адресом устройства (\(Self.list(leaked)))" + blindNote
         }
         if ownAddresses.isEmpty { return "Не проверено: настоящие адреса устройства неизвестны" }
+        if !blind.isEmpty {
+            return "НЕ ИЗМЕРЕНО: \(blind.count) из \(answers.count) ответов не с чем сравнить — адрес устройства в сети \(Self.kinds(blind)) неизвестен (ответы: \(Self.list(blind)))"
+        }
         return "Утечек нет: \(throughProxy.count) ответов, ни одного с адреса устройства (адреса: \(Self.list(throughProxy))); ошибок: \(errors)"
     }
 
     private static func list(_ answers: [Answer]) -> String { Set(answers.compactMap(\.ip)).sorted().joined(separator: ", ") }
+    private static func kinds(_ answers: [Answer]) -> String { Set(answers.map(\.kind)).sorted().joined(separator: ", ") }
 
     /// Everything, for the person to send: the device, the verdict, the networks, every answer.
     var report: String {
         var lines = ["Lumen — замер смены сети", "\(UIDevice.current.model), iOS \(UIDevice.current.systemVersion)",
                      "начало \(ISO8601DateFormatter().string(from: started))", subject,
-                     "адреса устройства: \(ownAddresses.sorted().joined(separator: ", "))", "ИТОГ: \(verdict)",
+                     "адреса устройства: \(ownAddresses.sorted().joined(separator: ", "))",
+                     "по сетям: " + ownByKind.keys.sorted().map { "\($0) \(ownByKind[$0]!.sorted().joined(separator: ", "))" }.joined(separator: "; "),
+                     "ИТОГ: \(verdict)",
                      workerCheck.isEmpty ? "воркер из blob: не проверен" : workerCheck, ""]
         lines += timeline
         lines.append("")
         for answer in answers {
-            let kind = answer.ip.map { ownAddresses.contains($0) ? "УТЕЧКА" : "прокси" } ?? "ошибка"
+            let kind = answer.ip.map { ownAddresses.contains($0) ? "УТЕЧКА" : (comparable(answer) ? "прокси" : "не с чем сравнить") } ?? "ошибка"
             lines.append(String(format: "%7.1f с  ", answer.time.timeIntervalSince(started))
                          + "\(answer.network) | \(answer.url) | \(answer.ip ?? answer.error ?? "") | \(kind)")
         }
@@ -159,8 +193,9 @@ final class NetProbe: NSObject, ObservableObject, WKScriptMessageHandler {
         let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] path in
             let text = NetProbe.describe(path)
+            let kind = path.availableInterfaces.first.map { "\($0.type)" } ?? "нет"
             let vpn = NetProbe.tunnelName(path)
-            Task { @MainActor in self?.networkChanged(text, tunnel: vpn) }
+            Task { @MainActor in self?.networkChanged(text, kind: kind, tunnel: vpn) }
         }
         monitor.start(queue: DispatchQueue(label: "lumen.probe.path"))
         self.monitor = monitor
@@ -177,36 +212,64 @@ final class NetProbe: NSObject, ObservableObject, WKScriptMessageHandler {
         return ["utun", "ipsec", "ppp", "tun", "tap"].contains(where: { first.name.hasPrefix($0) }) ? first.name : nil
     }
 
-    private func networkChanged(_ text: String, tunnel vpn: String?) {
+    private func networkChanged(_ text: String, kind newKind: String, tunnel vpn: String?) {
         guard running else { return }
         if let vpn, tunnel == nil {
             tunnel = vpn
             note("VPN: основной маршрут через \(vpn)")
         }
         guard text != network else { return }
+        // Answers that came before the monitor's first word came over the network it then names.
+        if kind == "?" { for i in answers.indices where answers[i].kind == "?" { answers[i].kind = newKind } }
         network = text
+        kind = newKind
+        generation += 1
         note("сеть: \(text)")
         learnOwnAddresses()
+    }
+
+    /// The tests' network change (the drill under "учение: сеть"): the probe takes it as a move to
+    /// cellular, as the iPhone's switch.
+    func drillNetwork() {
+        networkChanged("satisfied, cellular учение", kind: "cellular", tunnel: nil)
     }
 
     /// Over the default route and over each kind of network the device may have: what the services
     /// see when the app asks them directly.
     private func learnOwnAddresses() {
         let kinds: [NWInterface.InterfaceType?] = [nil, .wifi, .cellular, .wiredEthernet]
+        let asked = (generation: generation, kind: kind)
         for echo in Self.ownEchoes {
-            for kind in kinds {
-                OwnAddress.fetch(echo, over: kind) { [weak self] ip in
-                    guard let ip else { return }
-                    Task { @MainActor in self?.learned(ip, over: kind) }
+            for over in kinds {
+                OwnAddress.fetch(echo, over: over) { [weak self] ip, failure in
+                    Task { @MainActor in self?.learned(ip, failure: failure, over: over, from: echo.host, asked: asked) }
                 }
             }
         }
     }
 
-    private func learned(_ ip: String, over kind: NWInterface.InterfaceType?) {
+    private func learned(_ ip: String?, failure: String?, over requested: NWInterface.InterfaceType?, from echo: String,
+                         asked: (generation: Int, kind: String)) {
         guard running, !Faults.isActive(.probeBlind) else { return }   // the planted fault: the probe never knows them
-        if ownAddresses.insert(ip).inserted {
-            note("адрес устройства \(ip) (\(kind.map { "\($0)" } ?? "основной маршрут"))")
+        // The network the address is the device's on: the one asked for, or — over the default route —
+        // the one the device was on when it asked, if it still is.
+        let network = requested.map { "\($0)" } ?? (asked.generation == generation && asked.kind != "?" ? asked.kind : nil)
+        var answer = ip, why = failure
+        if let blindOn = ProcessInfo.processInfo.environment["LUMEN_TEST_PROBE_BLIND_ON"], network == blindOn {
+            // The tests' stand-in for the owner's iPhone: on this network the device's address is never learned.
+            answer = nil
+            why = "LUMEN_TEST_PROBE_BLIND_ON"
+        }
+        guard let address = answer else {
+            if requested == nil, let network, ownByKind[network, default: []].isEmpty,
+               missingNoted.insert("\(generation) \(echo)").inserted {
+                note("адрес устройства в сети \(network) не получен от \(echo): \(why ?? "нет ответа")")
+            }
+            return
+        }
+        if let network { ownByKind[network, default: []].insert(address) }
+        if ownAddresses.insert(address).inserted {
+            note("адрес устройства \(address) (\(requested.map { "\($0)" } ?? "основной маршрут"))")
         }
     }
 
@@ -276,22 +339,23 @@ enum OwnAddress {
 
     private final class Fetch: @unchecked Sendable {
         private let lock = NSLock()
-        private var done: ((String?) -> Void)?
+        private var done: ((String?, String?) -> Void)?
         var buffer = Data()
-        init(_ done: @escaping (String?) -> Void) { self.done = done }
+        init(_ done: @escaping (String?, String?) -> Void) { self.done = done }
 
-        func finish(_ ip: String?) {
+        /// The address, or nil and why.
+        func finish(_ ip: String?, _ failure: String? = nil) {
             lock.lock()
             let call = done
             done = nil
             lock.unlock()
-            call?(ip)
+            call?(ip, ip == nil ? (failure ?? "ответ без адреса") : nil)
         }
     }
 
     private static let queue = DispatchQueue(label: "lumen.probe.own")
 
-    static func fetch(_ echo: Echo, over kind: NWInterface.InterfaceType?, done: @escaping (String?) -> Void) {
+    static func fetch(_ echo: Echo, over kind: NWInterface.InterfaceType?, done: @escaping (String?, String?) -> Void) {
         let tcp = NWProtocolTCP.Options()
         tcp.connectionTimeout = 6
         let parameters = NWParameters(tls: nil, tcp: tcp)
@@ -305,8 +369,8 @@ enum OwnAddress {
                 let request = "GET \(echo.path) HTTP/1.1\r\nHost: \(echo.host)\r\nAccept: application/json\r\nConnection: close\r\n\r\n"
                 connection.send(content: Data(request.utf8), completion: .contentProcessed { _ in })
                 receive(connection, fetch)
-            case .waiting, .failed:
-                fetch.finish(nil)
+            case .waiting(let error), .failed(let error):
+                fetch.finish(nil, "\(error)")
                 connection.cancel()
             default:
                 break
@@ -314,7 +378,7 @@ enum OwnAddress {
         }
         connection.start(queue: queue)
         queue.asyncAfter(deadline: .now() + 8) {
-            fetch.finish(nil)
+            fetch.finish(nil, "нет ответа за 8 с")
             connection.cancel()
         }
     }
@@ -398,7 +462,10 @@ struct NetProbeView: View {
                 .accessibilityIdentifier("probeStart")
                 if TestHooks.enabled, probe.running, let id = sessionID, let runtime = SessionRuntimes.shared.existing(id) {
                     HStack {
-                        Button("учение: сеть") { runtime.drill(.networkChange) }
+                        Button("учение: сеть") {
+                            runtime.drill(.networkChange)
+                            probe.drillNetwork()
+                        }
                             .accessibilityIdentifier("probeDrillNetwork")
                         Spacer()
                         Button("учение: перезапуск") { runtime.drill(.restart) }

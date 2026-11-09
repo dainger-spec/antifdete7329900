@@ -205,6 +205,42 @@ final class RelayTests: LumenUITestCase {
         shot("46 the probe: through the proxy, no leak")
     }
 
+    /// The owner's iPhone, 9 November: on cellular the probe never learned the device's address; 73 of
+    /// 163 answers did not match the Wi-Fi one — by their time, those over cellular. An answer it did not
+    /// know was taken for one through the proxy: a leak over cellular would have gone unseen, and through
+    /// a proxy the verdict could have read "Утечек нет".
+    /// Now an answer from a network where the device's address is unknown is not compared, and the
+    /// verdict says so. LUMEN_TEST_PROBE_BLIND_ON stands in for that iPhone: on "cellular" the app's own
+    /// question gets no address. The red: probeTrustsUnknown, the probe as it was.
+    func testProbeSaysWhatItCannotSee() {
+        launch(reset: true, environment: ["LUMEN_TEST_PROBE_BLIND_ON": "cellular"])
+        app.buttons["proxiesButton"].tap()
+        wait(app.navigationBars["Прокси"], "the proxy list opens")
+        addProxy(name: "Нью-Йорк", kind: "SOCKS5", port: "28382", user: "ub", password: "pb")
+        waitRow("Нью-Йорк", says: "Работает")
+        leaveProxies()
+        createSession(name: "Замер")
+        openSession("Замер")
+        chooseProxy("Нью-Йорк", in: "Замер")
+        backToList()
+        wait(app.buttons["netProbeButton"], "the session list leads to the network probe (DEBUG)").tap()
+        wait(app.navigationBars["Замер сети"], "the probe opens")
+        let verdict = app.staticTexts["probeVerdict"]
+        app.buttons["probe-Замер"].tap()
+        app.buttons["probeStart"].tap()
+        // On the first network the device's address is known: through the proxy, no leak.
+        let clean = NSPredicate(format: "label BEGINSWITH %@", "Утечек нет")
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: clean, evaluatedWith: verdict)], timeout: 25), .completed,
+                       "through the proxy, on a network the probe knows: no leak: \(verdict.label)")
+        // Over to "cellular", where the device's address stays unknown.
+        wait(app.buttons["probeDrillNetwork"], "the probe offers the drills").tap()
+        sleep(8)
+        app.buttons["probeStart"].tap()
+        shot("48 the probe: a network where the device's address is unknown")
+        XCTAssertTrue(verdict.label.hasPrefix("НЕ ИЗМЕРЕНО") && verdict.label.contains("cellular"),
+                      "answers from a network where the device's address is unknown are not counted as through the proxy: \(verdict.label)")
+    }
+
     /// The relay's port, as the session's screen shows it to the tests (DEBUG builds only); with
     /// `other`, waits until it is a different one (the relay back on a new port).
     func relayPort(other: UInt16? = nil, timeout: TimeInterval = 15, file: StaticString = #filePath, line: UInt = #line) -> UInt16 {

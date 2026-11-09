@@ -42,6 +42,7 @@ public enum Fault: String, CaseIterable, Sendable {
     case lockedOpensDirect       // a profile that lived behind a proxy opens directly when its proxy may not be used
     // The network-switch probe (the instrument for the real iPhone)
     case probeBlind              // the probe never learns the device's own addresses: it can see no leak
+    case probeTrustsUnknown      // an answer from an address the probe does not know counts as through the proxy
     // Session settings
     case settingsNotSaved        // a session's settings are not written
     case userAgentIgnored        // the chosen User-Agent is not given to the web view

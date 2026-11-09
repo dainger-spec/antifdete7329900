@@ -37,6 +37,7 @@ relayFailoverOn	ui	LumenUITests/RelayTests/testRelayDownLetsNothingOut	deadrelay
 relayGapDirect	ui	LumenUITests/RelayTests/testRelayDownLetsNothingOut	gap: the page did not go direct
 pathChangeKeepsConnections	ui	LumenUITests/RelayTests/testNetworkChangeClosesConnections	a network change closes the connections made before it
 probeBlind	ui	LumenUITests/RelayTests/testNetworkProbe	the probe sees the device's own address
+probeTrustsUnknown	ui	LumenUITests/RelayTests/testProbeSaysWhatItCannotSee	answers from a network where the device's address is unknown
 relayGapDirect	ui	LumenUITests/RelayTests/testNetworkProbe	the probe sees no leak
 userAgentIgnored	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	iOS 26's Safari
 workerHookTimeZoneOnly	ui	LumenUITests/SettingsTests/testBlobWorkerReadsThePageCanvasWithTheDevicesTimeZone	canvas noise with the device's own time zone
