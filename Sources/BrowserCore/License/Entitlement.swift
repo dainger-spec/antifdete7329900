@@ -86,10 +86,19 @@ public struct Entitlement: Equatable, Sendable {
     public var expiresAt: Date
     /// Until this — the server still silent — work goes on with a warning (GRACE).
     public var graceEndsAt: Date
+    /// What the plan opens beyond profiles (`features`: format 1, absent means none). Values this
+    /// app does not know are kept but open nothing.
+    public var features: Set<String>
+
+    /// Scenario automation (docs/AUTOMATION.md): its plan's feature, and only while the license is
+    /// active — never in export-only.
+    public static let automationFeature = "automation"
+    public var allowsAutomation: Bool { status == .active && features.contains(Self.automationFeature) }
 
     public init(documentID: String = "", accountID: String = "", licenseID: String = "", deviceID: String, machineID: String,
                 role: String, plan: String, status: Status, exportReason: String?, limits: Limits, profilesOnOtherDevices: Int,
-                periodEndsAt: Date?, issuedAt: Date, refreshAfter: Date, expiresAt: Date, graceEndsAt: Date) {
+                periodEndsAt: Date?, issuedAt: Date, refreshAfter: Date, expiresAt: Date, graceEndsAt: Date,
+                features: Set<String> = []) {
         self.documentID = documentID
         self.accountID = accountID
         self.licenseID = licenseID
@@ -106,6 +115,7 @@ public struct Entitlement: Equatable, Sendable {
         self.refreshAfter = refreshAfter
         self.expiresAt = expiresAt
         self.graceEndsAt = graceEndsAt
+        self.features = features
     }
 
     public var isOwner: Bool { role == "owner" }
@@ -272,6 +282,7 @@ public enum EntitlementVerifier {
         var refreshAfter: String?
         var expiresAt: String?
         var graceEndsAt: String?
+        var features: [String]?
 
         struct LimitsFields: Decodable {
             var profiles: Int?
@@ -308,6 +319,8 @@ public enum EntitlementVerifier {
             refreshAfter = string("refreshAfter")
             expiresAt = string("expiresAt")
             graceEndsAt = string("graceEndsAt")
+            // A list of names; anything else there (not a list, a list of other things) opens nothing.
+            features = try? container.decode([String].self, forKey: Key("features"))
         }
 
         func entitlement(deviceID: String, machineID: String) -> Entitlement? {
@@ -331,7 +344,8 @@ public enum EntitlementVerifier {
                                exportReason: status == .exportOnly ? (exportReason ?? "period_ended") : nil,
                                limits: Entitlement.Limits(profiles: profiles, devices: devices, seats: seats),
                                profilesOnOtherDevices: profilesOnOtherDevices, periodEndsAt: periodEndsAt, issuedAt: issuedAt,
-                               refreshAfter: refreshAfter, expiresAt: expiresAt, graceEndsAt: graceEndsAt)
+                               refreshAfter: refreshAfter, expiresAt: expiresAt, graceEndsAt: graceEndsAt,
+                               features: Set(features ?? []))
         }
 
         /// RFC 3339 in UTC, `Z`, no fractions of a second (§2) — anything else is unreadable. The

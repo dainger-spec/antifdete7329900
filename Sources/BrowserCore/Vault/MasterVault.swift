@@ -196,6 +196,8 @@ public final class UnlockedVault: @unchecked Sendable {
     var proxyListKey: SymmetricKey { get throws { try vaultKey("proxy-list") } }
     /// The tags' colours (`labels.bin`, `TagColors`): the vault's, synced as an object of their own.
     var labelsKey: SymmetricKey { get throws { try vaultKey("profile-labels") } }
+    /// The scenarios (`scenarios.bin`, `ScenarioLibrary`): this Mac's, not synced in this version.
+    var scenariosKey: SymmetricKey { get throws { try vaultKey("scenarios") } }
     /// The license's key of an account without an email (`account-key.bin`, `AccountKeyVault`): this
     /// Mac's, never synced; a profile's own process, opened with a grant, cannot derive it.
     var accountKeyKey: SymmetricKey { get throws { try vaultKey("account-key") } }
