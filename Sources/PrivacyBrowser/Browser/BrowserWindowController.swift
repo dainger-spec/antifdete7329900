@@ -192,13 +192,16 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
                                          addressField.widthAnchor.constraint(lessThanOrEqualToConstant: 680), addressWidth])
         }
 
+        // The buttons in two groups laid out here, each one item of the toolbar: what goes before
+        // the address (the mark, Back, Forward, Reload) and what is the page's own after it. The
+        // space between a toolbar's items is the system's, and not the same everywhere: 24 pt
+        // between icons on macOS 26's runner, none in a profile's process on the owner's Mac, where
+        // the icons stood against each other (10 November).
+        let navigation = toolbarGroup([mark, backButton!, forwardButton!, reloadButton!])
+        let pageActions = toolbarGroup([bookmarkButton!, bookmarksMenuButton, historyButton, fillButton, saveButton])
         toolbarViews = [
-            (.init("mark"), "Lumen", mark),
-            (.init("back"), "Back", backButton!), (.init("forward"), "Forward", forwardButton!),
-            (.init("reload"), "Reload", reloadButton!), (.init("address"), "Address", addressField),
-            (.init("bookmark"), "Bookmark", bookmarkButton!), (.init("bookmarks"), "Bookmarks", bookmarksMenuButton),
-            (.init("history"), "History", historyButton), (.init("fill"), "Fill Password", fillButton),
-            (.init("save"), "Save Password", saveButton),
+            (.init("navigation"), "Navigation", navigation), (.init("address"), "Address", addressField),
+            (.init("page"), "Page", pageActions),
         ]
         if let simplified { toolbarViews.append((.init("simplified"), L("simplified.chip"), simplified)) }
         toolbarViews.append((.init("profile"), profileName, badge))
@@ -520,7 +523,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     /// the other items leave (between its 160 and 680 pt).
     private func fitAddressField() {
         guard let window, addressWidth != nil else { return }
-        // Each item with the toolbar's spacing (measured on macOS 26: 24 pt between icons).
+        // Each item with the toolbar's spacing (measured on macOS 26: 24 pt between items).
         let others = toolbarViews.filter { $0.0.rawValue != "address" }
             .reduce(CGFloat(0)) { $0 + max($1.2.fittingSize.width, $1.2.frame.width) + 26 }
         // The traffic lights and the toolbar's own margins.
@@ -550,6 +553,24 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     }
 
     /// A toolbar button: VoiceOver reads `label`; the tooltip adds the keyboard shortcut.
+    /// Toolbar buttons side by side with a spacing of their own: each button a 28 pt square (the
+    /// address field's height) that takes the click, 6 pt apart, 4 pt from the group's ends.
+    private func toolbarGroup(_ views: [NSView]) -> NSStackView {
+        let stack = NSStackView(views: views)
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: 4, bottom: 0, right: 4)
+        stack.setHuggingPriority(.required, for: .horizontal)
+        stack.setContentCompressionResistancePriority(.required, for: .horizontal)
+        for view in views where view is NSButton {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([view.widthAnchor.constraint(equalToConstant: 28),
+                                         view.heightAnchor.constraint(equalToConstant: 28)])
+        }
+        return stack
+    }
+
     private func toolbarButton(_ symbol: String, _ label: String, shortcut: String? = nil, _ action: Selector) -> NSButton {
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label) ?? NSImage()
         let button = NSButton(image: image, target: self, action: action)
@@ -964,7 +985,6 @@ extension BrowserWindowController: NSToolbarDelegate {
         item.isBordered = false
         switch itemIdentifier.rawValue {
         case "address", "profile", "simplified": item.visibilityPriority = .high
-        case "mark": item.visibilityPriority = .low
         default: break
         }
         return item

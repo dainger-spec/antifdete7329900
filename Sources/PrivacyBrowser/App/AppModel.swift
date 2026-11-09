@@ -79,6 +79,9 @@ final class AppModel: ObservableObject {
     @Published var proxiesRequest = false
     /// The command palette (⌘K) is open in the Profiles window.
     @Published var showingPalette = false
+    /// The Help window's topic (`HelpView`): what opens the window may choose it — the scenario
+    /// editor's Commands, the automation settings.
+    @Published var helpTopic: HelpTopic = .start
     /// A section of Settings to show when it next appears (the command palette).
     @Published var settingsSection: SettingsSection?
     /// The network guard's notice at the foot of the profiles was closed: not again until the app

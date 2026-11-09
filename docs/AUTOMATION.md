@@ -68,3 +68,10 @@ runs no other, and the log says why.
 
 The scenarios are kept in `scenarios.bin` at the vault's root under its own key; this Mac's only
 (not synced in this version).
+
+Where a person finds it (the owner, 10 November: behind File › Scenarios alone it was hidden, and what
+a scenario may say was in this file only): the Profiles window's sidebar has Scenarios, Automation
+API and Help beside Profiles and Proxies, and "Commands and Search" (⌘K) above them; the editor's
+Commands button, the automation settings and Help › Lumen Help (⌘?) open the app's own help
+(`HelpView`) — how a scenario is run, every command with what it takes, the API's requests with
+commands to copy — in the interface's language.

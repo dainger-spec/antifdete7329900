@@ -9,6 +9,7 @@ struct AutomationSettingsView: View {
     var embedded = false
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openWindow) private var openWindow
     @State private var enabled = false
     @State private var port = ""
     @State private var revealed = false
@@ -106,6 +107,11 @@ struct AutomationSettingsView: View {
                         .foregroundStyle(Theme.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    Button(L("automation.docs.open")) {
+                        model.helpTopic = .api
+                        openWindow(id: "help")
+                    }
+                    .buttonStyle(.lumenGhost)
                     Button(L("automation.example.copy")) { Self.copy(exampleCommand, concealed: true) }
                         .buttonStyle(.lumenSecondary)
                 }

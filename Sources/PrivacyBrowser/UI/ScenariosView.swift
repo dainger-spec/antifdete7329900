@@ -6,6 +6,7 @@ import SwiftUI
 /// name and JavaScript on the right, a profile to run it on, Run and Stop, and the run's log.
 struct ScenariosView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.openWindow) private var openWindow
     @State private var selection: UUID?
     @State private var name = ""
     @State private var source = ""
@@ -93,6 +94,8 @@ struct ScenariosView: View {
                 .frame(maxWidth: 420)
             Button(L("scenarios.new"), action: create)
                 .buttonStyle(.lumenPrimary)
+            Button(L("scenarios.help.how")) { openHelp(.scenarios) }
+                .buttonStyle(.lumenGhost)
         }
     }
 
@@ -106,6 +109,10 @@ struct ScenariosView: View {
                     .font(.lumenHeading)
                     .foregroundStyle(Theme.textPrimary)
                 Spacer()
+                // What a scenario may say, with examples: the app's help, at its commands.
+                Button { openHelp(.commands) } label: { Label(L("scenarios.help"), systemImage: "book") }
+                    .buttonStyle(.lumenSecondary)
+                    .help(L("scenarios.help.hint"))
                 if edited {
                     Button(L("scenarios.save"), action: save)
                         .buttonStyle(.lumenSecondary)
@@ -172,6 +179,11 @@ struct ScenariosView: View {
     }
 
     // MARK: Actions
+
+    private func openHelp(_ topic: HelpTopic) {
+        model.helpTopic = topic
+        openWindow(id: "help")
+    }
 
     private func select(_ id: UUID?) {
         if edited { save() }
