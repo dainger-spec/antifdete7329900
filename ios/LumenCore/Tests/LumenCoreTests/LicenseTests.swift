@@ -216,16 +216,19 @@ final class LicenseTests: XCTestCase {
     }
 
     func testTheClockSetBackBringsNothingBack() {
+        // Five days on: the document (in force until the 5th, grace until the 8th) is in its grace.
         let start = moment("2026-11-01T10:00:00Z")
         var clock = EffectiveClock(floorTime: start, floorUptime: 1_000)
-        let later = clock.now(wall: start.addingTimeInterval(7 * 86_400), uptime: 1_000 + 7 * 86_400)
-        XCTAssertEqual(later, start.addingTimeInterval(7 * 86_400))
-        // The clock set back by eight days, a minute later.
-        let back = clock.now(wall: start.addingTimeInterval(-86_400), uptime: 1_000 + 7 * 86_400 + 60)
-        XCTAssertEqual(back, start.addingTimeInterval(7 * 86_400 + 60), "the clock set back does not bring time back")
+        let later = clock.now(wall: start.addingTimeInterval(5 * 86_400), uptime: 1_000 + 5 * 86_400)
+        XCTAssertEqual(later, start.addingTimeInterval(5 * 86_400))
+        // The clock set back by six days, a minute later.
+        let back = clock.now(wall: start.addingTimeInterval(-86_400), uptime: 1_000 + 5 * 86_400 + 60)
+        XCTAssertEqual(back, start.addingTimeInterval(5 * 86_400 + 60), "the clock set back does not bring time back")
         // After a restart (the uptime starts again) the floor stays where it was.
         XCTAssertEqual(clock.now(wall: start, uptime: 5), back)
+        // So the document is still in its grace, not in force again as the bare clock would have it.
         XCTAssertEqual(state(TestSigner.payload(), at: back).mode, .grace)
+        XCTAssertEqual(state(TestSigner.payload(), at: start.addingTimeInterval(-86_400)).mode, .full)
     }
 
     func testProfilesOverTheLimitAreLocked() {
