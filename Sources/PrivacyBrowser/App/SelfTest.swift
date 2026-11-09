@@ -4768,8 +4768,17 @@ final class SelfTest {
     static func whatSitesSeeCheck(arguments: [String]) {
         setvbuf(stdout, nil, _IOLBF, 0)
         let inSafariWindow = arguments.contains("--safari-window")
-        let proxy: ProxySettings?
-        if let index = arguments.firstIndex(of: "--proxy") {
+        var proxy: ProxySettings?
+        // Measurement only (never merged): a SOCKS5 proxy with its login, as
+        // PB_TEST_PROXIES holds it — host:port:login:password, from the environment, never argv.
+        if arguments.contains("--proxy-from-environment") {
+            let parts = (ProcessInfo.processInfo.environment["PB_MEASURE_PROXY"] ?? "").split(separator: ":", maxSplits: 3).map(String.init)
+            guard parts.count == 4, let port = Int(parts[1]) else {
+                print("WHAT-SITES-SEE --proxy-from-environment wants PB_MEASURE_PROXY=host:port:login:password")
+                exit(64)
+            }
+            proxy = ProxySettings(kind: .socks5, host: parts[0], port: port, username: parts[2], password: parts[3])
+        } else if let index = arguments.firstIndex(of: "--proxy") {
             guard arguments.indices.contains(index + 1), let field = try? ProxyHostField.parse(arguments[index + 1]),
                   let port = field.port else {
                 print("WHAT-SITES-SEE --proxy wants host:port")
