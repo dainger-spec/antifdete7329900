@@ -16,6 +16,14 @@ SCENARIO="${1:-q1}"
 TEAM="${TEAM:?set TEAM to your Team ID (Xcode › Settings › Accounts › your team, or developer.apple.com › Membership)}"
 BUNDLE="${BUNDLE_ID:-io.lumenbrowser.measure.$TEAM}"
 OUT="$HOME/lumen-measure-device/$SCENARIO"; mkdir -p "$OUT"
+# q1's WebRTC-off check and q2 read the macOS app's shim beside ios-measure (the owner's run, 9 November:
+# a copy without it, and q1.webrtc-off-by-script read NOT MEASURED after the whole run).
+SHIM_SOURCE="$HERE/../Sources/PrivacyBrowser/Browser/PrivacyScripts.swift"
+if [[ "$SCENARIO" != q3 && ! -f "$SHIM_SOURCE" ]]; then
+    echo "No Sources/PrivacyBrowser/Browser/PrivacyScripts.swift beside ios-measure: $SCENARIO needs it. Copy it with the"
+    echo "command in RUN_Q1_Q4.md (git archive … ios-measure Sources/PrivacyBrowser/Browser/PrivacyScripts.swift)."
+    exit 1
+fi
 # The harness's ports, before anything slow: one left over from a failed run holds them (the owner).
 python3 "$HERE/ports_free.py" 28310 28380 28381 28382 28384 28443 3478/udp || exit 1
 command -v xcodegen >/dev/null || brew install xcodegen

@@ -26,7 +26,7 @@
 ```sh
 git fetch origin claude/ios-app-measure claude/ios-app
 rm -rf ~/lumen-run && mkdir -p ~/lumen-run/q1 ~/lumen-run/q4
-git archive origin/claude/ios-app-measure ios-measure | tar -x -C ~/lumen-run/q1
+git archive origin/claude/ios-app-measure ios-measure Sources/PrivacyBrowser/Browser/PrivacyScripts.swift | tar -x -C ~/lumen-run/q1
 git archive origin/claude/ios-app ios | tar -x -C ~/lumen-run/q4
 export TEAM=XXXXXXXXXX
 ~/lumen-run/q1/ios-measure/run_device.sh q1

@@ -16,6 +16,7 @@ device-tools.yml does both, so each check is seen red before it is trusted:
   - the summary names what it did not measure (before: INCONCLUSIVE checks vanished from it).
 """
 import os
+import re
 import plistlib
 import socket
 import subprocess
@@ -130,6 +131,31 @@ else:
 script = open(os.path.join(ROOT, "run_device.sh")).read()
 look_at, build_at = script.find('capture_look.py" look'), script.find("xcodebuild")
 check("run_device.sh looks at the recording before the build", 0 <= look_at < build_at, f"look at {look_at}, build at {build_at}")
+
+# The owner's macOS (9 November): `rvictl -l` lists the iPhone "with interface (null)" while rvi0 records.
+UDID = "00008120-0011223344556677"
+NULL_LISTED = f"Current Active Devices:\n\n\t[1] {UDID} with interface (null)\n"
+if os.path.exists(cl):
+    sys.path.insert(0, ROOT)
+    import capture_look  # noqa: E402
+    old = [l for l in NULL_LISTED.splitlines() if UDID in l and re.search(r"\brvi\d+\b", l)]
+    check("rvictl -l (null): the old rule (that list only) finds no interface — the bug, reproduced", not old)
+    check("rvictl -l (null): the one rvi interface this Mac has is taken (ifconfig rvi0)",
+          capture_look.interface_for(NULL_LISTED, UDID, "", ["rvi0"]) == "rvi0")
+    check("rvictl -l (null), several rvi interfaces: no guess", capture_look.interface_for(NULL_LISTED, UDID, "", ["rvi0", "rvi1"]) == "")
+
+# The owner's run (9 November): the guide copied ios-measure alone, and q1's WebRTC-off check, which reads
+# the macOS app's PrivacyScripts.swift beside it, read NOT MEASURED after the whole run.
+SHIM = "Sources/PrivacyBrowser/Browser/PrivacyScripts.swift"
+def copies_shim(guide):
+    return any("git archive origin/claude/ios-app-measure" in l and f" {SHIM} " in l + " " for l in guide.splitlines())
+check("the old guide's copy lacks PrivacyScripts.swift — the bug, reproduced",
+      not copies_shim("git archive origin/claude/ios-app-measure ios-measure | tar -x -C ~/lumen-run/q1\n"))
+check("RUN_Q1_Q4.md copies PrivacyScripts.swift beside ios-measure", copies_shim(open(os.path.join(ROOT, "RUN_Q1_Q4.md"), encoding="utf-8").read()))
+check("q2.py reads PrivacyScripts.swift where the guide puts it (the folder that holds ios-measure)",
+      f'os.path.join(ROOT, "{SHIM}")' in open(os.path.join(HOST, "q2.py"), encoding="utf-8").read())
+shim_at = script.find("PrivacyScripts.swift")
+check("run_device.sh stops before the build without PrivacyScripts.swift", 0 <= shim_at < build_at, f"at {shim_at}, build at {build_at}")
 
 # The summary says what was not measured, beside the count.
 probe2 = r"""
