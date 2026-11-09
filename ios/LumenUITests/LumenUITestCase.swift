@@ -269,7 +269,13 @@ class LumenUITestCase: XCTestCase {
         typeInto(app.textFields["proxyPort"], port)
         typeInto(app.textFields["proxyUser"], user)
         typeInto(app.secureTextFields["proxyPassword"], password)
-        app.buttons["saveProxy"].tap()
+        // A touch while the keyboard still moves is lost (CI run 29: the form of the second proxy stayed
+        // open): if the form is still there after 5 s, its button is touched again.
+        let save = app.buttons["saveProxy"]
+        save.tap()
+        for _ in 0..<2 where !field.waitForNonExistence(timeout: 5) {
+            if save.isHittable { save.tap() }
+        }
         waitGone(field, "the proxy form closes (\(name))")
         // iOS must not offer to keep the proxy's password among the person's own (CI runs 12, 13: its
         // "Save Password?" came a moment after the form closed, as a remote view app.alerts does
