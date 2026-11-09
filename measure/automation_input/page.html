@@ -1,0 +1,51 @@
+<!doctype html>
+<meta charset=utf-8>
+<title>input probe</title>
+<style>
+  body { font: 16px -apple-system; margin: 0; padding: 20px; height: 3000px; }
+  #button { position: absolute; left: 40px; top: 40px; width: 160px; height: 40px; }
+  #field { position: absolute; left: 40px; top: 120px; width: 240px; height: 30px; }
+  #area { position: absolute; left: 40px; top: 190px; width: 240px; height: 60px; border: 1px solid #888; }
+</style>
+<button id=button>Button</button>
+<input id=field autocomplete=off>
+<div id=area contenteditable></div>
+<script>
+// Everything a page can learn of one input event, recorded in the page's own world, as a detector
+// would. Read back by the probe (probe.swift) with window.__take().
+(() => {
+  const log = [];
+  const types = ['pointerover', 'pointerenter', 'pointermove', 'pointerdown', 'pointerup', 'pointercancel', 'pointerout',
+    'pointerleave', 'mouseover', 'mouseenter', 'mousemove', 'mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu',
+    'mouseout', 'mouseleave', 'wheel', 'scroll', 'keydown', 'keypress', 'beforeinput', 'input', 'keyup', 'focus',
+    'blur', 'focusin', 'focusout', 'touchstart', 'touchend', 'selectionchange', 'visibilitychange'];
+  const pick = (e) => {
+    const r = { type: e.type, trusted: e.isTrusted, t: Math.round(e.timeStamp * 10) / 10,
+      target: e.target && (e.target.id || e.target.nodeName || String(e.target)),
+      hasFocus: document.hasFocus(), visibility: document.visibilityState,
+      activation: navigator.userActivation ? [navigator.userActivation.isActive, navigator.userActivation.hasBeenActive] : null };
+    for (const k of ['clientX', 'clientY', 'screenX', 'screenY', 'movementX', 'movementY', 'button', 'buttons', 'detail',
+      'pointerType', 'pointerId', 'isPrimary', 'pressure', 'width', 'height', 'key', 'code', 'keyCode', 'which', 'location',
+      'repeat', 'isComposing', 'inputType', 'data', 'deltaX', 'deltaY', 'deltaMode', 'ctrlKey', 'shiftKey', 'altKey', 'metaKey'])
+      if (k in e) r[k] = e[k];
+    return r;
+  };
+  for (const type of types) {
+    (type === 'visibilitychange' || type === 'selectionchange' ? document : window)
+      .addEventListener(type, (e) => { if (log.length < 400) log.push(pick(e)); }, { capture: true, passive: true });
+  }
+  window.__take = () => {
+    const out = { events: log.splice(0), hasFocus: document.hasFocus(), visibility: document.visibilityState,
+      active: document.activeElement && (document.activeElement.id || document.activeElement.nodeName),
+      field: document.getElementById('field').value, area: document.getElementById('area').textContent,
+      scrollY: window.scrollY,
+      activation: navigator.userActivation ? [navigator.userActivation.isActive, navigator.userActivation.hasBeenActive] : null,
+      win: [window.screenX, window.screenY, window.outerWidth, window.outerHeight, window.innerWidth, window.innerHeight],
+      screen: [screen.width, screen.height, screen.availLeft, screen.availTop, screen.availWidth, screen.availHeight] };
+    return JSON.stringify(out);
+  };
+  window.__rect = (id) => { const r = document.getElementById(id).getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; };
+  window.__reset = () => { document.getElementById('field').value = ''; document.getElementById('area').textContent = '';
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); window.scrollTo(0, 0); log.length = 0; return true; };
+})();
+</script>

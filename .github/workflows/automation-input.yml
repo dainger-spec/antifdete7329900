@@ -1,0 +1,35 @@
+# claude/measure-automation-input — never merged. What a page sees of input an app sends into its
+# own web view, by each route (AppKit to the window or the view, Quartz into the view, posted to the
+# process, posted at the HID level) and in each window state (key, another window key, another app
+# active, off every screen) — before the automation's shared mechanism is chosen (the lead, 9 November).
+name: Automation input routes (measurement)
+on:
+  push:
+    branches: ['claude/measure-automation-input']
+jobs:
+  measure:
+    name: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: The machine
+        run: sw_vers; system_profiler SPDisplaysDataType | grep -E "Resolution|Display Type|Main Display" || true
+      - name: Input routes × window states
+        timeout-minutes: 15
+        run: |
+          mkdir -p build/AIProbe.app/Contents/MacOS out
+          swiftc -o build/AIProbe.app/Contents/MacOS/ai-probe measure/automation_input/probe.swift
+          printf '%s' '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>io.lumenbrowser.measure.aiprobe</string><key>CFBundleExecutable</key><string>ai-probe</string><key>CFBundleName</key><string>AIProbe</string><key>CFBundlePackageType</key><string>APPL</string><key>NSPrincipalClass</key><string>NSApplication</string></dict></plist>' > build/AIProbe.app/Contents/Info.plist
+          codesign -s - --force build/AIProbe.app
+          build/AIProbe.app/Contents/MacOS/ai-probe "$PWD/measure/automation_input/page.html" > out/probe.txt 2>&1 || echo "probe exited $?"
+          python3 measure/automation_input/analyse.py out/probe.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: automation-input-${{ matrix.runner }}
+          path: out
