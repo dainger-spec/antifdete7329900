@@ -330,6 +330,15 @@ class LumenUITestCase: XCTestCase {
         wait(sessions, "back on the session list", file: file, line: line)
     }
 
+    /// The session's device profile: "Полный" or "Упрощённый", from its settings.
+    func chooseProfile(_ level: String, in session: String, file: StaticString = #filePath, line: UInt = #line) {
+        app.buttons["settingsButton"].tap()
+        wait(app.buttons["settingsDone"], "the settings open", file: file, line: line)
+        reveal(app.segmentedControls["profileLevel"], "the device profile's choice is there").buttons[level].tap()
+        app.buttons["settingsDone"].tap()
+        waitForBrowser(session: session, file: file, line: line)
+    }
+
     func chooseProxy(_ name: String, in session: String, file: StaticString = #filePath, line: UInt = #line) {
         app.buttons["settingsButton"].tap()
         wait(app.buttons["settingsDone"], "the settings open")

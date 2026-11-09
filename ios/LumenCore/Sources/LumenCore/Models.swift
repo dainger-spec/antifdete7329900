@@ -64,9 +64,18 @@ public struct SessionSettings: Codable, Equatable, Sendable {
     /// The noise seed: stable for the session's whole life, different between sessions.
     public var noiseSeed: String
 
+    /// A new session's device profile is full (the owner, 8 November): canvas, WebGL and audio noised,
+    /// each session its own. What a script changes is only what varies from one iPhone to another; what
+    /// WebKit gives every iPhone alike — 4 cores, "Apple GPU", the platform, 5 touch points — is left to
+    /// WebKit, since a session that changed it would stand out from every iPhone.
+    public static var newSessionMode: FingerprintMode {
+        Faults.isActive(.profileDefaultsReal) ? .real : .noise   // the planted fault: a new session is not profiled
+    }
+
     public init(searchEngine: SearchEngine = .google, userAgent: UserAgentChoice = .thisDevice,
-                locale: LocaleChoice = .proxyCountry, canvas: FingerprintMode = .real, webGL: FingerprintMode = .real,
-                audio: FingerprintMode = .real, noiseSeed: String = UUID().uuidString) {
+                locale: LocaleChoice = .proxyCountry, canvas: FingerprintMode = SessionSettings.newSessionMode,
+                webGL: FingerprintMode = SessionSettings.newSessionMode,
+                audio: FingerprintMode = SessionSettings.newSessionMode, noiseSeed: String = UUID().uuidString) {
         self.searchEngine = searchEngine
         self.userAgent = userAgent
         self.locale = locale
@@ -79,6 +88,27 @@ public struct SessionSettings: Codable, Equatable, Sendable {
 
 public enum FingerprintMode: String, Codable, CaseIterable, Sendable {
     case off, real, noise
+}
+
+extension SessionSettings {
+    /// The device profile as one choice: full (canvas, WebGL and audio noised) or simplified — the
+    /// User-Agent, the time zone and the language only, canvas, WebGL and audio as the device has them.
+    public enum ProfileLevel: String, Sendable { case full, simplified, custom }
+
+    public var profileLevel: ProfileLevel {
+        get {
+            if canvas == .noise && webGL == .noise && audio == .noise { return .full }
+            if canvas == .real && webGL == .real && audio == .real { return .simplified }
+            return .custom
+        }
+        set {
+            switch newValue {
+            case .full: (canvas, webGL, audio) = (.noise, .noise, .noise)
+            case .simplified: (canvas, webGL, audio) = (.real, .real, .real)
+            case .custom: break
+            }
+        }
+    }
 }
 
 public enum LocaleChoice: Codable, Equatable, Sendable {

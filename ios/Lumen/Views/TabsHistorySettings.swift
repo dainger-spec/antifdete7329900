@@ -221,10 +221,21 @@ struct SessionSettingsView: View {
                 } footer: {
                     Text("Язык страницы меняется только в navigator.language: заголовок Accept-Language WebKit на iPhone задаёт один на всё приложение.")
                 }
-                Section("Профиль устройства") {
+                Section {
+                    Picker("Профиль устройства", selection: $settings.profileLevel) {
+                        Text("Полный").tag(SessionSettings.ProfileLevel.full)
+                        Text("Упрощённый").tag(SessionSettings.ProfileLevel.simplified)
+                        if settings.profileLevel == .custom { Text("Свой").tag(SessionSettings.ProfileLevel.custom) }
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("profileLevel")
                     modePicker("Канвас", $settings.canvas, id: "canvasMode")
                     modePicker("WebGL", $settings.webGL, id: "webglMode")
                     modePicker("Звук", $settings.audio, id: "audioMode")
+                } header: {
+                    Text("Профиль устройства")
+                } footer: {
+                    Text("Полный: канвас, WebGL и звук у профиля свои. Упрощённый: только строка браузера, часовой пояс и язык.")
                 }
                 Section("Поисковик") {
                     Picker("Поисковик", selection: $settings.searchEngine) {

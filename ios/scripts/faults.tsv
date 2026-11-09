@@ -48,3 +48,5 @@ settingsNotSaved	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	iOS
 noWebPageNamespace	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	window.browser is WebKit's own
 lockedOpensDirect	core	LumenCoreTests.LockTests/testLockRule	
 lockedOpensDirect	ui	LumenUITests/SessionsTests/testLockedProfileNeverOpensDirect	a locked profile reached the site from the device's address
+profileDefaultsReal	core	LumenCoreTests.ProfileTests/testANewSessionIsFullyProfiled	
+profileDefaultsReal	ui	LumenUITests/SettingsTests/testANewSessionHasTheFullProfile	a new session's device profile is full by default

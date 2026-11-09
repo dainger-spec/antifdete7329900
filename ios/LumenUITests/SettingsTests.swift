@@ -13,10 +13,14 @@ final class SettingsTests: LumenUITestCase {
         createSession(name: "Профиль")
         openSession("Профиль")
 
-        // As it comes: Safari's User-Agent, nothing replaced.
+        // As it comes: Safari's User-Agent (the device profile is full by default:
+        // testANewSessionHasTheFullProfile). The device's own canvas and audio, for what follows, are
+        // read with the simplified profile — nothing replaced.
         openPage("\(site)/env?first=1")
         let ua = pageLine("ua: ")
         XCTAssertTrue(ua.contains("Version/") && ua.hasSuffix("Safari/604.1"), "a new session reads as Safari: \(ua)")
+        chooseProfile("Упрощённый", in: "Профиль")
+        openPage("\(site)/env?simplified=1")
         let realCanvas = pageLine("canvas: ")
         let realAudio = pageLine("audio: ")
         XCTAssertEqual(pageLine("png: "), "png: 0", "the canvas's PNG drawn back reads as getImageData (nothing replaced)")
@@ -25,7 +29,7 @@ final class SettingsTests: LumenUITestCase {
         // As Safari on an iPhone (iOS 27.2) and on the Mac: WebKit's own window.browser.
         XCTAssertEqual(pageLine("browser: "), "browser: [object WebPageNamespace] runtime [object WebPageRuntime] connect,sendMessage own,true,true,true,object",
                        "window.browser is WebKit's own, as in Safari")
-        XCTAssertEqual(pageLine("lies: "), "lies: 0", "the natives check finds nothing (nothing replaced yet)")
+        XCTAssertEqual(pageLine("lies: "), "lies: 0", "the natives check finds nothing (nothing replaced)")
 
         // Through the Berlin proxy: Berlin's time zone and German, from the proxy's check.
         chooseProxy("Берлин", in: "Профиль")
@@ -86,6 +90,23 @@ final class SettingsTests: LumenUITestCase {
         shot("43 after relaunch")
     }
 
+    /// The owner (8 November): a new session's device profile is full — canvas and audio its own,
+    /// none of it seen by the natives check —, and "Упрощённый" gives the device's back.
+    func testANewSessionHasTheFullProfile() {
+        launch(reset: true)
+        createSession(name: "Новый")
+        openSession("Новый")
+        openPage("\(site)/env?profile=default")
+        let canvas = pageLine("canvas: ")
+        let audio = pageLine("audio: ")
+        XCTAssertEqual(pageLine("lies: "), "lies: 0", "the natives check finds none of the full profile's replacements")
+        chooseProfile("Упрощённый", in: "Новый")
+        openPage("\(site)/env?profile=simplified")
+        XCTAssertNotEqual(canvas, pageLine("canvas: "), "a new session's device profile is full by default: its canvas is its own")
+        XCTAssertNotEqual(audio, pageLine("audio: "), "a new session's device profile is full by default: its audio is its own")
+        shot("47 the full profile, then the simplified one")
+    }
+
     /// Canvas noise with the device's own time zone: a worker made from a blob must read the page's
     /// canvas. Until the mac app's fix of 8 November (claude/redesign 7fac7fd) PrivacyScripts'
     /// patchWindow hooked blob workers only with a replaced time zone, so here the worker read the real
@@ -94,7 +115,9 @@ final class SettingsTests: LumenUITestCase {
         launch(reset: true)
         createSession(name: "Воркер")
         openSession("Воркер")
-        // The control: nothing replaced, the worker reads what the page reads — the comparison works.
+        // The control: the simplified profile, nothing replaced — the worker reads what the page reads,
+        // the comparison works.
+        chooseProfile("Упрощённый", in: "Воркер")
         openPage("\(site)/env?worker=real")
         let real = pageLine("canvas: ")
         XCTAssertTrue(pageLine("worker: ").hasPrefix("worker: same"), "with nothing replaced a blob worker reads the page's canvas: \(pageLine("worker: "))")

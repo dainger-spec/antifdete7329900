@@ -191,3 +191,23 @@ final class LockTests: XCTestCase {
         XCTAssertFalse(try decoder.decode(Session.self, from: JSONSerialization.data(withJSONObject: without)).boundToProxy)
     }
 }
+
+/// A new session's device profile is full by default (the owner, 8 November); "simplified" is one choice.
+final class ProfileTests: XCTestCase {
+    func testANewSessionIsFullyProfiled() {
+        let settings = SessionSettings()
+        XCTAssertEqual([settings.canvas, settings.webGL, settings.audio], [.noise, .noise, .noise], "canvas, WebGL and audio noised")
+        XCTAssertEqual(settings.profileLevel, .full)
+        XCTAssertEqual(Session(name: "Новая").settings.profileLevel, .full, "a new session's settings are the full profile")
+    }
+
+    func testSimplifiedAndBack() {
+        var settings = SessionSettings()
+        settings.profileLevel = .simplified
+        XCTAssertEqual([settings.canvas, settings.webGL, settings.audio], [.real, .real, .real])
+        settings.webGL = .off
+        XCTAssertEqual(settings.profileLevel, .custom, "one changed by hand: neither")
+        settings.profileLevel = .full
+        XCTAssertEqual([settings.canvas, settings.webGL, settings.audio], [.noise, .noise, .noise])
+    }
+}

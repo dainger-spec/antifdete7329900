@@ -182,8 +182,9 @@ final class RelayTests: LumenUITestCase {
         let seen = XCTWaiter.wait(for: [expectation(for: leak, evaluatedWith: verdict)], timeout: 25)
         XCTAssertEqual(seen, .completed, "the probe sees the device's own address in a session without a proxy: \(verdict.label)")
         shot("45 the probe: a session without a proxy is a leak")
-        // Its worker check, which the owner's iPhone run reads in a session with canvas noise: here, with
-        // nothing replaced, the page and a worker made from a blob draw the same.
+        // Its worker check, which the owner's iPhone run read in a session with canvas noise: here a new
+        // session's full device profile (canvas noise, the device's time zone) — the page and a worker made
+        // from a blob draw the same.
         let worker = app.staticTexts["probeWorker"]
         XCTAssertTrue(worker.waitForExistence(timeout: 15), "the probe's worker check answers")
         XCTAssertTrue(worker.label.hasPrefix("воркер из blob: тот же канвас"), "the probe's worker check works in its page: \(worker.label)")

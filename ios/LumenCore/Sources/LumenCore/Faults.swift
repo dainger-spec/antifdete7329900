@@ -46,6 +46,7 @@ public enum Fault: String, CaseIterable, Sendable {
     case settingsNotSaved        // a session's settings are not written
     case userAgentIgnored        // the chosen User-Agent is not given to the web view
     case workerHookTimeZoneOnly  // blob workers hooked only with a replaced time zone (page-shim.js before 8 November)
+    case profileDefaultsReal     // a new session's canvas, WebGL and audio are left real: not profiled by default
     case timeZoneIgnored         // the page keeps the device's time zone
     case noiseUnstable           // the canvas noise seed changes on every read
     case canvasNoiseLowBit       // the canvas noise flips a colour's low bit, which a canvas cannot hold at partial alpha: its PNG reads back otherwise
