@@ -187,14 +187,30 @@ run_ui() { # result-name, fault ('' for none), -only-testing args...
     local name="$1" fault="$2"; shift 2
     rm -rf "$OUT/$name.xcresult"
     TEST_RUNNER_LUMEN_FAULTS="$fault" xcodebuild test-without-building "${COMMON[@]}" "$@" \
-        -resultBundlePath "$OUT/$name.xcresult" >"$OUT/$name.txt" 2>&1
+        -resultBundlePath "$OUT/$name.xcresult" >"$OUT/$name.txt" 2>&1 &
+    local pid=$!
+    # An app that never goes idle (CI run 35, red proxyChangeNotLive: after the first page something
+    # in the app kept animating, every step then waited XCTest's 60 s for it, the red took 69 minutes
+    # and the job ran out of time). After three such waits its screen is kept and the run is stopped:
+    # it says nothing about the check (lost(), below), and the screen shows what kept it busy.
+    while kill -0 "$pid" 2>/dev/null; do
+        sleep 10
+        if [[ "$(grep -c 'animations complete notification not received' "$OUT/$name.txt" 2>/dev/null)" -ge 3 ]]; then
+            mkdir -p "$OUT/screens"
+            xcrun simctl io "$UDID" screenshot "$OUT/screens/stuck-$name.png" >/dev/null 2>&1
+            echo "LUMEN CI: the app never went idle (three 60 s waits) — stopped; screen: screens/stuck-$name.png" >>"$OUT/$name.txt"
+            kill "$pid" 2>/dev/null; sleep 5; kill -9 "$pid" 2>/dev/null
+            break
+        fi
+    done
+    wait "$pid"
     local code=$?
     # The relays' own lines (Documents/relay.log, DEBUG builds): where a slow page spent its time.
     local data; data="$(xcrun simctl get_app_container "$UDID" io.lumenbrowser.ios data 2>/dev/null)"
     [[ -n "$data" && -f "$data/Documents/relay.log" ]] && cp "$data/Documents/relay.log" "$OUT/$name-relay.log"
     return $code
 }
-lost() { grep -q -E "crashed|Lost connection to the application|Failed to get matching snapshots|Failed to launch|does not have a process ID|is not running|Failed to terminate" "$1"; }
+lost() { grep -q -E "crashed|Lost connection to the application|Failed to get matching snapshots|Failed to launch|does not have a process ID|is not running|Failed to terminate|never went idle" "$1"; }
 while IFS=$'\t' read -r fault kind test expect; do
     [[ "$fault" =~ ^#|^$ ]] && continue
     [[ "$kind" == "ui" ]] || continue
@@ -204,7 +220,7 @@ while IFS=$'\t' read -r fault kind test expect; do
         # The app crashed or was lost (CI run 21: "does not have a process ID" at launch): that says
         # nothing about the check, so the red runs once more; its second run is the one that counts.
         mv "$OUT/red-$fault.txt" "$OUT/red-$fault-lost.txt"
-        say "again ui $fault: the app was lost in the first try — $(grep -m1 -E 'crashed|Lost connection|Failed to|process ID' "$OUT/red-$fault-lost.txt" | sed 's/.*error: //' | cut -c1-120)"
+        say "again ui $fault: the app was lost in the first try — $(grep -m1 -E 'crashed|Lost connection|Failed to|process ID|never went idle' "$OUT/red-$fault-lost.txt" | sed 's/.*error: //' | cut -c1-120)"
         run_ui "red-$fault" "$fault" "-only-testing:$test"; code=$?
     fi
     if [[ $code -eq 0 ]]; then
@@ -214,7 +230,7 @@ while IFS=$'\t' read -r fault kind test expect; do
         # terminates the app (CI run 20, reloadIgnored: the red failed in its own check, and was
         # counted invalid for those lines). A crash or a lost app says so in the words above.
         # A crash fails every test whatever the fault: it proves nothing about the check.
-        say "RED INVALID ui $fault: the app crashed or was lost, not the check — $(grep -m1 -E 'crashed|Lost connection|Failed to' "$OUT/red-$fault.txt" | sed 's/.*error: //' | cut -c1-160)"; STATUS=1
+        say "RED INVALID ui $fault: the app crashed or was lost, not the check — $(grep -m1 -E 'crashed|Lost connection|Failed to|never went idle' "$OUT/red-$fault.txt" | sed 's/.*error: //' | cut -c1-160)"; STATUS=1
     else
         # It counts only if the check named for this fault is the one that failed (the first failure:
         # the test stops there), not any other — CI run 12: newTabNotOpened "failed" with the app gone.
@@ -230,7 +246,7 @@ done < "$HERE/scripts/faults.tsv"
 if run_ui green "" ${ONLY[@]+"${ONLY[@]}"}; then
     say "GREEN ui: $(grep -E 'Executed [0-9]+ test' "$OUT/green.txt" | tail -1)"
 else
-    grep -E "error: -\[|failed -|Test Case .* failed" "$OUT/green.txt" | head -20 | tee -a "$LOG"; say "NOT GREEN ui"; STATUS=1
+    grep -E "error: -\[|failed -|Test Case .* failed|never went idle" "$OUT/green.txt" | head -20 | tee -a "$LOG"; say "NOT GREEN ui"; STATUS=1
 fi
 verdicts ui "$OUT/green.txt"
 # What the person saw: the screenshots the tests attached.
