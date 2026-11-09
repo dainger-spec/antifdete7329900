@@ -185,6 +185,9 @@ enum ProfileSessionHost {
             manager.onProxyLocationUnknown = { _ in ProfileSessionHost.send(.proxyLocationUnknown) }
             // Where it exits, when known: the country's flag on this process's Dock tile.
             BrowserSession.onExitLocation = { _, location in DockIcon.showExit(country: location?.countryCode) }
+            // A scenario's run log and its end, to the manager as they come.
+            manager.onScenarioLine = { _, runID, line in ProfileSessionHost.send(.scenarioLine(runID: runID, line)) }
+            manager.onScenarioEnded = { _, runID, outcome in ProfileSessionHost.send(.scenarioEnded(runID: runID, outcome)) }
             manager.onWarmUpProgress = { [weak self, weak manager] id in
                 guard let robot = manager?.warmUpRobot(for: id) else { return }
                 let status = robot.status
@@ -280,6 +283,13 @@ enum ProfileSessionHost {
                 }
             case .stopWarmUp:
                 manager?.stopWarmUp(profileID)
+            case .runScenario(let request):
+                if manager?.runScenario(profileID, name: request.name, source: request.source,
+                                        parametersJSON: request.parametersJSON, runID: request.runID) != true {
+                    ProfileSessionHost.send(.scenarioEnded(runID: request.runID, .failed("the profile could not start the run")))
+                }
+            case .stopScenario(let reason):
+                manager?.stopScenario(profileID, reason: reason)
             case .checkNetwork(let probe):
                 Task { @MainActor in
                     ProfileSessionHost.send(.networkReport(await ProfileNetworkGuard.report(probe: probe)))

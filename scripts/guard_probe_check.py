@@ -152,7 +152,14 @@ def main():
         rest = "".join(rest_lines)
         time.sleep(2)
         subprocess.run(["sudo", "-n", "pkill", "-INT", "-f", "tcpdump -i pktap"], check=False)
-        tcpdump.wait(timeout=20)
+        try:
+            tcpdump.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            # CI 767: tcpdump did not stop on SIGINT in 20 s and the check died here, before it had
+            # judged anything. Its output is line-buffered (-l): what it captured is in the file.
+            print("GUARD-PROBE-CHECK note: tcpdump did not stop on SIGINT in 20 s; stopped with SIGKILL")
+            subprocess.run(["sudo", "-n", "pkill", "-KILL", "-f", "tcpdump -i pktap"], check=False)
+            tcpdump.wait(timeout=20)
     print(first.rstrip())
     print(rest.rstrip())
     if not match:

@@ -31,6 +31,37 @@ import Foundation
 /// WebKit version with behaviours worth matching, a new behaviour set can be registered and
 /// pointed at from new generations here, without touching the profile format or the rest of
 /// the app (see `BehaviorSets` in the app layer).
+/// What an iPhone shows a page of itself that the Mac's engine does not: measured on the owner's
+/// iPhone (iOS 27, Safari 27, 8 November) with scripts/phone_page.py — a 402×874 point screen at
+/// 3×, five touch points, the platform "iPhone".
+public struct PhoneDevice: Equatable, Sendable {
+    public let platform: String
+    public let screenWidth: Int
+    public let screenHeight: Int
+    public let scale: Double
+    public let maxTouchPoints: Int
+
+    public init(platform: String, screenWidth: Int, screenHeight: Int, scale: Double, maxTouchPoints: Int) {
+        self.platform = platform
+        self.screenWidth = screenWidth
+        self.screenHeight = screenHeight
+        self.scale = scale
+        self.maxTouchPoints = maxTouchPoints
+    }
+
+    public static let ownersIPhone = PhoneDevice(platform: "iPhone", screenWidth: 402, screenHeight: 874, scale: 3, maxTouchPoints: 5)
+}
+
+/// How far an iPhone view goes to look like a phone (the owner, 8 November). `full`, the default:
+/// every value of the phone a page reads — the engine's own where WebKit has a setting for it (the
+/// platform, the pixel density), a script's for the rest (the screen, touch, the pointer and hover,
+/// the orientation), which a page that looks for them can tell are a script's. `engineOnly`: only
+/// what WebKit itself answers, so nothing a page reads is a script's — and the screen, touch and
+/// the pointer stay this Mac's, which a page sees at once.
+public enum PhoneDisguise: String, Codable, Sendable, CaseIterable {
+    case full, engineOnly
+}
+
 public struct DeviceGeneration: Identifiable, Equatable, Sendable {
     public enum Platform: String, Codable, Sendable, CaseIterable {
         case macOS, iOS, iPadOS
@@ -60,10 +91,14 @@ public struct DeviceGeneration: Identifiable, Equatable, Sendable {
     /// count: it sends the Mac's User-Agent, as Safari on an iPad does by default, so a page takes
     /// it for a Mac, and iPads themselves differ (an A-series iPad 4, an M-series iPad 8).
     public let processorCores: Int?
+    /// The phone an iPhone view presents itself as (`PhoneDevice`); nil for the Mac and the iPad
+    /// view (an iPad sends the Mac's User-Agent).
+    public let phone: PhoneDevice?
 
     public init(id: String, nameKey: String, platform: Platform, osVersionLabel: String,
                 userAgent: String, matchesEngine: Bool,
-                defaultWebRTCPolicy: WebRTCPolicy, behaviorSetID: String, processorCores: Int? = nil) {
+                defaultWebRTCPolicy: WebRTCPolicy, behaviorSetID: String, processorCores: Int? = nil,
+                phone: PhoneDevice? = nil) {
         self.id = id
         self.nameKey = nameKey
         self.platform = platform
@@ -73,6 +108,7 @@ public struct DeviceGeneration: Identifiable, Equatable, Sendable {
         self.defaultWebRTCPolicy = defaultWebRTCPolicy
         self.behaviorSetID = behaviorSetID
         self.processorCores = processorCores
+        self.phone = phone
     }
 
     /// The User-Agent this generation declares on a Mac whose Safari is `hostSafariVersion`
@@ -155,6 +191,18 @@ public enum SafariVersions {
         return number
     }
 
+    /// Whether Safari of `version` on a Mac gives pages `window.safari` (its legacy
+    /// `pushNotification` object), measured in a plain Safari window (scripts/window_safari_check.py,
+    /// run 42471690410, 8 November): Safari 26.6.2 and 27.0.1 do, Safari 27.2 does not — nor the owner's
+    /// Safari on his Mac (8 November). Safari 27.1 was not measured; it is counted with 27.0.
+    /// No iPhone or iPad Safari has it.
+    public static func givesWindowSafari(_ version: String) -> Bool {
+        let parts = version.split(separator: ".").compactMap { Int($0) }
+        guard let major = parts.first else { return false }
+        let minor = parts.dropFirst().first ?? 0
+        return major < 27 || (major == 27 && minor < 2)
+    }
+
     /// How far `version` is from `host` (this Mac's Safari, e.g. "26.0.1").
     public static func distance(of version: String, fromHost host: String) -> Distance {
         func parts(_ text: String) -> [Int] { text.split(separator: ".").compactMap { Int($0) } }
@@ -182,11 +230,13 @@ public enum DeviceGenerations {
         DeviceGeneration(
             id: "ios-27", nameKey: "gen.ios27", platform: .iOS, osVersionLabel: "27",
             userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Mobile/15E148 Safari/604.1",
-            matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior, processorCores: 6),
+            matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior, processorCores: 6,
+            phone: .ownersIPhone),
         DeviceGeneration(
             id: "ios-26", nameKey: "gen.ios26", platform: .iOS, osVersionLabel: "26",
             userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Mobile/15E148 Safari/604.1",
-            matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior, processorCores: 6),
+            matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior, processorCores: 6,
+            phone: .ownersIPhone),
         DeviceGeneration(
             id: "ipados-26", nameKey: "gen.ipados26", platform: .iPadOS, osVersionLabel: "26",
             // Safari's default on an iPad: the desktop website, with the Mac's UA.

@@ -160,7 +160,7 @@ safe('features', () => {
     'document.featurePolicy', 'document.fonts', 'Intl.Segmenter', 'Intl.DurationFormat', 'Intl.DisplayNames', 'Intl.ListFormat',
     'Temporal', 'WebAssembly', 'WebAssembly.Memory', 'structuredClone', 'scheduler', 'requestIdleCallback', 'queueMicrotask',
     'ResizeObserver', 'IntersectionObserver', 'PerformanceObserver', 'performance.memory', 'performance.measureUserAgentSpecificMemory',
-    'crossOriginIsolated', 'isSecureContext', 'TrustedTypes', 'trustedTypes', 'chrome', 'safari', 'webkit', 'opr', 'external',
+    'crossOriginIsolated', 'isSecureContext', 'TrustedTypes', 'trustedTypes', 'chrome', 'safari', 'browser', 'webkit', 'opr', 'external',
     'openDatabase', 'webkitResolveLocalFileSystemURL', 'webkitRequestFileSystem', 'StorageManager', 'webkitStorageInfo',
     'CanvasCaptureMediaStreamTrack', 'ImageCapture', 'MediaStreamTrackGenerator', 'EyeDropper', 'LaunchQueue', 'Sanitizer',
     'AbsoluteOrientationSensor', 'Accelerometer', 'AmbientLightSensor', 'NDEFReader', 'HID', 'Serial', 'Keyboard', 'IdleDetector',
@@ -255,6 +255,17 @@ safe('safariShape', () => {
           push && typeof push.permission === 'function' ? JSON.stringify(push.permission('web.example.test')) : '-'].join('|');
 });
 safe('webkitObject', () => typeof window.webkit);
+// window.browser: WebKit's WebPageNamespace, which Safari gives every page (the Mac and an iPhone,
+// no extension needed; claude/measure-canvas-browser): its class, runtime's and the property's shape.
+safe('browserShape', () => {
+  const b = window.browser;
+  if (!b) return 'absent';
+  const d = Object.getOwnPropertyDescriptor(window, 'browser');
+  const runtime = b.runtime;
+  return [Object.prototype.toString.call(b), Object.getOwnPropertyNames(b).sort().join(','),
+    Object.prototype.toString.call(runtime), Object.getOwnPropertyNames(Object.getPrototypeOf(runtime)).sort().join(','),
+    d ? ['own', d.enumerable, d.configurable, d.writable, typeof d.value].join(',') : 'inherited'].join(' ');
+});
 safe('windowOwnCount', () => Object.getOwnPropertyNames(window).length);
 // The names themselves, so that a difference in the count says which ones (scripts/safari_reference.py).
 safe('windowOwnNames', () => Object.getOwnPropertyNames(window).sort().join(' '));

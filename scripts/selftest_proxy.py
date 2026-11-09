@@ -53,6 +53,10 @@ jump to a fragment `#x` is rewritten to `#/x`, as a single-page app's router mig
 shows an alert; `broken` closes the connection without an answer (a page that does not load). `/pb-warmup/log.json` lists every `/pb-warmup/` request with its Referer, Cookie and
 User-Agent headers and the time it came.
 
+`/pb-automation/form` and `/pb-automation/two` are the pages of the automation commands' checks
+(`automation_page`): elements to click, type into, wait for and scroll to, and a recorder of every
+input event (`window.__take()`).
+
 `/pb-leak?run=<id>` is the leak page for a profile hosted in Safari's chrome (SelfTest's
 `safariChromeThroughTheProxy`, scripts/egress_check.py): served for any host, it makes every kind of
 request a page can make — and that Safari makes for a page (its icons, its OpenSearch
@@ -225,6 +229,43 @@ def header(request: str, name: str) -> str:
                  if line.lower().startswith(prefix)), "")
 
 
+def automation_page(name: str) -> bytes:
+    """Pages for the automation commands' checks (SelfTest's `automationCommands`): `form` has a
+    button, a field, an element that appears after 0.8 s, one that goes after 0.8 s, five items,
+    a button far below (reached by scrolling), and a link to `two`; both record every input event
+    with what a detector reads of it (`window.__take()`)."""
+    recorder = (
+        "<script>(() => { const log = [];"
+        " const types = ['pointerover','pointermove','pointerdown','pointerup','mousedown','mouseup','click','dblclick',"
+        "'wheel','keydown','keyup','input','blur','focus'];"
+        " const pick = (e) => { const r = {type: e.type, trusted: e.isTrusted, t: Math.round(e.timeStamp * 10) / 10,"
+        " target: e.target && (e.target.id || e.target.nodeName || String(e.target)), hasFocus: document.hasFocus()};"
+        " for (const k of ['clientX','clientY','screenX','screenY','buttons','pressure','key','code','keyCode','shiftKey','detail'])"
+        " if (k in e) r[k] = e[k]; return r; };"
+        " for (const type of types) addEventListener(type, (e) => { if (log.length < 2000) log.push(pick(e)); }, {capture: true, passive: true});"
+        " window.__take = () => JSON.stringify({events: log.splice(0), active: navigator.userActivation ? navigator.userActivation.hasBeenActive : null});"
+        " })();</script>"
+    )
+    if name == "two":
+        body = "<h1 id=heading>Page two</h1><p id=back>Second page.</p>"
+    else:
+        items = "".join(f"<p class=item>Item {i}</p>" for i in range(5))
+        body = (
+            "<h1 id=heading>Automation form</h1>"
+            "<button id=button onclick=\"document.getElementById('clicked').textContent='clicked ' + (+document.getElementById('clicked').dataset.n + 1); document.getElementById('clicked').dataset.n = +document.getElementById('clicked').dataset.n + 1\">Press me</button>"
+            "<p id=clicked data-n=0>not clicked</p>"
+            "<p><input id=field autocomplete=off data-kind=text></p>"
+            "<p id=gone>Going away</p>" + items +
+            "<p><a id=next href=\"/pb-automation/two\">To page two</a></p>"
+            "<div style=\"height:2400px\"></div>"
+            "<button id=far onclick=\"this.textContent='far clicked'\">Far button</button>"
+            "<script>setTimeout(() => { const p = document.createElement('p'); p.id = 'late'; p.textContent = 'Late';"
+            " document.body.insertBefore(p, document.body.firstChild); document.getElementById('gone').remove(); }, 800);</script>"
+        )
+    return (f"<!doctype html><html><head><meta charset=utf-8><title>PB automation {html.escape(name)}</title>"
+            f"<style>body{{font:16px -apple-system;margin:20px}}</style>{recorder}</head><body>{body}</body></html>").encode()
+
+
 def warmup_page(name: str, run: str) -> bytes:
     """A page of the warm-up robot checks (see the module docstring)."""
     def esc(text: str) -> str:
@@ -248,6 +289,11 @@ def warmup_page(name: str, run: str) -> bytes:
         " const report = (what) => { if (seen[what]) return; seen[what] = true;"
         " fetch('/pb-warmup/event/' + encodeURIComponent(run) + '/' + encodeURIComponent(name) + '-' + what); };"
         " const probe = () => typeof window.webkit + '-' + Object.getOwnPropertyNames(window).filter((n) => /warm|robot/i.test(n)).join('_');"
+        # Whether the page is shown (a page in a window nobody can see is "hidden": timers and
+        # drawing slowed, which a site can tell), and whether trusted pointer moves reach it.
+        " report('visibility-' + document.visibilityState);"
+        " document.addEventListener('visibilitychange', () => report('visibilitychange-' + document.visibilityState));"
+        " addEventListener('mousemove', (e) => report(e.isTrusted ? 'move' : 'move-untrusted'), {passive: true});"
         " try { const last = localStorage.getItem('pbwarm-click'); if (last) { localStorage.removeItem('pbwarm-click'); report('clickglobals-' + last); } } catch (e) {}"
         " addEventListener('scroll', (e) => { report(e.isTrusted ? 'scroll' : 'scroll-untrusted'); report('globals-' + probe()); }, {passive: true});"
         " addEventListener('wheel', (e) => report(e.isTrusted ? 'wheel' : 'wheel-untrusted'), {passive: true});"
@@ -585,6 +631,8 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
         content_type = "text/html; charset=utf-8"
     elif plain_path == "/pb-login":
         body, content_type = login_page({key: values[0] for key, values in parse_qs(query).items()}), "text/html; charset=utf-8"
+    elif plain_path.startswith("/pb-automation/"):
+        body, content_type = automation_page(plain_path[len("/pb-automation/"):]), "text/html; charset=utf-8"
     elif plain_path == "/pb-warmup/log.json":
         with SERVED_LOCK:
             body, content_type = json.dumps(WARMUP_LOG).encode(), "application/json"

@@ -106,7 +106,7 @@ Each of these stays, in the design's own style (the owner, 1 November):
 - Deleted profiles whose folders are kept (R3): a banner above the list with Bring back, Remove for
   good, Remove the old folder, Show in Finder.
 - "Simplified mode" in a profile's own window when it is not Safari's: the chip in its toolbar, and
-  why on a click.
+  why on a click. Not in an iPhone or iPad view's window, ours by design (the owner, 9 November).
 - Files set aside as unreadable (`*.unreadable`): named in every confirmation of a deletion.
 
 ## Checked by

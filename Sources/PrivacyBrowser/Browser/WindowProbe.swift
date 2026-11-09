@@ -21,6 +21,15 @@ enum WindowProbeAction: Codable, Equatable {
     case dragBottomBar(Double)
     /// A picture of the window's content as it is drawn now (PNG, base64), for a person to look at.
     case picture
+    /// Every editing and browsing action a person takes in a browser window, done as the key
+    /// presses it, and what came of it, one line each in `detail` (`WindowAudit`). `withoutMenu`:
+    /// with the menu bar emptied first, as a process had none before d4cb4ed (0.1.4) — the control.
+    case audit(withoutMenu: Bool)
+    /// Taps on the selected tab's page: fields and a button laid over it, each pressed with the
+    /// mouse at its middle — the events handed straight to the web view, in the window's
+    /// coordinates (a runner's process cannot be the active app, run 42429698672) — and what the
+    /// page heard, as JSON in `detail` (`TapProbe`).
+    case tap
 }
 
 struct WindowLook: Codable, Equatable {
@@ -99,6 +108,26 @@ enum WindowProbe {
                 view.cacheDisplay(in: view.bounds, to: rep)
                 look.picture = rep.representation(using: .png, properties: [:])?.base64EncodedString()
                 look.found = look.picture != nil
+            }
+        case .audit(let withoutMenu):
+            look.action = "audit" + (withoutMenu ? " without a menu bar" : "")
+            if let window {
+                let before = ExceptionLog.reported
+                look.detail = await WindowAudit.run(window, controller: controller, withoutMenu: withoutMenu,
+                                                    addressField: addressField(in: window))
+                // An exception an action threw, which the run loop caught and lived through: named,
+                // so the self-test says which action threw what (CI 758 lost it in a crash).
+                if ExceptionLog.reported > before {
+                    let thrown = ExceptionLog.loggedLines(containing: "caught by the run loop").suffix(ExceptionLog.reported - before)
+                    look.detail += thrown.map { "\nexception during the actions: \($0.prefix(300))" }.joined()
+                }
+                look.found = true
+            }
+        case .tap:
+            look.action = "tap"
+            if let window, let webView = controller?.selectedTab?.webView {
+                look.detail = await TapProbe.run(webView, in: window)
+                look.found = !look.detail.isEmpty
             }
         case .search(let text):
             look.action = "search"

@@ -50,6 +50,17 @@ struct AutomationSettingsView: View {
                     SettingSwitch(isOn: $enabled, label: L("automation.enabled"))
                 }
                 .onChange(of: enabled) { _, on in apply(enabled: on) }
+                if !model.allowsAutomation {
+                    Text(L("automation.notInPlan"))
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: Theme.cornerRadius).fill(Theme.warningTint))
+                        .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius).stroke(Theme.warningLine))
+                        .padding(.vertical, 8)
+                }
                 SettingCustomRow(L("automation.port")) {
                     Text(L("automation.port.detail"))
                         .font(.lumenBody)

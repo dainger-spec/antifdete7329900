@@ -112,6 +112,12 @@ final class AutomationAPITests: XCTestCase {
         XCTAssertEqual(try route("GET", "/v1/profiles/a/cookies?format=netscape").get(), .exportCookies("a", .netscape))
         XCTAssertEqual(try route("GET", "/v1/profiles/a/cookies?format=extension").get(), .exportCookies("a", .extensionJSON))
         XCTAssertEqual(try route("POST", "/v1/profiles/a/cookies", body: "x").get(), .importCookies("a", Data("x".utf8)))
+        XCTAssertEqual(try route("POST", "/v1/profiles/a/scenario", body: "{\"source\": \"await page.goto('https://b.test/')\"}").get(),
+                       .runScenario("a", ScenarioRunSpec(source: "await page.goto('https://b.test/')", scenario: nil)))
+        XCTAssertEqual(try route("POST", "/v1/profiles/a/scenario", body: "{\"scenario\": \"Sign in\", \"params\": {\"n\": 2}}").get(),
+                       .runScenario("a", ScenarioRunSpec(source: nil, scenario: "Sign in", parametersJSON: "{\"n\":2}")))
+        XCTAssertEqual(try route("GET", "/v1/profiles/a/scenario").get(), .scenarioState("a"))
+        XCTAssertEqual(try route("POST", "/v1/profiles/a/scenario/stop").get(), .stopScenario("a"))
 
         func refused(_ method: String, _ target: String, body: String = "") throws -> Int? {
             if case .failure(let refusal) = try route(method, target, body: body) { return refusal.response.status }
@@ -124,6 +130,11 @@ final class AutomationAPITests: XCTestCase {
         XCTAssertEqual(try refused("POST", "/v1/profiles/a/start", body: "[1]"), 400)
         XCTAssertEqual(try refused("GET", "/v1/profiles/a/cookies?format=har"), 400)
         XCTAssertEqual(try refused("POST", "/v1/profiles/a/cookies"), 400, "no body")
+        XCTAssertEqual(try refused("POST", "/v1/profiles/a/scenario"), 400, "neither source nor scenario")
+        XCTAssertEqual(try refused("POST", "/v1/profiles/a/scenario", body: "{\"source\": \"x\", \"scenario\": \"y\"}"), 400, "both")
+        XCTAssertEqual(try refused("POST", "/v1/profiles/a/scenario", body: "{\"source\": \"  \"}"), 400, "blank")
+        XCTAssertEqual(try refused("POST", "/v1/profiles/a/scenario", body: "{\"source\": \"x\", \"params\": [1]}"), 400, "params not an object")
+        XCTAssertEqual(try refused("GET", "/v1/profiles/a/scenario/stop"), 405)
         for address in ["file:///etc/passwd", "javascript:alert(1)", "about:blank", "https://"] {
             XCTAssertEqual(try refused("POST", "/v1/profiles/a/open", body: "{\"url\": \"\(address)\"}"), 400, address)
         }

@@ -54,6 +54,8 @@ struct ProfileDraft {
     var lastProxyLocation: ProxyLocation?
     var warnOnProxyIPChange = false
     var menusInAppLanguage = false
+    /// An iPhone view's full disguise (ProfileConfiguration.phoneDisguise); on by default.
+    var phoneFullDisguise = true
     var webRTC: WebRTCPolicy = .disabled
     var ephemeral = false
     var safeBrowsing = false
@@ -169,6 +171,7 @@ struct ProfileDraft {
         lastProxyLocation = c.lastProxyLocation
         warnOnProxyIPChange = c.warnOnProxyIPChange
         menusInAppLanguage = c.menusInAppLanguage
+        phoneFullDisguise = c.phoneDisguise == .full
         webRTC = c.webRTCPolicy
         ephemeral = c.ephemeral
         safeBrowsing = c.safeBrowsingEnabled
@@ -327,6 +330,7 @@ struct ProfileDraft {
         configuration.lastProxyLocation = lastProxyLocation
         configuration.warnOnProxyIPChange = warnOnProxyIPChange
         configuration.menusInAppLanguage = menusInAppLanguage
+        configuration.phoneDisguise = phoneFullDisguise ? .full : .engineOnly
         configuration.webRTCPolicy = webRTC
         configuration.ephemeral = ephemeral
         configuration.safeBrowsingEnabled = safeBrowsing

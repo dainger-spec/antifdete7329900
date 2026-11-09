@@ -30,6 +30,10 @@ enum ProfileCommand: Codable {
     case exportCookies
     case startWarmUp(WarmUpPlan)
     case stopWarmUp
+    /// Run a scenario (`ScenarioRunner`) in a window of its own of this profile.
+    case runScenario(ScenarioRunRequest)
+    /// Stop it: a command under way finishes first.
+    case stopScenario(ScenarioRunner.StopReason)
     /// Say where this profile's traffic goes (`ProfileNetworkGuard.report`); with `probe`, also
     /// fetch it once by each of the process's own ways of making a request.
     case checkNetwork(probe: URL?)
@@ -56,6 +60,14 @@ enum ProfileCommand: Codable {
     /// Do `action` to the profile's window as a person would and say what the window then shows
     /// (`WindowProbe`). Sent by the self-test only, never by the app.
     case lookAtWindow(WindowProbeAction)
+}
+
+/// A scenario to run in a profile's process: its text and its parameters (JSON), named for its log.
+struct ScenarioRunRequest: Codable, Equatable {
+    var runID: UUID
+    var name: String
+    var source: String
+    var parametersJSON: String
 }
 
 /// What the manager decided for a launch's WebRTC. With `relay`, the profile's pages are given that
@@ -86,6 +98,10 @@ enum ProfileEvent: Codable {
     /// Where the warm-up of this profile has got to; sent as the run goes on, and once more when
     /// it ends. Everything the warm-up screen and the profile list show comes from here.
     case warmUp(WarmUpStatus)
+    /// A line of a scenario's run log, as the run goes.
+    case scenarioLine(runID: UUID, ScenarioRunner.Line)
+    /// How a scenario's run ended.
+    case scenarioEnded(runID: UUID, ScenarioRunner.Outcome)
     /// The answer to `importCookies`: what the profile's store did with them, or nil when the
     /// profile could not take them (it was starting or stopping).
     case cookiesImported(ProfileManager.CookieImportOutcome?)

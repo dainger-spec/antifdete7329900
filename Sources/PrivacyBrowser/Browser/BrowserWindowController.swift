@@ -3,6 +3,7 @@ import BrowserCore
 import Combine
 import os
 import SwiftUI
+import UniformTypeIdentifiers
 import WebKit
 
 /// Window subclass so that File ▸ Close (⌘W) closes the current tab while the window's
@@ -45,6 +46,8 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     /// The address field's width: what the other toolbar items leave, up to 680 pt (`fitAddressField`).
     private var addressWidth: NSLayoutConstraint!
     private let webContainer = NSView()
+    /// Find on the page (⌘F), over the page's top edge.
+    private(set) lazy var findBar = PageFindBar { [weak self] in self?.selectedTab?.webView }
     private let addressField = AddressBarField()
     private var backButton: NSButton!
     private var forwardButton: NSButton!
@@ -85,7 +88,11 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         let window = BrowserWindow(contentRect: NSRect(origin: .zero, size: contentSize),
                                    styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                    backing: .buffered, defer: false)
-        if let deviceScreen { window.contentMaxSize = deviceScreen }
+        if let deviceScreen {
+            window.contentMaxSize = deviceScreen
+            // Neither the green button nor ⌃⌘F: an iPhone has no full screen.
+            window.collectionBehavior.insert(.fullScreenNone)
+        }
         window.isReleasedWhenClosed = false
         // Never saved as restorable state at quit: AppKit would write the title — the profile's
         // name — to ~/Library/Saved Application State in plaintext.
@@ -160,10 +167,15 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         let badge = NSHostingView(rootView: ProfileChipView(model: chrome))
         badge.setContentCompressionResistancePriority(.required, for: .horizontal)
         // This window is not Safari's: said where the person looks, with why (SimplifiedModeNotice).
-        // In the toolbar, whose height a page measures and which this leaves as it is.
+        // In the toolbar, whose height a page measures and which this leaves as it is. Not for an
+        // iPhone or iPad view: its window is ours by design, not a fallback (the owner, 9 November).
         let reason = ownWindowReason
-        let simplified = NSHostingView(rootView: SimplifiedModeChip(reason: reason) { [weak self] in self?.showSimplifiedMode() })
-        simplified.setContentCompressionResistancePriority(.required, for: .horizontal)
+        var simplified: NSView?
+        if reason != .deviceProfile {
+            let chip = NSHostingView(rootView: SimplifiedModeChip(reason: reason) { [weak self] in self?.showSimplifiedMode() })
+            chip.setContentCompressionResistancePriority(.required, for: .horizontal)
+            simplified = chip
+        }
         simplifiedChip = simplified
         // The app's mark, where Safari has its sidebar button.
         let mark = NSHostingView(rootView: LumenMark(size: 20))
@@ -186,9 +198,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
             (.init("reload"), "Reload", reloadButton!), (.init("address"), "Address", addressField),
             (.init("bookmark"), "Bookmark", bookmarkButton!), (.init("bookmarks"), "Bookmarks", bookmarksMenuButton),
             (.init("history"), "History", historyButton), (.init("fill"), "Fill Password", fillButton),
-            (.init("save"), "Save Password", saveButton), (.init("simplified"), L("simplified.chip"), simplified),
-            (.init("profile"), profileName, badge),
+            (.init("save"), "Save Password", saveButton),
         ]
+        if let simplified { toolbarViews.append((.init("simplified"), L("simplified.chip"), simplified)) }
+        toolbarViews.append((.init("profile"), profileName, badge))
         if isPhoneLayout {
             // The phone has no bar at the top: only what says whose window this is stays there.
             toolbarViews = toolbarViews.filter { ["simplified", "profile"].contains($0.0.rawValue) }
@@ -245,6 +258,13 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         } else {
             webContainer.bottomAnchor.constraint(equalTo: container.bottomAnchor).isActive = true
         }
+        findBar.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(findBar, positioned: .above, relativeTo: stoppedPage)
+        NSLayoutConstraint.activate([
+            findBar.topAnchor.constraint(equalTo: webContainer.topAnchor),
+            findBar.leadingAnchor.constraint(equalTo: webContainer.leadingAnchor),
+            findBar.trailingAnchor.constraint(equalTo: webContainer.trailingAnchor),
+        ])
         window.contentView = container
         fitAddressField()
     }
@@ -402,6 +422,99 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         if isPhoneLayout { showTabOverview() }
     }
 
+    // Find on the page: our bar over the page, WebKit's own search (`PageFindBar`).
+    @objc func findCommand(_ sender: Any?) { findBar.show() }
+    @objc func findNextCommand(_ sender: Any?) { findBar.search(backwards: false) }
+    @objc func findPreviousCommand(_ sender: Any?) { findBar.search(backwards: true) }
+    @objc func useSelectionForFindCommand(_ sender: Any?) { findBar.useSelection() }
+
+    /// Safari's zoom steps.
+    private static let zoomSteps: [CGFloat] = [0.5, 0.75, 0.85, 1, 1.15, 1.25, 1.5, 1.75, 2, 2.5, 3]
+    @objc func zoomInCommand(_ sender: Any?) { zoom(towardsLarger: true) }
+    @objc func zoomOutCommand(_ sender: Any?) { zoom(towardsLarger: false) }
+    @objc func actualSizeCommand(_ sender: Any?) { selectedTab?.webView.pageZoom = 1 }
+    private func zoom(towardsLarger: Bool) {
+        guard let webView = selectedTab?.webView else { return }
+        let now = webView.pageZoom, steps = Self.zoomSteps
+        webView.pageZoom = towardsLarger ? (steps.first { $0 > now + 0.001 } ?? steps[steps.count - 1])
+                                         : (steps.last { $0 < now - 0.001 } ?? steps[0])
+    }
+
+    @objc func printCommand(_ sender: Any?) {
+        guard let webView = selectedTab?.webView, let window else { return }
+        let operation = webView.printOperation(with: NSPrintInfo.shared)
+        operation.view?.frame = webView.bounds
+        operation.showsPrintPanel = true
+        operation.showsProgressPanel = true
+        operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+    }
+
+    /// The page as a web archive, where the person says (the save panel's choice is theirs).
+    @objc func saveAsCommand(_ sender: Any?) {
+        guard let webView = selectedTab?.webView, webView.url != nil, let window else { return }
+        let panel = NSSavePanel()
+        let title = (webView.title ?? "").isEmpty ? (webView.url?.host ?? "page") : (webView.title ?? "page")
+        panel.nameFieldStringValue = BrowserTab.safeDownloadName(title) + ".webarchive"
+        panel.allowedContentTypes = [.webArchive]
+        panel.canCreateDirectories = true
+        panel.beginSheetModal(for: window) { answer in
+            guard answer == .OK, let destination = panel.url else { return }
+            webView.createWebArchiveData { result in
+                do {
+                    try result.get().write(to: destination, options: .atomic)
+                } catch {
+                    NSAlert(error: error).beginSheetModal(for: window)
+                }
+            }
+        }
+    }
+
+    /// Share: the page's address onto this Mac's pasteboard. Nothing else yet — Mail, Messages and
+    /// AirDrop fetch an address they are given for its preview, as this Mac, outside the profile's
+    /// proxy (`HandOffs`), which is measured before any of them is offered.
+    @objc func copyLinkCommand(_ sender: Any?) {
+        guard let url = selectedTab?.url else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url.absoluteString, forType: .string)
+    }
+
+    @objc func closeWindowCommand(_ sender: Any?) { window?.performClose(nil) }
+    @objc func showHistoryCommand(_ sender: Any?) { showHistory() }
+    @objc func showBookmarksCommand(_ sender: Any?) { showBookmarks() }
+    @objc func bookmarkPageCommand(_ sender: Any?) { toggleBookmark() }
+    /// What this profile downloaded, and where it went — listed in the window: a profile's process
+    /// opens nothing in the Finder (`SystemOpen`).
+    @objc func showDownloadsCommand(_ sender: Any?) {
+        guard let window else { return }
+        let folder = BrowsingPreferences.current.downloadFolderURL.path
+        let files = BrowserTab.finishedDownloads.suffix(20).reversed()
+        let alert = NSAlert()
+        alert.messageText = L("downloads.title")
+        alert.informativeText = files.isEmpty ? String(format: L("downloads.none"), folder)
+            : String(format: L("downloads.list"), folder) + "\n" + files.map(\.lastPathComponent).joined(separator: "\n")
+        alert.beginSheetModal(for: window)
+    }
+
+    @objc func fullScreenCommand(_ sender: Any?) {
+        guard !isPhoneLayout else { return }
+        window?.toggleFullScreen(sender)
+    }
+
+    /// An iPhone has no full screen and its view is the phone's screen: off there. Find, print,
+    /// save, share and a bookmark need a page.
+    @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        switch item.action {
+        case #selector(fullScreenCommand(_:)):
+            return !isPhoneLayout
+        case #selector(printCommand(_:)), #selector(saveAsCommand(_:)), #selector(copyLinkCommand(_:)),
+             #selector(findCommand(_:)), #selector(findNextCommand(_:)), #selector(findPreviousCommand(_:)),
+             #selector(useSelectionForFindCommand(_:)), #selector(bookmarkPageCommand(_:)):
+            return selectedTab?.url != nil
+        default:
+            return true
+        }
+    }
+
     /// NSToolbar gives the address field its preferred width and sends the items that no longer
     /// fit to the overflow menu, rather than narrowing the field: so the field asks only for what
     /// the other items leave (between its 160 and 680 pt).
@@ -476,6 +589,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     }
 
     func selectTab(at index: Int) {
+        if !findBar.isHidden { findBar.close() }
         guard tabs.indices.contains(index) else { return }
         if index != selectedIndex { takeSnapshot(of: selectedTab) }
         selectedTab?.passwords.closeSuggestions()

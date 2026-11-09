@@ -39,6 +39,12 @@ function makeWindow(config, parentContext) {
     globalThis.Geolocation = Geolocation; globalThis.Permissions = Permissions;
     globalThis.Event = class Event { constructor(type) { this.type = type; } };
     globalThis.WeakRef = WeakRef;
+    // Blob workers, as far as hookWorkers reaches them: a Blob, URL.createObjectURL and a Worker
+    // that keeps the URL it was given.
+    globalThis.Blob = class Blob { constructor(parts, options) { this.parts = parts; this.type = (options && options.type) || ''; } };
+    let blobCount = 0;
+    globalThis.URL = class URL { static createObjectURL(blob) { return 'blob:test/' + (++blobCount); } };
+    globalThis.Worker = class Worker { constructor(url) { this.url = String(url); } };
     class Navigator {
       get platform() { illegal(this, Navigator); return 'MacIntel'; } get maxTouchPoints() { illegal(this, Navigator); return 0; }
       get hardwareConcurrency() { illegal(this, Navigator); return 8; }
@@ -419,12 +425,31 @@ test('macOS profile: navigator, screen and window keep their native values', () 
   assert.equal(run(w, `Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform').get.toString().includes("illegal(this, Navigator)")`), true);
 });
 
-test('an iPhone or iPad view replaces no navigator, screen or window value: it is Safari on the Mac', () => {
-  // Only the User-Agent (WebKit's own) and the window's size (the app's) differ; the script has no
-  // device values to give, and nothing in it touches the touch points, the platform or the screen.
+test('a profile without the full phone disguise replaces no navigator, screen or window value', () => {
+  // A Mac profile, the iPad view, and an iPhone view that leaves no script's trace (engineOnly):
+  // the script has no phone to give, and touches none of the touch points, the platform or the screen.
   const w = makeWindow(everything);
   assert.equal(run(w, surface), JSON.stringify(['MacIntel', 0, 8, 'en-US', ['en-US'], 'undefined', 1728, 1117, 1728, 1079, 2, 1200, 820]));
-  assert.doesNotMatch(body, /maxTouchPoints|standalone|availWidth|devicePixelRatio/);
+  assert.equal(run(w, `'orientation' in window`), false);
+});
+
+const phone = { platform: 'iPhone', width: 402, height: 874, maxTouchPoints: 5 };
+test('an iPhone view with the full disguise: the phone in the navigator, the screen and the window, through accessors as the engine makes them', () => {
+  const w = makeWindow({ ...everything, safariObject: false, phone });
+  // The pixel density is WebKit's own (PhoneEngine), not the script's: the realm's 2 stays.
+  assert.equal(run(w, surface), JSON.stringify(['iPhone', 5, 8, 'en-US', ['en-US'], 'undefined', 402, 874, 402, 874, 2, 402, 874]));
+  for (const [proto, name] of [['Navigator.prototype', 'platform'], ['Navigator.prototype', 'maxTouchPoints'], ['Screen.prototype', 'width'],
+                               ['Screen.prototype', 'availHeight']]) {
+    assert.equal(run(w, `Object.getOwnPropertyDescriptor(${proto}, '${name}').get.toString()`), nativeText(name), `${proto}.${name}`);
+    assert.equal(run(w, `Object.getOwnPropertyNames(Object.getOwnPropertyDescriptor(${proto}, '${name}').get).join()`), 'length,name');
+  }
+  // The engine's receiver check is kept: the wrong receiver throws the engine's error.
+  assert.equal(run(w, `try { Object.getOwnPropertyDescriptor(Navigator.prototype, 'maxTouchPoints').get.call({}); 'no error' } catch (e) { e.message }`),
+               'illegal invocation');
+  assert.equal(run(w, `Object.getOwnPropertyDescriptor(window, 'outerWidth').get.toString()`), nativeText('outerWidth'));
+  // Held upright, as iOS says: window.orientation 0, with its event handler.
+  assert.equal(run(w, `[window.orientation, 'onorientationchange' in window, Object.getOwnPropertyDescriptor(window, 'orientation').get.toString()].join('|')`),
+               `0|true|${nativeText('orientation')}`);
 });
 
 test('no rendering patches: canvas, audio and fonts stay native', () => {
@@ -461,6 +486,23 @@ test('geolocation deny: prompt until asked, then a real-looking denial', async (
   assert.throws(() => run(w, `navigator.geolocation.getCurrentPosition(1)`), (e) => e.name === 'TypeError');
   // Receivers that are not ours still get the native getter's TypeError.
   assert.throws(() => run(w, `Object.getOwnPropertyDescriptor(GeolocationPositionError.prototype, 'code').get.call({})`), (e) => e.name === 'TypeError');
+});
+
+test('workers made from a blob are hooked whenever a substitution reaches them, and only then', () => {
+  // The worker runs the shim (its URL is replaced by one whose script starts with it) exactly when
+  // the page has something a worker would otherwise answer differently.
+  const hooked = (config) => run(makeWindow(config), `(() => { const url = URL.createObjectURL(new Blob(['postMessage(1)'])); return new Worker(url).url !== url; })()`);
+  assert.equal(hooked(base), false, 'no substitution: no hook');
+  assert.equal(hooked({ ...base, storageQuota: 0.6 * 128 * 2 ** 30 }), true, 'the storage quota alone, this Mac\'s time zone');
+  assert.equal(hooked({ ...base, timeZone: 'Asia/Tokyo' }), true, 'a time zone');
+  assert.equal(hooked({ ...base, phone: { platform: 'iPhone', width: 402, height: 874, maxTouchPoints: 5 } }), true, 'an iPhone');
+  // The iOS app always sends a fingerprint: only a mode that changes something, or a language, counts.
+  const real = { seed: 's', canvas: 'real', webgl: 'real', audio: 'real', language: null, unstable: false, naive: false };
+  assert.equal(hooked({ ...base, fingerprint: real }), false, 'the iOS app\'s fingerprint with everything real');
+  assert.equal(hooked({ ...base, fingerprint: { ...real, canvas: 'noise' } }), true, 'canvas noise, this device\'s time zone');
+  assert.equal(hooked({ ...base, fingerprint: { ...real, webgl: 'off' } }), true, 'WebGL off');
+  assert.equal(hooked({ ...base, fingerprint: { ...real, audio: 'noise' } }), true, 'audio noise');
+  assert.equal(hooked({ ...base, fingerprint: { ...real, language: 'de-DE' } }), true, 'a language');
 });
 
 test('storage quota: Safari\'s instead of the app default', async () => {

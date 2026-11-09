@@ -30,6 +30,10 @@ struct BrowserTabContext {
     /// The profile has a proxy: a server's certificate is checked without this Mac fetching for
     /// it (`ServerTrust`).
     let hasProxy: Bool
+    /// An iPhone view: the phone's pixel density, which WebKit then renders and answers (`PhoneEngine`).
+    let phoneScale: Double?
+    /// An iPhone view: the platform its pages say, set on each main frame's navigation (`PhoneEngine`).
+    let phonePlatform: String?
     /// The profile proxy's user name and password, answered to the proxy's own auth challenges.
     let proxyCredential: URLCredential?
 }
@@ -119,6 +123,7 @@ final class BrowserTab: NSObject, PasswordAutoFillHost, AnswersProfileChallenges
         webView.customUserAgent = context.userAgent
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true
+        PhoneEngine.apply(to: webView, scale: context.phoneScale)
         // A link preview is fetched by Quick Look, outside the profile's store and proxy, and a
         // click on it opens the link in the default browser (`HandOffs`).
         webView.allowsLinkPreview = false
@@ -284,7 +289,11 @@ final class BrowserTab: NSObject, PasswordAutoFillHost, AnswersProfileChallenges
 
 extension BrowserTab: WKNavigationDelegate {
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
-                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+                 preferences: WKWebpagePreferences,
+                 decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void) {
+        // An iPhone view's platform, on a main frame's navigation only (`PhoneEngine.setPlatform`).
+        PhoneEngine.setPlatform(context.phonePlatform, on: preferences, mainFrame: navigationAction.targetFrame?.isMainFrame ?? true)
+        let decisionHandler: (WKNavigationActionPolicy) -> Void = { decisionHandler($0, preferences) }
         let scheme = navigationAction.request.url?.scheme?.lowercased() ?? ""
         let flags = navigationAction.modifierFlags
         if navigationAction.shouldPerformDownload {
@@ -595,8 +604,13 @@ extension BrowserTab: WKDownloadDelegate {
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
                   suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
         let preferences = BrowsingPreferences.current
+        let key = ObjectIdentifier(download)
+        let decide: (URL?) -> Void = { destination in
+            if let destination { Self.pendingDownloads[key] = destination }
+            completionHandler(destination)
+        }
         guard preferences.askWhereToSave, let window = webView.window, window.isVisible else {
-            completionHandler(Self.uniqueDownloadURL(suggestedFilename: suggestedFilename, in: preferences.downloadFolderURL))
+            decide(Self.uniqueDownloadURL(suggestedFilename: suggestedFilename, in: preferences.downloadFolderURL))
             return
         }
         let panel = NSSavePanel()
@@ -604,7 +618,7 @@ extension BrowserTab: WKDownloadDelegate {
         panel.directoryURL = preferences.downloadFolderURL
         panel.canCreateDirectories = true
         // No destination: WebKit cancels the download, and nothing is written.
-        panel.beginSheetModal(for: window) { answer in completionHandler(answer == .OK ? panel.url : nil) }
+        panel.beginSheetModal(for: window) { answer in decide(answer == .OK ? panel.url : nil) }
     }
 
     /// A download's challenges: its certificate as a page's (`ServerTrust`), the proxy's own with
@@ -617,7 +631,19 @@ extension BrowserTab: WKDownloadDelegate {
         }
     }
 
+    /// The files this process downloaded, newest last: the window's Show Downloads (⌥⌘L) lists
+    /// them — the profile's process opens nothing in the Finder (`SystemOpen`).
+    static private(set) var finishedDownloads: [URL] = []
+    private static var pendingDownloads: [ObjectIdentifier: URL] = [:]
+
+    func downloadDidFinish(_ download: WKDownload) {
+        if let destination = Self.pendingDownloads.removeValue(forKey: ObjectIdentifier(download)) {
+            Self.finishedDownloads.append(destination)
+        }
+    }
+
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        Self.pendingDownloads[ObjectIdentifier(download)] = nil
         // Cancelled in the save panel: nothing failed.
         if (error as NSError).domain == NSURLErrorDomain, (error as NSError).code == NSURLErrorCancelled { return }
         showMessage(String(format: L("download.failed"), error.localizedDescription))

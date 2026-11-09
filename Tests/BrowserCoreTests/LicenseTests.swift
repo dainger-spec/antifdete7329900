@@ -127,6 +127,24 @@ final class LicenseTests: XCTestCase {
         XCTAssertNotNil(check(try document(payload(["somethingNew": ["a": 1]]))).entitlement)
     }
 
+    func testAutomationOpensOnlyWithItsFeatureOnAnActiveLicense() throws {
+        // Absent: off.
+        XCTAssertFalse(try XCTUnwrap(check(try document(payload())).entitlement).allowsAutomation)
+        // Named: on; unknown names beside it change nothing and do not refuse the document.
+        let named = try XCTUnwrap(check(try document(payload(["features": ["automation", "teleport"]]))).entitlement)
+        XCTAssertTrue(named.allowsAutomation)
+        XCTAssertEqual(named.features, ["automation", "teleport"])
+        // Only unknown names: off, the document still valid.
+        XCTAssertFalse(try XCTUnwrap(check(try document(payload(["features": ["teleport"]]))).entitlement).allowsAutomation)
+        // Not a list of names: opens nothing, the document still valid.
+        XCTAssertFalse(try XCTUnwrap(check(try document(payload(["features": "automation"]))).entitlement).allowsAutomation)
+        XCTAssertFalse(try XCTUnwrap(check(try document(payload(["features": ["automation", 1]]))).entitlement).allowsAutomation)
+        // Export-only: off, whatever the plan names.
+        let exportOnly = try XCTUnwrap(check(try document(payload(["features": ["automation"], "status": "export_only",
+                                                                   "exportReason": "period_ended"]))).entitlement)
+        XCTAssertFalse(exportOnly.allowsAutomation)
+    }
+
     func testACountdownSaysTheTwoLargestUnitsRoundedDown() {
         func said(_ seconds: TimeInterval) -> String {
             Countdown.parts(seconds).map { "\($0.value) \($0.unit.rawValue)" }.joined(separator: " ")
