@@ -373,16 +373,20 @@ final class BrowserSession {
         windows.append(controller)
         if let window = controller.window {
             // Not moved off screen: AppKit pulls an ordinary window back onto a screen when it is
-            // ordered front, which is why the warm-up was visible. Fully transparent instead, at
-            // the lowest window level, taking no clicks and in no window list — WebKit still
-            // treats it as on screen, which is what keeps rendering and timers running and
-            // `document.visibilityState` at "visible", exactly as for a page someone is reading.
+            // ordered front, which is why the warm-up was visible. Fully transparent instead,
+            // taking no clicks (a person's clicks go through it to the window below) and in no
+            // window list. Not at the lowest level, below the desktop: there the system takes it
+            // for covered, its pages are "hidden" (timers and drawing slowed, which a site can
+            // tell) and most pointer moves never reach them (claude/measure-automation-input,
+            // rounds 6 and 7, macOS 26 and 27). At the floating level, ordered front, it is
+            // shown — `document.visibilityState` "visible" — even with a window over it, as for
+            // a page someone is reading.
             window.alphaValue = 0
             window.ignoresMouseEvents = true
-            window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.minimumWindow)))
+            window.level = .floating
             window.isExcludedFromWindowsMenu = true
             window.collectionBehavior.insert([.transient, .ignoresCycle, .fullScreenNone])
-            window.orderBack(nil)
+            window.orderFront(nil)
         }
         controller.addTab(url: URL(string: "about:blank"))
         return controller

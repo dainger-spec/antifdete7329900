@@ -42,7 +42,15 @@ held windows; everything else gets AppKit's own answers.
 
 ## The warm-up robot
 
-It holds focus on its own window (transparent, at the lowest level, never in front) for the whole
+Its window is transparent and lets a person's clicks through, at the floating level. It used to
+sit at the lowest level, below the desktop: there the system took it for covered, so its pages
+were "hidden" (timers and drawing slowed, which a site can tell) and most pointer moves never
+reached them (rounds 6 and 7; the self-test check "warm-up: its pages see themselves shown" was
+red on that window, CI 42620678327). Transparent windows at the normal, floating and status-bar
+levels stay shown even with an opaque window over them, take every input, and pass a real click
+through to the window below (round 7, macOS 26 and 27).
+
+It holds focus on that window for the whole
 run, so it now scrolls with wheel events and clicks with pointer moves and mouse events there,
 where before it fell back to `scrollBy` and `click()` (the self-test's note line
 `warm-up: scrolled with … input` says which). It still falls back when its events do not reach
