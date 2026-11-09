@@ -62,7 +62,8 @@ pressed button is let go). A script that loops without ever awaiting keeps its t
 Stop until the profile stops — the app and the page are not held up.
 
 The plan's `features` must name `automation` (docs: the document of rights, format 1; absent —
-off). It is asked before each command: a plan that loses it mid-run lets the step under way finish,
+off): the trial, Professional and Team have it, Personal does not (the owner and the lead,
+9 November). It is asked before each command: a plan that loses it mid-run lets the step under way finish,
 runs no other, and the log says why.
 
 The scenarios are kept in `scenarios.bin` at the vault's root under its own key; this Mac's only

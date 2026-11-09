@@ -12,7 +12,7 @@
 "automation.example" = "Try it";
 "automation.example.copy" = "Copy Command";
 "automation.note" = "Start and stop profiles, open pages in them, and read or write their cookies from a script on this Mac — curl, Python or scripts/pbctl. Only this Mac can connect (127.0.0.1), only with the token, and never a web page. Anyone who has the token can start your profiles and read their cookies: keep it like a password.";
-"automation.notInPlan" = "The automation API is part of the plan with automation. Your plan does not include it: while it is on, it answers every request with a refusal and the reason.";
+"automation.notInPlan" = "The automation API is part of the Professional and Team plans. Your plan does not include it: while it is on, it answers every request with a refusal and the reason.";
 "automation.port" = "Port";
 "automation.port.detail" = "Scripts connect to 127.0.0.1 on this port.";
 "automation.port.apply" = "Apply";
@@ -1559,7 +1559,7 @@
 "scenarios.save" = "Save";
 "scenarios.delete" = "Delete Scenario";
 "scenarios.delete.question" = "Delete “%@”?";
-"scenarios.notInPlan" = "Running scenarios is part of the plan with automation. Your plan does not include it: you can write scenarios, not run them.";
+"scenarios.notInPlan" = "Running scenarios is part of the Professional and Team plans. Your plan does not include it: you can write scenarios, not run them.";
 "scenarios.profile" = "Profile";
 "scenarios.running" = "Running…";
 "scenarios.stop" = "Stop";

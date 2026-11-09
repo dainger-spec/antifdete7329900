@@ -145,6 +145,90 @@ final class LicenseTests: XCTestCase {
         XCTAssertFalse(exportOnly.allowsAutomation)
     }
 
+    // MARK: Automation by plan (the owner and the lead, 9 November)
+
+    private typealias Judged = (name: String, entitlement: Entitlement)
+
+    /// What a set of documents says against the decision: automation is the trial's, Professional's
+    /// and Team's while the license is active; Personal and export-only have none. Each departure
+    /// and each kind of document not there is a line; empty means as decided.
+    private func automationFindings(_ documents: [Judged]) -> [String] {
+        var findings: [String] = []
+        var seen: Set<String> = []
+        for (name, entitlement) in documents {
+            let active = entitlement.status == .active
+            seen.insert(active ? entitlement.plan : "export_only")
+            let decided = active && ["trial", "pro", "team"].contains(entitlement.plan)
+            if entitlement.allowsAutomation != decided {
+                let found = entitlement.allowsAutomation ? "open" : "closed"
+                let wanted = decided ? "open" : "closed"
+                findings.append("\(name) (\(entitlement.plan), \(entitlement.status.rawValue)): automation \(found), decided \(wanted)")
+            }
+        }
+        for kind in ["trial", "pro", "team", "personal", "export_only"] where !seen.contains(kind) {
+            findings.append("no document of \(kind)")
+        }
+        return findings
+    }
+
+    /// The rule itself, on documents made here as the server is to sign them — and on each way of
+    /// departing from the decision, so that the run on the server's vectors below cannot pass blind.
+    func testTheRuleOfAutomationByPlanSeesEveryDeparture() throws {
+        func made(_ plan: String, _ features: [String]?, status: String = "active") throws -> Judged {
+            var changes: [String: Any?] = ["plan": plan, "status": status]
+            if let features { changes.updateValue(features, forKey: "features") }
+            if status != "active" { changes.updateValue("period_ended", forKey: "exportReason") }
+            let entitlement = try XCTUnwrap(check(try document(payload(changes))).entitlement, "\(plan) \(status)")
+            return (name: "made \(plan)", entitlement: entitlement)
+        }
+        let trial = try made("trial", ["automation"])
+        let pro = try made("pro", ["automation"])
+        let team = try made("team", ["automation"])
+        let personal = try made("personal", nil)
+        let ended = try made("pro", ["automation"], status: "export_only")
+        XCTAssertEqual(automationFindings([trial, pro, team, personal, ended]), [])
+        // Personal with no features at all, or with others only: the same.
+        XCTAssertEqual(automationFindings([trial, pro, team, try made("personal", []), ended]), [])
+        XCTAssertEqual(automationFindings([trial, pro, team, try made("personal", ["teleport"]), try made("personal", nil, status: "export_only")]), [])
+
+        // Personal given automation.
+        XCTAssertEqual(automationFindings([trial, pro, team, try made("personal", ["automation"]), ended]),
+                       ["made personal (personal, active): automation open, decided closed"])
+        // A paid plan, or the trial, without it — what the server signs today.
+        XCTAssertEqual(automationFindings([trial, try made("pro", nil), team, personal, ended]),
+                       ["made pro (pro, active): automation closed, decided open"])
+        XCTAssertEqual(automationFindings([trial, pro, try made("team", []), personal, ended]),
+                       ["made team (team, active): automation closed, decided open"])
+        XCTAssertEqual(automationFindings([try made("trial", nil), pro, team, personal, ended]),
+                       ["made trial (trial, active): automation closed, decided open"])
+        // A plan this app does not know, given automation: not decided, so said.
+        XCTAssertEqual(automationFindings([trial, pro, team, personal, ended, try made("studio", ["automation"])]),
+                       ["made studio (studio, active): automation open, decided closed"])
+        // A kind of document the set does not have at all.
+        XCTAssertEqual(automationFindings([pro, personal, ended]), ["no document of trial", "no document of team"])
+        XCTAssertEqual(automationFindings([trial, pro, team, personal]), ["no document of export_only"])
+        XCTAssertEqual(automationFindings([trial, pro, team, ended]), ["no document of personal"])
+    }
+
+    /// The server's own vectors: the trial, Professional and Team open automation; Personal and
+    /// export-only do not. The server signs no `features` yet (checked on v2026.11.09.3: the copy
+    /// here has none); until its vectors carry the field this is skipped, said as such, and
+    /// scripts/automation_plan_gate.py — which reads the same file — keeps a release from being made.
+    func testTheServersVectorsOpenAutomationToTheTrialProfessionalAndTeamOnly() throws {
+        let vectors = try vectors()
+        let keys = EntitlementKeys.fromInfoPlist(vectors.trustedKeys)
+        let documents: [Judged] = vectors.cases.compactMap { vector in
+            let check = EntitlementVerifier.check(Data(vector.document.utf8), keys: keys, deviceID: vector.deviceID, machineID: vector.machineID)
+            return check.entitlement.map { (name: vector.name, entitlement: $0) }
+        }
+        XCTAssertGreaterThanOrEqual(documents.count, 3, "the vectors' valid documents were read")
+        guard documents.contains(where: { !$0.entitlement.features.isEmpty }) else {
+            throw XCTSkip("the server's vectors carry no `features` yet (\(documents.count) valid documents, none with the field): "
+                + "automation by plan is not checked against the server until its entitlement-test-vectors.json is copied here")
+        }
+        XCTAssertEqual(automationFindings(documents), [])
+    }
+
     func testACountdownSaysTheTwoLargestUnitsRoundedDown() {
         func said(_ seconds: TimeInterval) -> String {
             Countdown.parts(seconds).map { "\($0.value) \($0.unit.rawValue)" }.joined(separator: " ")

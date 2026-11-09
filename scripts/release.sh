@@ -48,6 +48,10 @@
 # asks GitHub (scripts/full_run_gate.py) and stops before anything is built. Start a full run of the
 # commit with `git tag full/<sha12> <sha> && git push origin full/<sha12>`.
 #
+# Nor is one made while the server signs no automation into the documents of rights (step 0a,
+# scripts/automation_plan_gate.py; the owner and the lead, 9 November): the app's automation is the
+# plan's, and against a server without the field it would be refused to everyone.
+#
 # The private key never enters the repository, CI or the app; only its public half is built in. Nor
 # do R2's keys: the release stops first if any of them, or anything shaped like R2's, is in a commit
 # (scripts/check_secrets.py).
@@ -93,6 +97,23 @@ if [[ -n "${R2_ENDPOINT:-}${R2_ACCESS_KEY_ID:-}${R2_SECRET_ACCESS_KEY:-}" ]]; th
   : "${R2_ACCESS_KEY_ID:?R2_ACCESS_KEY_ID}" "${R2_SECRET_ACCESS_KEY:?R2_SECRET_ACCESS_KEY}"
   [[ "$SIGN_IDENTITY" != "-" ]] || { echo "error: a dry run is never uploaded" >&2; exit 1; }
   PUBLISH=1
+fi
+
+# 0a. The server signs automation into the documents of rights. The automation API and scenario runs
+# are the plan's (`features` names `automation`), and the owner and the lead, 9 November: no build
+# with that gate is released while the server does not sign the field — against it the API would
+# refuse everyone. scripts/automation_plan_gate.py reads the app's copy of the server's vectors: a
+# release stops until they show the trial, Professional and Team with automation and Personal
+# without. A dry run says so in its block.
+plan_status=0
+plan_line="$(python3 scripts/automation_plan_gate.py)" || plan_status=$?
+echo "$plan_line"
+if (( plan_status != 0 )); then
+  if [[ "$SIGN_IDENTITY" != "-" || -n "$PUBLISH" ]]; then
+    echo "error: the server's vectors do not show automation signed by plan (the line above): nothing is built, signed or published" >&2
+    exit 1
+  fi
+  DRY+=("the server does not sign automation into the documents of rights yet (scripts/automation_plan_gate.py, the line above): a signed or published release stops on it")
 fi
 
 # 0b. The full pipeline passed on this very commit. The owner, 3 November: the checks are split —
