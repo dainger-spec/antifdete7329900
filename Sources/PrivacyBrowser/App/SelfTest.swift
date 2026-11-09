@@ -383,6 +383,7 @@ final class SelfTest {
         await group("warm-up") { try await warmUp(repository) }
         await group("warm-up queue") { try await warmUpQueue(repository) }
         await group("the page cannot tell") { try await pageCannotTell(repository) }
+        await group("automation commands") { try await automationCommands(repository) }
         await group("Safari chrome") { try await safariChromeThroughTheProxy(repository) }
         await group("WebRTC through the proxy") { try await webRTCThroughTheProxy(repository) }
         await group("keychain between profiles") { try await keychainBetweenProfiles(repository) }
@@ -6882,6 +6883,183 @@ final class SelfTest {
     /// cookies, User-Agent), stays on each, scrolls, follows only the plain link of the same site,
     /// leaves nothing in the page world, and stops when asked, when its tab closes, when a page
     /// shows a dialog and when the profile stops (whose data then seals as usual).
+    // MARK: Automation commands (PageDriver)
+
+    /// The core commands of a scenario (`PageDriver`) on pages of the self-test proxy: each does
+    /// what it says, the page's record of the whole run passes the rules of "the page cannot tell"
+    /// (whose controls show they can fail), and the run leaves the profile's fingerprint surface and
+    /// the page's globals as they were — while a script run in the page's own world, the control,
+    /// is seen.
+    private func automationCommands(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("automation commands: each does what it says, and the page cannot tell them from a person", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the pages)")
+            return
+        }
+        guard let probe = Self.loadProbe() else {
+            check("automation commands: fingerprint_probe.js found (app bundle or PB_SELFTEST_PROBE)", false)
+            return
+        }
+        var configuration = ProfileConfiguration(ephemeral: true)
+        configuration.proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        configuration.matchProxyLocation = false
+        let profile = try repository.create(name: "Automation", configuration: configuration)
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        let controller = session.openWindow(url: nil)
+        let policy = NSApp.activationPolicy()
+        NSApp.setActivationPolicy(.accessory)
+        var driverToFinish: PageDriver?
+        defer {
+            driverToFinish?.finish()
+            NSApp.setActivationPolicy(policy)
+            controller.close()
+            session.shutDown()
+            try? repository.delete(profile.id)
+        }
+        guard let tab = controller.selectedTab, controller.window != nil else {
+            check("automation commands: a profile window to act on", false, "no tab or window")
+            return
+        }
+        let driver = PageDriver(webView: tab.webView) { url in _ = tab.load(url) }
+        driverToFinish = driver
+        driver.timeout = 15
+        var log: [String] = []
+        driver.onLog = { log.append($0) }
+        // Behind another app, as automation's windows usually are.
+        NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first?.activate()
+        _ = await waitUntil(timeout: 3) { !NSApp.isActive }
+        let form = URL(string: "http://automation.selftest.invalid/pb-automation/form")!
+        let two = URL(string: "http://automation.selftest.invalid/pb-automation/two")!
+        func outcome(_ body: () async throws -> Void) async -> String {
+            do { try await body(); return "ok" } catch { return String(describing: error) }
+        }
+
+        // Going to a page, and waiting for elements that come and go.
+        let went = await outcome { try await driver.goto(form) }
+        let title = driver.title ?? "-"
+        check("automation commands: goto loads the address and waits for it", went == "ok" && driver.url == form && title == "PB automation form",
+              "\(went) url=\(driver.url?.absoluteString ?? "nil") title=\(title)")
+        let waited = await outcome {
+            try await driver.waitFor("#late", state: .visible, timeout: 5)
+            try await driver.waitFor("#gone", state: .detached, timeout: 5)
+        }
+        let neverShown = await outcome { try await driver.waitFor("#never", state: .visible, timeout: 1) }
+        check("automation commands: waitFor waits for an element to appear and to go, and gives up after its time",
+              waited == "ok" && neverShown.hasPrefix("timed out"), "\(waited); never: \(neverShown)")
+
+        // What the page shows before the run: its fingerprint surface and its globals.
+        func surface() async -> [String: String] {
+            Self.flatten((try? await js(tab.webView, probe)) as? [String: Any] ?? [:])
+        }
+        let before = await surface()
+        _ = try? await js(tab.webView, "return __take();")
+
+        // Reading.
+        let late = try? await driver.textContent("#late")
+        let items = try? await driver.count(".item")
+        let attribute = try? await driver.getAttribute("#field", "data-kind")
+        let shown = try? await driver.isVisible("#heading")
+        let missing = try? await driver.isVisible("#nothing-here")
+        check("automation commands: text, count, attribute and visibility are read from the page",
+              late == "Late" && items == 5 && attribute == "text" && shown == true && missing == false,
+              "text \(late ?? "nil") count \(items.map(String.init) ?? "nil") attribute \(attribute ?? "nil") visible \(String(describing: shown))/\(String(describing: missing))")
+
+        // Clicking, double-clicking, typing, scrolling to a far element and clicking it.
+        let acted = await outcome {
+            try await driver.click("#button")
+            try await driver.click("#button", clickCount: 2)
+            try await driver.type("#field", "Hello World")
+            try await driver.click("#far")
+        }
+        let clicked = try? await driver.textContent("#clicked")
+        let typed = try? await driver.inputValue("#field")
+        let far = try? await driver.textContent("#far")
+        let scrolled = (try? await driver.evaluate("return window.scrollY;")) as? Double ?? 0
+        check("automation commands: click, double click, type and a click on an element far below (scrolled to with the wheel) all land",
+              acted == "ok" && clicked == "clicked 3" && typed == "Hello World" && far == "far clicked" && scrolled > 1000,
+              "\(acted); clicked \(clicked ?? "nil"), field \(typed ?? "nil"), far \(far ?? "nil"), scrollY \(Int(scrolled))")
+        check("automation commands: the run's log says what was typed only by its length",
+              log.contains("type 11 characters into #field") && !log.joined().contains("Hello"), "\(log)")
+
+        // What the page saw of all that.
+        let text = (try? await js(tab.webView, "return __take();")) as? String ?? "{}"
+        let record = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
+        let events = record["events"] as? [[String: Any]] ?? []
+        func kind(_ event: [String: Any]) -> String { event["type"] as? String ?? "" }
+        func number(_ event: [String: Any], _ key: String) -> Double? { (event[key] as? NSNumber)?.doubleValue }
+        let untrusted = events.filter { $0["trusted"] as? Bool != true }.map(kind)
+        var movesBeforeFirstPresses: [Int] = []
+        var movesSince = 0
+        for event in events {
+            if kind(event) == "pointermove" { movesSince += 1 }
+            if kind(event) == "mousedown" {
+                if number(event, "detail") == 1 { movesBeforeFirstPresses.append(movesSince) }
+                movesSince = 0
+            }
+        }
+        let downs = events.filter { kind($0) == "mousedown" }, presses = events.filter { kind($0) == "pointerdown" }
+        let wheels = events.filter { kind($0) == "wheel" }
+        let offset = presses.first.map { [(number($0, "screenX") ?? 0) - (number($0, "clientX") ?? 0), (number($0, "screenY") ?? 0) - (number($0, "clientY") ?? 0)] } ?? [0, 0]
+        let wheelsInPlace = !wheels.isEmpty && wheels.allSatisfy { wheel in
+            (number(wheel, "t") ?? 0) > 0
+                && abs((number(wheel, "screenX") ?? 0) - (number(wheel, "clientX") ?? 0) - offset[0]) <= 1
+                && abs((number(wheel, "screenY") ?? 0) - (number(wheel, "clientY") ?? 0) - offset[1]) <= 1
+        }
+        let focused = events.filter { ["pointerdown", "keydown", "wheel"].contains(kind($0)) }.allSatisfy { $0["hasFocus"] as? Bool == true }
+        let keys = events.filter { kind($0) == "keydown" }.map { $0["key"] as? String ?? "?" }
+        let doubleClick = events.contains { kind($0) == "dblclick" && $0["trusted"] as? Bool == true }
+        check("automation commands: the page cannot tell — every event trusted, pointer moves before every press, the button held, wheel time and place as a mouse's, focus throughout, keys with Shift around capitals, a real double click",
+              !events.isEmpty && untrusted.isEmpty
+                  && movesBeforeFirstPresses.count >= 4 && movesBeforeFirstPresses.allSatisfy { $0 >= 3 }
+                  && downs.allSatisfy { number($0, "buttons") == 1 } && presses.allSatisfy { number($0, "pressure") == 0.5 }
+                  && wheelsInPlace && focused && doubleClick
+                  && keys == ["Shift", "H", "e", "l", "l", "o", " ", "Shift", "W", "o", "r", "l", "d"]
+                  && record["active"] as? Bool == true,
+              "\(events.count) events, untrusted \(untrusted), moves before presses \(movesBeforeFirstPresses), buttons \(downs.map { number($0, "buttons") ?? -1 }), pressure \(presses.map { number($0, "pressure") ?? -1 }), \(wheels.count) wheels in place \(wheelsInPlace), focus \(focused), dblclick \(doubleClick), keys \(keys), activation \(String(describing: record["active"]))")
+
+        // The run left the page as it was; a script in the page's own world does not.
+        let after = await surface()
+        let changed = Set(before.keys).union(after.keys).filter { before[$0] != after[$0] }.sorted()
+        check("automation commands: the run changes nothing of the fingerprint surface or the page's globals (navigator.webdriver \(after["webdriver"] ?? "nil"))",
+              !before.isEmpty && changed.isEmpty && after["webdriver"] == "false",
+              "\(before.count) values, changed: \(changed.map { "\($0): \(before[$0] ?? "nil") → \(after[$0] ?? "nil")" })")
+        _ = try? await driver.evaluate("globalThis.pbIsolatedMark = 1; return true;")
+        let isolatedSeen = (try? await js(tab.webView, "return typeof globalThis.pbIsolatedMark;")) as? String
+        _ = try? await driver.evaluate("globalThis.pbPageMark = 1; return true;", world: .page)
+        let control = await surface()
+        let controlChanged = Set(after.keys).union(control.keys).filter { after[$0] != control[$0] }.sorted()
+        check("automation commands: evaluate runs in the driver's own world, which the page cannot see — and in the page's world, the control, the check sees the change",
+              isolatedSeen == "undefined" && !controlChanged.isEmpty,
+              "isolated global seen by the page: \(isolatedSeen ?? "nil"); page-world change seen in \(controlChanged)")
+
+        // Pictures.
+        let viewport = await outcome {
+            let png = try await driver.screenshot()
+            let element = try await driver.screenshot("#far")
+            let whole = NSBitmapImageRep(data: png), part = NSBitmapImageRep(data: element)
+            guard let whole, let part, whole.pixelsWide > 100, part.pixelsWide > 10, part.pixelsWide < whole.pixelsWide,
+                  part.pixelsHigh < whole.pixelsHigh else {
+                throw PageDriver.Failure.script("sizes \(whole?.pixelsWide ?? 0)x\(whole?.pixelsHigh ?? 0), \(part?.pixelsWide ?? 0)x\(part?.pixelsHigh ?? 0)")
+            }
+        }
+        check("automation commands: screenshot gives a PNG of the viewport and a smaller one of an element", viewport == "ok", viewport)
+
+        // Following a link, then back, forward, reload.
+        let navigated = await outcome {
+            try await driver.click("#next")
+            try await driver.waitForLoadState(.load)
+        }
+        let atTwo = driver.url
+        let back = await outcome { try await driver.back() }
+        let atForm = driver.url
+        let forward = await outcome { try await driver.forward() }
+        let reload = await outcome { try await driver.reload() }
+        let heading = try? await driver.textContent("#heading")
+        check("automation commands: a clicked link, back, forward and reload each come to their page",
+              navigated == "ok" && atTwo == two && back == "ok" && atForm == form && forward == "ok" && reload == "ok"
+                  && driver.url == two && heading == "Page two",
+              "link \(navigated) → \(atTwo?.lastPathComponent ?? "nil"); back \(back) → \(atForm?.lastPathComponent ?? "nil"); forward \(forward); reload \(reload) → \(driver.url?.lastPathComponent ?? "nil") \(heading ?? "nil")")
+    }
+
     // MARK: The page cannot tell (PageInput)
 
     /// A page that writes down everything it can learn of each input event, as a detector would.
