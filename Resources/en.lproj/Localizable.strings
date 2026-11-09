@@ -1545,6 +1545,8 @@
 "tags.color.7" = "Olive";
 "tags.colors.unreadable" = "The tags’ colours could not be read: labels.bin is left as it is. At the next choice of a colour it is kept beside as labels.bin.unreadable, never written over.";
 "tags.colors.newer" = "A newer version of Lumen wrote the tags’ colours: this version does not change them. Update Lumen.";
+"scenarios.unreadable" = "The scenarios could not be read: scenarios.bin is left as it is. At the next save it is kept beside as scenarios.bin.unreadable, never written over.";
+"scenarios.newer" = "A newer version of Lumen wrote the scenarios: this version does not change them. Update Lumen.";
 
 /* The licensing client: contract.* — the server's docs/CONTRACT.md §17, word for word; license.* — the app's own. */
 "contract.error.unreachable" = "The Lumen server isn’t responding. Check your connection and try again.";

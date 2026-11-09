@@ -13,21 +13,21 @@ import WebKit
 /// the script may catch; one left uncaught ends the run with it.
 @MainActor
 final class ScenarioRunner {
-    enum StopReason: String, Equatable {
+    enum StopReason: String, Equatable, Codable {
         case byUser
         /// The plan no longer has automation: the step under way finishes, then the run stops.
         case rightsEnded
         case profileStopped
     }
 
-    enum Outcome: Equatable {
+    enum Outcome: Equatable, Codable {
         case finished
         case failed(String)
         case stopped(StopReason)
     }
 
-    struct Line: Equatable {
-        enum Kind: String { case command, script, error, outcome }
+    struct Line: Equatable, Codable {
+        enum Kind: String, Codable { case command, script, error, outcome }
         var at: Date
         var kind: Kind
         var text: String

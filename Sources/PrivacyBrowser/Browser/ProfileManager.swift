@@ -33,6 +33,25 @@ final class ProfileManager: ObservableObject {
     /// A warm-up run of a profile moved on: another page visited, or it finished. The per-profile
     /// process reports it to the manager over the channel (`ProfileChannel`).
     var onWarmUpProgress: ((UUID) -> Void)?
+    /// A scenario's run of a profile, wherever it runs: its log and how it ended.
+    struct ScenarioRunState: Equatable {
+        var runID: UUID
+        var name: String
+        var startedAt: Date
+        var lines: [ScenarioRunner.Line]
+        var outcome: ScenarioRunner.Outcome?
+        var isRunning: Bool { outcome == nil }
+    }
+
+    /// The last run of a scenario of each profile (the scenario screen shows it).
+    @Published private(set) var scenarioRuns: [UUID: ScenarioRunState] = [:]
+    private var scenarioRunners: [UUID: ScenarioRunner] = [:]
+    /// Whether the plan has automation, asked before each command of a run in this process. In a
+    /// profile's own process it stays true: the manager sends a stop when the plan loses it.
+    var scenariosAllowed: () -> Bool = { true }
+    /// Told of each line and the end of a run in this process (a profile's process passes them on).
+    var onScenarioLine: ((UUID, UUID, ScenarioRunner.Line) -> Void)?
+    var onScenarioEnded: ((UUID, UUID, ScenarioRunner.Outcome) -> Void)?
     /// A profile's own process reported that it is up, and whether its window is Safari's chrome
     /// (the self-test checks that the chrome's own web views load through the profile's proxy).
     var onProfileRunning: ((UUID, Bool) -> Void)?
@@ -480,6 +499,10 @@ final class ProfileManager: ObservableObject {
                 self.reportedWarmUp[id] = status
                 self.onWarmUpProgress?(id)
                 self.objectWillChange.send()
+            case .scenarioLine(let runID, let line):
+                self.scenarioLine(id, runID, line)
+            case .scenarioEnded(let runID, let outcome):
+                self.scenarioEnded(id, runID, outcome)
             case .cookiesImported(let outcome):
                 let pending = self.pendingCookieImports.removeValue(forKey: id)
                 if let outcome { pending?.resume(returning: outcome) } else { pending?.resume(throwing: CookieImportError.busy) }
@@ -536,6 +559,8 @@ final class ProfileManager: ObservableObject {
             self.busyProfileIDs.remove(id)
             // A warm-up cannot outlive the process it ran in; what it collected is still shown.
             if self.reportedWarmUp[id]?.isRunning == true { self.reportedWarmUp[id]?.phase = .stopped }
+            // Nor a scenario's run.
+            if let run = self.scenarioRuns[id], run.isRunning { self.scenarioEnded(id, run.runID, .stopped(.profileStopped)) }
             // Nothing holds those files now. Sealed whatever way the process ended: one that crashed
             // left its WebKit data in plaintext in this home too, and it goes into the same archive
             // (the next launch takes it from there, as any crash residue).
@@ -1048,6 +1073,10 @@ final class ProfileManager: ObservableObject {
     // MARK: Stop
 
     func stop(_ id: UUID) async throws {
+        if let run = scenarioRuns[id], run.isRunning {
+            scenarioRunners[id]?.stop(.profileStopped)
+            scenarioEnded(id, run.runID, .stopped(.profileStopped))
+        }
         if let child = children.removeValue(forKey: id) {
             runningProfileIDs.remove(id)
             releaseWebRTC(of: id, pid: child.processIdentifier)
@@ -1283,6 +1312,62 @@ final class ProfileManager: ObservableObject {
         }
         guard let session = sessions[id] else { return false }
         return warmUpRobot(for: id).start(plan, in: session)
+    }
+
+    // MARK: Scenarios
+
+    /// Runs `source` in the running profile, in a window of its own (docs/AUTOMATION.md). False when
+    /// the profile is not running or a run of it is still going.
+    @discardableResult
+    func runScenario(_ id: UUID, name: String, source: String, parametersJSON: String = "{}", runID: UUID = UUID()) -> Bool {
+        guard !isShuttingDown, scenarioRuns[id]?.isRunning != true else { return false }
+        if let child = children[id] {
+            scenarioRuns[id] = ScenarioRunState(runID: runID, name: name, startedAt: Date(), lines: [], outcome: nil)
+            child.send(.runScenario(ScenarioRunRequest(runID: runID, name: name, source: source, parametersJSON: parametersJSON)))
+            objectWillChange.send()
+            return true
+        }
+        guard let session = sessions[id] else { return false }
+        let controller = session.openWindow(url: nil)
+        guard let tab = controller.selectedTab else { return false }
+        let driver = PageDriver(webView: tab.webView) { [weak tab] url in _ = tab?.load(url) }
+        let runner = ScenarioRunner(driver: driver)
+        runner.allowed = { [weak self] in self?.scenariosAllowed() ?? false }
+        scenarioRuns[id] = ScenarioRunState(runID: runID, name: name, startedAt: Date(), lines: [], outcome: nil)
+        scenarioRunners[id] = runner
+        runner.onLine = { [weak self] line in self?.scenarioLine(id, runID, line) }
+        runner.onEnd = { [weak self] outcome in self?.scenarioEnded(id, runID, outcome) }
+        let parameters = (try? JSONSerialization.jsonObject(with: Data(parametersJSON.utf8))) as? [String: Any] ?? [:]
+        objectWillChange.send()
+        runner.start(source, parameters: parameters)
+        return true
+    }
+
+    /// Stops the profile's run, wherever it runs: a command under way finishes first.
+    func stopScenario(_ id: UUID, reason: ScenarioRunner.StopReason = .byUser) {
+        guard scenarioRuns[id]?.isRunning == true else { return }
+        if let child = children[id] {
+            child.send(.stopScenario(reason))
+            return
+        }
+        scenarioRunners[id]?.stop(reason)
+    }
+
+    private func scenarioLine(_ id: UUID, _ runID: UUID, _ line: ScenarioRunner.Line) {
+        guard scenarioRuns[id]?.runID == runID else { return }
+        // The last lines of a long run are what matter; it keeps 5000.
+        if (scenarioRuns[id]?.lines.count ?? 0) >= 5000 { scenarioRuns[id]?.lines.removeFirst() }
+        scenarioRuns[id]?.lines.append(line)
+        onScenarioLine?(id, runID, line)
+        objectWillChange.send()
+    }
+
+    private func scenarioEnded(_ id: UUID, _ runID: UUID, _ outcome: ScenarioRunner.Outcome) {
+        guard scenarioRuns[id]?.runID == runID, scenarioRuns[id]?.outcome == nil else { return }
+        scenarioRuns[id]?.outcome = outcome
+        scenarioRunners[id] = nil
+        onScenarioEnded?(id, runID, outcome)
+        objectWillChange.send()
     }
 
     // MARK: Cookie import

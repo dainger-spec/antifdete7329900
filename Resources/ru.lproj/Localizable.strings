@@ -1545,6 +1545,8 @@
 "tags.color.7" = "Оливковый";
 "tags.colors.unreadable" = "Цвета меток не прочитались: файл labels.bin оставлен как есть. При первом новом выборе цвета он будет сохранён рядом как labels.bin.unreadable, а не перезаписан.";
 "tags.colors.newer" = "Цвета меток записала более новая версия Lumen: эта версия их не меняет. Обновите Lumen.";
+"scenarios.unreadable" = "Сценарии не прочитались: файл scenarios.bin оставлен как есть. При следующем сохранении он будет сохранён рядом как scenarios.bin.unreadable, а не перезаписан.";
+"scenarios.newer" = "Сценарии записала более новая версия Lumen: эта версия их не меняет. Обновите Lumen.";
 
 /* The licensing client: contract.* — the server's docs/CONTRACT.md §17, word for word; license.* — the app's own. */
 "contract.error.unreachable" = "Сервер Lumen не отвечает. Проверьте соединение и попробуйте ещё раз.";

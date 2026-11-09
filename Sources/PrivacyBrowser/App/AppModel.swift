@@ -34,6 +34,10 @@ final class AppModel: ObservableObject {
     @Published private(set) var tagColors = TagColors()
     /// `labels.bin` is a newer version's: shown as none, and no choice is written over it.
     private var tagColorsRefused = false
+    /// The scenarios of the automation editor (`scenarios.bin`): this Mac's.
+    @Published private(set) var scenarios = ScenarioLibrary()
+    /// `scenarios.bin` is a newer version's: shown as none, and nothing is written over it.
+    private var scenariosRefused = false
     /// The last unlock attempt failed with a wrong password (the unlock screen then shows which
     /// vault it tried).
     @Published private(set) var unlockFailed = false
@@ -168,6 +172,10 @@ final class AppModel: ObservableObject {
         }
         license.onStateChanged = { [weak self] in
             guard let self, self.phase == .unlocked else { return }
+            // A plan without automation any more: every run stops after its current step.
+            if !self.license.allowsAutomation, let manager = self.manager {
+                for (id, run) in manager.scenarioRuns where run.isRunning { manager.stopScenario(id, reason: .rightsEnded) }
+            }
             ExpiryNotifications.update(at: .stateChanged, license: self.license)
         }
         license.start()
@@ -388,6 +396,8 @@ final class AppModel: ObservableObject {
         let manager = ProfileManager(repository: repository)
         // The license decides whether a profile opens (§8): here, before its process starts.
         manager.launchGate = { [weak self] id in self?.license.refusalToOpen(id) }
+        // Scenario automation is the plan's (docs/AUTOMATION.md): asked before each command.
+        manager.scenariosAllowed = { [weak self] in self?.license.allowsAutomation ?? false }
         license.vaultOpened(vault)
         ExpiryNotifications.update(at: .stateChanged, license: license)
         manager.onError = { [weak self] message in self?.showError(message) }
@@ -423,6 +433,7 @@ final class AppModel: ObservableObject {
         }
         manager.refusesFailingProxy = { [weak self] in self?.settings.proxyFailure == .doNotLaunch }
         loadTagColors(from: vault)
+        loadScenarios(from: vault)
         manager.onProxyLaunchRefused = { [weak self] id, proxy, diagnosis in
             self?.reportProxyProblem(of: id, proxy: proxy, diagnosis: diagnosis, notStarted: true)
         }
@@ -522,6 +533,8 @@ final class AppModel: ObservableObject {
         proxyProblems = []
         tagColors = TagColors()
         tagColorsRefused = false
+        scenarios = ScenarioLibrary()
+        scenariosRefused = false
         managerObservation = nil
         manager = nil
         repository = nil
@@ -946,6 +959,67 @@ final class AppModel: ObservableObject {
         }
         try? updateDeviceSettings { $0.lastSync = status }
         refresh()
+    }
+
+    // MARK: Scenarios
+
+    /// `scenarios.bin` as it is. One that does not open is kept and said once; the next save moves
+    /// it aside as `scenarios.bin.unreadable`, never over it. A newer version's is said, and nothing
+    /// is written over it.
+    private func loadScenarios(from vault: UnlockedVault) {
+        do {
+            scenarios = try ScenarioLibrary.load(from: vault)
+            scenariosRefused = false
+        } catch {
+            scenarios = ScenarioLibrary()
+            if case CoreError.newerFormat = error {
+                scenariosRefused = true
+                showError(errorText(error))
+            } else {
+                Logger(subsystem: "PrivacyBrowser", category: "Vault")
+                    .error("scenarios.bin could not be read: \(error.logKind, privacy: .public); kept, moved aside at the next save")
+                showError(L("scenarios.unreadable"))
+            }
+        }
+    }
+
+    /// Saves `scenario` (added, or its edit), or removes it with `remove`. False when it was not written.
+    @discardableResult
+    func saveScenario(_ scenario: Scenario, remove: Bool = false) -> Bool {
+        guard let repository else { return false }
+        guard !scenariosRefused else {
+            showError(L("scenarios.newer"))
+            return false
+        }
+        var next = scenarios
+        if remove { next.remove(scenario.id) } else { next.put(scenario) }
+        do {
+            try next.save(to: repository.vault)
+            scenarios = next
+            return true
+        } catch {
+            showError(errorText(error))
+            return false
+        }
+    }
+
+    /// Whether this plan has scenario automation.
+    var allowsAutomation: Bool { license.allowsAutomation }
+
+    /// The last run of a scenario on profile `id`, if any.
+    func scenarioRun(of id: UUID) -> ProfileManager.ScenarioRunState? { manager?.scenarioRuns[id] }
+
+    /// Runs `scenario` on profile `id`, starting the profile first when it is not running. False
+    /// when the plan has no automation, the profile did not start, or a run of it is going.
+    func runScenario(_ scenario: Scenario, on id: UUID) async -> Bool {
+        guard license.allowsAutomation, manager != nil else { return false }
+        if !isRunning(id) { await launch(id) }
+        guard let manager, isRunning(id) else { return false }
+        return manager.runScenario(id, name: scenario.name, source: scenario.source)
+    }
+
+    func stopScenario(on id: UUID) {
+        manager?.stopScenario(id)
     }
 
     // MARK: Tags' colours
