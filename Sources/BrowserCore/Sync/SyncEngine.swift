@@ -24,6 +24,10 @@ public struct SyncReport: Equatable, Sendable {
     /// Profiles deleted on another device and removed locally. The app layer must also
     /// remove their WebKit data stores.
     public var deletedProfileIDs: [UUID] = []
+    /// Objects of deleted profiles written over on the sync location with a small envelope that
+    /// says so (`SyncPayload.deleted`, no data), so that they take no room there. Not uploads of
+    /// anything of this device's: not counted with `pushed`.
+    public var retired: [String] = []
     /// The sync location's vault header against this device's (`SyncEngine.publishVaultHeader`).
     public var passwordHeader: PasswordHeader = .same
     /// Profile files whose copy on this device does not open (damaged, cut short, another key's):
@@ -94,6 +98,11 @@ public struct SyncReport: Equatable, Sendable {
 ///
 /// Profile files are already encrypted with per-profile keys; the envelope adds a second
 /// layer that hides object names and binds blobs to their name and revision.
+///
+/// A deleted profile's objects are written over with a small envelope that says so (`deleted`,
+/// no data), by whichever device syncs first knowing of the deletion, and before anything else is
+/// written: they held the profile's files, which no device takes any more, and took the sync
+/// location's room (`retireObjects`). The folders of the profile on the devices are not touched.
 ///
 /// NOT synced: WebKit data store archives (localStorage/IndexedDB/cache; cookies sync through
 /// `cookies.bin` instead). They are large and only consistent while the profile is stopped.
@@ -202,11 +211,23 @@ public final class SyncEngine: @unchecked Sendable {
         report.passwordHeader = try await publishVaultHeader(listed: remoteObjects)
         let remote = Dictionary(remoteObjects.map { ($0.objectID, $0.revision) }, uniquingKeysWith: max)
 
+        // The objects of the profiles deleted here go first, before anything else is written: a
+        // sync location that is full takes these (each is smaller than what it replaces) and then
+        // has room for the rest — the index among it, which would otherwise be refused and stop
+        // the sync before the room was given back.
+        let deletedHere = repository.currentIndex().deletedProfileIDs
+        try await retireObjects(ofDeleted: deletedHere, remote: remote, state: &state, report: &report)
+
         let profilesBefore = Set(repository.list().map(\.id))
         try await syncIndex(remote: remote, state: &state, report: &report)
         try await syncLabels(remote: remote, state: &state, report: &report)
 
         let index = repository.currentIndex()
+        // And those of the profiles the index just taken in says were deleted elsewhere: the device
+        // that deleted them has usually done it, and then nothing is written here.
+        let known = Set(deletedHere)
+        try await retireObjects(ofDeleted: index.deletedProfileIDs.filter { !known.contains($0) },
+                                remote: remote, state: &state, report: &report)
         for entry in index.entries {
             let id = entry.summary.id
             for file in ProfileSyncFile.allCases {
@@ -243,6 +264,55 @@ public final class SyncEngine: @unchecked Sendable {
         report.deletedProfileIDs = profilesBefore.subtracting(profilesAfter).sorted { $0.uuidString < $1.uuidString }
         repository.removeOrphanedDirectories()
         return report
+    }
+
+    // MARK: Deleted profiles
+
+    /// What `ItemState` holds for an object written over as deleted: the hash of no data.
+    private static let retiredHash = SyncEngine.hash(Data())
+
+    /// The objects of deleted profiles that the sync location still holds are written over with a
+    /// small envelope that says so (`deleted: true`, no data) — a deletion is permanent
+    /// (`ProfileIndex.deletedProfileIDs`), no device takes these objects any more, and until now
+    /// they stayed there at their full size for good. Compare-and-swap, as every write: one that
+    /// another device wrote meanwhile is left for the next sync (`deferred`). An object this device
+    /// knows at the revision listed is written over without being fetched; any other is fetched
+    /// first, and one that already says it is deleted is only noted — so that two devices do not
+    /// write it over in turn. One that does not open here (damaged, or a newer version's) is left
+    /// as it is: what cannot be read is not written over, and no device needs it for the sync to go
+    /// on. A profile the index lists is never touched, whatever else it says. Nothing is written or
+    /// removed on this device.
+    private func retireObjects(ofDeleted ids: [UUID], remote: [String: Int],
+                               state: inout [String: ItemState], report: inout SyncReport) async throws {
+        guard !ids.isEmpty else { return }
+        let listed = Set(repository.currentIndex().entries.map(\.summary.id))
+        for id in ids where !listed.contains(id) {
+            for file in ProfileSyncFile.allCases {
+                let name = "profile/\(id.uuidString)/\(file.rawValue)"
+                let objectID = codec.objectID(for: name)
+                guard let remoteRevision = remote[objectID] else { continue }
+                var current = remoteRevision
+                if let known = state[name], known.revision == remoteRevision {
+                    if known.sha256 == Self.retiredHash { continue }
+                } else {
+                    guard let blob = try await transport.fetch(objectID: objectID),
+                          let decoded = try? codec.decode(blob), decoded.payload.logicalName == name else { continue }
+                    if decoded.payload.deleted, decoded.payload.data.isEmpty {
+                        state[name] = ItemState(revision: decoded.revision, sha256: Self.retiredHash)
+                        continue
+                    }
+                    current = decoded.revision
+                }
+                let blob = try codec.encode(SyncPayload(logicalName: name, deleted: true, data: Data()), revision: current + 1)
+                do {
+                    try await transport.store(objectID: objectID, revision: current + 1, data: blob, expectedRevision: current)
+                    state[name] = ItemState(revision: current + 1, sha256: Self.retiredHash)
+                    report.retired.append(name)
+                } catch CoreError.syncConflict {
+                    report.deferred.append(name)
+                }
+            }
+        }
     }
 
     // MARK: Index

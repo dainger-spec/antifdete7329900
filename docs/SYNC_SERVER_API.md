@@ -65,6 +65,13 @@ body = blob
 → 413               blob too large (server-defined limit)
 ```
 
+A vault with a limit on its room: when a profile is deleted, the client writes each of its
+objects over with a small one (a few hundred bytes; docs/SYNC_FORMAT.md, "Deleted profiles'
+objects"), before it writes anything else. A server that refuses writes on a full vault must take
+these — a write that makes an existing object smaller — or the room is never given back. The
+client's tests use a full location that refuses only what grows; the status a real server answers
+for "no room" is the server's to define, and is not in this document yet.
+
 The check of the precondition and the write must be atomic, for example as a single
 conditional UPDATE in a database. `412` is not an error for the client: the engine reports
 the object as `deferred` and retries it on the next sync, after merging where the object
@@ -92,7 +99,7 @@ append-only log of `(object, revision, sha256(blob))`. That is not part of v1.
 | Part | Status |
 |---|---|
 | Wire format (envelope, object IDs, AAD binding) | ready (`pbsync-2` since the vault's generation 2; `pbsync-1` still read) |
-| Client engine (merge, CAS, deferral, tombstones) | ready, unit-tested |
+| Client engine (merge, CAS, deferral, tombstones, deleted profiles' objects written over) | ready, unit-tested |
 | HTTP client for this API | ready, tested against an in-process stub |
 | Folder transport | ready, **local-only** (NAS share, external disk) |
 | Server implementation | **not included** |

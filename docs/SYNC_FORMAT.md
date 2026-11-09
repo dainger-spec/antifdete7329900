@@ -128,6 +128,8 @@ own through `cookies.bin`, cookie by cookie.
   generation it also raises the header on the sync location.
 - `payload = {"logicalName": "...", "deleted": false, "data": "<base64>"}`. After
   decrypting, the client checks that `HMAC(objectIDKey, logicalName) == objectID`.
+  `deleted: true` with no data is what a deleted profile's objects are written over with (see
+  "Deleted profiles' objects" below): an envelope of a few hundred bytes in the place of the file.
 - `envelopeKey = HKDF(VMK, "sync-envelope")` and `objectIDKey = HKDF(VMK, "sync-object-id")`.
 
 **The server learns:** the vault ID, how many objects exist, their sizes, their revision
@@ -149,7 +151,10 @@ revision and the SHA-256 of the last synced bytes.
    with fewer changes, or as many with another key (changed apart, or before changes were
    counted), is never published over the server's; the report says which
    (`SyncReport.passwordHeader`), and the sync goes on.
-2. **Index:** if the remote revision changed, fetch it and merge with the local index:
+2. **Deleted profiles' objects** (below): those of the profiles this device already knows deleted
+   are written over before the index is pushed; those the index of step 3 says were deleted
+   elsewhere, right after it.
+3. **Index:** if the remote revision changed, fetch it and merge with the local index:
    the union by profile ID, the higher summary revision wins, and profiles in either
    side's `deletedProfileIDs` are dropped (their folders on this Mac are kept, for the person to
    bring back as a new profile or remove: R3, docs/DESTRUCTIVE_PATHS.md). Save the result locally, and push it if it
@@ -157,7 +162,7 @@ revision and the SHA-256 of the last synced bytes.
    was not read (missing or unreadable, `ProfileRepository.IndexState`) is never pushed: the
    remote one is fetched and merged whatever its revision (docs/ARCHITECTURE.md, `index.bin`
    missing or unreadable).
-3. **Per-profile files**, for each profile in the merged index:
+4. **Per-profile files**, for each profile in the merged index:
    - local change only → push (`revision = remote + 1`, CAS on the remote revision) — but
      **config** older than the server's (by `settingsModifiedAt`, settings that differ) is not an
      edit: a version put back from a backup (R2). The server's stays the settings, this device's is
@@ -183,10 +188,44 @@ revision and the SHA-256 of the last synced bytes.
      - **passwords** are merged login by login (`passwords.bin` format 2, see below) — and so
        is a password file that changed only here while the server holds one, as for the other
        mergeable files.
-4. Delete local directories of profiles removed from the index, and report their IDs so
+5. Delete local directories of profiles removed from the index, and report their IDs so
    the app also removes their WebKit stores.
 
 A lost CAS race leaves the object in `report.deferred`; the next sync retries it.
+
+### Deleted profiles' objects
+
+A deletion is permanent (`deletedProfileIDs`), so no device takes a deleted profile's objects any
+more — and until this was written they stayed on the sync location whole, counted against its
+room for ever (the owner and the lead, 9 November; the server's question 13). Now each object of
+a profile in `deletedProfileIDs` that the location still lists is written over, once, with
+`{"logicalName": …, "deleted": true, "data": ""}` at `revision + 1` (CAS on the listed revision):
+about 350 bytes where the passwords, history or cookies were. `SyncReport.retired` names them.
+
+- **When.** Before the index is pushed, for the profiles this device's own index names deleted:
+  on a location that is full every such write makes room (each is smaller than what it replaces),
+  and the index — which would otherwise be refused and stop the sync — then fits. And again
+  after the index is merged, for the profiles it has just learnt were deleted elsewhere: the
+  device that deleted them has usually done it, and then nothing is written. Whichever device
+  syncs first does it; objects left whole by a version from before this are written over by the
+  first device with this version to sync.
+- **Never** an object of a profile the index lists (an ID both listed and deleted is left alone),
+  and never one that does not open under this vault's key or says another name inside: it is left
+  as it is and looked at again at the next sync — nothing unreadable is written over.
+- **Known state.** Once written, `sync-state.bin` holds the revision and the hash of no data, and
+  the object is not fetched again while its revision stays. An object the location lists at a
+  revision this device has not seen is fetched first: one that already says `deleted` with no
+  data is only noted.
+- **A write lost** to another device (CAS) goes to `report.deferred` and is tried at the next sync.
+- **What goes away.** The sync location's copy of the profile's files. The folder on a device
+  that did not delete the profile is kept as before (R3, docs/DESTRUCTIVE_PATHS.md): the person
+  brings it back as a new profile, or removes it. A device that never had the profile cannot get
+  it from the sync location after this — it could not before either: nothing fetches the objects
+  of a profile the index calls deleted.
+- **What the server sees.** Nothing new: `deleted` is inside the envelope. It sees an object
+  become small. The owner's server takes such a write on a vault that is over its room (its
+  decision on question 13); how it tells it from any other write is the server's, and is not
+  described here.
 
 A profile file this device cannot open — damaged, cut short, under another key — is handled before
 any of the above, and never pushed: it once was, over the server's good copy of the settings, which
