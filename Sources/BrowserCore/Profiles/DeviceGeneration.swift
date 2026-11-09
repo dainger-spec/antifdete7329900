@@ -31,6 +31,37 @@ import Foundation
 /// WebKit version with behaviours worth matching, a new behaviour set can be registered and
 /// pointed at from new generations here, without touching the profile format or the rest of
 /// the app (see `BehaviorSets` in the app layer).
+/// What an iPhone shows a page of itself that the Mac's engine does not: measured on the owner's
+/// iPhone (iOS 27, Safari 27, 8 November) with scripts/phone_page.py — a 402×874 point screen at
+/// 3×, five touch points, the platform "iPhone".
+public struct PhoneDevice: Equatable, Sendable {
+    public let platform: String
+    public let screenWidth: Int
+    public let screenHeight: Int
+    public let scale: Double
+    public let maxTouchPoints: Int
+
+    public init(platform: String, screenWidth: Int, screenHeight: Int, scale: Double, maxTouchPoints: Int) {
+        self.platform = platform
+        self.screenWidth = screenWidth
+        self.screenHeight = screenHeight
+        self.scale = scale
+        self.maxTouchPoints = maxTouchPoints
+    }
+
+    public static let ownersIPhone = PhoneDevice(platform: "iPhone", screenWidth: 402, screenHeight: 874, scale: 3, maxTouchPoints: 5)
+}
+
+/// How far an iPhone view goes to look like a phone (the owner, 8 November). `full`, the default:
+/// every value of the phone a page reads — the engine's own where WebKit has a setting for it (the
+/// platform, the pixel density), a script's for the rest (the screen, touch, the pointer and hover,
+/// the orientation), which a page that looks for them can tell are a script's. `engineOnly`: only
+/// what WebKit itself answers, so nothing a page reads is a script's — and the screen, touch and
+/// the pointer stay this Mac's, which a page sees at once.
+public enum PhoneDisguise: String, Codable, Sendable, CaseIterable {
+    case full, engineOnly
+}
+
 public struct DeviceGeneration: Identifiable, Equatable, Sendable {
     public enum Platform: String, Codable, Sendable, CaseIterable {
         case macOS, iOS, iPadOS
@@ -49,10 +80,25 @@ public struct DeviceGeneration: Identifiable, Equatable, Sendable {
     public let defaultWebRTCPolicy: WebRTCPolicy
     /// Which injected-script behaviour set this generation uses (extension point).
     public let behaviorSetID: String
+    /// The processor count WebKit is given in the profile's process (`ProfileProcess`), so that
+    /// `navigator.hardwareConcurrency` is the device's in the page, its frames and every worker —
+    /// WebKit's own value, not a script's. nil: this Mac's own count.
+    ///
+    /// WebKit reports 4 for fewer than 8 cores and 8 from 8 cores up (`NavigatorBase::
+    /// hardwareConcurrency`), so most Macs say 8 and an iPhone says 4: every iPhone iOS 26 and 27
+    /// run on has a 6-core CPU (A13 to A19: two performance and four efficiency cores, Apple's
+    /// specifications), and the owner's iPhone (iOS 27.0) reports 4. The iPad view keeps the Mac's
+    /// count: it sends the Mac's User-Agent, as Safari on an iPad does by default, so a page takes
+    /// it for a Mac, and iPads themselves differ (an A-series iPad 4, an M-series iPad 8).
+    public let processorCores: Int?
+    /// The phone an iPhone view presents itself as (`PhoneDevice`); nil for the Mac and the iPad
+    /// view (an iPad sends the Mac's User-Agent).
+    public let phone: PhoneDevice?
 
     public init(id: String, nameKey: String, platform: Platform, osVersionLabel: String,
                 userAgent: String, matchesEngine: Bool,
-                defaultWebRTCPolicy: WebRTCPolicy, behaviorSetID: String) {
+                defaultWebRTCPolicy: WebRTCPolicy, behaviorSetID: String, processorCores: Int? = nil,
+                phone: PhoneDevice? = nil) {
         self.id = id
         self.nameKey = nameKey
         self.platform = platform
@@ -61,6 +107,8 @@ public struct DeviceGeneration: Identifiable, Equatable, Sendable {
         self.matchesEngine = matchesEngine
         self.defaultWebRTCPolicy = defaultWebRTCPolicy
         self.behaviorSetID = behaviorSetID
+        self.processorCores = processorCores
+        self.phone = phone
     }
 
     /// The User-Agent this generation declares on a Mac whose Safari is `hostSafariVersion`
@@ -100,6 +148,61 @@ public enum SafariVersions {
         case far
     }
 
+    /// The Safari a macOS profile names: this Mac's Safari (`appVersion`) when Safari runs the WebKit
+    /// this app runs, and otherwise the Safari of the WebKit this app runs — a page measures the
+    /// engine, so naming another one is a contradiction it can see.
+    ///
+    /// Safari's own build (its CFBundleVersion, `appBuild`) is the build of the WebKit it runs: on
+    /// macOS 26.6.2 and 27.0.1 both are the same as the system WebKit.framework every app loads
+    /// (measured: Safari 26.6.2 = 21624.5.1.11.3, Safari 27.0.1 = 22625.1.29.11.28, Safari and its
+    /// web processes mapping /System/Library/Frameworks/WebKit.framework). CI run 718, a runner on
+    /// macOS 26.7.2 with Safari 27.2: the app ran WebKit 21624.5.1.11.3 while Safari had WebKit 27's
+    /// features and its canvas — two engines on one Mac, and the profile called itself Safari 27.2.
+    /// The engines are told apart by the builds' first number (21624 against 22…).
+    public static func declared(appVersion: String, appBuild: String?, webKitBuild: String?) -> Declared {
+        guard let appBuild, let webKitBuild, let appEngine = engine(appBuild), let ours = engine(webKitBuild),
+              appEngine != ours else {
+            return Declared(version: appVersion, sharesEngine: true)
+        }
+        if let known = knownBuilds[webKitBuild] { return Declared(version: known, sharesEngine: false) }
+        // A build not measured here: its major version, which the first number says from Safari 26
+        // on (21xxx is 26, 22xxx is 27), and no minor version this engine might not have.
+        return Declared(version: "\(ours / 1000 + 5).0", sharesEngine: false)
+    }
+
+    public struct Declared: Equatable, Sendable {
+        /// The version a macOS profile's User-Agent names.
+        public let version: String
+        /// Whether Safari runs the WebKit this app runs (a profile can then be this Mac's Safari).
+        public let sharesEngine: Bool
+
+        public init(version: String, sharesEngine: Bool) {
+            self.version = version
+            self.sharesEngine = sharesEngine
+        }
+    }
+
+    /// Safari releases by the build of their WebKit, as measured on CI's runners.
+    public static let knownBuilds: [String: String] = ["21624.5.1.11.3": "26.6.2", "22625.1.29.11.28": "27.0.1"]
+
+    /// The first number of a WebKit build ("21624" of "21624.5.1.11.3"), from Safari 26 on.
+    static func engine(_ build: String) -> Int? {
+        guard let first = build.split(separator: ".").first, let number = Int(first), number >= 21000 else { return nil }
+        return number
+    }
+
+    /// Whether Safari of `version` on a Mac gives pages `window.safari` (its legacy
+    /// `pushNotification` object), measured in a plain Safari window (scripts/window_safari_check.py,
+    /// run 42471690410, 8 November): Safari 26.6.2 and 27.0.1 do, Safari 27.2 does not — nor the owner's
+    /// Safari on his Mac (8 November). Safari 27.1 was not measured; it is counted with 27.0.
+    /// No iPhone or iPad Safari has it.
+    public static func givesWindowSafari(_ version: String) -> Bool {
+        let parts = version.split(separator: ".").compactMap { Int($0) }
+        guard let major = parts.first else { return false }
+        let minor = parts.dropFirst().first ?? 0
+        return major < 27 || (major == 27 && minor < 2)
+    }
+
     /// How far `version` is from `host` (this Mac's Safari, e.g. "26.0.1").
     public static func distance(of version: String, fromHost host: String) -> Distance {
         func parts(_ text: String) -> [Int] { text.split(separator: ".").compactMap { Int($0) } }
@@ -127,11 +230,13 @@ public enum DeviceGenerations {
         DeviceGeneration(
             id: "ios-27", nameKey: "gen.ios27", platform: .iOS, osVersionLabel: "27",
             userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Mobile/15E148 Safari/604.1",
-            matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior),
+            matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior, processorCores: 6,
+            phone: .ownersIPhone),
         DeviceGeneration(
             id: "ios-26", nameKey: "gen.ios26", platform: .iOS, osVersionLabel: "26",
             userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Mobile/15E148 Safari/604.1",
-            matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior),
+            matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior, processorCores: 6,
+            phone: .ownersIPhone),
         DeviceGeneration(
             id: "ipados-26", nameKey: "gen.ipados26", platform: .iPadOS, osVersionLabel: "26",
             // Safari's default on an iPad: the desktop website, with the Mac's UA.

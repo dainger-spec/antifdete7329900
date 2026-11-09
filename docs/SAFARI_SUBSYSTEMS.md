@@ -40,7 +40,7 @@ the row says what would show it.
 | Subsystem | What happens | Where it stands |
 |---|---|---|
 | Bookmarks (`BookmarksController`, `WebBookmarkGroup`, WebBookmarks) | the database opens "at (null)" (SQLite 11); no `Bookmarks.plist` is in the profile's home after a run | open (O4) |
-| History (`History`, `HistoryController`, `WBSHistoryServiceStore`) | Safari's History service is an XPC service of Safari's, refused to the process: History menu empty; visits go to the profile's own encrypted history | open (H1) |
+| History (`History`, `HistoryController`, `WBSHistoryServiceStore`) | Safari's History service is an XPC service of Safari's, refused to the process: Safari's History view showed nothing (the owner's Mac, 0.1.2). Visits go to the profile's own encrypted history — the one source of a profile's history — and Show All History (⌘Y) and Clear History… open it (`HistoryMenuRoute`); the recent pages in the History menu stay empty | partly (H1 for the menu's recent pages) |
 | Downloads (`DownloadsManager`) | a download does nothing and says nothing (its location view is a refused remote view) | open (O6) |
 | Tab groups' collection (`WBTabGroupManager`, `WBTabCollection`) | "Failed to instantiate tab collection" at first launch | open (O4) |
 

@@ -3,8 +3,8 @@ import Foundation
 /// What a user typed or pasted into a profile's proxy Host field, taken apart.
 ///
 /// People paste whole proxy strings there: `socks5://user:pass@1.2.3.4:1080`, `1.2.3.4:1080`,
-/// `1.2.3.4:1080:user:pass` (a common provider format), `user:pass@host`, `[2001:db8::1]:1080`,
-/// often with a trailing newline. Handed to `NWEndpoint.Host` as a name, any of that makes every
+/// `user:pass@host`, `[2001:db8::1]:1080`, and the providers' own orders — `1.2.3.4:1080:user:pass`,
+/// `user:pass:1.2.3.4:1080`, `1.2.3.4:1080@user:pass` — often with a trailing newline. Handed to `NWEndpoint.Host` as a name, any of that makes every
 /// load fail (-1000 / cannot find host), so the editor splits it into its fields and rejects
 /// anything that is not a host name or an IP address.
 public struct ProxyHostField: Equatable, Sendable {
@@ -107,18 +107,96 @@ public struct ProxyHostField: Equatable, Sendable {
             }
         }
 
-        // user:pass@host — the last "@", so a password may contain "@".
-        if let at = text.lastIndex(of: "@") {
-            let credentials = text[..<at]
-            text = String(text[text.index(after: at)...])
-            let parts = credentials.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
-            let user = String(parts[0])
-            guard !user.isEmpty else { return fail(.emptyUserName) }
-            field.username = user.removingPercentEncoding ?? user
-            let password = parts.count > 1 ? String(parts[1]) : ""
-            field.password = password.removingPercentEncoding ?? password
+        // Around an "@" the credentials come first (user:pass@host:port, the URL's order) or last
+        // (host:port@user:pass, as many providers hand them out). Both readings are tried; where
+        // both make a proxy, the one whose host is plausibly a proxy's (an IP address or a name
+        // with a dot) wins, and the URL's order breaks a tie.
+        if text.contains("@") {
+            let before = credentialsBefore(text, field: field), after = credentialsAfter(text, field: field)
+            switch (before, after) {
+            case (.success(let first), .success(let second)):
+                return .success(isPlausibleHost(first.host) || !isPlausibleHost(second.host) ? first : second)
+            case (.success(let first), .failure):
+                return .success(first)
+            case (.failure, .success(let second)):
+                return .success(second)
+            case (.failure(let failure), .failure):
+                return .failure(failure)
+            }
         }
 
+        if !text.hasPrefix("["), !ProxySettings.isIPv6(text) {
+            let parts = text.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+            if parts.count == 4 {
+                return fourParts(parts, field: field)
+            }
+        }
+        return hostAndPort(text, field: field)
+    }
+
+    /// user:pass@host[:port] — split at the last "@", so a password may contain "@".
+    private static func credentialsBefore(_ text: String, field: ProxyHostField) -> Result<ProxyHostField, Failure> {
+        guard let at = text.lastIndex(of: "@") else { return .failure(Failure(problem: .notAHost(text))) }
+        var field = field
+        guard credentials(text[..<at], into: &field) else { return .failure(Failure(problem: .emptyUserName)) }
+        return hostAndPort(String(text[text.index(after: at)...]), field: field)
+    }
+
+    /// host:port@user:pass — split at the first "@", so a password may contain "@". The port is
+    /// needed: `name@host` is the URL's order.
+    private static func credentialsAfter(_ text: String, field: ProxyHostField) -> Result<ProxyHostField, Failure> {
+        guard let at = text.firstIndex(of: "@") else { return .failure(Failure(problem: .notAHost(text))) }
+        var field = field
+        guard credentials(text[text.index(after: at)...], into: &field) else { return .failure(Failure(problem: .emptyUserName)) }
+        switch hostAndPort(String(text[..<at]), field: field) {
+        case .success(let read) where read.port != nil: return .success(read)
+        case .success: return .failure(Failure(problem: .notAHost(text)))
+        case .failure(let failure): return .failure(failure)
+        }
+    }
+
+    /// "user:pass" (the password may contain ":"); false for an empty user name.
+    private static func credentials(_ text: Substring, into field: inout ProxyHostField) -> Bool {
+        let parts = text.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+        let user = String(parts[0])
+        guard !user.isEmpty else { return false }
+        field.username = user.removingPercentEncoding ?? user
+        let password = parts.count > 1 ? String(parts[1]) : ""
+        field.password = password.removingPercentEncoding ?? password
+        return true
+    }
+
+    /// host:port:user:pass, or user:pass:host:port — both handed out by providers. Where both make
+    /// a proxy, the host first unless only the other reading's host is plausibly a proxy's.
+    private static func fourParts(_ parts: [String], field: ProxyHostField) -> Result<ProxyHostField, Failure> {
+        func reading(host: String, port: String, user: String, password: String) -> ProxyHostField? {
+            guard !user.isEmpty, let port = portNumber(port), ProxySettings.isValidHost(host) else { return nil }
+            var read = field
+            read.host = host
+            read.port = port
+            read.username = user
+            read.password = password
+            return read
+        }
+        let hostFirst = field.username == nil ? reading(host: parts[0], port: parts[1], user: parts[2], password: parts[3]) : nil
+        let userFirst = field.username == nil ? reading(host: parts[2], port: parts[3], user: parts[0], password: parts[1]) : nil
+        switch (hostFirst, userFirst) {
+        case let (first?, second?):
+            return .success(isPlausibleHost(first.host) || !isPlausibleHost(second.host) ? first : second)
+        case let (first?, nil):
+            return .success(first)
+        case let (nil, second?):
+            return .success(second)
+        case (nil, nil):
+            if portNumber(parts[1]) == nil, portNumber(parts[3]) == nil { return .failure(Failure(problem: .invalidPort(parts[1]))) }
+            return .failure(Failure(problem: .notAHost(parts.joined(separator: ":"))))
+        }
+    }
+
+    /// host, host:port, [IPv6]:port or a bare IPv6 address.
+    private static func hostAndPort(_ text: String, field: ProxyHostField) -> Result<ProxyHostField, Failure> {
+        func fail(_ problem: Problem) -> Result<ProxyHostField, Failure> { .failure(Failure(problem: problem)) }
+        var field = field
         if text.hasPrefix("[") {
             guard let close = text.firstIndex(of: "]") else { return fail(.unterminatedIPv6) }
             field.host = String(text[text.index(after: text.startIndex)..<close])
@@ -140,20 +218,18 @@ public struct ProxyHostField: Equatable, Sendable {
                 field.host = parts[0]
                 guard let port = portNumber(parts[1]) else { return fail(.invalidPort(parts[1])) }
                 field.port = port
-            case 4 where field.username == nil && !parts[2].isEmpty:
-                // host:port:user:pass, as many proxy providers hand them out.
-                field.host = parts[0]
-                guard let port = portNumber(parts[1]) else { return fail(.invalidPort(parts[1])) }
-                field.port = port
-                field.username = parts[2]
-                field.password = parts[3]
             default:
                 return fail(.notAHost(text))
             }
         }
-
         guard ProxySettings.isValidHost(field.host) else { return fail(.invalidHost(field.host)) }
         return .success(field)
+    }
+
+    /// A host a proxy is likely to have: an IP address, or a name with a dot in it ("localhost"
+    /// too). A single word such as a user name is a valid host name, but rarely a proxy's.
+    static func isPlausibleHost(_ host: String) -> Bool {
+        ProxySettings.isIPv4(host) || ProxySettings.isIPv6(host) || host.contains(".") || host.lowercased() == "localhost"
     }
 
     private static func portNumber(_ text: String) -> Int? {

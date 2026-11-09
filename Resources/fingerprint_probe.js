@@ -45,6 +45,32 @@ safe('timeZone', () => Intl.DateTimeFormat().resolvedOptions().timeZone);
 safe('tzOffset', () => new Date(Date.UTC(2024, 0, 15, 12)).getTimezoneOffset() + '/' + new Date(Date.UTC(2024, 6, 15, 12)).getTimezoneOffset());
 safe('intlLocale', () => { const o = Intl.DateTimeFormat().resolvedOptions(); return [o.locale, o.calendar, o.numberingSystem].join(','); });
 safe('dateString', () => new Date(Date.UTC(2024, 0, 15, 12)).toString());
+// What a page can read that follows the process's language rather than navigator.language: the
+// default formats, the browser's own words for an invalid form field, and the width the browser's
+// own labels give a file or date control (a page measures them; it cannot read the text).
+safe('localeFormats', () => [(1234567.891).toLocaleString(), new Date(Date.UTC(2024, 0, 15, 12)).toLocaleDateString(),
+  new Intl.NumberFormat().resolvedOptions().locale, new Intl.Collator().resolvedOptions().locale,
+  typeof Intl.DisplayNames === 'function' ? new Intl.DisplayNames(undefined, {type: 'language'}).resolvedOptions().locale : 'none'].join('|'));
+safe('validationMessages', () => {
+  const host = document.createElement('form');
+  host.style.cssText = 'position:absolute;left:-9999px;top:0';
+  const field = (type, attrs, value) => { const i = document.createElement('input'); i.type = type;
+    for (const [k, v] of Object.entries(attrs)) i.setAttribute(k, v); if (value !== undefined) i.value = value; host.appendChild(i); return i; };
+  const list = [field('text', {required: ''}), field('email', {}, 'x'), field('number', {min: '1'}, '0'), field('text', {pattern: '[0-9]+'}, 'a')];
+  (document.body || document.documentElement).appendChild(host);
+  const out = list.map(i => i.validationMessage).join(' | ');
+  host.remove();
+  return out;
+});
+safe('controlWidths', () => {
+  const host = document.createElement('div');
+  host.style.cssText = 'position:absolute;left:-9999px;top:0';
+  const widths = ['file', 'date', 'time', 'datetime-local', 'month', 'week'].map(t => { const i = document.createElement('input'); i.type = t; host.appendChild(i); return i; });
+  (document.body || document.documentElement).appendChild(host);
+  const out = widths.map(i => i.type + ':' + i.getBoundingClientRect().width.toFixed(1)).join(',');
+  host.remove();
+  return out;
+});
 
 // Canvas (deviceinfo.me's test: 6x6, five greys)
 safe('canvas', () => {
@@ -134,7 +160,7 @@ safe('features', () => {
     'document.featurePolicy', 'document.fonts', 'Intl.Segmenter', 'Intl.DurationFormat', 'Intl.DisplayNames', 'Intl.ListFormat',
     'Temporal', 'WebAssembly', 'WebAssembly.Memory', 'structuredClone', 'scheduler', 'requestIdleCallback', 'queueMicrotask',
     'ResizeObserver', 'IntersectionObserver', 'PerformanceObserver', 'performance.memory', 'performance.measureUserAgentSpecificMemory',
-    'crossOriginIsolated', 'isSecureContext', 'TrustedTypes', 'trustedTypes', 'chrome', 'safari', 'webkit', 'opr', 'external',
+    'crossOriginIsolated', 'isSecureContext', 'TrustedTypes', 'trustedTypes', 'chrome', 'safari', 'browser', 'webkit', 'opr', 'external',
     'openDatabase', 'webkitResolveLocalFileSystemURL', 'webkitRequestFileSystem', 'StorageManager', 'webkitStorageInfo',
     'CanvasCaptureMediaStreamTrack', 'ImageCapture', 'MediaStreamTrackGenerator', 'EyeDropper', 'LaunchQueue', 'Sanitizer',
     'AbsoluteOrientationSensor', 'Accelerometer', 'AmbientLightSensor', 'NDEFReader', 'HID', 'Serial', 'Keyboard', 'IdleDetector',
@@ -229,7 +255,20 @@ safe('safariShape', () => {
           push && typeof push.permission === 'function' ? JSON.stringify(push.permission('web.example.test')) : '-'].join('|');
 });
 safe('webkitObject', () => typeof window.webkit);
+// window.browser: WebKit's WebPageNamespace, which Safari gives every page (the Mac and an iPhone,
+// no extension needed; claude/measure-canvas-browser): its class, runtime's and the property's shape.
+safe('browserShape', () => {
+  const b = window.browser;
+  if (!b) return 'absent';
+  const d = Object.getOwnPropertyDescriptor(window, 'browser');
+  const runtime = b.runtime;
+  return [Object.prototype.toString.call(b), Object.getOwnPropertyNames(b).sort().join(','),
+    Object.prototype.toString.call(runtime), Object.getOwnPropertyNames(Object.getPrototypeOf(runtime)).sort().join(','),
+    d ? ['own', d.enumerable, d.configurable, d.writable, typeof d.value].join(',') : 'inherited'].join(' ');
+});
 safe('windowOwnCount', () => Object.getOwnPropertyNames(window).length);
+// The names themselves, so that a difference in the count says which ones (scripts/safari_reference.py).
+safe('windowOwnNames', () => Object.getOwnPropertyNames(window).sort().join(' '));
 
 // Native-looking functions (CreepJS "lies"): toString, name, length, own property names
 safe('natives', () => {

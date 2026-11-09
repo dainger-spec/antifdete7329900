@@ -17,11 +17,27 @@ final class AppModel: ObservableObject {
     /// A sync is running: launches wait for it (it replaces the profiles' files on disk).
     private var isSyncing = false
     @Published var errorMessage: String?
+    /// Why the master password just typed is not accepted (§10.1): it is the account's password or
+    /// the license's key. Shown under its field, on the setup screen and in "Change master password";
+    /// cleared as the password changes.
+    @Published var masterPasswordRefusal: String?
+    /// After an unlock (§10.1, later): the master password is the account's password or the license's
+    /// key, typed in this session. Said, not refused — the data is already locked with it — with the
+    /// action to change it beside the text.
+    @Published var masterPasswordWarning: String?
     /// A profile whose password manager should open (from "Passwords…" in a browser window).
     @Published var passwordsRequest: ProfileSummary?
     /// Profiles that were started with a proxy that does not work, and what the probe found
     /// (`ProfileManager.onProxyProblem`): the Profiles window says it in words, with Check.
     @Published var proxyProblems: [ProxyProblem] = []
+    /// The tags' colours (`labels.bin`): the vault's, for every view that shows tags.
+    @Published private(set) var tagColors = TagColors()
+    /// `labels.bin` is a newer version's: shown as none, and no choice is written over it.
+    private var tagColorsRefused = false
+    /// The scenarios of the automation editor (`scenarios.bin`): this Mac's.
+    @Published private(set) var scenarios = ScenarioLibrary()
+    /// `scenarios.bin` is a newer version's: shown as none, and nothing is written over it.
+    private var scenariosRefused = false
     /// The last unlock attempt failed with a wrong password (the unlock screen then shows which
     /// vault it tried).
     @Published private(set) var unlockFailed = false
@@ -65,10 +81,30 @@ final class AppModel: ObservableObject {
     @Published var showingPalette = false
     /// A section of Settings to show when it next appears (the command palette).
     @Published var settingsSection: SettingsSection?
+    /// The network guard's notice at the foot of the profiles was closed: not again until the app
+    /// starts again (kept nowhere but here).
+    @Published var guardNoticeHidden = false
+    /// Safari on this Mac runs a newer engine than profiles, and OK was not yet pressed for this
+    /// pair of versions (`EngineWarning`).
+    @Published private(set) var engineWarning: EngineWarning.Facts?
+
+    /// The version an update installed at the last quit: the profiles' window says it once.
+    @Published private(set) var updatedTo: String?
+
+    func updatedNoticeSeen() {
+        updatedTo = nil
+    }
+
+    func engineWarningSeen() {
+        if let engineWarning { EngineWarning.markSeen(engineWarning) }
+        engineWarning = nil
+    }
     /// This quit has recorded the profiles to reopen (a quit locks in more than one round).
     private var recordedProfilesToReopen = false
 
     private(set) var repository: ProfileRepository?
+    /// The open vault's profiles, for `AccountSwitchScenario`'s measurements (a check only).
+    var repositoryForChecks: ProfileRepository? { repository }
     private(set) var manager: ProfileManager?
     /// The warm-up queue and schedule of this unlock (`WarmUpCoordinator`).
     private(set) var warmUps: WarmUpCoordinator?
@@ -91,8 +127,19 @@ final class AppModel: ObservableObject {
 
     /// See `AppEnvironment.vaultDirectory` (inside the container when sandboxed).
     let root: URL
+    /// This Mac's license (`LicenseModel`, the server's docs/CONTRACT.md §8): read from
+    /// `account.json` before the vault is unlocked, and decided here every minute.
+    let license: LicenseModel
+    /// The first launch's sign-in and this Mac's connection are done — or this build has no account
+    /// server: the master password's screen comes next (§10.1, the owner's order).
+    @Published var accountStepDone: Bool
+    /// The master password's screen is the first this run shows (no sign-in before it): the
+    /// interface's language is offered on it (`FirstLaunchLanguagePicker`).
+    let setupIsFirstScreen: Bool
+    private var licenseObservation: AnyCancellable?
 
     init() {
+        _engineWarning = Published(initialValue: EngineWarning.unseen(EngineWarning.current))
         // Before the vault is looked for: a vault a sandboxed build of this app left in its
         // container is this build's to use (an unsandboxed build hosts Safari's chrome).
         AppEnvironment.adoptSandboxedDataIfNeeded()
@@ -100,12 +147,42 @@ final class AppModel: ObservableObject {
         AppEnvironment.removeStandaloneSafariHome(in: root)
         // Partial plaintext an unseal that did not finish left (R8): no profile runs yet.
         AppEnvironment.removeUnsealLeftovers(vault: root)
-        phase = MasterVault.exists(in: root) ? .locked : .setup
+        let firstPhase: Phase = MasterVault.exists(in: root) ? .locked : .setup
+        phase = firstPhase
+        license = LicenseModel(root: root)
+        let accountDone = !license.isConfigured || license.record.isSignedIn
+        accountStepDone = accountDone
+        // The master password's screen is this run's first: no sign-in comes before it.
+        setupIsFirstScreen = firstPhase == .setup && accountDone
         // No profile's page is handed to Quick Look, Services or another app (`HandOffs`).
         HandOffs.closeForWebViews()
         // Profiles in processes of their own get changed browsing settings at once.
         settings.onBrowsingChange = { [weak self] preferences in self?.manager?.sendPreferences(preferences) }
+        // The license counts this Mac's profiles (sent with each refresh, §6.2; the limit, §8.4) and
+        // asks for an update when the server sent what this version cannot judge (§9.4).
+        license.profilesHere = { [weak self] in self?.profiles ?? [] }
+        // The windows that show the license redraw with it.
+        licenseObservation = license.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        license.onAppOutdated = { [weak self] in Task { await self?.updater?.checkNow() } }
+        // The subscription's reminders for an account with a key alone (ExpiryNotifications): offered
+        // right after a key connected this Mac, or at the first warning — then, not over the lock.
+        license.onActivatedWithKey = { [weak self] in
+            guard let self else { return }
+            ExpiryNotifications.update(at: .activatedWithKey, license: self.license)
+        }
+        license.onStateChanged = { [weak self] in
+            guard let self, self.phase == .unlocked else { return }
+            // A plan without automation any more: every run stops after its current step.
+            if !self.license.allowsAutomation, let manager = self.manager {
+                for (id, run) in manager.scenarioRuns where run.isRunning { manager.stopScenario(id, reason: .rightsEnded) }
+            }
+            ExpiryNotifications.update(at: .stateChanged, license: self.license)
+        }
+        license.start()
     }
+
+    /// The unlocked vault, for the license's key (`AccountKeyVault`); nil while locked.
+    var unlockedVaultForAccount: UnlockedVault? { repository?.vault }
 
     /// Settings → Proxies → the list: the Profiles window shows its Proxies section.
     func showProxyList() {
@@ -128,6 +205,14 @@ final class AppModel: ObservableObject {
 
     func createVault(password: String) async {
         guard !isWorking else { return }
+        // §10.1, the owner's decision: the account's password, typed in this session, is not
+        // accepted as the master password — compared directly, never used to open anything; nor is
+        // the license's key, which goes to the server at every activation.
+        if let refusal = refusalOfMasterPassword(password) {
+            masterPasswordRefusal = refusal
+            return
+        }
+        masterPasswordRefusal = nil
         let root = root
         await perform {
             // Argon2id (64 MiB, 3 passes) takes a fraction of a second; keep it off the main thread.
@@ -135,7 +220,17 @@ final class AppModel: ObservableObject {
                 try MasterVault.create(in: root, password: password)
             }.value
             try self.didUnlock(vault)
+            self.license.forgetComparisons()
         }
+    }
+
+    /// §10.1: a new master password that is the account's password (typed in this session) or the
+    /// license's key (typed in this session, or kept in the vault) — the refusal's text; nil when it
+    /// is neither. Compared in memory only; nothing is derived from either, nothing is tried with them.
+    func refusalOfMasterPassword(_ password: String) -> String? {
+        if license.isAccountPassword(password) { return L("contract.master_password.same_as_account") }
+        if license.isLicenseKey(password) { return L("contract.master_password.same_as_key") }
+        return nil
     }
 
     func unlock(password: String) async {
@@ -166,6 +261,15 @@ final class AppModel: ObservableObject {
                 throw CoreError.wrongPassword
             }
             try self.didUnlock(vault)
+            // §10.1 later: the account's password and the master password typed in one session are
+            // the same — the data is already locked with it, so it is said, not refused; the same for
+            // the license's key (typed in this session, or kept in the vault just opened).
+            if self.license.isAccountPassword(password) {
+                self.masterPasswordWarning = L("contract.master_password.same_as_account_existing")
+            } else if self.license.isLicenseKey(password) {
+                self.masterPasswordWarning = L("contract.master_password.same_as_key")
+            }
+            self.license.forgetComparisons()
         }
     }
 
@@ -176,6 +280,12 @@ final class AppModel: ObservableObject {
     var vaultCreatedDescription: String {
         guard let header = try? MasterVault.readHeader(in: root) else { return "?" }
         return header.createdAt.shown(date: .abbreviated, time: .shortened)
+    }
+
+    /// The lock screen's footer: the day the vault was made ("12 March 2026"); nil when its
+    /// header cannot be read.
+    var vaultCreatedDay: String? {
+        (try? MasterVault.readHeader(in: root)).map { $0.createdAt.shown(date: .long, time: .omitted) }
     }
 
     /// The vault folder, with the real home directory shown as `~` (inside the App Sandbox
@@ -284,6 +394,12 @@ final class AppModel: ObservableObject {
                 .error("The profile index could not be read: \(Int(folders), privacy: .public) profile folders kept, none deleted, the index not written over")
         }
         let manager = ProfileManager(repository: repository)
+        // The license decides whether a profile opens (§8): here, before its process starts.
+        manager.launchGate = { [weak self] id in self?.license.refusalToOpen(id) }
+        // Scenario automation is the plan's (docs/AUTOMATION.md): asked before each command.
+        manager.scenariosAllowed = { [weak self] in self?.license.allowsAutomation ?? false }
+        license.vaultOpened(vault)
+        ExpiryNotifications.update(at: .stateChanged, license: license)
         manager.onError = { [weak self] message in self?.showError(message) }
         manager.onReturnToProfiles = { [weak self] in
             self?.activateProfilesWindow()
@@ -316,6 +432,8 @@ final class AppModel: ObservableObject {
             self?.reportProxyProblem(of: id, proxy: proxy, diagnosis: diagnosis)
         }
         manager.refusesFailingProxy = { [weak self] in self?.settings.proxyFailure == .doNotLaunch }
+        loadTagColors(from: vault)
+        loadScenarios(from: vault)
         manager.onProxyLaunchRefused = { [weak self] id, proxy, diagnosis in
             self?.reportProxyProblem(of: id, proxy: proxy, diagnosis: diagnosis, notStarted: true)
         }
@@ -401,6 +519,7 @@ final class AppModel: ObservableObject {
     var hasActivity: Bool { lockTask != nil || (manager?.hasActivity ?? false) }
 
     private func performLock() async {
+        license.vaultLocked()
         // First: no script may start a profile while they are being stopped and sealed.
         automationServer?.stop()
         automationServer = nil
@@ -412,6 +531,10 @@ final class AppModel: ObservableObject {
         proxyList?.stopChecking()
         proxyList = nil
         proxyProblems = []
+        tagColors = TagColors()
+        tagColorsRefused = false
+        scenarios = ScenarioLibrary()
+        scenariosRefused = false
         managerObservation = nil
         manager = nil
         repository = nil
@@ -430,6 +553,12 @@ final class AppModel: ObservableObject {
     /// sync, and the person is told so.
     func changePassword(current: String, new: String) async {
         guard let repository else { return }
+        // §10.1: the new master password is held to the rule a first one is.
+        if let refusal = refusalOfMasterPassword(new) {
+            masterPasswordRefusal = refusal
+            return
+        }
+        masterPasswordRefusal = nil
         let vault = repository.vault
         let target = deviceSettings.syncTarget
         var changed = false
@@ -478,6 +607,8 @@ final class AppModel: ObservableObject {
 
     func refresh() {
         profiles = repository?.list() ?? []
+        // The license tells the server the real number with its renewals (the owner, 3 November).
+        if repository != nil { license.profilesKnown(count: profiles.count) }
         updateIndexNotice()
         let kept = repository?.keptDeletedProfiles() ?? []
         if kept != keptDeletedProfiles { keptDeletedProfiles = kept }
@@ -497,6 +628,7 @@ final class AppModel: ObservableObject {
     func createProfile(name: String, configuration: ProfileConfiguration) throws -> UUID? {
         guard let repository else { return nil }
         try refuseWhileTheIndexIsUnreadable(repository)
+        if let refusal = license.refusalToCreate() { throw refusal }
         let summary = try repository.create(name: name, configuration: configuration)
         refresh()
         return summary.id
@@ -511,6 +643,10 @@ final class AppModel: ObservableObject {
     /// main thread: everything it carries is re-encrypted. The old folder stays, marked brought back.
     func bringBackDeletedProfile(_ id: UUID) async {
         guard let repository else { return }
+        if let refusal = license.refusalToCreate() {
+            errorMessage = refusal.text
+            return
+        }
         await perform {
             _ = try await Task.detached(priority: .userInitiated) { try ProfileTransfer.bringBack(id, in: repository) }.value
         }
@@ -532,6 +668,21 @@ final class AppModel: ObservableObject {
     /// The files in a profile's folder set aside as unreadable: its deletion's confirmation names them.
     func unreadableFiles(for id: UUID) -> [String] {
         repository?.unreadableFiles(for: id) ?? []
+    }
+
+    /// What the inspector counts of each profile it has shown (`ProfileRepository.counts`): read
+    /// when a profile is inspected, off the main thread, and only read — nothing is written, moved
+    /// aside or taken in.
+    @Published private(set) var inspectorCounts: [UUID: ProfileCounts] = [:]
+
+    func loadInspectorCounts(for id: UUID) {
+        guard let repository, let details = details[id] else { return }
+        let historyPolicy = details.historyPolicy
+        let cookies = details.syncsCookies
+        Task.detached(priority: .utility) {
+            let counts = repository.counts(for: id, historyPolicy: historyPolicy, cookies: cookies)
+            await MainActor.run { self.inspectorCounts[id] = counts }
+        }
     }
 
     /// The versions of the profile's settings kept beside them (R4, R2).
@@ -596,6 +747,7 @@ final class AppModel: ObservableObject {
     func importProfile(from url: URL, password: String, name: String?) async throws -> ProfileSummary {
         guard let repository else { throw CoreError.vaultNotFound }
         try refuseWhileTheIndexIsUnreadable(repository)
+        if let refusal = license.refusalToCreate() { throw refusal }
         let summary = try await Task.detached(priority: .userInitiated) {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -605,8 +757,10 @@ final class AppModel: ObservableObject {
         return summary
     }
 
+    /// The Profiles window's Delete, once the person confirmed it (one profile, or each of several):
+    /// the only caller of the one path that deletes a profile's data.
     func deleteProfile(_ id: UUID) async {
-        await perform { try await self.manager?.delete(id) }
+        await perform { try await self.manager?.deleteBecauseThePersonAsked(id) }
         refresh()
     }
 
@@ -782,9 +936,11 @@ final class AppModel: ObservableObject {
             let (transport, folder) = try syncTransport(for: target, vaultID: repository.vault.vaultID)
             scopedFolder = folder
             let report = try await SyncEngine(repository: repository, transport: transport).sync()
-            for id in report.deletedProfileIDs {
-                await manager.removeWebData(for: id)
-            }
+            if report.pulled.contains("labels") { loadTagColors(from: repository.vault) }
+            // A profile deleted on another device: nothing of it is deleted here. Its folder stays
+            // for the person to bring back or remove (R3); WebKit's store of it outside the vault —
+            // there only if sealing it failed at the unlock — stays as well. Profile data goes only
+            // by the person's own Delete (`ProfileManager.deleteBecauseThePersonAsked`).
             for copy in report.unreadable {
                 showError(Self.unreadableCopyText(copy, name: (try? repository.summary(for: copy.profileID))?.name))
             }
@@ -803,6 +959,108 @@ final class AppModel: ObservableObject {
         }
         try? updateDeviceSettings { $0.lastSync = status }
         refresh()
+    }
+
+    // MARK: Scenarios
+
+    /// `scenarios.bin` as it is. One that does not open is kept and said once; the next save moves
+    /// it aside as `scenarios.bin.unreadable`, never over it. A newer version's is said, and nothing
+    /// is written over it.
+    private func loadScenarios(from vault: UnlockedVault) {
+        do {
+            scenarios = try ScenarioLibrary.load(from: vault)
+            scenariosRefused = false
+        } catch {
+            scenarios = ScenarioLibrary()
+            if case CoreError.newerFormat = error {
+                scenariosRefused = true
+                showError(errorText(error))
+            } else {
+                Logger(subsystem: "PrivacyBrowser", category: "Vault")
+                    .error("scenarios.bin could not be read: \(error.logKind, privacy: .public); kept, moved aside at the next save")
+                showError(L("scenarios.unreadable"))
+            }
+        }
+    }
+
+    /// Saves `scenario` (added, or its edit), or removes it with `remove`. False when it was not written.
+    @discardableResult
+    func saveScenario(_ scenario: Scenario, remove: Bool = false) -> Bool {
+        guard let repository else { return false }
+        guard !scenariosRefused else {
+            showError(L("scenarios.newer"))
+            return false
+        }
+        var next = scenarios
+        if remove { next.remove(scenario.id) } else { next.put(scenario) }
+        do {
+            try next.save(to: repository.vault)
+            scenarios = next
+            return true
+        } catch {
+            showError(errorText(error))
+            return false
+        }
+    }
+
+    /// Whether this plan has scenario automation.
+    var allowsAutomation: Bool { license.allowsAutomation }
+
+    /// The last run of a scenario on profile `id`, if any.
+    func scenarioRun(of id: UUID) -> ProfileManager.ScenarioRunState? { manager?.scenarioRuns[id] }
+
+    /// Runs `scenario` on profile `id`, starting the profile first when it is not running. False
+    /// when the plan has no automation, the profile did not start, or a run of it is going.
+    func runScenario(_ scenario: Scenario, on id: UUID) async -> Bool {
+        guard license.allowsAutomation, manager != nil else { return false }
+        if !isRunning(id) { await launch(id) }
+        guard let manager, isRunning(id) else { return false }
+        return manager.runScenario(id, name: scenario.name, source: scenario.source)
+    }
+
+    func stopScenario(on id: UUID) {
+        manager?.stopScenario(id)
+    }
+
+    // MARK: Tags' colours
+
+    /// `labels.bin` as it is. One that does not open is kept as it is and said once; the next
+    /// choice of a colour moves it aside as `labels.bin.unreadable` (`TagColors.save`), never over
+    /// it. A newer version's is said, and no choice is written over it.
+    private func loadTagColors(from vault: UnlockedVault) {
+        do {
+            tagColors = try TagColors.load(from: vault)
+            tagColorsRefused = false
+        } catch {
+            tagColors = TagColors()
+            if case CoreError.newerFormat = error {
+                tagColorsRefused = true
+                showError(errorText(error))
+            } else {
+                Logger(subsystem: "PrivacyBrowser", category: "Vault")
+                    .error("labels.bin could not be read: \(error.logKind, privacy: .public); kept, moved aside at the next choice")
+                showError(L("tags.colors.unreadable"))
+            }
+        }
+    }
+
+    /// Gives `tag` a colour of the palette, or takes its colour away (nil), for the whole vault.
+    func setTagColor(_ color: Int?, for tag: String) {
+        guard let repository else { return }
+        guard !tagColorsRefused else {
+            showError(L("tags.colors.newer"))
+            return
+        }
+        let wanted = color.flatMap { (0..<ProfileAvatarStyle.colorCount).contains($0) ? $0 : nil }
+        guard tagColors.color(of: tag) != wanted else { return }
+        var next = tagColors
+        next.set(wanted, for: tag)
+        do {
+            try next.save(to: repository.vault)
+            tagColors = next
+        } catch {
+            showError(errorText(error))
+        }
     }
 
     /// A profile file that did not open on this Mac, as a sync left it (`SyncReport.unreadable`):
@@ -888,6 +1146,11 @@ final class AppModel: ObservableObject {
             while self?.isSyncing == true { try? await Task.sleep(nanoseconds: 100_000_000) }
         }
         handler.onChange = { [weak self] in self?.refresh() }
+        handler.allowsAutomation = { [weak self] in self?.license.allowsAutomation ?? false }
+        handler.savedScenario = { [weak self] name in
+            let matching = self?.scenarios.scenarios.filter { $0.name == name } ?? []
+            return matching.count == 1 ? matching[0] : nil
+        }
         let server = AutomationServer(settings: settings, handler: handler)
         server.onStateChange = { [weak self] state in self?.automationState = state }
         automationServer = server
@@ -922,7 +1185,7 @@ final class AppModel: ObservableObject {
         switch updater.notice {
         case .outcome(let outcome)?:
             switch outcome.result {
-            case .installed: break // the Updates sheet says which update this launch is
+            case .installed: updatedTo = outcome.version // and the Updates section says when
             case .rolledBack: showError(String(format: L("updates.notice.rolledBack"), outcome.version, outcome.detail))
             case .refused: showError(String(format: L("updates.notice.refused"), outcome.version, outcome.detail))
             case .gaveUp: showError(String(format: L("updates.notice.gaveUp"), outcome.version, outcome.detail))
@@ -1024,10 +1287,30 @@ struct ProfileDetails: Equatable {
     var exitCountryCode: String?
     var ephemeral: Bool
     var deviceGeneration: DeviceGeneration
+    /// The Safari version its settings pin (`ProfileConfiguration.safariVersion`); nil: this Mac's.
+    var safariVersion: String?
     /// The person's own tags and notes, and how the glyph looks.
     var tags: [String]
     var notes: String
     var avatar: ProfileAvatarStyle?
+    // What the inspector says of how it reaches the web and how sites see it.
+    /// "SOCKS5", "HTTP", "HTTPS": the proxy's kind, as the proxy list names it.
+    var proxyKind: String?
+    /// A SOCKS5 proxy: the kind that can carry UDP, so WebRTC through the app's relay.
+    var proxyCarriesUDP: Bool
+    /// The address sites saw it come from at its last launch through its proxy, when known.
+    var exitIP: String?
+    var timeZone: String
+    /// The WebRTC choice stored; what it amounts to with a proxy depends on the gate at launch
+    /// (`ProfileConfiguration.webRTCRouting`), which the inspector says as the editor does.
+    var webRTCChoice: WebRTCPolicy
+    /// It would carry WebRTC through its SOCKS5 proxy if the network guard worked
+    /// (`WebRTCProtectionNotice`): the profiles window says when the guard does not.
+    var wantsNetworkGuard: Bool
+    var languages: String
+    var window: String
+    var syncsCookies: Bool
+    var historyPolicy: HistoryStore.Policy
 
     init(_ configuration: ProfileConfiguration) {
         proxyEndpoint = configuration.proxy.map { "\($0.host):\($0.port)" }
@@ -1035,8 +1318,32 @@ struct ProfileDetails: Equatable {
         exitCountryCode = configuration.rememberedProxyLocation?.countryCode
         ephemeral = configuration.ephemeral
         deviceGeneration = configuration.deviceGeneration
+        safariVersion = configuration.safariVersion
         tags = configuration.tags
         notes = configuration.notes
         avatar = configuration.avatar
+        proxyKind = configuration.proxy.map { ProxyReport.kindName($0.kind, tls: $0.tlsToProxy) }
+        proxyCarriesUDP = configuration.proxy?.kind == .socks5
+        exitIP = configuration.rememberedProxyLocation?.exitIP
+        if let zone = configuration.timeZoneIdentifier {
+            timeZone = zone
+        } else if configuration.needsProxyLocation {
+            let direct = configuration.proxy == nil
+            timeZone = configuration.rememberedProxyLocation.map {
+                String(format: L(direct ? "inspector.timeZone.fromExit" : "inspector.timeZone.fromProxy"), $0.timeZoneIdentifier)
+            } ?? L(direct ? "inspector.fromExit" : "inspector.fromProxy")
+        } else {
+            timeZone = L("inspector.asThisMac")
+        }
+        webRTCChoice = configuration.webRTCPolicy
+        wantsNetworkGuard = WebRTCProtectionNotice.wants(proxyKind: configuration.proxy?.kind, webRTC: configuration.webRTCPolicy)
+        // Nil: the connection's — its proxy's country when the profile follows it — else this Mac's.
+        languages = configuration.languageOverride
+            ?? (configuration.needsProxyLocation
+                ? L(configuration.proxy == nil ? "inspector.languages.fromExit" : "inspector.languages.fromProxy")
+                : L("inspector.asThisMac"))
+        window = configuration.windowSize.map { "\($0.frame.width) × \($0.frame.height)" } ?? L("editor.window.app")
+        syncsCookies = configuration.syncsCookies
+        historyPolicy = configuration.historyPolicy
     }
 }

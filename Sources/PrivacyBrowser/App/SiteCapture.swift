@@ -1,7 +1,5 @@
 import AppKit
 import BrowserCore
-import TunnelCore
-import TunnelTransport
 import WebKit
 
 /// `Lumen --capture-sites <spec.json> <out-dir>`: loads pages in real profile windows and
@@ -17,9 +15,7 @@ import WebKit
 /// Spec (JSON): {"window": {"width": W, "height": H},
 ///               "profiles": [{"name": "default"}, {"name": "shimmed", "timeZone": "host", "webRTC": "relayOnly"},
 ///                            {"name": "proxied", "proxy": {"kind": "socks5", "host": "127.0.0.1", "port": 1080}},
-///                            {"name": "relayed", "proxy": {…socks5…}, "webRTC": "unrestricted", "relay": "harness"},
-///                            {"name": "tunnelled", "proxy": {…socks5…}, "webRTC": "unrestricted", "relay": "utun",
-///                             "route": {…TunnelRoute…}, "allInterfaces": false}],
+///                            {"name": "relayed", "proxy": {…socks5…}, "webRTC": "unrestricted", "relay": "harness"}],
 ///               "pages": [{"name": "…", "url": "…", "script": "<async function body>", "settleMs": 0,
 ///                          "timeoutMs": 60000, "extraTabs": 0}]}
 /// A page script is the body of an async function; its result is serialised with JSON.stringify.
@@ -36,14 +32,15 @@ final class SiteCapture {
             var geolocation: [Double]?
             /// `ProxySettings.Kind` raw value, host and port.
             var proxy: Proxy?
-            /// "harness": WebRTC through the packet tunnel's TURN server and SOCKS5 relay, run on a
-            /// UDP socket of this Mac instead of in the extension (`TURNUDPHost`) — what CI can run.
-            /// "utun": through `route`'s virtual relay addresses, which `Lumen --utun-relay`
-            /// (run as root, `UTunRelayHarness`) serves on a utun interface with the extension's router.
+            /// "harness": WebRTC through the app's own relay for this profile (`WebRTCRelays`: a TURN
+            /// server on 127.0.0.1 that sends through the profile's SOCKS5 proxy), as a launch gives
+            /// it — only for a proxy whose UDP leaves from its TCP exit, as the gate wants; refused,
+            /// the profile runs without WebRTC, as a launch's would, and its results say why
+            /// (`_relayRefused`). The page runs in this process, so no network guard holds it here.
             var relay: String?
-            var route: TunnelRoute?
-            /// libwebrtc gathers on every interface (`PBTunnelAllInterfaces`, BrowserSession).
-            var allInterfaces: Bool?
+            /// Where the proxy's TCP exit is asked (`ProxyExitLookup.endpoints`): the self-test proxy's
+            /// own trace, which answers in place of the Internet. Unset: Cloudflare's, as a launch.
+            var exitTrace: String?
         }
         struct Proxy: Decodable { var kind: String; var host: String; var port: Int }
         struct Page: Decodable {
@@ -132,17 +129,24 @@ final class SiteCapture {
             recordsHistory: false)
         // As a launch does (ProfileManager.launch): the rules the profile's web views get.
         if ContentRules.needed(by: configuration) { await ContentRules.prepare() }
-        var relayHost: TURNUDPHost?
+        var relayRefused: String?
         if profileSpec.relay == "harness" {
-            relayHost = try startRelayHarness(for: configuration)
-            configuration.webRTCRelay = relayHost.map { WebRTCRelay(urls: [$0.turnURL], username: $0.route.username, credential: $0.route.password) }
-        } else if profileSpec.relay == "utun" {
-            guard let route = profileSpec.route else { throw Failure("a utun relay needs its route") }
-            configuration.webRTCRelay = WebRTCRelay(urls: route.turnURLs, username: route.username, credential: route.password)
+            guard let proxy = configuration.proxy, proxy.kind == .socks5 else { throw Failure("the relay needs a SOCKS5 proxy") }
+            // As a launch decides (ProfileManager.decideWebRTC): the relay only for a proxy whose UDP
+            // leaves from the address its TCP does, held to that address.
+            let endpoints = ProxyExitLookup.endpoints
+            if let trace = profileSpec.exitTrace.flatMap(URL.init(string:)) { ProxyExitLookup.endpoints = [trace] }
+            let (support, exit) = await ProfileManager.proxyUDP(proxy, userAgent: configuration.userAgent(hostSafariVersion: HostSafari.version))
+            ProxyExitLookup.endpoints = endpoints
+            if support == .supported, let exit {
+                configuration.webRTCRelay = try WebRTCRelays.shared.start(profile: summary.id, proxy: proxy, exit: exit)
+                print("INFO relay for \(profileSpec.name) at \(configuration.webRTCRelay?.urls.first ?? "?")")
+            } else {
+                relayRefused = support.rawValue
+                print("INFO no relay for \(profileSpec.name): the gate refused it (\(support.rawValue)); WebRTC is off, as a launch would leave it")
+            }
         }
-        defer { relayHost?.stop() }
-        DebugSwitches.captureOverride.value = profileSpec.allInterfaces ?? false
-        defer { DebugSwitches.captureOverride.value = nil }
+        defer { WebRTCRelays.shared.stop(profile: summary.id) }
         let session = try BrowserSession(profileID: summary.id, profileName: summary.name, configuration: configuration,
                                          passwordVault: try repository.passwordVault(for: summary.id),
                                          passwordSettings: ProfilePasswordSettings(repository: repository, profileID: summary.id,
@@ -158,6 +162,7 @@ final class SiteCapture {
                                            width: spec.window.width, height: spec.window.height), display: true)
 
         var results: [String: Any] = [:]
+        if let relayRefused { results["_relayRefused"] = relayRefused }
         for page in spec.pages {
             print("INFO [\(profileSpec.name)] \(page.name): \(page.url)")
             do {
@@ -170,25 +175,6 @@ final class SiteCapture {
             while controller.tabCount > 1 { controller.closeTab(at: controller.tabCount - 1) }
         }
         return results
-    }
-
-    private let relayQueue = DispatchQueue(label: "PrivacyBrowser.capture.relay")
-
-    /// The packet tunnel's relay outside the tunnel: the TURN server on this Mac's primary IPv4
-    /// address, relaying through the profile's SOCKS5 proxy exactly as the extension does.
-    private func startRelayHarness(for configuration: ProfileConfiguration) throws -> TURNUDPHost {
-        guard let proxy = configuration.proxy, proxy.kind == .socks5, let port = UInt16(exactly: proxy.port) else {
-            throw Failure("the relay harness needs a SOCKS5 proxy")
-        }
-        guard let address = TURNUDPHost.primaryIPv4() else { throw Failure("no IPv4 interface for the relay harness") }
-        let route = TunnelRoute(id: UUID().uuidString, relayIPv4: address, relayIPv6: TunnelAddressing.relayIPv6(slot: 0),
-                                username: "capture", password: UUID().uuidString,
-                                proxy: SOCKSProxy(host: proxy.host, port: port, username: proxy.username, password: proxy.password))
-        let host = try TURNUDPHost(route: route, bindTo: address, queue: relayQueue,
-                                   relays: SOCKS5RelayFactory(queue: relayQueue, log: { print("INFO relay: \($0)") }),
-                                   log: { print("INFO turn: \($0)") })
-        print("INFO relay harness at \(host.turnURL)")
-        return host
     }
 
     private func run(_ page: Spec.Page, in controller: BrowserWindowController) async throws -> Any {

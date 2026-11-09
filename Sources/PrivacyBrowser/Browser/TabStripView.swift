@@ -39,7 +39,7 @@ final class TabStripView: NSView {
         newTabButton.action = #selector(newTab)
         newTabButton.isBordered = false
         newTabButton.toolTip = L("tab.newTab") + " (⌘T)"
-        newTabButton.contentTintColor = Theme.NS.textSecondary
+        newTabButton.contentTintColor = ProfileWindowTheme.NS.textSecondary
         addSubview(newTabButton)
         wantsLayer = true
         separator.boxType = .separator
@@ -55,7 +55,7 @@ final class TabStripView: NSView {
 
     override func updateLayer() {
         // The toolbar's colour: the strip reads as part of the window's chrome.
-        layer?.backgroundColor = Theme.NS.toolbar.cgColor
+        layer?.backgroundColor = ProfileWindowTheme.NS.toolbar.cgColor
     }
 
     func update(items: [Item], selectedIndex: Int) {
@@ -136,7 +136,7 @@ final class TabItemView: NSView {
         closeButton.target = self
         closeButton.action = #selector(close)
         closeButton.toolTip = L("tab.close") + " (⌘W)"
-        closeButton.contentTintColor = Theme.NS.textTertiary
+        closeButton.contentTintColor = ProfileWindowTheme.NS.textTertiary
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
@@ -158,7 +158,7 @@ final class TabItemView: NSView {
         if item.isLoading { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
         isLoading = item.isLoading
         isSelected = selected
-        titleField.textColor = selected ? Theme.NS.textPrimary : Theme.NS.textSecondary
+        titleField.textColor = selected ? ProfileWindowTheme.NS.textPrimary : ProfileWindowTheme.NS.textSecondary
         titleField.font = .systemFont(ofSize: 12, weight: selected ? .medium : .regular)
         needsDisplay = true
         needsLayout = true
@@ -181,9 +181,9 @@ final class TabItemView: NSView {
         // Resolved against the current appearance (light/dark) each time AppKit asks.
         layer?.cornerRadius = 6
         layer?.backgroundColor = isSelected
-            ? Theme.NS.tabSelected.cgColor
-            : (isHovered ? Theme.NS.hover.cgColor : NSColor.clear.cgColor)
-        layer?.borderColor = Theme.NS.hairline.cgColor
+            ? ProfileWindowTheme.NS.tabSelected.cgColor
+            : (isHovered ? ProfileWindowTheme.NS.hover.cgColor : NSColor.clear.cgColor)
+        layer?.borderColor = ProfileWindowTheme.NS.hairline.cgColor
         layer?.borderWidth = isSelected ? 1 : 0
     }
 

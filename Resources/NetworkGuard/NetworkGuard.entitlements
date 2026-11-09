@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- A content filter delivered as a system extension. Needs a provisioning profile of the team
+	     with the Network Extensions capability. The value is content-filter-provider-systemextension
+	     for Developer ID, content-filter-provider for Apple Development signing (NE_SIGNING in
+	     scripts/build-app.sh). -->
+	<key>com.apple.developer.networking.networkextension</key>
+	<array>
+		<string>$(NE_PROVIDER)</string>
+	</array>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>$(APP_GROUP)</string>
+	</array>
+	<key>com.apple.application-identifier</key>
+	<string>$(TEAM_ID).$(EXTENSION_ID)</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>$(TEAM_ID)</string>
+	<!-- Sandboxed, and without com.apple.security.network.client or .server: the guard cannot open
+	     a connection of its own, so it cannot carry a byte anywhere. It only lets a flow through or
+	     drops it. scripts/build-app.sh refuses an entitlements file that gives it either. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+</dict>
+</plist>

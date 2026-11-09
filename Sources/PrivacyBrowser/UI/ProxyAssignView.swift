@@ -77,7 +77,7 @@ private struct ProxyAssignPanel: View {
                                     .truncationMode(.middle)
                             }
                         }
-                        .toggleStyle(.checkbox)
+                        .toggleStyle(.lumenCheckbox)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
@@ -105,7 +105,7 @@ private struct ProxyAssignPanel: View {
                                 }
                             }
                         }
-                        .toggleStyle(.checkbox)
+                        .toggleStyle(.lumenCheckbox)
                         .disabled(!entry.kindKnown)
                         .help(entry.kindKnown ? "" : L("proxies.type.unknown.help"))
                         .frame(maxWidth: .infinity, alignment: .leading)

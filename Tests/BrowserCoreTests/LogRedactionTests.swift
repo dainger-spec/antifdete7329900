@@ -22,6 +22,23 @@ final class LogRedactionTests: XCTestCase {
         XCTAssertTrue(redacted.hasPrefix("Could not load <url> into \"…\" at <path> for <email> (<host>, card <number>)"), redacted)
     }
 
+    /// A license key, a purchase code, an invoice's number and the server's tokens are the account
+    /// itself for whoever holds them: never in clear, in any form a person writes them.
+    func testTheAccountsCodesAndTokensGo() {
+        for code in ["LMK-0123-4567-89AB-CDEF-GHJK-MNMT", "lmk-0123-4567-89ab-cdef-ghjk-mnmt", "LMK0123456789ABCDEFGHJKMNMT",
+                     "LMK 0123 4567 89AB CDEF GHJK MNMT", "LMK–0123–4567–89AB–CDEF–GHJK–MNMT", "0123-4567-89AB-CDEF-GHJK-MNMT",
+                     "LPC-0123-4567-89AB-CDEF-GHSY", "LMN-7K3Q-WXYZ-0123-4567-8929"] {
+            let redacted = LogRedaction.exceptionReason("-[NSTextField setStringValue:] was given \(code) by the field")
+            XCTAssertEqual(redacted, "-[NSTextField setStringValue:] was given <code> by the field", code)
+        }
+        for token in ["lmd_5Ab-c_d9", "lms_x"] {
+            XCTAssertEqual(LogRedaction.exceptionReason("Authorization: Bearer \(token)"), "Authorization: Bearer <token>")
+        }
+        // What is not one stays: a UUID, a method's name, six words of four letters.
+        let plain = "with this item from that view for 8C5E5A2D-1B3F-4E6A-9D7C-0A1B2C3D4E5F -[LMKView load]"
+        XCTAssertEqual(LogRedaction.exceptionReason(plain), plain)
+    }
+
     func testEveryKindOfQuote() {
         XCTAssertEqual(LogRedaction.exceptionReason("title 'Bank' “Bank” «Банк»"), "title '…' “…” «…»")
     }

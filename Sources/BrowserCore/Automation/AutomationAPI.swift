@@ -238,6 +238,19 @@ public enum AutomationGate {
     }
 }
 
+/// A scenario to run through the API: its text, or the name of a saved one, and its parameters.
+public struct ScenarioRunSpec: Equatable, Sendable {
+    public var source: String?
+    public var scenario: String?
+    public var parametersJSON: String
+
+    public init(source: String?, scenario: String?, parametersJSON: String = "{}") {
+        self.source = source
+        self.scenario = scenario
+        self.parametersJSON = parametersJSON
+    }
+}
+
 /// What a request asks for. A profile is named by its id or by its exact name.
 public enum AutomationRoute: Equatable, Sendable {
     case listProfiles
@@ -250,6 +263,11 @@ public enum AutomationRoute: Equatable, Sendable {
     case exportCookies(String, CookieExport.Format)
     /// The body: any cookie file the app imports (`CookieImporter`).
     case importCookies(String, Data)
+    /// Run a scenario on the running profile (docs/AUTOMATION.md): its text, or a saved one by name.
+    case runScenario(String, ScenarioRunSpec)
+    /// The profile's last run: running or how it ended, and its log.
+    case scenarioState(String)
+    case stopScenario(String)
 
     /// The route of `request`, or the answer for one that names none.
     public static func of(_ request: AutomationHTTP.Request) -> Result<AutomationRoute, AutomationRefusal> {
@@ -288,6 +306,25 @@ public enum AutomationRoute: Equatable, Sendable {
                     }
                     return .success(.open(profile, url: url))
                 }
+            case "scenario":
+                if request.method == "GET" { return .success(.scenarioState(profile)) }
+                return only("POST") {
+                    guard let body = object(request.body) else { return .failure(badJSON) }
+                    let source = body["source"] as? String, saved = body["scenario"] as? String
+                    guard (source != nil) != (saved != nil), !(source ?? saved ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                        return .failure(AutomationRefusal(.error(400, "bad_request",
+                            "Give {\"source\": \"…JavaScript…\"} or {\"scenario\": \"a saved scenario's name\"}, and optionally \"params\": {…}.")))
+                    }
+                    var parametersJSON = "{}"
+                    if let parameters = body["params"] {
+                        guard parameters is [String: Any], let data = try? JSONSerialization.data(withJSONObject: parameters),
+                              let text = String(data: data, encoding: .utf8) else {
+                            return .failure(AutomationRefusal(.error(400, "bad_request", "params is a JSON object.")))
+                        }
+                        parametersJSON = text
+                    }
+                    return .success(.runScenario(profile, ScenarioRunSpec(source: source, scenario: saved, parametersJSON: parametersJSON)))
+                }
             case "cookies":
                 if request.method == "GET" {
                     guard let format = cookieFormat(request.query["format"]) else {
@@ -303,6 +340,8 @@ public enum AutomationRoute: Equatable, Sendable {
             default:
                 break
             }
+        case 3 where !rest[0].isEmpty && rest[1] == "scenario" && rest[2] == "stop":
+            return only("POST") { .success(.stopScenario(rest[0])) }
         default:
             break
         }

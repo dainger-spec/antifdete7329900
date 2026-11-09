@@ -55,6 +55,8 @@ final class ProfileProcess {
 
     var isRunning: Bool { process.isRunning }
     var processIdentifier: Int32 { process.processIdentifier }
+    /// How the process ended, once it has: its exit status, or the signal that ended it (5, a trap).
+    var terminationStatus: Int32? { process.isRunning ? nil : process.terminationStatus }
 
     private init(profileID: UUID, isForWarmUpOnly: Bool, process: Process) {
         self.profileID = profileID
@@ -83,9 +85,10 @@ final class ProfileProcess {
 
     /// Starts the profile's process. `home` is the directory Safari's frameworks and the child's
     /// own Application Support lookups resolve into; `languages`, `locale` and `timeZone` are what
-    /// the profile's proxy location asks for, as far as it is known before the launch (the child
-    /// looks the proxy up again, and a different answer applies at the next launch — the same
-    /// limitation the single-process path has, only now it is per profile rather than per run).
+    /// websites are to see — the profile's own settings, else what its proxy location asks for, as
+    /// far as it is known before the launch (the child looks the proxy up again, and a different
+    /// answer applies at the next launch — the same limitation the single-process path has, only
+    /// now it is per profile rather than per run).
     static func start(profileID: UUID,
                       executable: URL,
                       vaultRoot: URL,
@@ -96,7 +99,9 @@ final class ProfileProcess {
                       timeZone: String?,
                       forWarmUpOnly: Bool = false,
                       proxyLocationFound: Bool = false,
-                      preferences: BrowsingPreferences = BrowsingPreferences()) throws -> ProfileProcess {
+                      preferences: BrowsingPreferences = BrowsingPreferences(),
+                      menusInAppLanguage: Bool = false,
+                      processorCores: Int? = nil) throws -> ProfileProcess {
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
 
         let process = Process()
@@ -112,7 +117,8 @@ final class ProfileProcess {
         process.environment = try childEnvironment(inheriting: ProcessInfo.processInfo.environment, home: home,
                                                    vaultRoot: vaultRoot, timeZone: timeZone, forWarmUpOnly: forWarmUpOnly,
                                                    proxyLocationFound: proxyLocationFound,
-                                                   preferences: preferences)
+                                                   preferences: preferences, menusInAppLanguage: menusInAppLanguage,
+                                                   processorCores: processorCores)
 
         let keyPipe = Pipe()
         process.standardInput = keyPipe
@@ -165,16 +171,29 @@ final class ProfileProcess {
     /// Everything else stays here — a shell's or CI's variables, debug switches, the self-test's
     /// own (`PB_SELFTEST_*`), `PB_PROFILE_PROCESS` — so that what a profile's process does does
     /// not depend on how the manager happened to be started.
+    /// Set when Safari's menus in a profile's window are to be in the app's language.
+    static let menusInAppLanguageVariable = "PB_MENUS_IN_APP_LANGUAGE"
+
     static let inheritedEnvironment: Set<String> = [
         "USER", "LOGNAME", "SHELL", "__CF_USER_TEXT_ENCODING", "COMMAND_MODE",
-        "APP_SANDBOX_CONTAINER_ID", "PRIVACYBROWSER_LANG", "PB_SAFARI_CHROME",
+        "APP_SANDBOX_CONTAINER_ID", "PRIVACYBROWSER_LANG", "PB_SAFARI_CHROME", "PB_GEO_SERVICES_OFF",
     ]
 
     /// Every name a profile's process can find in its environment (the self-test checks it).
     static let environmentNames = inheritedEnvironment.union([
         "HOME", "TMPDIR", "PATH", "CFFIXED_USER_HOME", "PRIVACYBROWSER_VAULT_DIR", "TZ", "__XPC_TZ", "PB_WARM_UP_ONLY",
+        processorCoresVariable,
+        menusInAppLanguageVariable,
         browsingPreferencesVariable,
     ])
+
+    /// The processor count the WebKit processes a profile's process starts are given (WebKit's
+    /// own `WTF_numberOfProcessorCores`, read once by each of them), `__XPC_`-prefixed as `__XPC_TZ`.
+    static let processorCoresVariable = "__XPC_WTF_numberOfProcessorCores"
+
+    /// The self-test's stand-in for a Mac with this many cores, for every profile's process that
+    /// is given no count of its own (CI's runners have three, where WebKit already says 4).
+    static var machineProcessorCoresStandIn: Int?
 
     /// The app's browsing settings as the process starts (`BrowsingPreferences`, JSON): its first
     /// window opens by them — its tabs restored, its zoom — before anything arrives on its channel.
@@ -185,11 +204,25 @@ final class ProfileProcess {
     /// process does not ask the geolocation services a second time (`ProfileManager.launch`).
     static let proxyLocationFoundVariable = "PB_PROXY_LOCATION_FOUND"
 
+    /// The interface's language a profile's process is given: this process's own
+    /// (`Localization.languageCode`) — or, the self-test choosing one for a profile's process, a
+    /// language the app speaks in this process's `PRIVACYBROWSER_LANG` as it is now. Never anything
+    /// of the profile's.
+    static func interfaceLanguage(parent: [String: String]) -> String {
+        if let asked = parent["PRIVACYBROWSER_LANG"]?.lowercased(), InterfaceLanguage.supported.contains(asked) { return asked }
+        return Localization.languageCode
+    }
+
     /// The environment of a profile's process, built from `inheritedEnvironment` and the profile.
     static func childEnvironment(inheriting parent: [String: String], home: URL, vaultRoot: URL,
                                  timeZone: String?, forWarmUpOnly: Bool, proxyLocationFound: Bool = false,
-                                 preferences: BrowsingPreferences = BrowsingPreferences()) throws -> [String: String] {
+                                 preferences: BrowsingPreferences = BrowsingPreferences(),
+                                 menusInAppLanguage: Bool = false, processorCores: Int? = nil) throws -> [String: String] {
         var environment = parent.filter { inheritedEnvironment.contains($0.key) }
+        // The interface's language, by name: the child's `-AppleLanguages` is the websites' list,
+        // and the two never decide each other (`InterfaceLanguage`; the child fixes it first thing,
+        // `Localization.pinInterfaceLanguage`).
+        environment["PRIVACYBROWSER_LANG"] = interfaceLanguage(parent: parent)
         environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
         // Safari's frameworks, and anything else asking for the user's home through Foundation,
         // land here; POSIX code reading HOME as well, and temporary files go into the home too, so
@@ -209,10 +242,20 @@ final class ProfileProcess {
             // hands an `__XPC_`-prefixed variable to the services it launches, without the prefix.
             environment["__XPC_TZ"] = timeZone
         }
+        // The device's processor count, for the pages, frames and workers of the WebKit processes
+        // the child starts (`DeviceGeneration.processorCores`): WebKit's own answer, in every one.
+        if let cores = processorCores ?? machineProcessorCoresStandIn {
+            environment[processorCoresVariable] = String(cores)
+        }
         // Started to warm the profile up and nothing else: it opens no window of its own and
         // quits when the run ends, which is what seals what the run collected.
         if forWarmUpOnly { environment["PB_WARM_UP_ONLY"] = "1" }
         if proxyLocationFound { environment[proxyLocationFoundVariable] = "1" }
+        // Safari's menus and panel in the app's language (the profile's setting): the process pins
+        // its bundles to the interface's language (`Localization.pinInterfaceLanguage`). Otherwise
+        // they follow the websites' list on the command line, and with them the browser's own words
+        // a page can read (`ProfileConfiguration.menusInAppLanguage`).
+        if menusInAppLanguage { environment[menusInAppLanguageVariable] = "1" }
         if let json = try? JSONEncoder().encode(preferences) {
             environment[browsingPreferencesVariable] = String(decoding: json, as: UTF8.self)
         }

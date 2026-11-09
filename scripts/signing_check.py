@@ -3,8 +3,11 @@
 (docs/IDENTITY.md, "What to register with Apple").
 
     TEAM_ID=<TEAM_ID> SIGN_IDENTITY="Developer ID Application: <name> (<TEAM_ID>)" \\
-      APP_PROFILE=lumen.provisionprofile EXTENSION_PROFILE=lumen-tunnel.provisionprofile \\
-      NOTARY_PROFILE=lumen-notary python3 scripts/signing_check.py
+      APP_PROFILE=lumen.provisionprofile EXTENSION_PROFILE=lumen-guard.provisionprofile \\
+      NOTARY_PROFILE=lumen-notary ENTITLEMENT_PUBLIC_KEYS=<id>=<base64> python3 scripts/signing_check.py
+
+ENTITLEMENT_PUBLIC_KEYS is what `lumen-api pubkey` prints on the account server: release.sh makes no
+signed build without them (a release that could accept no license), so neither does this check.
 
 Then send build/signing-check/report.txt (and notary-log.json, if notarization refused).
 `--profiles-only` reads the identity and the profiles alone (a second, no build): step 4 shows there.
@@ -34,7 +37,8 @@ import subprocess
 import sys
 import time
 
-NE_PROVIDER = "packet-tunnel-provider-systemextension"
+# The network guard is a content filter (docs/TUNNEL.md); its App ID is still $BUNDLE_ID.PacketTunnel.
+NE_PROVIDER = "content-filter-provider-systemextension"
 lines = []
 
 
@@ -127,13 +131,13 @@ def claims(team, bundle, extension, group):
         "com.apple.developer.system-extension.install": True,
         "com.apple.security.application-groups": [group],
     }
-    tunnel = {
+    guard = {
         "com.apple.application-identifier": team + "." + extension,
         "com.apple.developer.team-identifier": team,
         "com.apple.developer.networking.networkextension": [NE_PROVIDER],
         "com.apple.security.application-groups": [group],
     }
-    return app, tunnel
+    return app, guard
 
 
 def describe_profile(label, path, identity_sha1, claimed):
@@ -182,6 +186,9 @@ def find(pattern, text, group=1):
 def main():
     env = dict(os.environ)
     needed = ["TEAM_ID", "SIGN_IDENTITY", "APP_PROFILE", "EXTENSION_PROFILE", "NOTARY_PROFILE"]
+    if "--profiles-only" not in sys.argv:
+        # The release it makes is signed, and release.sh signs none without the account server's keys.
+        needed.append("ENTITLEMENT_PUBLIC_KEYS")
     missing = [name for name in needed if not env.get(name)]
     if missing:
         print("set " + ", ".join(missing) + " (see the top of this file and docs/IDENTITY.md)", file=sys.stderr)
@@ -221,11 +228,11 @@ def main():
             say("  " + line.strip())
     summary.append(("identity", "OK" if identity_sha1 else "FAIL"))
 
-    app_claims, tunnel_claims = claims(team, bundle, extension, group)
+    app_claims, guard_claims = claims(team, bundle, extension, group)
     app_verdicts = describe_profile("the app, APP_PROFILE", env["APP_PROFILE"], identity_sha1, app_claims)
-    tunnel_verdicts = describe_profile("the extension, EXTENSION_PROFILE", env["EXTENSION_PROFILE"], identity_sha1,
-                                       tunnel_claims)
-    for label, verdicts in (("app profile", app_verdicts), ("extension profile", tunnel_verdicts)):
+    guard_verdicts = describe_profile("the extension, EXTENSION_PROFILE", env["EXTENSION_PROFILE"], identity_sha1,
+                                      guard_claims)
+    for label, verdicts in (("app profile", app_verdicts), ("extension profile", guard_verdicts)):
         # A restricted entitlement the profile does not list is refused at launch, like a wrong value.
         others = [v for k, v in verdicts.items() if k != "com.apple.security.application-groups"]
         summary.append((label, "OK" if others and all(v == "OK" for v in others) else "FAIL"))
@@ -256,14 +263,30 @@ def main():
     notarized = find(r"^\s*status: (\w[\w ]*)$", log)
     stapled = "The staple and validate action worked" in log
     gatekeeper = bool(re.search(r": accepted\s*\n\s*source=Notarized Developer ID", log))
-    release_check = find(r"^(RELEASE-CHECK (PASS|FAIL).*)$", log)
+    # Every line of the release check, never the first PASS alone: the keychain between profiles is
+    # checked after the profile's window, and its FAIL is the check failed (release_check_gate.sh).
+    checks = re.findall(r"^RELEASE-CHECK (PASS|FAIL|INFO) (.*)$", log, re.M)
+    failed = [text for verdict, text in checks if verdict == "FAIL"]
+    window = any(verdict == "PASS" and text.startswith("a profile in a process of its own") for verdict, text in checks)
+    keychain = [(verdict, text) for verdict, text in checks
+                if text.startswith("keychain") or text.startswith("not shown in this build: keychain")]
+    keychain_failed = [text for verdict, text in keychain if verdict == "FAIL"]
+    keychain_passed = [text for verdict, text in keychain if verdict == "PASS"]
+    keychain_unshown = [text for verdict, text in keychain if verdict == "INFO" and text.startswith("not shown")]
     summary.append(("built and signed: app and extension", "OK" if built else "FAIL"))
     summary.append(("notarization", ("OK " if notarized == "Accepted" else "FAIL ") + str(notarized)
                     if submission else "NOT-RUN"))
     summary.append(("ticket stapled", "OK" if stapled else "NOT-RUN"))
     summary.append(("Gatekeeper (spctl, during the release)", "OK" if gatekeeper else "NOT-RUN"))
     summary.append(("the app as it ships starts (release check)",
-                    "OK" if release_check and "PASS" in release_check else ("FAIL" if release_check else "NOT-RUN")))
+                    ("FAIL " + failed[0][:160]) if failed else ("OK" if window else "NOT-RUN")))
+    # Shown in full only on a build the team signed: its three checks (the entitlements, the login
+    # keychain, the data-protection keychain) PASS here, or this is not done.
+    summary.append(("keychain between profiles (release check)",
+                    ("FAIL " + keychain_failed[0][:160]) if keychain_failed
+                    else "OK" if len(keychain_passed) >= 3 and not keychain_unshown
+                    else ("NOT-SHOWN " + keychain_unshown[0][:160]) if keychain_unshown
+                    else "NOT-RUN"))
     if status != 0:
         say("the release stopped; its last lines:")
         for line in log.strip().splitlines()[-25:]:
@@ -317,7 +340,7 @@ def main():
                 % (status_policy, " | ".join(policy.strip().splitlines()[-6:])))
             summary.append(("syspolicy_check distribution", "OK" if status_policy == 0 else "FAIL"))
 
-        binary = os.path.join(sysext, "Contents", "MacOS", "PacketTunnelExtension")
+        binary = os.path.join(sysext, "Contents", "MacOS", "NetworkGuardExtension")
         if os.path.exists(binary):
             section("The extension's binary started for 4 s (AMFI; nothing is installed)")
             started = time.time()
@@ -347,9 +370,9 @@ def main():
                 verdict = "UNCLEAR"
                 say("UNCLEAR it exited with %d after %.2f s (not an AMFI kill by its look; see the log lines)" % (code, lived))
             _, amfi = run(["log", "show", "--last", "2m", "--style", "compact", "--predicate",
-                           'eventMessage CONTAINS[c] "PacketTunnel" AND '
+                           'eventMessage CONTAINS[c] "NetworkGuard" AND '
                            '(process == "kernel" OR process == "amfid" OR process == "taskgated-helper")'], timeout=120)
-            for line in [l for l in amfi.splitlines() if "PacketTunnel" in l][-10:]:
+            for line in [l for l in amfi.splitlines() if "NetworkGuard" in l][-10:]:
                 say("  log: " + line.strip()[:400])
             summary.append(("extension binary starts with its entitlements (AMFI hint)", verdict))
 

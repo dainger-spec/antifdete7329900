@@ -75,18 +75,50 @@ scripts/pbctl stop "Shop DE"
 
 It reads the token from `PB_API_TOKEN` and the port from `PB_API_PORT` (default 50777).
 
+## The plan
+
+The whole API is part of the plan with automation (the document of rights' `features` names
+`automation`). The token is checked first — without it, or with a wrong one, **401** — and then the
+plan: without automation every route, the profile list, start, stop, open, cookies and scenarios
+alike, answers **403** `automation_not_in_plan`, with the reason, before anything of the request is
+read.
+
+## Scenarios
+
+A scenario (docs/AUTOMATION.md) acts on a running profile's pages as a person would — the app's own
+pointer, wheel and keyboard, which pages cannot tell from a person's.
+
+| Request | Does |
+|---|---|
+| `POST /v1/profiles/{profile}/scenario` `{"source": "…JavaScript…", "params": {…}}` | Runs that text on the running profile, in a window of its own; **202** `{"runID": …}`. `params` is optional (the script's `params`) |
+| `POST /v1/profiles/{profile}/scenario` `{"scenario": "Sign in"}` | Runs the saved scenario of that exact name (**404** `no_scenario` when there is not one) |
+| `GET /v1/profiles/{profile}/scenario` | The profile's last run: `running`, `outcome` (`finished`, `failed`, `stopped`), `reason`, and its `lines` (`at`, `kind`, `text`) |
+| `POST /v1/profiles/{profile}/scenario/stop` | Stops it: a command under way finishes first |
+
+A profile not running answers **409** `not_running`; a run already going, **409** `busy`. The log
+never holds what was typed — only how many characters.
+
+```sh
+curl -s -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:50777/v1/profiles/Shop%20DE/scenario \
+  -d '{"source": "await page.goto(params.url); log(await page.title());", "params": {"url": "https://example.com/"}}'
+curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:50777/v1/profiles/Shop%20DE/scenario
+```
+
 ## What it does not do
 
-It does not drive the pages themselves: there is no remote-debugging protocol for WebKit's
-embedded web views to hand out, as Chromium-based browsers hand out CDP for Puppeteer or
-Playwright to attach to. A script starts the profile, opens the page and takes the cookies; what
-happens on the page is the person's, or a warm-up's (**⋯ → Warm Up…**).
+There is no remote-debugging protocol: WebKit's embedded web views hand none out, as Chromium-based
+browsers hand out CDP for Puppeteer or Playwright to attach to — and one would be visible to pages.
+Scripts drive pages through scenarios above, run inside the app; command by command driving from
+outside (for the JavaScript and Python libraries) comes later.
 
 ## Checked
 
 Unit tests (`AutomationAPITests`): the request reader, the gate (token, `Host`, `Origin` and
 `Sec-Fetch-*`), the routes, a profile found by id or exact name, no credentials in an answer. The
 self-test, on a real listener: no token, a wrong token, a web page's request and a rebinding name
-refused; the list without the proxy's credentials; a profile started out of sight, a cookie
+refused (401, before the plan); every route — the old ones too — refused without automation in
+the plan (403 `automation_not_in_plan`; red on the code before the gate, claude/measure-api-gate-red);
+the list without the proxy's credentials; a profile started out of sight, a cookie
 imported into it and read back out, a `file:` address refused, the profile stopped; nothing
-answering once the API is off. The sandboxed build: does not listen, and says why.
+answering once the API is off; a scenario run with its parameters and its log read back, an unknown saved scenario not found, a
+run stopped. The sandboxed build: does not listen, and says why.

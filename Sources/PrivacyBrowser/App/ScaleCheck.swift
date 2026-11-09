@@ -132,7 +132,8 @@ enum ScaleCheck {
                     id: profile.id, name: profile.name, activity: .stopped,
                     exit: detail?.proxyEndpoint.map { ProfileExit.proxy(endpoint: $0, countryCode: detail?.exitCountryCode) } ?? .direct,
                     ephemeral: detail?.ephemeral ?? false,
-                    appearsAs: ProfileRowItem.appearsAs(detail?.deviceGeneration ?? DeviceGenerations.resolved(id: nil)),
+                    appearsAs: ProfileRowItem.appearsAs(detail?.deviceGeneration ?? DeviceGenerations.resolved(id: nil),
+                                                       safariVersion: detail?.safariVersion, hostSafariVersion: HostSafari.version),
                     lastUsed: profile.lastLaunchedAt, tags: detail?.tags ?? [], notes: detail?.notes ?? "", avatar: detail?.avatar)
             }
             refreshTimes.append(milliseconds(since: started))

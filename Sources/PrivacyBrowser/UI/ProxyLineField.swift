@@ -7,8 +7,10 @@ import SwiftUI
 /// list's Edit sheet. The field takes the strings providers sell —
 ///
 ///     host:port:user:pass
+///     user:pass:host:port
 ///     user:pass@host:port
-///     scheme://user:pass@host:port      (socks5, socks5h, socks, http, https)
+///     host:port@user:pass
+///     scheme://user:pass@host:port      (socks5, socks5h, socks, http, https; any order above)
 ///     host:port
 ///
 /// — and reads them as a line of a pasted list is read (`ProxyListImport.readField`): one parser for

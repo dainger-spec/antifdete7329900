@@ -23,7 +23,10 @@ import WebKit
 ///     same name).
 ///   * `dlopen` of a private framework needs the hardened runtime's
 ///     `com.apple.security.cs.disable-library-validation` and no App Sandbox: inside the sandbox
-///     this returns false at `load()`.
+///     this returns false at `load()`. Only `Contents/MacOS/LumenProfile` is signed with it — a
+///     profile's process and every check that runs this code start from there
+///     (`ProfileExecutable`); the app's own executable keeps library validation on, so `load()`
+///     returns false in it too (scripts/build-app.sh says why: docs/TUNNEL.md).
 ///   * Safari's chrome reads the `com.apple.Safari` preferences domain. In this process that domain
 ///     resolves to Safari's own container and is refused, so what it would have read arrives nil.
 ///     The process therefore has to run with `CFFIXED_USER_HOME` pointed at the profile's directory
@@ -205,7 +208,7 @@ enum SafariChrome {
         return absent
     }
 
-    /// `Lumen --check-safari-chrome`: loads Safari's frameworks and says which of the
+    /// `LumenProfile --check-safari-chrome`: loads Safari's frameworks and says which of the
     /// pieces this build relies on this macOS has. Exit code 0 when every structural and network
     /// piece is there, 1 when any is missing, 2 when the frameworks do not load (a sandboxed build,
     /// or a macOS without them). Absent stubs are listed only. Touches nothing else: no window, no
@@ -392,6 +395,7 @@ enum SafariChrome {
     /// Core Foundation's lookup of `com.apple.Safari`, a suite of it and the standard defaults all
     /// answer with the profile's values, and the account's file is not written.
     static func configureSafarisOwnServices(for configuration: ProfileConfiguration) {
+        profileSearchEngine = configuration.searchEngine ?? .standard
         var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
         for (key, value) in servicePreferenceValues(for: configuration) {
             arguments[key] = value
@@ -402,8 +406,27 @@ enum SafariChrome {
         // argument domain.
         arguments[homePageKey] = homePage(for: configuration)
         servicePreferenceKeys.append(homePageKey)
+        // The engine Safari's address bar searches with, by the names Safari keeps it under (its
+        // provider list is set below too: CI run 42421408245 had the list say Bing and the address
+        // bar still go to Google).
+        let engine = configuration.searchEngine ?? .standard
+        arguments["SearchProviderShortName"] = engine.name
+        arguments["SearchProviderIdentifier"] = safariSearchProviderIdentifier(engine)
+        servicePreferenceKeys += ["SearchProviderShortName", "SearchProviderIdentifier"]
         UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
         log.notice("Safari's own services are set for this profile (\(servicePreferenceKeys.count, privacy: .public) keys)")
+    }
+
+    /// The identifier Safari's provider list gives an engine.
+    nonisolated static func safariSearchProviderIdentifier(_ engine: SearchEngine) -> String {
+        switch engine {
+        case .google: return "com.google.www"
+        case .bing: return "com.bing.www"
+        case .yahoo: return "com.yahoo.www"
+        case .duckDuckGo: return "com.duckduckgo"
+        case .ecosia: return "org.ecosia.www"
+        case .yandex: return "ru.yandex.www"
+        }
     }
 
     /// Safari's home page, which History › Home opens.
@@ -500,9 +523,9 @@ enum SafariChrome {
         if let base: AnyObject = NSClassFromString("WBSSearchProvidersController"),
            base.responds(to: NSSelectorFromString("shared")),
            let shared = base.perform(NSSelectorFromString("shared"))?.takeUnretainedValue() as? NSObject {
-            setDefaultSearchEngine("Google", on: shared)
+            setDefaultSearchEngine(profileSearchEngine.name, on: shared)
         }
-        setDefaultSearchEngine("Google", on: controller)
+        setDefaultSearchEngine(profileSearchEngine.name, on: controller)
         // Safari's chrome reaches its providers through +[WBSSearchProvidersController shared],
         // which the base class creates bare: it never loads the provider list, so the suggestions
         // fetcher is handed a provider with no suggestions template and throws on the nil. Our
@@ -516,6 +539,15 @@ enum SafariChrome {
         }
         log.notice("Search providers: \(String(describing: controller.value(forKey: "defaultSearchEngineName")), privacy: .private)")
         return controller
+    }
+
+    /// The profile's search engine (its editor), which Safari's address bar searches with. It was
+    /// Google for every profile whatever its setting said (the owner, 8 November).
+    private(set) static var profileSearchEngine = SearchEngine.standard
+
+    /// What Safari's search providers say their default engine is now (the self-test reads it).
+    static var searchEngineInUse: String {
+        searchProviders.flatMap { $0.value(forKey: "defaultSearchEngineName") as? String } ?? "none"
     }
 
     /// `-setDefaultSearchEngine:forPrivateBrowsing:` takes a `BOOL`, which `perform` cannot pass,
@@ -706,6 +738,10 @@ enum SafariChrome {
             // that what the nib itself refers to still resolves.
             if let url = nibURL(named: name as String), let data = try? Data(contentsOf: url) {
                 let owner = chromeBundles.first { url.path.hasPrefix($0.bundleURL.path) }
+                if let localized = localizedNib(named: name as String, data: data, owner: owner) {
+                    log.notice("\(name, privacy: .public).nib from \(url.path, privacy: .public), by name, in this process's language")
+                    return localized
+                }
                 log.notice("\(name, privacy: .public).nib from \(url.path, privacy: .public)")
                 return NSNib(nibData: data, bundle: owner)
             }
@@ -820,6 +856,18 @@ enum SafariChrome {
     }
 
     private static var nibURLs: [String: URL?] = [:]
+
+    /// Safari's nib `name`, made by AppKit from `owner` by name — so with the words of the language
+    /// this process took — when `owner` answers for a file of these very bytes; nil otherwise, and
+    /// the caller makes it from the bytes. Safari's nibs are Base nibs with a strings table per
+    /// language (`ru.lproj/MainMenu.strings`, CI run 580), which AppKit applies only to a nib it
+    /// loads by name: made from the bytes, a nib keeps Base's English. The bytes are compared
+    /// rather than the paths, which differ through the Safari cryptex's links.
+    private static func localizedNib(named name: String, data: Data, owner: Bundle?) -> NSNib? {
+        guard let owner, let answered = owner.url(forResource: name, withExtension: "nib"),
+              (try? Data(contentsOf: answered)) == data else { return nil }
+        return NSNib(nibNamed: name, bundle: owner)
+    }
 
     /// Safari's providers, kept for the lifetime of the process because `+shared` hands them out.
     private static var searchProviders: NSObject?
@@ -1237,9 +1285,12 @@ enum SafariChrome {
             return false
         }
         let owner = chromeBundles.first { url.path.hasPrefix($0.bundleURL.path) }
+        // In this process's language where Safari.app answers for the file: made from the bytes,
+        // the menu kept Base's English — "File | Edit | View" over Russian items (CI runs 579, 580).
+        let nib = localizedNib(named: "MainMenu", data: data, owner: owner) ?? NSNib(nibData: data, bundle: owner)
         // This overload takes an NSArray, not [Any].
         var objects: NSArray?
-        guard NSNib(nibData: data, bundle: owner).instantiate(withOwner: NSApplication.shared, topLevelObjects: &objects) else {
+        guard nib.instantiate(withOwner: NSApplication.shared, topLevelObjects: &objects) else {
             log.error("Safari's MainMenu.nib did not instantiate")
             return false
         }
@@ -1263,6 +1314,13 @@ enum SafariChrome {
     }
 
     private static var menuObjects: [Any]?
+
+    /// The language Safari's chrome took in this process — its framework's localization, which its
+    /// toolbar's and menus' words come from — or nil when the chrome is not hosted here.
+    static var chromeLanguage: String? {
+        guard SafariChromeHost.isHosting, let controller = NSClassFromString("BrowserWindowController") else { return nil }
+        return Bundle(for: controller).preferredLocalizations.first
+    }
 
     /// Safari's Edit menu has Paste as Typed (the profile's process reports it).
     private(set) static var pasteAsTypedInMenu = false
@@ -1519,14 +1577,14 @@ enum SafariChrome {
 // MARK: - Standalone run
 
 extension SafariChrome {
-    /// `Lumen --safari-chrome [url]`: Safari's chrome with one of our web views in it, on
+    /// `LumenProfile --safari-chrome [url]`: Safari's chrome with one of our web views in it, on
     /// an ephemeral data store, as the way to try this outside the profile machinery. Returns
     /// without running anything when the frameworks cannot be loaded, which is what a sandboxed
     /// build does.
     static func startStandalone(arguments: [String]) {
         relaunchWithProfileHomeIfNeeded(arguments: arguments)
         guard load() else {
-            FileHandle.standardError.write(Data("Safari's private frameworks did not load: this build is sandboxed or library validation is on (see SafariChrome.swift)\n".utf8))
+            FileHandle.standardError.write(Data("Safari's private frameworks did not load: this build is sandboxed, or this is the app's own executable, which keeps library validation on — run Contents/MacOS/LumenProfile (see SafariChrome.swift)\n".utf8))
             exit(1)
         }
         installApplication()
@@ -1593,7 +1651,9 @@ extension SafariChrome {
         }
         setenv("CFFIXED_USER_HOME", home.path, 1)
         setenv("HOME", home.path, 1)
-        guard let executable = Bundle.main.executableURL?.path ?? arguments.first else { exit(3) }
+        // This process's own file: in a process started from LumenProfile the bundle's executable is
+        // the app's, which carries the app's keychain in a build with the network guard.
+        guard let executable = ProfileExecutable.ownPath() ?? arguments.first else { exit(3) }
         var argv: [UnsafeMutablePointer<CChar>?] = arguments.map { strdup($0) }
         argv.append(nil)
         execv(executable, &argv)
@@ -1641,7 +1701,8 @@ extension SafariChrome {
         try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         setenv("CFFIXED_USER_HOME", home.path, 1)
         setenv("PRIVACYBROWSER_VAULT_DIR", vault.path, 1)
-        guard let executable = Bundle.main.executableURL?.path ?? arguments.first else { return }
+        // This process's own file, never the bundle's executable (as `isolateForCheck` above).
+        guard let executable = ProfileExecutable.ownPath() ?? arguments.first else { return }
         var argv: [UnsafeMutablePointer<CChar>?] = arguments.map { strdup($0) }
         argv.append(nil)
         execv(executable, &argv)

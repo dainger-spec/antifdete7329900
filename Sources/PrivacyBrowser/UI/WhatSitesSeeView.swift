@@ -41,7 +41,7 @@ struct WhatSitesSeeView: View {
                 Spacer(minLength: 0)
                 if !snapshot.signals.isEmpty {
                     Toggle(L("whatSites.onlyDifferences"), isOn: $onlyDifferences)
-                        .toggleStyle(.checkbox)
+                        .toggleStyle(.lumenCheckbox)
                         .font(.lumenSecondary)
                 }
             }

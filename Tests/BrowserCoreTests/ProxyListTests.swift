@@ -133,10 +133,12 @@ final class ProxyListImportTests: XCTestCase {
             if case .proxy(let line) = ProxyListImport.readField(text) { return line }
             return nil
         }
-        // The four forms, as the editor's field takes them: the same proxy each time.
+        // The forms, as the editor's field takes them: the same proxy each time — the credentials
+        // before or after the address, with ":" or "@".
         let expected = ProxySettings(kind: .socks5, host: "1.2.3.4", port: 1080, username: "alice", password: "s3cret")
         for text in ["1.2.3.4:1080:alice:s3cret", "alice:s3cret@1.2.3.4:1080", "socks5://alice:s3cret@1.2.3.4:1080",
-                     " socks5://alice:s3cret@1.2.3.4:1080/\n"] {
+                     " socks5://alice:s3cret@1.2.3.4:1080/\n", "1.2.3.4:1080@alice:s3cret", "alice:s3cret:1.2.3.4:1080",
+                     "socks5://1.2.3.4:1080@alice:s3cret"] {
             XCTAssertEqual(proxy(text)?.proxy, expected, text)
         }
         XCTAssertEqual(proxy("1.2.3.4:1080")?.proxy, ProxySettings(kind: .socks5, host: "1.2.3.4", port: 1080))
@@ -202,6 +204,10 @@ final class ProxyListImportTests: XCTestCase {
         XCTAssertEqual(masked("socks5://alice:p%40ss@1.2.3.4:1080"), "socks5://alice:•••@1.2.3.4:1080")
         XCTAssertEqual(masked("  \u{FEFF}h.example:80:u:pa#ss  # Berlin\n"), "  \u{FEFF}h.example:80:u:•••  # Berlin\n")
         XCTAssertEqual(masked("# provider\r\nu:pw@h.example:80"), "# provider\r\nu:•••@h.example:80")
+        // The providers' other orders; a password that reads like the port is masked where it is.
+        XCTAssertEqual(masked("1.2.3.4:1080@alice:s3cret"), "1.2.3.4:1080@alice:•••")
+        XCTAssertEqual(masked("alice:s3cret:1.2.3.4:1080"), "alice:•••:1.2.3.4:1080")
+        XCTAssertEqual(masked("198.51.100.4:3128@admin:3128"), "198.51.100.4:3128@admin:•••")
         // No password, an empty one, or not one proxy: nothing to mask.
         XCTAssertNil(ProxyListImport.passwordRange(in: "1.2.3.4:1080"))
         XCTAssertNil(ProxyListImport.passwordRange(in: "solo@h.example:80"))
@@ -506,5 +512,37 @@ final class ProxyAssignmentTests: XCTestCase {
         // Changed profiles are newer for sync; the one that already had its proxy is not.
         XCTAssertEqual(try repository.summary(for: a.id).revision, 2)
         XCTAssertEqual(try repository.summary(for: c.id).revision, 1)
+    }
+}
+
+final class ProxyUDPLabelTests: XCTestCase {
+    /// Three things said, each from what the check really found; nothing for a dead proxy or one
+    /// whose UDP was not tried.
+    func testTheLabelFollowsWhatTheCheckFound() {
+        let expected: [ProxyUDPSupport: ProxyUDPLabel] = [
+            .supported: .supported, .unsupported: .unsupported, .elsewhere: .unsupported,
+            .unknown: .unchecked, .exitUnknown: .unchecked,
+        ]
+        for udp in ProxyUDPSupport.allCases {
+            var alive = ProxyCheckResult.alive(location: nil, latency: 0.1)
+            alive.udp = udp
+            XCTAssertEqual(alive.udpLabel, expected[udp], "\(udp)")
+            var dead = ProxyCheckResult.dead(.noAnswer)
+            dead.udp = udp
+            XCTAssertNil(dead.udpLabel, "a dead proxy says nothing of its UDP: \(udp)")
+        }
+        XCTAssertNil(ProxyCheckResult.alive(location: nil, latency: 0.1).udpLabel, "not tried: nothing said")
+        XCTAssertEqual(Set(expected.values), Set(ProxyUDPLabel.allCases))
+    }
+
+    /// A check kept by a build before this one reads back without the UDP; one with it keeps it.
+    func testAKeptCheckReadsWithAndWithoutTheUDP() throws {
+        var result = ProxyCheckResult.alive(location: nil, latency: 0.2, at: Date(timeIntervalSince1970: 1_800_000_000))
+        let old = try JSONEncoder().encode(result)
+        XCTAssertFalse(String(decoding: old, as: UTF8.self).contains("udp"))
+        XCTAssertNil(try JSONDecoder().decode(ProxyCheckResult.self, from: old).udp)
+        result.udp = .unsupported
+        let new = try JSONEncoder().encode(result)
+        XCTAssertEqual(try JSONDecoder().decode(ProxyCheckResult.self, from: new).udp, .unsupported)
     }
 }

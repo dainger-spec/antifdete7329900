@@ -2,25 +2,40 @@ import AppKit
 import BrowserCore
 import os
 
-/// The Safari of this Mac. Safari and every WKWebView render with the same system WebKit, so
-/// its version is the one the macOS generation's User-Agent declares
-/// (`DeviceGeneration.userAgent(hostSafariVersion:)`).
+/// The Safari of this Mac, and the Safari a macOS profile names (`DeviceGeneration.userAgent(hostSafariVersion:)`).
+/// Safari and every WKWebView usually render with the same system WebKit; when they do not — Safari
+/// updated beyond the WebKit this Mac gives apps (CI run 718: Safari 27.2, apps on WebKit 21624.5.1.11.3)
+/// — a profile names the Safari of the engine it runs (`SafariVersions.declared`).
 @MainActor
 enum HostSafari {
-    /// e.g. "26.0.1": Safari's bundle version, or — if that cannot be read — the version this
-    /// macOS release shipped with.
-    static let version: String = {
+    /// Safari.app's version and its own build (the build of the WebKit Safari runs), if readable.
+    static let app: (version: String, build: String?)? = {
         let candidates = [NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari"),
                           URL(fileURLWithPath: "/Applications/Safari.app")]
         for case let url? in candidates {
-            if let version = Bundle(url: url)?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+            let bundle = Bundle(url: url)
+            if let version = bundle?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
                DeviceGeneration.isSafariVersion(version) {
-                return version
+                return (version, bundle?.object(forInfoDictionaryKey: "CFBundleVersion") as? String)
             }
         }
-        let os = ProcessInfo.processInfo.operatingSystemVersion
-        return DeviceGenerations.bundledSafariVersion(macOSMajor: os.majorVersion, minor: os.minorVersion)
+        return nil
     }()
+
+    /// What a macOS profile's User-Agent names, and whether Safari runs this app's WebKit.
+    static let declared: SafariVersions.Declared = {
+        guard let app else {
+            let os = ProcessInfo.processInfo.operatingSystemVersion
+            return .init(version: DeviceGenerations.bundledSafariVersion(macOSMajor: os.majorVersion, minor: os.minorVersion),
+                         sharesEngine: true)
+        }
+        return SafariVersions.declared(appVersion: app.version, appBuild: app.build,
+                                       webKitBuild: WebKitBuild.version == "?" ? nil : WebKitBuild.version)
+    }()
+
+    /// e.g. "26.0.1": the Safari a macOS profile names — this Mac's Safari when it runs this app's
+    /// WebKit, else the Safari of that WebKit.
+    static var version: String { declared.version }
 }
 
 /// The language websites see: the `Accept-Language` header, `navigator.language(s)` and the
@@ -32,10 +47,13 @@ enum HostSafari {
 /// is no public per-web-view setting (a content rule list's `modify-headers` action only applies
 /// for Safari web extensions). So the first profile launched in a run decides: the language of
 /// its proxy's country when that is known (`ProfileConfiguration.matchProxyLocation`), otherwise
-/// the user's own languages — the list Safari on this Mac uses, not the app's UI language (which
-/// `Localization.applyProcessLanguage` keeps in the app's own domain). The JavaScript shim never
-/// overrides navigator.language(s), so the header and the script always agree — a mismatch
-/// between them is itself a detection signal.
+/// the user's own languages — the list Safari on this Mac uses. Never the app's interface language
+/// (`InterfaceLanguage`), in either direction: in this process the interface's is set first and
+/// this list replaces it for WebKit; in a profile's own process the websites' list is the command
+/// line's and the interface's is fixed before anything reads it (`ProfileProcess`,
+/// `Localization.pinInterfaceLanguage`). The self-test's group "interface and websites' languages"
+/// fails if they are ever linked. The JavaScript shim never overrides navigator.language(s), so
+/// the header and the script always agree — a mismatch between them is itself a detection signal.
 @MainActor
 enum WebContentLanguage {
     /// What WebKit was given (`AppleLanguages` as WebKit reads it), once decided.
@@ -62,6 +80,16 @@ enum WebContentLanguage {
         }
         decided = UserDefaults.standard.stringArray(forKey: "AppleLanguages") ?? []
         log.info("Websites see the languages \(decided?.joined(separator: ",") ?? "", privacy: .private) for this run")
+    }
+
+    /// In a profile's own process: the list its command line gave (`-AppleLanguages`), which is
+    /// the one WebKit read before anything in the process could change it (CI run 579). Only the
+    /// first call counts, as with `decide`.
+    static func adoptCommandLine() {
+        guard decided == nil else { return }
+        let arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        decided = arguments["AppleLanguages"] as? [String] ?? UserDefaults.standard.stringArray(forKey: "AppleLanguages") ?? []
+        log.info("Websites see the languages \(decided?.joined(separator: ",") ?? "", privacy: .private) for this run (the process's command line)")
     }
 
     /// The list WebKit is given: the proxy country's language, else the user's own languages.

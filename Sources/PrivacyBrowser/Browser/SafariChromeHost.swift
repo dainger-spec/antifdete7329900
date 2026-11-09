@@ -36,9 +36,6 @@ enum SafariChromeHost {
         case sandboxed
         /// `PB_SAFARI_CHROME=0`.
         case turnedOff
-        /// The profile's WebRTC goes through the packet tunnel, whose routes are the app's
-        /// process's: the profile runs there, and Safari's chrome is hosted only in a profile's own.
-        case tunnelProfile
         /// Profiles run in the app's own process (`ProfileProcess.isEnabled` off): Safari's chrome
         /// is hosted only in a profile's own process.
         case notInProfileProcess
@@ -64,7 +61,6 @@ enum SafariChromeHost {
         if let failure { return failure }
         if AppEnvironment.isSandboxed { return .sandboxed }
         if isTurnedOff { return .turnedOff }
-        if ProfileProcess.isEnabled, ProfileManager.relaysWebRTCThroughTunnel(configuration, tunnel: .shared) { return .tunnelProfile }
         return .notInProfileProcess
     }
 
@@ -197,6 +193,8 @@ enum SafariChromeHost {
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
+        // Safari's history items act on the profile's own history (`HistoryMenuRoute`).
+        HistoryMenuRoute.install(session: session)
         log.notice("A profile runs in Safari's chrome")
         return true
     }
@@ -239,6 +237,16 @@ enum SafariChromeHost {
         return NSStringFromClass(type(of: controller)) == "BrowserWindowController"
     }
 
+    /// Closes every browser window of Safari's as its close button does (`performClose:`): Safari
+    /// keeps such a window's pages for reopening it, and the last one closing quits the process
+    /// (`onLastWindowClosed`). What `ProfileCommand.closeWindows` asks; the self-test's way of
+    /// ending a profile as a person does.
+    static func performCloseEveryWindow() {
+        for window in NSApp.windows where isBrowserWindow(window) && window.isVisible {
+            window.performClose(nil)
+        }
+    }
+
     /// Closes every browser window of Safari's, as a quit or a stop does before the profile's data
     /// is sealed: the windows go when the user quits, rather than staying up through the seal.
     static func closeEveryWindow() {
@@ -269,17 +277,27 @@ enum HostedPageHistory {
     static func follow(_ webView: WKWebView) {
         guard followed.object(forKey: webView) == nil else { return }
         let follower = Follower()
+        // A visit is the committed page: its address is then the back-forward list's current item.
+        // The address changes when a load starts — the list still holds the page before — and again
+        // only when it changes after (a redirect, a same-document navigation): a load without either
+        // was never recorded (the account switch check, run 677: none of 8 visits in the history).
+        // So whatever follows a commit — the address, the title, the end of the load — tries again.
+        let attempt: @MainActor (WKWebView) -> Void = { webView in
+            guard let url = webView.url, isRecorded(webView, url),
+                  webView.backForwardList.currentItem?.url == url, url != follower.lastRecorded else { return }
+            follower.lastRecorded = url
+            ProfileNetworkGuard.session?.library.recordVisit(url: url, title: webView.title)
+        }
         follower.observations = [
             webView.observe(\.url, options: [.new]) { webView, _ in
-                MainActor.assumeIsolated {
-                    guard let url = webView.url, isRecorded(webView, url),
-                          webView.backForwardList.currentItem?.url == url, url != follower.lastRecorded else { return }
-                    follower.lastRecorded = url
-                    ProfileNetworkGuard.session?.library.recordVisit(url: url, title: webView.title)
-                }
+                MainActor.assumeIsolated { attempt(webView) }
+            },
+            webView.observe(\.isLoading, options: [.new]) { webView, _ in
+                MainActor.assumeIsolated { attempt(webView) }
             },
             webView.observe(\.title, options: [.new]) { webView, _ in
                 MainActor.assumeIsolated {
+                    attempt(webView)
                     guard let url = webView.url, isRecorded(webView, url) else { return }
                     ProfileNetworkGuard.session?.library.updateTitle(url: url, title: webView.title)
                 }

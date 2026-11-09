@@ -55,11 +55,11 @@ struct ProfileEditorForm: View {
     /// Keeps the glyph's colour the same as in the Profiles list.
     var avatarID: UUID
     var error: String?
-    /// The network extension can carry WebRTC through a SOCKS5 proxy (TunnelManager).
-    var tunnelCarriesWebRTC: Bool
+    /// The network guard is ready: WebRTC can go through a SOCKS5 proxy (`NetworkGuard`).
+    var guardReady: Bool
     var onCancel: () -> Void = {}
     var onSave: () -> Void = {}
-    var onTunnelSettings: () -> Void = {}
+    var onGuardSettings: () -> Void = {}
     /// The proxy list, for "From the list"; proxies whose type no check has found yet cannot be
     /// chosen (they are given to no profile).
     var savedProxies: [ProxyListEntry] = []
@@ -138,22 +138,22 @@ struct ProfileEditorForm: View {
                     HStack(spacing: 8) {
                         Image(systemName: part.symbol)
                             .font(.system(size: 12))
-                            .foregroundStyle(selected ? Theme.accent : Theme.textSecondary)
+                            .foregroundStyle(selected ? Theme.textPrimary : Theme.textSecondary)
                             .frame(width: 16)
                         // Two lines rather than cut ("Location and L…"), between words: the index
                         // is as wide as its longest word (`indexWidth`).
                         Text(L(part.titleKey))
                             .font(.system(size: 13, weight: selected ? .medium : .regular))
-                            .foregroundStyle(Theme.textPrimary)
+                            .foregroundStyle(selected ? Theme.textPrimary : Theme.textSecondary)
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .frame(minHeight: 28)
-                    .background(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
-                        .fill(selected ? Color.white.opacity(0.08) : .clear))
+                    .frame(minHeight: 30)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(selected ? Theme.rowSelected : .clear))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -165,14 +165,12 @@ struct ProfileEditorForm: View {
         .padding(.vertical, 14)
         .frame(width: Self.indexWidth)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Theme.surface)
     }
 
     private func section(_ part: Topic) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             Text(L(part.titleKey))
-                .font(.lumenSection)
-                .foregroundStyle(Theme.textPrimary)
+                .lumenCaps()
                 .accessibilityAddTraits(.isHeader)
             sectionContent(part)
         }
@@ -193,12 +191,16 @@ struct ProfileEditorForm: View {
 
     // MARK: Header and footer
 
+    /// The design's header: the profile's letters, what this is ("Edit profile", "New profile") in
+    /// capitals, its name, where it exits and how it appears; What sites see at the right.
     private var header: some View {
-        HStack(spacing: 12) {
-            ProfileAvatar(name: draft.name.isEmpty ? "?" : draft.name, id: avatarID, size: 36, style: draft.avatarStyle)
+        HStack(alignment: .center, spacing: 14) {
+            ProfileAvatar(name: draft.name.isEmpty ? "?" : draft.name, id: avatarID, size: 40, style: draft.avatarStyle)
             VStack(alignment: .leading, spacing: 3) {
-                Text(isNew ? L("editor.title.new") : (draft.name.isEmpty ? L("editor.title.edit") : draft.name))
-                    .font(.lumenSheetTitle)
+                Text(isNew ? L("editor.title.new") : L("editor.title.edit"))
+                    .lumenCaps()
+                Text(draft.name.isEmpty ? (isNew ? L("editor.title.new") : L("editor.title.edit")) : draft.name)
+                    .lumenHeadingTitle()
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                 subtitle
@@ -208,13 +210,13 @@ struct ProfileEditorForm: View {
                 Button(action: onWhatSitesSee) {
                     Label(L("profiles.row.whatSitesSee"), systemImage: "eye")
                 }
-                .buttonStyle(.lumenSecondary)
+                .buttonStyle(.lumenGhost)
                 .help(L("editor.whatSitesSee.help"))
             }
         }
         .padding(.horizontal, 24)
         .padding(.top, 22)
-        .padding(.bottom, 16)
+        .padding(.bottom, 18)
     }
 
     @ViewBuilder
@@ -232,6 +234,10 @@ struct ProfileEditorForm: View {
                 Image(systemName: "arrow.right").font(.system(size: 10, weight: .medium))
                 Text(L("editor.subtitle.direct"))
             }
+            // How sites see it: "Mac · Safari 26".
+            Text(verbatim: "·").foregroundStyle(Theme.textTertiary)
+            Text(ProfileRowItem.appearsAs(DeviceGenerations.resolved(id: draft.deviceGenerationID),
+                                          safariVersion: draft.safariVersion, hostSafariVersion: HostSafari.version))
         }
         .font(.lumenSecondary)
         .foregroundStyle(Theme.textSecondary)
@@ -263,7 +269,7 @@ struct ProfileEditorForm: View {
                 }
                 Spacer(minLength: 12)
                 Button(L("common.cancel"), action: onCancel)
-                    .buttonStyle(.lumenSecondary)
+                    .buttonStyle(.lumenGhost)
                     .keyboardShortcut(.cancelAction)
                 Button(L("common.save"), action: onSave)
                     .buttonStyle(.lumenPrimary)
@@ -375,14 +381,27 @@ struct ProfileEditorForm: View {
         return VStack(alignment: .leading, spacing: 14) {
             EditorRow(L("editor.generation")) {
                 Picker(L("editor.generation"), selection: $draft.deviceGenerationID) {
-                    ForEach(DeviceGenerations.all) { Text(L($0.nameKey)).tag($0.id) }
+                    // The Mac's generation is this Mac's Safari, by its version (its catalog name
+                    // said "macOS 26" on a Mac with Safari 27).
+                    ForEach(DeviceGenerations.all) { generation in
+                        Text(generation.matchesEngine ? String(format: L("gen.macos.host"), HostSafari.version) : L(generation.nameKey))
+                            .tag(generation.id)
+                    }
                 }
                 .labelsHidden()
                 .fixedSize()
             }
-            if !generation.matchesEngine {
-                EditorNote(generation.platform == .iPadOS ? L("editor.generation.ipad") : L("editor.generation.inconsistent"),
-                           tone: .warning)
+            // An iPad's own note stays; an iPhone's warning went (the owner, 9 November).
+            if !generation.matchesEngine && generation.platform == .iPadOS {
+                EditorNote(L("editor.generation.ipad"), tone: .warning)
+            }
+            // An iPhone's full disguise (the owner, 8 November: on by default; off is "leave no
+            // traces of the substitution" — only what WebKit itself answers as a phone).
+            if let phone = generation.phone {
+                EditorToggle(L("editor.phoneDisguise"),
+                             detail: String(format: L("editor.phoneDisguise.detail"), phone.screenWidth, phone.screenHeight,
+                                            Int(phone.scale), phone.maxTouchPoints),
+                             isOn: $draft.phoneFullDisguise)
             }
             if generation.matchesEngine && !draft.customUserAgent {
                 safariVersionChoice
@@ -443,10 +462,10 @@ struct ProfileEditorForm: View {
             ? String(format: L("editor.safari.risky"), version) : version
     }
 
-    /// With a proxy, WebRTC can only be on through the network extension's relay, and only for
+    /// With a proxy, WebRTC can only be on through the relay, held there by the network guard, and only for
     /// SOCKS5 (a proxy whose type is not known yet is not taken for one).
     private var webRTCLocked: Bool {
-        draft.hasProxy && !(draft.chosenProxy?.kind == .socks5 && tunnelCarriesWebRTC)
+        draft.hasProxy && !(draft.chosenProxy?.kind == .socks5 && guardReady)
     }
 
     // MARK: Connection
@@ -454,12 +473,10 @@ struct ProfileEditorForm: View {
     private var connection: some View {
         VStack(alignment: .leading, spacing: 14) {
             EditorField(L("editor.proxy.connection")) {
-                Picker(L("editor.proxy.connection"), selection: $draft.proxyMode) {
-                    ForEach(ProfileDraft.ProxyMode.allCases) { Text(L($0.labelKey)).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 380)
+                LumenSegmented(selection: $draft.proxyMode,
+                               options: ProfileDraft.ProxyMode.allCases.map { (value: $0, title: L($0.labelKey)) })
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel(L("editor.proxy.connection"))
             }
             switch draft.proxyMode {
             case .direct:
@@ -500,11 +517,14 @@ struct ProfileEditorForm: View {
             if draft.hasProxy, let kind = draft.chosenProxy?.kind {
                 if kind != .socks5 {
                     EditorNote(L("editor.webrtc.httpProxy"))
-                } else if tunnelCarriesWebRTC {
-                    EditorNote(L("editor.webrtc.viaTunnel"))
+                } else if guardReady {
+                    EditorNote(L("editor.webrtc.viaGuard"))
+                } else if !BuildKind.carriesGuard {
+                    // Nothing to turn on in this build: said as it is, with no button to a guard it lacks.
+                    EditorNote(L("editor.webrtc.noGuardInBuild"), tone: .warning)
                 } else {
-                    EditorNote(L("editor.webrtc.tunnelOff"), tone: .warning)
-                    Button(L("editor.webrtc.tunnelSettings"), action: onTunnelSettings)
+                    EditorNote(L("editor.webrtc.guardNotReady"), tone: .warning)
+                    Button(L("editor.webrtc.guardSettings"), action: onGuardSettings)
                         .buttonStyle(.link)
                         .foregroundStyle(Theme.accent)
                 }
@@ -615,14 +635,12 @@ struct ProfileEditorForm: View {
             Text(L("editor.locale"))
                 .font(.lumenLabel)
                 .foregroundStyle(Theme.textPrimary)
-            Picker(L("editor.locale"), selection: localeMode) {
-                Text(L("editor.locale.connection")).tag(LocaleSource.connection)
-                Text(L("editor.locale.manual")).tag(LocaleSource.manual)
-                Text(L("editor.locale.random")).tag(LocaleSource.random)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
+            LumenSegmented(selection: localeMode,
+                           options: [(value: LocaleSource.connection, title: L("editor.locale.connection")),
+                                     (value: LocaleSource.manual, title: L("editor.locale.manual")),
+                                     (value: LocaleSource.random, title: L("editor.locale.random"))])
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(L("editor.locale"))
         }
         switch draft.localeMode {
         case .connection:
@@ -664,6 +682,10 @@ struct ProfileEditorForm: View {
             EditorNote(mismatch, tone: .warning)
         }
         EditorNote(L("editor.language.note"))
+        EditorToggle(L("editor.menusInAppLanguage"), detail: L("editor.menusInAppLanguage.detail"), isOn: $draft.menusInAppLanguage)
+        if draft.menusInAppLanguage {
+            EditorNote(L("editor.menusInAppLanguage.on"), tone: .warning)
+        }
     }
 
     /// Switching to Random picks a place at once.
@@ -706,13 +728,11 @@ struct ProfileEditorForm: View {
     private var privacy: some View {
         VStack(alignment: .leading, spacing: 14) {
             EditorRow(L("editor.local")) {
-                Picker(L("editor.local"), selection: $draft.localRequests) {
-                    Text(L("editor.local.protected")).tag(LocalRequests.protected)
-                    Text(L("editor.local.allowed")).tag(LocalRequests.allowed)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
+                LumenSegmented(selection: $draft.localRequests,
+                               options: [(value: LocalRequests.protected, title: L("editor.local.protected")),
+                                         (value: LocalRequests.allowed, title: L("editor.local.allowed"))])
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel(L("editor.local"))
             }
             if draft.localRequests == .allowed && !draft.hasProxy {
                 EditorNote(L("editor.local.allowedWarning"), tone: .warning)
@@ -860,13 +880,15 @@ private struct TagEditor: View {
     @Binding var tags: [String]
     var suggestions: [String]
     @State private var text = ""
+    /// The tags' colours (the vault's): each chip with its dot.
+    @Environment(\.tagColors) private var tagColors
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if !tags.isEmpty {
                 FlowLayout(spacing: 6, lineSpacing: 6) {
                     ForEach(tags, id: \.self) { tag in
-                        TagChip(text: tag) { tags.removeAll { $0 == tag } }
+                        TagChip(text: tag, color: tagColors.color(of: tag)) { tags.removeAll { $0 == tag } }
                     }
                 }
             }
@@ -886,7 +908,7 @@ private struct TagEditor: View {
                     FlowLayout(spacing: 6, lineSpacing: 6) {
                         ForEach(offered.prefix(12), id: \.self) { tag in
                             Button { tags = ProfileTags.normalized(tags + [tag]) } label: {
-                                TagChip(text: tag)
+                                TagChip(text: tag, color: tagColors.color(of: tag))
                             }
                             .buttonStyle(.plain)
                             .help(String(format: L("editor.tags.addSuggested"), tag))
@@ -991,6 +1013,9 @@ private struct SavedProxyList: View {
                         SavedProxyRow(entry: entry)
                             .tag(entry.id)
                             .id(entry.id)
+                            .listRowBackground(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(selection == entry.id ? Theme.rowSelected : Color.clear))
+                            .background(SystemListHighlightOff().accessibilityHidden(true))
                     }
                 }
                 .overlay {
@@ -1180,7 +1205,7 @@ private struct EditorToggle: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .toggleStyle(.switch)
+        .toggleStyle(.lumenSwitch)
         .controlSize(.small)
     }
 }

@@ -171,6 +171,11 @@ final class AutomationServer {
             send(refusal, on: connection)
             return
         }
+        // With the token, the plan comes next: without automation, whatever was asked (the lead, 9 November).
+        if let refusal = handler.refusalWithoutThePlan() {
+            send(refusal, on: connection)
+            return
+        }
         switch AutomationRoute.of(request) {
         case .failure(let refusal):
             send(refusal.response, on: connection)
@@ -203,13 +208,26 @@ final class AutomationHandler {
     var waitForSync: () async -> Void = {}
     /// Something changed that the Profiles list shows.
     var onChange: () -> Void = {}
+    /// Whether the plan has automation; without it every route refuses, saying so.
+    var allowsAutomation: () -> Bool = { false }
+    /// A saved scenario by its exact name (one), for `{"scenario": "…"}`.
+    var savedScenario: (String) -> Scenario? = { _ in nil }
 
     init(manager: ProfileManager, repository: ProfileRepository) {
         self.manager = manager
         self.repository = repository
     }
 
+    /// The whole API is the plan's automation (the lead, 9 November): asked after the token
+    /// (AutomationGate: 401 without it) and before anything of the request is read — every route,
+    /// the ones older than scenarios too, refuses without it, saying why.
+    func refusalWithoutThePlan() -> AutomationHTTP.Response? {
+        allowsAutomation() ? nil : Self.notInPlan
+    }
+
     func handle(_ route: AutomationRoute) async -> AutomationHTTP.Response {
+        // Asked again here: the plan may have changed while the request was read.
+        if let refusal = refusalWithoutThePlan() { return refusal }
         switch route {
         case .listProfiles:
             return .json(200, repository.list().map(entry))
@@ -255,6 +273,40 @@ final class AutomationHandler {
                     return .error(409, "busy", error.localizedDescription)
                 }
             }
+        case .runScenario(let reference, let spec):
+            return await profile(reference) { summary in
+                guard manager.isRunning(summary.id) else {
+                    return .error(409, "not_running", "Start the profile first (POST …/start).")
+                }
+                let name: String, source: String
+                if let text = spec.source {
+                    (name, source) = ("API", text)
+                } else if let wanted = spec.scenario, let saved = savedScenario(wanted) {
+                    (name, source) = (saved.name, saved.source)
+                } else {
+                    return .error(404, "no_scenario", "No saved scenario is named \(spec.scenario ?? "") (exactly, one).")
+                }
+                let runID = UUID()
+                guard manager.runScenario(summary.id, name: name, source: source, parametersJSON: spec.parametersJSON, runID: runID) else {
+                    return .error(409, "busy", "A run of this profile is still going (POST …/scenario/stop).")
+                }
+                return .json(202, ScenarioAnswer(runID: runID.uuidString))
+            }
+        case .scenarioState(let reference):
+            return await profile(reference) { summary in
+                guard let run = manager.scenarioRuns[summary.id] else {
+                    return .error(404, "no_run", "This profile has not run a scenario since the vault was unlocked.")
+                }
+                return .json(200, ScenarioState(run))
+            }
+        case .stopScenario(let reference):
+            return await profile(reference) { summary in
+                guard manager.scenarioRuns[summary.id]?.isRunning == true else {
+                    return .error(409, "not_running", "No run of this profile is going.")
+                }
+                manager.stopScenario(summary.id)
+                return .json(202, ScenarioAnswer(runID: manager.scenarioRuns[summary.id]?.runID.uuidString ?? ""))
+            }
         case .importCookies(let reference, let data):
             return await profile(reference) { summary in
                 let report = CookieImporter.read(data)
@@ -272,6 +324,47 @@ final class AutomationHandler {
                     return .error(409, "busy", error.localizedDescription)
                 }
             }
+        }
+    }
+
+    /// The scenario routes without automation in the plan: said, with the reason.
+    private static let notInPlan = AutomationHTTP.Response.error(403, "automation_not_in_plan",
+        "The automation API is part of the plan with automation; this license's plan does not include it.")
+
+    private struct ScenarioAnswer: Encodable {
+        var runID: String
+    }
+
+    /// A run as the API gives it: the log's lines with their times and kinds, and how it ended.
+    private struct ScenarioState: Encodable {
+        struct Line: Encodable {
+            var at: Date
+            var kind: String
+            var text: String
+        }
+
+        var runID: String
+        var name: String
+        var startedAt: Date
+        var running: Bool
+        /// "finished", "failed", "stopped" — nil while running.
+        var outcome: String?
+        /// Why it failed or stopped.
+        var reason: String?
+        var lines: [Line]
+
+        init(_ run: ProfileManager.ScenarioRunState) {
+            runID = run.runID.uuidString
+            name = run.name
+            startedAt = run.startedAt
+            running = run.isRunning
+            switch run.outcome {
+            case nil: outcome = nil
+            case .finished?: outcome = "finished"
+            case .failed(let message)?: outcome = "failed"; reason = message
+            case .stopped(let why)?: outcome = "stopped"; reason = why.rawValue
+            }
+            lines = run.lines.map { Line(at: $0.at, kind: $0.kind.rawValue, text: $0.text) }
         }
     }
 

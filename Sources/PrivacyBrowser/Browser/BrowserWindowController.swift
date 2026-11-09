@@ -3,6 +3,7 @@ import BrowserCore
 import Combine
 import os
 import SwiftUI
+import UniformTypeIdentifiers
 import WebKit
 
 /// Window subclass so that File ▸ Close (⌘W) closes the current tab while the window's
@@ -36,15 +37,17 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     /// The profile chip and the start page (see BrowserChrome.swift).
     private let chrome: BrowserChromeModel
     /// Over the web views while the selected tab is an empty new tab.
-    private var startPage: NSHostingView<StartPageView>!
+    private var startPage: CoverHostingView<StartPageView>!
     /// Over the web views while the selected tab's page stopped (`BrowserTab.pageStopped`): its
     /// process kept ending, and the tab no longer reloads it by itself.
-    private var stoppedPage: NSHostingView<StoppedPageView>!
+    private var stoppedPage: CoverHostingView<StoppedPageView>!
     /// 0 with one tab: like Safari, the tab bar shows from the second tab on.
     private var tabStripHeight: NSLayoutConstraint!
     /// The address field's width: what the other toolbar items leave, up to 680 pt (`fitAddressField`).
     private var addressWidth: NSLayoutConstraint!
     private let webContainer = NSView()
+    /// Find on the page (⌘F), over the page's top edge.
+    private(set) lazy var findBar = PageFindBar { [weak self] in self?.selectedTab?.webView }
     private let addressField = AddressBarField()
     private var backButton: NSButton!
     private var forwardButton: NSButton!
@@ -60,6 +63,13 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     /// toolbar says so (`SimplifiedModeNotice`).
     let ownWindowReason: SafariChromeHost.OwnWindowReason
     private(set) var simplifiedChip: NSView?
+    /// An iPhone view: laid out as Safari on an iPhone (MobileChrome.swift) — the bottom bar, the tab
+    /// overview, the swipe between tabs — instead of desktop Safari's toolbar and tab strip.
+    let isPhoneLayout: Bool
+    private var tabOverview: MobileTabOverview?
+    private var mobileBack: NSButton?
+    /// The last picture of each tab, taken as it stops being the selected one: the overview's cards.
+    private var snapshots: [ObjectIdentifier: NSImage] = [:]
 
     init(session: BrowserSession) {
         self.session = session
@@ -69,6 +79,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
                                          exit: BrowserWindowController.profileExit(of: session),
                                          avatar: session.configuration.avatar)
         self.ownWindowReason = SafariChromeHost.reasonForOwnWindow(session.configuration)
+        self.isPhoneLayout = session.configuration.deviceGeneration.platform == .iOS
 
         // A mobile generation's window is the declared device's screen: its web content can never
         // be wider or taller than the screen the page is told about (see PrivacyScripts).
@@ -77,7 +88,11 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         let window = BrowserWindow(contentRect: NSRect(origin: .zero, size: contentSize),
                                    styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                    backing: .buffered, defer: false)
-        if let deviceScreen { window.contentMaxSize = deviceScreen }
+        if let deviceScreen {
+            window.contentMaxSize = deviceScreen
+            // Neither the green button nor ⌃⌘F: an iPhone has no full screen.
+            window.collectionBehavior.insert(.fullScreenNone)
+        }
         window.isReleasedWhenClosed = false
         // Never saved as restorable state at quit: AppKit would write the title — the profile's
         // name — to ~/Library/Saved Application State in plaintext.
@@ -98,7 +113,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         Theme.applyChrome(to: window)
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .line
-        window.backgroundColor = Theme.NS.toolbar
+        window.backgroundColor = ProfileWindowTheme.NS.toolbar
         buildInterface(in: window)
         WebContentAppearance.shared.follow(webContainer)
         // The profile's window size (Profile editor → Window), a real frame; a mobile generation's
@@ -121,6 +136,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     required init?(coder: NSCoder) { fatalError("not supported") }
 
     var tabCount: Int { tabs.count }
+    var selectedTabIndex: Int { selectedIndex }
+    var isShowingTabOverview: Bool { tabOverview.map { !$0.isHidden } ?? false }
+    /// The field a person types an address or a search into (the self-test types into it).
+    var addressBar: NSTextField { addressField }
     var selectedTab: BrowserTab? { tabs.indices.contains(selectedIndex) ? tabs[selectedIndex] : nil }
 
     // MARK: Interface
@@ -137,7 +156,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
 
         addressField.placeholderAttributedString = NSAttributedString(
             string: L("toolbar.address.placeholder"),
-            attributes: [.foregroundColor: Theme.NS.textTertiary, .font: NSFont.systemFont(ofSize: 13)])
+            attributes: [.foregroundColor: ProfileWindowTheme.NS.textTertiary, .font: NSFont.systemFont(ofSize: 13)])
         addressField.delegate = self
         addressField.lineBreakMode = .byTruncatingTail
         addressField.cell?.usesSingleLineMode = true
@@ -148,10 +167,15 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         let badge = NSHostingView(rootView: ProfileChipView(model: chrome))
         badge.setContentCompressionResistancePriority(.required, for: .horizontal)
         // This window is not Safari's: said where the person looks, with why (SimplifiedModeNotice).
-        // In the toolbar, whose height a page measures and which this leaves as it is.
+        // In the toolbar, whose height a page measures and which this leaves as it is. Not for an
+        // iPhone or iPad view: its window is ours by design, not a fallback (the owner, 9 November).
         let reason = ownWindowReason
-        let simplified = NSHostingView(rootView: SimplifiedModeChip(reason: reason) { [weak self] in self?.showSimplifiedMode() })
-        simplified.setContentCompressionResistancePriority(.required, for: .horizontal)
+        var simplified: NSView?
+        if reason != .deviceProfile {
+            let chip = NSHostingView(rootView: SimplifiedModeChip(reason: reason) { [weak self] in self?.showSimplifiedMode() })
+            chip.setContentCompressionResistancePriority(.required, for: .horizontal)
+            simplified = chip
+        }
         simplifiedChip = simplified
         // The app's mark, where Safari has its sidebar button.
         let mark = NSHostingView(rootView: LumenMark(size: 20))
@@ -160,11 +184,13 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         // The address field takes the room the toolbar has left.
         addressField.translatesAutoresizingMaskIntoConstraints = false
         addressField.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        addressWidth = addressField.widthAnchor.constraint(equalToConstant: 680)
-        addressWidth.priority = .defaultLow
-        NSLayoutConstraint.activate([addressField.heightAnchor.constraint(equalToConstant: 28),
-                                     addressField.widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
-                                     addressField.widthAnchor.constraint(lessThanOrEqualToConstant: 680), addressWidth])
+        if !isPhoneLayout {
+            addressWidth = addressField.widthAnchor.constraint(equalToConstant: 680)
+            addressWidth.priority = .defaultLow
+            NSLayoutConstraint.activate([addressField.heightAnchor.constraint(equalToConstant: 28),
+                                         addressField.widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
+                                         addressField.widthAnchor.constraint(lessThanOrEqualToConstant: 680), addressWidth])
+        }
 
         toolbarViews = [
             (.init("mark"), "Lumen", mark),
@@ -172,9 +198,14 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
             (.init("reload"), "Reload", reloadButton!), (.init("address"), "Address", addressField),
             (.init("bookmark"), "Bookmark", bookmarkButton!), (.init("bookmarks"), "Bookmarks", bookmarksMenuButton),
             (.init("history"), "History", historyButton), (.init("fill"), "Fill Password", fillButton),
-            (.init("save"), "Save Password", saveButton), (.init("simplified"), L("simplified.chip"), simplified),
-            (.init("profile"), profileName, badge),
+            (.init("save"), "Save Password", saveButton),
         ]
+        if let simplified { toolbarViews.append((.init("simplified"), L("simplified.chip"), simplified)) }
+        toolbarViews.append((.init("profile"), profileName, badge))
+        if isPhoneLayout {
+            // The phone has no bar at the top: only what says whose window this is stays there.
+            toolbarViews = toolbarViews.filter { ["simplified", "profile"].contains($0.0.rawValue) }
+        }
         let toolbar = NSToolbar(identifier: "PrivacyBrowser.BrowserWindow")
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
@@ -183,7 +214,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
 
         tabStrip.delegate = self
         let container = NSView()
-        startPage = NSHostingView(rootView: StartPageView(
+        startPage = CoverHostingView(rootView: StartPageView(
             model: chrome,
             open: { [weak self] url in self?.openFromStartPage(url) },
             submit: { [weak self] text in
@@ -193,7 +224,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         // Part of the chrome (dark), unlike the web views beside it (the system's appearance).
         startPage.appearance = Theme.chromeAppearance
         startPage.isHidden = true
-        stoppedPage = NSHostingView(rootView: StoppedPageView(reload: { [weak self] in self?.reload() }))
+        stoppedPage = CoverHostingView(rootView: StoppedPageView(reload: { [weak self] in self?.reload() }))
         // It fills the tab's place and asks for no size of its own: SwiftUI's minimum for it — its
         // text wrapped at the narrowest width — held the web view some 2,700 pt tall even while it
         // was hidden, and a page measured that (the self-test's window size, CI run 559).
@@ -213,7 +244,6 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
             webContainer.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
             webContainer.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             webContainer.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            webContainer.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             startPage.topAnchor.constraint(equalTo: webContainer.topAnchor),
             startPage.leadingAnchor.constraint(equalTo: webContainer.leadingAnchor),
             startPage.trailingAnchor.constraint(equalTo: webContainer.trailingAnchor),
@@ -223,15 +253,273 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
             stoppedPage.trailingAnchor.constraint(equalTo: webContainer.trailingAnchor),
             stoppedPage.bottomAnchor.constraint(equalTo: webContainer.bottomAnchor),
         ])
+        if isPhoneLayout {
+            buildPhoneBars(in: container)
+        } else {
+            webContainer.bottomAnchor.constraint(equalTo: container.bottomAnchor).isActive = true
+        }
+        findBar.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(findBar, positioned: .above, relativeTo: stoppedPage)
+        NSLayoutConstraint.activate([
+            findBar.topAnchor.constraint(equalTo: webContainer.topAnchor),
+            findBar.leadingAnchor.constraint(equalTo: webContainer.leadingAnchor),
+            findBar.trailingAnchor.constraint(equalTo: webContainer.trailingAnchor),
+        ])
         window.contentView = container
         fitAddressField()
+    }
+
+    /// The phone's bottom bar — Back, the address pill, the tabs button — under the page, and the
+    /// tab overview over everything (MobileChrome.swift).
+    private func buildPhoneBars(in container: NSView) {
+        let bar = MobileBottomBar()
+        bar.appearance = Theme.chromeAppearance
+        bar.wantsLayer = true
+        bar.layer?.backgroundColor = ProfileWindowTheme.NS.toolbar.cgColor
+        bar.onSwipe = { [weak self] next in
+            guard let self, self.tabs.count > 1 else { return }
+            if next { self.selectNextTab() } else { self.selectPreviousTab() }
+        }
+        bar.setAccessibilityIdentifier("mobile-bottom-bar")
+        let back = MobileCircleButton(symbol: "chevron.left", label: L("toolbar.back"), identifier: "mobile-back",
+                                      target: self, action: #selector(goBack))
+        mobileBack = back
+        let tabsButton = MobileCircleButton(symbol: "square.on.square", label: L("mobile.tabs.show"), identifier: "mobile-tabs",
+                                            target: self, action: #selector(showTabOverview))
+        let pill = NSView()
+        pill.wantsLayer = true
+        pill.layer?.cornerRadius = 22
+        pill.layer?.backgroundColor = NSColor(white: 0.18, alpha: 0.92).cgColor
+        pill.translatesAutoresizingMaskIntoConstraints = false
+        let magnifier = NSImageView(image: NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil) ?? NSImage())
+        magnifier.contentTintColor = .secondaryLabelColor
+        magnifier.translatesAutoresizingMaskIntoConstraints = false
+        addressField.placeholderAttributedString = NSAttributedString(
+            string: L("mobile.address.placeholder"),
+            attributes: [.foregroundColor: ProfileWindowTheme.NS.textTertiary, .font: NSFont.systemFont(ofSize: 15)])
+        addressField.font = .systemFont(ofSize: 15)
+        addressField.isBordered = false
+        addressField.drawsBackground = false
+        addressField.focusRingType = .none
+        addressField.setAccessibilityIdentifier("mobile-address")
+        addressField.drawsBox = false
+        addressField.textColor = .white
+        // As on the phone: the site's name in the pill, the whole address once it is tapped.
+        addressField.onBeginEditing = { [weak self] in
+            guard let self, let url = self.selectedTab?.url else { return }
+            self.addressField.stringValue = url.absoluteString
+            self.addressField.currentEditor()?.selectAll(nil)
+        }
+        addressField.translatesAutoresizingMaskIntoConstraints = false
+        pill.addSubview(magnifier)
+        pill.addSubview(addressField)
+        for view in [back, pill, tabsButton] as [NSView] { bar.addSubview(view) }
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(bar)
+        let overview = MobileTabOverview()
+        overview.appearance = Theme.chromeAppearance
+        overview.isHidden = true
+        overview.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(overview)
+        tabOverview = overview
+        overview.select = { [weak self] index in
+            guard let self else { return }
+            self.selectTab(at: index)
+            self.hideTabOverview()
+        }
+        overview.close = { [weak self] index in
+            guard let self else { return }
+            if self.tabs.count == 1 {
+                // The last tab closed from the overview leaves an empty one, as on the phone.
+                self.addTab(url: nil)
+                self.closeTab(at: 0)
+            } else {
+                self.closeTab(at: index)
+            }
+            self.refreshOverview()
+        }
+        overview.newTab = { [weak self] in
+            self?.hideTabOverview()
+            self?.addTab(url: nil)
+        }
+        overview.done = { [weak self] in self?.hideTabOverview() }
+        NSLayoutConstraint.activate([
+            webContainer.bottomAnchor.constraint(equalTo: bar.topAnchor),
+            bar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            bar.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            bar.heightAnchor.constraint(equalToConstant: MobileBottomBar.height),
+            back.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 12),
+            back.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            tabsButton.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -12),
+            tabsButton.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            pill.leadingAnchor.constraint(equalTo: back.trailingAnchor, constant: 8),
+            pill.trailingAnchor.constraint(equalTo: tabsButton.leadingAnchor, constant: -8),
+            pill.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            pill.heightAnchor.constraint(equalToConstant: 44),
+            magnifier.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: 14),
+            magnifier.centerYAnchor.constraint(equalTo: pill.centerYAnchor),
+            addressField.leadingAnchor.constraint(equalTo: magnifier.trailingAnchor, constant: 8),
+            addressField.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -14),
+            addressField.centerYAnchor.constraint(equalTo: pill.centerYAnchor),
+            overview.topAnchor.constraint(equalTo: container.topAnchor),
+            overview.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            overview.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            overview.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+    }
+
+    /// What the phone's pill shows of an address: the site's name, as Safari on an iPhone does.
+    static func siteName(_ url: URL?) -> String {
+        guard let url, let host = url.host, !host.isEmpty else { return url?.absoluteString ?? "" }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+
+    // MARK: The phone's tab overview
+
+    /// The tabs button: every tab as a card (the selected one's picture taken now).
+    @objc func showTabOverview() {
+        guard isPhoneLayout, let overview = tabOverview else { return }
+        takeSnapshot(of: selectedTab) { [weak self] in
+            guard let self else { return }
+            self.refreshOverview()
+            overview.isHidden = false
+            self.window?.makeFirstResponder(overview)
+        }
+    }
+
+    func hideTabOverview() {
+        tabOverview?.isHidden = true
+        if let webView = selectedTab?.webView, webView.url != nil { window?.makeFirstResponder(webView) }
+    }
+
+    private func refreshOverview() {
+        tabOverview?.show(tabs.map { MobileTabOverview.Card(title: $0.displayTitle, image: snapshots[ObjectIdentifier($0)]) },
+                          selected: selectedIndex)
+    }
+
+    private func takeSnapshot(of tab: BrowserTab?, then done: @escaping () -> Void = {}) {
+        guard isPhoneLayout, let tab, tab.webView.window != nil, tab.url != nil else { return done() }
+        tab.webView.takeSnapshot(with: nil) { [weak self] image, _ in
+            MainActor.assumeIsolated {
+                if let image { self?.snapshots[ObjectIdentifier(tab)] = image }
+                done()
+            }
+        }
+    }
+
+    // MARK: The menu bar's commands (OwnWindowMenu), through the responder chain
+
+    @objc func newTabCommand(_ sender: Any?) { newTab() }
+    @objc func reopenClosedTabCommand(_ sender: Any?) { reopenClosedTab() }
+    @objc func openLocationCommand(_ sender: Any?) { focusAddressBar() }
+    @objc func reloadCommand(_ sender: Any?) { reload() }
+    @objc func backCommand(_ sender: Any?) { goBack() }
+    @objc func forwardCommand(_ sender: Any?) { goForward() }
+    @objc func nextTabCommand(_ sender: Any?) { selectNextTab() }
+    @objc func previousTabCommand(_ sender: Any?) { selectPreviousTab() }
+    @objc func showAllTabsCommand(_ sender: Any?) {
+        if isPhoneLayout { showTabOverview() }
+    }
+
+    // Find on the page: our bar over the page, WebKit's own search (`PageFindBar`).
+    @objc func findCommand(_ sender: Any?) { findBar.show() }
+    @objc func findNextCommand(_ sender: Any?) { findBar.search(backwards: false) }
+    @objc func findPreviousCommand(_ sender: Any?) { findBar.search(backwards: true) }
+    @objc func useSelectionForFindCommand(_ sender: Any?) { findBar.useSelection() }
+
+    /// Safari's zoom steps.
+    private static let zoomSteps: [CGFloat] = [0.5, 0.75, 0.85, 1, 1.15, 1.25, 1.5, 1.75, 2, 2.5, 3]
+    @objc func zoomInCommand(_ sender: Any?) { zoom(towardsLarger: true) }
+    @objc func zoomOutCommand(_ sender: Any?) { zoom(towardsLarger: false) }
+    @objc func actualSizeCommand(_ sender: Any?) { selectedTab?.webView.pageZoom = 1 }
+    private func zoom(towardsLarger: Bool) {
+        guard let webView = selectedTab?.webView else { return }
+        let now = webView.pageZoom, steps = Self.zoomSteps
+        webView.pageZoom = towardsLarger ? (steps.first { $0 > now + 0.001 } ?? steps[steps.count - 1])
+                                         : (steps.last { $0 < now - 0.001 } ?? steps[0])
+    }
+
+    @objc func printCommand(_ sender: Any?) {
+        guard let webView = selectedTab?.webView, let window else { return }
+        let operation = webView.printOperation(with: NSPrintInfo.shared)
+        operation.view?.frame = webView.bounds
+        operation.showsPrintPanel = true
+        operation.showsProgressPanel = true
+        operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+    }
+
+    /// The page as a web archive, where the person says (the save panel's choice is theirs).
+    @objc func saveAsCommand(_ sender: Any?) {
+        guard let webView = selectedTab?.webView, webView.url != nil, let window else { return }
+        let panel = NSSavePanel()
+        let title = (webView.title ?? "").isEmpty ? (webView.url?.host ?? "page") : (webView.title ?? "page")
+        panel.nameFieldStringValue = BrowserTab.safeDownloadName(title) + ".webarchive"
+        panel.allowedContentTypes = [.webArchive]
+        panel.canCreateDirectories = true
+        panel.beginSheetModal(for: window) { answer in
+            guard answer == .OK, let destination = panel.url else { return }
+            webView.createWebArchiveData { result in
+                do {
+                    try result.get().write(to: destination, options: .atomic)
+                } catch {
+                    NSAlert(error: error).beginSheetModal(for: window)
+                }
+            }
+        }
+    }
+
+    /// Share: the page's address onto this Mac's pasteboard. Nothing else yet — Mail, Messages and
+    /// AirDrop fetch an address they are given for its preview, as this Mac, outside the profile's
+    /// proxy (`HandOffs`), which is measured before any of them is offered.
+    @objc func copyLinkCommand(_ sender: Any?) {
+        guard let url = selectedTab?.url else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url.absoluteString, forType: .string)
+    }
+
+    @objc func closeWindowCommand(_ sender: Any?) { window?.performClose(nil) }
+    @objc func showHistoryCommand(_ sender: Any?) { showHistory() }
+    @objc func showBookmarksCommand(_ sender: Any?) { showBookmarks() }
+    @objc func bookmarkPageCommand(_ sender: Any?) { toggleBookmark() }
+    /// What this profile downloaded, and where it went — listed in the window: a profile's process
+    /// opens nothing in the Finder (`SystemOpen`).
+    @objc func showDownloadsCommand(_ sender: Any?) {
+        guard let window else { return }
+        let folder = BrowsingPreferences.current.downloadFolderURL.path
+        let files = BrowserTab.finishedDownloads.suffix(20).reversed()
+        let alert = NSAlert()
+        alert.messageText = L("downloads.title")
+        alert.informativeText = files.isEmpty ? String(format: L("downloads.none"), folder)
+            : String(format: L("downloads.list"), folder) + "\n" + files.map(\.lastPathComponent).joined(separator: "\n")
+        alert.beginSheetModal(for: window)
+    }
+
+    @objc func fullScreenCommand(_ sender: Any?) {
+        guard !isPhoneLayout else { return }
+        window?.toggleFullScreen(sender)
+    }
+
+    /// An iPhone has no full screen and its view is the phone's screen: off there. Find, print,
+    /// save, share and a bookmark need a page.
+    @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        switch item.action {
+        case #selector(fullScreenCommand(_:)):
+            return !isPhoneLayout
+        case #selector(printCommand(_:)), #selector(saveAsCommand(_:)), #selector(copyLinkCommand(_:)),
+             #selector(findCommand(_:)), #selector(findNextCommand(_:)), #selector(findPreviousCommand(_:)),
+             #selector(useSelectionForFindCommand(_:)), #selector(bookmarkPageCommand(_:)):
+            return selectedTab?.url != nil
+        default:
+            return true
+        }
     }
 
     /// NSToolbar gives the address field its preferred width and sends the items that no longer
     /// fit to the overflow menu, rather than narrowing the field: so the field asks only for what
     /// the other items leave (between its 160 and 680 pt).
     private func fitAddressField() {
-        guard let window else { return }
+        guard let window, addressWidth != nil else { return }
         // Each item with the toolbar's spacing (measured on macOS 26: 24 pt between icons).
         let others = toolbarViews.filter { $0.0.rawValue != "address" }
             .reduce(CGFloat(0)) { $0 + max($1.2.fittingSize.width, $1.2.frame.width) + 26 }
@@ -301,7 +589,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     }
 
     func selectTab(at index: Int) {
+        if !findBar.isHidden { findBar.close() }
         guard tabs.indices.contains(index) else { return }
+        if index != selectedIndex { takeSnapshot(of: selectedTab) }
         selectedTab?.passwords.closeSuggestions()
         selectedIndex = index
         let webView = tabs[index].webView
@@ -327,6 +617,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
             return
         }
         let tab = tabs.remove(at: index)
+        snapshots[ObjectIdentifier(tab)] = nil
         if let url = tab.url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
             recentlyClosed.append(url)
             if recentlyClosed.count > 25 { recentlyClosed.removeFirst() }
@@ -365,7 +656,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
 
     /// Updates tab strip, address bar, buttons and window title from the selected tab.
     private func refreshChrome() {
-        let showsTabStrip = tabs.count > 1
+        let showsTabStrip = tabs.count > 1 && !isPhoneLayout
         tabStrip.isHidden = !showsTabStrip
         tabStripHeight.constant = showsTabStrip ? TabStripView.height : 0
         updateStartPage()
@@ -378,9 +669,11 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         guard let tab = selectedTab else { return }
         window?.title = String(format: L("window.browser.title"), profileName, tab.displayTitle)
         if addressField.currentEditor() == nil { // don't overwrite what the user is typing
-            addressField.stringValue = tab.url?.absoluteString ?? ""
+            addressField.stringValue = isPhoneLayout ? Self.siteName(tab.url) : tab.url?.absoluteString ?? ""
         }
         backButton.isEnabled = tab.webView.canGoBack
+        mobileBack?.isEnabled = tab.webView.canGoBack
+        if isShowingTabOverview { refreshOverview() }
         forwardButton.isEnabled = tab.webView.canGoForward
         reloadButton.image = NSImage(systemSymbolName: tab.isLoading ? "xmark" : "arrow.clockwise",
                                      accessibilityDescription: tab.isLoading ? "Stop" : "Reload")
@@ -473,7 +766,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     /// What the address bar (or the start page's field) opens for `input`: a web address, else a
     /// search with the profile's engine (`ProfileConfiguration.searchEngine`), through its proxy.
     func addressURL(_ input: String) -> URL? {
-        WebAddress.url(fromAddressBarInput: input, engine: session?.configuration.searchEngine ?? .standard)
+        WebAddress.url(fromAddressBarInput: input, engine: session?.searchEngine() ?? .standard)
     }
 
     // MARK: Bookmarks and history
@@ -684,4 +977,15 @@ extension BrowserWindowController: TabStripViewDelegate {
     func tabStrip(_ strip: TabStripView, didSelect index: Int) { selectTab(at: index) }
     func tabStrip(_ strip: TabStripView, didClose index: Int) { closeTab(at: index) }
     func tabStripDidRequestNewTab(_ strip: TabStripView) { newTab() }
+}
+
+/// A SwiftUI view laid over a tab's web view in our window — the start page, the stopped page's
+/// cover — that takes no click while it is hidden. NSHostingView answers AppKit's hit test for
+/// itself even when hidden: in a mobile view (our window) every click on the page went to the
+/// hidden stopped page's cover, and not one reached the page (run 690, macOS 26.6.2 and 27.0.1;
+/// the owner, 2 November: "a tap is not taken"). A hidden NSView takes none; this one neither.
+final class CoverHostingView<Content: View>: NSHostingView<Content> {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        isHiddenOrHasHiddenAncestor ? nil : super.hitTest(point)
+    }
 }

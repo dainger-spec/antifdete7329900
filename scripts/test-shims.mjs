@@ -39,6 +39,12 @@ function makeWindow(config, parentContext) {
     globalThis.Geolocation = Geolocation; globalThis.Permissions = Permissions;
     globalThis.Event = class Event { constructor(type) { this.type = type; } };
     globalThis.WeakRef = WeakRef;
+    // Blob workers, as far as hookWorkers reaches them: a Blob, URL.createObjectURL and a Worker
+    // that keeps the URL it was given.
+    globalThis.Blob = class Blob { constructor(parts, options) { this.parts = parts; this.type = (options && options.type) || ''; } };
+    let blobCount = 0;
+    globalThis.URL = class URL { static createObjectURL(blob) { return 'blob:test/' + (++blobCount); } };
+    globalThis.Worker = class Worker { constructor(url) { this.url = String(url); } };
     class Navigator {
       get platform() { illegal(this, Navigator); return 'MacIntel'; } get maxTouchPoints() { illegal(this, Navigator); return 0; }
       get hardwareConcurrency() { illegal(this, Navigator); return 8; }
@@ -102,7 +108,12 @@ function makeWindow(config, parentContext) {
     };
     globalThis.RTCStatsReport = class RTCStatsReport extends Map {};
     // What only the engine knows: every peer connection it made (a test reads it; pages never get it).
-    const engine = { instances: [] };
+    const engine = { instances: [], added: [], resolved: [] };
+    // As libwebrtc: a candidate's address that is a name (not IPv4, not IPv6) is resolved by this Mac.
+    const resolveNamed = (line) => {
+      const m = reflectApply(RegExp.prototype.exec, /^(?:a=)?candidate:\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+(\\S+)/i, [line]);
+      if (m && !reflectApply(nativeTest, /^[\\d.]+$|:/, [m[1]])) engine.resolved.push(m[1]);
+    };
     Object.defineProperty(globalThis, '__engine', { value: engine });
     globalThis.RTCPeerConnection = class RTCPeerConnection {
       constructor(c) {
@@ -127,6 +138,24 @@ function makeWindow(config, parentContext) {
         return result;
       }
       close() { illegal(this, RTCPeerConnection); this.closed = true; }
+      get signalingState() { illegal(this, RTCPeerConnection); return this.closed ? 'closed' : 'stable'; }
+      get remoteDescription() { illegal(this, RTCPeerConnection); return this.remote || null; }
+      addIceCandidate(c) {
+        illegal(this, RTCPeerConnection);
+        const invalid = () => { const e = new Error('InvalidStateError'); e.name = 'InvalidStateError'; return Promise.reject(e); };
+        if (this.closed || !this.remote) return invalid();
+        const line = c === undefined || c === null || c.candidate === undefined ? '' : NativeString(c.candidate);
+        engine.added.push(line);
+        resolveNamed(line);
+        return Promise.resolve();
+      }
+      setRemoteDescription(d) {
+        illegal(this, RTCPeerConnection);
+        const sdp = NativeString(d.sdp), type = NativeString(d.type);
+        this.remote = { sdp, type };
+        for (const line of sdp.split('\\n')) resolveNamed(line.trim());
+        return Promise.resolve();
+      }
       // As WebKit: a promise of a new maplike report each call, its entries plain objects.
       getStats() { illegal(this, RTCPeerConnection); return Promise.resolve(report(this.stats)); }
     };
@@ -140,7 +169,10 @@ function makeWindow(config, parentContext) {
     };
     globalThis.webkitRTCPeerConnection = globalThis.RTCPeerConnection;
     engine.Native = globalThis.RTCPeerConnection;
-    engine.methods = Object.getOwnPropertyNames(engine.Native.prototype).map((name) => engine.Native.prototype[name]);
+    engine.methods = Object.getOwnPropertyNames(engine.Native.prototype).map((name) => {
+      const d = Object.getOwnPropertyDescriptor(engine.Native.prototype, name);
+      return d.value || d.get;
+    });
     globalThis.RTCDataChannel = function () {};
     globalThis.RTCIceTransport = function () {};
     Object.defineProperty(globalThis, 'open', { value: function open() { if (this !== globalThis) throw new TypeError('illegal invocation'); return null; },
@@ -203,10 +235,15 @@ test('date components agree with Intl for random instants', () => {
   const w = makeWindow({ ...base, timeZone: 'America/Sao_Paulo' });
   const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', hourCycle: 'h23',
     year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', weekday: 'short' });
+  // One function made in the window and called with each instant, not a source of its own for
+  // each: Bun 1.2.23's vm.runInContext returns, for about 6 in 100 000 sources it has not run, the
+  // result of another it has — `(() => ${t})()` alone, no shim in the window (CI run 717; Bun 1.4.4
+  // and Node: 0 in 100 000).
+  const components = run(w, `(t) => { const d = new Date(t); return [d.getFullYear(), d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes(), d.getDay()]; }`);
   for (let i = 0; i < 500; i++) {
     const t = Math.floor(Math.random() * 2e12);
     const p = Object.fromEntries(fmt.formatToParts(new Date(t)).map((x) => [x.type, x.value]));
-    const got = run(w, `(() => { const d = new Date(${t}); return [d.getFullYear(), d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes(), d.getDay()]; })()`);
+    const got = components(t);
     const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(p.weekday);
     assert.deepEqual(Array.from(got), [+p.year, +p.month, +p.day, +p.hour, +p.minute, day], `t=${t}`);
   }
@@ -388,12 +425,31 @@ test('macOS profile: navigator, screen and window keep their native values', () 
   assert.equal(run(w, `Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform').get.toString().includes("illegal(this, Navigator)")`), true);
 });
 
-test('an iPhone or iPad view replaces no navigator, screen or window value: it is Safari on the Mac', () => {
-  // Only the User-Agent (WebKit's own) and the window's size (the app's) differ; the script has no
-  // device values to give, and nothing in it touches the touch points, the platform or the screen.
+test('a profile without the full phone disguise replaces no navigator, screen or window value', () => {
+  // A Mac profile, the iPad view, and an iPhone view that leaves no script's trace (engineOnly):
+  // the script has no phone to give, and touches none of the touch points, the platform or the screen.
   const w = makeWindow(everything);
   assert.equal(run(w, surface), JSON.stringify(['MacIntel', 0, 8, 'en-US', ['en-US'], 'undefined', 1728, 1117, 1728, 1079, 2, 1200, 820]));
-  assert.doesNotMatch(body, /maxTouchPoints|standalone|availWidth|devicePixelRatio/);
+  assert.equal(run(w, `'orientation' in window`), false);
+});
+
+const phone = { platform: 'iPhone', width: 402, height: 874, maxTouchPoints: 5 };
+test('an iPhone view with the full disguise: the phone in the navigator, the screen and the window, through accessors as the engine makes them', () => {
+  const w = makeWindow({ ...everything, safariObject: false, phone });
+  // The pixel density is WebKit's own (PhoneEngine), not the script's: the realm's 2 stays.
+  assert.equal(run(w, surface), JSON.stringify(['iPhone', 5, 8, 'en-US', ['en-US'], 'undefined', 402, 874, 402, 874, 2, 402, 874]));
+  for (const [proto, name] of [['Navigator.prototype', 'platform'], ['Navigator.prototype', 'maxTouchPoints'], ['Screen.prototype', 'width'],
+                               ['Screen.prototype', 'availHeight']]) {
+    assert.equal(run(w, `Object.getOwnPropertyDescriptor(${proto}, '${name}').get.toString()`), nativeText(name), `${proto}.${name}`);
+    assert.equal(run(w, `Object.getOwnPropertyNames(Object.getOwnPropertyDescriptor(${proto}, '${name}').get).join()`), 'length,name');
+  }
+  // The engine's receiver check is kept: the wrong receiver throws the engine's error.
+  assert.equal(run(w, `try { Object.getOwnPropertyDescriptor(Navigator.prototype, 'maxTouchPoints').get.call({}); 'no error' } catch (e) { e.message }`),
+               'illegal invocation');
+  assert.equal(run(w, `Object.getOwnPropertyDescriptor(window, 'outerWidth').get.toString()`), nativeText('outerWidth'));
+  // Held upright, as iOS says: window.orientation 0, with its event handler.
+  assert.equal(run(w, `[window.orientation, 'onorientationchange' in window, Object.getOwnPropertyDescriptor(window, 'orientation').get.toString()].join('|')`),
+               `0|true|${nativeText('orientation')}`);
 });
 
 test('no rendering patches: canvas, audio and fonts stay native', () => {
@@ -430,6 +486,23 @@ test('geolocation deny: prompt until asked, then a real-looking denial', async (
   assert.throws(() => run(w, `navigator.geolocation.getCurrentPosition(1)`), (e) => e.name === 'TypeError');
   // Receivers that are not ours still get the native getter's TypeError.
   assert.throws(() => run(w, `Object.getOwnPropertyDescriptor(GeolocationPositionError.prototype, 'code').get.call({})`), (e) => e.name === 'TypeError');
+});
+
+test('workers made from a blob are hooked whenever a substitution reaches them, and only then', () => {
+  // The worker runs the shim (its URL is replaced by one whose script starts with it) exactly when
+  // the page has something a worker would otherwise answer differently.
+  const hooked = (config) => run(makeWindow(config), `(() => { const url = URL.createObjectURL(new Blob(['postMessage(1)'])); return new Worker(url).url !== url; })()`);
+  assert.equal(hooked(base), false, 'no substitution: no hook');
+  assert.equal(hooked({ ...base, storageQuota: 0.6 * 128 * 2 ** 30 }), true, 'the storage quota alone, this Mac\'s time zone');
+  assert.equal(hooked({ ...base, timeZone: 'Asia/Tokyo' }), true, 'a time zone');
+  assert.equal(hooked({ ...base, phone: { platform: 'iPhone', width: 402, height: 874, maxTouchPoints: 5 } }), true, 'an iPhone');
+  // The iOS app always sends a fingerprint: only a mode that changes something, or a language, counts.
+  const real = { seed: 's', canvas: 'real', webgl: 'real', audio: 'real', language: null, unstable: false, naive: false };
+  assert.equal(hooked({ ...base, fingerprint: real }), false, 'the iOS app\'s fingerprint with everything real');
+  assert.equal(hooked({ ...base, fingerprint: { ...real, canvas: 'noise' } }), true, 'canvas noise, this device\'s time zone');
+  assert.equal(hooked({ ...base, fingerprint: { ...real, webgl: 'off' } }), true, 'WebGL off');
+  assert.equal(hooked({ ...base, fingerprint: { ...real, audio: 'noise' } }), true, 'audio noise');
+  assert.equal(hooked({ ...base, fingerprint: { ...real, language: 'de-DE' } }), true, 'a language');
 });
 
 test('storage quota: Safari\'s instead of the app default', async () => {
@@ -581,6 +654,47 @@ test('WebRTC through the tunnel: a page that tampers with built-ins still gets o
     assert.equal(report.gatheredOutsideRelay, 0, `${name}: nothing gathered outside the relay`);
     assert.equal(report.nativeSeen, false, `${name}: the native constructor and methods stay out of the page's reach`);
   }
+});
+
+test('WebRTC through the tunnel: a remote candidate named by a host name never reaches the resolver', async () => {
+  const relay = { urls: ['turn:127.0.0.1:50000?transport=udp'], username: 'u1', credential: 'c1' };
+  const w = makeWindow({ ...base, webRTC: 'tunnel', webRTCRelay: relay });
+  const engine = () => JSON.parse(run(w, `JSON.stringify({ added: __engine.added, resolved: __engine.resolved, sdp: pc.remoteDescription && pc.remoteDescription.sdp })`));
+  run(w, `var pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.example' }] })`);
+  // Before a remote description the engine refuses, as it would: nothing is resolved either way.
+  await assert.rejects(run(w, `pc.addIceCandidate({ candidate: 'candidate:1 1 udp 2122260223 early.example 9 typ host', sdpMid: '0' })`),
+                       (e) => e.name === 'InvalidStateError');
+  const sdp = ['v=0', 'a=candidate:1 1 udp 2122260223 192.0.2.44 50000 typ host',
+               'a=candidate:2 1 udp 2122260223 2001:db8::44 50001 typ host',
+               'a=candidate:3 1 udp 2122260223 4c1a2b3c-aaaa-bbbb-cccc-0123456789ab.local 50002 typ host',
+               'a=candidate:4 1 tcp 1518280447 peer-run7.leak.example 9 typ host tcptype active',
+               'a=candidate:5 1 udp 1686052607 203.0.113.9 3478 typ srflx raddr 0.0.0.0 rport 0', ''].join('\r\n');
+  await run(w, `pc.setRemoteDescription({ type: 'offer', sdp: ${JSON.stringify(sdp)} })`);
+  let state = engine();
+  assert.deepEqual(state.resolved, [], 'no name in the remote SDP reached the resolver');
+  assert.ok(state.sdp.includes('192.0.2.44') && state.sdp.includes('2001:db8::44') && state.sdp.includes('203.0.113.9'), 'addresses stay');
+  assert.ok(!state.sdp.includes('.local') && !state.sdp.includes('leak.example'), 'named candidates are gone');
+  // Trickled candidates: addresses go to the engine, names do not, and the page is told success.
+  await run(w, `pc.addIceCandidate({ candidate: 'candidate:6 1 udp 2122260223 198.51.100.7 50003 typ host', sdpMid: '0' })`);
+  await run(w, `pc.addIceCandidate({ candidate: 'candidate:7 1 udp 2122260223 another.local 50004 typ host', sdpMid: '0' })`);
+  await run(w, `pc.addIceCandidate(new (class { get candidate() { return 'candidate:8 1 udp 2122260223 name.leak.example 9 typ host'; } })())`);
+  state = engine();
+  assert.deepEqual(state.added, ['candidate:6 1 udp 2122260223 198.51.100.7 50003 typ host']);
+  assert.deepEqual(state.resolved, []);
+  // A getter or a toString that answers differently each time: the engine gets what was checked.
+  await run(w, `var n = 0; pc.addIceCandidate({ get candidate() { return n++ ? 'candidate:9 1 udp 1 flip.leak.example 9 typ host' : 'candidate:9 1 udp 1 192.0.2.9 9 typ host'; }, sdpMid: '0' })`);
+  await run(w, `var m = 0; pc.addIceCandidate({ candidate: { toString() { return m++ ? 'candidate:10 1 udp 1 192.0.2.10 9 typ host' : 'candidate:10 1 udp 1 tostring.leak.example 9 typ host'; } }, sdpMid: '0' })`);
+  state = engine();
+  assert.deepEqual(state.added.slice(1), ['candidate:9 1 udp 1 192.0.2.9 9 typ host'], 'the value read once, its text made once');
+  assert.deepEqual(state.resolved, []);
+  // The legacy success callback is called for a dropped one too.
+  assert.equal(await run(w, `new Promise((resolve) => pc.addIceCandidate({ candidate: 'candidate:11 1 udp 1 cb.leak.example 9 typ host', sdpMid: '0' }, () => resolve('called')))`), 'called');
+  // The engine's receiver check, and the end of candidates, as ever.
+  assert.throws(() => run(w, `RTCPeerConnection.prototype.addIceCandidate.call({}, { candidate: 'candidate:1 1 udp 1 x.example 9 typ host' })`), (e) => e.name === 'TypeError');
+  await run(w, `pc.addIceCandidate(null)`);
+  assert.deepEqual(engine().resolved, []);
+  assert.equal(run(w, `RTCPeerConnection.prototype.addIceCandidate.toString()`), nativeText('addIceCandidate'));
+  assert.equal(run(w, `RTCPeerConnection.prototype.setRemoteDescription.toString()`), nativeText('setRemoteDescription'));
 });
 
 test('WebRTC through the tunnel: the validating connection never gathers', () => {

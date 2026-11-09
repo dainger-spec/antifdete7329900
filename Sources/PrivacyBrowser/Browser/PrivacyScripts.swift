@@ -15,9 +15,10 @@ import WebKit
 ///   * navigator.language(s): it must match the Accept-Language header, which only WebKit sets
 ///     (see `WebContentLanguage`); WebKit exposes a single language, as Safari does;
 ///   * navigator.deviceMemory: Safari does not implement it, so defining it marks a fake.
-/// No profile overrides a navigator or screen value: it runs on the very engine and hardware it
-/// declares, and native values agree with everything else a page can measure (CSS media queries,
-/// window sizes, touch events), which a declared phone would not. An iPhone or iPad view is
+/// No script overrides a navigator or screen value: a profile runs on the very engine and hardware
+/// it declares, and native values agree with everything else a page can measure (CSS media
+/// queries, window sizes, touch events), which a declared phone would not. The one value an iPhone
+/// view changes, the processor count, WebKit itself is given (`DeviceGeneration.processorCores`). An iPhone or iPad view is
 /// Safari on this Mac under that device's User-Agent, in a window of its screen's size — what
 /// Safari's own Develop › User Agent gives — and nothing more (the owner's decision, 31 October).
 ///
@@ -36,14 +37,24 @@ enum PrivacyScripts {
         var geolocation: Geolocation
         /// "disabled", "relayOnly", "unrestricted", or "tunnel" (with `webRTCRelay`).
         var webRTC: String
-        /// The packet tunnel's TURN relay for this launch (`ProfileConfiguration.webRTCRouting`).
+        /// The app's TURN relay for this launch (`ProfileConfiguration.webRTCRouting`).
         var webRTCRelay: Relay?
-        /// Safari the app exposes `window.safari` (`pushNotification`) on the Mac, a WKWebView does
-        /// not; a page that checks it is told the same as by Safari — in an iPhone or iPad view too,
-        /// which is Safari on this Mac under that device's User-Agent.
+        /// `window.safari` (`pushNotification`): only a macOS profile, and only when the Safari it
+        /// names gives pages one (`SafariVersions.givesWindowSafari`: up to 27.1, not from 27.2). An
+        /// iPhone or iPad has none (the owner's iPhone, 8 November), so an iPhone or iPad view never
+        /// gets one: there it was a mark of ours that no real browser shows.
         var safariObject: Bool
         /// The per-origin storage quota Safari reports (`safariStorageQuota`), before rounding.
         var storageQuota: Double?
+        /// An iPhone view with the full disguise: the phone the script presents (`patchPhone`).
+        var phone: Phone?
+
+        struct Phone: Encodable {
+            var platform: String
+            var width: Int
+            var height: Int
+            var maxTouchPoints: Int
+        }
 
         struct Relay: Encodable {
             var urls: [String]
@@ -60,6 +71,7 @@ enum PrivacyScripts {
 
     }
 
+    @MainActor
     static func shimConfiguration(for configuration: ProfileConfiguration) -> ShimConfiguration {
         let webRTC: String
         var relay: ShimConfiguration.Relay?
@@ -77,11 +89,24 @@ enum PrivacyScripts {
         case let .fixed(latitude, longitude, accuracy):
             geolocation = .init(mode: "fixed", latitude: latitude, longitude: longitude, accuracy: accuracy)
         }
+        // window.safari: a macOS profile whose named Safari gives one; never an iPhone or iPad view.
+        let namedSafariVersion = HostSafari.version
+        let namedSafariGivesOne = configuration.deviceGeneration.platform == .macOS
+            && SafariVersions.givesWindowSafari(namedSafariVersion)
         return ShimConfiguration(timeZone: configuration.timeZoneIdentifier, geolocation: geolocation,
                                  webRTC: webRTC, webRTCRelay: relay,
-                                 // Every generation is Safari on this Mac: an iPhone or iPad view
-                                 // changes the User-Agent and the window's size, nothing a page measures.
-                                 safariObject: true, storageQuota: safariStorageQuota)
+                                 safariObject: namedSafariGivesOne,
+                                 storageQuota: safariStorageQuota,
+                                 phone: phoneScript(for: configuration))
+    }
+
+    /// What the full disguise's script presents of the phone; nil for a Mac or iPad profile and
+    /// for an iPhone view that leaves no script's trace (`PhoneDisguise.engineOnly`).
+    static func phoneScript(for configuration: ProfileConfiguration) -> ShimConfiguration.Phone? {
+        guard configuration.deviceGeneration.platform == .iOS, configuration.phoneDisguise == .full,
+              let phone = configuration.deviceGeneration.phone else { return nil }
+        return .init(platform: phone.platform, width: phone.screenWidth, height: phone.screenHeight,
+                     maxTouchPoints: phone.maxTouchPoints)
     }
 
     /// navigator.storage.estimate().quota in Safari on a Mac, before WebKit rounds it up: a
@@ -98,11 +123,14 @@ enum PrivacyScripts {
     static func deviceScreenSize(for configuration: ProfileConfiguration) -> CGSize? {
         switch configuration.deviceGeneration.platform {
         case .macOS: return nil
-        case .iOS: return CGSize(width: 390, height: 844)
+        // The phone's screen (the owner's iPhone, 402×874): the window is as wide as it.
+        case .iOS: return configuration.deviceGeneration.phone.map { CGSize(width: $0.screenWidth, height: $0.screenHeight) }
+            ?? CGSize(width: 402, height: 874)
         case .iPadOS: return CGSize(width: 820, height: 1180)
         }
     }
 
+    @MainActor
     static func makeUserContentController(for configuration: ProfileConfiguration) -> WKUserContentController {
         let controller = WKUserContentController()
         controller.addUserScript(WKUserScript(source: source(for: configuration),
@@ -112,6 +140,7 @@ enum PrivacyScripts {
         return controller
     }
 
+    @MainActor
     static func source(for configuration: ProfileConfiguration) -> String {
         let json = (try? String(data: JSONEncoder().encode(shimConfiguration(for: configuration)), encoding: .utf8)) ?? "{}"
         return "(function install(CONFIG) {\n" + shimBody + "\n})(" + json + ");"
@@ -150,7 +179,17 @@ function patchWindow(w) {
   patched.add(w);
   try { patchToString(w); } catch (e) {}
   if (CONFIG.timeZone) { try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {} }
-  if (CONFIG.timeZone) { try { hookWorkers(w); } catch (e) {} }
+  if (CONFIG.phone) { try { patchPhone(w, CONFIG.phone); } catch (e) {} }
+  // Workers made from a blob run this same function with the same CONFIG (hookWorkers): every
+  // substitution above `if (IS_WORKER) return` reaches them — the time zone, an iPhone's
+  // platform, the storage quota, and the iOS app's fingerprint (ios/shim/fingerprint.js, put in
+  // this function by ios/scripts/build-shim.py). So they are hooked whenever any of those is on,
+  // and only then (substitutesInWorkers): a worker left unhooked beside a substituted page answers
+  // what the page does not (the lead, 8 November: the hook stood on the time zone alone, and a
+  // profile with this Mac's time zone gave its workers the app's quota beside Safari's on the
+  // page), and a hook with nothing to carry is a wrapper of ours with no reason. A worker loaded
+  // from a URL runs none of it: a limit of its own (docs/ISOLATION_AND_LIMITATIONS.md).
+  if (substitutesInWorkers(CONFIG)) { try { hookWorkers(w); } catch (e) {} }
   if (CONFIG.storageQuota) { try { patchStorageQuota(w, CONFIG.storageQuota); } catch (e) {} }
   if (IS_WORKER) return; // no window, geolocation, WebRTC or frames in a worker
   if (CONFIG.safariObject) { try { patchSafariObject(w); } catch (e) {} }
@@ -231,6 +270,274 @@ function define(target, name, value) {
   const existing = Object.getOwnPropertyDescriptor(target, name);
   Object.defineProperty(target, name, { value: value, writable: true, configurable: true,
                                         enumerable: existing ? !!existing.enumerable : false });
+}
+
+// ---- An iPhone (the full disguise, `PhoneDisguise.full`) -----------------------------------------
+// What the Mac's WebKit cannot be told and an iPhone's page reads: the phone's screen and the
+// window as large as it, five touch points, touch events, a coarse pointer without hover, the
+// portrait orientation, and the platform in a worker (the page's own is WebKit's, `PhoneEngine`).
+// Accessors where the engine defines them, made as the engine makes them (`getter`, `method`,
+// `constructor`). A touch made here from a click is a script's event: its isTrusted is false, and
+// the stylesheets' own @media rules keep this Mac's pointer — what a page that looks for them sees.
+function overrideGetter(obj, name, value) {
+  let holder = obj;
+  while (holder && !Object.prototype.hasOwnProperty.call(holder, name)) holder = Object.getPrototypeOf(holder);
+  if (!holder || holder === Object.prototype) return;
+  const native = Object.getOwnPropertyDescriptor(holder, name);
+  if (!native || !native.get) return;
+  const nativeGet = native.get;
+  const get = getter(name, function () {
+    ReflectApply(nativeGet, this, []); // the engine's own receiver check
+    return typeof value === 'function' ? value(ReflectApply(nativeGet, this, [])) : value;
+  });
+  Object.defineProperty(holder, name, { get: get, set: native.set, enumerable: native.enumerable, configurable: true });
+}
+
+function patchPhone(w, phone) {
+  const nav = w.navigator;
+  if (nav) overrideGetter(nav, 'platform', phone.platform);
+  if (IS_WORKER) return;
+  if (nav) overrideGetter(nav, 'maxTouchPoints', phone.maxTouchPoints);
+  const s = w.screen;
+  if (s) {
+    overrideGetter(s, 'width', phone.width);
+    overrideGetter(s, 'height', phone.height);
+    overrideGetter(s, 'availWidth', phone.width);  // an iPhone has no menu bar or Dock
+    overrideGetter(s, 'availHeight', phone.height);
+    if ('availLeft' in s) overrideGetter(s, 'availLeft', 0);
+    if ('availTop' in s) overrideGetter(s, 'availTop', 0);
+  }
+  // On an iPhone the window is the screen.
+  overrideGetter(w, 'outerWidth', phone.width);
+  overrideGetter(w, 'outerHeight', phone.height);
+  for (const name of ['screenX', 'screenY', 'screenLeft', 'screenTop']) overrideGetter(w, name, 0);
+  try { patchOrientation(w); } catch (e) {}
+  try { patchPointerQueries(w, phone); } catch (e) {}
+  try { patchTouch(w); } catch (e) {}
+}
+
+// Portrait, as a phone is held: screen.orientation, and window.orientation with its event, which
+// only iOS has.
+function patchOrientation(w) {
+  const SO = w.ScreenOrientation;
+  if (SO) {
+    overrideGetter(SO.prototype, 'type', 'portrait-primary');
+    overrideGetter(SO.prototype, 'angle', 0);
+  }
+  if (!('orientation' in w)) {
+    Object.defineProperty(w, 'orientation', { get: getter('orientation', function () { return 0; }),
+                                               set: undefined, enumerable: true, configurable: true });
+  }
+  if (!('onorientationchange' in w)) defineHandler(w, 'onorientationchange', 'orientationchange');
+}
+
+// matchMedia answers for a coarse pointer without hover, and for the phone's screen in
+// device-width/-height: the query is answered as one where those features are replaced by what
+// a phone says. Only what a script asks; the stylesheets' @media rules are the engine's.
+function patchPointerQueries(w, phone) {
+  const MQL = w.MediaQueryList;
+  if (!MQL || typeof w.matchMedia !== 'function') return;
+  const matchesDesc = Object.getOwnPropertyDescriptor(MQL.prototype, 'matches');
+  const mediaDesc = Object.getOwnPropertyDescriptor(MQL.prototype, 'media');
+  if (!matchesDesc || !matchesDesc.get || !mediaDesc || !mediaDesc.get) return;
+  const nativeMatches = matchesDesc.get, nativeMedia = mediaDesc.get, nativeMatchMedia = w.matchMedia;
+  // Always true, and always false whatever the window's size (a width bound was true for a view of no
+  // width, the self-test's): the resolution is at least 1 and never a million.
+  const YES = '(min-width: 0px)', NO = '(min-resolution: 1000000dppx)';
+  const rewrite = (query) => query
+    .replace(/\(\s*(any-)?pointer\s*:\s*(fine|coarse|none)\s*\)/gi, (m, any, v) => (v.toLowerCase() === 'coarse' ? YES : NO))
+    .replace(/\(\s*(any-)?pointer\s*\)/gi, YES)
+    .replace(/\(\s*(any-)?hover\s*:\s*(hover|none)\s*\)/gi, (m, any, v) => (v.toLowerCase() === 'none' ? YES : NO))
+    .replace(/\(\s*(any-)?hover\s*\)/gi, NO)
+    .replace(/\(\s*(min-|max-)?device-(width|height)\s*:\s*([\d.]+)px\s*\)/gi, (m, bound, side, n) => {
+      const size = side.toLowerCase() === 'width' ? phone.width : phone.height, x = parseFloat(n);
+      const b = (bound || '').toLowerCase();
+      return (b === 'min-' ? size >= x : b === 'max-' ? size <= x : size === x) ? YES : NO;
+    });
+  const matches = getter('matches', function () {
+    const native = ReflectApply(nativeMatches, this, []);
+    const query = ReflectApply(nativeMedia, this, []);
+    const rewritten = rewrite(query);
+    return rewritten === query ? native : ReflectApply(nativeMatches, ReflectApply(nativeMatchMedia, w, [rewritten]), []);
+  });
+  Object.defineProperty(MQL.prototype, 'matches', { get: matches, set: undefined, enumerable: matchesDesc.enumerable, configurable: true });
+}
+
+// An event handler attribute (ontouchstart, onorientationchange) as the engine has one.
+function defineHandler(target, name, type) {
+  const handlers = new WeakMap();
+  const get = getter(name, function () { const h = handlers.get(this); return h ? h.fn : null; });
+  const set = asNative({ ['set ' + name](fn) {
+    const old = handlers.get(this);
+    if (old) this.removeEventListener(type, old.listener);
+    if (typeof fn === 'function') {
+      const listener = function (event) { const r = ReflectApply(fn, this, [event]); if (r === false) event.preventDefault(); return r; };
+      handlers.set(this, { fn: fn, listener: listener });
+      this.addEventListener(type, listener);
+    } else {
+      handlers.delete(this);
+    }
+  } }['set ' + name]);
+  Object.defineProperty(target, name, { get: get, set: set, enumerable: true, configurable: true });
+}
+
+// Touch events: TouchEvent, Touch and TouchList as iOS has them, ontouch* handlers, and a touch
+// for each press of the primary button — touchstart, touchmove while it is held, touchend (a
+// touchend whose default is prevented takes the click away, as on a phone) — with the pointer
+// events saying "touch".
+function patchTouch(w) {
+  const doc = w.document, NativeUIEvent = w.UIEvent;
+  if (!doc || !NativeUIEvent || 'TouchEvent' in w) return;
+  const slots = new WeakMap();
+  const read = (o, Interface, key) => {
+    const slot = slots.get(o);
+    if (!slot || !(o instanceof Interface)) throw new w.TypeError('The ' + Interface.name + '.' + key + ' getter can only be used on instances of ' + Interface.name);
+    return slot[key];
+  };
+  const accessors = (proto, Interface, keys) => {
+    for (const key of keys) {
+      Object.defineProperty(proto, key, { get: getter(key, function () { return read(this, Interface, key); }),
+                                          set: undefined, enumerable: true, configurable: true });
+    }
+  };
+  const TouchListProto = {};
+  const listTarget = function () { throw new w.TypeError('Illegal constructor'); };
+  listTarget.prototype = TouchListProto;
+  const TouchList = constructor('TouchList', 0, listTarget, {}, TouchListProto, w.Object);
+  define(TouchListProto, 'item', method('item', 1, function (index) { const list = read(this, TouchList, 'list'); return list[index >>> 0] || null; }));
+  Object.defineProperty(TouchListProto, 'length', { get: getter('length', function () { return read(this, TouchList, 'list').length; }),
+                                                    set: undefined, enumerable: true, configurable: true });
+  Object.defineProperty(TouchListProto, Symbol.toStringTag, { value: 'TouchList', configurable: true });
+  const makeList = (touches) => {
+    const list = Object.create(TouchListProto);
+    slots.set(list, { list: touches });
+    touches.forEach((touch, i) => Object.defineProperty(list, i, { value: touch, enumerable: true, configurable: false, writable: false }));
+    return list;
+  };
+
+  const TouchProto = {};
+  const touchKeys = ['identifier', 'target', 'screenX', 'screenY', 'clientX', 'clientY', 'pageX', 'pageY',
+                     'radiusX', 'radiusY', 'rotationAngle', 'force', 'altitudeAngle', 'azimuthAngle', 'touchType'];
+  const touchTarget = function (init) {
+    if (!new.target) throw new w.TypeError("Failed to construct 'Touch': Please use the 'new' operator.");
+    if (!init || typeof init.identifier !== 'number' || !init.target) throw new w.TypeError('Type error');
+    const touch = Object.create(TouchProto);
+    const slot = {};
+    for (const key of touchKeys) slot[key] = init[key] !== undefined ? init[key] : (key === 'touchType' ? 'direct' : key === 'radiusX' || key === 'radiusY' ? 1 : 0);
+    slots.set(touch, slot);
+    return touch;
+  };
+  touchTarget.prototype = TouchProto;
+  const Touch = constructor('Touch', 1, touchTarget, {}, TouchProto, w.Object);
+  accessors(TouchProto, Touch, touchKeys);
+  Object.defineProperty(TouchProto, Symbol.toStringTag, { value: 'Touch', configurable: true });
+
+  const TouchEventProto = Object.create(NativeUIEvent.prototype);
+  const eventKeys = ['touches', 'targetTouches', 'changedTouches', 'altKey', 'metaKey', 'ctrlKey', 'shiftKey', 'scale', 'rotation'];
+  const eventTarget = function (type, init) {
+    if (!new.target) throw new w.TypeError("Failed to construct 'TouchEvent': Please use the 'new' operator.");
+    const options = init || {};
+    const event = ReflectConstruct(NativeUIEvent, [type, options], eventTarget);
+    const list = (value) => (value && slots.has(value) ? value : makeList(Array.isArray(value) ? value : []));
+    slots.set(event, { touches: list(options.touches), targetTouches: list(options.targetTouches), changedTouches: list(options.changedTouches),
+                       altKey: !!options.altKey, metaKey: !!options.metaKey, ctrlKey: !!options.ctrlKey, shiftKey: !!options.shiftKey,
+                       scale: 1, rotation: 0 });
+    return event;
+  };
+  eventTarget.prototype = TouchEventProto;
+  // Its [[Prototype]] is UIEvent, as MouseEvent's is (the helper takes the one of the interface given).
+  const TouchEvent = constructor('TouchEvent', 1, eventTarget, {}, TouchEventProto, w.MouseEvent || NativeUIEvent);
+  Object.defineProperty(TouchEventProto, 'constructor', { value: TouchEvent, writable: true, enumerable: false, configurable: true });
+  accessors(TouchEventProto, TouchEvent, eventKeys);
+  Object.defineProperty(TouchEventProto, Symbol.toStringTag, { value: 'TouchEvent', configurable: true });
+  Object.defineProperty(TouchListProto, 'constructor', { value: TouchList, writable: true, enumerable: false, configurable: true });
+  Object.defineProperty(TouchProto, 'constructor', { value: Touch, writable: true, enumerable: false, configurable: true });
+  for (const [name, value] of [['TouchEvent', TouchEvent], ['Touch', Touch], ['TouchList', TouchList]]) {
+    Object.defineProperty(w, name, { value: value, writable: true, enumerable: false, configurable: true });
+  }
+
+  // ontouch*: on elements, the document and the window, as GlobalEventHandlers has them on iOS.
+  for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) {
+    for (const target of [w.HTMLElement && w.HTMLElement.prototype, w.SVGElement && w.SVGElement.prototype,
+                          w.Document && w.Document.prototype, w]) {
+      if (target && !Object.prototype.hasOwnProperty.call(target, 'on' + type)) defineHandler(target, 'on' + type, type);
+    }
+  }
+  // document.createEvent('TouchEvent'), which the Mac refuses.
+  const nativeCreateEvent = w.Document.prototype.createEvent;
+  define(w.Document.prototype, 'createEvent', method('createEvent', 1, function (kind) {
+    if (String(kind).toLowerCase() === 'touchevent' || String(kind).toLowerCase() === 'touchevents') {
+      ReflectApply(nativeCreateEvent, this, ['UIEvent']); // the receiver check
+      return new TouchEvent('', {});
+    }
+    return ReflectApply(nativeCreateEvent, this, [kind]);
+  }));
+
+  // The pointer events of the primary button say "touch".
+  const PE = w.PointerEvent;
+  const typeDesc = PE && Object.getOwnPropertyDescriptor(PE.prototype, 'pointerType');
+  const nativeType = typeDesc && typeDesc.get;
+  if (nativeType) overrideGetter(PE.prototype, 'pointerType', (value) => (value === 'mouse' ? 'touch' : value));
+  const pointerTypeOf = (event) => (nativeType ? ReflectApply(nativeType, event, []) : 'mouse');
+
+  // A press of the primary button is a touch: touchstart, touchmove, touchend at the target the
+  // press began on.
+  let active = null, swallowClick = false;
+  const nativeDispatch = w.EventTarget.prototype.dispatchEvent;
+  const touchOf = (event, target) => new Touch({ identifier: 0, target: target, screenX: event.screenX, screenY: event.screenY,
+                                                 clientX: event.clientX, clientY: event.clientY, pageX: event.pageX, pageY: event.pageY,
+                                                 radiusX: 1, radiusY: 1, force: event.type === 'pointerup' ? 0 : 1 });
+  const send = (target, type, touches, changed) => {
+    const event = new TouchEvent(type, { bubbles: true, cancelable: type !== 'touchcancel', composed: true, view: w,
+                                         touches: touches, targetTouches: touches, changedTouches: changed });
+    ReflectApply(nativeDispatch, target, [event]);
+    return event;
+  };
+  const primary = (event) => event.isPrimary && pointerTypeOf(event) === 'mouse';
+  // A touchstart whose default was prevented takes the press's mouse events and its click away
+  // (and so the focus a press gives), as on a phone; a prevented touchend takes the click.
+  let swallowMouse = false;
+  w.addEventListener('pointerdown', (event) => {
+    if (!primary(event) || event.button !== 0) return;
+    const touch = touchOf(event, event.target);
+    active = { target: event.target };
+    swallowClick = false;
+    swallowMouse = false;
+    const started = send(event.target, 'touchstart', [touch], [touch]);
+    if (started.defaultPrevented) { swallowMouse = true; swallowClick = true; }
+  }, true);
+  for (const type of ['mousedown', 'mouseup']) {
+    w.addEventListener(type, (event) => {
+      if (!swallowMouse || event.button !== 0) return;
+      if (type === 'mouseup') swallowMouse = false;
+      event.stopImmediatePropagation();
+      event.preventDefault();
+    }, true);
+  }
+  w.addEventListener('pointermove', (event) => {
+    if (!active || !primary(event) || !(event.buttons & 1)) return;
+    const touch = touchOf(event, active.target);
+    send(active.target, 'touchmove', [touch], [touch]);
+  }, true);
+  w.addEventListener('pointerup', (event) => {
+    if (!active || !primary(event)) return;
+    const target = active.target;
+    active = null;
+    const ended = send(target, 'touchend', [], [touchOf(event, target)]);
+    if (ended.defaultPrevented) swallowClick = true;
+  }, true);
+  w.addEventListener('pointercancel', (event) => {
+    if (!active || !primary(event)) return;
+    const target = active.target;
+    active = null;
+    send(target, 'touchcancel', [], [touchOf(event, target)]);
+  }, true);
+  w.addEventListener('click', (event) => {
+    if (!swallowClick) return;
+    swallowClick = false;
+    event.stopImmediatePropagation();
+    event.preventDefault();
+  }, true);
 }
 
 // ---- Time zone --------------------------------------------------------------------------------
@@ -445,8 +752,9 @@ function patchStorageQuota(w, quota) {
 }
 
 // ---- Safari the app -----------------------------------------------------------------------------
-// Safari exposes window.safari, a plain object holding a SafariRemoteNotification (website push
-// permission API); a page that looks for it to recognise Safari finds what Safari would give it.
+// Safari up to 27.1 on a Mac exposes window.safari, a plain object holding a SafariRemoteNotification
+// (website push permission API); a macOS profile naming such a Safari gives a page what that Safari
+// would. Never in an iPhone or iPad view, and not from Safari 27.2, which has none.
 function patchSafariObject(w) {
   if ('safari' in w) return;
   const proto = {};
@@ -616,6 +924,9 @@ const StringSlice = String.prototype.slice;
 const StringToLowerCase = String.prototype.toLowerCase;
 const StringLastIndexOf = String.prototype.lastIndexOf;
 const StringIndexOf = String.prototype.indexOf;
+const NativeString = String;
+const NativePromise = Promise;
+const PromiseResolve = Promise.resolve;
 const call = (fn, self, ...args) => ReflectApply(fn, self, args);
 
 // An iterable the engine converts as a WebIDL sequence, iterated by closures of this script.
@@ -659,7 +970,7 @@ function patchWebRTC(w, policy, relay) {
   const nativeGetConfiguration = nativeProto.getConfiguration;
   const nativeSetConfiguration = nativeProto.setConfiguration;
   const nativeClose = nativeProto.close;
-  // 'tunnel': the packet tunnel's TURN relay is the only ICE server, so every candidate is a
+  // 'tunnel': the app's TURN relay (127.0.0.1) is the only ICE server, so every candidate is a
   // relay through the profile's proxy. The page keeps seeing its own configuration.
   const viaTunnel = policy === 'tunnel' && relay ? relay : null;
   const relayServers = [];
@@ -690,7 +1001,7 @@ function patchWebRTC(w, policy, relay) {
     return record;
   };
   const isObject = (value) => value !== null && (typeof value === 'object' || typeof value === 'function');
-  // What the engine gets: relay-only; in the tunnel the relay as the only ICE server. Of the
+  // What the engine gets: relay-only; with the app's relay, it as the only ICE server. Of the
   // page's members only those that do not choose where packets go.
   const engineConfig = (record) => {
     const next = ObjectCreate(null);
@@ -867,6 +1178,75 @@ function patchWebRTC(w, policy, relay) {
       }));
     }
   }
+  // A remote candidate named by a host name — an mDNS ".local" name or any other — would be
+  // resolved by this Mac's own resolver, outside the proxy: whoever answers for that name learns
+  // which resolver asked, and so roughly where this Mac is (docs/TUNNEL.md, "DNS"). Through the
+  // relay a peer is reached by its address alone, so a candidate without one is dropped before the
+  // engine sees it: in addIceCandidate, and as a line of a remote description's SDP. The page's
+  // values are read once, here, and the engine is given that copy, so that a getter or a toString
+  // cannot show this check one thing and the engine another.
+  if (viaTunnel) {
+    const nativeAdd = nativeProto.addIceCandidate;
+    const nativeSetRemote = nativeProto.setRemoteDescription;
+    const stateGetter = (ObjectGetOwnPropertyDescriptor(nativeProto, 'signalingState') || {}).get;
+    const remoteGetter = (ObjectGetOwnPropertyDescriptor(nativeProto, 'remoteDescription') || {}).get;
+    const isAddress = (text) => call(RegExpExec, /^\d{1,3}(?:\.\d{1,3}){3}$/, text) !== null
+      || (call(StringIndexOf, text, ':') >= 0 && call(RegExpExec, /^[0-9a-f:.]+$/i, text) !== null);
+    // 'candidate:<foundation> <component> <transport> <priority> <address> <port> typ <type> …'
+    const namedByHost = (line) => {
+      const match = call(RegExpExec, /^(?:a=)?candidate:\S+\s+\S+\s+\S+\s+\S+\s+(\S+)/i, line);
+      return match !== null && !isAddress(match[1]);
+    };
+    const withoutNamedCandidates = (sdp) => {
+      let out = '';
+      let start = 0;
+      while (start < sdp.length) {
+        let end = call(StringIndexOf, sdp, '\n', start);
+        end = end < 0 ? sdp.length : end + 1;
+        const line = call(StringSlice, sdp, start, end);
+        if (!namedByHost(call(StringSlice, line, 0, 2) === 'a=' ? line : '')) out += line;
+        start = end;
+      }
+      return out;
+    };
+    const withRest = (first, rest) => {
+      const args = [first];
+      for (let i = 0; i < rest.length; i++) args[i + 1] = rest[i];
+      return args;
+    };
+    if (typeof nativeAdd === 'function') {
+      define(nativeProto, 'addIceCandidate', method('addIceCandidate', nativeAdd.length, function (candidate, ...rest) {
+        if (!call(WeakMapGet, pageView, this) || !isObject(candidate)) return ReflectApply(nativeAdd, this, arguments);
+        // The members as WebIDL reads them (lexicographic), each once; the address's text made here.
+        const record = ObjectCreate(null);
+        const keys = ['candidate', 'sdpMLineIndex', 'sdpMid', 'usernameFragment'];
+        for (let i = 0; i < keys.length; i++) {
+          const value = candidate[keys[i]];
+          if (value !== undefined) record[keys[i]] = keys[i] === 'candidate' ? NativeString(value) : value;
+        }
+        const closed = typeof stateGetter === 'function' && call(stateGetter, this) === 'closed';
+        const remote = typeof remoteGetter !== 'function' || call(remoteGetter, this) !== null;
+        if (typeof record.candidate === 'string' && namedByHost(record.candidate) && !closed && remote) {
+          // As the engine answers a candidate it could not reach: nothing, and success.
+          const done = call(PromiseResolve, NativePromise);
+          if (typeof rest[0] === 'function') call(PromiseThen, done, rest[0]);
+          return done;
+        }
+        return ReflectApply(nativeAdd, this, withRest(record, rest));
+      }));
+    }
+    if (typeof nativeSetRemote === 'function') {
+      define(nativeProto, 'setRemoteDescription', method('setRemoteDescription', nativeSetRemote.length, function (description, ...rest) {
+        if (!call(WeakMapGet, pageView, this) || !isObject(description)) return ReflectApply(nativeSetRemote, this, arguments);
+        const record = ObjectCreate(null);
+        const sdp = description.sdp;
+        const type = description.type;
+        if (sdp !== undefined) record.sdp = withoutNamedCandidates(NativeString(sdp));
+        if (type !== undefined) record.type = type;
+        return ReflectApply(nativeSetRemote, this, withRest(record, rest));
+      }));
+    }
+  }
   define(nativeProto, 'constructor', RTCPeerConnection);
   // Only the names this engine has (Safari 26 has no webkitRTCPeerConnection any more).
   for (const name of names) {
@@ -938,6 +1318,16 @@ function hookChildWindows(w) {
 // URLs and its CSP. The script is one line (an indirect eval of its text), so the page's code keeps
 // its line numbers. Workers loaded from a URL are left alone: rewriting them would change their
 // location and how their relative URLs resolve. Service workers cannot be reached.
+// Whether anything the page is given differs in a worker unless the worker runs the shim too. The
+// iOS app always sends a fingerprint object (ios/Lumen/Browser/PageSettings.swift): it counts only
+// with a canvas, WebGL or audio mode other than 'real' (each is 'off', 'real' or 'noise') or a
+// language set — what ios/shim/fingerprint.js changes.
+function substitutesInWorkers(config) {
+  const fp = config.fingerprint;
+  const fingerprint = !!fp && (!!fp.language || ['canvas', 'webgl', 'audio'].some((k) => !!fp[k] && fp[k] !== 'real'));
+  return !!(config.timeZone || config.phone || config.storageQuota) || fingerprint;
+}
+
 function hookWorkers(w) {
   const URLClass = w.URL;
   const nativeCreate = URLClass && URLClass.createObjectURL;

@@ -41,9 +41,20 @@ if [ -z "$scratch" ] || [ ! -d "$scratch" ]; then
 fi
 copy="$scratch/Lumen.app"
 cp -R "$app" "$copy"
+# A profile's process runs from Contents/MacOS/LumenProfile (ProfileExecutable.swift): it declares the
+# SDK too, signed again with its own entitlements under the app's identifier.
+profile_binary="Contents/MacOS/LumenProfile"
 if [ -n "$minos" ] && xcrun vtool -set-build-version macos "$minos" "$sdk" -replace -output "$copy/$binary.declared" "$copy/$binary" > "$out/vtool.txt" 2>&1; then
   mv "$copy/$binary.declared" "$copy/$binary"
   xcrun vtool -show-build "$copy/$binary" > "$out/build-version-copy.txt" 2>&1
+  if [ -f "$copy/$profile_binary" ]; then
+    codesign -d --entitlements - --xml "$app/$profile_binary" > "$out/profile-entitlements.plist" 2>/dev/null
+    xcrun vtool -set-build-version macos "$minos" "$sdk" -replace -output "$copy/$profile_binary.declared" "$copy/$profile_binary" >> "$out/vtool.txt" 2>&1 \
+      && mv "$copy/$profile_binary.declared" "$copy/$profile_binary"
+    codesign --force --options runtime --timestamp=none \
+      --identifier "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$copy/Contents/Info.plist")" \
+      --entitlements "$out/profile-entitlements.plist" --sign - "$copy/$profile_binary" >> "$out/codesign.txt" 2>&1
+  fi
   codesign -d --entitlements - --xml "$app" > "$out/entitlements.plist" 2>/dev/null
   codesign --force --options runtime --timestamp=none --entitlements "$out/entitlements.plist" --sign - "$copy" > "$out/codesign.txt" 2>&1 \
     || echo "::warning title=$title::the copy that declares SDK $sdk could not be signed: $(tail -1 "$out/codesign.txt")"

@@ -52,6 +52,13 @@ proxy checker's `pbinvalid…`, a proxy host name under selftest.invalid that th
 is asked for (the proxy checker's geolocation service is a name under selftest.invalid too). Seen,
 the capture is known to see such packets, and their absence where a proxy should have been used
 means something; not seen, that part shows nothing: it is said as SKIPPED, and the run fails.
+A UDP control (`INFO egress-control-udp <name> <address> <port>`) is a packet the self-test makes
+the app send there on purpose, outside every window: WebRTC's STUN request from a profile without a
+proxy, to a public STUN server. Only outside a window does such a packet count as the control;
+inside one it is a leak like any other. Seen as the app's (its process, or WebKit's acting for it),
+the capture is shown to see
+WebRTC's UDP of the app's processes, so its absence in the window of the profile whose WebRTC goes
+through its proxy means something; not seen, it is SKIPPED, and the run fails.
 The app's packets are told by its process's name, which the self-test prints (`INFO egress-process
 <name> <pid>`), never by a name written in here: a control packet must be named after it (the proxy
 checker's question is asked for the self-test's own process), or the capture's names are not the
@@ -82,6 +89,7 @@ META = re.compile(r"\(([^()]*)\)")
 PROC = re.compile(r"(?<![e])proc ([^,():]+):(\d+)")
 EPROC = re.compile(r"eproc ([^,():]+):(\d+)")
 FLOW = re.compile(r"\bIP6? (\S+) > (\S+?):? ")
+PORT = re.compile(r"[.:](\d+)$")
 TIME = re.compile(r"^(\d+\.\d+)")
 
 
@@ -110,6 +118,7 @@ def parse(line: str):
         "dns_answer": bool(flow) and flow.group(1).endswith((".53", ".domain")),
         "src": address(flow.group(1)) if flow else None,
         "dst": address(flow.group(2)) if flow else None,
+        "dst_port": int(PORT.search(flow.group(2)).group(1)) if flow and PORT.search(flow.group(2)) else None,
         "line": line.rstrip("\n"),
     }
 
@@ -124,6 +133,9 @@ def main() -> int:
     log = open(args.selftest_log, encoding="utf-8", errors="replace").read()
     tokens = re.findall(r"INFO egress-token (\w+)", log)
     controls = re.findall(r"INFO egress-control (\w+)", log)
+    # Name → (address, port): UDP sent there on purpose, by the app.
+    udp_controls = {name: (ipaddress.ip_address(ip), int(port))
+                    for name, ip, port in re.findall(r"INFO egress-control-udp (\w+) (\S+) (\d+)", log)}
     begins = [float(t) for t in re.findall(r"INFO egress-window begin ([\d.]+)", log)]
     ends = [float(t) for t in re.findall(r"INFO egress-window end ([\d.]+)", log)]
     pids = {int(p) for p in re.findall(r"INFO egress-pid (\d+)", log)}
@@ -193,6 +205,11 @@ def main() -> int:
         question = QUESTION.search(line)
         name = question.group(1).lower() if question else ""
         control = next((c for c in controls if c in lowered), None)
+        # A UDP control is made outside every window; the same packet inside one is a leak like any.
+        if control is None and packet["dst"] is not None and not in_window(packet):
+            control = next((name for name, (ip, port) in udp_controls.items()
+                            if packet["dst"] == ip and packet["dst_port"] == port
+                            and (named_as_app(packet["proc"]) or named_as_app(packet["eproc"]))), None)
         if control:
             owners = [f"{kind} {owner[0]}" for kind, owner in (("proc", packet["proc"]), ("eproc", packet["eproc"])) if owner]
             seen_controls.setdefault(control, []).append(", ".join(owners) or "no process")
@@ -226,7 +243,7 @@ def main() -> int:
     # an intermediate the sandboxed build had fetched stayed in this Mac's cache, so the capture
     # around the unsandboxed build never saw the control; each build now has names of its own).
     unseen = []
-    for control in controls:
+    for control in controls + sorted(udp_controls):
         if control in seen_controls:
             print(f"egress check: control {control} seen {len(seen_controls[control])} times "
                   f"({sorted(set(seen_controls[control]))[:4]}): the capture sees such packets")

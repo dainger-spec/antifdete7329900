@@ -155,6 +155,9 @@ enum ProfileSessionHost {
             // A process without Safari's chrome has its default store closed here, before the
             // launch builds anything (with the chrome, that happened before its menu came up).
             ProfileNetworkGuard.takeOverDefaultStore()
+            // Our own window (an iPhone view, the simplified mode): no Safari menu bar comes with it,
+            // so it gets ours — New Tab, Close Tab, Open Location… (OwnWindowMenu).
+            if !SafariChromeHost.isHosting { OwnWindowMenu.install() }
             // What Safari's chrome needs and this macOS does not have is said where the user is
             // looking, not only in the log: a renamed method can be a feature gone quiet. Only while
             // the chrome is hosted: without it the profile's window itself says why, and a missing
@@ -180,6 +183,11 @@ enum ProfileSessionHost {
             manager.onSealed = { _, report in ProfileSessionHost.send(.sealed(report)) }
             // Where the proxy exits could not be found: the manager says so, where the user looks.
             manager.onProxyLocationUnknown = { _ in ProfileSessionHost.send(.proxyLocationUnknown) }
+            // Where it exits, when known: the country's flag on this process's Dock tile.
+            BrowserSession.onExitLocation = { _, location in DockIcon.showExit(country: location?.countryCode) }
+            // A scenario's run log and its end, to the manager as they come.
+            manager.onScenarioLine = { _, runID, line in ProfileSessionHost.send(.scenarioLine(runID: runID, line)) }
+            manager.onScenarioEnded = { _, runID, outcome in ProfileSessionHost.send(.scenarioEnded(runID: runID, outcome)) }
             manager.onWarmUpProgress = { [weak self, weak manager] id in
                 guard let robot = manager?.warmUpRobot(for: id) else { return }
                 let status = robot.status
@@ -212,6 +220,8 @@ enum ProfileSessionHost {
                     self.showedWindow = !self.isForWarmUpOnly
                     self.isReady = true
                     ProfileSessionHost.send(.running(hostsSafariChrome: SafariChromeHost.isHosting))
+                    ProfileSessionHost.send(.interfaceLanguage(code: Localization.languageCode, bundles: Localization.bundlesLanguage,
+                                                               chrome: SafariChrome.chromeLanguage))
                     // Whatever the manager asked for while the profile was still starting.
                     let waiting = self.pendingCommands
                     self.pendingCommands = []
@@ -273,6 +283,13 @@ enum ProfileSessionHost {
                 }
             case .stopWarmUp:
                 manager?.stopWarmUp(profileID)
+            case .runScenario(let request):
+                if manager?.runScenario(profileID, name: request.name, source: request.source,
+                                        parametersJSON: request.parametersJSON, runID: request.runID) != true {
+                    ProfileSessionHost.send(.scenarioEnded(runID: request.runID, .failed("the profile could not start the run")))
+                }
+            case .stopScenario(let reason):
+                manager?.stopScenario(profileID, reason: reason)
             case .checkNetwork(let probe):
                 Task { @MainActor in
                     ProfileSessionHost.send(.networkReport(await ProfileNetworkGuard.report(probe: probe)))
@@ -280,6 +297,21 @@ enum ProfileSessionHost {
             case .preferences(let preferences):
                 BrowsingPreferences.current = preferences
                 DockIcon.show(initials: preferences.dockInitials, of: profileName)
+            case .webRTC(let message):
+                // The launch inside this process waits for it (`ProfileManager.webRTCRelay`).
+                ProfileManager.receiveWebRTC(message)
+            case .closeWindows:
+                SafariChromeHost.performCloseEveryWindow()
+            case .checkKeychain(let probe):
+                ProfileSessionHost.send(.keychainReport(KeychainCheck.run(probe)))
+            case .lookAtWindow(let action):
+                Task { @MainActor in
+                    ProfileSessionHost.send(.windowLook(await WindowProbe.perform(action, session: self.manager?.session(for: self.profileID))))
+                }
+            case .lookAtHistory:
+                Task { @MainActor in
+                    ProfileSessionHost.send(.historyLook(await HistoryWindowReader.look()))
+                }
             case .walkMenu(let from):
                 SafariMenuWalk.start(from: from, session: manager?.session(for: profileID)) { line in
                     ProfileSessionHost.send(.menuWalk(line))
@@ -303,7 +335,7 @@ enum ProfileSessionHost {
         /// Whether a command can be acted on before the profile's session exists.
         private func isImmediate(_ command: ProfileCommand) -> Bool {
             switch command {
-            case .stop, .preferences: return true
+            case .stop, .preferences, .webRTC: return true
             default: return false
             }
         }

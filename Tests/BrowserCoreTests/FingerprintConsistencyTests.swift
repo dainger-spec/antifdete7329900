@@ -14,6 +14,30 @@ final class SafariUserAgentTests: XCTestCase {
         XCTAssertEqual(ios.userAgent(hostSafariVersion: "18.6"), ios.userAgent)
     }
 
+    /// CI run 718: Safari 27.2 on a Mac whose apps run WebKit 21624.5.1.11.3 (Safari 26.6.2's).
+    func testAProfileNamesTheSafariOfTheEngineItRuns() {
+        // One engine: this Mac's Safari, as before.
+        XCTAssertEqual(SafariVersions.declared(appVersion: "26.6.2", appBuild: "21624.5.1.11.3", webKitBuild: "21624.5.1.11.3"),
+                       .init(version: "26.6.2", sharesEngine: true))
+        XCTAssertEqual(SafariVersions.declared(appVersion: "27.0.1", appBuild: "22625.1.29.11.28", webKitBuild: "22625.1.29.11.28"),
+                       .init(version: "27.0.1", sharesEngine: true))
+        // Two engines: never Safari 27.2 on WebKit 26 — the Safari whose engine the profile runs.
+        XCTAssertEqual(SafariVersions.declared(appVersion: "27.2", appBuild: "22627.1.3.10.1", webKitBuild: "21624.5.1.11.3"),
+                       .init(version: "26.6.2", sharesEngine: false))
+        // An engine not measured: its major version only.
+        XCTAssertEqual(SafariVersions.declared(appVersion: "27.2", appBuild: "22627.1.3.10.1", webKitBuild: "21630.2.1"),
+                       .init(version: "26.0", sharesEngine: false))
+        // A build that cannot be read says nothing: this Mac's Safari, as before.
+        XCTAssertEqual(SafariVersions.declared(appVersion: "27.2", appBuild: nil, webKitBuild: "21624.5.1.11.3"),
+                       .init(version: "27.2", sharesEngine: true))
+        XCTAssertEqual(SafariVersions.declared(appVersion: "27.2", appBuild: "?", webKitBuild: "21624.5.1.11.3"),
+                       .init(version: "27.2", sharesEngine: true))
+        XCTAssertTrue(SafariVersions.knownBuilds.values.allSatisfy(DeviceGeneration.isSafariVersion))
+        // And the User-Agent it gives.
+        let declared = SafariVersions.declared(appVersion: "27.2", appBuild: "22627.1", webKitBuild: "21624.5.1.11.3").version
+        XCTAssertTrue(ProfileConfiguration().userAgent(hostSafariVersion: declared).contains("Version/26.6.2 Safari/"))
+    }
+
     func testSafariVersionFormat() {
         for good in ["26", "26.0", "26.0.1", "18.6", "17.4.1"] {
             XCTAssertTrue(DeviceGeneration.isSafariVersion(good), good)
@@ -53,6 +77,12 @@ final class SafariUserAgentTests: XCTestCase {
         let iPhone = ProfileConfiguration(deviceGenerationID: "ios-26", safariVersion: "18.6")
         XCTAssertEqual(iPhone.userAgent(hostSafariVersion: "27.0"), DeviceGenerations.generation(id: "ios-26")?.userAgent)
 
+        XCTAssertTrue(SafariVersions.givesWindowSafari("26.6.2"))
+        XCTAssertTrue(SafariVersions.givesWindowSafari("27.0.1"))
+        XCTAssertFalse(SafariVersions.givesWindowSafari("27.2"))
+        XCTAssertFalse(SafariVersions.givesWindowSafari("27.2.1"))
+        XCTAssertFalse(SafariVersions.givesWindowSafari("28.0"))
+        XCTAssertFalse(SafariVersions.givesWindowSafari("?"))
         XCTAssertEqual(SafariVersions.distance(of: "27.0", fromHost: "27.0.1"), .same)
         XCTAssertEqual(SafariVersions.distance(of: "27.1", fromHost: "27.0"), .close)
         XCTAssertEqual(SafariVersions.distance(of: "26.6", fromHost: "27.0"), .far)
@@ -127,10 +157,11 @@ final class ProxyLocationTests: XCTestCase {
         config.proxy = ProxySettings(kind: .socks5, host: "198.51.100.1", port: 1080)
         XCTAssertNil(config.proxyLocation(lookedUp: nil))
 
-        // An explicit time zone is kept; no proxy or matching off: nothing is looked up.
+        // An explicit time zone is kept; matching off: nothing is looked up. A direct connection is
+        // looked up as a proxy is (testADirectConnectionIsAnExitLikeAProxy).
         config.timeZoneIdentifier = "America/New_York"
         XCTAssertEqual(config.applying(berlin).timeZoneIdentifier, "America/New_York")
-        XCTAssertFalse(ProfileConfiguration().needsProxyLocation)
+        XCTAssertFalse(ProfileConfiguration(matchProxyLocation: false).needsProxyLocation)
         XCTAssertFalse(ProfileConfiguration(proxy: proxy, matchProxyLocation: false).needsProxyLocation)
         XCTAssertNil(ProfileConfiguration(proxy: proxy, matchProxyLocation: false).applying(berlin).timeZoneIdentifier)
     }
@@ -167,12 +198,45 @@ final class ProxyLocationTests: XCTestCase {
         XCTAssertTrue(ProfileConfiguration(proxy: proxy).needsProxyLookup)
         XCTAssertFalse(ProfileConfiguration(proxy: proxy, matchProxyLocation: false).needsProxyLookup)
         XCTAssertTrue(ProfileConfiguration(proxy: proxy, matchProxyLocation: false, warnOnProxyIPChange: true).needsProxyLookup)
-        XCTAssertFalse(ProfileConfiguration(warnOnProxyIPChange: true).needsProxyLookup, "no proxy")
+        XCTAssertFalse(ProfileConfiguration(matchProxyLocation: false, warnOnProxyIPChange: true).needsProxyLookup,
+                       "no proxy: the IP warning is a proxy's")
         let remembered = ProxyLocation(timeZoneIdentifier: "Europe/Berlin", countryCode: "DE", proxyEndpoint: ProxyLocation.endpoint(of: proxy))
         var config = ProfileConfiguration(proxy: proxy, lastProxyLocation: remembered)
         XCTAssertEqual(config.rememberedProxyLocation, remembered)
         config.proxy = ProxySettings(kind: .socks5, host: "198.51.100.1", port: 1080)
         XCTAssertNil(config.rememberedProxyLocation, "remembered for another proxy")
+    }
+
+    /// The lead, 7 November: a profile with no proxy learns where it exits as one with a proxy does —
+    /// looked up at launch, remembered between launches with its address, its time zone and language
+    /// following that country — and a proxy's location is never taken for it, nor its for a proxy.
+    func testADirectConnectionIsAnExitLikeAProxy() {
+        XCTAssertEqual(ProxyLocation.exitEndpoint(of: nil), ProxyLocation.directEndpoint)
+        let direct = ProfileConfiguration()
+        XCTAssertTrue(direct.needsProxyLocation)
+        XCTAssertTrue(direct.needsProxyLookup)
+        let helsinki = ProxyLocation(timeZoneIdentifier: "Europe/Helsinki", countryCode: "FI",
+                                     proxyEndpoint: ProxyLocation.directEndpoint, exitIP: "203.0.113.9")
+        XCTAssertEqual(direct.proxyLocation(lookedUp: helsinki), helsinki)
+        XCTAssertEqual(direct.applying(helsinki).timeZoneIdentifier, "Europe/Helsinki")
+        XCTAssertEqual(direct.webLanguage(for: helsinki), "fi-FI")
+        var remembered = ProfileConfiguration(lastProxyLocation: helsinki)
+        XCTAssertEqual(remembered.rememberedProxyLocation, helsinki)
+        XCTAssertEqual(remembered.proxyLocation(lookedUp: nil), helsinki, "lookup failed: the last one")
+        // Its address is kept, as its country is, warning or not.
+        XCTAssertEqual(remembered.keepingStoredState(of: remembered).lastProxyLocation?.exitIP, "203.0.113.9")
+        // A proxy added: the direct location is not that proxy's, and the other way round.
+        let proxy = ProxySettings(kind: .socks5, host: "203.0.113.7", port: 1080)
+        remembered.proxy = proxy
+        XCTAssertNil(remembered.rememberedProxyLocation)
+        XCTAssertNil(remembered.keepingStoredState(of: remembered).lastProxyLocation?.exitIP)
+        let berlin = ProxyLocation(timeZoneIdentifier: "Europe/Berlin", countryCode: "DE", proxyEndpoint: ProxyLocation.endpoint(of: proxy))
+        XCTAssertNil(ProfileConfiguration(lastProxyLocation: berlin).rememberedProxyLocation, "remembered for a proxy")
+        // Matching off: this Mac's own time zone and languages, nothing looked up.
+        let off = ProfileConfiguration(matchProxyLocation: false, lastProxyLocation: helsinki)
+        XCTAssertFalse(off.needsProxyLookup)
+        XCTAssertNil(off.proxyLocation(lookedUp: helsinki))
+        XCTAssertNil(off.applying(helsinki).timeZoneIdentifier)
     }
 
     func testRememberedLocationBelongsToTheProxysCredentialsToo() {
@@ -264,7 +328,7 @@ final class ProxiedWebRTCTests: XCTestCase {
         }
     }
 
-    /// With the packet tunnel's relay, a SOCKS5 profile's WebRTC goes through it (relay-only);
+    /// With the app's relay, a SOCKS5 profile's WebRTC goes through it (relay-only);
     /// an HTTP proxy cannot carry UDP, and "disabled" stays disabled. The relay is never stored.
     func testRoutingThroughTheTunnelRelay() throws {
         let relay = WebRTCRelay(urls: ["turn:192.0.2.10:3478?transport=udp"], username: "u", credential: "c")
@@ -295,5 +359,21 @@ final class ProxiedWebRTCTests: XCTestCase {
         let iPad = DeviceGenerations.generation(id: "ipados-26")?.userAgent ?? ""
         XCTAssertTrue(iPad.hasPrefix("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26."), iPad)
         XCTAssertTrue(iPad.hasSuffix(" Safari/605.1.15"), iPad)
+    }
+
+    /// The processor count WebKit is given in an iPhone view: an iPhone's six cores, which WebKit
+    /// reports as 4 (fewer than 8), as the owner's iPhone does. The Mac and the iPad view (the
+    /// Mac's User-Agent) keep this Mac's own.
+    func testAnIPhoneViewIsGivenAnIPhonesProcessorCount() {
+        for id in ["ios-26", "ios-27"] {
+            let cores = DeviceGenerations.generation(id: id)?.processorCores
+            XCTAssertEqual(cores, 6, id)
+            XCTAssertLessThan(cores ?? 8, 8, "WebKit would report 8 for \(id)")
+        }
+        XCTAssertNil(DeviceGenerations.generation(id: DeviceGenerations.defaultID)?.processorCores)
+        XCTAssertNil(DeviceGenerations.generation(id: "ipados-26")?.processorCores)
+        for generation in DeviceGenerations.all where generation.platform == .iOS {
+            XCTAssertNotNil(generation.processorCores, "an iPhone generation without a processor count: \(generation.id)")
+        }
     }
 }

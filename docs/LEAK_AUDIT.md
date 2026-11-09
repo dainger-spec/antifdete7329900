@@ -147,7 +147,7 @@ without them, and the hook is what closes it. Anything else: send the output.
 One line each; back to them once the list above is closed.
 
 - Main-process profiles (sandboxed build) have no process-wide net — not the Safari-chrome path.
-- Profiles in their own processes stop each other's packet tunnel — WebRTC relay; such profiles stay in the main process.
+- (Until 2 November 2026) profiles in their own processes stopped each other's packet tunnel; the tunnel is gone: each profile's WebRTC goes through a relay of its own in the manager, held by the network guard (docs/TUNNEL.md).
 - `leak_check.py` covers our own windows only, not Safari's chrome or WebTransport — test gap.
 - `leak_check.py`: "relay candidates … NOT at the proxy address" flips between runs with no relay change (at: 378–380, 383; not: 382, 384, 385) — candidates are relay-only and the data channel goes through the proxy each time; suspected IPv4 vs IPv6 of the trace it compares with — not verified.
 - A remote HTTPS site's service worker fetching this Mac — not provable now: the test proxy serves no trusted HTTPS origin.

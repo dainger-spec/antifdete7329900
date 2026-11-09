@@ -35,6 +35,7 @@ ALLOWED_EXPRESSIONS = {
     # Numbers and yes/no values.
     "carried": "how many proxy configurations a store carries",
     "restored": "a count of restored items",
+    "confirmed": "whether the account server confirmed this Mac's sign-out (yes or no)",
     "sitesAdded": "a count",
     "self.cookiesCollected": "a count",
     "installed": "a yes/no or a count of hooks",
@@ -42,6 +43,13 @@ ALLOWED_EXPRESSIONS = {
     "absent": "names of private classes and methods this macOS does not have",
     "onProfile": "a yes/no",
     "status": "a process exit status",
+    "pid": "a process identifier (a profile's own process, held by the network guard)",
+    "decoded.pid": "a process identifier the app asked the network guard to hold",
+    "running": "a yes/no: whether the network guard's filter runs",
+    "current": "a yes/no: whether the installed network guard is this app's version",
+    "report?.dropped ?? -1": "a count of flows the network guard dropped for its probe",
+    "report?.seenOnItsBehalf ?? -1": "a count of flows the network guard saw opened for its probe",
+    "host.address.port": "the port on 127.0.0.1 the system gave a profile's WebRTC relay",
     "missing": "names of private classes and methods this macOS does not have",
     "missing ? \"requested, no credentials set\" : \"rejected\"": "a fixed text",
     "configuration.lastProxyLocation == nil ? \"the system time zone\" : \"the last known location\"": "a fixed text",
@@ -63,6 +71,20 @@ ALLOWED_EXPRESSIONS = {
 
 # Safe in one file only, where the name means something harmless.
 ALLOWED_IN_FILE = {
+    ("NetworkGuard.swift", "cause"): "why the network guard was lost: a fixed word from the code or a state's name",
+    ("NetworkGuard.swift", "refusal"): "why the network guard did not take a process: a fixed text of its own (GuardService) or of the app",
+    ("GuardFilterProvider.swift", "opener.name"): "the name of the process that opened a dropped flow (WebKit's, the system's), not an address",
+    ("GuardFilterProvider.swift", "summary.counts"):
+        "how many flows the filter was given in five seconds, by kind (FlowTally.WindowSummary): no name, no address",
+    ("GuardFilterProvider.swift", "checkFlowProperty"):
+        "a property of the flow object of a flow to TEST-NET-3 (the guard's check, the diagnosis's own), "
+        "never routed: its tokens' pids, its direction, its identifier — nothing of anyone's",
+    ("GuardFilterProvider.swift", "checkFirstData"):
+        "what the guard read at the first data of a flow to TEST-NET-3: pids, the kernel's record of its "
+        "socket (ports, the documentation address, pids), the verdict — nothing of anyone's",
+    ("GuardFilterProvider.swift", "check.description"):
+        "a flow to the documentation network 203.0.113.0/24 only (TEST-NET-3, never routed: the check's probe, the diagnosis's "
+        "own): that address, the processes it is counted for and opened by, their pids and signing identifiers, the verdict",
     ("SafariChrome.swift", "path"): "a Safari framework's path, under /System or /Applications",
     ("SafariChrome.swift", "reason"): "dlerror() for a Safari framework",
     ("SafariChrome.swift", "name"): "a nib's name in Safari's frameworks",
@@ -76,6 +98,7 @@ ALLOWED_IN_FILE = {
     ("SafariChromeHost.swift", "structural.joined(separator: \", \")"): "names of Safari's classes this macOS lacks",
     ("SafariChromeHost.swift", "patched.joined(separator: \", \")"): "names of Safari's configuration factories",
     ("ProxyGeoLookup.swift", "service.url.host ?? \"?\""): "a geolocation service of the app's own list, not the proxy",
+    ("ProxyExitLookup.swift", "endpoint.host ?? \"?\""): "Cloudflare's trace address of the app's own list (1.1.1.1, 1.0.0.1), not the proxy",
     ("ContentRules.swift", "identifier"): "the rule list's identifier, a constant of the code",
     ("ExceptionLog.swift", "when"): "where an exception was seen: a fixed text of that file",
     ("ProfileManager.swift", "report.forced"): "a yes/no: whether a seal was forced",
@@ -87,6 +110,12 @@ ALLOWED_IN_FILE = {
     ("SafariAccountPreferences.swift", "domain"): "a preferences domain's name from the code: com.apple.Safari, or the self-test's",
     ("SafariAccountPreferences.swift", "removed"): "names of com.apple.Safari keys from that file's own list, or \"none\"",
     ("SafariAccountPreferences.swift", "left"): "names of com.apple.Safari keys from that file's own list, or \"none\"",
+    ("LicenseSelfTest.swift", "marker"):
+        "a random marker the self-test writes to find it in the log again: nothing of the user's",
+    ("LicenseSelfTest.swift", "secondMarker"):
+        "the same, written again after the email and the new key, to show the log is read to its end: nothing of the user's",
+    ("LicenseSelfTest.swift", "thirdMarker"):
+        "the same, written again after the code's sign-in and the robot check, to show the log is read to its end: nothing of the user's",
     ("ExceptionLog.swift", "redactedReason"):
         "an exception's reason with every address, path, e-mail, quote and long number cut out "
         "(LogRedaction, LogRedactionTests); the full reason is logged privately",

@@ -39,6 +39,15 @@ public struct ProxyLocation: Codable, Equatable, Sendable {
     /// username (some from the password), so other credentials are another proxy: nothing
     /// remembered applies, and an exit-IP change is not one. Without credentials the key is the
     /// one older builds stored.
+    /// Where a profile with no proxy exits: this Mac's own connection (the lead, 7 November: a direct
+    /// connection is an exit like any other, only without a go-between).
+    public static let directEndpoint = "direct"
+
+    /// The key of where a profile exits: its proxy's (`endpoint(of:)`), or `directEndpoint`.
+    public static func exitEndpoint(of proxy: ProxySettings?) -> String {
+        proxy.map(endpoint(of:)) ?? directEndpoint
+    }
+
     public static func endpoint(of proxy: ProxySettings) -> String {
         let address = "\(proxy.kind.rawValue)://\(proxy.host):\(proxy.port)"
         guard proxy.username?.isEmpty == false || proxy.password?.isEmpty == false else { return address }

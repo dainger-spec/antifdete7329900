@@ -107,7 +107,9 @@ public enum SiteComparison {
     /// Every signal either snapshot has, by category and key; without Safari's, each is
     /// `.onlyProfile` (the profile's own snapshot, nothing to compare with).
     public static func compare(profile: SiteSnapshot, safari: SiteSnapshot?) -> [SiteSignal] {
-        let keys = Set(profile.values.keys).union(safari.map { Array($0.values.keys) } ?? [])
+        // The window's own names are a thousand words long: CI's comparison says which differ; the
+        // count ("probe.windowOwnCount") is what is listed here.
+        let keys = Set(profile.values.keys).union(safari.map { Array($0.values.keys) } ?? []).subtracting(["probe.windowOwnNames"])
         let signals = keys.map { (key: String) -> SiteSignal in
             let mine = profile.values[key], theirs = safari?.values[key]
             let verdict: SiteSignal.Verdict

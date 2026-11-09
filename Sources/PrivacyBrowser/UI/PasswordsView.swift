@@ -149,6 +149,11 @@ struct PasswordListView: View {
                             }
                         }
                     }
+                    // The design's selected row: the system's, under the app's white tint, was white
+                    // behind white words.
+                    .listRowBackground(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(selection == entry.id ? Theme.rowSelected : Color.clear))
+                    .background(SystemListHighlightOff().accessibilityHidden(true))
                 }
                 .overlay {
                     if filtered.isEmpty {

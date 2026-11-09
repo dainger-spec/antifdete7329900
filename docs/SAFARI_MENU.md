@@ -249,8 +249,8 @@ differ from walk to walk (the record leaves them out).
 | Safari › Settings… | ⌘, | our Settings | our Settings | **ours**: the manager's Settings (Safari's own have no place in a profile) |
 | Safari › Settings for This Website… | - | changes the window; window _NSPopoverWindow | changes the window; window _NSPopoverWindow | **keep**: per-site settings, kept in the profile's home |
 | Safari › Connection Security Details… | - | disabled | disabled | **keep**: the page's certificate |
-| Safari › Clear History… | - | disabled | disabled | **broken**: disabled: Safari's history is not built in a profile (open: H1) |
-| Safari › Clear History and Keep Website Data… | - | disabled | disabled | **broken**: disabled: Safari's history is not built in a profile (open: H1) |
+| Safari › Clear History… | - | a window: the profile's library | a window: the profile's library | **fixed**: was disabled; opens the profile's own history, where it is cleared (`HistoryMenuRoute`; Safari's history service is not a profile's: H1) |
+| Safari › Clear History and Keep Website Data… | - | a window: the profile's library | a window: the profile's library | **fixed**: was disabled; opens the profile's own history, where it is cleared (`HistoryMenuRoute`) |
 | Safari › Services | - | not chosen: services | not chosen: services | **keep**: not chosen: the system's Services hand the selection to other applications |
 | Safari › Hide Safari | ⌘H | another app in front; changes the window | another app in front; changes the window | **keep** |
 | Safari › Hide Others | ⌥⌘H | hides other apps | hides other apps | **keep** |
@@ -343,8 +343,8 @@ differ from walk to walk (the record leaves them out).
 | View › Text Encoding › Default | - | disabled | disabled | **keep** |
 | View › Enter Full Screen | F | changes the window; window NSToolbarFullScreenWindow | changes the window; window NSToolbarFullScreenWindow | **keep**: AppKit's layout exception, when it comes (runs 463 and 468), is caught inside AppKit |
 | View › Enter Full Screen | ⌃⌘F | changes the window; window NSToolbarFullScreenWindow | changes the window; window NSToolbarFullScreenWindow | **keep**: AppKit's layout exception, when it comes (runs 463 and 468), is caught inside AppKit |
-| History › Show All History | ⌘Y | changes the window | changes the window | **keep** |
-| History › Back | ⌘[ | changes the window | changes the window | **keep** |
+| History › Show All History | ⌘Y | a window: the profile's library | a window: the profile's library | **fixed**: showed Safari's own history, empty in every profile (the owner's Mac, 0.1.2: three pages open, nothing listed); opens the profile's own history (`HistoryMenuRoute`), checked by what the window shows (`HistoryWindowReader`) |
+| History › Back | ⌘[ | disabled | disabled | **keep**: in the walk it comes after Show All History, which turned the tab to Safari's history page (so there was a page to go back from) and now opens the profile's library window instead, leaving the tab where it was (full run 5, 4fb2aa8, on both macOS) |
 | History › Forward | ⌘] | disabled | disabled | **keep** |
 | History › Home | ⇧⌘H | nothing seen | nothing seen | **fixed**: (the owner's decision) the profile's start page, Safari's own home page setting in the process's argument domain; Safari's default (apple.com/startpage) for a profile without one |
 | History › Return to Search Results | ⌥⌘S | disabled | disabled | **keep** |

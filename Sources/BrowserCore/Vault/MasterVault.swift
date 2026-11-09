@@ -53,7 +53,8 @@ public struct VaultHeader: Codable, Equatable, Sendable {
 ///                                               ├─HKDF "profile-key-wrap"▶ wraps per-profile keys
 ///                                               ├─HKDF "sync-envelope"   ▶ sync encryption key
 ///                                               ├─HKDF "sync-object-id"  ▶ sync object-name MAC key
-///                                               └─HKDF "device-settings" ▶ settings.bin (not synced)
+///                                               ├─HKDF "device-settings" ▶ settings.bin (not synced)
+///                                               └─HKDF "account-key"     ▶ account-key.bin (not synced)
 /// per-profile key (random 256-bit, stored wrapped in the index)
 ///                                               ├─ encrypts profile configuration
 ///                                               ├─HKDF "passwords"       ▶ password vault key
@@ -193,6 +194,13 @@ public final class UnlockedVault: @unchecked Sendable {
     var settingsKey: SymmetricKey { get throws { try vaultKey("device-settings") } }
     /// The proxy list (`proxies.bin`, `ProxyList`): this Mac's, never synced, like the settings.
     var proxyListKey: SymmetricKey { get throws { try vaultKey("proxy-list") } }
+    /// The tags' colours (`labels.bin`, `TagColors`): the vault's, synced as an object of their own.
+    var labelsKey: SymmetricKey { get throws { try vaultKey("profile-labels") } }
+    /// The scenarios (`scenarios.bin`, `ScenarioLibrary`): this Mac's, not synced in this version.
+    var scenariosKey: SymmetricKey { get throws { try vaultKey("scenarios") } }
+    /// The license's key of an account without an email (`account-key.bin`, `AccountKeyVault`): this
+    /// Mac's, never synced; a profile's own process, opened with a grant, cannot derive it.
+    var accountKeyKey: SymmetricKey { get throws { try vaultKey("account-key") } }
 
     private func vaultKey(_ purpose: String) throws -> SymmetricKey {
         guard let masterKey else { throw CoreError.notGranted(purpose) }

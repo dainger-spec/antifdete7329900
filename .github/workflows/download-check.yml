@@ -1,0 +1,58 @@
+name: Download check
+
+# The published disk image, downloaded on runners that have never seen Lumen and marked as a
+# browser marks a download (scripts/download_check.sh): it must open without a word from
+# Gatekeeper — the image notarized and stapled, the app inside too — and the screen after opening
+# the image and the app is kept (the download-check-* artifacts). Run by hand after a release:
+#   Actions › Download check › Run workflow, with the image's address (download.json's "url").
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: The disk image's address (https://dl.lumenbrowser.io/Lumen-<version>.dmg)
+        required: true
+
+jobs:
+  download:
+    name: Download check — ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: The machine
+        run: sw_vers
+      - name: The image's window — what its layout holds, and whether it shows its picture
+        # The owner, 3 November: 0.1.1's window had its icons and its size and no picture. What the
+        # published image's picture and .DS_Store are, what Finder answers for the window's picture,
+        # and the window captured in both appearances and compared point by point with the picture
+        # the image carries (scripts/dmg_window_shot.sh). Before the download check, whose opening of the
+        # app leaves Gatekeeper's question on the screen (it covered the window in the run of 3 November).
+        env:
+          IMAGE_URL: ${{ github.event.inputs.url }}
+        run: |
+          [[ "$IMAGE_URL" == https://dl.lumenbrowser.io/* ]] || { echo "::error::not an address at dl.lumenbrowser.io: $IMAGE_URL"; exit 1; }
+          for volume in /Volumes/Lumen*; do [[ -d "$volume" ]] && hdiutil detach "$volume" -force -quiet; done
+          mkdir -p build/image
+          curl -fsSL --retry 3 -o build/image/image.dmg "$IMAGE_URL"
+          shasum -a 256 build/image/image.dmg
+          scripts/dmg_window_shot.sh build/image/image.dmg build/dmg-window --both
+      - name: The image as someone downloads it
+        if: always()
+        env:
+          IMAGE_URL: ${{ github.event.inputs.url }}
+        run: |
+          [[ "$IMAGE_URL" == https://dl.lumenbrowser.io/* ]] || { echo "::error::not an address at dl.lumenbrowser.io: $IMAGE_URL"; exit 1; }
+          scripts/download_check.sh "$IMAGE_URL" --expect accepted --shots build/download-shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: download-check-${{ matrix.runner }}
+          path: |
+            build/download-shots
+            build/dmg-window
+          if-no-files-found: ignore

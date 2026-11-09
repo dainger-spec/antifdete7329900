@@ -3,6 +3,7 @@ import BrowserCore
 import CryptoKit
 import Darwin
 import Network
+import NetworkGuardCore
 import os
 import WebKit
 
@@ -43,10 +44,12 @@ final class SelfTest {
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
         let test = SelfTest()
-        // A hung check must not hold CI; the whole run takes about five minutes on the runner. What
-        // had been checked by then is still counted.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 600) {
-            print("SELFTEST TIMEOUT after 600 s")
+        // A hung check must not hold CI; what had been checked by then is still counted. The whole
+        // run took 538–596 s on macOS 27.0.1's runner (full runs 3 to 5) and was cut at 600 s in
+        // run 6, its last ~25 checks never made: 900 s; 1080 s since the languages-per-profile
+        // group (six launches of a profile's own process, about three minutes).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1080) {
+            print("SELFTEST TIMEOUT after 1080 s")
             MainActor.assumeIsolated { _ = test.finish(timedOut: true) }
             exit(3)
         }
@@ -268,11 +271,31 @@ final class SelfTest {
         info("macOS \(ProcessInfo.processInfo.operatingSystemVersionString), Safari \(HostSafari.version)")
         environmentChecks()
         vaultKeyDerivation()
-        // Without the packet tunnel (any build but a signed NE=1 one) proxied profiles keep WebRTC
-        // off; the proxy checks below verify that, scripts/leak_check.py the relay itself.
-        let tunnel = TunnelManager.shared
-        check("tunnel: a build without the network extension says so (proxied profiles keep WebRTC off)",
-              tunnel.extensionIdentifier != nil || (tunnel.state == .notBuilt && !tunnel.canCarryWebRTC), "\(tunnel.state)")
+        // Without the network guard proxied profiles keep WebRTC off (`WebRTCGate`); "WebRTC through
+        // the proxy" below checks that in a profile's own process, and the relay with a stand-in.
+        check("network guard: this build says it has none, and nothing stands in for it outside the self-test's own checks",
+              NetworkGuard.shared.state == .notInBuild && !NetworkGuard.shared.selfTestStandIn, "\(NetworkGuard.shared.state)")
+        // The kernel's table of sockets, which the guard reads for each flow to know whom it is for
+        // (SocketTable; the owner's Mac, 4 November): it must read here — in the sandboxed build,
+        // inside the App Sandbox, as the guard's own extension runs.
+        // A UDP socket of this process's own, connected to a documentation address (nothing is sent),
+        // must be listed: a read that returns nothing is not a read (macOS 27.0.1 lists to a process
+        // that is not root only its own sockets, the guard's extension runs as root).
+        let sandbox = AppEnvironment.isSandboxed ? ", inside the App Sandbox" : ""
+        let ownSocket = Self.connectedUDPSocket(to: "203.0.113.2", port: 9)
+        defer { if let ownSocket { close(ownSocket.descriptor) } }
+        switch SocketTable.read(.udp) {
+        case .success(let sockets):
+            let listed = ownSocket.flatMap { own in
+                SocketTable.socket(of: .udp, localPort: own.port, remoteAddress: "203.0.113.2", remotePort: 9, openerPID: getpid(), in: sockets)
+            }
+            check("network guard: the kernel's table of sockets reads in this process\(sandbox), and lists this process's own UDP socket",
+                  listed?.lastPID == getpid(), "\(sockets.count) read; own socket \(ownSocket.map { "on port \($0.port)" } ?? "not made")")
+            info("the kernel's table of UDP sockets: \(sockets.count) read, \(sockets.filter(\.delegated).count) delegated, "
+                 + "\(sockets.filter(\.userSpaceStack).count) flows of the user-space stack (as uid \(getuid()))")
+        case .failure(let error):
+            check("network guard: the kernel's table of sockets reads in this process\(sandbox), and lists this process's own UDP socket", false, "\(error)")
+        }
         // As the first launch of a profile with a German proxy would, before WebKit starts any
         // process; checked by fingerprintSurface (navigator) and proxies (Accept-Language header).
         WebContentLanguage.decide("de-DE")
@@ -303,7 +326,8 @@ final class SelfTest {
         // A profile with a proxy does not start without the proxied profile's rule list (ContentRules).
         await ContentRules.prepare()
         info("WebKit \(WebKitBuild.version)")
-        debugSwitchesStayDebugSwitches()
+        info("Safari.app \(HostSafari.app?.version ?? "?") build \(HostSafari.app?.build ?? "?"); a macOS profile names Safari \(HostSafari.version)"
+             + (HostSafari.declared.sharesEngine ? " (Safari runs this WebKit)" : " (Safari runs a WebKit of its own)"))
         // Each group on its own: an error one did not expect fails that group, by name, and the
         // run goes on with the next, so that one error never hides the checks after it.
         await group("exceptions") { try await exceptionChecks() }
@@ -327,6 +351,7 @@ final class SelfTest {
         await group("editor labels") { try editorLabels() }
         await group("window sizes") { try await windowSizes(repository) }
         await group("named Safari version") { try await namedSafariVersion(repository) }
+        await group("two engines: said once for each pair") { enginesWarningOnce() }
         await group("local requests") { try await localRequests(repository) }
         await group("cookies at creation") { try await cookiesAtCreation(repository) }
         await group("diagnostics") { try await diagnosticsBundle(repository) }
@@ -357,9 +382,27 @@ final class SelfTest {
         await group("profile sync") { try await profileSync(repository) }
         await group("warm-up") { try await warmUp(repository) }
         await group("warm-up queue") { try await warmUpQueue(repository) }
+        await group("the page cannot tell") { try await pageCannotTell(repository) }
+        await group("automation commands") { try await automationCommands(repository) }
+        await group("scenario runs") { try await scenarioRuns(repository) }
         await group("Safari chrome") { try await safariChromeThroughTheProxy(repository) }
+        await group("WebRTC through the proxy") { try await webRTCThroughTheProxy(repository) }
+        await group("keychain between profiles") { try await keychainBetweenProfiles(repository) }
         await group("Safari's app-link banner tracker") { try await safariAppLinkTracker(repository) }
+        // The license: signed in with a key against a server played on the loopback; where the key
+        // is not (account.json, the defaults, the diagnostics); without the server; revoked.
+        await group("licensing") {
+            for result in await LicenseSelfTest.run(scratch: FileManager.default.temporaryDirectory) {
+                check(result.name, result.passed, result.detail)
+            }
+        }
         await group("a mobile view in its own process") { try await mobileViewInItsOwnProcess(repository) }
+        await group("processor count") { try await processorCountInOwnProcess(repository) }
+        await group("a phone's window") { try await phoneWindowAndSearch(repository) }
+        await group("closing a profile's window") { try await closingTheWindowEndsTheProfile(repository) }
+        await group("interface and websites' languages") { try await interfaceApartFromWebsites(repository) }
+        await group("languages per profile") { try await languagesPerProfile(repository) }
+        await group("a direct connection is an exit") { try await directConnectionIsAnExit(repository) }
         await group("lock during launch") { try await lockDuringLaunch(repository) }
         await group("quit") { try await quitFromFocusedPage(repository) }
         await group("forced seal") { try await forcedSealAtQuit(repository) }
@@ -1158,6 +1201,8 @@ final class SelfTest {
         manager.onError = { _ in }
         let token = AutomationSettings.newToken()
         let handler = AutomationHandler(manager: manager, repository: repository)
+        var automationInPlan = false
+        handler.allowsAutomation = { automationInPlan }
         let server = AutomationServer(settings: AutomationSettings(isEnabled: true, port: 0, token: token), handler: handler)
         server.start()
         defer { server.stop() }
@@ -1193,8 +1238,24 @@ final class SelfTest {
             return (status, text.components(separatedBy: "\r\n\r\n").dropFirst().joined(separator: "\r\n\r\n"))
         }
         let base = "/v1/profiles/\(profile.id.uuidString)"
+        // The token is asked first: without it 401, whatever the plan.
         check("automation: a request without the token is refused", await call("GET", "/v1/profiles", token: "").status == 401)
         check("automation: a request with a wrong token is refused", await call("GET", "/v1/profiles", token: token + "x").status == 401)
+        // The whole API is the plan's automation (the lead, 9 November): with the token but without it,
+        // every route refuses and says why — the ones older than scenarios too.
+        var refusedRoutes: [String] = []
+        for (method, path, body) in [("GET", "/v1/profiles", ""), ("GET", base, ""), ("POST", base + "/start", "{\"window\": false}"),
+                                     ("POST", base + "/stop", ""), ("POST", base + "/open", "{\"url\": \"https://example.com/\"}"),
+                                     ("GET", base + "/cookies", ""), ("POST", base + "/cookies", "x\ty"),
+                                     ("POST", base + "/scenario", "{\"source\": \"log('x')\"}"), ("GET", base + "/scenario", ""),
+                                     ("POST", base + "/scenario/stop", "")] {
+            let answer = await call(method, path, body: body)
+            if answer.status != 403 || !answer.body.contains("automation_not_in_plan") { refusedRoutes.append("\(method) \(path): \(answer.status)") }
+        }
+        check("automation: without automation in the plan every route of the API refuses with the reason (403 automation_not_in_plan), the token still asked first",
+              refusedRoutes.isEmpty && !manager.isRunning(profile.id) && manager.scenarioRuns[profile.id] == nil,
+              "not refused: \(refusedRoutes)")
+        automationInPlan = true
         check("automation: a web page's request is refused, with the token too",
               await call("GET", "/v1/profiles", extra: ["Origin": "https://attacker.example"]).status == 403)
         check("automation: a name pointed at 127.0.0.1 is refused (DNS rebinding)",
@@ -1220,6 +1281,28 @@ final class SelfTest {
               "\(exported.status) \(exported.body.prefix(300))")
         check("automation: only an http or https address is opened",
               await call("POST", base + "/open", body: "{\"url\": \"file:///etc/passwd\"}").status == 400)
+        // Scenarios through the API.
+        let ran = await call("POST", base + "/scenario",
+                             body: "{\"source\": \"log('from the API', params.n); await sleep(50);\", \"params\": {\"n\": 3}}")
+        _ = await waitUntil(timeout: 20) { manager.scenarioRuns[profile.id]?.isRunning == false }
+        let state = await call("GET", base + "/scenario")
+        check("automation: a scenario sent through the API runs with its parameters, and its log and end are read back",
+              ran.status == 202 && state.status == 200 && state.body.contains("\"outcome\" : \"finished\"")
+                  && state.body.contains("from the API 3"),
+              "\(ran.status) \(ran.body.prefix(120)) / \(state.status) \(state.body.prefix(400))")
+        let unknown = await call("POST", base + "/scenario", body: "{\"scenario\": \"no such \(run)\"}")
+        check("automation: a saved scenario that is not there is not found", unknown.status == 404 && unknown.body.contains("no_scenario"),
+              "\(unknown.status) \(unknown.body.prefix(160))")
+        let looping = await call("POST", base + "/scenario", body: "{\"source\": \"while (true) { await sleep(100); }\"}")
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        let stopping = await call("POST", base + "/scenario/stop")
+        _ = await waitUntil(timeout: 10) { manager.scenarioRuns[profile.id]?.isRunning == false }
+        let stoppedState = await call("GET", base + "/scenario")
+        check("automation: a run is stopped through the API",
+              looping.status == 202 && stopping.status == 202 && stoppedState.body.contains("\"outcome\" : \"stopped\"")
+                  && stoppedState.body.contains("byUser"),
+              "\(looping.status) \(stopping.status) \(stoppedState.body.prefix(300))")
+
         let stopped = await call("POST", base + "/stop")
         check("automation: the profile stops", stopped.status == 200 && !manager.isRunning(profile.id), "\(stopped.status)")
 
@@ -1407,7 +1490,7 @@ final class SelfTest {
         check("Safari chrome: the leak page ran and reported", !page.isEmpty, "no report from the page")
         info("Safari chrome: the leak page reported \(page)")
         // WebRTC opens its sockets outside the data store's proxy: in a proxied profile without
-        // the tunnel it must not exist at all, in the page, in a frame of another site and in an
+        // the relay it must not exist at all, in the page, in a frame of another site and in an
         // about:blank frame (where a script-only removal is classically got round).
         check("Safari chrome: WebRTC is off in Safari's web views (page, frame, about:blank frame)",
               page["rtc"] as? String == "undefined" && frame["rtc"] as? String == "undefined"
@@ -1717,6 +1800,58 @@ final class SelfTest {
                      "Safari did not fetch it in this run (not exercised): where it would go is not shown")
             }
         }
+        // What the person sees of the profile's history: the History window, opened as they open
+        // it (History › Show All History, ⌘Y), read from the views on screen. The owner's Mac, 0.1.2,
+        // 4 November: the card counted 4 entries in the profile's history, the window showed none;
+        // the checks had counted the store, never the window.
+        var historyLook: HistoryWindowLook?
+        manager.onHistoryLook = { _, look in historyLook = look }
+        let historyAsked = manager.lookAtHistory(profile.id)
+        _ = await waitUntil(timeout: 20) { historyLook != nil }
+        var lookedAt = historyLook
+        // And the windows as the window server shows them — what is on the screen, whatever draws
+        // it: macOS 27.0.1 (full run 5) drew the profile's list in its process as nothing Vision
+        // could read. The pictures are kept (PB_SELFTEST_SHOTS, else a temporary folder).
+        var screenSaid: [String] = []
+        // And whether this Mac's Vision reads at all: a picture with a known line, drawn as the
+        // list draws its rows (macOS 27.0.1's runner, full run 6: nothing read from a window that
+        // showed both pages, which macOS 26.6.2's read).
+        var control: (read: Bool, said: String)?
+        if var seen = lookedAt, !seen.regions.isEmpty {
+            let folder = ProcessInfo.processInfo.environment["PB_SELFTEST_SHOTS"].map { URL(fileURLWithPath: $0) }
+                ?? FileManager.default.temporaryDirectory.appendingPathComponent("pb-history-\(run)")
+            let read = await HistoryWindowReader.readFromScreen(regions: seen.regions, folder: folder)
+            seen.screen = read.lines
+            screenSaid = read.said
+            lookedAt = seen
+            control = await HistoryWindowReader.readsControl(scale: NSScreen.main?.backingScaleFactor ?? 1)
+        }
+        let lookSaid: String
+        if let lookedAt {
+            let rows = lookedAt.texts.prefix(12).joined(separator: " | ")
+            let asked = screenSaid.isEmpty ? "nothing to ask for" : screenSaid.joined(separator: "; ")
+            let onScreen = "on the screen (\(asked)): \(lookedAt.screen.prefix(16).joined(separator: " | ")); "
+                + "Vision's control: \(control?.said ?? "not made")"
+            lookSaid = "\(lookedAt.chosen); views: \(lookedAt.views.joined(separator: "; ")); rows: \(rows); "
+                + "page: \(lookedAt.page ?? "none"); clearing: \(lookedAt.clearing.joined(separator: ", ")); "
+                + "first row: \(lookedAt.firstRow ?? "none"); read from its pixels: \(lookedAt.recognized.prefix(12).joined(separator: " | ")); "
+                + onScreen
+        } else {
+            lookSaid = historyAsked ? "no answer in 20 s" : "not asked: the profile has no process of its own"
+        }
+        info("Safari chrome: the History window, as the person opens it — \(lookSaid)")
+        // Read from the pixels, the page's title may have two characters misread (its run id is hex).
+        let historyShowsPage = lookedAt.map { $0.shows("start-\(run)") || $0.shows("PB leak page \(run)", tolerance: 2) } ?? false
+        let historyCheck = "Safari chrome: the History window, opened as the person opens it (History › Show All History), shows the page Safari's window loaded"
+        if !historyShowsPage, let lookedAt, lookedAt.texts.isEmpty, lookedAt.rowCount > 0, let control, !control.read {
+            // Rows there, drawn, and nothing on this Mac that reads pixels: not seen, so not passed —
+            // and not failed on the instrument's word. A list with no rows fails above all readers.
+            skip(historyCheck, "this Mac's Vision reads no text, not even a control picture with a known line, "
+                 + "so the \(lookedAt.rowCount) rows of the window cannot be read here; its picture is kept (\(screenSaid.joined(separator: "; ")))")
+        } else {
+            check(historyCheck, historyShowsPage, lookSaid)
+        }
+
         // A stop: Safari's window goes first, then the seal, whose retries no longer wait for Safari
         // (it keeps the pages of the windows it closes); the process reports how the seal went.
         sealReport = nil
@@ -1808,6 +1943,236 @@ final class SelfTest {
         check("Safari chrome: nothing went wrong while it ran", messages.isEmpty, messages.joined(separator: " | "))
     }
 
+    // MARK: WebRTC through the profile's proxy
+
+    /// WebRTC of a profile with a SOCKS5 proxy that relays UDP — the self-test proxy's `--socks-udp`
+    /// listener, which connects nowhere and plays the NAT itself — in the profile's own process, in
+    /// Safari's chrome, on `/pb-rtc` opened on loopback (a secure context, where WebRTC exists), each
+    /// run inside an egress window: nothing of the profile's may leave this Mac then
+    /// (scripts/egress_check.py).
+    ///   * The control: no network guard in this build (nor could a CI runner load one), so the
+    ///     profile runs with no RTCPeerConnection at all, in its page and in an about:blank frame,
+    ///     and is told why (`WebRTCGate`).
+    ///   * The call: the self-test stands in for the guard, so the profile gets the product's own
+    ///     relay (`WebRTCRelays`, here) and user script: a video call between two connections of the
+    ///     page, through the relay and the proxy's UDP, with relay candidates only, at the proxy's
+    ///     public address, frames decoded on the far side, and the page's own STUN server — named
+    ///     after the run — never asked (a DNS question for it fails the capture).
+    ///   * One address: the gate's comparison of the proxy's UDP address with its TCP exit (the
+    ///     self-test proxy's trace says the exit), alone — the same address, another one, none found
+    ///     — and a launch whose proxy's UDP leaves from another address than its TCP: no
+    ///     RTCPeerConnection, and the profile is told why.
+    /// Then the capture's control for WebRTC, outside any window: a STUN request made on purpose
+    /// from a profile without a proxy, which the capture must see as the app's.
+    private func webRTCThroughTheProxy(_ repository: ProfileRepository) async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let udpPort = environment["PB_SELFTEST_SOCKS_UDP_PROXY_PORT"].flatMap(Int.init),
+              let httpPort = environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("WebRTC through the proxy: a video call through the profile's proxy, and none without the guard",
+                 "PB_SELFTEST_SOCKS_UDP_PROXY_PORT not set: the self-test proxy's UDP listener is not running")
+            return
+        }
+        guard !AppEnvironment.isSandboxed else {
+            skip("WebRTC through the proxy: a video call through the profile's proxy, and none without the guard",
+                 "the sandboxed build runs no process per profile, which WebRTC through a proxy needs", .build)
+            return
+        }
+        let socks = ProxySettings(kind: .socks5, host: "127.0.0.1", port: udpPort)
+        let http = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        // Where the proxy's TCP leaves from: the self-test proxy's own trace answers in place of
+        // Cloudflare's, with the address its UDP leaves from too (203.0.113.77) unless told another.
+        let exitTrace = "http://exit.selftest.invalid/cdn-cgi/trace"
+        let endpoints = ProxyExitLookup.endpoints
+        ProxyExitLookup.endpoints = [URL(string: exitTrace)!]
+        defer { ProxyExitLookup.endpoints = endpoints }
+
+        // What the proxy's UDP side did so far, asked through its HTTP listener.
+        func udpStats() async -> [String: Any] {
+            let url = URL(string: "http://proxied.selftest.invalid/pb-udp.json")!
+            guard let text = try? await loadThroughProxy(repository, http, url: url) else { return [:] }
+            return (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
+        }
+        // The WebRTC page's report for a run.
+        func rtcReport(_ run: String) async -> [String: Any]? {
+            let url = URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!
+            guard let text = try? await loadThroughProxy(repository, http, url: url),
+                  let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] else { return nil }
+            return (object["reports"] as? [[String: Any]])?.first { $0["rtcPage"] != nil }
+        }
+        // One launch of the proxied profile in its own process, on the WebRTC page in `mode`.
+        func launch(mode: String) async throws -> (report: [String: Any], refusals: [WebRTCRefusal], messages: [String], started: Bool) {
+            let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
+            let profile = try repository.create(name: "WebRTC \(mode)", configuration: ProfileConfiguration(
+                startURL: URL(string: "http://127.0.0.1:\(httpPort)/pb-rtc?run=\(run)&mode=\(mode)"),
+                proxy: socks, webRTCPolicy: .unrestricted, matchProxyLocation: false))
+            defer { try? repository.delete(profile.id) }
+            let manager = ProfileManager(repository: repository)
+            var messages: [String] = []
+            manager.onError = { messages.append($0) }
+            var hostsChrome: Bool?
+            manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
+            info("egress-token \(run)")
+            info("egress-window begin \(Date().timeIntervalSince1970)")
+            setenv("PB_PROFILE_PROCESS", "1", 1)
+            do {
+                try await manager.launch(profile.id)
+            } catch {
+                setenv("PB_PROFILE_PROCESS", "0", 1)
+                info("egress-window end \(Date().timeIntervalSince1970)")
+                throw error
+            }
+            setenv("PB_PROFILE_PROCESS", "0", 1)
+            if let pid = manager.processIdentifier(of: profile.id) { info("egress-pid \(pid)") }
+            let started = await waitUntil(timeout: 90) { hostsChrome != nil }
+            var report: [String: Any] = [:]
+            let deadline = Date().addingTimeInterval(mode == "call" ? 120 : 60)
+            while report.isEmpty, Date() < deadline {
+                report = await rtcReport(run) ?? [:]
+                if report.isEmpty { try? await Task.sleep(nanoseconds: 2_000_000_000) }
+            }
+            let refusals = Array(manager.webRTCRefusals.values)
+            await manager.shutDown()
+            info("egress-window end \(Date().timeIntervalSince1970)")
+            return (report, refusals, messages, started)
+        }
+
+        // The control: the production gate, nothing standing in for the guard.
+        let control = try await launch(mode: "presence")
+        info("WebRTC through the proxy, the control: \(control.report), refusals \(control.refusals), messages \(control.messages)")
+        check("WebRTC through the proxy, the control: the profile's own process started", control.started)
+        check("WebRTC through the proxy, the control: without the guard no RTCPeerConnection, in the page or in an about:blank frame",
+              control.report["rtc"] as? String == "undefined" && control.report["rtcFrame"] as? String == "undefined",
+              control.report.isEmpty ? "no report from the page" : "\(control.report)")
+        let refusal = control.refusals.first
+        check("WebRTC through the proxy, the control: the profile is told why, in words",
+              control.refusals.count == 1 && refusal.map { $0.rawValue.hasPrefix("guard") } == true
+                && refusal.map { control.messages.contains(ProfileManager.webRTCOffText($0)) } == true,
+              "refusals \(control.refusals), messages \(control.messages)")
+
+        // The owner's Mac, 0.1.2, macOS 27.0.1, 4 November: the guard installed and answering, its
+        // check on this Mac failed (the probe's flow was counted for WebKit's network process).
+        // A proxied profile with WebRTC on must then have none at all, inside this capture.
+        NetworkGuard.shared.selfTestState = .unproven
+        let unproven: (report: [String: Any], refusals: [WebRTCRefusal], messages: [String], started: Bool)
+        do {
+            unproven = try await launch(mode: "presence")
+        } catch {
+            NetworkGuard.shared.selfTestState = nil
+            throw error
+        }
+        NetworkGuard.shared.selfTestState = nil
+        info("WebRTC through the proxy, the guard's check failed: \(unproven.report), refusals \(unproven.refusals), messages \(unproven.messages)")
+        check("WebRTC through the proxy, the guard's check failed: no RTCPeerConnection, in the page or in an about:blank frame",
+              unproven.started && unproven.report["rtc"] as? String == "undefined" && unproven.report["rtcFrame"] as? String == "undefined",
+              unproven.report.isEmpty ? "no report from the page (started \(unproven.started))" : "\(unproven.report)")
+        check("WebRTC through the proxy, the guard's check failed: the profile is told so, in words",
+              unproven.refusals == [.guardUnproven] && unproven.messages.contains(ProfileManager.webRTCOffText(.guardUnproven)),
+              "refusals \(unproven.refusals), messages \(unproven.messages)")
+
+        // The call: the product's relay, the self-test standing in for the guard.
+        let before = await udpStats()
+        NetworkGuard.shared.selfTestStandIn = true
+        let call: (report: [String: Any], refusals: [WebRTCRefusal], messages: [String], started: Bool)
+        do {
+            call = try await launch(mode: "call")
+        } catch {
+            NetworkGuard.shared.selfTestStandIn = false
+            throw error
+        }
+        NetworkGuard.shared.selfTestStandIn = false
+        let after = await udpStats()
+        info("WebRTC through the proxy, the call: \(call.report), refusals \(call.refusals), proxy UDP before \(before) after \(after)")
+        let types = call.report["candidateTypes"] as? [String] ?? []
+        let addresses = call.report["candidateAddresses"] as? [String] ?? []
+        let inbound = call.report["inbound"] as? [String: Any] ?? [:]
+        let frames = (inbound["framesDecoded"] as? NSNumber)?.intValue ?? 0
+        func count(_ stats: [String: Any], _ key: String) -> Int { (stats[key] as? NSNumber)?.intValue ?? 0 }
+        check("WebRTC through the proxy, the call: the profile's own process started", call.started)
+        check("WebRTC through the proxy, the call: RTCPeerConnection is there with the relay", call.report["rtc"] as? String == "function"
+                && call.refusals.isEmpty, call.report.isEmpty ? "no report from the page" : "\(call.report), refusals \(call.refusals)")
+        check("WebRTC through the proxy, the call: relay candidates only, at the proxy's public address",
+              types == ["relay"] && addresses == ["203.0.113.77"], "types \(types), addresses \(addresses)")
+        check("WebRTC through the proxy, the call: the video went through and was decoded on the far side",
+              call.report["connected"] as? Bool == true && call.report["track"] as? Bool == true && frames >= 30,
+              "connected \(call.report["connected"] ?? "nil"), track \(call.report["track"] ?? "nil"), frames \(frames), \(inbound)")
+        check("WebRTC through the proxy, the call: its UDP went through the proxy's associations",
+              count(after, "associations") - count(before, "associations") >= 2
+                && count(after, "handedOver") - count(before, "handedOver") >= 100,
+              "associations \(count(before, "associations"))→\(count(after, "associations")), datagrams handed over \(count(before, "handedOver"))→\(count(after, "handedOver"))")
+        // A peer's candidates named by host names (in its description, trickled, an mDNS one): the
+        // page is told they were taken, and no resolver is asked — the capture holds no packet with
+        // this run's name (egress_check.py, the run's token).
+        check("WebRTC through the proxy, the call: a peer's candidates named by host names are taken without asking any resolver",
+              call.report["namedCandidates"] as? String == "taken", "\(call.report["namedCandidates"] ?? "nil")")
+        let dropped = (after["dropped"] as? [String] ?? []).filter { !((before["dropped"] as? [String] ?? []).contains($0)) }
+        check("WebRTC through the proxy, the call: the relay asked the proxy for nothing but peers and its egress probe",
+              dropped.isEmpty, dropped.joined(separator: ", "))
+
+        // One address: the gate's own comparison, against this proxy's UDP (203.0.113.77).
+        let userAgent = ProfileConfiguration(ephemeral: true).userAgent(hostSafariVersion: HostSafari.version)
+        let same = await ProfileManager.proxyUDP(socks, userAgent: userAgent)
+        ProxyExitLookup.endpoints = [URL(string: exitTrace + "?ip=203.0.113.78")!]
+        let elsewhere = await ProfileManager.proxyUDP(socks, userAgent: userAgent)
+        ProxyExitLookup.endpoints = [URL(string: "http://exit.selftest.invalid/pb-no-trace")!]
+        let unknown = await ProfileManager.proxyUDP(socks, userAgent: userAgent)
+        check("WebRTC through the proxy, one address: UDP that leaves from the proxy's TCP exit gives the relay, held to that address",
+              same.support == .supported && same.exit?.description == "203.0.113.77", "\(same.support) \(same.exit?.description ?? "no exit")")
+        check("WebRTC through the proxy, one address: UDP that leaves from another address than the proxy's TCP gives no relay",
+              elsewhere.support == .elsewhere && elsewhere.exit == nil, "\(elsewhere.support) \(elsewhere.exit?.description ?? "no exit")")
+        check("WebRTC through the proxy, one address: a TCP exit that cannot be found out gives no relay",
+              unknown.support == .exitUnknown && unknown.exit == nil, "\(unknown.support) \(unknown.exit?.description ?? "no exit")")
+
+        // One address, a launch: the guard standing in as for the call, a proxy whose UDP leaves from
+        // another address than its TCP leaves the profile without WebRTC, and says why.
+        ProxyExitLookup.endpoints = [URL(string: exitTrace + "?ip=203.0.113.78")!]
+        NetworkGuard.shared.selfTestStandIn = true
+        let apart: (report: [String: Any], refusals: [WebRTCRefusal], messages: [String], started: Bool)
+        do {
+            apart = try await launch(mode: "presence")
+        } catch {
+            NetworkGuard.shared.selfTestStandIn = false
+            throw error
+        }
+        NetworkGuard.shared.selfTestStandIn = false
+        ProxyExitLookup.endpoints = [URL(string: exitTrace)!]
+        info("WebRTC through the proxy, one address, a launch: \(apart.report), refusals \(apart.refusals), messages \(apart.messages)")
+        check("WebRTC through the proxy, one address: a proxy whose UDP leaves from elsewhere — no RTCPeerConnection, in the page or in an about:blank frame",
+              apart.started && apart.report["rtc"] as? String == "undefined" && apart.report["rtcFrame"] as? String == "undefined",
+              apart.report.isEmpty ? "no report from the page (started \(apart.started))" : "\(apart.report)")
+        check("WebRTC through the proxy, one address: the profile is told why, in words",
+              apart.refusals == [.proxyUDPElsewhere] && apart.messages.contains(ProfileManager.webRTCOffText(.proxyUDPElsewhere)),
+              "refusals \(apart.refusals), messages \(apart.messages)")
+
+        // The capture's control for WebRTC's UDP: a STUN request from a profile without a proxy, on
+        // purpose, outside every window, to a public STUN server (Google's, by address: no DNS).
+        let stun = (ip: "74.125.250.129", port: 19302)
+        let direct = try repository.create(name: "WebRTC control", configuration: ProfileConfiguration(webRTCPolicy: .unrestricted, ephemeral: true))
+        defer { try? repository.delete(direct.id) }
+        let session = try makeSession(repository, direct.id, key: repository.profileKey(for: direct.id))
+        defer { session.shutDown() }
+        let webView = WKWebView(frame: .zero, configuration: session.makeWebViewConfiguration())
+        try await PageLoader.load(webView, html: "<!doctype html><title>WebRTC control</title>", baseURL: URL(string: "https://localhost/")!)
+        info("egress-control-udp webrtc \(stun.ip) \(stun.port)")
+        let sent = try await js(webView, """
+            if (typeof RTCPeerConnection !== 'function') return 'no RTCPeerConnection';
+            const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:\(stun.ip):\(stun.port)' }] });
+            const types = [];
+            pc.onicecandidate = (event) => {
+              if (event.candidate && event.candidate.candidate) types.push((/ typ (\\w+)/.exec(event.candidate.candidate) || [])[1]);
+            };
+            pc.createDataChannel('control');
+            await pc.setLocalDescription(await pc.createOffer());
+            await new Promise((resolve) => {
+              const timer = setTimeout(resolve, 6000);
+              pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') { clearTimeout(timer); resolve(); } };
+            });
+            pc.close();
+            return 'gathered: ' + types.join(',');
+            """) as? String
+        check("WebRTC through the proxy: the capture's control — a profile without a proxy sends WebRTC's STUN itself",
+              sent?.hasPrefix("gathered") == true, sent ?? "nil")
+    }
+
     /// What `XPCServiceWatch` saw while the profile ran in Safari's chrome: every XPC service that
     /// started, and whether this app (the self-test, or the profile's process it started) is the
     /// one the system holds responsible for it; and each one's files open in the real Safari's
@@ -1856,8 +2221,8 @@ final class SelfTest {
     private func exceptionChecks() async throws {
         info("exceptions: in this process an exception passed through the preprocessor keeps its call stack: "
              + "\(ExceptionLog.preprocessorKeepsCallStacks())")
-        guard let executable = Bundle.main.executableURL else {
-            check("exceptions: this build's executable is there to run the check", false)
+        guard let executable = profileLikeExecutable() else {
+            check("exceptions: this build's profile executable is there to run the check", false)
             return
         }
         let chained = await runOwnExecutable(executable, ["--exception-check"], timeout: 30)
@@ -1907,13 +2272,23 @@ final class SelfTest {
              + (control.signaled ? "died by signal \(control.status)" : "lived, exit \(control.status)") + " — \(first)")
     }
 
+    /// What the exception and nib checks start: a process like a profile's, started as one is — from
+    /// LumenProfile (`ProfileExecutable`). The sandboxed build runs every profile in the app's one
+    /// process, so there it is the app's own executable: LumenProfile, started from the sandboxed app,
+    /// dies in the App Sandbox's own initialization (`_libsecinit_appsandbox`, signal 5) before a
+    /// line of this app's runs (CI run 650).
+    private func profileLikeExecutable() -> URL? {
+        if AppEnvironment.isSandboxed { return Bundle.main.executableURL }
+        return try? ProfileExecutable.url()
+    }
+
     /// Safari's Bookmarks sidebar makes its nibs itself, with this app as their bundle, and they are
     /// Safari's: in a process like a profile's, made the same way, each must come from Safari's file
     /// (`SafariChrome.bridgeNibInitializers`), with nothing thrown. A nib this Safari does not have
     /// is said, not failed on.
     private func safariNibChecks() async throws {
-        guard let executable = Bundle.main.executableURL else {
-            check("Safari's nibs: this build's executable is there to run the check", false)
+        guard let executable = profileLikeExecutable() else {
+            check("Safari's nibs: this build's profile executable is there to run the check", false)
             return
         }
         let run = await runOwnExecutable(executable, ["--nib-check"], timeout: 60)
@@ -2015,6 +2390,28 @@ final class SelfTest {
     /// the window size it was saved under — the profile's size again once that was changed in the
     /// editor — and never larger than the screen, or hanging outside it. On a defaults suite of its
     /// own; the window itself moved and reopened is not shown here.
+    /// Safari newer than the profiles' engine (`EngineWarning`): the profiles window says it until
+    /// OK, not again for the same pair of versions, and again for a newer Safari. This Mac's own
+    /// state is said, not checked: it is the runner image's.
+    private func enginesWarningOnce() {
+        info("two engines on this Mac: \(EngineWarning.current.map { "Safari \($0.safari), profiles' engine \($0.engine)" } ?? "no")")
+        let key = "engineWarning.seen"
+        let kept = UserDefaults.standard.string(forKey: key)
+        defer { UserDefaults.standard.set(kept, forKey: key) }
+        UserDefaults.standard.removeObject(forKey: key)
+        let pair = EngineWarning.Facts(safari: "27.2", engine: "26.6.2", macOS: 26)
+        check("two engines: said before OK", EngineWarning.unseen(pair) == pair)
+        EngineWarning.markSeen(pair)
+        check("two engines: not said again for the same pair after OK", EngineWarning.unseen(pair) == nil)
+        let newer = EngineWarning.Facts(safari: "27.3", engine: "26.6.2", macOS: 26)
+        check("two engines: said again for a newer Safari", EngineWarning.unseen(newer) == newer)
+        check("two engines: nothing said where Safari and profiles share one engine", EngineWarning.unseen(nil) == nil)
+        let text = EngineWarning.bannerText(pair) + " " + EngineWarning.aboutParagraphs(pair).joined(separator: " ")
+        check("two engines: the words name both Safaris and both macOS versions, with nothing left unfilled",
+              text.contains("27.2") && text.contains("26.6.2") && text.contains("26") && text.contains("27")
+                  && !text.contains("%@") && !text.contains("$@"), text)
+    }
+
     private func savedWindowFrame() {
         let suite = "PrivacyBrowser.SelfTest.Frame-\(UUID().uuidString.prefix(8))"
         guard let defaults = UserDefaults(suiteName: suite) else {
@@ -2216,6 +2613,9 @@ final class SelfTest {
     /// in its User-Agent only — and none may add noise or Chromium-only properties. Compared against a web view without any profile script. The probe is
     /// Resources/fingerprint_probe.js, the one scripts/safari_reference.py runs in real Safari;
     /// with PB_SELFTEST_SURFACE_OUT set, every result is written there as JSON for that comparison.
+    /// window.browser as Safari 27.0.1 and 27.2 give it, the probe's "browserShape" (claude/measure-canvas-browser).
+    static let safariBrowserShape = "[object WebPageNamespace] runtime [object WebPageRuntime] connect,sendMessage own,true,true,true,object"
+
     private func fingerprintSurface(_ repository: ProfileRepository) async throws {
         guard let probe = Self.loadProbe() else {
             check("surface: fingerprint_probe.js found (app bundle or PB_SELFTEST_PROBE)", false)
@@ -2244,9 +2644,9 @@ final class SelfTest {
         info("plain WKWebView: plugins \(string(reference, "plugins")), languages \(string(reference, "languages")), WebGL \(string(reference, "webgl.unmaskedRenderer"))")
         check("language: navigator.language is the language WebKit was given",
               string(reference, "language") == WebContentLanguage.decided?.first, string(reference, "language"))
-        // A profile without a proxy country: this Mac's languages, as Safari has them — not the
-        // app's UI language, which Localization.applyProcessLanguage keeps in the app's domain.
-        // (scripts/live_compare.py checks the result against Safari's navigator.language.)
+        // A profile without a proxy country: this Mac's languages, as Safari has them — never the
+        // app's interface language (the group "interface and websites' languages" checks that in
+        // a profile's own process). (scripts/live_compare.py checks the result against Safari's.)
         let systemLanguages = WebContentLanguage.languages(for: nil)
         check("language: without a proxy country, websites get this Mac's languages, not the app's UI language",
               !systemLanguages.isEmpty && systemLanguages == WebContentLanguage.systemLanguages, systemLanguages.joined(separator: ","))
@@ -2257,13 +2657,15 @@ final class SelfTest {
             ["plugins", "mimeTypes", "pdfViewerEnabled", "language", "languages", "deviceMemory", "ownNavigator", "ownScreen",
              "navigatorProtoCount", "colorDepth", "canvas.colors", "canvas.urlLength", "canvas.url", "canvasText", "fonts",
              "webkitObject", "webdriver", "doNotTrack"].contains(key) || key.hasPrefix("webgl.")
-                || (key.hasPrefix("features.") && key != "features.safari") // window.safari is added on purpose (macOS)
+                // window.safari is added on purpose (macOS); window.browser too, as Safari has it (below)
+                || (key.hasPrefix("features.") && key != "features.safari" && key != "features.browser")
         }.sorted()
-        for generationID in [DeviceGenerations.defaultID, "ios-26"] {
+        // An iPhone view twice: with the full disguise (the default) and leaving no script's trace.
+        for (generationID, disguise) in [(DeviceGenerations.defaultID, PhoneDisguise.full), ("ios-26", .full), ("ios-26", .engineOnly)] {
             // WebRTC left as the engine has it: its removal (the default policy) is checked by the
             // shim checks and would otherwise be the one deliberate difference here.
             let profile = try repository.create(name: "Surface \(generationID)", configuration: ProfileConfiguration(
-                webRTCPolicy: .unrestricted, ephemeral: true, deviceGenerationID: generationID))
+                webRTCPolicy: .unrestricted, ephemeral: true, deviceGenerationID: generationID, phoneDisguise: disguise))
             let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
             let tabConfiguration = session.makeWebViewConfiguration()
             check("surface (\(generationID)): user-installed fonts hidden from pages, as in Safari",
@@ -2291,15 +2693,89 @@ final class SelfTest {
             let safariQuota = PrivacyScripts.safariStorageQuota.rounded(.up)
             check("surface (\(generationID)): storage quota is Safari's",
                   quota?.doubleValue == safariQuota, "\(quota?.stringValue ?? "nil") vs \(String(format: "%.0f", safariQuota))")
+            // A frame loaded by a navigation of its own (run 42479119796: an iPhone view's platform on
+            // every navigation, a frame's included, made WebKit raise and ended the profile's process
+            // on the first page with an iframe): the page lives, and the frame answers as the page.
+            let framePlatform = try await js(tab.webView, """
+                return await new Promise((done) => {
+                  const f = document.createElement('iframe'); f.srcdoc = '<p>frame</p>';
+                  f.onload = () => { try { done(String(f.contentWindow.navigator.platform)); } catch (e) { done('error'); } };
+                  document.body.appendChild(f); setTimeout(() => done('timeout'), 5000); });
+                """) as? String ?? "nil"
+            // A worker made from a blob, as pages make them: what its navigator says.
+            let workerPlatform = try await js(tab.webView, """
+                return await new Promise((done) => {
+                  const w = new Worker(URL.createObjectURL(new Blob(['postMessage(navigator.platform)'], { type: 'text/javascript' })));
+                  w.onmessage = (e) => done(String(e.data)); w.onerror = () => done('error'); setTimeout(() => done('timeout'), 5000); });
+                """) as? String ?? "nil"
+            // What the page's substitutions say there and in a worker made from a blob (the lead, 8
+            // November: a worker that answers unsubstituted beside a substituted page is a sign we
+            // make ourselves). The storage quota is substituted in every profile; the time zone only
+            // where one is set — here none is, the case that left workers unhooked.
+            let pageAndWorker = try await js(tab.webView, """
+                const page = [String((await navigator.storage.estimate()).quota), Intl.DateTimeFormat().resolvedOptions().timeZone].join('|');
+                const worker = await new Promise((done) => {
+                  const source = 'navigator.storage && navigator.storage.estimate ? navigator.storage.estimate().then((e) => postMessage(String(e.quota) + "|" + Intl.DateTimeFormat().resolvedOptions().timeZone), () => postMessage("error")) : postMessage("absent")';
+                  const w = new Worker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
+                  w.onmessage = (e) => done(String(e.data)); w.onerror = () => done('error'); setTimeout(() => done('timeout'), 5000); });
+                return page + ' / ' + worker;
+                """) as? String ?? "nil"
             tab.tearDown()
             session.shutDown()
             try repository.delete(profile.id)
 
-            let name = generationID == DeviceGenerations.defaultID ? "macOS" : "iPhone view"
-            writeSurface(probed, name: generationID == DeviceGenerations.defaultID ? "macos" : "iphone")
-            let differing = engineKeys.filter { string(probed, $0) != string(reference, $0) }
-            check("surface (\(name)): engine and hardware signals as in a plain web view (\(engineKeys.count) keys)",
+            let isPhone = generationID != DeviceGenerations.defaultID
+            let fullPhone = isPhone && disguise == .full
+            let name = !isPhone ? "macOS" : fullPhone ? "iPhone view" : "iPhone view, no script's trace"
+            writeSurface(probed, name: !isPhone ? "macos" : fullPhone ? "iphone" : "iphone-engine")
+            // Every profile turns on what Safari has and a plain web view lacks (Apple Pay, WebKit's
+            // own switch), and an iPhone view off what an iPhone's Safari has not (Notification,
+            // `PhoneEngine`): those are checked below, not against the plain web view. The full
+            // disguise's own (touch, orientation) are checked below as an iPhone's.
+            let safariKeys: (String) -> Bool = { key in
+                ["ApplePay", "Payment", "MerchantValidation"].contains { key.contains($0) } || (isPhone && key.contains("Notification"))
+                    || (fullPhone && ["touch", "Touch", "orientation"].contains { key.contains($0) })
+            }
+            let compared = engineKeys.filter { !safariKeys($0) }
+            let differing = compared.filter { string(probed, $0) != string(reference, $0) }
+            check("surface (\(name)): engine and hardware signals as in a plain web view (\(compared.count) keys)",
                   differing.isEmpty, differing.map { "\($0): \(string(probed, $0)) vs \(string(reference, $0))" }.joined(separator: "; "))
+            check("surface (\(name)): ApplePaySession is there, as in Safari (\(isPhone ? "an iPhone's" : "Safari's window on the Mac"))",
+                  string(probed, "features.ApplePaySession") == "function", string(probed, "features.ApplePaySession"))
+            if isPhone {
+                // What WebKit answers as an iPhone (the owner's iPhone, 8 November), not a script:
+                // in both disguises.
+                check("surface (\(name)): navigator.platform is an iPhone's, the engine's own getter",
+                      // The getter as a plain web view prints its own (the probe's "native-text" is built from
+                      // the function's name, which for a getter is "get platform": never a getter's text).
+                      string(probed, "platform") == "iPhone"
+                        && string(probed, "natives.Navigator.platform getter") == string(reference, "natives.Navigator.platform getter"),
+                      "\(string(probed, "platform")); getter \(string(probed, "natives.Navigator.platform getter")) vs "
+                        + string(reference, "natives.Navigator.platform getter"))
+                check("surface (\(name)): a frame loaded by its own navigation says the iPhone's platform, and the page lives",
+                      framePlatform == "iPhone", framePlatform)
+                check("surface (\(name)): devicePixelRatio is an iPhone's 3",
+                      string(probed, "screen").hasSuffix("x3"), string(probed, "screen"))
+                check("surface (\(name)): no Notification, as in an iPhone's Safari outside a home-screen web app",
+                      string(probed, "features.Notification") == "undefined", string(probed, "features.Notification"))
+            }
+            if fullPhone {
+                // The full disguise's script: the owner's iPhone's screen (402×874, the window as
+                // large), five touch points, touch events, a coarse pointer without hover — each
+                // accessor printed as the engine prints its own.
+                let phoneValues: [(String, String)] = [("maxTouchPoints", "5"), ("screen", "402x874x402x874x3"),
+                                                        ("pointer", "false,false,true"), ("touch", "true,function,function"),
+                                                        ("orientation", "portrait-primary")]
+                for (key, wanted) in phoneValues {
+                    check("surface (\(name)): \(key) is the iPhone's", string(probed, key) == wanted, "\(string(probed, key)), wanted \(wanted)")
+                }
+                check("surface (\(name)): a blob worker's navigator.platform is the iPhone's too", workerPlatform == "iPhone", workerPlatform)
+                for native in ["Navigator.maxTouchPoints getter", "Screen.width getter", "window.outerWidth getter"] {
+                    check("surface (\(name)): \(native) reads as the engine's own (as a plain web view prints it)",
+                          string(probed, "natives.\(native)") == string(reference, "natives.\(native)"),
+                          "\(string(probed, "natives.\(native)")) vs \(string(reference, "natives.\(native)"))")
+                }
+            }
             // The shim adds no noise and no visible wrappers: toString, length and own properties
             // of the rendering functions are the engine's own.
             let renderingNatives = probed.filter { $0.key.hasPrefix("natives.") && ($0.key.contains("Canvas") || $0.key.contains("WebGL")
@@ -2308,15 +2784,55 @@ final class SelfTest {
                   !renderingNatives.isEmpty && renderingNatives.values.allSatisfy { $0.hasPrefix("native-text") || $0 == "absent" },
                   renderingNatives.map { "\($0.key)=\($0.value)" }.joined(separator: "; "))
             check("surface (\(name)): one language, as WebKit exposes", string(probed, "languages") == string(probed, "language"))
-            // Safari the app exposes window.safari on the Mac — in an iPhone view too, which is
-            // Safari on this Mac under an iPhone's User-Agent (the owner's decision, 31 October).
-            check("surface (\(name)): window.safari present, as in Safari on the Mac",
-                  string(probed, "features.safari") == "object", string(probed, "safariShape"))
-            // No generation changes what a page measures of this Mac: the touch points, the
-            // platform and the screen of a phone, said without touch, broke sites and gave the
-            // profile away all the same.
-            for key in ["platform", "maxTouchPoints", "hardwareConcurrency", "screen", "standalone", "pointer", "touch",
-                        "timeZone", "tzOffset", "dateString"] {
+            if generationID == DeviceGenerations.defaultID {
+                // The Safari it names is the Safari of the engine it runs: this Mac's Safari when that
+                // runs this app's WebKit, never a Safari whose engine it does not have (CI run 718:
+                // "Safari 27.2" on WebKit 21624.5.1.11.3).
+                let ua = string(probed, "ua")
+                let app = HostSafari.app?.version
+                let named = ua.contains("Version/\(HostSafari.version) ")
+                // One engine: this Mac's Safari. Two: never Safari.app's version.
+                let consistent = HostSafari.declared.sharesEngine ? (app == nil || app == HostSafari.version)
+                    : (app == nil || !ua.contains("Version/\(app ?? "") "))
+                check("surface (macOS): the profile names the Safari of the engine it runs", named && consistent,
+                      "User-Agent \(ua); Safari.app \(app ?? "?") build \(HostSafari.app?.build ?? "?"), this app's WebKit \(WebKitBuild.version), "
+                          + "named \(HostSafari.version)\(HostSafari.declared.sharesEngine ? "" : " (Safari runs a WebKit of its own)")")
+            }
+            let halves = pageAndWorker.components(separatedBy: " / ")
+            if halves.count == 2, halves[1] == "absent" {
+                skip("surface (\(name)): a blob worker answers the storage quota and the time zone as the page does",
+                     "this WebKit gives a worker no navigator.storage")
+            } else {
+                check("surface (\(name)): a blob worker answers the storage quota and the time zone as the page does (no substitution left behind in workers)",
+                      halves.count == 2 && halves[0] == halves[1], "page / worker: \(pageAndWorker)")
+            }
+            // window.browser: WebKit's own WebPageNamespace, as Safari gives every page on the Mac and
+            // on an iPhone (the lead, 8 November: the one difference between an iPhone view's 949 names
+            // and the owner's iPhone's 950); in both iPhone disguises — the engine's, not a script's.
+            check("surface (\(name)): window.browser is WebKit's own, as in Safari (WebPageNamespace: runtime.connect, runtime.sendMessage)",
+                  string(probed, "browserShape") == Self.safariBrowserShape, string(probed, "browserShape"))
+            // window.safari: a macOS profile has it exactly when the Safari it names gives pages one
+            // (up to 27.1); an iPhone view never — no iPhone has it, and there it was a mark of
+            // ours alone (the owner's iPhone and Mac, 8 November).
+            let wantsSafari = generationID == DeviceGenerations.defaultID && SafariVersions.givesWindowSafari(HostSafari.version)
+            check("surface (\(name)): window.safari \(wantsSafari ? "present" : "absent"), as in "
+                    + (generationID == DeviceGenerations.defaultID ? "Safari \(HostSafari.version) on the Mac" : "Safari on an iPhone"),
+                  string(probed, "features.safari") == (wantsSafari ? "object" : "undefined"),
+                  "features.safari \(string(probed, "features.safari")), \(string(probed, "safariShape"))")
+            // The rest of what a page measures of this Mac: an iPhone view's platform and pixel
+            // density are the phone's (above) in both disguises; its screen, touch, pointer and
+            // orientation with the full disguise's script only — without it they are this Mac's,
+            // and so is a worker's platform (no script's trace).
+            if isPhone && !fullPhone {
+                check("surface (\(name)): a blob worker's navigator.platform stays this Mac's (WebKit's setting does not reach workers)",
+                      workerPlatform == "MacIntel", workerPlatform)
+            }
+            let phoneOwn = fullPhone ? ["platform", "screen", "maxTouchPoints", "pointer", "touch", "orientation"]
+                : isPhone ? ["platform", "screen"] : []
+            let nativeKeys = ["platform", "maxTouchPoints", "hardwareConcurrency", "screen", "standalone", "pointer", "touch",
+                              "orientation", "timeZone", "tzOffset", "dateString"]
+                .filter { !phoneOwn.contains($0) }
+            for key in nativeKeys {
                 check("surface (\(name)): native \(key)", string(probed, key) == string(reference, key),
                       "\(string(probed, key)) vs \(string(reference, key))")
             }
@@ -2382,7 +2898,11 @@ final class SelfTest {
     /// PB_SELFTEST_SURFACE_OUT: a directory; one JSON file per probed surface.
     private func writeSurface(_ surface: [String: String], name: String) {
         guard let directory = ProcessInfo.processInfo.environment["PB_SELFTEST_SURFACE_OUT"], !directory.isEmpty else { return }
-        var nested: [String: Any] = [:]
+        // Whose engine: scripts/safari_reference.py tells a profile that cannot be this Safari (Safari
+        // with a WebKit of its own) from one that differs from it.
+        var nested: [String: Any] = ["_engine": [
+            "webKit": WebKitBuild.version, "safariApp": HostSafari.app?.version ?? "?", "safariAppBuild": HostSafari.app?.build ?? "?",
+            "declared": HostSafari.version, "sharesEngine": HostSafari.declared.sharesEngine ? "true" : "false"]]
         for (key, value) in surface {
             let parts = key.split(separator: ".", maxSplits: 1).map(String.init)
             if parts.count == 2 {
@@ -2465,6 +2985,20 @@ final class SelfTest {
         check("proxy location: a service the proxy holds open does not use up the lookup, the next one answers",
               behindHeld.location?.timeZoneIdentifier == "Europe/Berlin" && heldFor < ProxyGeoLookup.nextServiceAfter + 4,
               "\(behindHeld.location?.timeZoneIdentifier ?? "nil") after \(Int(heldFor)) s")
+
+        // A profile's bypass list is for its pages. The lookup is the app's own request about the
+        // proxy and goes through it whatever the list says: around it, it would ask from this Mac's
+        // address (here: a name no resolver knows, so no answer) and be answered with this Mac's
+        // location.
+        ProxyGeoLookup.services = [.init(url: URL(string: "http://geo.selftest.invalid/pb-geo.json?tz=America/Chicago")!,
+                                         timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"])]
+        let bypassing = await ProxyGeoLookup.lookUp(proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort,
+                                                                         excludedDomains: ["geo.selftest.invalid"]),
+                                                    userAgent: "PrivacyBrowser self-test")
+        check("proxy location: a profile's bypass list naming the service does not take the lookup around the proxy",
+              bypassing.location?.timeZoneIdentifier == "America/Chicago"
+                && !bypassing.connections.isEmpty && bypassing.connections.allSatisfy { $0.port == httpPort },
+              "\(bypassing.location?.timeZoneIdentifier ?? "nil"), connections \(bypassing.connections)")
 
         var explicit = stored
         explicit.timeZoneIdentifier = "Asia/Tokyo"
@@ -2917,6 +3451,32 @@ final class SelfTest {
                   result.isAlive && result.exitIP == "203.0.113.21" && result.countryCode == "DE" && result.city == "Berlin",
                   String(describing: result))
         }
+        // Its UDP, tried for real (the lead, 7 November): the proxy with UDP ASSOCIATE carries it from
+        // its pages' address; the plain SOCKS5 refuses the association; with the pages' address not
+        // found out it could not be checked; an HTTP proxy is not tried and says nothing.
+        if let udpPort = port("PB_SELFTEST_SOCKS_UDP_PROXY_PORT"), let socksPort = port("PB_SELFTEST_SOCKS_PROXY_PORT") {
+            let endpoints = ProxyExitLookup.endpoints
+            defer { ProxyExitLookup.endpoints = endpoints }
+            let withUDP = ProxySettings(kind: .socks5, host: loopback, port: udpPort)
+            ProxyExitLookup.endpoints = [URL(string: "http://exit.selftest.invalid/cdn-cgi/trace")!]
+            let carries = await ProxyChecker.check(withUDP)
+            check("proxy checker, UDP: a SOCKS5 proxy that relays UDP from its pages' address — UDP works",
+                  carries.isAlive && carries.udp == .supported && carries.udpLabel == .supported, String(describing: carries))
+            let plain = await ProxyChecker.check(ProxySettings(kind: .socks5, host: loopback, port: socksPort))
+            check("proxy checker, UDP: a SOCKS5 proxy that refuses UDP ASSOCIATE — no UDP, WebRTC will not work with it",
+                  plain.isAlive && plain.udp == .unsupported && plain.udpLabel == .unsupported, String(describing: plain))
+            ProxyExitLookup.endpoints = [URL(string: "http://exit.selftest.invalid/cdn-cgi/trace?ip=203.0.113.78")!]
+            let apart = await ProxyChecker.check(withUDP)
+            check("proxy checker, UDP: UDP that leaves from another address than the pages — no UDP",
+                  apart.isAlive && apart.udp == .elsewhere && apart.udpLabel == .unsupported, String(describing: apart))
+            ProxyExitLookup.endpoints = [URL(string: "http://exit.selftest.invalid/pb-no-trace")!]
+            let unknown = await ProxyChecker.check(withUDP)
+            check("proxy checker, UDP: the pages' address not found out — UDP not checked",
+                  unknown.isAlive && unknown.udp == .exitUnknown && unknown.udpLabel == .unchecked, String(describing: unknown))
+            let http = await ProxyChecker.check(ProxySettings(kind: .httpConnect, host: loopback, port: httpPort))
+            check("proxy checker, UDP: an HTTP proxy is not tried and nothing is said of its UDP",
+                  http.isAlive && http.udp == nil && http.udpLabel == nil, String(describing: http))
+        }
         if let silentPort {
             let silent = await ProxyChecker.check(ProxySettings(kind: .socks5, host: loopback, port: silentPort))
             check("proxy checker: the silent proxy fails as silent, and nothing came back from anywhere",
@@ -3141,18 +3701,6 @@ final class SelfTest {
     /// nil `RunLoop::main()`) when they are the first WebKit use in the process — e.g. "unlock,
     /// then delete a profile" or "unlock, then open an ephemeral profile". Must run before anything
     /// else touches WebKit.
-    /// The tunnel's all-interfaces switch (hardware checks only) is not turned on by a command-line
-    /// argument: only by the app's own saved settings (`DebugSwitches`).
-    private func debugSwitchesStayDebugSwitches() {
-        let arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
-        var withSwitch = arguments
-        withSwitch["PBTunnelAllInterfaces"] = true
-        UserDefaults.standard.setVolatileDomain(withSwitch, forName: UserDefaults.argumentDomain)
-        let turnedOn = DebugSwitches.tunnelAllInterfaces
-        UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
-        check("the tunnel's all-interfaces switch is not turned on by a command-line argument", !turnedOn)
-    }
-
     private func firstWebKitUse(_ repository: ProfileRepository) async throws {
         let vault = WebDataStoreVault(repository: repository)
         let removalsBefore = WebDataStoreVault.removeCallCount
@@ -3520,7 +4068,7 @@ final class SelfTest {
         let copy = repository.root.appendingPathComponent("kept-deleted-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.copyItem(at: folder, to: copy)
         defer { try? FileManager.default.removeItem(at: copy) }
-        try await ProfileManager(repository: repository).delete(profile.id)
+        try await ProfileManager(repository: repository).deleteBecauseThePersonAsked(profile.id)
         let goneAfterDeletion = !FileManager.default.fileExists(atPath: folder.path)
         try FileManager.default.copyItem(at: copy, to: folder) // put back from a backup
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -4538,6 +5086,44 @@ final class SelfTest {
         check("settings: a profile's Dock icon shows the first letters of its name, and none means the app's icon",
               twoLetters && shortName && noLetters && withLetters)
 
+        // The exit country's flag beside the letters: the tile with "DE" differs from the tile
+        // without a country where the flag is drawn, and what changed is mostly Germany's red and
+        // gold (CI run 599: counting gold alone found 3 pixels of the flag, too few to tell). A code
+        // that is no country's draws nothing.
+        func bitmap(_ image: NSImage?) -> NSBitmapImageRep? {
+            image?.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:))
+        }
+        // Red or gold: much more red than blue. The app's icon and the letters have none.
+        func isWarm(_ colour: NSColor) -> Bool { colour.redComponent > 0.55 && colour.redComponent > colour.blueComponent + 0.25 }
+        var changed = 0, warmWith = 0, warmWithout = 0
+        var mean = (red: 0.0, green: 0.0, blue: 0.0)
+        if let with = bitmap(DockIcon.image(initials: 2, of: "North wind", country: "DE")),
+           let without = bitmap(DockIcon.image(initials: 2, of: "North wind")),
+           with.pixelsWide == without.pixelsWide, with.pixelsHigh == without.pixelsHigh {
+            for y in stride(from: 0, to: with.pixelsHigh, by: 2) {
+                for x in stride(from: 0, to: with.pixelsWide, by: 2) {
+                    guard let a = with.colorAt(x: x, y: y)?.usingColorSpace(.sRGB),
+                          let b = without.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                    if isWarm(a) { warmWith += 1 }
+                    if isWarm(b) { warmWithout += 1 }
+                    let difference = abs(a.redComponent - b.redComponent) + abs(a.greenComponent - b.greenComponent)
+                        + abs(a.blueComponent - b.blueComponent)
+                    guard difference > 0.25 else { continue }
+                    changed += 1
+                    mean.red += Double(a.redComponent)
+                    mean.green += Double(a.greenComponent)
+                    mean.blue += Double(a.blueComponent)
+                }
+            }
+        }
+        let count = Double(max(changed, 1))
+        let average = String(format: "%.2f %.2f %.2f", mean.red / count, mean.green / count, mean.blue / count)
+        let flagAlone = DockIcon.image(initials: 0, of: "North wind", country: "DE") != nil
+        let notACountry = DockIcon.image(initials: 0, of: "North wind", country: "XX") == nil
+        check("settings: a profile's Dock icon shows its exit country's flag beside the letters (Germany's red and gold on the tile, none without it); no flag for a code that is no country's",
+              changed > 200 && warmWith > 150 && warmWithout == 0 && flagAlone && notACountry,
+              "pixels changed by the flag \(changed) (every other row and column), their mean colour \(average); red or gold with the flag \(warmWith), without \(warmWithout); the flag alone \(flagAlone); XX drew nothing \(notACountry)")
+
         let a = UUID(), b = UUID(), c = UUID(), d = UUID(), gone = UUID()
         var activity: [(id: UUID, activity: ProfileManager.Activity)] = []
         activity.append((id: a, activity: ProfileManager.Activity.window(ownProcess: false)))
@@ -4563,7 +5149,8 @@ final class SelfTest {
     // MARK: Simplified mode (a profile's window that is not Safari's)
 
     /// A profile whose window is the app's own and not Safari's runs in a simplified mode, and that
-    /// window says so with why (`SimplifiedModeNotice`): its toolbar has the chip, in the toolbar —
+    /// window says so with why (`SimplifiedModeNotice`) — an iPhone or iPad view's, ours by design,
+    /// does not (the owner, 9 November): its toolbar has the chip, in the toolbar —
     /// whose height a page measures — and no taller than what is already there; its reason is the
     /// one the window was opened for; and the chip's popover opens and closes. Every session here
     /// is in this process: a Mac profile's window is ours because the App Sandbox is on (the
@@ -4584,6 +5171,20 @@ final class SelfTest {
                 controller.close()
                 session.shutDown()
                 try? repository.delete(profile.id)
+            }
+            if expected == .deviceProfile {
+                // An iPhone or iPad view's window is ours by design, not a fallback: no chip (the
+                // owner, 9 November). Asked once the toolbar has its profile chip, so not too early.
+                let ready = await waitUntil(timeout: 5) {
+                    controller.window?.toolbar?.items.contains { $0.itemIdentifier.rawValue == "profile" } == true
+                }
+                let chipless = controller.simplifiedChip == nil
+                    && controller.window?.toolbar?.items.contains { $0.itemIdentifier.rawValue == "simplified" } != true
+                check("simplified mode: a \(name) profile's window, ours by design, has no simplified-mode chip",
+                      ready && chipless, "toolbar ready \(ready), chip \(controller.simplifiedChip == nil ? "none" : "there")")
+                check("simplified mode: a \(name) profile's window gives the reason it is not Safari's (\(expected))",
+                      controller.ownWindowReason == expected, "\(controller.ownWindowReason)")
+                continue
             }
             let shown = await waitUntil(timeout: 5) {
                 controller.window?.toolbar?.items.contains { $0.itemIdentifier.rawValue == "simplified" && $0.view === controller.simplifiedChip } == true
@@ -4607,13 +5208,13 @@ final class SelfTest {
             }
         }
         // Every reason says something of its own, and the missing pieces by name.
-        let reasons: [SafariChromeHost.OwnWindowReason] = [.deviceProfile, .sandboxed, .turnedOff, .tunnelProfile, .notInProfileProcess,
+        let reasons: [SafariChromeHost.OwnWindowReason] = [.deviceProfile, .sandboxed, .turnedOff, .notInProfileProcess,
                                                            .frameworksDidNotLoad, .missingPieces(["BrowserWindowController"]),
                                                            .notSafarisApplication, .windowDidNotOpen]
         let texts = reasons.map { SimplifiedModeNotice.reasonText($0) }
-        check("simplified mode: each of the nine reasons is said in words of its own, the missing pieces by name",
+        check("simplified mode: each of the eight reasons is said in words of its own, the missing pieces by name",
               texts.allSatisfy { $0.count > 20 && !$0.contains("simplified.") } && Set(texts).count == reasons.count
-                && texts[6].contains("BrowserWindowController"), texts.joined(separator: " | "))
+                && texts[5].contains("BrowserWindowController"), texts.joined(separator: " | "))
     }
 
     // MARK: A page whose process keeps ending
@@ -4685,6 +5286,10 @@ final class SelfTest {
                   idle < 0.4, "\(Int(idle * 100)) % of a core over 4 s (the control read \(Int(control * 100)) %)")
         }
 
+        // A click on the page, as a person makes one (the owner, 2 November: in a mobile view a tap
+        // on many sites is not taken).
+        await clickReachesPage(controller, tab, "ended page: an iPhone view's page, loaded")
+
         // The page's process ended from outside, as a crash ends it, four times at most. A
         // sandboxed build may not signal another process: there WebKit's own call ends it
         // (`_killWebContentProcess`), which our tab is told of the same way.
@@ -4722,6 +5327,57 @@ final class SelfTest {
         let back = await waitUntil(timeout: 20) { !tab.pageStopped && !tab.isLoading && pid() > 0 && pid() != last }
         check("ended page: Reload asks for the page again", back && !controller.showsStoppedPage,
               "stopped \(tab.pageStopped), process \(pid()), cover shown \(controller.showsStoppedPage)")
+        await clickReachesPage(controller, tab, "ended page: after Reload, the cover hidden again")
+    }
+
+    /// A click at the middle of `tab`'s page in our window: AppKit must give it to the page's web
+    /// view, not to a view laid over it, and — where this window can be key — the page must get it.
+    /// Run 690 (claude/measure-touch, macOS 26.6.2 and 27.0.1): in a mobile view every click's point
+    /// went to NSHostingView<StoppedPageView>, the cover for a page whose process keeps ending, laid
+    /// over the web view and hidden; not one event reached the page.
+    private func clickReachesPage(_ controller: BrowserWindowController, _ tab: BrowserTab, _ name: String) async {
+        guard let window = controller.window, let frame = window.contentView?.superview ?? window.contentView else {
+            check("\(name): a click on the page goes to the page", false, "no window")
+            return
+        }
+        let webView = tab.webView
+        let middle = webView.convert(NSPoint(x: webView.bounds.midX, y: webView.bounds.midY), to: nil)
+        let hit = frame.hitTest(middle)
+        let inPage = hit.map { $0 === webView || $0.isDescendant(of: webView) } ?? false
+        let said = hit.map { String(describing: type(of: $0)) + ($0.isHiddenOrHasHiddenAncestor ? " (hidden)" : "") } ?? "nothing"
+        check("\(name): a click on the page goes to the page, not to a view over it", inPage, "AppKit gives it to \(said)")
+
+        // The click itself, through the window as AppKit hands a person's click on — only where
+        // this window can be key. CI's runners do not let this process be the active app (runs 692,
+        // 694), and a click on a window that is not key is AppKit's "first mouse", which WebKit takes
+        // for activating the window. Handed straight to the view the hit test names it proves
+        // nothing: NSHostingView passes a click it is handed on, and the page counted it with the
+        // hidden cover over it (run 694). The hit test above is the route a person's click takes.
+        _ = try? await webView.evaluateJavaScript(
+            "window.__pbClicks = 0; document.addEventListener('click', (e) => { window.__pbClicks++; e.preventDefault(); }, true); 0")
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        guard await waitUntil(timeout: 3, { window.isKeyWindow }) else {
+            skip("\(name): the page gets a click with the mouse, through the window",
+                 "this window could not be made key here (the app is not active); the hit test above is the route a person's click takes")
+            return
+        }
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            if let event = NSEvent.mouseEvent(with: type, location: middle, modifierFlags: [],
+                                              timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                              context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0) {
+                window.sendEvent(event)
+            }
+            try? await Task.sleep(nanoseconds: 80_000_000)
+        }
+        var clicks = 0
+        for _ in 0..<20 {
+            clicks = (try? await webView.evaluateJavaScript("window.__pbClicks || 0")) as? Int ?? 0
+            if clicks > 0 { break }
+            try? await Task.sleep(nanoseconds: 150_000_000)
+        }
+        check("\(name): the page gets a click with the mouse, through the window", clicks == 1,
+              "the page counted \(clicks) click(s); AppKit gave it to \(said)")
     }
 
     /// The owner, 1 November, a sample of the process: an iPhone view, in its own process as the
@@ -4800,6 +5456,145 @@ final class SelfTest {
         await manager.shutDown()
     }
 
+    /// The keychain between profiles (`KeychainIsolation`): two profiles in processes of their own,
+    /// held to a proxy that goes nowhere, each asked from inside; this process and a process of the
+    /// app's own executable — a profile as it was started before LumenProfile — are the controls.
+    private func keychainBetweenProfiles(_ repository: ProfileRepository) async throws {
+        guard !AppEnvironment.isSandboxed else {
+            for name in [KeychainIsolation.entitlementsName, KeychainIsolation.loginName, KeychainIsolation.itemsName] {
+                skip(name, "the sandboxed build runs no process per profile", .build)
+            }
+            return
+        }
+        let closed = ProfileConfiguration(proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: 1), matchProxyLocation: false)
+        let first = try repository.create(name: "Keychain A", configuration: closed)
+        defer { try? repository.delete(first.id) }
+        let second = try repository.create(name: "Keychain B", configuration: closed)
+        defer { try? repository.delete(second.id) }
+        let manager = ProfileManager(repository: repository)
+        var running: Set<UUID> = []
+        var exited: [UUID: Int32] = [:]
+        manager.onProfileRunning = { id, _ in running.insert(id) }
+        manager.onChildExited = { id, status in exited[id] = status }
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        defer { setenv("PB_PROFILE_PROCESS", "0", 1) }
+        for profile in [first, second] {
+            do {
+                try await manager.launch(profile.id)
+            } catch {
+                for name in [KeychainIsolation.entitlementsName, KeychainIsolation.loginName, KeychainIsolation.itemsName] {
+                    check(name, false, "\(profile.name) did not start: \(error)")
+                }
+                await manager.shutDown()
+                return
+            }
+        }
+        let up = await waitUntil(timeout: 120) { running.isSuperset(of: [first.id, second.id]) || !exited.isEmpty }
+        guard up, exited.isEmpty, manager.processIdentifier(of: first.id) != nil, manager.processIdentifier(of: second.id) != nil else {
+            let why = "the profiles did not both come up in processes of their own (up \(running.count) of 2, ended \(exited))"
+            for name in [KeychainIsolation.entitlementsName, KeychainIsolation.loginName, KeychainIsolation.itemsName] {
+                check(name, false, why)
+            }
+            await manager.shutDown()
+            return
+        }
+        let outcome = await KeychainIsolation.look(manager: manager, profiles: first.id, second.id) { detail in
+            self.info("keychain: \(detail)")
+        }
+        await manager.shutDown()
+        for (name, verdict) in KeychainIsolation.verdicts(outcome) {
+            switch verdict {
+            case .pass: check(name, true)
+            case .fail(let why): check(name, false, why)
+            case .skip(let why):
+                // Not shown in this build, or not with this signature: a build without the network
+                // guard, or one no team signed. An identity of the team's that the keychain then
+                // refused is a check that could not be made where it must be.
+                if outcome.appHoldsTeamIdentity {
+                    check(name, false, why)
+                } else {
+                    skip(name, why, name == KeychainIsolation.entitlementsName ? .build : .machine)
+                }
+            }
+        }
+    }
+
+    /// A person ends a profile two ways: by closing its window, or with Stop in the Profiles window
+    /// while the window is open. Either quits the profile's process, whose quit closes every page
+    /// before the seal (`ProfileNetworkGuard.closeEveryPage`) and then lets Safari's chrome go its
+    /// own way out — which, on the owner's Mac (2 November, macOS 27.0.1), set the find delegate of
+    /// a page closed under it and trapped in -[WKWebView _setFindDelegate:] (the second terminate:
+    /// Safari's tryToTerminate tore its tabs down). Each way here: the process must end by itself,
+    /// status 0 — no crash, no kill — and leave nothing of the profile in plaintext on disk: its
+    /// website data and Safari's home sealed.
+    private func closingTheWindowEndsTheProfile(_ repository: ProfileRepository) async throws {
+        for byStop in [false, true] {
+            try await endAProfile(repository, byStop: byStop)
+        }
+    }
+
+    private func endAProfile(_ repository: ProfileRepository, byStop: Bool) async throws {
+        let name = byStop
+            ? "Safari chrome: Stop with the profile's window open ends its process by itself — no crash, nothing left in plaintext"
+            : "Safari chrome: closing a profile's window as its close button does ends its process by itself — no crash, nothing left in plaintext"
+        guard !AppEnvironment.isSandboxed else {
+            skip(name, "the sandboxed build runs no process per profile", .build)
+            return
+        }
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip(name, "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the page)")
+            return
+        }
+        let profile = try repository.create(name: byStop ? "Stop with the window open" : "Close the window", configuration: ProfileConfiguration(
+            startURL: URL(string: "http://proxied.selftest.invalid/one"),
+            proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), matchProxyLocation: false))
+        defer { try? repository.delete(profile.id) }
+        let manager = ProfileManager(repository: repository)
+        var messages: [String] = []
+        manager.onError = { messages.append($0) }
+        var hostsChrome: Bool?
+        manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
+        var exited: Int32?
+        manager.onChildExited = { _, status in exited = status }
+        manager.onChildStopped = { _, status in exited = status }
+        var sealReport: ProfileSealReport?
+        manager.onChildSealed = { _, report in sealReport = report }
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        do {
+            try await manager.launch(profile.id)
+        } catch {
+            setenv("PB_PROFILE_PROCESS", "0", 1)
+            check(name, false, "its process did not start: \(error)")
+            return
+        }
+        setenv("PB_PROFILE_PROCESS", "0", 1)
+        if let pid = manager.processIdentifier(of: profile.id) { info("egress-pid \(pid)") }
+        let up = await waitUntil(timeout: 90) { hostsChrome != nil || exited != nil }
+        guard up, hostsChrome == true, exited == nil else {
+            check(name, false, "Safari's window did not come up in the profile's process (running \(String(describing: hostsChrome)), ended \(exited.map(String.init) ?? "no"))")
+            await manager.shutDown()
+            return
+        }
+        // The page loads; then the profile is ended as a person ends it, and nothing else is asked.
+        try? await Task.sleep(nanoseconds: 4_000_000_000)
+        if byStop {
+            try? await manager.stop(profile.id)
+        } else {
+            _ = manager.closeWindows(profile.id)
+        }
+        let ended = await waitUntil(timeout: 60) { exited != nil }
+        // Nothing of the profile in plaintext on disk, as the update's gate looks for it (UpdateGate).
+        let folder = repository.directory(for: profile.id)
+        let plaintext = WebDataStoreVault.discoverDirectories(for: profile.id).map(\.lastPathComponent)
+            + ["home.noindex", "home"].filter { FileManager.default.fileExists(atPath: folder.appendingPathComponent($0).path) }
+        info("\(byStop ? "stop with the window open" : "closing a profile's window"): the process ended with status \(exited.map(String.init) ?? "none"), its seal "
+             + (sealReport.map { "\($0.forced ? "forced" : "not forced"), pages closed first \($0.pagesClosed)" } ?? "not reported"))
+        check(name, ended && exited == 0 && sealReport != nil && plaintext.isEmpty,
+              "ended \(ended ? "with status \(exited.map(String.init) ?? "?")" : "NOT within 60 s"), seal \(sealReport == nil ? "NOT reported" : "reported"), "
+              + "in plaintext: \(plaintext.isEmpty ? "nothing" : plaintext.joined(separator: ", ")), messages \(messages)")
+        if !ended { await manager.shutDown() }
+    }
+
     private func mobileViewInItsOwnProcess(_ repository: ProfileRepository) async throws {
         let name = "mobile view process: an iPhone view in its own process, idle, does not keep it busy"
         guard !AppEnvironment.isSandboxed else {
@@ -4869,6 +5664,621 @@ final class SelfTest {
         } else {
             skip(name, "the iPhone view's process did not come up")
         }
+        try? await manager.stop(profile.id)
+    }
+
+    /// What a page is told of the processor count (`navigator.hardwareConcurrency`), everywhere it
+    /// can ask — the page, a dedicated worker made from a blob, one loaded from a URL and one inside
+    /// another, a shared worker, a service worker, a frame of the same origin, one of another
+    /// origin and an empty one — in a profile's own process, started as the app starts one, on a
+    /// Mac with ten cores: CI's runners have three, where WebKit says 4 whatever it is told, so this
+    /// process stands in for the Mac (`ProfileProcess.machineProcessorCoresStandIn`), as the real
+    /// count would reach WebKit. A Mac profile must then see 8 everywhere — the control: the stand-in
+    /// reached WebKit — and an iPhone view 4 everywhere, an iPhone's (the owner, 7 November: the
+    /// iPhone says 4, a Mac with eight cores or more 8). WebKit's own value in each, so the getter
+    /// stays the engine's (native text, nothing on `navigator` itself); scripts/cores_page.py is
+    /// the page (served by scripts/selftest_proxy.py at /pb-cores).
+    private func processorCountInOwnProcess(_ repository: ProfileRepository) async throws {
+        let prefix = "processor count"
+        guard !AppEnvironment.isSandboxed else {
+            skip("\(prefix): an iPhone view says an iPhone's in its pages, frames and workers",
+                 "the sandboxed build runs no process per profile", .build)
+            return
+        }
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("\(prefix): an iPhone view says an iPhone's in its pages, frames and workers",
+                 "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the page)")
+            return
+        }
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        let givenProcess = ProcessInfo.processInfo.environment["PB_PROFILE_PROCESS"]
+        ProfileProcess.machineProcessorCoresStandIn = 10
+        defer {
+            ProfileProcess.machineProcessorCoresStandIn = nil
+            if let givenProcess { setenv("PB_PROFILE_PROCESS", givenProcess, 1) } else { unsetenv("PB_PROFILE_PROCESS") }
+        }
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        let places = ["page", "blobWorker", "urlWorker", "nestedWorker", "sharedWorker", "serviceWorker",
+                      "sameOriginFrame", "otherOriginFrame", "blankFrame"]
+        for (generationID, expected, what) in [("macos-26", 8, "a Mac profile (the control: the stand-in reached WebKit)"),
+                                                ("ios-27", 4, "an iPhone view (iOS 27)"), ("ios-26", 4, "an iPhone view (iOS 26)")] {
+            let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
+            // No proxy: the page is on this Mac, which a profile reaches directly.
+            let profile = try repository.create(name: "Processor count \(generationID)", configuration: ProfileConfiguration(
+                startURL: URL(string: "http://127.0.0.1:\(httpPort)/pb-cores?run=\(run)"), ephemeral: true,
+                deviceGenerationID: generationID, matchProxyLocation: false))
+            defer { try? repository.delete(profile.id) }
+            let manager = ProfileManager(repository: repository)
+            var launchError = ""
+            do { try await manager.launch(profile.id) } catch { launchError = String(describing: error) }
+            let ownProcess = manager.processIdentifier(of: profile.id) != nil
+            var report: [String: Any] = [:]
+            if launchError.isEmpty {
+                for _ in 0..<30 where report.isEmpty {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    let url = URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!
+                    if let text = try? await loadThroughProxy(repository, proxy, url: url),
+                       let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] {
+                        report = (object["reports"] as? [[String: Any]] ?? []).first { $0["page"] != nil } ?? [:]
+                    }
+                }
+            }
+            // A number, or "<number> <getter native>" from a worker that also reports its getter.
+            func count(_ place: String) -> String { String(describing: report[place] ?? "nil").components(separatedBy: " ").first ?? "nil" }
+            let seen = places.map { "\($0) \(String(describing: report[$0] ?? "nil"))" }.joined(separator: ", ")
+            info("\(prefix): \(what): \(seen); getter native \(report["getterNative"] ?? "nil"), own properties on navigator \(report["navigatorOwn"] ?? "nil")")
+            check("\(prefix): \(what) says \(expected) in the page, every worker and every frame",
+                  ownProcess && !report.isEmpty && places.allSatisfy { count($0) == String(expected) },
+                  report.isEmpty ? "no report (own process \(ownProcess)\(launchError.isEmpty ? "" : ", launch \(launchError)"))" : seen)
+            check("\(prefix): \(what) — the getter is the engine's (native text in the page and in workers, nothing on navigator)",
+                  report["getterNative"] as? Bool == true && (report["navigatorOwn"] as? NSNumber)?.intValue == 0
+                    && ["blobWorker", "urlWorker"].allSatisfy { String(describing: report[$0] ?? "").hasSuffix(" true") },
+                  report.isEmpty ? "no report" : "page \(report["getterNative"] ?? "nil"), navigator's own \(report["navigatorOwn"] ?? "nil"), "
+                    + "workers \(report["blobWorker"] ?? "nil") / \(report["urlWorker"] ?? "nil")")
+            try? await manager.stop(profile.id)
+        }
+    }
+
+    /// An iPhone view's window used as a person uses a phone's Safari (the owner, 8 November: no way
+    /// to open a second tab, no list of tabs, the search engine of the profile's settings not used),
+    /// in the profile's own process, its controls pressed as VoiceOver presses them (`WindowProbe`):
+    /// the bottom bar's tabs button opens the overview, + there opens a second tab, the overview then
+    /// lists two, the first one's × closes it; ⌘T from the menu bar opens a tab; a drag along the
+    /// bottom bar goes to the next tab and back. A search typed into the address bar goes to the
+    /// engine of the profile's settings — chosen while the profile runs — as the proxy sees it; and
+    /// in a profile in Safari's window, to the engine chosen there (it was Google for every profile).
+    private func phoneWindowAndSearch(_ repository: ProfileRepository) async throws {
+        let prefix = "phone window"
+        guard !AppEnvironment.isSandboxed else {
+            skip("\(prefix): tabs as on an iPhone, and the search engine of the profile",
+                 "the sandboxed build runs no process per profile", .build)
+            return
+        }
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("\(prefix): tabs as on an iPhone, and the search engine of the profile",
+                 "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
+            return
+        }
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        let givenProcess = ProcessInfo.processInfo.environment["PB_PROFILE_PROCESS"]
+        defer { if let givenProcess { setenv("PB_PROFILE_PROCESS", givenProcess, 1) } else { unsetenv("PB_PROFILE_PROCESS") } }
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(10)).lowercased()
+
+        func act(_ manager: ProfileManager, _ id: UUID, _ action: WindowProbeAction, timeout: TimeInterval = 25) async -> WindowLook {
+            var look: WindowLook?
+            manager.onWindowLook = { _, answer in look = answer }
+            guard manager.lookAtWindow(id, action) else { return WindowLook(action: "\(action)", detail: "no process") }
+            _ = await waitUntil(timeout: timeout) { look != nil }
+            if look == nil, let pid = manager.processIdentifier(of: id) {
+                // No answer: where the profile's main thread is (CI 759 — the window's actions without a
+                // menu bar never came back, and nothing said why).
+                for line in await Self.mainThreadStack(of: pid) { info("\(prefix): no answer to \(action), main thread: \(line)") }
+            }
+            let seen = look ?? WindowLook(action: "\(action)", detail: "no answer")
+            info("\(prefix): \(seen.action) → found \(seen.found), tabs \(seen.tabs), selected \(seen.selected), "
+                 + "overview \(seen.overviewShown), controls \(seen.controls.filter { $0.hasPrefix("mobile") }.joined(separator: " ")), "
+                 + "menu \(seen.menuItems.prefix(6).joined(separator: ", "))\(seen.detail.isEmpty ? "" : ", \(seen.detail)")")
+            return seen
+        }
+        func targets(since: Int) async -> (count: Int, hosts: [String]) {
+            let url = URL(string: "http://proxied.selftest.invalid/pb-targets.json?since=\(since)")!
+            guard let text = try? await loadThroughProxy(repository, proxy, url: url),
+                  let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { return (since, []) }
+            return (object["count"] as? Int ?? since, (object["targets"] as? [String] ?? []).map { $0.lowercased() })
+        }
+        func launch(_ configuration: ProfileConfiguration, _ name: String) async throws -> (ProfileManager, UUID, Bool?) {
+            let profile = try repository.create(name: name, configuration: configuration)
+            let manager = ProfileManager(repository: repository)
+            var hostsChrome: Bool?
+            manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
+            do { try await manager.launch(profile.id) } catch { info("\(prefix): \(name) did not start: \(error)") }
+            _ = await waitUntil(timeout: 90) { hostsChrome != nil }
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            return (manager, profile.id, hostsChrome)
+        }
+
+        // An iPhone view.
+        let (phone, phoneID, _) = try await launch(ProfileConfiguration(
+            startURL: URL(string: "http://proxied.selftest.invalid/one?phone=\(run)"), proxy: proxy, ephemeral: true,
+            deviceGenerationID: "ios-27", matchProxyLocation: false, searchEngine: .duckDuckGo), "Phone window")
+        defer { try? repository.delete(phoneID) }
+        let start = await act(phone, phoneID, .describe)
+        // Every action a person takes in the window (the owner, 8 November: text would not paste in
+        // an iPhone view). The control first: the same keys with the menu bar emptied, as 0.1.4's
+        // process had none — paste must not work there, or the check sees nothing.
+        let bare = await act(phone, phoneID, .audit(withoutMenu: true), timeout: 150)
+        let barePaste = bare.detail.split(separator: "\n").first { $0.hasPrefix("address bar ⌘V") }.map(String.init) ?? "no answer"
+        check("\(prefix) actions: the control — without a menu bar (0.1.4), ⌘V does not paste into the address bar",
+              barePaste.hasSuffix("DOES NOT WORK"), barePaste)
+        let audit = await act(phone, phoneID, .audit(withoutMenu: false), timeout: 150)
+        let auditLines = audit.detail.split(separator: "\n").map(String.init)
+        let judged = auditLines.filter { $0.hasSuffix("— WORKS") || $0.hasSuffix("— DOES NOT WORK") }
+        for line in auditLines where !judged.contains(line) { info("\(prefix) actions: \(line)") }
+        let verdicts = judged.count
+        for line in judged {
+            check("\(prefix) actions: \(String(line.prefix { $0 != ":" }))", line.hasSuffix("— WORKS"), line)
+        }
+        check("\(prefix) actions: the window's actions were all pressed (at least 24 answered)", verdicts >= 24, "\(verdicts) answered")
+        // A press with the mouse is a phone's tap (the full disguise, on by default): a field takes
+        // it, a page that cancels touchstart gets no mouse events, click or focus from it.
+        let taps = tapsHeard(await act(phone, phoneID, .tap))
+        tapChecks(taps, prefix: prefix, disguised: true)
+        let firstPicture = await act(phone, phoneID, .picture)
+        if let base64 = firstPicture.picture, let data = Data(base64Encoded: base64),
+           let folder = ProcessInfo.processInfo.environment["PB_SELFTEST_SHOTS"] {
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            try? data.write(to: URL(fileURLWithPath: folder).appendingPathComponent("phone-page.png"))
+        }
+        check("\(prefix): the bottom bar has the tabs button, as Safari on an iPhone (Back, the address, Tabs)",
+              ["mobile-back", "mobile-address", "mobile-tabs"].allSatisfy(start.controls.contains),
+              "controls: \(start.controls.joined(separator: " "))")
+        let overview = await act(phone, phoneID, .press("mobile-tabs"))
+        check("\(prefix): the tabs button opens the tab overview", overview.found && overview.overviewShown, overview.detail)
+        let added = await act(phone, phoneID, .press("mobile-new-tab"))
+        check("\(prefix): + in the overview opens a new tab — two tabs, the overview closed",
+              added.found && added.tabs == 2 && !added.overviewShown, "tabs \(added.tabs), overview \(added.overviewShown)")
+        let listed = await act(phone, phoneID, .press("mobile-tabs"))
+        check("\(prefix): the overview then lists both tabs, a card each",
+              listed.overviewShown && listed.controls.contains("mobile-tab-card-0") && listed.controls.contains("mobile-tab-card-1"),
+              listed.controls.filter { $0.hasPrefix("mobile-tab") }.joined(separator: " "))
+        // What the overview looks like, kept for a person to compare with an iPhone's (PB_SELFTEST_SHOTS).
+        let shots = ProcessInfo.processInfo.environment["PB_SELFTEST_SHOTS"].map { URL(fileURLWithPath: $0) }
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent("pb-phone-\(run)")
+        func keep(_ name: String) async {
+            let look = await act(phone, phoneID, .picture)
+            guard let base64 = look.picture, let data = Data(base64Encoded: base64) else { return }
+            try? FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+            try? data.write(to: shots.appendingPathComponent("phone-\(name).png"))
+            info("\(prefix): picture of the \(name) kept in \(shots.path)")
+        }
+        await keep("overview")
+        let closed = await act(phone, phoneID, .press("mobile-tab-close-0"))
+        check("\(prefix): a card's × closes that tab — one left", closed.found && closed.tabs == 1, "tabs \(closed.tabs)")
+        _ = await act(phone, phoneID, .press("mobile-tabs-done"))
+        let menu = await act(phone, phoneID, .shortcut("t"))
+        check("\(prefix): the menu bar has New Tab (⌘T), and ⌘T opens a tab",
+              menu.menuItems.contains { $0.hasPrefix("⌘T ") } && menu.found && menu.tabs == 2,
+              "tabs \(menu.tabs), menu \(menu.menuItems.joined(separator: ", "))")
+        let swiped = await act(phone, phoneID, .dragBottomBar(-160))
+        let back = await act(phone, phoneID, .dragBottomBar(160))
+        check("\(prefix): a drag along the bottom bar goes to the other tab, and back",
+              swiped.found && swiped.tabs == 2 && back.tabs == 2 && swiped.selected != menu.selected && back.selected == menu.selected,
+              "selected \(menu.selected) → \(swiped.selected) → \(back.selected)")
+        // The engine changed in the profile's settings while it runs, as the editor saves it.
+        var changed = try repository.loadConfiguration(phoneID)
+        changed.searchEngine = .bing
+        try repository.saveConfiguration(changed, for: phoneID)
+        let before = await targets(since: 0)
+        let searched = await act(phone, phoneID, .search("pbq\(run) weather"))
+        try? await Task.sleep(nanoseconds: 4_000_000_000)
+        let after = await targets(since: before.count)
+        check("\(prefix): a search from the address bar goes to the engine of the profile's settings (Bing, chosen while it ran)",
+              searched.found && after.hosts.contains { $0.hasPrefix("www.bing.com") }
+                && !after.hosts.contains { $0.hasPrefix("duckduckgo.com") || $0.hasPrefix("www.google.com") },
+              "requests after the search: \(after.hosts.joined(separator: " ")), tabs \(searched.urls.joined(separator: " "))")
+        try? await phone.stop(phoneID)
+
+        // The control: an iPhone view without the full disguise hears a press as a Mac's click —
+        // the tap check above would see nothing if the press never reached the page.
+        let (plain, plainID, _) = try await launch(ProfileConfiguration(
+            startURL: URL(string: "http://proxied.selftest.invalid/one?plain=\(run)"), proxy: proxy, ephemeral: true,
+            deviceGenerationID: "ios-27", matchProxyLocation: false, phoneDisguise: .engineOnly), "Phone window, no script's trace")
+        defer { try? repository.delete(plainID) }
+        tapChecks(tapsHeard(await act(plain, plainID, .tap)), prefix: "\(prefix), no script's trace", disguised: false)
+        try? await plain.stop(plainID)
+
+        // A profile in Safari's window: Safari's address bar, the profile's engine.
+        let (desk, deskID, hosts) = try await launch(ProfileConfiguration(
+            startURL: URL(string: "http://proxied.selftest.invalid/one?desk=\(run)"), proxy: proxy, ephemeral: true,
+            matchProxyLocation: false, searchEngine: .bing), "Search in Safari's window")
+        defer { try? repository.delete(deskID) }
+        if hosts == true {
+            let deskBefore = await targets(since: 0)
+            let deskSearch = await act(desk, deskID, .search("pbq\(run) news"))
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            let deskAfter = await targets(since: deskBefore.count)
+            check("\(prefix): in Safari's window, a search from its address bar goes to the profile's engine (Bing), not Google",
+                  deskSearch.found && deskAfter.hosts.contains { $0.hasPrefix("www.bing.com") }
+                    && !deskAfter.hosts.contains { $0.hasPrefix("www.google.com") },
+                  "\(deskSearch.detail); requests after the search: \(deskAfter.hosts.joined(separator: " "))")
+        } else {
+            skip("\(prefix): in Safari's window, a search goes to the profile's engine",
+                 hosts == nil ? "the profile's process did not report its window" : "Safari's chrome is not hosted here")
+        }
+        try? await desk.stop(deskID)
+    }
+
+    /// The main thread of a process that does not answer, as `sample` sees it over two seconds: the
+    /// frames of its heaviest path, innermost last, at most 40.
+    static func mainThreadStack(of pid: Int32) async -> [String] {
+        await Task.detached { () -> [String] in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/sample")
+            process.arguments = [String(pid), "2", "-mayDie"]
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = Pipe()
+            guard (try? process.run()) != nil else { return ["sample could not run"] }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            let lines = String(decoding: data, as: UTF8.self).split(separator: "\n").map(String.init)
+            guard let start = lines.firstIndex(where: { $0.contains("com.apple.main-thread") }) else {
+                return ["no main thread in sample's output (\(lines.count) lines)"]
+            }
+            // The first path down the call graph (sample lists the heaviest child first): each line
+            // kept is deeper than the one before.
+            var frames: [String] = []
+            var depth = -1
+            for line in lines[(start + 1)...] {
+                guard line.hasPrefix("    ") else { break }
+                let indent = line.prefix { " +!:|".contains($0) }.count
+                let rest = line.dropFirst(indent)
+                guard rest.first?.isNumber == true, indent > depth else { continue }
+                depth = indent
+                frames.append(String(rest.drop { $0.isNumber || $0 == " " }.prefix(170)))
+            }
+            return Array(frames.suffix(40))
+        }.value
+    }
+
+    /// What `WindowProbeAction.tap` brought back: for each thing pressed, the events in the order
+    /// the page heard them and what had the focus.
+    private struct TapsHeard {
+        var events: [String: [[String: Any]]] = [:]
+        var focused: [String: String] = [:]
+        var pressed: [String: [Int]] = [:]
+        var raw = ""
+        func types(_ name: String) -> [String] { (events[name] ?? []).compactMap { $0["type"] as? String } }
+        func count(_ name: String, _ type: String) -> Int { types(name).filter { $0 == type }.count }
+    }
+
+    private func tapsHeard(_ look: WindowLook) -> TapsHeard {
+        var heard = TapsHeard()
+        heard.raw = look.detail
+        guard let object = (try? JSONSerialization.jsonObject(with: Data(look.detail.utf8))) as? [String: Any] else { return heard }
+        for (name, value) in object {
+            guard let entry = value as? [String: Any] else { continue }
+            heard.pressed[name] = entry["pressed"] as? [Int]
+            let page = entry["heard"] as? [String: Any]
+            heard.events[name] = page?["taps"] as? [[String: Any]] ?? []
+            heard.focused[name] = page?["focused"] as? String ?? ""
+        }
+        return heard
+    }
+
+    private func tapChecks(_ taps: TapsHeard, prefix: String, disguised: Bool) {
+        let field = taps.types("field")
+        info("\(prefix) tap: a field heard \(field.joined(separator: ", ")); focus \(taps.focused["field"] ?? "?")")
+        info("\(prefix) tap: touchstart cancelled — a button heard \(taps.types("cancel").joined(separator: ", ")), "
+             + "a field heard \(taps.types("guarded").joined(separator: ", ")); focus \(taps.focused["guarded"] ?? "?")")
+        let pointerTypes = Set((taps.events["field"] ?? []).filter { ($0["type"] as? String)?.hasPrefix("pointer") == true }
+            .compactMap { $0["pointerType"] as? String })
+        guard disguised else {
+            check("\(prefix) tap: the control — a press is a Mac's click: no touch events, the click and the focus",
+                  taps.count("field", "touchstart") == 0 && taps.count("field", "touchend") == 0 && taps.count("field", "click") == 1
+                    && taps.focused["field"] == "pb-tap-field" && pointerTypes == ["mouse"],
+                  "heard \(field.joined(separator: ", ")); pointer \(pointerTypes.sorted().joined(separator: ",")); "
+                    + "focus \(taps.focused["field"] ?? "?"); \(taps.raw.prefix(300))")
+            return
+        }
+        let start = (taps.events["field"] ?? []).first { $0["type"] as? String == "touchstart" }
+        let at = start?["at"] as? [Int] ?? []
+        let pressed = taps.pressed["field"] ?? []
+        let near = at.count == 2 && pressed.count == 2 && abs(at[0] - pressed[0]) <= 3 && abs(at[1] - pressed[1]) <= 3
+        check("\(prefix) tap: a press on a field is a phone's tap — touchstart and touchend once, where it was pressed, one touch",
+              taps.count("field", "touchstart") == 1 && taps.count("field", "touchend") == 1 && near
+                && start?["touches"] as? Int == 1 && start?["cancelable"] as? Bool == true,
+              "heard \(field.joined(separator: ", ")); touch at \(at), pressed at \(pressed)")
+        check("\(prefix) tap: then the click, once, and the field takes the focus (a search box can be typed into)",
+              taps.count("field", "click") == 1 && taps.focused["field"] == "pb-tap-field",
+              "clicks \(taps.count("field", "click")), focus \(taps.focused["field"] ?? "?")")
+        check("\(prefix) tap: the pointer events say touch", pointerTypes == ["touch"], pointerTypes.sorted().joined(separator: ","))
+        let cancelled = taps.types("cancel")
+        check("\(prefix) tap: a cancelled touchstart takes the mouse events and the click away, as on a phone",
+              taps.count("cancel", "touchstart") == 1 && !cancelled.contains("mousedown") && !cancelled.contains("mouseup")
+                && !cancelled.contains("click"),
+              "heard \(cancelled.joined(separator: ", "))")
+        check("\(prefix) tap: a field whose touchstart is cancelled does not take the focus",
+              taps.count("guarded", "touchstart") == 1 && taps.focused["guarded"] != "pb-tap-guarded",
+              "heard \(taps.types("guarded").joined(separator: ", ")); focus \(taps.focused["guarded"] ?? "?")")
+    }
+
+    /// The interface's language and the language websites see are apart, both ways (the owner, 1
+    /// November: an interface in Russian, a profile that looks American to every site). A profile's
+    /// own process, started as the app starts one, twice: the interface Russian and the profile's
+    /// language German, then the interface English and the profile's language Russian — in each
+    /// pair the language the other side would show were they linked either way, and neither this
+    /// Mac's (CI's runners are English). Its pages must see the profile's language
+    /// (`navigator.language`, `navigator.languages`, `Accept-Language`, as "What sites see" reads
+    /// them), and the process must say it took the interface's: its own words, its bundles' (AppKit),
+    /// Safari's chrome's.
+    private func interfaceApartFromWebsites(_ repository: ProfileRepository) async throws {
+        guard !AppEnvironment.isSandboxed else {
+            skip("languages: the interface's and the websites' apart in a profile's own process",
+                 "the sandboxed build runs no process per profile", .build)
+            return
+        }
+        let given = ProcessInfo.processInfo.environment["PRIVACYBROWSER_LANG"]
+        defer {
+            if let given { setenv("PRIVACYBROWSER_LANG", given, 1) } else { unsetenv("PRIVACYBROWSER_LANG") }
+        }
+        // The owner, 7 November: Safari's chrome and the process's bundles (AppKit) take the websites'
+        // language unless "Profile menus in the app's language" is on; Lumen's own words are the
+        // interface's either way.
+        for (interface, websites, menusInAppLanguage) in [("ru", "de-DE", false), ("en", "ru-RU", false), ("ru", "de-DE", true)] {
+            let pair = "interface \(interface), the profile's language \(websites)\(menusInAppLanguage ? ", menus in the app's language" : "")"
+            let menus = menusInAppLanguage ? interface : String(websites.prefix(2))
+            var configuration = ProfileConfiguration(ephemeral: true)
+            configuration.languageOverride = websites
+            configuration.menusInAppLanguage = menusInAppLanguage
+            let profile = try repository.create(name: "Languages \(interface) \(websites)", configuration: configuration)
+            defer { try? repository.delete(profile.id) }
+            let manager = ProfileManager(repository: repository)
+            var reported: (code: String, bundles: String, chrome: String?)?
+            manager.onInterfaceLanguage = { _, code, bundles, chrome in reported = (code, bundles, chrome) }
+            var launchError = ""
+            let snapshot = WhatSitesSee(profileID: profile.id, manager: { manager }, launch: { id in
+                do { try await manager.launch(id) } catch { launchError = String(describing: error) }
+            })
+            // This process's interface stays as it is; the profile's process is given this one.
+            setenv("PRIVACYBROWSER_LANG", interface, 1)
+            setenv("PB_PROFILE_PROCESS", "1", 1)
+            await snapshot.take()
+            setenv("PB_PROFILE_PROCESS", "0", 1)
+            let ownProcess = manager.processIdentifier(of: profile.id) != nil
+            _ = await waitUntil(timeout: 10) { reported != nil }
+            let values = snapshot.profileSnapshot?.values ?? [:]
+            let language = values["probe.language"] ?? "nil", languages = values["probe.languages"] ?? "nil"
+            let accept = values["headers.navigation.accept-language"] ?? "nil"
+            // By the language itself: WebKit gives a page "ru" for (ru-RU) and "de-DE" for (de-DE)
+            // (CI run 580), as Safari does for the same list.
+            func primary(_ tag: String) -> String { String(tag.lowercased().prefix { $0.isLetter }) }
+            let wanted = primary(websites)
+            info("languages: \(pair): pages see navigator.language \(language), navigator.languages \(languages), "
+                 + "Accept-Language \(accept); its process: \(reported.map { "words \($0.code), bundles \($0.bundles), chrome \($0.chrome ?? "not hosted")" } ?? "said nothing")")
+            check("languages: \(pair) — its pages see \(websites) (navigator.language, navigator.languages, Accept-Language)",
+                  ownProcess && primary(language) == wanted && primary(languages) == wanted && primary(accept) == wanted,
+                  "own process \(ownProcess), navigator.language \(language), navigator.languages \(languages), "
+                  + "Accept-Language \(accept), step \(snapshot.step)\(launchError.isEmpty ? "" : ", launch \(launchError)")")
+            check("languages: \(pair) — its process: Lumen's words \(interface), its bundles' (AppKit) \(menus)",
+                  reported?.code == interface && reported?.bundles == menus,
+                  reported.map { "words \($0.code), bundles \($0.bundles)" } ?? "the process did not say")
+            if let chrome = reported?.chrome {
+                check("languages: \(pair) — Safari's chrome in its window \(menus)", chrome == menus, chrome)
+            } else {
+                skip("languages: \(pair) — Safari's chrome in its window \(menus)",
+                     reported == nil ? "the process did not say" : "Safari's chrome is not hosted in this process")
+            }
+            try? await manager.stop(profile.id)
+        }
+    }
+
+    /// Languages per profile (the lead, 7 November: "the language websites see is one for the whole
+    /// app, the first profile started in the run sets it"). Measured, not assumed, each profile in
+    /// a process of its own as the released build runs them:
+    /// (1) two profiles whose proxies exit in different countries (Finland, the United States),
+    ///     both running at once: what each one's pages see of language, formats, the browser's own
+    ///     words and labels, and time zone — the first read again while the second runs;
+    /// (2) a profile whose proxy exited in Finland at its last launch and exits in the United States
+    ///     now: what its process starts with;
+    /// (3) one profile, the websites' language fixed (en-US), started with the interface in Russian,
+    ///     in English and in Russian again: every value its page reads, compared between the
+    ///     languages, the two Russian runs the control for what differs from one run to the next.
+    private func languagesPerProfile(_ repository: ProfileRepository) async throws {
+        let prefix = "languages per profile"
+        guard !AppEnvironment.isSandboxed else {
+            skip("\(prefix): each profile's process its own language", "the sandboxed build runs no process per profile", .build)
+            return
+        }
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("\(prefix): each profile's process its own language", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
+            return
+        }
+        let services = ProxyGeoLookup.services
+        let givenProcess = ProcessInfo.processInfo.environment["PB_PROFILE_PROCESS"]
+        let givenLanguage = ProcessInfo.processInfo.environment["PRIVACYBROWSER_LANG"]
+        defer {
+            ProxyGeoLookup.services = services
+            if let givenProcess { setenv("PB_PROFILE_PROCESS", givenProcess, 1) } else { unsetenv("PB_PROFILE_PROCESS") }
+            if let givenLanguage { setenv("PRIVACYBROWSER_LANG", givenLanguage, 1) } else { unsetenv("PRIVACYBROWSER_LANG") }
+        }
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        func exits(in country: String, zone: String) {
+            ProxyGeoLookup.services = [.init(url: URL(string: "http://geo.selftest.invalid/pb-geo.json?country=\(country)&tz=\(zone)")!,
+                                             timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"])]
+        }
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        let manager = ProfileManager(repository: repository)
+        var messages: [String] = []
+        manager.onError = { messages.append($0) }
+        func primary(_ tag: String) -> String { String(tag.lowercased().prefix { $0.isLetter }) }
+        struct Seen { var values: [String: String]; var ownProcess: Bool; var error: String }
+        func look(_ id: UUID) async -> Seen {
+            var launchError = ""
+            let snapshot = WhatSitesSee(profileID: id, manager: { manager }, launch: { id in
+                do { try await manager.launch(id) } catch { launchError = String(describing: error) }
+            })
+            await snapshot.take()
+            return Seen(values: snapshot.profileSnapshot?.values ?? [:], ownProcess: manager.processIdentifier(of: id) != nil,
+                        error: launchError.isEmpty ? "\(snapshot.step)" : launchError)
+        }
+        let localeKeys = ["probe.language", "probe.languages", "headers.navigation.accept-language", "probe.intlLocale",
+                          "probe.localeFormats", "probe.validationMessages", "probe.controlWidths", "probe.dateString", "probe.timeZone"]
+        func describe(_ seen: Seen) -> String {
+            localeKeys.map { "\($0.replacingOccurrences(of: "probe.", with: "")) \(seen.values[$0] ?? "nil")" }.joined(separator: "; ")
+                + "; own process \(seen.ownProcess)\(seen.values.isEmpty ? ", \(seen.error)" : "")"
+        }
+        func sees(_ seen: Seen, _ language: String, _ zone: String) -> Bool {
+            let wanted = primary(language)
+            return seen.ownProcess
+                && primary(seen.values["probe.language"] ?? "") == wanted && primary(seen.values["probe.languages"] ?? "") == wanted
+                && primary(seen.values["headers.navigation.accept-language"] ?? "") == wanted
+                && primary(seen.values["probe.intlLocale"] ?? "") == wanted && seen.values["probe.timeZone"] == zone
+        }
+        func profile(_ name: String, remembered: ProxyLocation? = nil, language: String? = nil, proxied: Bool = true) throws -> UUID {
+            var configuration = ProfileConfiguration(proxy: proxied ? proxy : nil, ephemeral: true)
+            configuration.matchProxyLocation = proxied
+            configuration.lastProxyLocation = remembered
+            configuration.languageOverride = language
+            return try repository.create(name: name, configuration: configuration).id
+        }
+
+        // (1) Two countries at once.
+        let finnish = try profile("Languages: Finland")
+        let american = try profile("Languages: United States")
+        defer { try? repository.delete(finnish); try? repository.delete(american) }
+        exits(in: "FI", zone: "Europe/Helsinki")
+        let first = await look(finnish)
+        exits(in: "US", zone: "America/New_York")
+        let second = await look(american)
+        let firstAgain = await look(finnish)
+        info("\(prefix): Finland, alone: \(describe(first))")
+        info("\(prefix): the United States, Finland running: \(describe(second))")
+        info("\(prefix): Finland again, the United States running: \(describe(firstAgain))")
+        check("\(prefix): two profiles at once, proxies in Finland and the United States — each one's pages see its own country's language and time zone",
+              sees(first, "fi-FI", "Europe/Helsinki") && sees(second, "en-US", "America/New_York") && sees(firstAgain, "fi-FI", "Europe/Helsinki"),
+              "Finland: \(describe(first)) | United States: \(describe(second)) | Finland again: \(describe(firstAgain))")
+        try? await manager.stop(finnish)
+        try? await manager.stop(american)
+
+        // (2) The proxy exited in Finland last time, in the United States now.
+        let endpoint = ProxyLocation.endpoint(of: proxy)
+        let moved = try profile("Languages: moved", remembered: ProxyLocation(timeZoneIdentifier: "Europe/Helsinki", countryCode: "FI",
+                                                                              proxyEndpoint: endpoint))
+        defer { try? repository.delete(moved) }
+        exits(in: "US", zone: "America/Chicago")
+        messages.removeAll()
+        let movedSeen = await look(moved)
+        _ = await waitUntil(timeout: 10) { !manager.hasProxyLookupsInFlight }
+        info("\(prefix): remembered Finland, exits in the United States now: \(describe(movedSeen)); messages: \(messages)")
+        check("\(prefix): a proxy that exited in Finland last time and exits in the United States now — the pages see the United States (en, America/Chicago), not the last launch's country",
+              sees(movedSeen, "en-US", "America/Chicago"), "\(describe(movedSeen)); messages: \(messages)")
+        try? await manager.stop(moved)
+
+        // (3) The interface's language: invisible to pages?
+        let fixed = try profile("Languages: interface", language: "en-US", proxied: false)
+        defer { try? repository.delete(fixed) }
+        var runs: [(String, [String: String])] = []
+        for interface in ["ru", "en", "ru"] {
+            setenv("PRIVACYBROWSER_LANG", interface, 1)
+            let seen = await look(fixed)
+            runs.append((interface, seen.values))
+            try? await manager.stop(fixed)
+        }
+        let (ru1, en, ru2) = (runs[0].1, runs[1].1, runs[2].1)
+        let keys = Set(ru1.keys).union(en.keys).union(ru2.keys).filter { !SiteComparison.perWindow($0) }
+        let noise = keys.filter { ru1[$0] != ru2[$0] }
+        let leaks = keys.filter { !noise.contains($0) && ru1[$0] != en[$0] }.sorted()
+        info("\(prefix): the interface Russian, English, Russian, websites en-US: \(keys.count) values read; "
+             + "\(noise.count) differ between the two Russian runs (\(noise.sorted().prefix(12).joined(separator: ", ")))")
+        for key in leaks { info("\(prefix): differs with the interface's language: \(key): ru \(ru1[key] ?? "nil") | en \(en[key] ?? "nil")") }
+        // The owner's decision (7 November): a profile's window speaks the language its websites
+        // see — Safari's menus and the browser's own words a page reads (an invalid form field's
+        // message) with it — unless "Profile menus in the app's language" is on. Any value that
+        // follows the interface's language with it off fails here.
+        let formWords = "probe.validationMessages"
+        if ru1.isEmpty || en.isEmpty || ru2.isEmpty {
+            check("\(prefix): the interface's language (Russian, English) shows in nothing a page reads", false,
+                  "a run read nothing: ru \(ru1.count), en \(en.count), ru \(ru2.count) values")
+        } else {
+            check("\(prefix): the interface's language (Russian, English) shows in nothing a page reads — \(keys.count) values, \(noise.count) of them differing between two runs alike",
+                  leaks.isEmpty, leaks.map { "\($0): ru \(ru1[$0] ?? "nil") | en \(en[$0] ?? "nil")" }.joined(separator: "; "))
+            check("\(prefix): a United States profile, menus in the app's language off — the form's own words are English, the interface Russian",
+                  ru1[formWords]?.contains("Fill out this field") == true, ru1[formWords] ?? "nil")
+        }
+        // A Japanese one: the form's words Japanese, not English (the bundle has no Japanese of
+        // Lumen's own, only the folder that lets the process take Japanese) nor Russian.
+        var japanese = try repository.loadConfiguration(fixed)
+        japanese.languageOverride = "ja-JP"
+        try repository.saveConfiguration(japanese, for: fixed)
+        setenv("PRIVACYBROWSER_LANG", "ru", 1)
+        let jaSeen = await look(fixed)
+        try? await manager.stop(fixed)
+        let jaWords = jaSeen.values[formWords] ?? ""
+        info("\(prefix): a Japanese profile, the interface Russian: the form's words \(jaWords); language \(jaSeen.values["probe.language"] ?? "nil")")
+        check("\(prefix): a Japanese profile, menus in the app's language off — the form's own words are Japanese, neither English nor Russian",
+              !jaWords.isEmpty && !jaWords.contains("Fill out") && !jaWords.contains("Заполните")
+                  && jaWords.unicodeScalars.contains { (0x3040...0x30FF).contains($0.value) || (0x4E00...0x9FFF).contains($0.value) },
+              jaWords.isEmpty ? "nil" : jaWords)
+        // The setting on: the form's words in the app's language — the price the editor states,
+        // checked as intended, not as a leak.
+        var inAppLanguage = try repository.loadConfiguration(fixed)
+        inAppLanguage.languageOverride = "en-US"
+        inAppLanguage.menusInAppLanguage = true
+        try repository.saveConfiguration(inAppLanguage, for: fixed)
+        let onSeen = await look(fixed)
+        try? await manager.stop(fixed)
+        let onWords = onSeen.values[formWords] ?? ""
+        info("\(prefix): menus in the app's language on, the interface Russian, websites en-US: the form's words \(onWords)")
+        check("\(prefix): menus in the app's language on — the form's own words are the app's (Russian), as the setting says they will be",
+              onWords.contains("Заполните") && onSeen.values["probe.language"] == "en-US", onWords.isEmpty ? "nil" : onWords)
+    }
+
+    /// A profile with no proxy learns where it exits as one with a proxy does (the lead, 7 November):
+    /// looked up at launch over its own connection, the country and address remembered and shown,
+    /// its time zone and language that country's. The geolocation service here is the self-test
+    /// proxy's page asked directly (http://127.0.0.1:<port>/pb-geo.json), answering Japan; the
+    /// runner's own time zone is GMT and its language English, so a profile that did not look
+    /// itself up shows neither.
+    private func directConnectionIsAnExit(_ repository: ProfileRepository) async throws {
+        let name = "direct connection: a profile with no proxy exits in Japan — its pages see Asia/Tokyo and ja, its card Japan and the address"
+        guard !AppEnvironment.isSandboxed else {
+            skip(name, "the sandboxed build runs no process per profile", .build)
+            return
+        }
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip(name, "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
+            return
+        }
+        let services = ProxyGeoLookup.services
+        let givenProcess = ProcessInfo.processInfo.environment["PB_PROFILE_PROCESS"]
+        defer {
+            ProxyGeoLookup.services = services
+            if let givenProcess { setenv("PB_PROFILE_PROCESS", givenProcess, 1) } else { unsetenv("PB_PROFILE_PROCESS") }
+        }
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        ProxyGeoLookup.services = [.init(url: URL(string: "http://127.0.0.1:\(httpPort)/pb-geo.json?country=JP&tz=Asia/Tokyo&ip=203.0.113.88")!,
+                                         timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"])]
+        let profile = try repository.create(name: "Direct exit", configuration: ProfileConfiguration(ephemeral: true))
+        defer { try? repository.delete(profile.id) }
+        let manager = ProfileManager(repository: repository)
+        var launchError = ""
+        let snapshot = WhatSitesSee(profileID: profile.id, manager: { manager }, launch: { id in
+            do { try await manager.launch(id) } catch { launchError = String(describing: error) }
+        })
+        await snapshot.take()
+        let values = snapshot.profileSnapshot?.values ?? [:]
+        let stored = try? repository.loadConfiguration(profile.id)
+        let details = stored.map { ProfileDetails($0) }
+        let seen = "time zone \(values["probe.timeZone"] ?? "nil"), language \(values["probe.language"] ?? "nil"), "
+            + "Accept-Language \(values["headers.navigation.accept-language"] ?? "nil"); remembered \(stored?.lastProxyLocation.map { "\($0.countryCode ?? "?") \($0.timeZoneIdentifier) \($0.exitIP ?? "no address") (\($0.proxyEndpoint))" } ?? "nothing"); "
+            + "card: country \(details?.exitCountryCode ?? "nil"), address \(details?.exitIP ?? "nil"), time zone \(details?.timeZone ?? "nil")"
+            + (launchError.isEmpty ? "" : "; launch \(launchError)")
+        info("direct connection: \(seen)")
+        check(name, values["probe.timeZone"] == "Asia/Tokyo" && (values["probe.language"] ?? "").hasPrefix("ja")
+                && details?.exitCountryCode == "JP" && details?.exitIP == "203.0.113.88"
+                && stored?.lastProxyLocation?.proxyEndpoint == "direct", seen)
         try? await manager.stop(profile.id)
     }
 
@@ -5316,7 +6726,7 @@ final class SelfTest {
         check("cookie import: imported persistent cookies survive a stop and a launch; the session cookie does not",
               third.contains("hostonly=imported-hostonly-value") && third.contains("live=imported-live-value")
                   && !third.contains("session="), third)
-        try await manager.delete(profile.id)
+        try await manager.deleteBecauseThePersonAsked(profile.id)
     }
 
     // MARK: Session cookies after a stop
@@ -5347,8 +6757,8 @@ final class SelfTest {
                   imported == .applied(stored: 1, refused: []) && !kept,
                   "import \(imported); the store \(released ? "let go" : "still alive 10 s after the stop"); "
                       + "after the launch \(after.map(\.name))")
-            try await manager.delete(measured.id)
-            if let other { try await manager.delete(other.id) }
+            try await manager.deleteBecauseThePersonAsked(measured.id)
+            if let other { try await manager.deleteBecauseThePersonAsked(other.id) }
         }
     }
 
@@ -5401,8 +6811,8 @@ final class SelfTest {
               imported.id != original.id && after.contains("carried=carried-value"), after)
         try await manager.stop(imported.id)
         check("profile transfer: nothing went wrong", messages.isEmpty, messages.joined(separator: " | "))
-        try await manager.delete(imported.id)
-        try await manager.delete(original.id)
+        try await manager.deleteBecauseThePersonAsked(imported.id)
+        try await manager.deleteBecauseThePersonAsked(original.id)
     }
 
     // MARK: Profile sync (cookies and settings between two devices)
@@ -5504,7 +6914,7 @@ final class SelfTest {
                   && FileManager.default.fileExists(atPath: copy.path),
               "\(zones) \(conflict.resolvedConflicts)")
         check("profile sync: no errors reported", messages.isEmpty, "\(messages)")
-        try await managerA.delete(profile.id)
+        try await managerA.deleteBecauseThePersonAsked(profile.id)
     }
 
     // MARK: Session warm-up robot
@@ -5514,6 +6924,528 @@ final class SelfTest {
     /// cookies, User-Agent), stays on each, scrolls, follows only the plain link of the same site,
     /// leaves nothing in the page world, and stops when asked, when its tab closes, when a page
     /// shows a dialog and when the profile stops (whose data then seals as usual).
+    // MARK: Scenario runs (ScenarioRunner)
+
+    /// A scenario's JavaScript run through `ScenarioRunner` on a profile's page: it does what it
+    /// says and logs it; an error ends the run with its reason; Stop ends a waiting script and one
+    /// that loops without end (the app answering meanwhile); a plan that loses automation lets the
+    /// step under way finish and runs no other.
+    private func scenarioRuns(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("scenario runs: a scenario runs, fails, stops as it should", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the pages)")
+            return
+        }
+        var configuration = ProfileConfiguration(ephemeral: true)
+        configuration.proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        configuration.matchProxyLocation = false
+        let profile = try repository.create(name: "Scenario", configuration: configuration)
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        let controller = session.openWindow(url: nil)
+        let policy = NSApp.activationPolicy()
+        NSApp.setActivationPolicy(.accessory)
+        defer {
+            NSApp.setActivationPolicy(policy)
+            controller.close()
+            session.shutDown()
+            try? repository.delete(profile.id)
+        }
+        guard let tab = controller.selectedTab else {
+            check("scenario runs: a profile window to run in", false)
+            return
+        }
+        let base = "http://automation.selftest.invalid/pb-automation/"
+        func run(_ source: String, allowed: @escaping () -> Bool = { true }, stopAfter: TimeInterval? = nil,
+                 timeout: TimeInterval = 60) async -> (ScenarioRunner.Outcome?, [ScenarioRunner.Line], TimeInterval) {
+            let driver = PageDriver(webView: tab.webView) { url in _ = tab.load(url) }
+            driver.timeout = 15
+            let runner = ScenarioRunner(driver: driver)
+            runner.allowed = allowed
+            let started = Date()
+            runner.start(source, parameters: ["base": base, "word": "Hello"])
+            if let stopAfter {
+                try? await Task.sleep(nanoseconds: UInt64(stopAfter * 1_000_000_000))
+                runner.stop()
+            }
+            _ = await waitUntil(timeout: timeout) { runner.outcome != nil }
+            return (runner.outcome, runner.lines, Date().timeIntervalSince(started))
+        }
+
+        // A whole scenario.
+        let (done, lines, _) = await run("""
+            await page.goto(params.base + 'form');
+            await page.waitFor('#late');
+            await page.click('#button');
+            await page.type('#field', params.word);
+            const value = await page.inputValue('#field');
+            const items = await page.count('.item');
+            const title = await page.evaluate(() => document.title);
+            log('read', value, items, title);
+            if (value !== 'Hello' || items !== 5) throw new Error('wrong values ' + value + ' ' + items);
+            """)
+        let texts = lines.map(\.text)
+        check("scenario runs: a scenario's commands run in order, its log has each and the script's own lines, and it finishes",
+              done == .finished && texts.contains("click #button") && texts.contains("type 5 characters into #field")
+                  && texts.contains("read Hello 5 PB automation form") && !texts.filter { $0.hasPrefix("type") }.joined().contains("Hello"),
+              "\(String(describing: done)) \(texts)")
+
+        // An error: an element that never comes, and a mistake in the script.
+        let (failed, failedLines, _) = await run("""
+            await page.goto(params.base + 'form');
+            await page.click('#nothing-like-it', {timeout: 1000});
+            log('never here');
+            """)
+        let (broken, _, _) = await run("this is not javascript ((")
+        if case .failed(let message)? = failed, case .failed? = broken {
+            check("scenario runs: a command that fails ends the run with its reason; a script that does not parse does not run",
+                  message.contains("#nothing-like-it") && !failedLines.map(\.text).contains("never here"), message)
+        } else {
+            check("scenario runs: a command that fails ends the run with its reason; a script that does not parse does not run", false,
+                  "\(String(describing: failed)) / \(String(describing: broken))")
+        }
+
+        // Stop: a script waiting between commands, and one that loops without end.
+        let (waiting, _, waitingTime) = await run("while (true) { await page.pause(200); }", stopAfter: 1.0, timeout: 10)
+        // A main thread held up by the script would tick 0–1 times in the second (a 50 ms timer ticks
+        // 7–9 times on CI's runners, CI 42651547574).
+        var ticks = 0
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in ticks += 1 }
+        let (looping, _, loopingTime) = await run("for (;;) {}", stopAfter: 1.0, timeout: 10)
+        timer.invalidate()
+        check("scenario runs: Stop ends a waiting script and one that loops without end, and the app answers meanwhile",
+              waiting == .stopped(.byUser) && waitingTime < 4 && looping == .stopped(.byUser) && loopingTime < 4 && ticks >= 4,
+              "waiting \(String(describing: waiting)) in \(String(format: "%.1f", waitingTime)) s; looping \(String(describing: looping)) in \(String(format: "%.1f", loopingTime)) s; main-thread ticks \(ticks)")
+
+        // The plan loses automation after two commands: the third never runs.
+        var commands = 0
+        let (ended, endedLines, _) = await run("""
+            await page.goto(params.base + 'form');
+            await page.click('#button');
+            await page.click('#button');
+            log('after the third');
+            """, allowed: { commands += 1; return commands <= 3 })
+        let clicks = (try? await PageDriver(webView: tab.webView).textContent("#clicked")) ?? "nil"
+        check("scenario runs: a plan that loses automation lets the step under way finish, runs no other, and says why",
+              ended == .stopped(.rightsEnded) && clicks == "clicked 1" && !endedLines.map(\.text).contains("after the third")
+                  && endedLines.last?.text.contains("automation is no longer in this plan") == true,
+              "\(String(describing: ended)) \(clicks) \(endedLines.map(\.text))")
+    }
+
+    // MARK: Automation commands (PageDriver)
+
+    /// The core commands of a scenario (`PageDriver`) on pages of the self-test proxy: each does
+    /// what it says, the page's record of the whole run passes the rules of "the page cannot tell"
+    /// (whose controls show they can fail), and the run leaves the profile's fingerprint surface and
+    /// the page's globals as they were — while a script run in the page's own world, the control,
+    /// is seen.
+    private func automationCommands(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("automation commands: each does what it says, and the page cannot tell them from a person", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the pages)")
+            return
+        }
+        guard let probe = Self.loadProbe() else {
+            check("automation commands: fingerprint_probe.js found (app bundle or PB_SELFTEST_PROBE)", false)
+            return
+        }
+        var configuration = ProfileConfiguration(ephemeral: true)
+        configuration.proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        configuration.matchProxyLocation = false
+        let profile = try repository.create(name: "Automation", configuration: configuration)
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        let controller = session.openWindow(url: nil)
+        let policy = NSApp.activationPolicy()
+        NSApp.setActivationPolicy(.accessory)
+        var driverToFinish: PageDriver?
+        defer {
+            driverToFinish?.finish()
+            NSApp.setActivationPolicy(policy)
+            controller.close()
+            session.shutDown()
+            try? repository.delete(profile.id)
+        }
+        guard let tab = controller.selectedTab, controller.window != nil else {
+            check("automation commands: a profile window to act on", false, "no tab or window")
+            return
+        }
+        let driver = PageDriver(webView: tab.webView) { url in _ = tab.load(url) }
+        driverToFinish = driver
+        driver.timeout = 15
+        var log: [String] = []
+        driver.onLog = { log.append($0) }
+        // Behind another app, as automation's windows usually are.
+        NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first?.activate()
+        _ = await waitUntil(timeout: 3) { !NSApp.isActive }
+        let form = URL(string: "http://automation.selftest.invalid/pb-automation/form")!
+        let two = URL(string: "http://automation.selftest.invalid/pb-automation/two")!
+        func outcome(_ body: () async throws -> Void) async -> String {
+            do { try await body(); return "ok" } catch { return String(describing: error) }
+        }
+
+        // Going to a page, and waiting for elements that come and go.
+        let went = await outcome { try await driver.goto(form) }
+        let title = driver.title ?? "-"
+        check("automation commands: goto loads the address and waits for it", went == "ok" && driver.url == form && title == "PB automation form",
+              "\(went) url=\(driver.url?.absoluteString ?? "nil") title=\(title)")
+        let waited = await outcome {
+            try await driver.waitFor("#late", state: .visible, timeout: 5)
+            try await driver.waitFor("#gone", state: .detached, timeout: 5)
+        }
+        let neverShown = await outcome { try await driver.waitFor("#never", state: .visible, timeout: 1) }
+        check("automation commands: waitFor waits for an element to appear and to go, and gives up after its time",
+              waited == "ok" && neverShown.hasPrefix("timed out"), "\(waited); never: \(neverShown)")
+
+        // What the page shows before the run: its fingerprint surface and its globals.
+        func surface() async -> [String: String] {
+            Self.flatten((try? await js(tab.webView, probe)) as? [String: Any] ?? [:])
+        }
+        let before = await surface()
+        _ = try? await js(tab.webView, "return __take();")
+
+        // Reading.
+        let late = try? await driver.textContent("#late")
+        let items = try? await driver.count(".item")
+        let attribute = try? await driver.getAttribute("#field", "data-kind")
+        let shown = try? await driver.isVisible("#heading")
+        let missing = try? await driver.isVisible("#nothing-here")
+        check("automation commands: text, count, attribute and visibility are read from the page",
+              late == "Late" && items == 5 && attribute == "text" && shown == true && missing == false,
+              "text \(late ?? "nil") count \(items.map(String.init) ?? "nil") attribute \(attribute ?? "nil") visible \(String(describing: shown))/\(String(describing: missing))")
+
+        // Clicking, double-clicking, typing, scrolling to a far element and clicking it.
+        let acted = await outcome {
+            try await driver.click("#button")
+            try await driver.click("#button", clickCount: 2)
+            try await driver.type("#field", "Hello World")
+            try await driver.click("#far")
+        }
+        let clicked = try? await driver.textContent("#clicked")
+        let typed = try? await driver.inputValue("#field")
+        let far = try? await driver.textContent("#far")
+        let scrolled = (try? await driver.evaluate("return window.scrollY;")) as? Double ?? 0
+        check("automation commands: click, double click, type and a click on an element far below (scrolled to with the wheel) all land",
+              acted == "ok" && clicked == "clicked 3" && typed == "Hello World" && far == "far clicked" && scrolled > 1000,
+              "\(acted); clicked \(clicked ?? "nil"), field \(typed ?? "nil"), far \(far ?? "nil"), scrollY \(Int(scrolled))")
+        check("automation commands: the run's log says what was typed only by its length",
+              log.contains("type 11 characters into #field") && !log.joined().contains("Hello"), "\(log)")
+
+        // What the page saw of all that.
+        let text = (try? await js(tab.webView, "return __take();")) as? String ?? "{}"
+        let record = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
+        let events = record["events"] as? [[String: Any]] ?? []
+        func kind(_ event: [String: Any]) -> String { event["type"] as? String ?? "" }
+        func number(_ event: [String: Any], _ key: String) -> Double? { (event[key] as? NSNumber)?.doubleValue }
+        let untrusted = events.filter { $0["trusted"] as? Bool != true }.map(kind)
+        var movesBeforeFirstPresses: [Int] = []
+        var movesSince = 0
+        for event in events {
+            if kind(event) == "pointermove" { movesSince += 1 }
+            if kind(event) == "mousedown" {
+                if number(event, "detail") == 1 { movesBeforeFirstPresses.append(movesSince) }
+                movesSince = 0
+            }
+        }
+        let downs = events.filter { kind($0) == "mousedown" }, presses = events.filter { kind($0) == "pointerdown" }
+        let wheels = events.filter { kind($0) == "wheel" }
+        func apart(_ event: [String: Any]) -> (x: Double, y: Double) {
+            let screenX: Double = number(event, "screenX") ?? 0, clientX: Double = number(event, "clientX") ?? 0
+            let screenY: Double = number(event, "screenY") ?? 0, clientY: Double = number(event, "clientY") ?? 0
+            return (screenX - clientX, screenY - clientY)
+        }
+        let offset: (x: Double, y: Double) = presses.first.map(apart) ?? (0, 0)
+        func wheelInPlace(_ wheel: [String: Any]) -> Bool {
+            let time: Double = number(wheel, "t") ?? 0
+            let place = apart(wheel)
+            return time > 0 && abs(place.x - offset.x) <= 1 && abs(place.y - offset.y) <= 1
+        }
+        let wheelsInPlace = !wheels.isEmpty && wheels.allSatisfy(wheelInPlace)
+        let focused = events.filter { ["pointerdown", "keydown", "wheel"].contains(kind($0)) }.allSatisfy { $0["hasFocus"] as? Bool == true }
+        let keys = events.filter { kind($0) == "keydown" }.map { $0["key"] as? String ?? "?" }
+        let doubleClick = events.contains { kind($0) == "dblclick" && $0["trusted"] as? Bool == true }
+        let pressesAfterMoves = movesBeforeFirstPresses.count >= 4 && movesBeforeFirstPresses.allSatisfy { $0 >= 3 }
+        let buttonsHeld = downs.allSatisfy { number($0, "buttons") == 1 } && presses.allSatisfy { number($0, "pressure") == 0.5 }
+        let expectedKeys = ["Shift", "H", "e", "l", "l", "o", " ", "Shift", "W", "o", "r", "l", "d"]
+        let activated = record["active"] as? Bool == true
+        var recordPasses = !events.isEmpty && untrusted.isEmpty && pressesAfterMoves && buttonsHeld
+        recordPasses = recordPasses && wheelsInPlace && focused && doubleClick && keys == expectedKeys && activated
+        check("automation commands: the page cannot tell — every event trusted, pointer moves before every press, the button held, wheel time and place as a mouse's, focus throughout, keys with Shift around capitals, a real double click",
+              recordPasses,
+              "\(events.count) events, untrusted \(untrusted), moves before presses \(movesBeforeFirstPresses), buttons \(downs.map { number($0, "buttons") ?? -1 }), pressure \(presses.map { number($0, "pressure") ?? -1 }), \(wheels.count) wheels in place \(wheelsInPlace), focus \(focused), dblclick \(doubleClick), keys \(keys), activation \(String(describing: record["active"]))")
+
+        // The run left the page as it was; a script in the page's own world does not.
+        let after = await surface()
+        let changed = Set(before.keys).union(after.keys).filter { before[$0] != after[$0] }.sorted()
+        check("automation commands: the run changes nothing of the fingerprint surface or the page's globals (navigator.webdriver \(after["webdriver"] ?? "nil"))",
+              !before.isEmpty && changed.isEmpty && after["webdriver"] == "false",
+              "\(before.count) values, changed: \(changed.map { "\($0): \(before[$0] ?? "nil") → \(after[$0] ?? "nil")" })")
+        _ = try? await driver.evaluate("globalThis.pbIsolatedMark = 1; return true;")
+        let isolatedSeen = (try? await js(tab.webView, "return typeof globalThis.pbIsolatedMark;")) as? String
+        _ = try? await driver.evaluate("globalThis.pbPageMark = 1; return true;", world: .page)
+        let control = await surface()
+        let controlChanged = Set(after.keys).union(control.keys).filter { after[$0] != control[$0] }.sorted()
+        check("automation commands: evaluate runs in the driver's own world, which the page cannot see — and in the page's world, the control, the check sees the change",
+              isolatedSeen == "undefined" && !controlChanged.isEmpty,
+              "isolated global seen by the page: \(isolatedSeen ?? "nil"); page-world change seen in \(controlChanged)")
+
+        // Pictures.
+        let viewport = await outcome {
+            let png = try await driver.screenshot()
+            let element = try await driver.screenshot("#far")
+            let whole = NSBitmapImageRep(data: png), part = NSBitmapImageRep(data: element)
+            guard let whole, let part, whole.pixelsWide > 100, part.pixelsWide > 10, part.pixelsWide < whole.pixelsWide,
+                  part.pixelsHigh < whole.pixelsHigh else {
+                throw PageDriver.Failure.script("sizes \(whole?.pixelsWide ?? 0)x\(whole?.pixelsHigh ?? 0), \(part?.pixelsWide ?? 0)x\(part?.pixelsHigh ?? 0)")
+            }
+        }
+        check("automation commands: screenshot gives a PNG of the viewport and a smaller one of an element", viewport == "ok", viewport)
+
+        // Following a link, then back, forward, reload.
+        let navigated = await outcome {
+            try await driver.click("#next")
+            guard await waitUntil(timeout: 10, { driver.url == two }) else { throw PageDriver.Failure.timeout("the link's page") }
+            try await driver.waitForLoadState(.load)
+        }
+        let atTwo = driver.url
+        let back = await outcome { try await driver.back() }
+        let atForm = driver.url
+        let forward = await outcome { try await driver.forward() }
+        let reload = await outcome { try await driver.reload() }
+        let heading = try? await driver.textContent("#heading")
+        check("automation commands: a clicked link, back, forward and reload each come to their page",
+              navigated == "ok" && atTwo == two && back == "ok" && atForm == form && forward == "ok" && reload == "ok"
+                  && driver.url == two && heading == "Page two",
+              "link \(navigated) → \(atTwo?.lastPathComponent ?? "nil"); back \(back) → \(atForm?.lastPathComponent ?? "nil"); forward \(forward); reload \(reload) → \(driver.url?.lastPathComponent ?? "nil") \(heading ?? "nil")")
+    }
+
+    // MARK: The page cannot tell (PageInput)
+
+    /// A page that writes down everything it can learn of each input event, as a detector would.
+    private static let inputProbePage = """
+        <!doctype html><meta charset=utf-8><title>input</title>
+        <style>body{font:16px -apple-system;margin:0;padding:20px;height:3000px}
+        #button{position:absolute;left:40px;top:40px;width:160px;height:40px}
+        #field{position:absolute;left:40px;top:120px;width:240px;height:30px}</style>
+        <button id=button>Button</button><input id=field autocomplete=off>
+        <script>
+        (() => {
+          const log = [];
+          const types = ['pointerover','pointermove','pointerdown','pointerup','mouseover','mousemove','mousedown','mouseup',
+            'click','wheel','keydown','keyup','input','blur','focus'];
+          const pick = (e) => {
+            const r = {type: e.type, trusted: e.isTrusted, t: Math.round(e.timeStamp * 10) / 10,
+              target: e.target && (e.target.id || e.target.nodeName || String(e.target)), hasFocus: document.hasFocus()};
+            for (const k of ['clientX','clientY','screenX','screenY','button','buttons','pressure','key','code','keyCode','shiftKey'])
+              if (k in e) r[k] = e[k];
+            return r;
+          };
+          for (const type of types)
+            window.addEventListener(type, (e) => { if (log.length < 500) log.push(pick(e)); }, {capture: true, passive: true});
+          window.__take = () => JSON.stringify({events: log.splice(0), field: document.getElementById('field').value});
+          window.__rect = (id) => { const r = document.getElementById(id).getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; };
+          window.__reset = () => { document.getElementById('field').value = '';
+            if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); window.scrollTo(0, 0); log.length = 0; return true; };
+        })();
+        </script>
+        """
+
+    private struct InputLog {
+        var events: [[String: Any]]
+        var field: String
+
+        func all(_ type: String) -> [[String: Any]] { events.filter { $0["type"] as? String == type } }
+        func double(_ event: [String: Any], _ key: String) -> Double? { (event[key] as? NSNumber)?.doubleValue }
+    }
+
+    /// What a page sees of the app's pointer, wheel and keyboard (`PageInput`), against what a
+    /// person's mouse and keyboard give it (measured with the system's own events, rounds 1–5 of
+    /// claude/measure-automation-input). One check per kind of trace; each also runs once with
+    /// that one fix left out (`PageInput.fault`), and must then see the trace — else the check
+    /// could not fail. The window is in the background (another app in front) for every run, as
+    /// automation's windows usually are.
+    private func pageCannotTell(_ repository: ProfileRepository) async throws {
+        let profile = try repository.create(name: "Input", configuration: ProfileConfiguration(ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        let controller = session.openWindow(url: nil)
+        let policy = NSApp.activationPolicy()
+        NSApp.setActivationPolicy(.accessory)
+        defer {
+            PageInput.fault = nil
+            NSApp.setActivationPolicy(policy)
+            controller.close()
+            session.shutDown()
+            try? repository.delete(profile.id)
+        }
+        guard let webView = controller.selectedTab?.webView, controller.window != nil else {
+            check("the page cannot tell: a profile window to act on", false, "no tab or window")
+            return
+        }
+        webView.loadHTMLString(Self.inputProbePage, baseURL: URL(string: "http://input.selftest.invalid/"))
+        var ready = false
+        for _ in 0..<50 where !ready {
+            ready = (try? await js(webView, "return typeof window.__take === 'function' && document.readyState === 'complete';")) as? Bool == true
+            if !ready { try? await Task.sleep(nanoseconds: 100_000_000) }
+        }
+        guard ready else {
+            check("the page cannot tell: the probe page loads in a profile window", false, "not ready after 5 s")
+            return
+        }
+        func rect(_ id: String) async -> CGRect? {
+            guard let r = try? await js(webView, "return __rect(id);", ["id": id]) as? [Double], r.count == 4 else { return nil }
+            return CGRect(x: r[0], y: r[1], width: r[2], height: r[3])
+        }
+        guard let button = await rect("button"), let field = await rect("field") else {
+            check("the page cannot tell: the probe page's elements have places", false)
+            return
+        }
+        let typed: [Character] = ["a", "B"]
+        let keys = typed.compactMap { PageInput.key(typing: $0) }
+        if keys.count != typed.count {
+            skip("the page cannot tell: keys as a keyboard gives them", "this Mac's keyboard layout types no \"a\" or \"B\"")
+        }
+        // Another app in front: the window is in the background, as automation's usually are.
+        func background() async -> Bool {
+            NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first?.activate()
+            return await waitUntil(timeout: 3) { !NSApp.isActive && controller.window?.isKeyWindow != true }
+        }
+        func sleep(_ seconds: Double) async { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
+
+        func run(_ fault: PageInput.Fault?) async -> (log: InputLog?, background: Bool) {
+            PageInput.fault = nil
+            let behind = await background()
+            _ = try? await js(webView, "return __reset();")
+            PageInput.fault = fault
+            let input = PageInput(webView: webView)
+            input.holdFocus()
+            await sleep(0.3)
+            let start = CGPoint(x: button.midX + 140, y: button.midY + 70)
+            for target in [button, field] {
+                let point = CGPoint(x: target.midX + 3.4, y: target.midY + 1.6)
+                await input.move(along: input.path(to: point, from: start, steps: 9), interval: 0.03)
+                await sleep(0.15)
+                await input.click(hold: 0.09)
+                await sleep(0.25)
+            }
+            for key in keys {
+                await input.press(key, hold: 0.08)
+                await sleep(0.12)
+            }
+            for _ in 0..<3 {
+                input.wheel(40)
+                await sleep(0.05)
+            }
+            await sleep(0.6)
+            input.releaseFocus()
+            PageInput.fault = nil
+            guard let text = try? await js(webView, "return __take();") as? String,
+                  let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { return (nil, behind) }
+            return (InputLog(events: object["events"] as? [[String: Any]] ?? [], field: object["field"] as? String ?? ""), behind)
+        }
+
+        // The rules: what a person's mouse and keyboard always give (each with what it saw).
+        let expectedField = keys.count == typed.count ? String(typed) : ""
+        typealias Rule = (InputLog) -> (Bool, String)
+        let moves: Rule = { log in
+            guard let down = log.events.firstIndex(where: { $0["type"] as? String == "pointerdown" }) else { return (false, "no pointerdown") }
+            let before = log.events[..<down]
+            let count = before.filter { $0["type"] as? String == "pointermove" }.count
+            let over = before.last { $0["type"] as? String == "pointerover" && $0["target"] as? String == "button" }
+            let gap = (log.double(log.events[down], "t") ?? 0) - (over.flatMap { log.double($0, "t") } ?? .infinity)
+            return (count >= 4 && gap >= 20, "\(count) moves before the press, over the button \(over == nil ? "never" : "\(Int(gap)) ms") before it")
+        }
+        let buttons: Rule = { log in
+            let downs = log.all("mousedown"), presses = log.all("pointerdown")
+            let ok = downs.count == 2 && downs.allSatisfy { log.double($0, "buttons") == 1 }
+                && presses.count == 2 && presses.allSatisfy { log.double($0, "pressure") == 0.5 }
+            return (ok, "mousedown buttons \(downs.map { log.double($0, "buttons") ?? -1 }), pointerdown pressure \(presses.map { log.double($0, "pressure") ?? -1 })")
+        }
+        let wheelTime: Rule = { log in
+            let wheels = log.all("wheel"), lastPress = log.all("pointerdown").last.flatMap { log.double($0, "t") } ?? 0
+            let times = wheels.compactMap { log.double($0, "t") }
+            return (wheels.count == 3 && times.count == 3 && times.allSatisfy { $0 > 0 && $0 >= lastPress }, "wheel times \(times), last press \(lastPress)")
+        }
+        let wheelPlace: Rule = { log in
+            guard let press = log.all("pointerdown").last else { return (false, "no press") }
+            func offset(_ e: [String: Any]) -> [Double] {
+                [(log.double(e, "screenX") ?? .nan) - (log.double(e, "clientX") ?? .nan), (log.double(e, "screenY") ?? .nan) - (log.double(e, "clientY") ?? .nan)]
+            }
+            let wheels = log.all("wheel")
+            let ok = wheels.count == 3 && wheels.allSatisfy { wheel in
+                zip(offset(wheel), offset(press)).allSatisfy { abs($0 - $1) <= 1 }
+                    && abs((log.double(wheel, "clientX") ?? .nan) - (log.double(press, "clientX") ?? .nan)) <= 1.5
+                    && abs((log.double(wheel, "clientY") ?? .nan) - (log.double(press, "clientY") ?? .nan)) <= 1.5
+            }
+            return (ok, "wheel client/screen \(wheels.map { [log.double($0, "clientX") ?? -1, log.double($0, "clientY") ?? -1, log.double($0, "screenX") ?? -1, log.double($0, "screenY") ?? -1] }), press \(offset(press)) apart")
+        }
+        let focus: Rule = { log in
+            let acted = log.events.filter { ["pointerdown", "keydown", "wheel"].contains($0["type"] as? String ?? "") }
+            let focused = !acted.isEmpty && acted.allSatisfy { $0["hasFocus"] as? Bool == true }
+            let clicked = log.all("click").map { $0["target"] as? String ?? "?" }
+            let windowBlur = log.events.contains { $0["type"] as? String == "blur" && ($0["target"] as? String ?? "").hasPrefix("[object Window") }
+            return (focused && clicked == ["button", "field"] && !windowBlur && log.field == expectedField,
+                    "focus \(acted.map { $0["hasFocus"] as? Bool == true ? 1 : 0 }), clicks on \(clicked), window blur \(windowBlur), field \"\(log.field)\"")
+        }
+        let trusted: Rule = { log in
+            let untrusted = log.events.filter { $0["trusted"] as? Bool != true }.map { $0["type"] as? String ?? "?" }
+            return (!log.events.isEmpty && untrusted.isEmpty, "\(log.events.count) events, untrusted: \(untrusted)")
+        }
+        let keysRule: Rule = { log in
+            let seen = log.events.filter { ["keydown", "keyup"].contains($0["type"] as? String ?? "") }.map {
+                "\($0["type"] as? String == "keydown" ? "↓" : "↑")\($0["key"] as? String ?? "?")/\($0["code"] as? String ?? "?")/\(log.double($0, "keyCode").map { Int($0) } ?? -1)\($0["shiftKey"] as? Bool == true ? "⇧" : "")"
+            }
+            let expected = ["↓a/KeyA/65", "↑a/KeyA/65", "↓Shift/ShiftLeft/16⇧", "↓B/KeyB/66⇧", "↑B/KeyB/66⇧", "↑Shift/ShiftLeft/16"]
+            return (seen == expected && log.field == "aB", "\(seen) field \"\(log.field)\"")
+        }
+
+        let (whole, behind) = await run(nil)
+        info("the page cannot tell: window in the background for the run: \(behind) (app active: \(NSApp.isActive))")
+        guard let whole else {
+            check("the page cannot tell: the probe page's record is read", false)
+            return
+        }
+        // Each kind with its own fix left out.
+        for (name, rule, fault) in [("pointer moves come before a press, as a hand moves the mouse", moves, PageInput.Fault.moves),
+                                    ("a press holds the button (buttons 1, pressure 0.5)", buttons, .buttons),
+                                    ("wheel events have the time of the events around them", wheelTime, .wheelTime),
+                                    ("wheel events are where the pointer is, on the screen as on the page", wheelPlace, .wheelPlace)] {
+            let (good, saw) = rule(whole)
+            let (control, broken) = await run(fault)
+            let (controlPassed, controlSaw) = control.map(rule) ?? (true, "no record")
+            check("the page cannot tell: \(name) — and without the fix (\(fault.rawValue)) the check sees it",
+                  good && !controlPassed, "with: \(saw); without: \(controlSaw) (background \(broken))")
+        }
+        // Focus: the control needs a window really in the background.
+        let (focusGood, focusSaw) = focus(whole)
+        if behind {
+            let (control, _) = await run(.focus)
+            let (controlPassed, controlSaw) = control.map(focus) ?? (true, "no record")
+            check("the page cannot tell: a page in a window behind another app keeps its focus, and the clicks and keys reach it — and without the fix (focus) the check sees it",
+                  focusGood && !controlPassed, "with: \(focusSaw); without: \(controlSaw)")
+        } else {
+            check("the page cannot tell: the page keeps its focus, and the clicks and keys reach it", focusGood, focusSaw)
+            skip("the page cannot tell: without the focus fix the check sees it", "no other app could be put in front of the self-test here")
+        }
+        // Trusted, and keys as a keyboard gives them: against events a page script makes.
+        _ = try? await js(webView, "return __reset();")
+        _ = try? await js(webView, """
+            const b = document.getElementById('button'), f = document.getElementById('field');
+            b.dispatchEvent(new MouseEvent('mousedown', {bubbles: true})); b.click(); f.focus();
+            for (const key of ['a', 'B']) { f.dispatchEvent(new KeyboardEvent('keydown', {key, bubbles: true})); f.value += key;
+              f.dispatchEvent(new KeyboardEvent('keyup', {key, bubbles: true})); }
+            return true;
+            """)
+        let scripted = (try? await js(webView, "return __take();") as? String).flatMap {
+            try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
+        }.map { InputLog(events: $0["events"] as? [[String: Any]] ?? [], field: $0["field"] as? String ?? "") }
+        let (trustedGood, trustedSaw) = trusted(whole)
+        let (scriptedTrusted, scriptedSaw) = scripted.map(trusted) ?? (true, "no record")
+        check("the page cannot tell: every event is trusted — and a page script's events are seen as not", trustedGood && !scriptedTrusted,
+              "with: \(trustedSaw); script: \(scriptedSaw)")
+        if keys.count == typed.count {
+            let (keysGood, keysSaw) = keysRule(whole)
+            let (scriptedKeys, scriptedKeysSaw) = scripted.map(keysRule) ?? (true, "no record")
+            check("the page cannot tell: keys as a keyboard gives them (key, code, keyCode, Shift held around the capital) — and a page script's keys are seen as not",
+                  keysGood && !scriptedKeys, "with: \(keysSaw); script: \(scriptedKeysSaw)")
+        }
+    }
+
     private func warmUp(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
             skip("warm-up: a plan's pages visited, dwelt on, scrolled and followed as the plan says", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves and times the pages)")
@@ -5608,7 +7540,15 @@ final class SelfTest {
         check("warm-up: it scrolls each page it stays on (the pages see trusted scroll events)",
               ["a", "b", "c"].allSatisfy { events.contains("\($0)-scroll") } && loaded.allSatisfy { $0.scrolls > 0 },
               "\(events.sorted()) scrolls=\(visits.map(\.scrolls))")
-        info("warm-up: scrolled with \(robot.scrollInput?.rawValue ?? "-") input (wheel events seen: \(events.contains { $0.hasSuffix("-wheel") })), clicked with \(robot.clickInput?.rawValue ?? "-") input (trusted clicks seen: \(events.contains { $0.hasSuffix("-click") }))")
+        info("warm-up: scrolled with \(robot.scrollInput?.rawValue ?? "-") input (wheel events seen: \(events.contains { $0.hasSuffix("-wheel") })), clicked with \(robot.clickInput?.rawValue ?? "-") input (trusted clicks seen: \(events.contains { $0.hasSuffix("-click") })); last pointer: \(robot.clickDiagnosis ?? "-")")
+        // Its window is never shown to the person; its pages must still be shown pages to themselves
+        // (a hidden one has its timers and drawing slowed, which a site can tell).
+        let visibility = events.filter { $0.contains("visibility") }.sorted()
+        check("warm-up: its pages see themselves shown (visibilityState visible from load on, never hidden)",
+              ["a", "b", "c"].allSatisfy { events.contains("\($0)-visibility-visible") } && !visibility.contains { $0.hasSuffix("-hidden") },
+              "\(visibility)")
+        check("warm-up: trusted pointer moves reach its pages (pages see a pointer before a click)",
+              ["a", "b", "c"].contains { events.contains("\($0)-move") }, "\(events.filter { $0.contains("move") }.sorted())")
         let referers = Dictionary(log.map { ($0.path, $0.referer) }, uniquingKeysWith: { first, _ in first })
         let refused = ["/pb-warmup/logout", "/pb-warmup/partner", "/pb-warmup/file.zip", "/pb-warmup/popup"]
         check("warm-up: from each page it follows only the plain link of the same site (with the page as Referer), never sign-out, another site, a file or a new window",
@@ -5704,7 +7644,7 @@ final class SelfTest {
               stoppedFirst && sealError == nil && !manager.isRunning(profile.id)
                   && !webKitDataDirectoriesExist(profile.id) && messages.isEmpty,
               "stoppedFirst=\(stoppedFirst) state=\(robot.state) seal=\(sealError ?? "ok") messages=\(messages)")
-        try await manager.delete(profile.id)
+        try await manager.deleteBecauseThePersonAsked(profile.id)
     }
 
     /// Two profiles warmed up through the queue (`WarmUpCoordinator`), as "Warm Up Several…" does:
@@ -5798,8 +7738,8 @@ final class SelfTest {
         check("warm-up schedule: a run from the queue counts as the profile's last run, stored with its schedule",
               (stored?.lastRunAt ?? .distantPast) >= queued && (coordinator.nextRun(of: first.id) ?? .distantPast) > Date().addingTimeInterval(23 * 3600),
               "lastRunAt=\(String(describing: stored?.lastRunAt)) next=\(String(describing: coordinator.nextRun(of: first.id)))")
-        try await manager.delete(first.id)
-        try await manager.delete(second.id)
+        try await manager.deleteBecauseThePersonAsked(first.id)
+        try await manager.deleteBecauseThePersonAsked(second.id)
     }
 
     /// The profile's WebKit data is not on disk in plain form (sealed).
@@ -6116,6 +8056,31 @@ final class SelfTest {
         return false
     }
 
+    /// A UDP socket of this process connected to `address`:`port` (nothing is sent), and its local
+    /// port; nil when it could not be made.
+    private static func connectedUDPSocket(to address: String, port: UInt16) -> (descriptor: Int32, port: UInt16)? {
+        let descriptor = Darwin.socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+        guard descriptor >= 0 else { return nil }
+        var remote = sockaddr_in()
+        remote.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        remote.sin_family = sa_family_t(AF_INET)
+        remote.sin_port = port.bigEndian
+        inet_pton(AF_INET, address, &remote.sin_addr)
+        let connected = withUnsafePointer(to: &remote) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        }
+        var local = sockaddr_in()
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let named = withUnsafeMutablePointer(to: &local) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(descriptor, $0, &length) }
+        }
+        guard connected == 0, named == 0, local.sin_port != 0 else {
+            close(descriptor)
+            return nil
+        }
+        return (descriptor, UInt16(bigEndian: local.sin_port))
+    }
+
     private func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
@@ -6163,9 +8128,15 @@ private final class PageLoader: NSObject, WKNavigationDelegate {
         try await PageLoader().run(webView) { $0.load(URLRequest(url: url)) }
     }
 
+    /// The tab's own delegate (a `BrowserTab`), which decides each navigation as it does for a
+    /// person — an iPhone view's platform is set there (CI 764: with this loader in its place the
+    /// page said MacIntel) — and gets the web view back once the page has loaded.
+    private weak var tabDelegate: WKNavigationDelegate?
+
     private func run(_ webView: WKWebView, start: (WKWebView) -> Void) async throws {
+        tabDelegate = webView.navigationDelegate
         webView.navigationDelegate = self
-        defer { webView.navigationDelegate = nil }
+        defer { webView.navigationDelegate = tabDelegate }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             self.continuation = continuation
             start(webView)
@@ -6180,6 +8151,15 @@ private final class PageLoader: NSObject, WKNavigationDelegate {
         guard let continuation else { return }
         self.continuation = nil
         continuation.resume(with: result)
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, preferences: WKWebpagePreferences,
+                 decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void) {
+        guard let tab = tabDelegate, tab.responds(to: #selector(WKNavigationDelegate.webView(_:decidePolicyFor:preferences:decisionHandler:))) else {
+            decisionHandler(.allow, preferences)
+            return
+        }
+        tab.webView?(webView, decidePolicyFor: navigationAction, preferences: preferences, decisionHandler: decisionHandler)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

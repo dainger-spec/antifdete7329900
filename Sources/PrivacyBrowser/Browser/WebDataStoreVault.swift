@@ -378,8 +378,9 @@ final class WebDataStoreVault {
 
     // MARK: Delete
 
-    /// Removes the profile's WebKit data. For a profile whose store this process did not create
-    /// (just created, never launched since unlock, or deleted via sync) WebKit has no store to
+    /// Removes the profile's WebKit data — only for the person's Delete
+    /// (`ProfileManager.deleteBecauseThePersonAsked`). For a profile whose store this process did not
+    /// create (just created, or never launched since unlock) WebKit has no store to
     /// remove — and right after unlock no WebKit object exists, so `remove(forIdentifier:)` would
     /// crash; deleting the leftover directories is enough.
     func deleteData(profileID: UUID) async {

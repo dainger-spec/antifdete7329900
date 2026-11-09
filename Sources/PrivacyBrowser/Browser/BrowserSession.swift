@@ -32,11 +32,22 @@ final class BrowserSession {
     let passwordSettings: ProfilePasswordSettings
     let library: ProfileLibrary
     var onAllWindowsClosed: (() -> Void)?
+    /// The search engine the address bar searches with now: the profile's setting as it is saved,
+    /// so a change made while the profile runs applies to the next search (ProfileManager reads
+    /// it from the vault); the launch's own setting until it is given that.
+    lazy var searchEngine: () -> SearchEngine = { [configuration] in configuration.searchEngine ?? .standard }
     /// Where this run's proxy exits (the launch's lookup, or what was remembered for the proxy),
     /// shown in its windows' chrome; set again when a lookup finishes after launch.
     var exitLocation: ProxyLocation? {
-        didSet { windows.forEach { $0.exitLocationDidChange() } }
+        didSet {
+            windows.forEach { $0.exitLocationDidChange() }
+            Self.onExitLocation?(profileID, exitLocation)
+        }
     }
+    /// Told each time a session's exit location is set: a profile's own process puts the country's
+    /// flag on its Dock tile (`DockIcon`, ProfileSessionHost). Unset in the app's process, whose
+    /// one tile is every profile's.
+    static var onExitLocation: ((UUID, ProxyLocation?) -> Void)?
 
     private(set) var dataStore: WKWebsiteDataStore?
     private let userContentController: WKUserContentController
@@ -133,6 +144,8 @@ final class BrowserSession {
         BrowserTabContext(profileName: profileName, userAgent: configuration.userAgent(hostSafariVersion: HostSafari.version),
                           passwordVault: passwordVault, passwordSettings: passwordSettings, library: library,
                           hasProxy: configuration.proxy != nil,
+                          phoneScale: PhoneEngine.phone(of: configuration)?.scale,
+                          phonePlatform: PhoneEngine.phone(of: configuration)?.platform,
                           proxyCredential: configuration.proxy.flatMap { proxy in
                               proxy.username.map { URLCredential(user: $0, password: proxy.password ?? "", persistence: .forSession) }
                           })
@@ -157,6 +170,8 @@ final class BrowserSession {
     /// here, which is why this is a method of the session and not a copy loop somewhere else.
     func applyProfile(to webConfiguration: WKWebViewConfiguration) {
         webConfiguration.websiteDataStore = dataStore ?? ProfileNetworkGuard.closedStore
+        // Safari's chrome brings its own controller where it has one; where not, ours (`webPageNamespace`).
+        giveWebPageNamespace(to: webConfiguration)
         applyPrivacyPreferences(to: webConfiguration.preferences)
         applyContent(to: webConfiguration.userContentController)
     }
@@ -211,7 +226,7 @@ final class BrowserSession {
     ///
     ///   * WebRTC opens its sockets outside the data store's proxy: off in the engine, as Lockdown
     ///     Mode does, whenever the profile's WebRTC is off (the default, and always with a proxy
-    ///     the tunnel cannot carry: `webRTCRouting`). No RTC interface in any frame, nothing for a
+    ///     whose WebRTC the gate did not allow: `webRTCRouting`). No RTC interface in any frame, nothing for a
     ///     page to reach before the shim runs; the shim's removal stays as the fallback for a
     ///     WebKit without this preference.
     ///   * Safe Browsing lookups are made by a system service, outside the proxy: per profile,
@@ -230,13 +245,6 @@ final class BrowserSession {
         WebKitPreferences.setBool(preferences, "_setShouldAllowUserInstalledFonts:", false)
         if configuration.effectiveWebRTCPolicy == .disabled {
             WebKitPreferences.setBool(preferences, "_setPeerConnectionEnabled:", false)
-        }
-        // WebRTC through the packet tunnel: libwebrtc gathers on the tunnel interface for the relay
-        // addresses (measured with a utun in CI; the tunnel's enforced routes are a second line).
-        // For the hardware checks in docs/TUNNEL.md it can also be made to gather on every
-        // interface: `defaults write <bundle id> PBTunnelAllInterfaces -bool YES` (`DebugSwitches`).
-        if case .relay = configuration.webRTCRouting, DebugSwitches.tunnelAllInterfaces {
-            WebKitPreferences.setBool(preferences, "_setEnumeratingAllNetworkInterfacesEnabled:", true)
         }
         if configuration.proxy != nil {
             for key in Self.featuresOffWithAProxy { WebKitFeatures.set(preferences, key, false) }
@@ -275,8 +283,29 @@ final class BrowserSession {
         }
     }
 
+    /// `window.browser` in every page, as Safari gives it (the Mac's Safari 27.0.1 and 27.2, the
+    /// owner's iPhone; claude/measure-canvas-browser, 8 November): WebKit's own WebPageNamespace —
+    /// `runtime.sendMessage` and `runtime.connect`, for pages to reach an extension — which WebKit
+    /// puts in the main world of every frame of a web view whose configuration has an extension
+    /// controller, with no extension loaded. Measured: the object, its runtime, the property and
+    /// what sendMessage does are Safari's own. One per profile's process, no extension in it ever,
+    /// and kept nowhere (a non-persistent controller configuration).
+    /// (macOS 15.4's API; the package builds for less, every Mac the app runs on has it.)
+    private lazy var webPageNamespace: AnyObject? = {
+        if #available(macOS 15.4, *) { return WKWebExtensionController(configuration: .nonPersistent()) }
+        return nil
+    }()
+
+    /// Puts `webPageNamespace` on `webConfiguration` unless it has a controller of its own.
+    private func giveWebPageNamespace(to webConfiguration: WKWebViewConfiguration) {
+        guard #available(macOS 15.4, *), webConfiguration.webExtensionController == nil,
+              let controller = webPageNamespace as? WKWebExtensionController else { return }
+        webConfiguration.webExtensionController = controller
+    }
+
     func makeWebViewConfiguration() -> WKWebViewConfiguration {
         let webConfiguration = WKWebViewConfiguration()
+        giveWebPageNamespace(to: webConfiguration)
         // Never the default store: it has no proxy (a session that is shutting down has no store).
         webConfiguration.websiteDataStore = dataStore ?? ProfileNetworkGuard.closedStore
         webConfiguration.userContentController = userContentController
@@ -286,6 +315,15 @@ final class BrowserSession {
         // page sees as document.fullscreenEnabled === undefined).
         webConfiguration.preferences.isElementFullscreenEnabled = true
         applyPrivacyPreferences(to: webConfiguration.preferences)
+        // Apple Pay's interfaces, as a profile in Safari's window has them from Safari's own code
+        // and an iPhone's Safari has them: WebKit's `ApplePayEnabled`, off for an app that is not
+        // Safari. Their calls then answer as Safari's do on the same Mac — no card: false, a session
+        // without a gesture refused (payments check, full run 17: "on-page", all six Apple Pay and
+        // Payment Request calls as Safari's). Push stays off here: two of its calls answer otherwise.
+        WebKitPreferences.setBool(webConfiguration.preferences, "_setApplePayEnabled:", true)
+        // An iPhone view: what WebKit itself answers as an iPhone (the platform, no Notification);
+        // the pixel density per web view (`BrowserTab`).
+        PhoneEngine.apply(to: webConfiguration, for: configuration)
         return webConfiguration
     }
 
@@ -335,16 +373,20 @@ final class BrowserSession {
         windows.append(controller)
         if let window = controller.window {
             // Not moved off screen: AppKit pulls an ordinary window back onto a screen when it is
-            // ordered front, which is why the warm-up was visible. Fully transparent instead, at
-            // the lowest window level, taking no clicks and in no window list — WebKit still
-            // treats it as on screen, which is what keeps rendering and timers running and
-            // `document.visibilityState` at "visible", exactly as for a page someone is reading.
+            // ordered front, which is why the warm-up was visible. Fully transparent instead,
+            // taking no clicks (a person's clicks go through it to the window below) and in no
+            // window list. Not at the lowest level, below the desktop: there the system takes it
+            // for covered, its pages are "hidden" (timers and drawing slowed, which a site can
+            // tell) and most pointer moves never reach them (claude/measure-automation-input,
+            // rounds 6 and 7, macOS 26 and 27). At the floating level, ordered front, it is
+            // shown — `document.visibilityState` "visible" — even with a window over it, as for
+            // a page someone is reading.
             window.alphaValue = 0
             window.ignoresMouseEvents = true
-            window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.minimumWindow)))
+            window.level = .floating
             window.isExcludedFromWindowsMenu = true
             window.collectionBehavior.insert([.transient, .ignoresCycle, .fullScreenNone])
-            window.orderBack(nil)
+            window.orderFront(nil)
         }
         controller.addTab(url: URL(string: "about:blank"))
         return controller
@@ -405,12 +447,19 @@ final class BrowserSession {
     func showLibrary(_ section: LibraryView.Section, from controller: BrowserWindowController? = nil) {
         if libraryWindow == nil {
             libraryWindow = LibraryWindowController(session: self) { [weak self] url in
-                self?.openInNewTab(url)
+                self?.openFromLibrary(url)
             } onClose: { [weak self] in
                 self?.libraryWindow = nil
             }
         }
         libraryWindow?.show(section)
+    }
+
+    /// A page chosen in the library: in Safari's window when the profile is shown in Safari's, else
+    /// in a tab of ours.
+    private func openFromLibrary(_ url: URL) {
+        if windows.isEmpty, SafariChromeHost.open(session: self, url: url) { return }
+        openInNewTab(url)
     }
 
     // MARK: Shutdown

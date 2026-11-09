@@ -501,7 +501,7 @@
  },
  "History › Back | goBackInWindow: | ⌘[": {
   "behaviour": [
-   "-"
+   "disabled"
   ],
   "xpc": []
  },
@@ -535,7 +535,7 @@
   ],
   "xpc": []
  },
- "History › Show All History | toggleHistoryInBookmarksView: | ⌘Y": {
+ "History › Show All History | showProfileHistory: | ⌘Y": {
   "behaviour": [
    "-"
   ],
@@ -547,15 +547,15 @@
   ],
   "xpc": []
  },
- "Safari › Clear History and Keep Website Data… | clearHistoryAndKeepWebsiteData: | -": {
+ "Safari › Clear History and Keep Website Data… | clearProfileHistory: | -": {
   "behaviour": [
-   "disabled"
+   "-"
   ],
   "xpc": []
  },
- "Safari › Clear History… | clearHistoryAndWebsiteData: | -": {
+ "Safari › Clear History… | clearProfileHistory: | -": {
   "behaviour": [
-   "disabled"
+   "-"
   ],
   "xpc": []
  },

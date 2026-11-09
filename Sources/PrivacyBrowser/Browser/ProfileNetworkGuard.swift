@@ -68,14 +68,59 @@ enum ProfileNetworkGuard {
     /// profile's store in use. Returns how many were closed.
     @discardableResult
     static func closeEveryPage() -> Int {
+        guardClosedPages()
         let close = NSSelectorFromString("_close")
         var closed = 0
         for view in webViews.allObjects where view.responds(to: close) {
+            closedPages.add(view)
             view.perform(close)
             closed += 1
         }
         return closed
     }
+
+    /// The pages `closeEveryPage` closed: their web views stay, Safari's chrome's to tear down.
+    private static let closedPages = NSHashTable<WKWebView>.weakObjects()
+    private static var closedPagesGuarded = false
+
+    /// A page closed here keeps its web view, and Safari's chrome tears that down later, on its own
+    /// way out: `-[WebViewController invalidate]` sets the web view's find delegate to nil. WebKit
+    /// reaches the find delegate through the page's find client, and closing the page replaced that
+    /// client with WebKit's base one, which the accessors' downcast refuses: a trap on WebKit 27
+    /// (the owner's Mac, 2 November: a profile ended after its seal in -[WKWebView
+    /// _setFindDelegate:]); a WebKit that does not check writes into an object of the wrong type.
+    /// For a page closed here the two answer as a page without a find delegate does and touch
+    /// nothing; every other web view is WebKit's as before. (The diagnostic logging delegate's
+    /// accessors, the other client a close takes away, check for none themselves.)
+    private static func guardClosedPages() {
+        guard !closedPagesGuarded else { return }
+        closedPagesGuarded = true
+        let setter = NSSelectorFromString("_setFindDelegate:")
+        if let method = class_getInstanceMethod(WKWebView.self, setter) {
+            typealias Setter = @convention(c) (AnyObject, Selector, AnyObject?) -> Void
+            let original = unsafeBitCast(method_getImplementation(method), to: Setter.self)
+            let replacement: @convention(block) (AnyObject, AnyObject?) -> Void = { view, delegate in
+                if let view = view as? WKWebView, closedPages.contains(view) { return }
+                original(view, setter, delegate)
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        } else {
+            log.notice("-[WKWebView _setFindDelegate:] is not in this macOS: nothing to guard for closed pages")
+        }
+        let getter = NSSelectorFromString("_findDelegate")
+        if let method = class_getInstanceMethod(WKWebView.self, getter) {
+            typealias Getter = @convention(c) (AnyObject, Selector) -> Unmanaged<AnyObject>?
+            let original = unsafeBitCast(method_getImplementation(method), to: Getter.self)
+            let replacement: @convention(block) (AnyObject) -> AnyObject? = { view in
+                if let view = view as? WKWebView, closedPages.contains(view) { return nil }
+                return original(view, getter)?.takeUnretainedValue()
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        } else {
+            log.notice("-[WKWebView _findDelegate] is not in this macOS: nothing to guard for closed pages")
+        }
+    }
+
     /// WebKit's real default store, closed and kept alive so that WebKit keeps handing out this one.
     private static var realDefaultStore: WKWebsiteDataStore?
     /// Hooks that could not be installed because what they patch is not in this macOS.
@@ -118,6 +163,10 @@ enum ProfileNetworkGuard {
         // QUIC goes around any proxy: a profile with one does not run with UDP open.
         if !proxies.isEmpty, !closures.sorted.contains("udp") {
             throw CoreError.invalidConfiguration("UDP could not be closed to the profile's process")
+        }
+        // Nor does any profile run with the keychain open to its process (`closeTheProcess`).
+        if !closures.sorted.contains("keychain") {
+            throw CoreError.invalidConfiguration("the keychain could not be closed to the profile's process")
         }
         missingHooks += everyStoreStartsClosed(except: profileID)
         missingHooks += everyWebViewGetsTheProfilesData()
@@ -662,9 +711,10 @@ enum ProfileNetworkGuard {
         // WebKit before 7621 it never consults the content rules, and Safari turns it on.
         pin("_setDNSPrefetchingEnabled:", required: false) { asked in asked && (proxies ?? []).isEmpty }
         // ICE candidate filtering (no host addresses to a page that was not granted the camera)
-        // is on, as in Safari; gathering on every interface only for the tunnel's hardware checks.
+        // is on, as in Safari; libwebrtc gathers on the default interface only — through the relay
+        // on loopback (`WebRTCRelays`) it needs no other.
         pin("_setICECandidateFilteringEnabled:", required: false) { _ in true }
-        pin("_setEnumeratingAllNetworkInterfacesEnabled:", required: false) { asked in asked && allInterfacesAllowed }
+        pin("_setEnumeratingAllNetworkInterfacesEnabled:", required: false) { _ in false }
 
         // The feature switches, by key. Every boolean preference is a feature too, WebRTC's
         // included, so the same switch reaches it by another way: the same answers there.
@@ -712,7 +762,7 @@ enum ProfileNetworkGuard {
         case "ICECandidateFilteringEnabled"?:
             return true
         case "EnumeratingAllNetworkInterfacesEnabled"?:
-            return asked && allInterfacesAllowed
+            return false
         case "DNSPrefetchingEnabled"?:
             return asked && !proxied
         case "SafeBrowsingEnabled"?:
@@ -724,12 +774,6 @@ enum ProfileNetworkGuard {
         }
     }
 
-    /// WebRTC may gather on every interface: the profile's WebRTC goes through the tunnel, and the
-    /// hardware checks asked for it (`BrowserSession.applyPrivacyPreferences`).
-    private static var allInterfacesAllowed: Bool {
-        guard let session, case .relay = session.configuration.webRTCRouting else { return false }
-        return DebugSwitches.tunnelAllInterfaces
-    }
 
     /// Each way of turning on what the profile has off, tried on preferences of no web view: the
     /// ways that get through the pins (`pinPrivacyPreferences`), for the report. Empty is right.
@@ -781,9 +825,23 @@ enum ProfileNetworkGuard {
     ///   * Any read or write in the real Safari's places (`SafariPaths`): Safari's frameworks find
     ///     them from the account's real home, not from the profile's, and a profile must neither
     ///     leave its browsing there nor read the user's own into itself.
+    ///   * The keychain, whatever this process's signature carries: securityd's services — the one
+    ///     that serves the account's login keychain and the XPC ones of the data-protection keychain
+    ///     (secd) — and the account's keychain files, which only they read and write. A profile's
+    ///     process is started from LumenProfile, which holds no entitlement that gives a keychain
+    ///     (`ProfileExecutable`); this lock does not depend on that: run from the app's own
+    ///     executable, which an NE=1 build gives the application identifier that opens the
+    ///     data-protection keychain, it would be refused securityd all the same. Without it, a
+    ///     profile's process kept an item in the login keychain and every other profile's was shown
+    ///     it, and an item the app made under its own signature (KeychainIsolation: CI run 659).
+    ///     Every profile's process has it, with or without a proxy, or does not run (`engage`).
     nonisolated private static func closeTheProcess(udp: Bool) -> [String] {
         var rules: [String] = []
         if udp { rules.append("(deny network-outbound (remote udp \"*:*\"))") }
+        rules.append("(deny mach-lookup (global-name \"com.apple.SecurityServer\") (global-name-regex #\"^com\\.apple\\.securityd\\.\"))")
+        if let realHome = SafariPaths.realHome {
+            rules.append("(deny file-read* file-write* (subpath \"\(realHome)/Library/Keychains\"))")
+        }
         var placesClosed = false
         if let realHome = SafariPaths.realHome, let home = ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"],
            realHome != home {
@@ -810,6 +868,9 @@ enum ProfileNetworkGuard {
             var error: UnsafeMutablePointer<CChar>?
             if sandboxInit(profile, 0, &error) == 0 {
                 if attempt.contains(services) { closures.insert("safari-xpc-services") } else { missing.append("sandbox: Safari's XPC services stay open") }
+                // The keychain is closed only if securityd is out of reach now, as the kernel answers.
+                let reached = KeychainCheck.securitydServices.filter { KeychainCheck.lookUp($0) == KERN_SUCCESS }
+                if reached.isEmpty { closures.insert("keychain") } else { missing.append("sandbox: securityd stays reachable (\(reached.joined(separator: ", ")))") }
                 if udp { closures.insert("udp") }
                 if placesClosed { closures.insert("safari-places") }
                 logger.notice("The kernel closes to this process: \(closures.sorted.joined(separator: ", "), privacy: .public)")
@@ -822,7 +883,8 @@ enum ProfileNetworkGuard {
         return missing
     }
 
-    /// What the kernel closed to this process (`closeTheProcess`): "udp", "safari-places".
+    /// What the kernel closed to this process (`closeTheProcess`): "udp", "safari-places",
+    /// "safari-xpc-services", "keychain".
     nonisolated private static let closures = LockedSet()
 
     // MARK: Lock 2: every other store closed

@@ -53,6 +53,9 @@ struct ProfileDraft {
     /// Carried through unchanged (a cache for launching; see ProfileConfiguration).
     var lastProxyLocation: ProxyLocation?
     var warnOnProxyIPChange = false
+    var menusInAppLanguage = false
+    /// An iPhone view's full disguise (ProfileConfiguration.phoneDisguise); on by default.
+    var phoneFullDisguise = true
     var webRTC: WebRTCPolicy = .disabled
     var ephemeral = false
     var safeBrowsing = false
@@ -167,6 +170,8 @@ struct ProfileDraft {
         if localeMode == .connection && !c.matchProxyLocation && c.proxy != nil { localeMode = .manual }
         lastProxyLocation = c.lastProxyLocation
         warnOnProxyIPChange = c.warnOnProxyIPChange
+        menusInAppLanguage = c.menusInAppLanguage
+        phoneFullDisguise = c.phoneDisguise == .full
         webRTC = c.webRTCPolicy
         ephemeral = c.ephemeral
         safeBrowsing = c.safeBrowsingEnabled
@@ -324,6 +329,8 @@ struct ProfileDraft {
         configuration.localeSource = localeMode == .random ? .random : nil
         configuration.lastProxyLocation = lastProxyLocation
         configuration.warnOnProxyIPChange = warnOnProxyIPChange
+        configuration.menusInAppLanguage = menusInAppLanguage
+        configuration.phoneDisguise = phoneFullDisguise ? .full : .engineOnly
         configuration.webRTCPolicy = webRTC
         configuration.ephemeral = ephemeral
         configuration.safeBrowsingEnabled = safeBrowsing
@@ -376,7 +383,7 @@ struct ProfileEditorView: View {
     @State private var draft = ProfileDraft()
     @State private var error: String?
     @State private var loaded = false
-    @State private var showingTunnel = false
+    @State private var showingGuard = false
     @State private var showingWhatSitesSee = false
     @State private var topic: ProfileEditorForm.Topic = .profile
     /// A check run from the editor: Check, or Save finding a proxy's type.
@@ -391,7 +398,7 @@ struct ProfileEditorView: View {
     /// The versions of the settings kept beside them (R4, R2), and the one the person asked to remove.
     @State private var keptVersions: [KeptSettings] = []
     @State private var removingVersion: String?
-    @ObservedObject private var tunnel = TunnelManager.shared
+    @ObservedObject private var networkGuard = NetworkGuard.shared
 
     /// The glyph colour of a profile not created yet (it has no id).
     private static let newProfileAvatarID = UUID(uuid: (0x4C, 0x55, 0x4D, 0x45, 0x4E, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, 1))
@@ -406,7 +413,7 @@ struct ProfileEditorView: View {
             }
         }
         .onAppear(perform: load)
-        .sheet(isPresented: $showingTunnel) { TunnelSettingsView() }
+        .sheet(isPresented: $showingGuard) { NetworkGuardSettingsView() }
         .sheet(isPresented: $showingWhatSitesSee) {
             if case .existing(let profile) = target {
                 WhatSitesSeeView(name: profile.name, snapshot: WhatSitesSee(profileID: profile.id, manager: { model.manager },
@@ -439,8 +446,8 @@ struct ProfileEditorView: View {
 
     private func form(saved: [ProxyListEntry]) -> some View {
         ProfileEditorForm(draft: $draft, topic: $topic, isNew: target.isNew, avatarID: avatarID, error: error,
-                          tunnelCarriesWebRTC: tunnel.canCarryWebRTC,
-                          onCancel: { dismiss() }, onSave: save, onTunnelSettings: { showingTunnel = true },
+                          guardReady: networkGuard.state == .ready,
+                          onCancel: { dismiss() }, onSave: save, onGuardSettings: { showingGuard = true },
                           savedProxies: saved, checkingProxy: checking, onCheckProxy: checkProxy,
                           knownTags: knownTags, visibleScreen: WindowSizing.visibleScreen,
                           onChooseCookieFile: { choosingCookieFile = true }, onDropCookieFile: readCookieFile,

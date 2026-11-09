@@ -8,6 +8,15 @@ import SystemConfiguration
 // Top-level code runs on the main thread; Swift 5 mode does not infer main-actor isolation for it.
 MainActor.assumeIsolated {
     let arguments = CommandLine.arguments
+    // A profile's process: started with the websites' languages, its interface's language fixed
+    // before anything asks a bundle for its own (Localization.pinInterfaceLanguage).
+    // A profile's process: Safari's menus and the browser's own words in the websites' language
+    // unless the profile asks for the app's (the owner, 7 November: a profile's window is the window
+    // of the person it stands for; ProfileConfiguration.menusInAppLanguage).
+    if arguments.contains("--profile-session"),
+       ProcessInfo.processInfo.environment[ProfileProcess.menusInAppLanguageVariable] == "1" {
+        Localization.pinInterfaceLanguage()
+    }
     // The core's errors in the person's language wherever one is shown (Localization.swift).
     installErrorTranslation()
     if arguments.contains("--sdk-check") {
@@ -38,13 +47,34 @@ MainActor.assumeIsolated {
         SelfTest.migrationStep(write: true)
     } else if arguments.contains("--selftest-read-vault") {
         SelfTest.migrationStep(write: false)
-    } else if arguments.contains("--utun-relay") {
-        // The packet tunnel's data path on a utun interface, for CI (root; UTunRelayHarness.swift).
-        UTunRelayHarness.start(arguments: arguments)
+    } else if arguments.contains("--keychain-probe") {
+        // One look at the keychains from this process, outside any profile's sandbox: the entitlements
+        // it holds that give one, whether it reaches securityd, and what the data-protection and the
+        // login keychain let it do under the probe's service (KeychainCheck; the self-test and the
+        // release check run it from each of the bundle's executables).
+        KeychainCheck.runFromCommandLine(arguments: arguments)
+    } else if arguments.contains("--socket-owners") {
+        // The kernel's table of sockets connected to an address — the process that uses each and the
+        // one it is counted for — as the network guard reads it (SocketOwners.swift).
+        SocketOwners.run(arguments: arguments)
+    } else if arguments.contains("--guard-probe") {
+        // The process the network guard's check on this Mac holds: one WebRTC request of WebKit's,
+        // to a documentation address, made on its behalf (GuardProbe.swift; NetworkGuard.prove).
+        GuardProbe.run()
+    } else if arguments.contains("--guard-diagnose") {
+        // The network guard on this Mac, measured and said in words: does its filter get flows, did
+        // the check's probe send its request, whom macOS counted it for (GuardDiagnosis.swift). Run
+        // from Terminal as the app's own executable, which holds the right that reads the filter's
+        // configuration: /Applications/Lumen.app/Contents/MacOS/Lumen --guard-diagnose
+        GuardDiagnosis.run()
     } else if let index = arguments.firstIndex(of: "--render-app-icon") {
         // The app icon's iconset, drawn from the Lumen mark (AppIcon.swift; scripts/build-app.sh).
         let folder = arguments.indices.contains(index + 1) ? arguments[index + 1] : "AppIcon.iconset"
         exit(AppIcon.writeIconset(to: URL(fileURLWithPath: folder)) ? 0 : 1)
+    } else if let index = arguments.firstIndex(of: "--render-dmg-background") {
+        // The disk image window's picture, 1× and 2× (DiskImageBackground.swift; scripts/make_dmg.sh).
+        let folder = arguments.indices.contains(index + 1) ? arguments[index + 1] : "."
+        exit(DiskImageBackground.write(to: URL(fileURLWithPath: folder)) ? 0 : 1)
     } else if arguments.contains("--profile-session") {
         // One profile in its own process, started by the manager process (ProfileProcess.swift
         // says why, ProfileSessionHost.swift what it does). Its language, locale and time zone are
@@ -103,8 +133,9 @@ MainActor.assumeIsolated {
         SafariChrome.runNibCheck(arguments: arguments)
     } else if arguments.contains("--safari-chrome") {
         // Safari's own window hosted in this process, with one of our web views in its tab
-        // (SafariChrome.swift). Needs a build without the App Sandbox and with library validation
-        // off; it exits with a message when the frameworks cannot be loaded. A developer's tool:
+        // (SafariChrome.swift). Needs a build without the App Sandbox, run from LumenProfile — the
+        // one executable signed with library validation off; it exits with a message when the
+        // frameworks cannot be loaded. A developer's tool:
         // it runs no profile — no proxy, none of a profile process's locks — so it is refused
         // unless asked for in so many words (PB_DEVELOPER=1).
         guard ProcessInfo.processInfo.environment["PB_DEVELOPER"] == "1" else {
@@ -112,10 +143,32 @@ MainActor.assumeIsolated {
             exit(64)
         }
         SafariChrome.startStandalone(arguments: arguments)
+    } else if arguments.contains("--selftest-license-renewal") {
+        // The license's renewals as the app's own model makes them — a vault opened, a profile made —
+        // for scripts/license_renewal_check.py's stand-in server (LicenseRenewalScenario.swift).
+        LicenseRenewalScenario.start()
+    } else if arguments.contains("--selftest-account-switch") {
+        // A profile's data while this Mac signs out of an account, into another and back
+        // (AccountSwitchScenario.swift, for scripts/account_switch_check.py).
+        AccountSwitchScenario.start()
     } else if arguments.contains("--selftest-updates") {
         // The update scenarios of docs/UPDATES.md §8, driven by scripts/update_check.py on a CI
         // runner (UpdateSelfTest.swift): they replace this very app with another build.
         UpdateSelfTest.start(arguments: arguments)
+    } else if arguments.contains("--key-crash-check") {
+        // A process holding the account's key crashes on purpose; its crash report must hold no form
+        // of the key, the control's must (LicenseSelfTest.crashCheck; scripts/key_crash_check.py).
+        // Under AppKit's run loop, as the self-test runs the account server it plays (under
+        // dispatchMain, macOS 27 stopped the process before its first line: CI run 601).
+        let control = arguments.contains("--control")
+        let application = NSApplication.shared
+        application.setActivationPolicy(.prohibited)
+        Task { @MainActor in await LicenseSelfTest.crashCheck(control: control) }
+        application.run()
+    } else if arguments.contains("--interface-language-check") {
+        // Which language this app's interface takes, and from where, as it starts (CI: plain, with
+        // -AppleLanguages, after an earlier version's write; InterfaceLanguageCheck.swift).
+        InterfaceLanguageCheck.run()
     } else if arguments.contains("--render-ui-snapshots") {
         // The app's screens with sample data, as PNG files for design review (UISnapshots.swift).
         UISnapshots.start(arguments: arguments)
@@ -139,7 +192,15 @@ MainActor.assumeIsolated {
         WebContentLanguage.decide(nil)
         SiteCapture.start(arguments: arguments)
     } else {
-        // Russian by default (English fallback); must be set before AppKit builds its menus.
+        if let index = arguments.firstIndex(of: "--settings-window-check") {
+            // The Settings window as the person gets it: this app as it runs, Settings opened as ⌘,
+            // opens it, the window server's picture read for a band (SettingsWindowCheck; CI).
+            let folder = arguments.indices.contains(index + 1) ? arguments[index + 1] : "settings-window"
+            SettingsWindowCheck.folder = URL(fileURLWithPath: folder, isDirectory: true)
+            SettingsWindowCheck.control = arguments.contains("--control")
+        }
+        // The interface's language (Localization: the person's choice, else this Mac's, else
+        // English); set before AppKit builds its menus.
         Localization.applyProcessLanguage()
         SimplifiedModeNotice.presentsAutomatically = true
         PrivacyBrowserApp.main()

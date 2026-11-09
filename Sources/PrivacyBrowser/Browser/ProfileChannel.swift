@@ -30,6 +30,10 @@ enum ProfileCommand: Codable {
     case exportCookies
     case startWarmUp(WarmUpPlan)
     case stopWarmUp
+    /// Run a scenario (`ScenarioRunner`) in a window of its own of this profile.
+    case runScenario(ScenarioRunRequest)
+    /// Stop it: a command under way finishes first.
+    case stopScenario(ScenarioRunner.StopReason)
     /// Say where this profile's traffic goes (`ProfileNetworkGuard.report`); with `probe`, also
     /// fetch it once by each of the process's own ways of making a request.
     case checkNetwork(probe: URL?)
@@ -39,6 +43,46 @@ enum ProfileCommand: Codable {
     /// Choose every item of Safari's menu bar in turn, from item `from` on, and say what each did
     /// (`SafariMenuWalk`). Sent by the `--menu-walk` check only, never by the app.
     case walkMenu(from: Int)
+    /// Close every window of the profile as its close button does — the way a person ends a
+    /// profile; the last one closing quits the process, which seals. Sent by the self-test only.
+    case closeWindows
+    /// The manager's decision on this launch's WebRTC (`WebRTCGate`): the relay the profile's pages
+    /// are given, or why there is none. A profile with a SOCKS5 proxy that wants WebRTC waits for it
+    /// before it builds anything, and without it runs with WebRTC off.
+    case webRTC(WebRTCLaunchMessage)
+    /// Look at the data-protection keychain from inside this process (`KeychainCheck`): which of the
+    /// entitlements that give one it holds, and what the keychain lets it do under the probe's own
+    /// service. Sent by the self-test and the release check only, never by the app.
+    case checkKeychain(KeychainProbe)
+    /// Choose History › Show All History as the person does, and say what the window then shows
+    /// (`HistoryWindowReader`). Sent by the self-test only, never by the app.
+    case lookAtHistory
+    /// Do `action` to the profile's window as a person would and say what the window then shows
+    /// (`WindowProbe`). Sent by the self-test only, never by the app.
+    case lookAtWindow(WindowProbeAction)
+}
+
+/// A scenario to run in a profile's process: its text and its parameters (JSON), named for its log.
+struct ScenarioRunRequest: Codable, Equatable {
+    var runID: UUID
+    var name: String
+    var source: String
+    var parametersJSON: String
+}
+
+/// What the manager decided for a launch's WebRTC. With `relay`, the profile's pages are given that
+/// TURN server — the manager's, on loopback (`WebRTCRelays`) — as their only ICE server, and the
+/// network guard holds the profile's processes to the proxy; without it, WebRTC is off in the
+/// engine, for `refusal`.
+struct WebRTCLaunchMessage: Codable, Equatable {
+    struct Relay: Codable, Equatable {
+        var urls: [String]
+        var username: String
+        var credential: String
+    }
+
+    var relay: Relay?
+    var refusal: WebRTCRefusal?
 }
 
 enum ProfileEvent: Codable {
@@ -47,9 +91,17 @@ enum ProfileEvent: Codable {
     /// The profile is up and its first window is on screen; `hostsSafariChrome` says whether that
     /// window is Safari's own chrome (the self-test checks the chrome's web views use the proxy).
     case running(hostsSafariChrome: Bool)
+    /// Sent with `running`: the interface's language this process was given (`code`), the one its
+    /// bundles took — AppKit's words and, when hosted, Safari's chrome (`bundles`, `chrome`). The
+    /// self-test checks them against what the profile's pages see, which is never decided by them.
+    case interfaceLanguage(code: String, bundles: String, chrome: String?)
     /// Where the warm-up of this profile has got to; sent as the run goes on, and once more when
     /// it ends. Everything the warm-up screen and the profile list show comes from here.
     case warmUp(WarmUpStatus)
+    /// A line of a scenario's run log, as the run goes.
+    case scenarioLine(runID: UUID, ScenarioRunner.Line)
+    /// How a scenario's run ended.
+    case scenarioEnded(runID: UUID, ScenarioRunner.Outcome)
     /// The answer to `importCookies`: what the profile's store did with them, or nil when the
     /// profile could not take them (it was starting or stopping).
     case cookiesImported(ProfileManager.CookieImportOutcome?)
@@ -76,6 +128,12 @@ enum ProfileEvent: Codable {
     case proxyLocationUnknown
     /// One step of `walkMenu`, as a line of JSON (`SafariMenuWalk`).
     case menuWalk(String)
+    /// The answer to `checkKeychain`.
+    case keychainReport(KeychainReport)
+    /// The answer to `lookAtHistory`.
+    case historyLook(HistoryWindowLook)
+    /// The answer to `lookAtWindow`.
+    case windowLook(WindowLook)
 }
 
 /// How a profile's WebKit data was sealed as its process quit: whether WebKit let the store go

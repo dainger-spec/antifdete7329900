@@ -324,13 +324,227 @@ signing, notarization and stapling skipped and said so, a throwaway Ed25519 key 
 every push and the release path is not untested code on the day there is an account.
 
 As built: `VERSION` and `BUILD` are required; `FEED_URL` and `DOWNLOAD_URL` (https only) say where
-the appcast and the zips are published; `UPDATE_KEY_FILE` is the private key from `pbupdate keygen`
+the appcast and the zips are published — for a release (the owner, 2 November):
+
+| | Value | So that |
+|---|---|---|
+| `FEED_URL` | `https://dl.lumenbrowser.io/appcast.json` | the app looks for updates there (built into it) |
+| `DOWNLOAD_URL` | `https://dl.lumenbrowser.io/` (the folder) | the disk image the website offers is `https://dl.lumenbrowser.io/Lumen-<version>.dmg`, the zip the updater downloads `https://dl.lumenbrowser.io/Lumen-<version>.zip` |
+
+Both are the defaults of a release (`SIGN_IDENTITY` given), so neither has to be set; a dry run keeps
+`updates.invalid`. `UPDATE_KEY_FILE` is the private key from `pbupdate keygen`
 (kept out of the repository and of CI); `UPDATE_EXTRA_PUBLIC_KEYS` adds keys the app also trusts
 (rotation); `PREVIOUS_APPCAST` keeps the releases of the appcast published now; `NOTES_FILE` is the
 release notes (`docs/release-notes-next.txt` gathers what the next release's are to say). The app is built by `build-app.sh` with the feed, the public keys and — with a
 Developer ID — the Team ID updates must be signed by (and a secure timestamp, which notarization
 needs). At the end the appcast and the zip are checked with `pbupdate verify`, the code the app
 itself checks them with, and the script lists what a real release still needs when it ran dry.
+
+### What is published, and where (the owner, 1 November)
+
+Everything is at **`https://dl.lumenbrowser.io/`**, a Cloudflare R2 bucket under its own name: the
+appcast (`appcast.json`), the zip the updater downloads (`Lumen-<version>.zip`, unchanged) and the
+**disk image the website offers** (`Lumen-<version>.dmg`). Made and checked by the owner on
+2 November: the bucket is `lumen-downloads`, the domain `dl.lumenbrowser.io` with TLS 1.2 at least,
+publishing through R2's S3 API with a key that may only read and write the objects of this bucket
+(Object Read & Write); an upload and its download over the domain were tried live. A real release (`SIGN_IDENTITY` given)
+takes these addresses unless `FEED_URL` / `DOWNLOAD_URL` say otherwise; a dry run keeps
+`updates.invalid`, so that no build CI makes looks anywhere real.
+
+**Why a disk image.** From a zip people leave the app in Downloads; macOS runs an app from there
+translocated — from a read-only copy elsewhere — and an update cannot replace it. The image holds
+the app and a link to Applications (`scripts/make_dmg.sh`): drag the one onto the other. In two
+steps (the owner, 2 November): first the plain image — Finder's own window, the two icons in it —
+with the whole release path brought to its end on it, the check on a clean Mac included; then, as a
+change of its own on top, the window laid out: the app's dark backdrop with its mark and name, an
+arrow from Lumen to Applications, the window's size and the icons' places (the picture drawn by
+`Lumen --render-dmg-background`, one for both languages). The layout lives in the image's
+`.DS_Store`, which only Finder writes, so the script asks Finder over AppleScript; on the release's
+Mac macOS asks once **"“Terminal” wants access to control “Finder”. Allowing control will provide
+access to documents and data in “Finder”, and to perform actions within that app."** — Allow (the
+name is the terminal's the release runs in; System Settings › Privacy & Security › Automation turns
+it on again). **Whatever goes wrong there, the image is made plain and the release goes on**, with a
+warning.
+
+**Whether the window shows its picture is checked, not said** (the owner, 3 November: 0.1.1's window
+had its icons and its size and no picture, while make_dmg.sh printed "laid out by Finder" — a line
+that only knew a `.DS_Store` was there). make_dmg.sh now says what the image holds, read back: Finder's
+answer when asked for the window's picture right after setting it ("finder: …"), what the volume's
+`.DS_Store` names — the picture's alias, its file, the path inside the volume and where the volume was
+mounted when Finder made it — and the icons' places, before the image is made read-only and in the
+read-only image, and whether the `.DS_Store` came through byte for byte (`scripts/dmg_facts.py`).
+Then release.sh (step 3c) opens the finished image in Finder, captures its window in this Mac's
+appearance and compares it point by point with the picture the image carries
+(`scripts/dmg_window_shot.sh`, `scripts/dmg_background_check.py`): the backdrop, and the plates, mark
+and name a window of any one colour cannot show. The block at the end says **"the image's window
+shows its picture"** or **"DOES NOT SHOW ITS PICTURE"**; it never stops a release, and it is never
+left out silently (`DMG_WINDOW_CHECK=0` leaves it out and the block says so). The terminal must be
+allowed once to record the screen (Privacy & Security › Screen & System Audio Recording); without
+it the capture holds no window and the verdict says so. CI runs the same check on the dry run's
+image in both appearances, and its control — the same app laid out without its picture
+(`make_dmg.sh --no-picture`) — must fail it (the `dmg-window` artifact); on macOS 27 it is reported.
+After a release, the Download check workflow runs it on the published image on clean macOS 26 and 27.
+
+What 0.1.1's image holds (the Download check on the published image, clean macOS 26.6.2 and 27.0.1,
+3 November): the picture is there (`.background/background.tiff`, both pages), the `.DS_Store` is
+there and came through the read-only conversion, with the window's size and the icons' places — but
+its icon view is Finder's own: 48-point icons, 12-point names, no picture named. The window opened
+white with small icons on both. So the picture was neither lost nor unreadable: Finder, on the owner's
+Mac, did not keep the view options it was given. CI's macOS 27 (1x) kept them all with the same script,
+in three variants measured in run 672 — the picture set last, set before the icons' places as 0.1.1's
+script did, and a PNG instead of the two-scale TIFF — and showed the picture in each. On macOS 27
+`hdiutil attach` warns that it is deprecated in favour of `diskutil image attach` and works, and
+Finder's own answer for a window's picture fails (-10000) even when the picture is set and kept.
+
+So make_dmg.sh now reads what Finder kept before the image is made read-only, and when the icons are
+not of 128 points or no picture is named it asks Finder again, three times at most; then the image is
+made plain, said as such (the picture is set last too, after the forum thread 836253, harmlessly).
+What Finder kept is then compared, record by record, with what the read-only image holds
+(`dmg_facts.py --compare`): on CI's macOS 26 (run 672) the two files' bytes differed while every fact
+read from them was the same, and the script's line for that was a warning that said no more; it now
+says whether a record differs and which — for a property list, which of its keys. Whether all this
+settles the owner's Mac is for its next release to say: its block reads the window.
+
+**The image is signed, notarized and stapled too**, after the app inside it was: `codesign` with
+the Developer ID and a timestamp, `notarytool submit … --wait`, `stapler staple`, `stapler validate`
+and `spctl --assess --type open --context context:primary-signature` on the image. The app keeps
+its own ticket inside (`make_dmg.sh` checks that the copy in the image is the same signature and
+still stapled), so it opens offline once copied out.
+
+**Uploaded** when R2's keys are in the environment of the run — `R2_ENDPOINT`
+(`https://<account>.r2.cloudflarestorage.com`, without the bucket), `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY`; `R2_BUCKET` is `lumen-downloads` unless given — by `scripts/r2_publish.sh`,
+with curl's own S3 signing (nothing installed):
+
+- **Before anything is built**, the release's two names are checked free in the bucket (which
+  also tries the keys), and the appcast published now is fetched from it, so that the new appcast
+  keeps its releases (`PREVIOUS_APPCAST` still names another). A VERSION already published stops
+  the release there, not after notarization.
+- **At the end**, the zip and the image first, the appcast last — a feed never names a file not
+  there yet. Each upload signs the file's SHA-256 (`x-amz-content-sha256`), so R2 itself refuses
+  bytes that did not arrive as built; the object keeps it (`x-amz-meta-sha256`). The versioned
+  files are cached for a year, the appcast never.
+- **Each file is then downloaded from its public address** — `dl.lumenbrowser.io`, through
+  Cloudflare, as anyone gets it — and its SHA-256 compared with the built file's. What is served
+  must be, byte for byte, what was built; otherwise the release has failed, and the script says
+  what was served instead (its SHA-256, its size, and Cloudflare's cache status).
+- **A published version is never replaced.** If `Lumen-<version>.zip` or `.dmg` is in the bucket
+  already, the release stops: people downloaded those bytes, the website names their SHA-256, and
+  Cloudflare keeps them for a year. Only the appcast is rewritten (`--replace`). The same bytes are
+  left as they are and only read back, so a publication that failed half way is finished by
+  running `scripts/r2_publish.sh` again on the files in `build/release`, in the same order.
+- **The keys reach curl on its standard input**, as its configuration, never on its command line,
+  which `ps` shows every user of the Mac. They are in no file the script writes.
+
+Without the keys the script says what goes where, in that order.
+
+**No secret of a release in the repository**, which is public: `scripts/check_secrets.py` runs before
+anything else and stops the release on any finding. It looks for the values of `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY` and the update key (the file `UPDATE_KEY_FILE` names) as this run has them,
+and for anything shaped like R2's keys whatever its value (one of R2's variables or an `aws_*_key`
+setting given 32 to 64 hex digits, an `ID:SECRET` pair of R2's shape) — in every file of every
+commit any ref reaches, in the index, and in what `git add -A` would take next (files `.gitignore`
+does not exclude); a file it excludes is where such keys may live. A finding names the commit, the
+file and the line, never the value; a key that was pushed is public, so it is rotated first. The
+whole history (all branches, 1.5 GB of files) takes about 15 seconds.
+
+**For the website**, at the end, in one piece to copy (and in `download.json`): the image's
+address, the version, its size in megabytes (decimal, as Finder counts) and in bytes, its SHA-256,
+the minimum macOS. Written by a JSON serializer (`scripts/download_json.py`) and read back as the
+site reads it — strict JSON, every field of the format and no other, the size and SHA-256 the
+image's, the minimum macOS the app's `LSMinimumSystemVersion` — before anything is published; any
+of it wrong stops the release. 0.1.1's, put together by awk and a template, said `"sizeMB": 17,5`
+on the owner's Mac, whose Russian locale writes a decimal comma: no JSON reader takes that, and CI,
+whose locale is English, could not have shown it. `scripts/test_download_json.sh` (CI, both jobs)
+writes the file under four locales and must have each taken, and holds the check to ten files it
+must refuse, 0.1.1's among them.
+
+**Checked as downloaded**: `scripts/download_check.sh` fetches the image, marks it as a browser
+marks a download, and asks Gatekeeper what macOS asks when it is opened — the image (`spctl
+--type open`), its ticket, then the app copied out and marked the same way (`spctl --type
+execute`, `syspolicy_check distribution`). With `--shots` it then does what the person does —
+double-clicks the image, opens the app from Applications — and keeps the screen after each, with
+what Gatekeeper logged; nobody answers the dialogs, so the screen shows what the person would be
+asked. CI runs it on every push on the dry run's image with `--expect rejected`: an image that is
+not notarized must be refused, or the check (or the runner's Gatekeeper) proves nothing; its
+screens are the `download-check-control` artifact. After a release, the workflow "Download check"
+runs it on the published image with `--expect accepted`, on runners that have never seen Lumen,
+and keeps their screens.
+
+**Not yet done once for real**: nothing of signing with a Developer ID, notarizing or stapling
+has run with a live Apple account — CI has none, and every run so far was dry. The first real
+runs are expected to need a second try: `xcrun notarytool log <submission id> --keychain-profile
+lumen-notary` says why Apple refused one.
+
+### What the owner provides for a real release (the owner, 2 November)
+
+**`NE=1` (3 November):** its first signed, notarized build was killed by the kernel at its start on
+macOS 27.0.1 — the app's executable held the network guard's provider right beside library validation
+off, and the kernel kills an executable holding that right beside any relaxation of that class
+(measured: docs/TUNNEL.md, "What the kernel kills"). Since then the app's own executable keeps library
+validation on, and only LumenProfile has it off; build-app.sh refuses a build that pairs them again,
+and release.sh stops any signed build the kernel does not start, before it is notarized. `NE=1` is
+released once a build of this layout has passed release.sh and the hardware checklist
+(docs/TUNNEL.md).
+
+With the network guard (`NE=1`: WebRTC in a proxied profile through its proxy, docs/TUNNEL.md) —
+since the keychain a profile's process could share with the app's is closed (docs/IDENTITY.md, "The
+keychain") — the App IDs and provisioning profiles of docs/IDENTITY.md, "What to register with
+Apple" (registered on 31 October; `scripts/signing_check.py --profiles-only` reads them back), and
+beside them, on the Mac that runs `release.sh`:
+
+1. **The Developer ID Application certificate, with its private key, in the login keychain.**
+   Made by the team's Account Holder: Xcode › Settings › Accounts › the team › Manage
+   Certificates… › + › *Developer ID Application* (Xcode makes the key and the request); or on
+   developer.apple.com › Account › Certificates, Identifiers & Profiles › Certificates › + ›
+   *Developer ID Application*, with a request from Keychain Access › Certificate Assistant ›
+   Request a Certificate From a Certificate Authority (saved to disk), the downloaded `.cer`
+   double-clicked. Then `security find-identity -v -p codesigning` lists
+   `Developer ID Application: <name> (<TEAM_ID>)` — that text is `SIGN_IDENTITY`.
+2. **The Team ID**: developer.apple.com › Account › Membership details › Team ID (ten characters)
+   — `TEAM_ID`.
+3. **The notary's credentials, stored once in the login keychain** under the name `lumen-notary`
+   (`NOTARY_PROFILE=lumen-notary`), either way:
+   - an app-specific password: account.apple.com › Sign-In and Security › App-Specific Passwords ›
+     + (shown once), then
+     `xcrun notarytool store-credentials lumen-notary --apple-id <the Apple Account's email> --team-id <TEAM_ID>`
+     and the password when asked;
+   - or an App Store Connect API key: appstoreconnect.apple.com › Users and Access › Integrations ›
+     App Store Connect API › Team Keys › + (role Developer), the `.p8` downloaded (once), then
+     `xcrun notarytool store-credentials lumen-notary --key <path to AuthKey_….p8> --key-id <Key ID> --issuer <Issuer ID>`.
+   Nothing of it goes into a file of the repository; `notarytool` reads it from the keychain.
+4. **The update key**: `pbupdate keygen <file>` once, the file kept outside the repository
+   (owner-only, and a copy offline) — `UPDATE_KEY_FILE`. Its public half is built into every
+   release; losing it means the next key can only come in an update signed with this one.
+5. **The keys of the documents of rights**, as the account server prints them (`lumen-api pubkey`)
+   — `ENTITLEMENT_PUBLIC_KEYS`; never the development key, which the release refuses.
+6. **R2's keys** for `dl.lumenbrowser.io` — `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`,
+   `R2_SECRET_ACCESS_KEY` (the bucket, `lumen-downloads`, is the default `R2_BUCKET`) — in the
+   environment of the run only: typed or read from a password manager into the shell that runs
+   the release, never into a file of the repository. The release refuses to start if one is in a
+   commit.
+7. **Xcode 27**, the active one (`xcode-select -p`): its SwiftPM declares SDK 14.0, and a release of
+   a build declaring 15 or newer is refused (the certificate fetched outside a profile's proxy on
+   macOS 27, docs/ISOLATION_AND_LIMITATIONS.md §2).
+
+Then:
+
+```sh
+NE=1 APP_PROFILE=<path>/lumen.provisionprofile EXTENSION_PROFILE=<path>/lumen-guard.provisionprofile \
+  TEAM_ID=<TEAM_ID> SIGN_IDENTITY="Developer ID Application: <name> (<TEAM_ID>)" NOTARY_PROFILE=lumen-notary \
+  UPDATE_KEY_FILE=<file> ENTITLEMENT_PUBLIC_KEYS=<id>=<base64> \
+  R2_ENDPOINT=https://<account>.r2.cloudflarestorage.com R2_ACCESS_KEY_ID=… R2_SECRET_ACCESS_KEY=… \
+  VERSION=0.1.0 BUILD=1 scripts/release.sh
+```
+
+Before the first one, `scripts/signing_check.py` (the same variables but the R2 keys and the update
+key) makes the whole chain once on a throwaway build — sign, notarize, staple, Gatekeeper, the
+release check with its keychain between profiles — and writes a report with no secret in it.
+Without `NE=1` the release has no guard: `release.sh` says so at the end, and a proxied profile
+keeps WebRTC off.
+
+At the end it prints the block for the website; then Actions › Download check › Run workflow with
+its `url` checks the published image on clean Macs.
 
 ### Which build is released
 
@@ -350,17 +564,43 @@ runtime, not the App Sandbox. Only the Mac App Store requires the sandbox — an
 app that loads Safari's private frameworks at all, sandboxed or not: were the App Store ever the
 channel, it is the product's promise that would change, not the build. The updater does not need
 it (its helper runs outside the sandbox by design; §8's end-to-end run covers both builds). The
-packet tunnel's system extension is sandboxed by its own entitlements; the app that installs it
+network guard's system extension is sandboxed by its own entitlements; the app that installs it
 need not be (`build-app.sh` adds the extension's entitlements to either build; untried with a real
 team, docs/TUNNEL.md).
 
+**Which macOS.** 26 and later: `LSMinimumSystemVersion` 26.0 in the app, its updater's helper and the
+network guard (build-app.sh stops if they differ), what download.json and the appcast tell people,
+what the website says and what CI tests (macOS 26 and 27). The website's promise lives on its
+download page in each language, /ru/download and /en/download (the owner, 3 November): release.sh reads
+both before publishing (`scripts/site_minimum_check.py`), each must state the app's major version on
+its own, and the check names every address it asked and what it found there — the claim's words, no
+claim (with what the page says near "macOS", and whether its words are drawn by JavaScript, which the
+check does not run), or the address not read, with its answer; when the site redirects, the page it led
+to is named as the one read. A page that states another version, or
+none, or cannot be read stops a release that publishes; a run that publishes nothing says so in its
+block. (CI run 669 had read the root and the address without a language: the root need not carry the
+claim, and the other answered 404, which the site fixes on its side.) A
+profile's window is Safari 26's own; on an older macOS, macOS itself refuses to open the app, with
+its own message — 0.1.1 said 14.0, and on macOS 15 it would have installed and not worked. The
+executables still declare macOS 14 (`Package.swift`), for a measured reason: with Xcode 27, SwiftPM
+writes the deployment target as the declared SDK too — `.macOS(.v14)` gives minos 14.0 and SDK 14.0,
+`.macOS("26.0")` gives minos 26.0 and SDK 26.0 (CI run 667, macOS 27) — and a declared SDK of 15 or
+newer turns on WebKit's network loader, with which macOS 27 fetched a certificate's intermediate
+outside a profile's proxy (docs/ISOLATION_AND_LIMITATIONS.md §2; release.sh refuses such a build).
+`LSMinimumSystemVersion` decides what macOS opens; the declared SDK, what WebKit does.
+
 **Signing.** The same Developer ID Application certificate, hardened runtime and secure timestamp.
-The entitlements are `Resources/PrivacyBrowser-NoSandbox.entitlements`: camera and microphone, and
-`com.apple.security.cs.disable-library-validation` — Safari's frameworks are Apple's code loaded into
-a process this team signed, which library validation refuses otherwise. The sandbox's own
-entitlements (`network.*`, `files.*`, the temporary exception for the update's staging folder) and
-`container-migration.plist` are not in it. `release.sh` reads the signature back and stops on the
-sandbox, on library validation left on, on `get-task-allow`, or without the hardened runtime.
+The entitlements are `Resources/PrivacyBrowser-NoSandbox.entitlements`: camera and microphone. The
+profile's executable, `Contents/MacOS/LumenProfile`, is signed with them and
+`com.apple.security.cs.disable-library-validation` besides — Safari's frameworks are Apple's code
+loaded into a process this team signed, which library validation refuses otherwise, and they load only
+in LumenProfile's processes. The app's own executable keeps library validation on: beside the network
+guard's right the kernel kills an executable with it off at its start (docs/TUNNEL.md, "What the
+kernel kills"). The sandbox's own entitlements (`network.*`, `files.*`, the temporary exception for
+the update's staging folder) and `container-migration.plist` are not in it. `release.sh` reads the
+signatures back and stops on the sandbox, on library validation off in the app's own executable or on
+in LumenProfile, on a relaxation beside the network extension's right in any executable, on
+`get-task-allow`, or without the hardened runtime.
 
 **Notarization.** Unchanged: `notarytool submit`, `stapler staple`, `spctl --assess`. The notary
 service requires the hardened runtime and accepts its documented exceptions, library validation
@@ -380,11 +620,11 @@ among them; it does not look for private interfaces (that is App Store review).
 - The manager's process — the vault, the master key — is not confined by the App Sandbox, and holds
   no web content: every profile runs in a process of its own, with its profile's key only and a
   kernel sandbox profile of its own (UDP with a proxy, the real Safari's places, Safari's XPC
-  services; §4a) — except a profile whose WebRTC goes through the packet tunnel, which stays in the
-  manager's process.
-- With library validation off, the process would load a library that is neither Apple's nor this
-  team's if asked to: it loads only from `/System/Library/PrivateFrameworks`, on the sealed system
-  volume, and `DYLD_*` variables stay refused (no `allow-dyld-environment-variables`).
+  services; §4a).
+- With library validation off — LumenProfile's processes only; the manager's process, which holds the
+  vault and the master key, keeps it on — a profile's process would load a library that is neither
+  Apple's nor this team's if asked to: it loads only from `/System/Library/PrivateFrameworks`, on the
+  sealed system volume, and `DYLD_*` variables stay refused (no `allow-dyld-environment-variables`).
 - The local automation API exists in this build only (off by default; ISOLATION_AND_LIMITATIONS.md
   §10).
 
@@ -392,15 +632,20 @@ There has been no release yet. A tester's sandboxed build of the same bundle ID:
 the sandbox takes over its vault at its first start (README).
 
 **The gate** (`release.sh` step 2b, on the app after notarization and stapling, run from a copy so
-that what is published is exactly what was checked): `Lumen --check-safari-chrome` — every class and
+that what is published is exactly what was checked): `LumenProfile --check-safari-chrome` — every class and
 method the chrome, and a profile's hold on its proxy, rely on is in this Safari — and
 `Lumen --release-check` (`ReleaseCheck.swift`): a profile started the way the app starts one, with
 nothing set by hand (`PB_PROFILE_PROCESS`, `PB_SAFARI_CHROME` or the `PBProfileProcess` default set
 fail it), held to a proxy that goes nowhere, in a vault of its own in a temporary folder, must get a
-process of its own whose window is Safari's own chrome. Anything else stops the release. CI runs the
-gate in the release dry run on every push, and its controls, each of which must fail for its own
-reason: the sandboxed build, the release with Safari's chrome turned off for the profile's process
-(`--release-check --control`), and `release.sh` given `SANDBOX=1`. What it proves is the Mac the
+process of its own whose window is Safari's own chrome; then a second profile beside it, for the
+keychain between profiles (docs/IDENTITY.md, "The keychain"). Anything else stops the release:
+`release.sh` takes the verdict from the check's exit status and every one of its lines
+(`scripts/release_check_gate.sh`) — one PASS among them is not a pass, and a keychain FAIL after the
+window's PASS stops it as any other. CI runs the gate in the release dry run on every push, and its
+controls, each of which must fail for its own reason: the sandboxed build, the release with Safari's
+chrome turned off for the profile's process (`--release-check --control`), the release's app with
+LumenProfile signed with the app group, `release.sh` given `SANDBOX=1`, and the gate's reading held
+to outputs made up for the purpose, each with the verdict it must give. What it proves is the Mac the
 release is made on; on another macOS a profile whose window cannot be Safari's says so in its window
 (simplified mode, ISOLATION_AND_LIMITATIONS.md §4a).
 
@@ -420,6 +665,21 @@ handed over at the last quit — is said once at the next launch. In the UI snap
 
 ## 8. How it is proven
 
+- **Publishing (CI, Linux, every push):** `scripts/test_r2_publish.sh` runs `scripts/r2_publish.sh`
+  against a local R2 (`scripts/r2_local.py`) that computes every request's AWS signature again with
+  the secret and refuses one that does not match, and refuses an upload whose body is not the
+  SHA-256 it signed, as R2 does. Made to work: a name checked free, the image uploaded with its
+  SHA-256 signed, its type and a year's cache, read back the same; the same bytes not uploaded
+  twice; the appcast replaced, and fetched back as the latest. Made to fail: other bytes under a
+  published name, a public address serving other bytes (one byte changed), an address that is not
+  the bucket's, a wrong secret, another bucket, an endpoint with the bucket in it, an http address,
+  a key with a quote in it. And curl, run through a wrapper that keeps its arguments, never had a
+  key among them; nothing printed holds the secret.
+- **The secret check (CI, Linux, every push):** `scripts/check_secrets.py --self-check` plants the
+  secrets — in a commit a later one deletes, on a branch not checked out, in the index, in an
+  untracked file, in a changed tracked one, in an ignored one — beside look-alikes, and fails unless
+  every planted one is found, the ignored one and the look-alikes are not, and no value is printed;
+  then the check runs on the repository itself (shapes only: CI has no key).
 - **Unit tests (BrowserCore, Linux and macOS):** the appcast envelope and its items; Ed25519 of the
   appcast and of a zip, a forged or tampered one refused; versions compared component by component;
   no downgrade; an appcast older than the last accepted refused; R1–R4 for every file in §4
@@ -465,5 +725,5 @@ handed over at the last quit — is said once at the next launch. In the UI snap
 - Installing into a location that needs administrator rights (Sparkle asks for a password; we say
   "not installable here").
 - Delta updates.
-- Updating the packet-tunnel system extension: a new extension version is activated by
-  `OSSystemExtensionRequest` at the next launch that needs it, as today (docs/TUNNEL.md).
+- Updating the network guard's system extension: the updated app asks macOS to activate its own
+  version at its next start, which replaces the old one without a new approval (docs/TUNNEL.md).

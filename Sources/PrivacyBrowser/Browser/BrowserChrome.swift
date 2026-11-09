@@ -66,23 +66,23 @@ struct ProfileChipView: View {
             ProfileAvatar(name: model.profileName, id: model.profileID, size: 16, style: model.avatar)
             Text(model.profileName)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Theme.textPrimary)
+                .foregroundStyle(ProfileWindowTheme.textPrimary)
                 .lineLimit(1)
             if case let .proxy(_, code) = model.exit {
-                Rectangle().fill(Theme.strongBorder).frame(width: 1, height: 12)
+                Rectangle().fill(ProfileWindowTheme.strongBorder).frame(width: 1, height: 12)
                 if let code {
                     CountryFlag(code: code, size: 12)
                 } else {
                     Image(systemName: "network")
                         .font(.system(size: 10))
-                        .foregroundStyle(Theme.textSecondary)
+                        .foregroundStyle(ProfileWindowTheme.textSecondary)
                 }
             }
         }
         .padding(.leading, 4)
         .padding(.trailing, 8)
         .frame(height: 24)
-        .background(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).fill(Theme.accentTint))
+        .background(RoundedRectangle(cornerRadius: ProfileWindowTheme.controlRadius, style: .continuous).fill(ProfileWindowTheme.accentTint))
         .fixedSize()
         .help(description)
         .accessibilityElement(children: .ignore)
@@ -117,15 +117,15 @@ struct StoppedPageView: View {
         VStack(spacing: 14) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 28, weight: .regular))
-                .foregroundStyle(Theme.warning)
+                .foregroundStyle(ProfileWindowTheme.warning)
                 .accessibilityHidden(true)
             Text(L("tab.stopped.title"))
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
+                .foregroundStyle(ProfileWindowTheme.textPrimary)
                 .multilineTextAlignment(.center)
             Text(L("tab.stopped.body"))
                 .font(.system(size: 13))
-                .foregroundStyle(Theme.textSecondary)
+                .foregroundStyle(ProfileWindowTheme.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: 420)
@@ -135,7 +135,7 @@ struct StoppedPageView: View {
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.surface)
+        .background(ProfileWindowTheme.surface)
         .environment(\.colorScheme, .dark)
         .accessibilityElement(children: .contain)
     }
@@ -183,7 +183,7 @@ struct StartPageView: View {
                             if model.favorites.isEmpty && model.recents.isEmpty {
                                 Text(L("start.empty"))
                                     .font(.lumenBody)
-                                    .foregroundStyle(Theme.textTertiary)
+                                    .foregroundStyle(ProfileWindowTheme.textTertiary)
                                     .multilineTextAlignment(.center)
                                     .frame(maxWidth: .infinity)
                             }
@@ -199,7 +199,7 @@ struct StartPageView: View {
                 ExitPill(exit: model.exit).padding(16)
             }
         }
-        .background(Theme.surface)
+        .background(ProfileWindowTheme.surface)
         .environment(\.colorScheme, .dark)
     }
 
@@ -207,7 +207,7 @@ struct StartPageView: View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 14))
-                .foregroundStyle(Theme.textTertiary)
+                .foregroundStyle(ProfileWindowTheme.textTertiary)
             TextField(text: $query, prompt: Text(verbatim: "")) {
                 Text(L("toolbar.address.placeholder"))
             }
@@ -218,7 +218,7 @@ struct StartPageView: View {
                     // Lumen's placeholder: macOS draws an unfocused field's prompt almost as bright as text.
                     Text(L("toolbar.address.placeholder"))
                         .font(.system(size: 14))
-                        .foregroundStyle(Theme.textTertiary)
+                        .foregroundStyle(ProfileWindowTheme.textTertiary)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }
@@ -231,15 +231,15 @@ struct StartPageView: View {
         }
         .padding(.horizontal, 14)
         .frame(height: 40)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.field))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.fieldBorder, lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(ProfileWindowTheme.field))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(ProfileWindowTheme.fieldBorder, lineWidth: 1))
     }
 
     private func favorites(columns: Int) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(L("start.favorites"))
                 .font(.lumenSection)
-                .foregroundStyle(Theme.textPrimary)
+                .foregroundStyle(ProfileWindowTheme.textPrimary)
                 .accessibilityAddTraits(.isHeader)
             LazyVGrid(columns: Array(repeating: GridItem(.fixed(Self.tile.width), spacing: Self.gap), count: columns),
                       alignment: .leading, spacing: Self.gap) {
@@ -254,12 +254,12 @@ struct StartPageView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(L("start.recents"))
                 .font(.lumenSection)
-                .foregroundStyle(Theme.textPrimary)
+                .foregroundStyle(ProfileWindowTheme.textPrimary)
                 .accessibilityAddTraits(.isHeader)
             VStack(spacing: 0) {
                 ForEach(model.recents) { site in
                     RecentRow(site: site) { open(site.url) }
-                        .overlay(alignment: .bottom) { Rectangle().fill(Theme.divider).frame(height: 1) }
+                        .overlay(alignment: .bottom) { Rectangle().fill(ProfileWindowTheme.divider).frame(height: 1) }
                 }
             }
         }
@@ -277,19 +277,19 @@ private struct FavoriteTile: View {
                 SiteGlyph(host: site.host, size: 28)
                 Text(site.title)
                     .font(.lumenSecondary)
-                    .foregroundStyle(Theme.textPrimary)
+                    .foregroundStyle(ProfileWindowTheme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .padding(.horizontal, 8)
             }
             .frame(width: StartPageView.tile.width, height: StartPageView.tile.height)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hovered ? Theme.raised : Theme.card))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hovered ? ProfileWindowTheme.raised : ProfileWindowTheme.card))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(ProfileWindowTheme.hairline, lineWidth: 1))
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
-        .animation(Theme.hoverAnimation, value: hovered)
+        .animation(ProfileWindowTheme.hoverAnimation, value: hovered)
         .help(site.url.absoluteString)
     }
 }
@@ -304,17 +304,17 @@ private struct RecentRow: View {
                 SiteGlyph(host: site.host, size: 16)
                 Text(site.title)
                     .font(.lumenBody)
-                    .foregroundStyle(Theme.textPrimary)
+                    .foregroundStyle(ProfileWindowTheme.textPrimary)
                     .lineLimit(1)
                 Spacer(minLength: 16)
                 Text(site.host)
                     .font(.lumenSecondary)
-                    .foregroundStyle(Theme.textTertiary)
+                    .foregroundStyle(ProfileWindowTheme.textTertiary)
                     .lineLimit(1)
                 if let date = site.visitedAt {
                     Text(Self.when(date))
                         .font(.lumenSecondary)
-                        .foregroundStyle(Theme.textTertiary)
+                        .foregroundStyle(ProfileWindowTheme.textTertiary)
                         .monospacedDigit()
                         .frame(minWidth: 64, alignment: .trailing)
                 }
@@ -324,7 +324,7 @@ private struct RecentRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .hoverHighlight(cornerRadius: Theme.controlRadius)
+        .profileWindowHoverHighlight(cornerRadius: ProfileWindowTheme.controlRadius)
         .help(site.url.absoluteString)
     }
 
@@ -376,11 +376,11 @@ struct ExitPill: View {
             }
         }
         .font(.system(size: 12, weight: .medium))
-        .foregroundStyle(Theme.accent)
+        .foregroundStyle(ProfileWindowTheme.accent)
         .lineLimit(1)
         .padding(.horizontal, 10)
         .frame(height: 24)
-        .background(Capsule().fill(Theme.accentTint))
+        .background(Capsule().fill(ProfileWindowTheme.accentTint))
         .accessibilityElement(children: .combine)
     }
 }

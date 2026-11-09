@@ -32,7 +32,7 @@ one) is closed without an answer: neither is a request served.
 Pages also report the request's `Accept-Language` header (`accept-language=...`), the path
 `/pb-geo.json` answers like a geolocation service (`{"ip": "203.0.113.7", "timezone":
 "Europe/Berlin", "country": "DE", "city": "Berlin", "org": "AS64500 Example Networks"}`; `?ip=`,
-`?tz=` and `?delay=<seconds>` change the answer) for the proxy-location checks, and `/pb-served.json` lists the paths served so far (so the self-test
+`?tz=`, `?country=` and `?delay=<seconds>` change the answer) for the proxy-location checks, and `/pb-served.json` lists the paths served so far (so the self-test
 can tell which requests reached the proxy, e.g. that a beacon did not).
 
 `/pb-login` is a sign-in form for the password AutoFill checks (`?signup=1`: a new password and
@@ -52,6 +52,10 @@ world can see of a robot (`window.webkit`, globals named like one) at its first 
 jump to a fragment `#x` is rewritten to `#/x`, as a single-page app's router might. `<name>` `alert`
 shows an alert; `broken` closes the connection without an answer (a page that does not load). `/pb-warmup/log.json` lists every `/pb-warmup/` request with its Referer, Cookie and
 User-Agent headers and the time it came.
+
+`/pb-automation/form` and `/pb-automation/two` are the pages of the automation commands' checks
+(`automation_page`): elements to click, type into, wait for and scroll to, and a recorder of every
+input event (`window.__take()`).
 
 `/pb-leak?run=<id>` is the leak page for a profile hosted in Safari's chrome (SelfTest's
 `safariChromeThroughTheProxy`, scripts/egress_check.py): served for any host, it makes every kind of
@@ -88,6 +92,23 @@ it. Needs the `openssl` command; without it, no TLS (said at start-up). `--aia-t
 `--canary <port>` listens on 127.0.0.1 and ::1 and notes every connection it takes: the leak page
 asks for that port on loopback addresses, which a proxied profile must send to its proxy like
 anything else. A connection here is one that went around the proxy.
+
+`--socks-udp <port>` is a SOCKS5 proxy that also does UDP ASSOCIATE (RFC 1928 §7), as a proxy that
+carries WebRTC must, and still connects nowhere. Each association gets a relay socket on 127.0.0.1
+and a public address of its own, `203.0.113.77:<port>` (TEST-NET-3, never routed): a STUN Binding
+sent through it, to any server, is answered by the proxy itself with that address, and a datagram
+sent to another association's public address is handed to that association, as a NAT with
+hairpinning would (one sent to such an address while its association is closed, or not yet heard
+from, is counted as `toPeerUndelivered`). Anything else is dropped and noted. `/pb-udp.json` counts associations, STUN
+answers, datagrams handed over and the destinations dropped. `/cdn-cgi/trace` answers as
+Cloudflare's trace does (`ip=` the address the request came from): the proxy's TCP exit, this
+proxy's public address, the one its UDP leaves from; `?ip=` makes it another, for the self-test's
+"one address" controls. `/pb-rtc?run=<id>&mode=presence|call`
+is the WebRTC page: `presence` reports `typeof RTCPeerConnection` in the page and an about:blank
+frame; `call` makes a video call between two connections of the page — a canvas stream, frames
+decoded on the far side — with a STUN server named after the run id (a DNS question for it, or a
+packet to it, is a leak the capture sees), and reports the candidates, their addresses and the
+frames to `/pb-leak/report`.
 """
 import argparse
 import base64
@@ -105,6 +126,8 @@ import tempfile
 import threading
 import time
 from urllib.parse import parse_qs
+
+import cores_page  # scripts/cores_page.py: the processor-count page, served at /pb-cores
 
 
 def read_until_blank_line(conn: socket.socket) -> bytes:
@@ -130,6 +153,12 @@ LEAK_REPORTS: dict = {}
 # Connections the canary listener took (each a request that went around the proxy).
 CANARY: list = []
 CANARY_PORT = 1
+# UDP associations (`--socks-udp`): public port → (relay socket, client address or None).
+UDP_ASSOCIATIONS: dict = {}
+UDP_LOCK = threading.Lock()
+UDP_STATS = {"associations": 0, "stunAnswered": 0, "handedOver": 0, "dropped": [], "toPeerUndelivered": []}
+UDP_PUBLIC_IP = "203.0.113.77"
+UDP_NEXT_PORT = [41000]
 # TLS contexts serving a certificate whose chain needs a fetch: "canary" through the proxies,
 # "control" on --tls-control. None when the certificates could not be made.
 TLS: dict = {}
@@ -200,6 +229,43 @@ def header(request: str, name: str) -> str:
                  if line.lower().startswith(prefix)), "")
 
 
+def automation_page(name: str) -> bytes:
+    """Pages for the automation commands' checks (SelfTest's `automationCommands`): `form` has a
+    button, a field, an element that appears after 0.8 s, one that goes after 0.8 s, five items,
+    a button far below (reached by scrolling), and a link to `two`; both record every input event
+    with what a detector reads of it (`window.__take()`)."""
+    recorder = (
+        "<script>(() => { const log = [];"
+        " const types = ['pointerover','pointermove','pointerdown','pointerup','mousedown','mouseup','click','dblclick',"
+        "'wheel','keydown','keyup','input','blur','focus'];"
+        " const pick = (e) => { const r = {type: e.type, trusted: e.isTrusted, t: Math.round(e.timeStamp * 10) / 10,"
+        " target: e.target && (e.target.id || e.target.nodeName || String(e.target)), hasFocus: document.hasFocus()};"
+        " for (const k of ['clientX','clientY','screenX','screenY','buttons','pressure','key','code','keyCode','shiftKey','detail'])"
+        " if (k in e) r[k] = e[k]; return r; };"
+        " for (const type of types) addEventListener(type, (e) => { if (log.length < 2000) log.push(pick(e)); }, {capture: true, passive: true});"
+        " window.__take = () => JSON.stringify({events: log.splice(0), active: navigator.userActivation ? navigator.userActivation.hasBeenActive : null});"
+        " })();</script>"
+    )
+    if name == "two":
+        body = "<h1 id=heading>Page two</h1><p id=back>Second page.</p>"
+    else:
+        items = "".join(f"<p class=item>Item {i}</p>" for i in range(5))
+        body = (
+            "<h1 id=heading>Automation form</h1>"
+            "<button id=button onclick=\"document.getElementById('clicked').textContent='clicked ' + (+document.getElementById('clicked').dataset.n + 1); document.getElementById('clicked').dataset.n = +document.getElementById('clicked').dataset.n + 1\">Press me</button>"
+            "<p id=clicked data-n=0>not clicked</p>"
+            "<p><input id=field autocomplete=off data-kind=text></p>"
+            "<p id=gone>Going away</p>" + items +
+            "<p><a id=next href=\"/pb-automation/two\">To page two</a></p>"
+            "<div style=\"height:2400px\"></div>"
+            "<button id=far onclick=\"this.textContent='far clicked'\">Far button</button>"
+            "<script>setTimeout(() => { const p = document.createElement('p'); p.id = 'late'; p.textContent = 'Late';"
+            " document.body.insertBefore(p, document.body.firstChild); document.getElementById('gone').remove(); }, 800);</script>"
+        )
+    return (f"<!doctype html><html><head><meta charset=utf-8><title>PB automation {html.escape(name)}</title>"
+            f"<style>body{{font:16px -apple-system;margin:20px}}</style>{recorder}</head><body>{body}</body></html>").encode()
+
+
 def warmup_page(name: str, run: str) -> bytes:
     """A page of the warm-up robot checks (see the module docstring)."""
     def esc(text: str) -> str:
@@ -223,6 +289,11 @@ def warmup_page(name: str, run: str) -> bytes:
         " const report = (what) => { if (seen[what]) return; seen[what] = true;"
         " fetch('/pb-warmup/event/' + encodeURIComponent(run) + '/' + encodeURIComponent(name) + '-' + what); };"
         " const probe = () => typeof window.webkit + '-' + Object.getOwnPropertyNames(window).filter((n) => /warm|robot/i.test(n)).join('_');"
+        # Whether the page is shown (a page in a window nobody can see is "hidden": timers and
+        # drawing slowed, which a site can tell), and whether trusted pointer moves reach it.
+        " report('visibility-' + document.visibilityState);"
+        " document.addEventListener('visibilitychange', () => report('visibilitychange-' + document.visibilityState));"
+        " addEventListener('mousemove', (e) => report(e.isTrusted ? 'move' : 'move-untrusted'), {passive: true});"
         " try { const last = localStorage.getItem('pbwarm-click'); if (last) { localStorage.removeItem('pbwarm-click'); report('clickglobals-' + last); } } catch (e) {}"
         " addEventListener('scroll', (e) => { report(e.isTrusted ? 'scroll' : 'scroll-untrusted'); report('globals-' + probe()); }, {passive: true});"
         " addEventListener('wheel', (e) => report(e.isTrusted ? 'wheel' : 'wheel-untrusted'), {passive: true});"
@@ -478,8 +549,16 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
         answer_json = json.loads(GEO_ANSWER)
         answer_json["ip"] = params.get("ip", answer_json["ip"])
         answer_json["timezone"] = params.get("tz", answer_json["timezone"])
+        answer_json["country"] = params.get("country", answer_json["country"])
         time.sleep(min(float(params.get("delay", "0")), 30))
         body, content_type = json.dumps(answer_json).encode(), "application/json"
+    elif plain_path == "/pb-targets.json":
+        # Every request and tunnel seen, from `since` on (the self-test notes the count before it
+        # acts, then reads what came after: which search engine a typed query went to).
+        since = int(parse_qs(query).get("since", ["0"])[0] or 0)
+        with SERVED_LOCK:
+            body = json.dumps({"count": len(TARGETS), "targets": [t["target"] for t in TARGETS[since:]]}).encode()
+        content_type = "application/json"
     elif plain_path == "/pb-served.json":
         body, content_type = json.dumps(served).encode(), "application/json"
     elif plain_path == "/pb-leak":
@@ -497,6 +576,32 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
         body, content_type = b"postMessage(Intl.DateTimeFormat().resolvedOptions().timeZone)", "text/javascript"
     elif plain_path == "/pb-leak/frame":
         body, content_type = leak_frame(safe_run(query)), "text/html; charset=utf-8"
+    elif plain_path == "/pb-cores":
+        # What a page is told of the processor count, everywhere it can ask (scripts/cores_page.py);
+        # the other-origin frame on "localhost" of the same port, the report into the leak log.
+        port = header(request, "Host").rpartition(":")[2] or "80"
+        body = cores_page.page_html(f"/pb-leak/report?run={safe_run(query)}&data=", f"http://localhost:{port}", "/pb-cores").encode()
+        content_type = "text/html; charset=utf-8"
+    elif plain_path == "/pb-cores/worker.js":
+        body, content_type = cores_page.URL_WORKER_SCRIPT.encode(), "text/javascript"
+    elif plain_path == "/pb-cores/sw.js":
+        body, content_type = cores_page.SW_SCRIPT.encode(), "text/javascript"
+    elif plain_path == "/pb-cores/frame":
+        body, content_type = ("<!doctype html><script>" + cores_page.FRAME_SCRIPT + "</script>").encode(), "text/html; charset=utf-8"
+    elif plain_path == "/pb-rtc":
+        params = parse_qs(query)
+        body, content_type = rtc_page(safe_run(query), params.get("mode", ["presence"])[0]), "text/html; charset=utf-8"
+    elif plain_path == "/cdn-cgi/trace":
+        # Where the proxy's TCP leaves from, as Cloudflare's trace says it (ProxyExitLookup).
+        params = {key: values[0] for key, values in parse_qs(query).items()}
+        body = (f"fl=selftest\nh={target.rsplit(':', 1)[0]}\nip={params.get('ip', UDP_PUBLIC_IP)}\n"
+                f"ts={time.time():.3f}\nvisit_scheme=http\n").encode()
+        content_type = "text/plain"
+    elif plain_path == "/pb-udp.json":
+        with UDP_LOCK:
+            body = json.dumps(dict(UDP_STATS, dropped=list(UDP_STATS["dropped"])[-50:],
+                                   toPeerUndelivered=list(UDP_STATS["toPeerUndelivered"])[-50:])).encode()
+        content_type = "application/json"
     elif plain_path == "/pb-leak/report":
         params = parse_qs(query)
         run = safe_run(query)
@@ -526,6 +631,8 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
         content_type = "text/html; charset=utf-8"
     elif plain_path == "/pb-login":
         body, content_type = login_page({key: values[0] for key, values in parse_qs(query).items()}), "text/html; charset=utf-8"
+    elif plain_path.startswith("/pb-automation/"):
+        body, content_type = automation_page(plain_path[len("/pb-automation/"):]), "text/html; charset=utf-8"
     elif plain_path == "/pb-warmup/log.json":
         with SERVED_LOCK:
             body, content_type = json.dumps(WARMUP_LOG).encode(), "application/json"
@@ -755,6 +862,234 @@ def handle_socks(conn: socket.socket, listener: int = 0, auth: bool = False) -> 
         respond_with_page(conn, f"via={via} atyp={atyp} target={host}:{port} listener={listener}")
 
 
+RTC_SCRIPT = r"""
+const report = async (data) => {
+  await fetch('/pb-leak/report?run=RUN&data=' + encodeURIComponent(JSON.stringify(Object.assign({ rtcPage: 'MODE' }, data))),
+              { cache: 'no-store' });
+};
+const timeout = (ms, value) => new Promise((resolve) => setTimeout(() => resolve(value), ms));
+(async () => {
+  const frame = document.createElement('iframe');
+  document.body.appendChild(frame);
+  const presence = { rtc: typeof RTCPeerConnection, rtcFrame: typeof frame.contentWindow.RTCPeerConnection,
+                     dataChannel: typeof RTCDataChannel };
+  if ('MODE' !== 'call' || typeof RTCPeerConnection !== 'function') { await report(presence); return; }
+  // The page's own STUN server, named after the run: through the relay it is never asked, and a
+  // DNS question for it, or a packet to it, is a leak the capture sees.
+  const config = { iceServers: [{ urls: 'stun:stun-RUN.leak.example.com:3478' }] };
+  const a = new RTCPeerConnection(config), b = new RTCPeerConnection(config);
+  const candidates = [];
+  const forward = (to) => (event) => {
+    if (!event.candidate || !event.candidate.candidate) return;
+    candidates.push(event.candidate.candidate);
+    to.addIceCandidate(event.candidate).catch(() => {});
+  };
+  a.onicecandidate = forward(b);
+  b.onicecandidate = forward(a);
+  const canvas = document.createElement('canvas');
+  canvas.width = 320; canvas.height = 240;
+  // A canvas kept in memory (willReadFrequently): on macOS 27 an accelerated 2D canvas gave its
+  // stream no frame at all, in the document or not (measured, run 612); this one, WebGL and a camera did.
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  let painted = 0;
+  const paint = setInterval(() => {
+    context.fillStyle = 'hsl(' + ((painted * 7) % 360) + ',80%,50%)';
+    context.fillRect(0, 0, 320, 240);
+    context.fillStyle = '#000';
+    context.fillText(String(painted++), 10, 20);
+  }, 33);
+  const stream = canvas.captureStream(30);
+  for (const track of stream.getTracks()) a.addTrack(track, stream);
+  // VP8 first: libwebrtc encodes it in software, and a CI runner's VM may have no H.264 encoder.
+  try {
+    const codecs = RTCRtpSender.getCapabilities('video').codecs;
+    const vp8 = codecs.filter((c) => c.mimeType.toLowerCase() === 'video/vp8');
+    if (vp8.length) a.getTransceivers()[0].setCodecPreferences(vp8.concat(codecs.filter((c) => !vp8.includes(c))));
+  } catch (e) {}
+  const remote = new Promise((resolve) => { b.ontrack = (event) => resolve(event.track); });
+  let error = null;
+  try {
+    await a.setLocalDescription(await a.createOffer());
+    // A peer's candidates named by host names, in its description and trickled: through the relay
+    // none may be resolved — a DNS question for one (or an mDNS one) is a leak the capture sees.
+    const named = 'a=candidate:97 1 udp 2122260223 peer-RUN.leak.example.com 9 typ host\r\n'
+                + 'a=candidate:98 1 udp 2122260223 RUN.local 9 typ host\r\n';
+    await b.setRemoteDescription({ type: a.localDescription.type,
+                                   sdp: a.localDescription.sdp.replace(/(a=mid:[^\r\n]*\r\n)/, '$1' + named) });
+    await b.setLocalDescription(await b.createAnswer());
+    await a.setRemoteDescription(b.localDescription);
+  } catch (e) { error = String(e); }
+  let namedCandidates = null;
+  try {
+    const mid = (b.getTransceivers()[0] && b.getTransceivers()[0].mid) || '0';
+    await b.addIceCandidate({ candidate: 'candidate:99 1 udp 2122260223 trickle-RUN.leak.example.com 9 typ host', sdpMid: mid });
+    namedCandidates = 'taken';
+  } catch (e) { namedCandidates = String(e); }
+  const track = await Promise.race([remote, timeout(20000, null)]);
+  const connected = await Promise.race([new Promise((resolve) => {
+    const check = () => { if (['connected', 'completed'].includes(a.iceConnectionState)) resolve(true); };
+    a.oniceconnectionstatechange = check; check();
+  }), timeout(30000, false)]);
+  await timeout(10000);
+  let inbound = null, outbound = null;
+  try {
+    (await b.getStats()).forEach((s) => {
+      if (s.type === 'inbound-rtp' && s.kind === 'video') {
+        inbound = { framesDecoded: s.framesDecoded || 0, bytesReceived: s.bytesReceived || 0, packetsReceived: s.packetsReceived || 0,
+                    decoder: s.decoderImplementation || null };
+      }
+    });
+    (await a.getStats()).forEach((s) => {
+      if (s.type === 'outbound-rtp' && s.kind === 'video') {
+        outbound = { framesEncoded: s.framesEncoded || 0, bytesSent: s.bytesSent || 0, encoder: s.encoderImplementation || null };
+      }
+    });
+  } catch (e) { error = error || String(e); }
+  const ice = a.iceConnectionState;
+  clearInterval(paint);
+  a.close(); b.close();
+  const types = [...new Set(candidates.map((c) => (/ typ (\w+)/.exec(c) || [])[1]))].sort();
+  const addresses = [...new Set(candidates.map((c) => c.split(' ')[4]))].sort();
+  await report(Object.assign(presence, { candidateTypes: types, candidateAddresses: addresses, track: !!track,
+                                         connected, ice, inbound, outbound, painted, error, namedCandidates }));
+})();
+"""
+
+
+def rtc_page(run: str, mode: str) -> bytes:
+    mode = mode if mode in ("presence", "call") else "presence"
+    script = RTC_SCRIPT.replace("RUN", run).replace("MODE", mode)
+    return (f"<!doctype html><html><head><meta charset=utf-8><title>PB RTC</title></head>"
+            f"<body><p>WebRTC {mode}</p><script>{script}</script></body></html>").encode()
+
+
+def stun_binding_answer(request: bytes, public_port: int) -> bytes:
+    """The STUN Binding success (RFC 5389) for `request`, with XOR-MAPPED-ADDRESS the association's
+    public address. None when `request` is no Binding request."""
+    if len(request) < 20 or request[0:2] != b"\x00\x01" or request[4:8] != b"\x21\x12\xa4\x42":
+        return None
+    transaction = request[8:20]
+    ip = socket.inet_aton(UDP_PUBLIC_IP)
+    xport = public_port ^ 0x2112
+    xip = bytes(b ^ m for b, m in zip(ip, b"\x21\x12\xa4\x42"))
+    attribute = struct.pack("!HH", 0x0020, 8) + b"\x00\x01" + struct.pack("!H", xport) + xip
+    return struct.pack("!HH", 0x0101, len(attribute)) + b"\x21\x12\xa4\x42" + transaction + attribute
+
+
+def socks_udp_header(host: str, port: int) -> bytes:
+    return b"\x00\x00\x00\x01" + socket.inet_aton(host) + struct.pack("!H", port)
+
+
+def parse_socks_udp(datagram: bytes):
+    """(host, port, payload) of a SOCKS5 UDP request, or None (fragments are not taken)."""
+    if len(datagram) < 10 or datagram[2] != 0:
+        return None
+    atyp = datagram[3]
+    if atyp == 1:
+        host, rest = socket.inet_ntoa(datagram[4:8]), datagram[8:]
+    elif atyp == 3:
+        length = datagram[4]
+        host, rest = datagram[5:5 + length].decode("latin-1"), datagram[5 + length:]
+    elif atyp == 4:
+        host, rest = socket.inet_ntop(socket.AF_INET6, datagram[4:20]), datagram[20:]
+    else:
+        return None
+    if len(rest) < 2:
+        return None
+    return host, struct.unpack("!H", rest[:2])[0], rest[2:]
+
+
+def run_udp_association(relay: socket.socket, public_port: int) -> None:
+    """Every datagram the client sends through one association: STUN answered here, datagrams to
+    another association's public address handed over, the rest dropped."""
+    while True:
+        try:
+            datagram, client = relay.recvfrom(65536)
+        except OSError:
+            return
+        with UDP_LOCK:
+            entry = UDP_ASSOCIATIONS.get(public_port)
+            if entry is None:
+                return
+            UDP_ASSOCIATIONS[public_port] = (relay, client)
+        parsed = parse_socks_udp(datagram)
+        if parsed is None:
+            continue
+        host, port, payload = parsed
+        if host == UDP_PUBLIC_IP:
+            with UDP_LOCK:
+                target = UDP_ASSOCIATIONS.get(port)
+            if target and target[1]:
+                try:
+                    target[0].sendto(socks_udp_header(UDP_PUBLIC_IP, public_port) + payload, target[1])
+                    with UDP_LOCK:
+                        UDP_STATS["handedOver"] += 1
+                except OSError:
+                    pass
+                continue
+            # To a peer's public address whose association is not there to take it: closed already
+            # (the far side hung up a moment before this side's last packet) or not yet heard from
+            # its client. A peer all the same, not another destination: counted apart, never
+            # "dropped" (CI run 683: one such packet at the end of the call failed the self-test).
+            with UDP_LOCK:
+                UDP_STATS["toPeerUndelivered"].append(f"{host}:{port}")
+            continue
+        answer = stun_binding_answer(payload, public_port)
+        if answer is not None:
+            relay.sendto(socks_udp_header(host if re.fullmatch(r"[0-9.]+", host) else UDP_PUBLIC_IP, port) + answer, client)
+            with UDP_LOCK:
+                UDP_STATS["stunAnswered"] += 1
+            continue
+        with UDP_LOCK:
+            UDP_STATS["dropped"].append(f"{host}:{port}")
+
+
+def handle_socks_udp(conn: socket.socket, listener: int = 0) -> None:
+    """SOCKS5 without authentication, CONNECT answered with a page as by `handle_socks`, and UDP
+    ASSOCIATE (see the module docstring)."""
+    with conn:
+        first = recv_exact(conn, 2)
+        if first[0] != 5:
+            return
+        recv_exact(conn, first[1])
+        conn.sendall(b"\x05\x00")
+        _, cmd, _, atyp = recv_exact(conn, 4)
+        if atyp == 1:
+            host = socket.inet_ntoa(recv_exact(conn, 4))
+        elif atyp == 3:
+            host = recv_exact(conn, recv_exact(conn, 1)[0]).decode()
+        elif atyp == 4:
+            host = socket.inet_ntop(socket.AF_INET6, recv_exact(conn, 16))
+        else:
+            return
+        (port,) = struct.unpack("!H", recv_exact(conn, 2))
+        if cmd == 1:
+            conn.sendall(b"\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00")
+            respond_with_page(conn, f"via=socks5-udp atyp={atyp} target={host}:{port} listener={listener}")
+            return
+        if cmd != 3:
+            conn.sendall(b"\x05\x07\x00\x01\x00\x00\x00\x00\x00\x00")
+            return
+        relay = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        relay.bind(("127.0.0.1", 0))
+        with UDP_LOCK:
+            public_port = UDP_NEXT_PORT[0]
+            UDP_NEXT_PORT[0] += 1
+            UDP_ASSOCIATIONS[public_port] = (relay, None)
+            UDP_STATS["associations"] += 1
+        conn.sendall(b"\x05\x00\x00\x01" + socket.inet_aton("127.0.0.1") + struct.pack("!H", relay.getsockname()[1]))
+        threading.Thread(target=run_udp_association, args=(relay, public_port), daemon=True).start()
+        # The association lives as long as this connection (RFC 1928 §7).
+        try:
+            while conn.recv(64):
+                pass
+        except OSError:
+            pass
+        with UDP_LOCK:
+            UDP_ASSOCIATIONS.pop(public_port, None)
+        relay.close()
+
+
 def handle_silent(conn: socket.socket) -> None:
     """Takes the connection and never answers (see the module docstring): whatever comes is read
     and dropped until the client gives up."""
@@ -851,6 +1186,7 @@ def main() -> None:
     parser.add_argument("--tls-control", type=int, default=None)
     parser.add_argument("--canary", type=int, default=None)
     parser.add_argument("--silent", type=int, default=None)
+    parser.add_argument("--socks-udp", type=int, default=None)
     parser.add_argument("--aia-tag", type=aia_tag, default="")
     args = parser.parse_args()
     make_certificates(args.aia_tag)
@@ -875,6 +1211,9 @@ def main() -> None:
                          daemon=True).start()
     if args.silent:
         threading.Thread(target=serve, args=(args.silent, handle_silent), daemon=True).start()
+    if args.socks_udp:
+        threading.Thread(target=serve, args=(args.socks_udp, functools.partial(handle_socks_udp, listener=args.socks_udp)),
+                         daemon=True).start()
     serve(args.socks, functools.partial(handle_socks, listener=args.socks))
 
 

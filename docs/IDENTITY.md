@@ -10,9 +10,10 @@ what changed, what kept the old name and why, and what has to be registered with
 | The app, as a person sees it | `Lumen.app`; `CFBundleName` and `CFBundleDisplayName` Lumen |
 | Bundle ID (`scripts/build-app.sh`, `BUNDLE_ID`) | `io.lumenbrowser.Lumen` |
 | The executable, `Contents/MacOS/` | `Lumen` — the SwiftPM product `PrivacyBrowser`, renamed when the bundle is made |
+| A profile's process | `Contents/MacOS/LumenProfile` — the same code, signed apart under the same identifier without the entitlements that give a keychain (`ProfileExecutable`; "The keychain" below) |
 | The installer helper | `Contents/Helpers/Lumen Updater.app`, executable `LumenUpdater`, bundle ID `io.lumenbrowser.Lumen.Updater` |
-| The packet-tunnel system extension | `io.lumenbrowser.Lumen.PacketTunnel` (`EXTENSION_ID`), shown as "Lumen WebRTC relay" |
-| The app group (NE builds only) | `<TEAM_ID>.io.lumenbrowser.Lumen` (`APP_GROUP`); the extension's Mach service `<TEAM_ID>.io.lumenbrowser.Lumen.tunnel` |
+| The network guard's system extension (a content filter, docs/TUNNEL.md) | `io.lumenbrowser.Lumen.PacketTunnel` (`EXTENSION_ID`: the App ID registered on 31 October, kept), shown as "Lumen network guard" |
+| The app group (NE builds only) | `<TEAM_ID>.io.lumenbrowser.Lumen` (`APP_GROUP`); the extension's Mach service `<TEAM_ID>.io.lumenbrowser.Lumen.guard` |
 | Releases | `Lumen-<version>.zip` (`scripts/release.sh`) |
 
 Every text of the app's own that names the product says Lumen (both languages), and so do the
@@ -35,7 +36,7 @@ check's `User-Agent`.
   existing vault where it is. The setup screen's text that names the folder names it as it is.
 - **Inside a profile's home**, `Library/PrivacyBrowser/SafariDefaults` (Safari's per-profile
   settings): a path in sealed data, for the same reason.
-- **The log's subsystem**, `PrivacyBrowser` (and the extension's `PrivacyBrowser.PacketTunnel`): the
+- **The log's subsystem**, `PrivacyBrowser` (and the extension's `PrivacyBrowser.NetworkGuard`): the
   bundle ID is a build setting (CI builds four of them), the readers of the log — the diagnostics
   archive, the exception log's reader, CI's update check — would have to move with it in step, and
   the extension's code is not changed by the rename.
@@ -74,13 +75,69 @@ not open it: its profiles stay there, for the old build. To carry one, export it
 the Profiles window → Export Profile…, a `.pbprofile` with a password of its own) and import it in
 Lumen.
 
-**The keychain.** Nothing to lose: the app's code keeps nothing in a keychain, and every keychain
-write a profile's process makes is refused for want of an entitlement (`errSecMissingEntitlement`,
-CI run 521; CI's keychain measurement lists what appears while the app runs). A build with the
-network extension (`NE=1`) carries the application identifier `<TEAM_ID>.io.lumenbrowser.Lumen`,
-which opens the data-protection keychain to it: Safari's code in a profile's process would then keep
-its "Safari Defaults" there, under that identifier and shared by every profile — to be closed before
-an NE build ships.
+**The keychain.** The app's code keeps nothing in a keychain, and a profile's process must neither
+keep anything in one nor be shown anything of one, whatever the app's signature holds. There are two
+to reach. The data-protection keychain opens to an application identifier, an access group or an app
+group: a build with the network extension (`NE=1`) gives the app `<TEAM_ID>.io.lumenbrowser.Lumen`
+and the app group, and Safari's code in a process holding them would keep its "Safari Defaults"
+there, under that identifier and shared by every profile. The account's login keychain, the
+file-based one, opens to any process of the account that securityd answers, whatever its signature:
+opening it by its path, as any code in it can, a profile's process kept an item there that every
+other profile's process was shown, as it was shown an item the app made under its own signature (CI
+run 659, both macOS). That keychain shows any process the attributes of every item in it — names of
+services and accounts, never a secret — so the person's own were open to it the same way; the check
+asks only for its own service and does not look at them. Asked for "the default keychain" instead, a
+profile's process — whose home is its own and holds none — was left waiting on the system's dialog
+(run 656).
+
+Closed (3 November) by the profile's own sandbox, whatever its signature holds: every profile's
+process puts itself in a kernel sandbox before Safari's frameworks load
+(`ProfileNetworkGuard.closeTheProcess`), which refuses securityd's services — `com.apple.SecurityServer`,
+the login keychain's, and every `com.apple.securityd.*`, the data-protection keychain's (secd) — and
+the account's `~/Library/Keychains`, read or written. The process then looks the two services up
+itself; if either still answers, the profile does not run. The app's own process is not in that
+sandbox: outside profiles its keychain is as it was.
+
+And by the profile's executable (2 November): every profile's process — and every process that runs
+Safari's code for the app — is started from `Contents/MacOS/LumenProfile`, the same code signed with
+the base entitlements only (`scripts/build-app.sh`: none of `com.apple.application-identifier`,
+`keychain-access-groups`, `com.apple.security.application-groups`,
+`com.apple.developer.team-identifier`, nor the network guard's, read back from the signature after
+signing). The app reads LumenProfile's signature before every start and starts nothing from it, or
+from anything else, when it carries one of them (`ProfileExecutable`): a profile does not open, and
+the person is told the copy of Lumen is damaged. LumenProfile keeps the app's identifier, by which
+the network guard knows a profile's process (anchor, identifier, team).
+
+Shown by the self-test and by the release check on the build that ships (`KeychainIsolation`), in
+three verdicts:
+
+1. A profile's process holds none of those entitlements; the app's own executable does (CI's
+   `NE=check` build gives the app the app group, the one an ad hoc signature can carry).
+2. The login keychain: profile A keeps nothing there and profile B is shown nothing of it, while two
+   processes of the profile's executable outside a profile's sandbox keep an item and see it (the
+   control) and the app keeps and sees its own. Without the sandbox's lock this verdict fails (CI run
+   659: profile A kept an item there and profile B was shown it, and the app's); with it, it passes
+   (run 660: securityd refused to both profiles, nothing kept, nothing shown).
+3. The data-protection keychain: on a build signed by the team, profile A's item is refused and
+   profile B sees neither it nor the app's, which a process of the app's own executable does see. On
+   CI's runners no ad hoc signature opens that keychain, the app group included (run 646), so this
+   one is shown only on a signed build.
+
+A release whose app holds the team's identity stops if any of the three is not shown, and
+`release.sh` reads every line of the check (`scripts/release_check_gate.sh`). CI also makes the
+release's app with LumenProfile signed with the app group: it must not start a profile.
+
+**On a build the team signed (3 November).** 0.1.1 with the network guard (`NE=1`), signed with
+Developer ID and notarized, on the owner's Mac (macOS 27.0.1, build 26A434, J713): the kernel's
+log shows a profile's process refused both of securityd's services by its sandbox —
+`denied lookup: com.apple.SecurityServer` and `denied lookup: com.apple.securityd.xpc`, a Sandbox
+restriction — in a build whose bundle carries the network guard's rights. The lock behind verdicts 2
+and 3 is so shown on the real signature, not only on CI's ad hoc one. The release check's own three
+verdicts on that build were not reached: its app's executable was killed by the kernel at its start
+(docs/TUNNEL.md, "Status"). They were on its copy `app-no-dlv` the same day — the app's executable
+signed again with Developer ID without library validation off, the layout every build has since
+(docs/TUNNEL.md, "What the kernel kills"): profiles A and B `refused (1100)` by both securityd
+services, the control outside a profile's sandbox wrote its item and read it back.
 
 ## What to register with Apple
 
@@ -93,6 +150,9 @@ In this order, in Certificates, Identifiers & Profiles of the team that signs Lu
    capabilities *Network Extensions*, *System Extension* and *App Groups* (on, nothing assigned).
 3. **Identifier, App ID (explicit, macOS) `io.lumenbrowser.Lumen.PacketTunnel`**, description
    "Lumen WebRTC relay": capabilities *Network Extensions* and *App Groups* (on, nothing assigned).
+   Since 2 November it holds the network guard, a content filter (docs/TUNNEL.md): the same App ID
+   and capability; its profile must allow `content-filter-provider-systemextension`, which the
+   Network Extensions capability grants with the others.
 4. **The app group `<TEAM_ID>.io.lumenbrowser.Lumen`: nothing to register.** A macOS group named with
    the team ID's prefix is the team's by its signature; the portal's App Groups list holds `group.…`
    identifiers only. This is the step least sure to hold as written: if the extension is refused for
@@ -111,7 +171,7 @@ Then (docs/TUNNEL.md, docs/UPDATES.md §6):
 
 ```sh
 NE=1 TEAM_ID=<TEAM_ID> SIGN_IDENTITY="Developer ID Application: <name> (<TEAM_ID>)" \
-  APP_PROFILE=lumen.provisionprofile EXTENSION_PROFILE=lumen-tunnel.provisionprofile \
+  APP_PROFILE=lumen.provisionprofile EXTENSION_PROFILE=lumen-guard.provisionprofile \
   NOTARY_PROFILE=lumen-notary VERSION=0.1.0 BUILD=1 UPDATE_KEY_FILE=… FEED_URL=https://… \
   scripts/release.sh
 ```

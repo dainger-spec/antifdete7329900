@@ -7,7 +7,9 @@ import os
 /// proxy's exit IP and answers with it, its time zone and country (`ProxyLocation`).
 ///
 /// PRIVACY: the query goes to a third-party service (below), over HTTPS, only through the
-/// profile's proxy — never direct: `ProxyConfigurationFactory` sets `allowFailover = false` —
+/// profile's proxy — never direct: `ProxyConfigurationFactory` sets `allowFailover = false`, and
+/// the profile's bypass list, which is for its pages, does not apply (`makeWithoutBypass`): a
+/// service on it was asked from this Mac's own address, and answered with this Mac's location —
 /// with the profile's User-Agent, no cookies and no cache. It runs when a profile with a proxy
 /// launches with `matchProxyLocation` or `warnOnProxyIPChange` (`needsProxyLookup`). Each lookup
 /// has its own URLSession with that profile's proxy: lookups of profiles launched together do
@@ -28,7 +30,13 @@ enum ProxyGeoLookup {
     /// HTTPS services that need no API key, asked in order until one answers (`nextServiceAfter`):
     /// a proxy that cuts or holds one of them (they are blocked often) must leave time for the
     /// others. Replaced by the self-test with endpoints of its local proxy.
-    static var services: [Service] = [
+    /// PB_GEO_SERVICES_OFF=1 (CI only, its workflows' env): no service is asked unless a check
+    /// sets one. CI's runners keep GMT while their address is elsewhere; a profile with no proxy,
+    /// which now follows where it exits, would differ from the runner's own Safari there by design,
+    /// in every comparison. The self-test's "a direct connection is an exit" sets its own service.
+    static var services: [Service] = ProcessInfo.processInfo.environment["PB_GEO_SERVICES_OFF"] == "1" ? [] : defaultServices
+
+    static let defaultServices: [Service] = [
         Service(url: URL(string: "https://ipinfo.io/json")!, timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"],
                 cityKeyPath: ["city"], asnKeyPath: ["org"], organizationKeyPath: ["org"]),
         Service(url: URL(string: "https://get.geojs.io/v1/ip/geo.json")!, timeZoneKeyPath: ["timezone"], countryKeyPath: ["country_code"],
@@ -78,23 +86,28 @@ enum ProxyGeoLookup {
         var description: String { "\(address.contains(":") ? "[\(address)]" : address):\(port.map(String.init) ?? "?")" }
     }
 
-    static func lookUp(proxy: ProxySettings, userAgent: String, timeout: TimeInterval = 12) async -> Result {
-        guard let proxies = try? ProxyConfigurationFactory.make(proxy), !proxies.isEmpty else { return Result() }
+    /// `proxy` nil: a profile with no proxy — asked over this Mac's own connection, which is that
+    /// profile's way out (the lead, 7 November), with the same User-Agent and no cookies or cache.
+    static func lookUp(proxy: ProxySettings?, userAgent: String, timeout: TimeInterval = 12) async -> Result {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.proxyConfigurations = proxies
+        if let proxy {
+            guard let proxies = try? ProxyConfigurationFactory.makeWithoutBypass(proxy), !proxies.isEmpty else { return Result() }
+            configuration.proxyConfigurations = proxies
+        }
+        // No proxy: the system's own settings, as the profile's pages use them.
         configuration.httpCookieStorage = nil
         configuration.urlCache = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         configuration.httpAdditionalHeaders = ["User-Agent": userAgent, "Accept": "application/json"]
         configuration.waitsForConnectivity = false
-        let challenges = ProxyChallengeObserver(credential: proxy.username.map {
-            URLCredential(user: $0, password: proxy.password ?? "", persistence: .forSession)
+        let challenges = ProxyChallengeObserver(credential: proxy?.username.map {
+            URLCredential(user: $0, password: proxy?.password ?? "", persistence: .forSession)
         })
         let session = URLSession(configuration: configuration, delegate: challenges, delegateQueue: nil)
         defer { session.invalidateAndCancel() }
         var result = Result()
         let deadline = Date().addingTimeInterval(timeout)
-        let endpoint = ProxyLocation.endpoint(of: proxy)
+        let endpoint = ProxyLocation.exitEndpoint(of: proxy)
         let services = Self.services
         let stagger = UInt64(max(0.1, nextServiceAfter) * 1_000_000_000)
         let untilDeadline = UInt64(max(0, timeout) * 1_000_000_000)
@@ -204,7 +217,7 @@ enum ProxyGeoLookup {
 
 /// Answers the proxy's own challenge with the profile's credentials, and notes when it has none
 /// to give (the load is then cancelled: fail-closed).
-private final class ProxyChallengeObserver: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+final class ProxyChallengeObserver: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     private let credential: URLCredential?
     private let lock = NSLock()
     private var _proxyRequiredCredentials = false
