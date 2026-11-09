@@ -235,9 +235,11 @@ final class PageDriver {
     func click(_ selector: String, clickCount: Int = 1, timeout: TimeInterval? = nil) async throws {
         onLog?("click \(selector)")
         try await reach(selector, timeout: timeout)
-        for index in 0..<max(1, clickCount) {
-            if index > 0 { try await pause(0.08...0.16) }
-            await input.click(hold: Double.random(in: 0.06...0.13, using: &generator))
+        // A double click's presses come within the system's interval, each counted as its place.
+        let count = max(1, clickCount)
+        for index in 0..<count {
+            if index > 0 { try await pause(0.06...0.12) }
+            await input.click(hold: Double.random(in: 0.05...0.1, using: &generator), clickCount: count > 1 ? index + 1 : nil)
         }
     }
 

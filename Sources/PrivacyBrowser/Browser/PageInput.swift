@@ -109,10 +109,11 @@ final class PageInput {
         return CGPoint(x: inView.x / scale, y: y / scale)
     }
 
-    /// Presses the left button where the pointer is.
-    func press() {
+    /// Presses the left button where the pointer is. `clickCount` names the press's place in a
+    /// double or triple click; nil counts as AppKit does (a press soon after the last, near it).
+    func press(clickCount: Int? = nil) {
         guard let pointer else { return }
-        mouse(.leftMouseDown, at: pointer)
+        mouse(.leftMouseDown, at: pointer, clickCount: clickCount)
     }
 
     /// Lets the left button go where the pointer is.
@@ -122,9 +123,9 @@ final class PageInput {
     }
 
     /// Presses and lets go, holding the button `hold` seconds.
-    func click(hold: TimeInterval) async {
+    func click(hold: TimeInterval, clickCount: Int? = nil) async {
         await takeFirstResponder()
-        press()
+        press(clickCount: clickCount)
         try? await Task.sleep(nanoseconds: UInt64(max(0, hold) * 1_000_000_000))
         release()
     }
@@ -141,13 +142,15 @@ final class PageInput {
         try? await Task.sleep(nanoseconds: 60_000_000)
     }
 
-    private func mouse(_ type: NSEvent.EventType, at location: NSPoint) {
+    private func mouse(_ type: NSEvent.EventType, at location: NSPoint, clickCount forced: Int? = nil) {
         guard let webView, let window = webView.window else { return }
         let now = ProcessInfo.processInfo.systemUptime
         var clickCount = 0
         if type == .leftMouseDown {
             // A second press soon after the first, near it, is a double click (as AppKit counts).
-            if let last = lastClick, now - last.at <= NSEvent.doubleClickInterval,
+            if let forced {
+                clickCount = max(1, forced)
+            } else if let last = lastClick, now - last.at <= NSEvent.doubleClickInterval,
                abs(last.location.x - location.x) <= 4, abs(last.location.y - location.y) <= 4 {
                 clickCount = last.count + 1
             } else {
