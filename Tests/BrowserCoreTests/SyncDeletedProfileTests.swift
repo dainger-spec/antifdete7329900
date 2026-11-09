@@ -362,6 +362,7 @@ final class SyncDeletedProfileTests: XCTestCase {
         _ = try await engine.sync()
         let full = await location.total
         await location.setLimit(full)
+        let writtenBefore = await location.written.count
 
         try a.delete(gone)
         let new = try a.create(name: "New", configuration: ProfileConfiguration(timeZoneIdentifier: "Europe/Paris")).id
@@ -372,7 +373,9 @@ final class SyncDeletedProfileTests: XCTestCase {
         let total = await location.total
         XCTAssertLessThan(total, full)
 
-        let written = await location.written
+        // Only what this sync wrote: the first one wrote the index too.
+        let everyWrite = await location.written
+        let written = Array(everyWrite.dropFirst(writtenBefore))
         let indexAt = try XCTUnwrap(written.firstIndex(of: codec.objectID(for: "index")))
         let lastGone = try XCTUnwrap([name(.config, of: gone), name(.passwords, of: gone)]
             .compactMap { written.lastIndex(of: codec.objectID(for: $0)) }.max())
