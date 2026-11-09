@@ -50,6 +50,7 @@ jobs:
           build/AIProbe3.app/Contents/MacOS/ai-probe3 "$PWD/measure/automation_input/page.html" > out/probe3.txt 2>&1 || echo "probe3 exited $?"
           python3 measure/automation_input/analyse2.py out/probe3.txt
       - name: Round 4 — the pointer's place and the wheel's window answered in this process
+        if: false
         timeout-minutes: 15
         run: |
           mkdir -p out build/AIProbe4.app/Contents/MacOS
@@ -58,6 +59,15 @@ jobs:
           codesign -s - --force build/AIProbe4.app
           build/AIProbe4.app/Contents/MacOS/ai-probe4 "$PWD/measure/automation_input/page.html" > out/probe4.txt 2>&1 || echo "probe4 exited $?"
           python3 measure/automation_input/analyse2.py out/probe4.txt
+      - name: Round 5 — moves to the tracking area's owner, the wheel at the window's own point
+        timeout-minutes: 15
+        run: |
+          mkdir -p out build/AIProbe5.app/Contents/MacOS
+          swiftc -o build/AIProbe5.app/Contents/MacOS/ai-probe5 measure/automation_input/probe5.swift
+          printf '%s' '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>io.lumenbrowser.measure.aiprobe5</string><key>CFBundleExecutable</key><string>ai-probe5</string><key>CFBundleName</key><string>AIProbe5</string><key>CFBundlePackageType</key><string>APPL</string><key>NSPrincipalClass</key><string>NSApplication</string></dict></plist>' > build/AIProbe5.app/Contents/Info.plist
+          codesign -s - --force build/AIProbe5.app
+          build/AIProbe5.app/Contents/MacOS/ai-probe5 "$PWD/measure/automation_input/page.html" > out/probe5.txt 2>&1 || echo "probe5 exited $?"
+          python3 measure/automation_input/analyse2.py out/probe5.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
