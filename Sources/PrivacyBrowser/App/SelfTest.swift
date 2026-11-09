@@ -7208,6 +7208,14 @@ final class SelfTest {
               ["a", "b", "c"].allSatisfy { events.contains("\($0)-scroll") } && loaded.allSatisfy { $0.scrolls > 0 },
               "\(events.sorted()) scrolls=\(visits.map(\.scrolls))")
         info("warm-up: scrolled with \(robot.scrollInput?.rawValue ?? "-") input (wheel events seen: \(events.contains { $0.hasSuffix("-wheel") })), clicked with \(robot.clickInput?.rawValue ?? "-") input (trusted clicks seen: \(events.contains { $0.hasSuffix("-click") })); last pointer: \(robot.clickDiagnosis ?? "-")")
+        // Its window is never shown to the person; its pages must still be shown pages to themselves
+        // (a hidden one has its timers and drawing slowed, which a site can tell).
+        let visibility = events.filter { $0.contains("visibility") }.sorted()
+        check("warm-up: its pages see themselves shown (visibilityState visible from load on, never hidden)",
+              ["a", "b", "c"].allSatisfy { events.contains("\($0)-visibility-visible") } && !visibility.contains { $0.hasSuffix("-hidden") },
+              "\(visibility)")
+        check("warm-up: trusted pointer moves reach its pages (pages see a pointer before a click)",
+              ["a", "b", "c"].contains { events.contains("\($0)-move") }, "\(events.filter { $0.contains("move") }.sorted())")
         let referers = Dictionary(log.map { ($0.path, $0.referer) }, uniquingKeysWith: { first, _ in first })
         let refused = ["/pb-warmup/logout", "/pb-warmup/partner", "/pb-warmup/file.zip", "/pb-warmup/popup"]
         check("warm-up: from each page it follows only the plain link of the same site (with the page as Referer), never sign-out, another site, a file or a new window",

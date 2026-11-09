@@ -123,9 +123,22 @@ final class PageInput {
 
     /// Presses and lets go, holding the button `hold` seconds.
     func click(hold: TimeInterval) async {
+        await takeFirstResponder()
         press()
         try? await Task.sleep(nanoseconds: UInt64(max(0, hold) * 1_000_000_000))
         release()
+    }
+
+    /// Makes the web view its window's first responder, as a window does for the view clicked,
+    /// a beat before the press: WebKit tells the page it has focus a little later, and a press sent
+    /// at once would come first (measured: hasFocus false at that first press, round 6 and CI
+    /// 42613676137; a real click gave false on macOS 26 and true on 27).
+    func takeFirstResponder() async {
+        guard Self.fault != .focus, let webView, let window = webView.window else { return }
+        let responder = window.firstResponder as? NSView
+        if let responder, responder === webView || responder.isDescendant(of: webView) { return }
+        window.makeFirstResponder(webView)
+        try? await Task.sleep(nanoseconds: 60_000_000)
     }
 
     private func mouse(_ type: NSEvent.EventType, at location: NSPoint) {

@@ -248,6 +248,11 @@ def warmup_page(name: str, run: str) -> bytes:
         " const report = (what) => { if (seen[what]) return; seen[what] = true;"
         " fetch('/pb-warmup/event/' + encodeURIComponent(run) + '/' + encodeURIComponent(name) + '-' + what); };"
         " const probe = () => typeof window.webkit + '-' + Object.getOwnPropertyNames(window).filter((n) => /warm|robot/i.test(n)).join('_');"
+        # Whether the page is shown (a page in a window nobody can see is "hidden": timers and
+        # drawing slowed, which a site can tell), and whether trusted pointer moves reach it.
+        " report('visibility-' + document.visibilityState);"
+        " document.addEventListener('visibilitychange', () => report('visibilitychange-' + document.visibilityState));"
+        " addEventListener('mousemove', (e) => report(e.isTrusted ? 'move' : 'move-untrusted'), {passive: true});"
         " try { const last = localStorage.getItem('pbwarm-click'); if (last) { localStorage.removeItem('pbwarm-click'); report('clickglobals-' + last); } } catch (e) {}"
         " addEventListener('scroll', (e) => { report(e.isTrusted ? 'scroll' : 'scroll-untrusted'); report('globals-' + probe()); }, {passive: true});"
         " addEventListener('wheel', (e) => report(e.isTrusted ? 'wheel' : 'wheel-untrusted'), {passive: true});"
