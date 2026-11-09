@@ -19,6 +19,9 @@ on:
       ios:
         description: iOS runtime (newest, or a version such as 17.5)
         default: newest
+      suite:
+        description: one suite only — "core" (the core's tests alone, a few minutes) or a test class; empty runs them all
+        default: ""
 
 jobs:
   app:
@@ -27,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: ["core,SessionsTests,ProxyCheckTests,FreeTierTests", "BrowserTests", "ProxyTests", "SettingsTests", "RelayTests"]
+        suite: ${{ fromJSON(inputs.suite && format('["{0}"]', inputs.suite) || '["core,SessionsTests,ProxyCheckTests,FreeTierTests", "BrowserTests", "ProxyTests", "SettingsTests", "RelayTests"]') }}
     name: Lumen iOS — ${{ matrix.suite }} (${{ inputs.os || 'xcode-27' }}, iOS ${{ inputs.ios || 'newest' }})
     runs-on: ${{ inputs.os || 'xcode-27' }}
     timeout-minutes: 120
