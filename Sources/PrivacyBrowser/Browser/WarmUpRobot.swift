@@ -71,6 +71,8 @@ final class WarmUpRobot: ObservableObject {
     @Published private(set) var pageCount = 0
     /// The run's pointer, wheel and keyboard on its tab's page.
     private var input: PageInput?
+    /// What the robot's world saw of its last pointer moves (self-test notes).
+    private(set) var clickDiagnosis: String?
     @Published private(set) var scrollInput: Input?
     @Published private(set) var clickInput: Input?
     /// Its tab is not the one shown (the user selected another): the next page waits for it, as a
@@ -599,8 +601,8 @@ final class WarmUpRobot: ObservableObject {
         let find = "const a = document.querySelectorAll('a[href]')[index]; if (!a || a.href !== href) return false;"
         if let input, input.webView === webView, webView.window != nil {
             _ = await script("""
-                const seen = globalThis.warmUpPointer = {target: null, trusted: false};
-                seen.listener = (e) => { seen.target = e.target; seen.trusted = e.isTrusted; };
+                const seen = globalThis.warmUpPointer = {target: null, trusted: false, moves: 0};
+                seen.listener = (e) => { seen.target = e.target; seen.trusted = e.isTrusted; seen.moves++; };
                 document.addEventListener('mousemove', seen.listener, {capture: true});
                 return true;
                 """, [:], in: tab)
@@ -615,12 +617,16 @@ final class WarmUpRobot: ObservableObject {
             let moved = await input.move(along: input.path(to: point, from: start, steps: steps),
                                          interval: Double.random(in: 0.012...0.02, using: &generator))
             guard moved, await wait(Double.random(in: 0.12...0.3, using: &generator), run: run) else { return false }
-            let reached = await script(find + """
+            let answer = await script(find + """
                  const seen = globalThis.warmUpPointer;
                  if (seen && seen.listener) document.removeEventListener('mousemove', seen.listener, {capture: true});
-                 return !!seen && seen.trusted && !!seen.target && (seen.target === a || a.contains(seen.target));
-                """, arguments, in: tab) as? Bool
+                 const t = seen && seen.target;
+                 return [!!seen && seen.trusted && !!t && (t === a || a.contains(t)),
+                         `${seen ? seen.moves : -1} moves, last on ${t ? (t.id || t.nodeName) : 'nothing'}, trusted ${!!seen && seen.trusted}`];
+                """, arguments, in: tab) as? [Any]
             guard liveTab(run) != nil else { return false }
+            let reached = answer?.first as? Bool
+            clickDiagnosis = "\(steps) moves sent to (\(Int(point.x)), \(Int(point.y))); the page's world saw \(answer?.last as? String ?? "no answer")"
             if reached == true {
                 // The button always comes up again, even when the run ends meanwhile.
                 await input.click(hold: Double.random(in: 0.06...0.14, using: &generator))

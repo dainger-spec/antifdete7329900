@@ -169,7 +169,17 @@ final class PageInput {
                 webView.mouseMoved(with: event)
             }
         case .leftMouseDown:
-            if Self.fault == .focus { window.sendEvent(event) } else { webView.mouseDown(with: event) }
+            if Self.fault == .focus {
+                window.sendEvent(event)
+                return
+            }
+            // A window makes the view clicked its first responder before the press reaches it
+            // (the page then has focus at its pointerdown, as with a person's click).
+            let responder = window.firstResponder as? NSView
+            if responder == nil || !(responder === webView || responder!.isDescendant(of: webView)) {
+                window.makeFirstResponder(webView)
+            }
+            webView.mouseDown(with: event)
         case .leftMouseUp:
             if Self.fault == .focus { window.sendEvent(event) } else { webView.mouseUp(with: event) }
         default:
