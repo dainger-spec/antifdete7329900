@@ -7053,6 +7053,7 @@ final class SelfTest {
         // Following a link, then back, forward, reload.
         let navigated = await outcome {
             try await driver.click("#next")
+            guard await waitUntil(timeout: 10, { driver.url == two }) else { throw PageDriver.Failure.timeout("the link's page") }
             try await driver.waitForLoadState(.load)
         }
         let atTwo = driver.url

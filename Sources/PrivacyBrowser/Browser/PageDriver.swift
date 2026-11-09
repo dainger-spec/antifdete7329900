@@ -234,8 +234,7 @@ final class PageDriver {
     /// scrolling it into view with the wheel first when it is out of view.
     func click(_ selector: String, clickCount: Int = 1, timeout: TimeInterval? = nil) async throws {
         onLog?("click \(selector)")
-        let point = try await pointerTarget(selector, timeout: timeout)
-        try await moveTo(point)
+        try await reach(selector, timeout: timeout)
         for index in 0..<max(1, clickCount) {
             if index > 0 { try await pause(0.08...0.16) }
             await input.click(hold: Double.random(in: 0.06...0.13, using: &generator))
@@ -245,8 +244,22 @@ final class PageDriver {
     /// Moves the pointer over the element `selector`.
     func hover(_ selector: String, timeout: TimeInterval? = nil) async throws {
         onLog?("hover \(selector)")
-        let point = try await pointerTarget(selector, timeout: timeout)
-        try await moveTo(point)
+        try await reach(selector, timeout: timeout)
+    }
+
+    /// The pointer onto the element, and still on it when it gets there: a page that moved under
+    /// the way (still scrolling, a late banner) is followed, as an eye follows it.
+    private func reach(_ selector: String, timeout: TimeInterval?) async throws {
+        for attempt in 0..<3 {
+            let point = try await pointerTarget(selector, timeout: timeout)
+            try await moveTo(point)
+            let still = try await isolated(Self.findAll + """
+                const e = find(selector)[0], t = document.elementFromPoint(x, y);
+                return !!e && !!t && (t === e || e.contains(t));
+                """, ["selector": selector, "x": point.x, "y": point.y]) as? Bool
+            if still == true { return }
+            if attempt == 2 { throw Failure.covered(selector, by: "the page moving under the pointer") }
+        }
     }
 
     /// Clicks the viewport point `point` (CSS pixels from the viewport's top left).
@@ -324,6 +337,19 @@ final class PageDriver {
         try await pause(0.2...0.35)
     }
 
+    /// Where the page has scrolled to once it stops moving (a wheel's scrolling runs on for a
+    /// moment after the last event).
+    private func settledScroll() async throws -> Double? {
+        var last = try await isolated("return window.scrollY;") as? Double
+        for _ in 0..<20 {
+            try await Task.sleep(nanoseconds: 80_000_000)
+            let now = try await isolated("return window.scrollY;") as? Double
+            if now == last { return now }
+            last = now
+        }
+        return last
+    }
+
     /// Scrolls with the wheel until the element is wholly in view (or as much of it as fits).
     func scrollIntoView(_ selector: String) async throws {
         for _ in 0..<40 {
@@ -336,7 +362,7 @@ final class PageDriver {
             let wanted = info.box.midY - height / 2
             let before = try await isolated("return window.scrollY;") as? Double
             try await scroll(by: max(-600, min(600, wanted)))
-            let after = try await isolated("return window.scrollY;") as? Double
+            let after = try await settledScroll()
             // The page cannot scroll further that way.
             if before == after {
                 let now = try await element(selector)
