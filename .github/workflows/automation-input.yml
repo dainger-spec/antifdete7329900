@@ -40,6 +40,7 @@ jobs:
           build/AIProbe2.app/Contents/MacOS/ai-probe2 "$PWD/measure/automation_input/page.html" > out/probe2.txt 2>&1 || echo "probe2 exited $?"
           python3 measure/automation_input/analyse2.py out/probe2.txt
       - name: Round 3 — wheel place, first click in the background, moves with the cursor away, a covered window
+        if: false
         timeout-minutes: 15
         run: |
           mkdir -p out build/AIProbe3.app/Contents/MacOS
@@ -48,6 +49,15 @@ jobs:
           codesign -s - --force build/AIProbe3.app
           build/AIProbe3.app/Contents/MacOS/ai-probe3 "$PWD/measure/automation_input/page.html" > out/probe3.txt 2>&1 || echo "probe3 exited $?"
           python3 measure/automation_input/analyse2.py out/probe3.txt
+      - name: Round 4 — the pointer's place and the wheel's window answered in this process
+        timeout-minutes: 15
+        run: |
+          mkdir -p out build/AIProbe4.app/Contents/MacOS
+          swiftc -o build/AIProbe4.app/Contents/MacOS/ai-probe4 measure/automation_input/probe4.swift
+          printf '%s' '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>io.lumenbrowser.measure.aiprobe4</string><key>CFBundleExecutable</key><string>ai-probe4</string><key>CFBundleName</key><string>AIProbe4</string><key>CFBundlePackageType</key><string>APPL</string><key>NSPrincipalClass</key><string>NSApplication</string></dict></plist>' > build/AIProbe4.app/Contents/Info.plist
+          codesign -s - --force build/AIProbe4.app
+          build/AIProbe4.app/Contents/MacOS/ai-probe4 "$PWD/measure/automation_input/page.html" > out/probe4.txt 2>&1 || echo "probe4 exited $?"
+          python3 measure/automation_input/analyse2.py out/probe4.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
