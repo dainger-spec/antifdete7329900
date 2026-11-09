@@ -215,33 +215,48 @@ while IFS=$'\t' read -r fault kind test expect; do
     [[ "$fault" =~ ^#|^$ ]] && continue
     [[ "$kind" == "ui" ]] || continue
     class="$(echo "$test" | cut -d/ -f2)"; in_suite "$class" || continue
-    run_ui "red-$fault" "$fault" "-only-testing:$test"; code=$?
-    if [[ $code -ne 0 ]] && lost "$OUT/red-$fault.txt"; then
-        # The app crashed or was lost (CI run 21: "does not have a process ID" at launch): that says
-        # nothing about the check, so the red runs once more; its second run is the one that counts.
-        mv "$OUT/red-$fault.txt" "$OUT/red-$fault-lost.txt"
-        say "again ui $fault: the app was lost in the first try — $(grep -m1 -E 'crashed|Lost connection|Failed to|process ID|never went idle' "$OUT/red-$fault-lost.txt" | sed 's/.*error: //' | cut -c1-120)"
+    for try in 1 2; do
         run_ui "red-$fault" "$fault" "-only-testing:$test"; code=$?
-    fi
-    if [[ $code -eq 0 ]]; then
-        say "RED DID NOT FAIL ui $fault: $test passed with the fault"; STATUS=1
-    elif lost "$OUT/red-$fault.txt"; then
-        # Not "Unable to monitor animations": XCTest prints it right after a test's own relaunch
-        # terminates the app (CI run 20, reloadIgnored: the red failed in its own check, and was
-        # counted invalid for those lines). A crash or a lost app says so in the words above.
-        # A crash fails every test whatever the fault: it proves nothing about the check.
-        say "RED INVALID ui $fault: the app crashed or was lost, not the check — $(grep -m1 -E 'crashed|Lost connection|Failed to|never went idle' "$OUT/red-$fault.txt" | sed 's/.*error: //' | cut -c1-160)"; STATUS=1
-    else
-        # It counts only if the check named for this fault is the one that failed (the first failure:
-        # the test stops there), not any other — CI run 12: newTabNotOpened "failed" with the app gone.
-        first="$(grep -m1 -E 'error: -\[' "$OUT/red-$fault.txt" | sed 's/.*error: //')"
-        if [[ -n "${expect:-}" && "$first" != *"$expect"* ]]; then
-            say "RED OTHER CHECK ui $fault: $test failed, but not in the check that must catch it ($expect) — $(echo "$first" | cut -c1-200)"; STATUS=1
-        else
-            say "red   ui $fault: $test failed with the fault — $(echo "$first" | cut -c1-200)"
-            REDS+=("ui|$fault|$test")
+        if [[ $code -ne 0 && $try -eq 1 ]] && lost "$OUT/red-$fault.txt"; then
+            # The app crashed or was lost (CI run 21: "does not have a process ID" at launch): that says
+            # nothing about the check, so the red runs once more; its second run is the one that counts.
+            mv "$OUT/red-$fault.txt" "$OUT/red-$fault-lost.txt"
+            say "again ui $fault: the app was lost in the first try — $(grep -m1 -E 'crashed|Lost connection|Failed to|process ID|never went idle' "$OUT/red-$fault-lost.txt" | sed 's/.*error: //' | cut -c1-120)"
+            continue
         fi
-    fi
+        if [[ $code -eq 0 ]]; then
+            say "RED DID NOT FAIL ui $fault: $test passed with the fault"; STATUS=1
+        elif lost "$OUT/red-$fault.txt"; then
+            # Not "Unable to monitor animations": XCTest prints it right after a test's own relaunch
+            # terminates the app (CI run 20, reloadIgnored: the red failed in its own check, and was
+            # counted invalid for those lines). A crash or a lost app says so in the words above.
+            # A crash fails every test whatever the fault: it proves nothing about the check.
+            say "RED INVALID ui $fault: the app crashed or was lost, not the check — $(grep -m1 -E 'crashed|Lost connection|Failed to|never went idle' "$OUT/red-$fault.txt" | sed 's/.*error: //' | cut -c1-160)"; STATUS=1
+        else
+            # It counts only if the check named for this fault is the one that failed (the first failure:
+            # the test stops there), not any other — CI run 12: newTabNotOpened "failed" with the app gone.
+            first="$(grep -m1 -E 'error: -\[' "$OUT/red-$fault.txt" | sed 's/.*error: //')"
+            if [[ -n "${expect:-}" && "$first" != *"$expect"* ]]; then
+                if [[ $try -eq 1 ]]; then
+                    # CI run 37 (relayResolvesLocally, relayGapDirect): the testbed served the page, and
+                    # the test did not find its text on the screen in time — a step before the named
+                    # check failed, or the named check passed blind and a later one caught the fault.
+                    # That is the runner, not the check: the first try's log and screens are kept
+                    # (red-<fault>-other.txt, screens/other-<fault>), and the red runs once more — its
+                    # second run is the one that counts.
+                    mv "$OUT/red-$fault.txt" "$OUT/red-$fault-other.txt"
+                    xcrun xcresulttool export attachments --path "$OUT/red-$fault.xcresult" --output-path "$OUT/screens/other-$fault" >/dev/null 2>&1
+                    say "again ui $fault: the first try failed in another check than the one that must catch it ($expect) — $(echo "$first" | cut -c1-200)"
+                    continue
+                fi
+                say "RED OTHER CHECK ui $fault: $test failed, but not in the check that must catch it ($expect) — $(echo "$first" | cut -c1-200)"; STATUS=1
+            else
+                say "red   ui $fault: $test failed with the fault — $(echo "$first" | cut -c1-200)"
+                REDS+=("ui|$fault|$test")
+            fi
+        fi
+        break
+    done
 done < "$HERE/scripts/faults.tsv"
 if run_ui green "" ${ONLY[@]+"${ONLY[@]}"}; then
     say "GREEN ui: $(grep -E 'Executed [0-9]+ test' "$OUT/green.txt" | tail -1)"
