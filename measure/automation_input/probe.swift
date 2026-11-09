@@ -236,7 +236,6 @@ enum Route: String, CaseIterable { case window, view, quartz, pid, hid }
     }
 }
 
-let probe = Probe()
-Task { @MainActor in await probe.main() }
+Task { @MainActor in await Probe().main() }
 DispatchQueue.main.asyncAfter(deadline: .now() + 600) { print("TIMEOUT"); exit(1) }
 application.run()
