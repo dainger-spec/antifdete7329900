@@ -6965,12 +6965,14 @@ final class SelfTest {
 
         // Stop: a script waiting between commands, and one that loops without end.
         let (waiting, _, waitingTime) = await run("while (true) { await page.pause(200); }", stopAfter: 1.0, timeout: 10)
+        // A main thread held up by the script would tick 0–1 times in the second (a 50 ms timer ticks
+        // 7–9 times on CI's runners, CI 42651547574).
         var ticks = 0
         let timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in ticks += 1 }
         let (looping, _, loopingTime) = await run("for (;;) {}", stopAfter: 1.0, timeout: 10)
         timer.invalidate()
         check("scenario runs: Stop ends a waiting script and one that loops without end, and the app answers meanwhile",
-              waiting == .stopped(.byUser) && waitingTime < 4 && looping == .stopped(.byUser) && loopingTime < 4 && ticks >= 10,
+              waiting == .stopped(.byUser) && waitingTime < 4 && looping == .stopped(.byUser) && loopingTime < 4 && ticks >= 4,
               "waiting \(String(describing: waiting)) in \(String(format: "%.1f", waitingTime)) s; looping \(String(describing: looping)) in \(String(format: "%.1f", loopingTime)) s; main-thread ticks \(ticks)")
 
         // The plan loses automation after two commands: the third never runs.
