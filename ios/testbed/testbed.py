@@ -35,6 +35,10 @@ this Mac, so a test sees on the screen what the pages say about how they were re
                    that served such a request are open now ("open T: 1")
   Site connections are kept alive between requests (60 s), as real sites keep them.
   STUN      UDP 127.0.0.1:3478 (stun.lumentest through a proxy), answers Binding requests
+  account   http://127.0.0.1:28395: a stand-in for the Lumen account server (account.py — sign-in,
+            activation, the signed document of rights). The site shows and changes its accounts:
+            /__account?email=E[&set=S]; and has the site's robot check, <anything>/robot-check?action=A:
+            a button that hands the app's window its token (window.webkit.messageHandlers.lumenRobotCheck)
   /__events everything the site and the proxies saw, as JSON (for the tests' own bookkeeping)
 
     python3 ios/testbed/testbed.py --out build/testbed
@@ -50,6 +54,8 @@ import socket
 import struct
 import time
 import urllib.parse
+
+import account
 
 EVENTS = []
 KEEP_ALIVE = 60   # seconds a site connection may stay idle between requests
@@ -285,6 +291,20 @@ async def site(reader, writer, scheme="http"):
                 out = reply("200 OK", page("seen", f"<p>site {html.escape(token)}: {hits}</p><p>dns {html.escape(token)}: {asked}</p>"
                                                    f"<p>route {html.escape(token)}: {route} </p><p>open {html.escape(token)}: {still}</p>"
                                                    f"<p>at: {html.escape(target)}</p>"), extra=["Cache-Control: no-store"])
+            elif path == "/__account":
+                lines = "".join(f"<p>{html.escape(line)}</p>" for line in account.control(query))
+                out = reply("200 OK", page("account", lines + f"<p>at: {html.escape(target)}</p>"), extra=["Cache-Control: no-store"])
+            elif path.endswith("/robot-check"):
+                # The site's robot check as the app's own window shows it (CONTRACT.md §5.5): the page
+                # hands its token to the app; the stand-in's token says which action it is for.
+                action = query.get("action", "")
+                out = reply("200 OK", page("robot-check", f"<h1>Проверка</h1><p>action: {html.escape(action)}</p>"
+                                                           "<p><button id=robot style='font-size:22px'>Я не робот</button></p>"
+                                                           "<p id=sent>token: not sent</p>",
+                                           "document.getElementById('robot').onclick = () => {"
+                                           f"  window.webkit.messageHandlers.lumenRobotCheck.postMessage('robot-ok-' + {json.dumps(action)});"
+                                           "  document.getElementById('sent').textContent = 'token: sent'; };"),
+                            extra=["Cache-Control: no-store"])
             elif path == "/served":
                 SERVED_COUNTER[0] += 1
                 out = reply("200 OK", page("served", f"<h1>Счётчик</h1><p id=n>served: {SERVED_COUNTER[0]}</p>"),
@@ -579,6 +599,7 @@ async def main():
     await asyncio.start_server(socks_proxy("C", "uc:pc", "", udp=True), "127.0.0.1", 28383)
     switchable("D", 28384, http_proxy("D", "ud:pd", ""))
     await asyncio.start_server(silent_proxy, "127.0.0.1", 28391)
+    await account.start(event)
     await switch("D", True)
     await asyncio.get_running_loop().create_datagram_endpoint(Stun, local_addr=("127.0.0.1", 3478))
     await asyncio.get_running_loop().create_datagram_endpoint(LumentestDNS, local_addr=("127.0.0.1", 28353))

@@ -13,14 +13,15 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"          # ios/
 OUT="${1:?out dir}"; WANT="${2:-newest}"
-# SUITE: "all" (default), or a comma list of "core" and end-to-end test classes (SessionsTests, ...):
-# the workflow runs them as parallel jobs. Each job keeps the order — its reds first, then its green.
+# SUITE: "all" (default), or a comma list of "core", "build" and end-to-end test classes
+# (SessionsTests, ...): the workflow runs them as parallel jobs. Each job keeps the order — its reds
+# first, then its green. "build" builds the app and its tests and runs none: does it all compile.
 SUITE="${SUITE:-all}"
 in_suite() { [[ "$SUITE" == "all" || ",$SUITE," == *",$1,"* ]]; }   # core | a test class
 ONLY=()
 if [[ "$SUITE" != "all" ]]; then
     IFS=',' read -ra PARTS <<<"$SUITE"
-    for part in "${PARTS[@]}"; do [[ "$part" == "core" ]] || ONLY+=("-only-testing:LumenUITests/$part"); done
+    for part in "${PARTS[@]}"; do [[ "$part" == "core" || "$part" == "build" ]] || ONLY+=("-only-testing:LumenUITests/$part"); done
 fi
 mkdir -p "$OUT"; OUT="$(cd "$OUT" && pwd)"
 LOG="$OUT/ci.txt"
@@ -43,6 +44,8 @@ if in_suite core; then
     for t in test_device_pick.py test_capture_look.py test_release_rules.py; do
         python3 "$HERE/scripts/$t" 2>&1 | tee -a "$LOG"; [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "$t failed"; STATUS=1; }
     done
+    # The account server's stand-in signs its documents with the testbed's own Ed25519: RFC 8032's vectors.
+    python3 "$HERE/testbed/ed25519.py" 2>&1 | tee -a "$LOG"; [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "the testbed's Ed25519 is wrong"; STATUS=1; }
 fi
 
 # A red run counts only if its test passes without the fault: a test that fails anyway proves nothing
@@ -89,7 +92,7 @@ else
 fi
 verdicts core "$OUT/core-green.txt"
 fi
-if [[ "$SUITE" != "all" && ${#ONLY[@]} -eq 0 ]]; then say "== status $STATUS (core only)"; exit $STATUS; fi
+if [[ "$SUITE" != "all" && ${#ONLY[@]} -eq 0 ]] && ! in_suite build; then say "== status $STATUS (core only)"; exit $STATUS; fi
 
 # ---- 2. A simulated iPhone: the reference's screen (iPhone 17 Pro, else 16 Pro), on the iOS asked for.
 read -r RUNTIME_ID RUNTIME_VERSION TYPE <<<"$(xcrun simctl list -j | python3 -c '
@@ -183,6 +186,7 @@ if /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity:NSExceptionDomains:
 else
     say "BUILD WRONG: the test build has no ATS exception for geo.lumentest — every proxy check would fail"; exit 2
 fi
+if [[ "$SUITE" != "all" && ${#ONLY[@]} -eq 0 ]]; then say "== status $STATUS (built, no end-to-end test asked for)"; exit $STATUS; fi
 run_ui() { # result-name, fault ('' for none), -only-testing args...
     local name="$1" fault="$2"; shift 2
     rm -rf "$OUT/$name.xcresult"

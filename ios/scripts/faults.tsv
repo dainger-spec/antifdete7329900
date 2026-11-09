@@ -72,3 +72,11 @@ freePlanProxies	ui	LumenUITests/FreeTierTests/testFreePlan	a free profile goes w
 sharedStore	ui	LumenUITests/FreeTierTests/testFreePlan	free profiles are isolated
 profileDefaultsReal	ui	LumenUITests/FreeTierTests/testFreePlan	each free profile has its own device profile
 upgradeOpensInApp	ui	LumenUITests/FreeTierTests/testFreePlan	the site opens in Safari
+# The account, end to end against the testbed's stand-in for the server.
+activationWithoutPlatform	ui	LumenUITests/AccountTests/testSigningInOpensThePlan	the activation said it is an iPhone
+overLimitOpens	ui	LumenUITests/AccountTests/testSigningInOpensThePlan	a profile beyond the plan
+revokedStaysSignedIn	ui	LumenUITests/AccountTests/testSigningInOpensThePlan	an iPhone unlinked on the server is signed out
+phoneLimitUnexplained	ui	LumenUITests/AccountTests/testRefusalsChecksAndOtherPlans	the limit of phones is said with its reason
+signatureNotChecked	ui	LumenUITests/AccountTests/testRefusalsChecksAndOtherPlans	a document signed with another key is refused
+robotCheckNotShown	ui	LumenUITests/AccountTests/testRefusalsChecksAndOtherPlans	the robot check opens in the app
+featuresFromPlan	ui	LumenUITests/AccountTests/testRefusalsChecksAndOtherPlans	no proxies without the feature

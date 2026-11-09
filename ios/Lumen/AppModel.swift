@@ -15,19 +15,27 @@ enum LaunchOptions {
     }
 }
 
-/// Where the app's rights come from (`Access`). Until the account server's document of rights fills
-/// it (signing in to a Lumen account), everything is allowed; a test sets the plan (DEBUG builds only):
-/// LUMEN_TEST_ACCESS=free — the free plan; =none — a paid plan that ended.
+/// Where the app's rights come from (`Access`): the Lumen account — the server's signed document of
+/// rights, or the free level while nobody is signed in (Account.swift). That is a release build,
+/// always. A DEBUG build has everything open unless told otherwise (LUMEN_TEST_ACCESS): the account
+/// server does not know iPhones yet, so a build on a real iPhone could not sign in anywhere — until
+/// it does, the account is what a test asks for by name:
+///   account — nothing fixed: the account decides, as in a release build (AccountTests, against the
+///             testbed's stand-in for the server);
+///   free    — the free level; none — a paid period that ended; full, or nothing — everything.
 enum AccessSource {
-    static func current() -> Access {
+    /// The rights fixed for this launch; nil: the account decides.
+    static func fixed() -> Access? {
         #if DEBUG
         switch ProcessInfo.processInfo.environment["LUMEN_TEST_ACCESS"] {
+        case "account": return nil
         case "free": return .free
         case "none": return .expired
-        default: break
+        default: return .full
         }
+        #else
+        return nil
         #endif
-        return .full
     }
 
     /// The site where plans are chosen and paid for: `<site>/pricing`, opened in Safari, never in
@@ -38,7 +46,7 @@ enum AccessSource {
             return url.appendingPathComponent("pricing")
         }
         #endif
-        return URL(string: "https://lumenbrowser.io/pricing")!
+        return AccountClient.site.appendingPathComponent("pricing")
     }
 }
 
@@ -55,17 +63,35 @@ final class AppModel: ObservableObject {
     /// Proxies being checked right now (their rows show it).
     @Published private(set) var checking: Set<UUID> = []
     /// What this iPhone may do now (the one place rights come from).
-    @Published private(set) var access = AccessSource.current()
+    @Published private(set) var access: Access
+    /// The rights a test fixed (DEBUG builds); nil: the account decides them.
+    let fixedAccess: Access?
+    /// Where this iPhone stands with the account server.
+    @Published private(set) var license = LicenseState(mode: .notSignedIn, access: .free)
+    /// This iPhone's place in a license, once signed in.
+    @Published private(set) var account: AccountRecord?
+    /// What the server last said that the person must read (the iPhone unlinked, …).
+    @Published var accountNotice: String?
+    /// The document `license` was decided by, when it passed the check.
+    var entitlement: Entitlement?
+    var refreshFailures = 0
+    var nextRefreshAttempt = Date.distantPast
+    var refreshing = false
+    var accountTimer: Timer?
 
     init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         store = LumenStore(root: support.appendingPathComponent("Lumen", isDirectory: true))
+        fixedAccess = AccessSource.fixed()
+        access = fixedAccess ?? .free
         if LaunchOptions.resetState {
             store.removeAll()
             ProxyPasswords.removeAll()
+            AccountStore.save(nil)   // the iPhone's own identifier stays, as it does through a reinstall
         }
         catalog = SessionCatalog(store: store)
         refresh()
+        startAccount()
         // WebKit's data-store calls finish on WebKit's main run loop, which exists only once WebKit is
         // initialized: before that, fetching the store identifiers crashes (CI run 3: SIGSEGV in
         // WebsiteDataStore::fetchAllDataStoreIdentifiers → RunLoop::dispatch). The macOS app does
@@ -130,9 +156,28 @@ final class AppModel: ObservableObject {
         access.proxies ? proxy(session.proxyID) : nil
     }
 
-    /// Whether `session` may open now: one that lived behind a proxy never opens without one it may use.
+    /// Whether `session` may open now: one that lived behind a proxy never opens without one it may
+    /// use, and one beyond the plan's count of profiles stays shut (the ones made first are open).
     func lock(_ session: Session) -> SessionLock {
-        SessionLock.of(session, proxyExists: proxy(session.proxyID) != nil, access: access)
+        let within = License.withinLimit(sessions, allowed: access.maxProfiles).contains(session.id)
+        return SessionLock.of(session, proxyExists: proxy(session.proxyID) != nil, access: access, overLimit: !within)
+    }
+
+    /// Whether a lock on `session` is the proxy's — it lived behind one and may not use one now — and
+    /// not the plan's (no right to open sites, or a profile beyond the plan's count).
+    func lockedForProxy(_ session: Session) -> Bool {
+        access.browse && License.withinLimit(sessions, allowed: access.maxProfiles).contains(session.id)
+    }
+
+    /// The account's decision, applied: the rights, who is signed in — and the open sessions told.
+    func apply(_ state: LicenseState, account: AccountRecord?, entitlement: Entitlement?) {
+        self.entitlement = entitlement
+        if license != state { license = state }
+        if self.account != account { self.account = account }
+        if access != state.access {
+            access = state.access
+            refreshRuntimes()
+        }
     }
 
     // MARK: Proxies
@@ -181,7 +226,7 @@ final class AppModel: ObservableObject {
     func password(for id: UUID) -> String? { ProxyPasswords.get(id) }
 
     /// Open sessions take a new or changed proxy at once (no relaunch).
-    private func refreshRuntimes() {
+    func refreshRuntimes() {
         for session in sessions {
             SessionRuntimes.shared.existing(session.id)?.update(session: session, proxy: usableProxy(session),
                                                                 locked: lock(session).isLocked)

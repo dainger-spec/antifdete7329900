@@ -16,12 +16,45 @@ struct PlansView: View {
     /// The planted fault's page (upgradeOpensInApp): the site inside the app.
     @State private var inApp: URL?
     #endif
+    @State private var signingIn = false
+    @State private var confirmSignOut = false
+    @State private var refreshing = false
 
     var body: some View {
         NavigationStack {
             List {
                 if let because {
                     Section { Text(because).accessibilityIdentifier("plansBecause") }
+                }
+                // The account: who is signed in on this iPhone, or the way in. (A test that fixed the
+                // rights has no account to show.)
+                if model.fixedAccess == nil {
+                    Section("Аккаунт") {
+                        if let account = model.account {
+                            Text(account.email).accessibilityIdentifier("accountEmail")
+                            if !account.code.isEmpty {
+                                Text("Код этого iPhone в кабинете: \(account.code)").font(.subheadline).foregroundStyle(.secondary)
+                                    .accessibilityIdentifier("deviceCode")
+                            }
+                            Button(refreshing ? "Обновляем…" : "Обновить статус") {
+                                refreshing = true
+                                Task {
+                                    await model.refreshAccount()
+                                    refreshing = false
+                                }
+                            }
+                            .disabled(refreshing)
+                            .accessibilityIdentifier("refreshAccount")
+                            Button("Выйти", role: .destructive) { confirmSignOut = true }
+                                .accessibilityIdentifier("signOut")
+                        } else {
+                            Text("Вход не выполнен").accessibilityIdentifier("signedOut")
+                            Button("Войти") { signingIn = true }.accessibilityIdentifier("signIn")
+                        }
+                        if let message = model.accountMessage {
+                            Text(message).font(.subheadline).foregroundStyle(.orange).accessibilityIdentifier("accountNotice")
+                        }
+                    }
                 }
                 Section("Ваш тариф") {
                     Text(model.access.planTitle).font(.headline).accessibilityIdentifier("planName")
@@ -49,6 +82,14 @@ struct PlansView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Готово") { dismiss() }.accessibilityIdentifier("plansDone") }
+            }
+            .sheet(isPresented: $signingIn) { SignInView() }
+            .confirmationDialog("Выйти из аккаунта на этом iPhone?", isPresented: $confirmSignOut, titleVisibility: .visible) {
+                Button("Выйти", role: .destructive) { Task { await model.signOut() } }
+                    .accessibilityIdentifier("confirmSignOut")
+                Button("Отмена", role: .cancel) {}
+            } message: {
+                Text("Этот iPhone отключится от аккаунта. Профили останутся здесь; прокси будут недоступны, пока вы не войдёте снова.")
             }
             #if DEBUG
             .sheet(isPresented: Binding(get: { inApp != nil }, set: { if !$0 { inApp = nil } })) {

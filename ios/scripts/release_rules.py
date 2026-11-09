@@ -8,6 +8,9 @@ in the built app.
 2. No App-Bound Domains: WKAppBoundDomains is not declared and limitsNavigationsToAppBoundDomains is
    never turned on — the device profile works on every site, at the price of service workers
    (LIMITATIONS.md).
+3. The account (9 November): the app trusts documents of rights signed by the owner's key(s) only.
+   Neither the development server's key nor the testbed's — keys anyone knows — may be in the app's
+   sources, in project.yml or in the built Info.plist: with one, anyone could sign themselves a plan.
 
     python3 ios/scripts/release_rules.py [ios-dir] [--app Lumen.app]   -> exit 0, or 1 listing each breach
 
@@ -38,6 +41,19 @@ WORDS = {
     "multi-account": r"multi-?\s?account",
 }
 LITERAL = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
+# Keys anyone knows: the development server's (the server's CONTRACT.md §7.2) and the testbed's
+# stand-in's (ios/testbed/account.py --key) — each by its id and by the key itself.
+KNOWN_KEYS = {
+    "the development server's key": ("445c6300da0205b1", "/+/sbiH55nmy+2gRqQz12E0spl9L/YDWvjnecaN2M1c="),
+    "the testbed's key": ("cbbc653cdb8bd787", "dNOl9JtGQJg6VOEIn3+1dscg5hWYkx9XUqm+qJ5CnZc="),
+}
+
+
+def known_key_in(text):
+    for name, parts in KNOWN_KEYS.items():
+        if any(part in text for part in parts):
+            return name
+    return None
 
 
 def word_in(text):
@@ -80,6 +96,8 @@ def scan(ios, app=None):
         for number, line in enumerate(open(path, encoding="utf-8"), 1):
             for text in LITERAL.findall(line):
                 judge(f"{rel}:{number}", text)
+            if known_key_in(line):
+                found.append((f"{rel}:{number}", "known-key", f"{known_key_in(line)}: {line.strip()}"))
             code = LITERAL.sub('""', line).split("//", 1)[0]   # the code itself: no literals, no comment
             if "limitsNavigationsToAppBoundDomains" in code and not re.search(r"limitsNavigationsToAppBoundDomains\s*=\s*false", code):
                 found.append((f"{rel}:{number}", "app-bound", line.strip()))
@@ -97,6 +115,8 @@ def scan(ios, app=None):
             found.append(("project.yml", "app-bound", "WKAppBoundDomains is declared"))
         # Info.plist values (NS…Description, CFBundleDisplayName…): any "Key: value" line of the file.
         for number, line in enumerate(lines, 1):
+            if known_key_in(line):
+                found.append((f"project.yml:{number}", "known-key", f"{known_key_in(line)}: {line.strip()}"))
             m = re.match(r"\s*(NS\w+|CF\w+|UI\w+|LS\w+):\s*(.+)$", line)
             if m:
                 judge(f"project.yml:{number}", m.group(2).strip().strip("\"'"))
@@ -116,6 +136,8 @@ def scan(ios, app=None):
             found.append((os.path.basename(app) + "/Info.plist", "app-bound", f"WKAppBoundDomains = {info['WKAppBoundDomains']!r}"))
         for key, value in plist_strings(info):
             judge(f"{os.path.basename(app)}/Info.plist {key}", value)
+            if known_key_in(key + " " + value):
+                found.append((f"{os.path.basename(app)}/Info.plist {key}", "known-key", known_key_in(key + " " + value)))
     return found
 
 
@@ -133,7 +155,8 @@ def main(argv):
         for where, rule, text in found:
             print(f"  [{rule}] {where}: {text}", file=sys.stderr)
         return 1
-    print("release rules: none of the positioning words, no App-Bound Domains" + (f" (and {os.path.basename(app)})" if app else ""))
+    print("release rules: none of the positioning words, no App-Bound Domains, no key anyone knows"
+          + (f" (and {os.path.basename(app)})" if app else ""))
     return 0
 
 

@@ -44,6 +44,13 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoadsInWebContent: true
         ITSAppUsesNonExemptEncryption: false
+        # The Lumen account (the server's CONTRACT.md §2, §7.2): the server, the site, and the keys
+        # documents of rights are trusted by — key id -> base64 of the raw Ed25519 public key. The
+        # release build gets the owner's key(s) here (none yet: the iPhone has had no release); a
+        # test's stand-in key comes with the test (DEBUG builds only), never from this file.
+        PBAccountServerURL: https://api.lumenbrowser.io
+        PBAccountSiteURL: https://lumenbrowser.io
+        PBEntitlementPublicKeys: {}
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.lumenbrowser.ios
@@ -51,9 +58,10 @@ targets:
     postBuildScripts:
       # Debug builds (the tests') only: the proxy check asks the testbed's geolocation service,
       # http://geo.lumentest, through the proxy — plain http, which App Transport Security refuses an
-      # app's own URLSession (CI run 5). Release keeps ATS whole for the app's requests; web pages
-      # are NSAllowsArbitraryLoadsInWebContent in both.
-      - name: "Debug only: the testbed's geolocation service over http"
+      # app's own URLSession (CI run 5) — and the account's requests go to the testbed's stand-in for
+      # the account server, http://account.lumentest. Release keeps ATS whole for the app's requests;
+      # web pages are NSAllowsArbitraryLoadsInWebContent in both.
+      - name: "Debug only: the testbed's geolocation service and account server over http"
         basedOnDependencyAnalysis: false
         inputFiles:
           - $(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)
@@ -65,6 +73,8 @@ targets:
           pb "Add :NSAppTransportSecurity:NSExceptionDomains dict"
           pb "Add :NSAppTransportSecurity:NSExceptionDomains:geo.lumentest dict"
           pb "Add :NSAppTransportSecurity:NSExceptionDomains:geo.lumentest:NSExceptionAllowsInsecureHTTPLoads bool true"
+          pb "Add :NSAppTransportSecurity:NSExceptionDomains:account.lumentest dict"
+          pb "Add :NSAppTransportSecurity:NSExceptionDomains:account.lumentest:NSExceptionAllowsInsecureHTTPLoads bool true"
   LumenUITests:
     type: bundle.ui-testing
     platform: iOS

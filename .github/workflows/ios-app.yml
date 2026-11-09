@@ -20,17 +20,17 @@ on:
         description: iOS runtime (newest, or a version such as 17.5)
         default: newest
       suite:
-        description: one suite only — "core" (the core's tests alone, a few minutes) or a test class; empty runs them all
+        description: one suite only — "core" (the core's tests alone, a few minutes), "core,build" (and the app built), or a test class; empty runs them all
         default: ""
 
 jobs:
   app:
-    # Five jobs side by side, each with its own simulator and testbed; each keeps the order — the
+    # Six jobs side by side, each with its own simulator and testbed; each keeps the order — the
     # reds of its suite first, then its green run.
     strategy:
       fail-fast: false
       matrix:
-        suite: ${{ fromJSON(inputs.suite && format('["{0}"]', inputs.suite) || '["core,SessionsTests,ProxyCheckTests,FreeTierTests", "BrowserTests", "ProxyTests", "SettingsTests", "RelayTests"]') }}
+        suite: ${{ fromJSON(inputs.suite && format('["{0}"]', inputs.suite) || '["core,SessionsTests,ProxyCheckTests,FreeTierTests", "BrowserTests", "ProxyTests", "SettingsTests", "RelayTests", "AccountTests"]') }}
     name: Lumen iOS — ${{ matrix.suite }} (${{ inputs.os || 'xcode-27' }}, iOS ${{ inputs.ios || 'newest' }})
     runs-on: ${{ inputs.os || 'xcode-27' }}
     timeout-minutes: 120

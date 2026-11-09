@@ -25,6 +25,14 @@ struct SessionsView: View {
         NavigationStack(path: $model.path) {
             List {
                 let shown = model.filteredSessions(query)
+                // What the account says that the person must read (the iPhone unlinked, no answer of
+                // the server, the paid period over): one line, the plan behind it.
+                if let message = model.accountMessage {
+                    Button { editor = .plans(because: nil) } label: {
+                        Label(message, systemImage: "exclamationmark.triangle").font(.subheadline)
+                    }
+                    .accessibilityIdentifier("accountMessage")
+                }
                 if model.sessions.isEmpty {
                     ContentUnavailableView("Сессий пока нет", systemImage: "rectangle.stack.badge.plus",
                                            description: Text("У каждой сессии свои куки, хранилище, вкладки, история и прокси."))
@@ -33,7 +41,8 @@ struct SessionsView: View {
                 }
                 ForEach(shown) { session in
                     NavigationLink(value: session.id) {
-                        SessionCard(session: session, proxy: model.proxy(session.proxyID), locked: model.lock(session).isLocked)
+                        SessionCard(session: session, proxy: model.proxy(session.proxyID), lock: model.lock(session),
+                                    lockedForProxy: model.lockedForProxy(session))
                     }
                     .accessibilityIdentifier("session-\(session.name)")
                     .contextMenu {
@@ -87,7 +96,8 @@ struct SessionsView: View {
 struct SessionCard: View {
     let session: Session
     let proxy: ProxyEntry?
-    var locked = false
+    var lock = SessionLock.open
+    var lockedForProxy = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -98,8 +108,10 @@ struct SessionCard: View {
             }
             Text(proxy.map { "Прокси: \($0.displayName)" } ?? (session.boundToProxy ? "Прокси удалён" : "Без прокси"))
                 .font(.subheadline).foregroundStyle(.secondary)
-            if locked {
-                Label("Заперт: без прокси не откроется", systemImage: "lock.fill").font(.caption).foregroundStyle(.orange)
+            if case let .locked(reason) = lock {
+                // A profile that lived behind a proxy says the short thing; any other lock, its reason.
+                Label(lockedForProxy ? "Заперт: без прокси не откроется" : "Заперт: \(reason)", systemImage: "lock.fill")
+                    .font(.caption).foregroundStyle(.orange)
             }
             Text(openedText).font(.caption).foregroundStyle(.secondary)
             if !session.notes.isEmpty {

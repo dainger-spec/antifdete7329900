@@ -83,6 +83,20 @@ with open(os.path.join(app, "Info.plist"), "wb") as f:
     plistlib.dump({"CFBundleIdentifier": "io.lumenbrowser.ios", "WKAppBoundDomains": ["web.telegram.org"]}, f)
 check("red — the built app declares WKAppBoundDomains: found", any(f[1] == "app-bound" for f in scan(IOS, app)))
 
+# The account: a key anyone knows, wherever it could be planted.
+from release_rules import KNOWN_KEYS  # noqa: E402
+for name, (key_id, key) in KNOWN_KEYS.items():
+    hits = scan(planted(f"        PBEntitlementPublicKeys: {{{key_id}: {key}}}", "project.yml"))
+    check(f"red — {name} in project.yml: found", any(f[1] == "known-key" for f in hits))
+    hits = scan(planted(f'let trusted = ["{key_id}": "{key}"]', "Lumen/Account/AccountClient.swift"))
+    check(f"red — {name} in the sources: found", any(f[1] == "known-key" for f in hits))
+    with open(os.path.join(app, "Info.plist"), "wb") as f:
+        plistlib.dump({"CFBundleIdentifier": "io.lumenbrowser.ios", "PBEntitlementPublicKeys": {key_id: key}}, f)
+    check(f"red — {name} in the built app's Info.plist: found", any(f[1] == "known-key" for f in scan(IOS, app)))
+with open(os.path.join(app, "Info.plist"), "wb") as f:
+    plistlib.dump({"CFBundleIdentifier": "io.lumenbrowser.ios", "PBEntitlementPublicKeys": {"eaae27700d8b08a3": "iiZ+mIsNmJjmQ/RMlcV8EFhoNUtJoTZrsP52U52qcf4="}}, f)
+check("another key in the built app is not taken for a known one", not any(f[1] == "known-key" for f in scan(IOS, app)))
+
 allowed = scan(planted('let x = [Text("Сессии"), Text("Изоляция сессий"), Text("Профиль устройства"), Text("Тестирование сайтов"), Text("Доступно на тарифе выше")]'))
 check("the app's own words are allowed (сессии, изоляция, профиль устройства, тестирование)", not allowed, repr(allowed))
 

@@ -15,8 +15,10 @@ class LumenUITestCase: XCTestCase {
     func launch(reset: Bool, access: String? = nil, environment: [String: String] = [:]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = reset ? ["-LumenResetState"] : []
-        // The rights the app starts with ("none": no proxies — the access lost), DEBUG builds only.
-        if let access { app.launchEnvironment["LUMEN_TEST_ACCESS"] = access }
+        // The rights the app starts with, DEBUG builds only: everything, for a test that checks
+        // something else; "free" — the free level; "none" — a paid period that ended; "account" —
+        // nothing fixed: the Lumen account decides, as in a release build (AccountTests).
+        app.launchEnvironment["LUMEN_TEST_ACCESS"] = access ?? "full"
         // xcodebuild hands TEST_RUNNER_LUMEN_FAULTS to this process as LUMEN_FAULTS.
         if let faults = ProcessInfo.processInfo.environment["LUMEN_FAULTS"], !faults.isEmpty {
             app.launchEnvironment["LUMEN_FAULTS"] = faults

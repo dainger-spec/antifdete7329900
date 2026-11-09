@@ -55,6 +55,8 @@ public enum Fault: String, CaseIterable, Sendable {
     case overLimitOpens          // profiles beyond the plan's count open like the rest
     case activationWithoutPlatform // the activation does not say "ios": the server counts the iPhone as a Mac
     case phoneLimitUnexplained   // the refusal for the license's limit of phones is shown without its reason
+    case robotCheckNotShown      // a sign-in that asks for the robot check gets its words and no check
+    case revokedStaysSignedIn    // the server says the iPhone is unlinked, and the app keeps its token and document
     // The network-switch probe (the instrument for the real iPhone)
     case probeBlind              // the probe never learns the device's own addresses: it can see no leak
     case probeTrustsUnknown      // an answer from an address the probe does not know counts as through the proxy
