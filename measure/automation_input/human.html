@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Замер мыши и клавиатуры</title>
+<style>
+  :root { color-scheme: light dark; --accent: #2f6fde; --muted: #888; }
+  body { font: 15px -apple-system, system-ui, sans-serif; margin: 0; padding: 24px; max-width: 980px; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  p, li { line-height: 1.45; }
+  #arena { position: relative; height: 420px; border: 1px solid var(--muted); border-radius: 10px; margin: 16px 0; user-select: none; }
+  .target { position: absolute; width: 90px; height: 36px; border-radius: 8px; border: 0; background: var(--accent); color: #fff; font: inherit; cursor: pointer; }
+  .target[hidden] { display: none; }
+  #typing { width: 100%; font: 17px ui-monospace, Menlo, monospace; padding: 8px; box-sizing: border-box; }
+  #status { color: var(--muted); }
+  #result { width: 100%; height: 120px; font: 12px ui-monospace, Menlo, monospace; box-sizing: border-box; }
+  button.big { font: inherit; padding: 8px 16px; }
+</style>
+<h1>Замер мыши и клавиатуры (около 5 минут)</h1>
+<p>Страница ничего не отправляет. Она записывает только время и координаты движений мыши, нажатия кнопок,
+прокрутку и время нажатия клавиш во второй части. Набираемый текст задан ниже. Ничего своего не вводите.</p>
+<ol>
+  <li><b>Мышь.</b> Нажмите «Начать». В поле появится синяя кнопка. Наведите на неё мышь и нажмите, как обычно.
+    Появится следующая. Всего 25 кнопок. Иногда прокрутите колёсиком или трекпадом внутри рамки. Темп обычный.</li>
+  <li><b>Клавиатура.</b> Щёлкните в поле ввода и наберите строку <code>Hello world 2026, test@example.com</code>
+    три раза, каждый раз с новой строки (Enter). Ошибки исправляйте как обычно.</li>
+  <li>Нажмите «Скопировать результат» и вставьте его в чат одним сообщением.</li>
+</ol>
+<p><button class="big" id="start">Начать</button> <span id="status">не начато</span></p>
+<div id="arena"><button class="target" id="target" hidden>Нажать</button></div>
+<textarea id="typing" rows="4" placeholder="Сюда: Hello world 2026, test@example.com (3 раза)" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
+<p><button class="big" id="copy">Скопировать результат</button></p>
+<textarea id="result" readonly placeholder="Здесь появится результат"></textarea>
+<script>
+(() => {
+  const arena = document.getElementById('arena'), target = document.getElementById('target');
+  const status = document.getElementById('status'), typing = document.getElementById('typing');
+  const rec = { v: 1, ua: navigator.userAgent, dpr: devicePixelRatio, screen: [screen.width, screen.height],
+    mouse: [], clicks: [], wheel: [], keys: [], targets: [] };
+  let started = false, count = 0, t0 = 0;
+  const now = () => Math.round((performance.now() - t0) * 10) / 10;
+  const round = (n) => Math.round(n * 100) / 100;
+  function place() {
+    const w = arena.clientWidth - 90, h = arena.clientHeight - 36;
+    const x = Math.round(Math.random() * w), y = Math.round(Math.random() * h);
+    target.style.left = x + 'px'; target.style.top = y + 'px'; target.hidden = false;
+    const r = target.getBoundingClientRect();
+    rec.targets.push({ t: now(), x: round(r.left), y: round(r.top), w: r.width, h: r.height });
+  }
+  document.getElementById('start').onclick = () => {
+    if (started) return;
+    started = true; t0 = performance.now(); count = 0; place();
+    status.textContent = 'кнопка 1 из 25';
+  };
+  arena.addEventListener('pointermove', (e) => {
+    if (!started) return;
+    for (const c of (e.getCoalescedEvents ? e.getCoalescedEvents() : [e]))
+      rec.mouse.push([now(), round(c.clientX), round(c.clientY), c.buttons, c.pointerType === 'mouse' ? 0 : 1]);
+  }, { passive: true });
+  for (const type of ['pointerdown', 'pointerup']) arena.addEventListener(type, (e) => {
+    if (started) rec.clicks.push([now(), type === 'pointerdown' ? 1 : 0, round(e.clientX), round(e.clientY), e.pressure, e.buttons]);
+  });
+  arena.addEventListener('wheel', (e) => {
+    if (started) rec.wheel.push([now(), round(e.deltaX), round(e.deltaY), e.deltaMode]);
+  }, { passive: true });
+  target.addEventListener('click', () => {
+    count++;
+    if (count >= 25) { target.hidden = true; status.textContent = 'мышь готова, теперь клавиатура'; return; }
+    status.textContent = 'кнопка ' + (count + 1) + ' из 25';
+    place();
+  });
+  // Keys: when each went down and up, and which key (code only: what is typed is the given line).
+  for (const type of ['keydown', 'keyup']) typing.addEventListener(type, (e) => {
+    if (!t0) t0 = performance.now();
+    rec.keys.push([now(), type === 'keydown' ? 1 : 0, e.code, e.repeat ? 1 : 0, e.shiftKey ? 1 : 0]);
+  });
+  document.getElementById('copy').onclick = async () => {
+    rec.typedLength = typing.value.length;
+    rec.typedMatches = typing.value.split('\n').filter((l) => l.trim() === 'Hello world 2026, test@example.com').length;
+    const text = 'HUMAN-INPUT ' + JSON.stringify(rec);
+    const out = document.getElementById('result');
+    out.value = text; out.select();
+    try { await navigator.clipboard.writeText(text); status.textContent = 'скопировано (' + text.length + ' знаков)'; }
+    catch { status.textContent = 'выделено: нажмите ⌘C'; }
+  };
+})();
+</script>
+</html>
