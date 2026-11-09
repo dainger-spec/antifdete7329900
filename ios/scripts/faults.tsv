@@ -28,7 +28,10 @@ passwordAutofill	ui	LumenUITests/ProxyTests/testProxyPersonPath	the password pro
 checkWithoutDeadline	ui	LumenUITests/ProxyCheckTests/testACheckEndsWithAnAnswer	the row of Зависший says прокси не ответил
 deadHTTPDropped	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect	dead-http: the page did not go direct
 deadSOCKSDropped	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect	dead-socks: the page did not go direct
-recheckDropsProxy	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect	rechecked: the page did not go direct
+# recheckDropsProxy: caught at the re-checked page, by whichever of its two checks sees it first — the page shown
+# directly, or the testbed's count of its requests (CI run 35, second try: the runner's network dropped for 2 s
+# while that page came directly; it reached the site, the response was cut, and only the count saw it).
+recheckDropsProxy	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect	rechecked
 failoverOn	ui	LumenUITests/ProxyTests/testDeadProxyNeverGoesDirect	the page did not go direct
 relayOpen	ui	LumenUITests/RelayTests/testRelayDoorIsShut	another app without its password
 relayOnNetwork	ui	LumenUITests/RelayTests/testRelayDoorIsShut	the relay from a network: nothing answers
