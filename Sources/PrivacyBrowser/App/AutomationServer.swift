@@ -171,6 +171,11 @@ final class AutomationServer {
             send(refusal, on: connection)
             return
         }
+        // With the token, the plan comes next: without automation, whatever was asked (the lead, 9 November).
+        if let refusal = handler.refusalWithoutThePlan() {
+            send(refusal, on: connection)
+            return
+        }
         switch AutomationRoute.of(request) {
         case .failure(let refusal):
             send(refusal.response, on: connection)
@@ -203,7 +208,7 @@ final class AutomationHandler {
     var waitForSync: () async -> Void = {}
     /// Something changed that the Profiles list shows.
     var onChange: () -> Void = {}
-    /// Whether the plan has scenario automation; without it the scenario routes refuse, saying so.
+    /// Whether the plan has automation; without it every route refuses, saying so.
     var allowsAutomation: () -> Bool = { false }
     /// A saved scenario by its exact name (one), for `{"scenario": "…"}`.
     var savedScenario: (String) -> Scenario? = { _ in nil }
@@ -213,7 +218,16 @@ final class AutomationHandler {
         self.repository = repository
     }
 
+    /// The whole API is the plan's automation (the lead, 9 November): asked after the token
+    /// (AutomationGate: 401 without it) and before anything of the request is read — every route,
+    /// the ones older than scenarios too, refuses without it, saying why.
+    func refusalWithoutThePlan() -> AutomationHTTP.Response? {
+        allowsAutomation() ? nil : Self.notInPlan
+    }
+
     func handle(_ route: AutomationRoute) async -> AutomationHTTP.Response {
+        // Asked again here: the plan may have changed while the request was read.
+        if let refusal = refusalWithoutThePlan() { return refusal }
         switch route {
         case .listProfiles:
             return .json(200, repository.list().map(entry))
@@ -260,7 +274,6 @@ final class AutomationHandler {
                 }
             }
         case .runScenario(let reference, let spec):
-            guard allowsAutomation() else { return Self.notInPlan }
             return await profile(reference) { summary in
                 guard manager.isRunning(summary.id) else {
                     return .error(409, "not_running", "Start the profile first (POST …/start).")
@@ -280,7 +293,6 @@ final class AutomationHandler {
                 return .json(202, ScenarioAnswer(runID: runID.uuidString))
             }
         case .scenarioState(let reference):
-            guard allowsAutomation() else { return Self.notInPlan }
             return await profile(reference) { summary in
                 guard let run = manager.scenarioRuns[summary.id] else {
                     return .error(404, "no_run", "This profile has not run a scenario since the vault was unlocked.")
@@ -288,7 +300,6 @@ final class AutomationHandler {
                 return .json(200, ScenarioState(run))
             }
         case .stopScenario(let reference):
-            guard allowsAutomation() else { return Self.notInPlan }
             return await profile(reference) { summary in
                 guard manager.scenarioRuns[summary.id]?.isRunning == true else {
                     return .error(409, "not_running", "No run of this profile is going.")
@@ -318,7 +329,7 @@ final class AutomationHandler {
 
     /// The scenario routes without automation in the plan: said, with the reason.
     private static let notInPlan = AutomationHTTP.Response.error(403, "automation_not_in_plan",
-        "Running scenarios is part of the plan with automation; this license's plan does not include it.")
+        "The automation API is part of the plan with automation; this license's plan does not include it.")
 
     private struct ScenarioAnswer: Encodable {
         var runID: String

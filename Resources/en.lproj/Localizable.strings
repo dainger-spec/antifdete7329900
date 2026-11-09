@@ -12,6 +12,7 @@
 "automation.example" = "Try it";
 "automation.example.copy" = "Copy Command";
 "automation.note" = "Start and stop profiles, open pages in them, and read or write their cookies from a script on this Mac — curl, Python or scripts/pbctl. Only this Mac can connect (127.0.0.1), only with the token, and never a web page. Anyone who has the token can start your profiles and read their cookies: keep it like a password.";
+"automation.notInPlan" = "The automation API is part of the plan with automation. Your plan does not include it: while it is on, it answers every request with a refusal and the reason.";
 "automation.port" = "Port";
 "automation.port.detail" = "Scripts connect to 127.0.0.1 on this port.";
 "automation.port.apply" = "Apply";

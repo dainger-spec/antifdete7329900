@@ -75,12 +75,18 @@ scripts/pbctl stop "Shop DE"
 
 It reads the token from `PB_API_TOKEN` and the port from `PB_API_PORT` (default 50777).
 
+## The plan
+
+The whole API is part of the plan with automation (the document of rights' `features` names
+`automation`). The token is checked first — without it, or with a wrong one, **401** — and then the
+plan: without automation every route, the profile list, start, stop, open, cookies and scenarios
+alike, answers **403** `automation_not_in_plan`, with the reason, before anything of the request is
+read.
+
 ## Scenarios
 
 A scenario (docs/AUTOMATION.md) acts on a running profile's pages as a person would — the app's own
-pointer, wheel and keyboard, which pages cannot tell from a person's. Running one is part of the
-plan with automation (the document of rights' `features` names `automation`); without it each of
-these routes answers **403** `automation_not_in_plan`, with the reason.
+pointer, wheel and keyboard, which pages cannot tell from a person's.
 
 | Request | Does |
 |---|---|
@@ -110,8 +116,9 @@ outside (for the JavaScript and Python libraries) comes later.
 Unit tests (`AutomationAPITests`): the request reader, the gate (token, `Host`, `Origin` and
 `Sec-Fetch-*`), the routes, a profile found by id or exact name, no credentials in an answer. The
 self-test, on a real listener: no token, a wrong token, a web page's request and a rebinding name
-refused; the list without the proxy's credentials; a profile started out of sight, a cookie
+refused (401, before the plan); every route — the old ones too — refused without automation in
+the plan (403 `automation_not_in_plan`; red on the code before the gate, claude/measure-api-gate-red);
+the list without the proxy's credentials; a profile started out of sight, a cookie
 imported into it and read back out, a `file:` address refused, the profile stopped; nothing
-answering once the API is off; the scenario routes refused without automation in the plan, a
-scenario run with its parameters and its log read back, an unknown saved scenario not found, a
+answering once the API is off; a scenario run with its parameters and its log read back, an unknown saved scenario not found, a
 run stopped. The sandboxed build: does not listen, and says why.

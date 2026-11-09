@@ -1238,8 +1238,24 @@ final class SelfTest {
             return (status, text.components(separatedBy: "\r\n\r\n").dropFirst().joined(separator: "\r\n\r\n"))
         }
         let base = "/v1/profiles/\(profile.id.uuidString)"
+        // The token is asked first: without it 401, whatever the plan.
         check("automation: a request without the token is refused", await call("GET", "/v1/profiles", token: "").status == 401)
         check("automation: a request with a wrong token is refused", await call("GET", "/v1/profiles", token: token + "x").status == 401)
+        // The whole API is the plan's automation (the lead, 9 November): with the token but without it,
+        // every route refuses and says why — the ones older than scenarios too.
+        var refusedRoutes: [String] = []
+        for (method, path, body) in [("GET", "/v1/profiles", ""), ("GET", base, ""), ("POST", base + "/start", "{\"window\": false}"),
+                                     ("POST", base + "/stop", ""), ("POST", base + "/open", "{\"url\": \"https://example.com/\"}"),
+                                     ("GET", base + "/cookies", ""), ("POST", base + "/cookies", "x\ty"),
+                                     ("POST", base + "/scenario", "{\"source\": \"log('x')\"}"), ("GET", base + "/scenario", ""),
+                                     ("POST", base + "/scenario/stop", "")] {
+            let answer = await call(method, path, body: body)
+            if answer.status != 403 || !answer.body.contains("automation_not_in_plan") { refusedRoutes.append("\(method) \(path): \(answer.status)") }
+        }
+        check("automation: without automation in the plan every route of the API refuses with the reason (403 automation_not_in_plan), the token still asked first",
+              refusedRoutes.isEmpty && !manager.isRunning(profile.id) && manager.scenarioRuns[profile.id] == nil,
+              "not refused: \(refusedRoutes)")
+        automationInPlan = true
         check("automation: a web page's request is refused, with the token too",
               await call("GET", "/v1/profiles", extra: ["Origin": "https://attacker.example"]).status == 403)
         check("automation: a name pointed at 127.0.0.1 is refused (DNS rebinding)",
@@ -1265,14 +1281,7 @@ final class SelfTest {
               "\(exported.status) \(exported.body.prefix(300))")
         check("automation: only an http or https address is opened",
               await call("POST", base + "/open", body: "{\"url\": \"file:///etc/passwd\"}").status == 400)
-        // Scenarios through the API: refused, with the reason, while the plan has no automation.
-        let refusedRun = await call("POST", base + "/scenario", body: "{\"source\": \"log('x')\"}")
-        let refusedState = await call("GET", base + "/scenario")
-        check("automation: without automation in the plan, the scenario routes refuse and say why (403 automation_not_in_plan)",
-              refusedRun.status == 403 && refusedRun.body.contains("automation_not_in_plan") && refusedState.status == 403
-                  && manager.scenarioRuns[profile.id] == nil,
-              "\(refusedRun.status) \(refusedRun.body.prefix(160)) / \(refusedState.status)")
-        automationInPlan = true
+        // Scenarios through the API.
         let ran = await call("POST", base + "/scenario",
                              body: "{\"source\": \"log('from the API', params.n); await sleep(50);\", \"params\": {\"n\": 3}}")
         _ = await waitUntil(timeout: 20) { manager.scenarioRuns[profile.id]?.isRunning == false }
