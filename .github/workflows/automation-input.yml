@@ -79,7 +79,7 @@ jobs:
           codesign -s - --force build/AIProbe6.app
           build/AIProbe6.app/Contents/MacOS/ai-probe6 "$PWD/measure/automation_input/page.html" > out/probe6.txt 2>&1 || echo "probe6 exited $?"
           python3 measure/automation_input/analyse2.py out/probe6.txt
-      - name: Round 7 — transparent click-through windows above others: shown or hidden
+      - name: Round 7 — transparent click-through windows above others — shown or hidden
         timeout-minutes: 15
         run: |
           mkdir -p out build/AIProbe7.app/Contents/MacOS
