@@ -215,8 +215,7 @@ public final class SyncEngine: @unchecked Sendable {
         // sync location that is full takes these (each is smaller than what it replaces) and then
         // has room for the rest — the index among it, which would otherwise be refused and stop
         // the sync before the room was given back.
-        let deletedHere = repository.currentIndex().deletedProfileIDs
-        try await retireObjects(ofDeleted: deletedHere, remote: remote, state: &state, report: &report)
+        // RED RUN (never merged): the objects of deleted profiles are left as they are.
 
         let profilesBefore = Set(repository.list().map(\.id))
         try await syncIndex(remote: remote, state: &state, report: &report)
@@ -225,9 +224,6 @@ public final class SyncEngine: @unchecked Sendable {
         let index = repository.currentIndex()
         // And those of the profiles the index just taken in says were deleted elsewhere: the device
         // that deleted them has usually done it, and then nothing is written here.
-        let known = Set(deletedHere)
-        try await retireObjects(ofDeleted: index.deletedProfileIDs.filter { !known.contains($0) },
-                                remote: remote, state: &state, report: &report)
         for entry in index.entries {
             let id = entry.summary.id
             for file in ProfileSyncFile.allCases {
