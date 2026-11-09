@@ -137,8 +137,10 @@ final class AppModel: ObservableObject {
             checking.remove(id)
             guard let index = proxies.firstIndex(where: { $0.id == id }) else { return }
             if Faults.isActive(.recheckDropsProxy), proxies[index].check?.alive == true, !result.alive {
-                // The planted fault: a proxy found dead is taken off its sessions, which then go direct.
-                for session in sessions where session.proxyID == id { catalog.setProxy(session.id, proxyID: nil) }
+                // The planted fault: a proxy found dead is taken off its sessions, which then go direct — the
+                // binding cleared too, or the lock (SessionLock) would keep them shut and the fault would
+                // plant nothing (CI run 32); the lock has its own red, lockedOpensDirect.
+                for session in sessions where session.proxyID == id { catalog.setProxy(session.id, proxyID: nil, unbind: true) }
                 refresh()
             }
             proxies[index].check = result
