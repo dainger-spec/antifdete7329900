@@ -1547,6 +1547,25 @@
 "tags.colors.newer" = "Цвета меток записала более новая версия Lumen: эта версия их не меняет. Обновите Lumen.";
 "scenarios.unreadable" = "Сценарии не прочитались: файл scenarios.bin оставлен как есть. При следующем сохранении он будет сохранён рядом как scenarios.bin.unreadable, а не перезаписан.";
 "scenarios.newer" = "Сценарии записала более новая версия Lumen: эта версия их не меняет. Обновите Lumen.";
+"window.scenarios.title" = "Сценарии";
+"menu.scenarios" = "Сценарии";
+"scenarios.title" = "Сценарии";
+"scenarios.new" = "Новый сценарий";
+"scenarios.untitled" = "Сценарий";
+"scenarios.empty.title" = "Сценариев пока нет";
+"scenarios.empty.detail" = "Сценарий делает в профиле то, что сделал бы человек: открывает страницы, нажимает, печатает, ждёт. Сайты видят мышь и клавиатуру человека.";
+"scenarios.name" = "Название";
+"scenarios.save" = "Сохранить";
+"scenarios.delete" = "Удалить сценарий";
+"scenarios.delete.question" = "Удалить «%@»?";
+"scenarios.notInPlan" = "Запуск сценариев входит в тариф с автоматизацией. В вашем тарифе его нет: писать сценарии можно, запускать — нет.";
+"scenarios.profile" = "Профиль";
+"scenarios.running" = "Идёт…";
+"scenarios.stop" = "Остановить";
+"scenarios.run" = "Запустить";
+"scenarios.code" = "Код сценария";
+"scenarios.log.empty" = "Здесь появится журнал запуска.";
+"scenarios.template" = "// Что сделал бы человек, шаг за шагом. Каждая команда ждёт страницу.\n// page.goto, page.click, page.type, page.press, page.waitFor, page.textContent, page.scroll…\nawait page.goto('https://example.com/');\nawait page.waitFor('h1');\nlog('Заголовок:', await page.textContent('h1'));\n";
 
 /* The licensing client: contract.* — the server's docs/CONTRACT.md §17, word for word; license.* — the app's own. */
 "contract.error.unreachable" = "Сервер Lumen не отвечает. Проверьте соединение и попробуйте ещё раз.";

@@ -1547,6 +1547,25 @@
 "tags.colors.newer" = "A newer version of Lumen wrote the tags’ colours: this version does not change them. Update Lumen.";
 "scenarios.unreadable" = "The scenarios could not be read: scenarios.bin is left as it is. At the next save it is kept beside as scenarios.bin.unreadable, never written over.";
 "scenarios.newer" = "A newer version of Lumen wrote the scenarios: this version does not change them. Update Lumen.";
+"window.scenarios.title" = "Scenarios";
+"menu.scenarios" = "Scenarios";
+"scenarios.title" = "Scenarios";
+"scenarios.new" = "New Scenario";
+"scenarios.untitled" = "Scenario";
+"scenarios.empty.title" = "No scenarios yet";
+"scenarios.empty.detail" = "A scenario does in a profile what a person would: goes to pages, clicks, types, waits. Sites see a person’s mouse and keyboard.";
+"scenarios.name" = "Name";
+"scenarios.save" = "Save";
+"scenarios.delete" = "Delete Scenario";
+"scenarios.delete.question" = "Delete “%@”?";
+"scenarios.notInPlan" = "Running scenarios is part of the plan with automation. Your plan does not include it: you can write scenarios, not run them.";
+"scenarios.profile" = "Profile";
+"scenarios.running" = "Running…";
+"scenarios.stop" = "Stop";
+"scenarios.run" = "Run";
+"scenarios.code" = "Scenario code";
+"scenarios.log.empty" = "The run’s log appears here.";
+"scenarios.template" = "// What a person would do, step by step. Every command waits for the page.\n// page.goto, page.click, page.type, page.press, page.waitFor, page.textContent, page.scroll…\nawait page.goto('https://example.com/');\nawait page.waitFor('h1');\nlog('Heading:', await page.textContent('h1'));\n";
 
 /* The licensing client: contract.* — the server's docs/CONTRACT.md §17, word for word; license.* — the app's own. */
 "contract.error.unreachable" = "The Lumen server isn’t responding. Check your connection and try again.";

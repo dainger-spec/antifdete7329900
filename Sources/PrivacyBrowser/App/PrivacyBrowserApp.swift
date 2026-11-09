@@ -33,6 +33,7 @@ struct PrivacyBrowserApp: App {
                     .keyboardShortcut("t", modifiers: [.command, .shift])
                 Divider()
                 CommandPaletteButton(model: model)
+                ScenariosMenuButton(model: model)
             }
             CommandGroup(after: .pasteboard) {
                 Button(L("menu.pasteAsTyped")) { HumanPaste.pasteIntoKeyWindow() }
@@ -68,6 +69,17 @@ struct PrivacyBrowserApp: App {
                     .keyboardShortcut("y")
             }
         }
+        // The scenario editor (docs/AUTOMATION.md): File › Scenarios.
+        Window(L("window.scenarios.title"), id: "scenarios") {
+            ScenariosView()
+                .environmentObject(model)
+                .preferredColorScheme(.dark)
+                .background(WindowReader { window in
+                    Theme.applyAppWindow(to: window)
+                })
+        }
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 1100, height: 760)
         // ⌘, and the app menu's Settings…; also ⋯ → Settings… in the Profiles window.
         Settings {
             SettingsView()
@@ -172,6 +184,18 @@ private struct WindowReader: NSViewRepresentable {
         DispatchQueue.main.async {
             if let window = nsView.window { onResolve(window) }
         }
+    }
+}
+
+/// File › Scenarios (⇧⌘E): the scenario editor's window, with the vault unlocked.
+private struct ScenariosMenuButton: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button(L("menu.scenarios")) { openWindow(id: "scenarios") }
+            .keyboardShortcut("e", modifiers: [.command, .shift])
+            .disabled(model.phase != .unlocked)
     }
 }
 
