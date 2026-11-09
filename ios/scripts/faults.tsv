@@ -51,6 +51,13 @@ unmaskedReplacement	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	
 settingsNotSaved	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	iOS 26's Safari
 noWebPageNamespace	ui	LumenUITests/SettingsTests/testSessionSettingsPersonPath	window.browser is WebKit's own
 lockedOpensDirect	core	LumenCoreTests.LockTests/testLockRule	
+profileLimitIgnored	core	LumenCoreTests.AccessTests/testFreePlan	
+freePlanProxies	core	LumenCoreTests.AccessTests/testFreePlan	
 lockedOpensDirect	ui	LumenUITests/SessionsTests/testLockedProfileNeverOpensDirect	a locked profile reached the site from the device's address
 profileDefaultsReal	core	LumenCoreTests.ProfileTests/testANewSessionIsFullyProfiled	
 profileDefaultsReal	ui	LumenUITests/SettingsTests/testANewSessionHasTheFullProfile	a new session's device profile is full by default
+profileLimitIgnored	ui	LumenUITests/FreeTierTests/testFreePlan	the plans open instead of a third profile
+freePlanProxies	ui	LumenUITests/FreeTierTests/testFreePlan	a free profile goes without a proxy
+sharedStore	ui	LumenUITests/FreeTierTests/testFreePlan	free profiles are isolated
+profileDefaultsReal	ui	LumenUITests/FreeTierTests/testFreePlan	each free profile has its own device profile
+upgradeOpensInApp	ui	LumenUITests/FreeTierTests/testFreePlan	the site opens in Safari

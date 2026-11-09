@@ -211,3 +211,29 @@ final class ProfileTests: XCTestCase {
         XCTAssertEqual([settings.canvas, settings.webGL, settings.audio], [.noise, .noise, .noise])
     }
 }
+
+/// The plans' rights, from Access alone (the owner, 8 November): free — two profiles, no proxies;
+/// a paid plan that ended — the same, its proxied profiles locked.
+final class AccessTests: XCTestCase {
+    func testFreePlan() {
+        let free = Access.free
+        XCTAssertFalse(free.proxies, "the free plan has no proxies")
+        XCTAssertEqual(free.maxProfiles, 2)
+        XCTAssertTrue(free.mayCreateProfile(having: 0))
+        XCTAssertTrue(free.mayCreateProfile(having: 1))
+        XCTAssertFalse(free.mayCreateProfile(having: 2), "a third profile is not made on the free plan")
+        XCTAssertEqual(free.profileCounter(2), "Профили: 2 из 2")
+        // A profile that lived behind a proxy (a paid plan, then free): locked, never direct.
+        XCTAssertTrue(SessionLock.of(Session(name: "Счета", proxyID: UUID()), proxyExists: true, access: free).isLocked)
+        XCTAssertEqual(SessionLock.of(Session(name: "Чистый"), proxyExists: false, access: free), .open)
+    }
+
+    func testExpiredAndFull() {
+        XCTAssertFalse(Access.expired.proxies)
+        XCTAssertFalse(Access.expired.mayCreateProfile(having: 2), "an ended plan keeps the free plan's count")
+        XCTAssertEqual(Access.expired.planTitle, "Подписка закончилась")
+        XCTAssertTrue(Access.full.proxies)
+        XCTAssertTrue(Access.full.mayCreateProfile(having: 500))
+        XCTAssertEqual(Access.full.profileCounter(5), "Профили: 5")
+    }
+}

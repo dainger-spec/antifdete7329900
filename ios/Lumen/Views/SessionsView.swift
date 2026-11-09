@@ -10,10 +10,13 @@ struct SessionsView: View {
     enum EditorTarget: Identifiable {
         case new
         case edit(UUID)
+        /// The plan; `because`: what the plan did not allow.
+        case plans(because: String?)
         var id: String {
             switch self {
             case .new: return "new"
             case let .edit(id): return id.uuidString
+            case .plans: return "plans"
             }
         }
     }
@@ -47,13 +50,22 @@ struct SessionsView: View {
             .navigationTitle("Сессии")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { editor = .new } label: { Image(systemName: "plus") }
+                    Button {
+                        // One more profile than the plan allows: the plans, saying why.
+                        let target: EditorTarget = model.mayCreateSession ? .new
+                            : .plans(because: "На этом тарифе профилей не больше \(model.access.maxProfiles ?? model.sessions.count).")
+                        editor = target
+                    } label: { Image(systemName: "plus") }
                         .accessibilityIdentifier("newSession")
                         .accessibilityLabel("Новая сессия")
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     NavigationLink { ProxiesView() } label: { Label("Прокси", systemImage: "network") }
                         .accessibilityIdentifier("proxiesButton")
+                }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { editor = .plans(because: nil) } label: { Label("Тариф", systemImage: "person.crop.circle") }
+                        .accessibilityIdentifier("plansButton")
                 }
                 ToolbarItem(placement: .topBarTrailing) { DebugProbeLink() }
             }
@@ -64,6 +76,7 @@ struct SessionsView: View {
                 switch target {
                 case .new: SessionEditor(sessionID: nil)
                 case let .edit(id): SessionEditor(sessionID: id)
+                case let .plans(because): PlansView(because: because)
                 }
             }
         }

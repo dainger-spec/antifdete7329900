@@ -16,16 +16,29 @@ enum LaunchOptions {
 }
 
 /// Where the app's rights come from (`Access`). Until the account server's document of rights fills
-/// it (the next step), everything is allowed; a test takes the proxies away (LUMEN_TEST_ACCESS=none,
-/// DEBUG builds only).
+/// it (signing in to a Lumen account), everything is allowed; a test sets the plan (DEBUG builds only):
+/// LUMEN_TEST_ACCESS=free — the free plan; =none — a paid plan that ended.
 enum AccessSource {
     static func current() -> Access {
         #if DEBUG
-        if ProcessInfo.processInfo.environment["LUMEN_TEST_ACCESS"] == "none" {
-            return Access(proxies: false, reason: "Доступ к прокси закончился.")
+        switch ProcessInfo.processInfo.environment["LUMEN_TEST_ACCESS"] {
+        case "free": return .free
+        case "none": return .expired
+        default: break
         }
         #endif
         return .full
+    }
+
+    /// The site where plans are chosen and paid for: `<site>/pricing`, opened in Safari, never in
+    /// the app (the owner, 8 November). A test points it at its testbed (DEBUG builds only).
+    static var pricingURL: URL {
+        #if DEBUG
+        if let value = ProcessInfo.processInfo.environment["LUMEN_TEST_SITE_URL"], let url = URL(string: value) {
+            return url.appendingPathComponent("pricing")
+        }
+        #endif
+        return URL(string: "https://lumenbrowser.io/pricing")!
     }
 }
 
@@ -77,8 +90,13 @@ final class AppModel: ObservableObject {
 
     // MARK: Sessions
 
+    /// Whether the plan lets one more profile be made (Access: the free plan keeps two).
+    var mayCreateSession: Bool { access.mayCreateProfile(having: sessions.count) }
+
+    /// A new session, if the plan allows one more; nil otherwise.
     @discardableResult
-    func createSession(name: String, notes: String, tags: String) -> Session {
+    func createSession(name: String, notes: String, tags: String) -> Session? {
+        guard mayCreateSession else { return nil }
         let session = catalog.create(name: name, notes: notes, tags: [tags])
         refresh()
         return session
@@ -99,6 +117,8 @@ final class AppModel: ObservableObject {
     /// A proxy given to a session binds it to proxies; `unbind` — the person's own choice, confirmed —
     /// lets a session that had one go without it.
     func setProxy(_ id: UUID, proxyID: UUID?, unbind: Bool = false) {
+        // A plan without proxies gives none (the free plan): the settings offer none either.
+        if proxyID != nil, !access.proxies { return }
         catalog.setProxy(id, proxyID: proxyID, unbind: unbind)
         refresh()
         refreshRuntimes()

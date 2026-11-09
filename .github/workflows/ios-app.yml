@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: ["core,SessionsTests,ProxyCheckTests", "BrowserTests", "ProxyTests", "SettingsTests", "RelayTests"]
+        suite: ["core,SessionsTests,ProxyCheckTests,FreeTierTests", "BrowserTests", "ProxyTests", "SettingsTests", "RelayTests"]
     name: Lumen iOS — ${{ matrix.suite }} (${{ inputs.os || 'xcode-27' }}, iOS ${{ inputs.ios || 'newest' }})
     runs-on: ${{ inputs.os || 'xcode-27' }}
     timeout-minutes: 120

@@ -115,6 +115,8 @@ struct SessionSettingsView: View {
     @State private var confirmUnbind = false
     @State private var customUserAgent = ""
     @State private var loaded = false
+    /// The plans, from the proxy section of a plan without proxies.
+    @State private var showPlans = false
 
     private var userAgentTag: Binding<String> {
         Binding(get: {
@@ -161,34 +163,49 @@ struct SessionSettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Прокси") {
-                    Picker("Прокси", selection: Binding(get: { proxyID }, set: { chosen in
-                        // A session that lived behind a proxy goes without one only when the person
-                        // says so, knowing what it means; otherwise it stays bound (and locked).
-                        if chosen == nil, model.session(sessionID)?.boundToProxy == true {
-                            confirmUnbind = true
-                            return
+                Section {
+                    // A plan without proxies (the free plan) offers none: the profile goes without one.
+                    // One that lived behind a proxy keeps its choice (it is locked and not shown here).
+                    if model.access.proxies || model.session(sessionID)?.boundToProxy == true {
+                        Picker("Прокси", selection: Binding(get: { proxyID }, set: { chosen in
+                            // A session that lived behind a proxy goes without one only when the person
+                            // says so, knowing what it means; otherwise it stays bound (and locked).
+                            if chosen == nil, model.session(sessionID)?.boundToProxy == true {
+                                confirmUnbind = true
+                                return
+                            }
+                            proxyID = chosen
+                            model.setProxy(sessionID, proxyID: chosen)
+                        })) {
+                            Text("Без прокси").tag(UUID?.none)
+                            ForEach(model.proxies) { entry in
+                                Text(entry.displayName).tag(UUID?.some(entry.id))
+                            }
                         }
-                        proxyID = chosen
-                        model.setProxy(sessionID, proxyID: chosen)
-                    })) {
-                        Text("Без прокси").tag(UUID?.none)
-                        ForEach(model.proxies) { entry in
-                            Text(entry.displayName).tag(UUID?.some(entry.id))
+                        .pickerStyle(.inline)
+                        .labelsHidden()
+                        .accessibilityIdentifier("proxyPicker")
+                        .confirmationDialog("Профиль работал через прокси", isPresented: $confirmUnbind, titleVisibility: .visible) {
+                            Button("Открывать без прокси", role: .destructive) {
+                                proxyID = nil
+                                model.setProxy(sessionID, proxyID: nil, unbind: true)
+                            }
+                            .accessibilityIdentifier("confirmUnbind")
+                            Button("Оставить прокси", role: .cancel) {}
+                        } message: {
+                            Text("Без прокси сайты этого профиля увидят настоящий адрес устройства.")
                         }
+                    } else {
+                        Text("Без прокси").accessibilityIdentifier("proxyNone")
                     }
-                    .pickerStyle(.inline)
-                    .labelsHidden()
-                    .accessibilityIdentifier("proxyPicker")
-                    .confirmationDialog("Профиль работал через прокси", isPresented: $confirmUnbind, titleVisibility: .visible) {
-                        Button("Открывать без прокси", role: .destructive) {
-                            proxyID = nil
-                            model.setProxy(sessionID, proxyID: nil, unbind: true)
+                } header: {
+                    Text("Прокси")
+                } footer: {
+                    if !model.access.proxies {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(model.access.reason ?? "Прокси на этом тарифе нет.").accessibilityIdentifier("proxiesNotOnPlan")
+                            Button("Тарифы") { showPlans = true }.accessibilityIdentifier("plansFromSettings")
                         }
-                        .accessibilityIdentifier("confirmUnbind")
-                        Button("Оставить прокси", role: .cancel) {}
-                    } message: {
-                        Text("Без прокси сайты этого профиля увидят настоящий адрес устройства.")
                     }
                 }
                 Section("Браузер (строка User-Agent)") {
@@ -253,6 +270,7 @@ struct SessionSettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Готово") { dismiss() }.accessibilityIdentifier("settingsDone") }
             }
+            .sheet(isPresented: $showPlans) { PlansView() }
             .onAppear {
                 if let session = model.session(sessionID) {
                     settings = session.settings
