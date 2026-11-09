@@ -1,6 +1,7 @@
 // swift-tools-version:5.9
 // Lumen for iPhone — the app's core: models, storage, the sessions catalogue, address input, search
-// engines. Foundation only, so `swift test` runs it on any Mac (and Linux) without a simulator.
+// engines, the account's document of rights. Foundation and CryptoKit only, so `swift test` runs it
+// on any Mac without a simulator.
 import PackageDescription
 
 let package = Package(
@@ -9,6 +10,7 @@ let package = Package(
     products: [.library(name: "LumenCore", targets: ["LumenCore"])],
     targets: [
         .target(name: "LumenCore"),
-        .testTarget(name: "LumenCoreTests", dependencies: ["LumenCore"]),
+        // The account server's own test vectors (its docs/entitlement-test-vectors.json), read by path.
+        .testTarget(name: "LumenCoreTests", dependencies: ["LumenCore"], exclude: ["entitlement-test-vectors.json"]),
     ]
 )

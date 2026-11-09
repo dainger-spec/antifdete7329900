@@ -55,6 +55,17 @@ profileLimitIgnored	core	LumenCoreTests.AccessTests/testFreePlan
 freePlanProxies	core	LumenCoreTests.AccessTests/testFreePlan	
 lockedOpensDirect	ui	LumenUITests/SessionsTests/testLockedProfileNeverOpensDirect	a locked profile reached the site from the device's address
 profileDefaultsReal	core	LumenCoreTests.ProfileTests/testANewSessionIsFullyProfiled	
+# The account: the document of rights is checked as the Mac checks it, and the rights are its features and limits.
+signatureNotChecked	core	LumenCoreTests.EntitlementTests/testServerVectors	bad_signature
+wrongDeviceAccepted	core	LumenCoreTests.EntitlementTests/testServerVectors	wrong_device
+unknownFeatureRejected	core	LumenCoreTests.LicenseTests/testUnknownFeaturesArePassedOver	a feature this app does not know breaks nothing
+featuresFromPlan	core	LumenCoreTests.LicenseTests/testRightsComeFromFeatures	in the features: no proxies
+freeLimitOwnRule	core	LumenCoreTests.LicenseTests/testTheFreeLevelComesFromTheDocument	the profile count is the document
+documentNeverExpires	core	LumenCoreTests.LicenseTests/testADocumentRunsOut	past the document
+clockRollbackTrusted	core	LumenCoreTests.LicenseTests/testTheClockSetBackBringsNothingBack	the clock set back does not bring time back
+overLimitOpens	core	LumenCoreTests.LicenseTests/testProfilesOverTheLimitAreLocked	the two made first stay open
+activationWithoutPlatform	core	LumenCoreTests.LicenseTests/testAnActivationSaysItIsAnIPhone	the activation names its platform
+phoneLimitUnexplained	core	LumenCoreTests.LicenseTests/testRefusalsAreSaidWithTheirReason	the limit of phones is said with its reason
 profileDefaultsReal	ui	LumenUITests/SettingsTests/testANewSessionHasTheFullProfile	a new session's device profile is full by default
 profileLimitIgnored	ui	LumenUITests/FreeTierTests/testFreePlan	the plans open instead of a third profile
 freePlanProxies	ui	LumenUITests/FreeTierTests/testFreePlan	a free profile goes without a proxy

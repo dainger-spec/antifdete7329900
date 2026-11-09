@@ -231,7 +231,7 @@ final class AccessTests: XCTestCase {
     func testExpiredAndFull() {
         XCTAssertFalse(Access.expired.proxies)
         XCTAssertFalse(Access.expired.mayCreateProfile(having: 2), "an ended plan keeps the free plan's count")
-        XCTAssertEqual(Access.expired.planTitle, "Подписка закончилась")
+        XCTAssertEqual(Access.expired.planTitle, "Оплаченный период закончился")
         XCTAssertTrue(Access.full.proxies)
         XCTAssertTrue(Access.full.mayCreateProfile(having: 500))
         XCTAssertEqual(Access.full.profileCounter(5), "Профили: 5")

@@ -44,6 +44,17 @@ public enum Fault: String, CaseIterable, Sendable {
     case profileLimitIgnored     // the plan's profile limit is not kept: a free iPhone makes a third profile
     case freePlanProxies         // the free plan's proxies left on: a free profile goes through a proxy
     case upgradeOpensInApp       // the plans' site opens inside the app, not in Safari
+    // The account (rights from the server's signed document)
+    case signatureNotChecked     // a document's signature is not checked: anyone's payload is taken
+    case wrongDeviceAccepted     // a document of another device or another iPhone is taken
+    case unknownFeatureRejected  // a feature name this app does not know makes the document unreadable
+    case featuresFromPlan        // the rights come from the plan's status, not from the document's features
+    case freeLimitOwnRule        // signed in without a plan, the profile count is the app's own, not the document's
+    case documentNeverExpires    // a document is in force for ever: its last day and the period's end are not looked at
+    case clockRollbackTrusted    // the decision is made by the bare clock: set back, it brings a document back
+    case overLimitOpens          // profiles beyond the plan's count open like the rest
+    case activationWithoutPlatform // the activation does not say "ios": the server counts the iPhone as a Mac
+    case phoneLimitUnexplained   // the refusal for the license's limit of phones is shown without its reason
     // The network-switch probe (the instrument for the real iPhone)
     case probeBlind              // the probe never learns the device's own addresses: it can see no leak
     case probeTrustsUnknown      // an answer from an address the probe does not know counts as through the proxy
