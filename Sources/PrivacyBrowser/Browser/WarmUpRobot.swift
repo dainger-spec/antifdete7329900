@@ -13,12 +13,14 @@ import WebKit
 /// How it acts on a page, so that pages see a visitor and not a script:
 /// * It reads pages (scroll position, links) in a content world of its own, invisible to the
 ///   page's scripts, as Password AutoFill does.
-/// * While its window is the key window, it scrolls with wheel events sent to the web view, as
-///   a mouse with smooth scrolling would, and clicks with mouse events at the link, after a
-///   trusted pointer move was seen to reach that very link (by a listener of its own world). Otherwise (another app in
-///   front, or the events did not reach the page) it scrolls with `scrollBy` from its world —
-///   pages then see the scrolling but no wheel — and clicks with the link's `click()`, an
-///   untrusted click. Which way it last went is reported (`scrollInput`, `clickInput`).
+/// * It scrolls with wheel events, as a mouse with smooth scrolling would, and moves the pointer
+///   to a link and clicks it with mouse events once a trusted move was seen to reach that very
+///   link (by a listener of its own world) — all through `PageInput`, which keeps its window's
+///   page focused for the run though the window is never in front, and gives the page what a
+///   person's mouse gives it. When the events did not reach the page, it scrolls with
+///   `scrollBy` from its world — pages then see the scrolling but no wheel — and clicks with the
+///   link's `click()`, an untrusted click. Which way it last went is reported (`scrollInput`,
+///   `clickInput`).
 /// * It loads a page only while its tab is the one shown: a page loading in a tab out of sight
 ///   has no window (outer size 0×0), which a visitor's never has.
 ///
@@ -67,6 +69,8 @@ final class WarmUpRobot: ObservableObject {
     @Published private(set) var state: State = .idle
     @Published private(set) var visits: [WarmUpVisit] = []
     @Published private(set) var pageCount = 0
+    /// The run's pointer, wheel and keyboard on its tab's page.
+    private var input: PageInput?
     @Published private(set) var scrollInput: Input?
     @Published private(set) var clickInput: Input?
     /// Its tab is not the one shown (the user selected another): the next page waits for it, as a
@@ -158,6 +162,10 @@ final class WarmUpRobot: ObservableObject {
             return false
         }
         offscreenWindow = controller
+        // Its window is never in front; its page keeps the focus of a page someone is using.
+        let input = PageInput(webView: tab.webView)
+        input.holdFocus()
+        self.input = input
         cookiesBefore = nil
         cookiesCollected = 0
         cookieSites = nil
@@ -192,6 +200,8 @@ final class WarmUpRobot: ObservableObject {
 
     /// Closes the warm-up's own window and lets go of everything it held.
     private func release() {
+        input?.releaseFocus()
+        input = nil
         tab?.refusesDownloads = false
         countCookiesSoFar()
         startedAt = nil
@@ -471,9 +481,9 @@ final class WarmUpRobot: ObservableObject {
         let down = gesture.deltas.reduce(0, +) > 0
         // Nothing to scroll that way (a short page, or already at the end).
         if down ? before.room < 4 : before.y < 4 { return false }
-        if tab.webView.window?.isKeyWindow == true {
+        if let input, input.webView === tab.webView, tab.webView.window != nil {
             for delta in gesture.deltas {
-                guard sendWheel(delta, to: tab.webView), await wait(gesture.interval, run: run) else { break }
+                guard input.wheel(delta), await wait(gesture.interval, run: run) else { break }
             }
             // The wheel's scrolling may still be running: give it a moment.
             guard await wait(0.25, run: run) else { return false }
@@ -502,24 +512,6 @@ final class WarmUpRobot: ObservableObject {
             """, [:], in: tab) as? [Double]
         guard let value, value.count == 2 else { return nil }
         return ScrollPosition(y: value[0], room: value[1])
-    }
-
-    /// A wheel event of `delta` points (positive: down) at the middle of the web view, as a
-    /// mouse with smooth scrolling sends it.
-    private func sendWheel(_ delta: Double, to webView: WKWebView) -> Bool {
-        guard let window = webView.window,
-              let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1,
-                                  wheel1: Int32(-delta.rounded()), wheel2: 0, wheel3: 0) else { return false }
-        let inWindow = webView.convert(NSPoint(x: webView.bounds.midX, y: webView.bounds.midY), to: nil)
-        let onScreen = window.convertPoint(toScreen: inWindow)
-        // Quartz puts the origin at the top left of the main screen.
-        let mainHeight = NSScreen.screens.first?.frame.height ?? window.frame.maxY
-        event.location = CGPoint(x: onScreen.x, y: mainHeight - onScreen.y)
-        event.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(window.windowNumber))
-        event.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(window.windowNumber))
-        guard let wheel = NSEvent(cgEvent: event) else { return false }
-        webView.scrollWheel(with: wheel)
-        return true
     }
 
     // MARK: Following a link
@@ -597,48 +589,44 @@ final class WarmUpRobot: ObservableObject {
         return try? JSONDecoder().decode(PageLinks.self, from: data)
     }
 
-    /// How mouse events are handed to the web view: made from Quartz events (as the wheel's) and
-    /// given to the view, made by AppKit and given to the view, or to its window (which passes
-    /// them on as it does the system's).
-    private enum Route: CaseIterable {
-        case quartz
-        case view
-        case window
-    }
-
     /// Clicks the link: with mouse events when a trusted pointer move is seen to reach that very
-    /// link, else with its `click()`. The move is watched by a one-shot listener of the robot's
-    /// world, which the page cannot see.
+    /// link, else with its `click()`. The moves are watched by a listener of the robot's world,
+    /// which the page cannot see.
     private func click(_ choice: PageLinks.Link, at point: CGPoint, in tab: BrowserTab, run: Int,
                        using generator: inout some RandomNumberGenerator) async -> Bool {
         let webView = tab.webView
         let arguments: [String: Any] = ["index": choice.index, "href": choice.link.href]
         let find = "const a = document.querySelectorAll('a[href]')[index]; if (!a || a.href !== href) return false;"
-        if webView.window?.isKeyWindow == true, let location = windowLocation(of: point, in: webView) {
-            for route in Route.allCases {
-                _ = await script("""
-                    const seen = globalThis.warmUpPointer = {target: null, trusted: false};
-                    document.addEventListener('mousemove', (e) => { seen.target = e.target; seen.trusted = e.isTrusted; },
-                                              {capture: true, once: true});
-                    return true;
-                    """, [:], in: tab)
+        if let input, input.webView === webView, webView.window != nil {
+            _ = await script("""
+                const seen = globalThis.warmUpPointer = {target: null, trusted: false};
+                seen.listener = (e) => { seen.target = e.target; seen.trusted = e.isTrusted; };
+                document.addEventListener('mousemove', seen.listener, {capture: true});
+                return true;
+                """, [:], in: tab)
+            guard liveTab(run) != nil else { return false }
+            // From where the pointer was (somewhere on the page the first time), as a hand moves it.
+            let size = webView.bounds.size
+            let start = CGPoint(x: Double.random(in: 0.2...0.8, using: &generator) * size.width,
+                                y: Double.random(in: 0.3...0.9, using: &generator) * size.height)
+            let from = input.pointerViewportPoint() ?? start
+            let distance = hypot(point.x - from.x, point.y - from.y)
+            let steps = max(6, min(45, Int(distance / Double.random(in: 9...15, using: &generator))))
+            let moved = await input.move(along: input.path(to: point, from: start, steps: steps),
+                                         interval: Double.random(in: 0.012...0.02, using: &generator))
+            guard moved, await wait(Double.random(in: 0.12...0.3, using: &generator), run: run) else { return false }
+            let reached = await script(find + """
+                 const seen = globalThis.warmUpPointer;
+                 if (seen && seen.listener) document.removeEventListener('mousemove', seen.listener, {capture: true});
+                 return !!seen && seen.trusted && !!seen.target && (seen.target === a || a.contains(seen.target));
+                """, arguments, in: tab) as? Bool
+            guard liveTab(run) != nil else { return false }
+            if reached == true {
+                // The button always comes up again, even when the run ends meanwhile.
+                await input.click(hold: Double.random(in: 0.06...0.14, using: &generator))
                 guard liveTab(run) != nil else { return false }
-                send(.mouseMoved, at: location, to: webView, via: route)
-                guard await wait(Double.random(in: 0.15...0.4, using: &generator), run: run) else { return false }
-                let reached = await script(find + """
-                     const seen = globalThis.warmUpPointer;
-                     return !!seen && seen.trusted && !!seen.target && (seen.target === a || a.contains(seen.target));
-                    """, arguments, in: tab) as? Bool
-                guard liveTab(run) != nil else { return false }
-                if reached == true {
-                    send(.leftMouseDown, at: location, to: webView, via: route)
-                    // The button always comes up again, even when the run ends meanwhile.
-                    let held = await wait(Double.random(in: 0.06...0.14, using: &generator), run: run)
-                    send(.leftMouseUp, at: location, to: webView, via: route)
-                    guard held else { return false }
-                    clickInput = .native
-                    return true
-                }
+                clickInput = .native
+                return true
             }
             log.notice("The pointer's events did not reach the link; clicking from the robot's script world")
         }
@@ -647,53 +635,6 @@ final class WarmUpRobot: ObservableObject {
         guard liveTab(run) != nil else { return false }
         if clicked == true { clickInput = .script }
         return clicked == true
-    }
-
-    /// Where the viewport point `point` (CSS pixels) is in the web view's window.
-    private func windowLocation(of point: CGPoint, in webView: WKWebView) -> NSPoint? {
-        guard webView.window != nil else { return nil }
-        let scale = webView.pageZoom * webView.magnification
-        let x = point.x * scale, y = point.y * scale
-        let inView = NSPoint(x: x, y: webView.isFlipped ? y : webView.bounds.height - y)
-        return webView.convert(inView, to: nil)
-    }
-
-    private func send(_ type: NSEvent.EventType, at location: NSPoint, to webView: WKWebView, via route: Route) {
-        guard let window = webView.window, let event = mouseEvent(type, at: location, in: window, quartz: route == .quartz) else { return }
-        if route == .window {
-            window.sendEvent(event)
-            return
-        }
-        switch type {
-        case .mouseMoved: webView.mouseMoved(with: event)
-        case .leftMouseDown: webView.mouseDown(with: event)
-        case .leftMouseUp: webView.mouseUp(with: event)
-        default: break
-        }
-    }
-
-    private func mouseEvent(_ type: NSEvent.EventType, at location: NSPoint, in window: NSWindow, quartz: Bool) -> NSEvent? {
-        guard quartz else {
-            return NSEvent.mouseEvent(with: type, location: location, modifierFlags: [],
-                                      timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                                      context: nil, eventNumber: 0, clickCount: type == .mouseMoved ? 0 : 1,
-                                      pressure: type == .leftMouseDown ? 1 : 0)
-        }
-        let quartzType: CGEventType
-        switch type {
-        case .leftMouseDown: quartzType = .leftMouseDown
-        case .leftMouseUp: quartzType = .leftMouseUp
-        default: quartzType = .mouseMoved
-        }
-        let onScreen = window.convertPoint(toScreen: location)
-        // Quartz puts the origin at the top left of the main screen.
-        let mainHeight = NSScreen.screens.first?.frame.height ?? window.frame.maxY
-        guard let event = CGEvent(mouseEventSource: nil, mouseType: quartzType,
-                                  mouseCursorPosition: CGPoint(x: onScreen.x, y: mainHeight - onScreen.y), mouseButton: .left) else { return nil }
-        event.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(window.windowNumber))
-        event.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(window.windowNumber))
-        if quartzType != .mouseMoved { event.setIntegerValueField(.mouseEventClickState, value: 1) }
-        return NSEvent(cgEvent: event)
     }
 
     // MARK: Scripts in the robot's world

@@ -382,6 +382,7 @@ final class SelfTest {
         await group("profile sync") { try await profileSync(repository) }
         await group("warm-up") { try await warmUp(repository) }
         await group("warm-up queue") { try await warmUpQueue(repository) }
+        await group("the page cannot tell") { try await pageCannotTell(repository) }
         await group("Safari chrome") { try await safariChromeThroughTheProxy(repository) }
         await group("WebRTC through the proxy") { try await webRTCThroughTheProxy(repository) }
         await group("keychain between profiles") { try await keychainBetweenProfiles(repository) }
@@ -6881,6 +6882,237 @@ final class SelfTest {
     /// cookies, User-Agent), stays on each, scrolls, follows only the plain link of the same site,
     /// leaves nothing in the page world, and stops when asked, when its tab closes, when a page
     /// shows a dialog and when the profile stops (whose data then seals as usual).
+    // MARK: The page cannot tell (PageInput)
+
+    /// A page that writes down everything it can learn of each input event, as a detector would.
+    private static let inputProbePage = """
+        <!doctype html><meta charset=utf-8><title>input</title>
+        <style>body{font:16px -apple-system;margin:0;padding:20px;height:3000px}
+        #button{position:absolute;left:40px;top:40px;width:160px;height:40px}
+        #field{position:absolute;left:40px;top:120px;width:240px;height:30px}</style>
+        <button id=button>Button</button><input id=field autocomplete=off>
+        <script>
+        (() => {
+          const log = [];
+          const types = ['pointerover','pointermove','pointerdown','pointerup','mouseover','mousemove','mousedown','mouseup',
+            'click','wheel','keydown','keyup','input','blur','focus'];
+          const pick = (e) => {
+            const r = {type: e.type, trusted: e.isTrusted, t: Math.round(e.timeStamp * 10) / 10,
+              target: e.target && (e.target.id || e.target.nodeName || String(e.target)), hasFocus: document.hasFocus()};
+            for (const k of ['clientX','clientY','screenX','screenY','button','buttons','pressure','key','code','keyCode','shiftKey'])
+              if (k in e) r[k] = e[k];
+            return r;
+          };
+          for (const type of types)
+            window.addEventListener(type, (e) => { if (log.length < 500) log.push(pick(e)); }, {capture: true, passive: true});
+          window.__take = () => JSON.stringify({events: log.splice(0), field: document.getElementById('field').value});
+          window.__rect = (id) => { const r = document.getElementById(id).getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; };
+          window.__reset = () => { document.getElementById('field').value = '';
+            if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); window.scrollTo(0, 0); log.length = 0; return true; };
+        })();
+        </script>
+        """
+
+    private struct InputLog {
+        var events: [[String: Any]]
+        var field: String
+
+        func all(_ type: String) -> [[String: Any]] { events.filter { $0["type"] as? String == type } }
+        func double(_ event: [String: Any], _ key: String) -> Double? { (event[key] as? NSNumber)?.doubleValue }
+    }
+
+    /// What a page sees of the app's pointer, wheel and keyboard (`PageInput`), against what a
+    /// person's mouse and keyboard give it (measured with the system's own events, rounds 1–5 of
+    /// claude/measure-automation-input). One check per kind of trace; each also runs once with
+    /// that one fix left out (`PageInput.fault`), and must then see the trace — else the check
+    /// could not fail. The window is in the background (another app in front) for every run, as
+    /// automation's windows usually are.
+    private func pageCannotTell(_ repository: ProfileRepository) async throws {
+        let profile = try repository.create(name: "Input", configuration: ProfileConfiguration(ephemeral: true))
+        let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
+        let controller = session.openWindow(url: nil)
+        let policy = NSApp.activationPolicy()
+        NSApp.setActivationPolicy(.accessory)
+        defer {
+            PageInput.fault = nil
+            NSApp.setActivationPolicy(policy)
+            controller.close()
+            session.shutDown()
+            try? repository.delete(profile.id)
+        }
+        guard let webView = controller.selectedTab?.webView, controller.window != nil else {
+            check("the page cannot tell: a profile window to act on", false, "no tab or window")
+            return
+        }
+        webView.loadHTMLString(Self.inputProbePage, baseURL: URL(string: "http://input.selftest.invalid/"))
+        var ready = false
+        for _ in 0..<50 where !ready {
+            ready = (try? await js(webView, "return typeof window.__take === 'function' && document.readyState === 'complete';")) as? Bool == true
+            if !ready { try? await Task.sleep(nanoseconds: 100_000_000) }
+        }
+        guard ready else {
+            check("the page cannot tell: the probe page loads in a profile window", false, "not ready after 5 s")
+            return
+        }
+        func rect(_ id: String) async -> CGRect? {
+            guard let r = try? await js(webView, "return __rect(id);", ["id": id]) as? [Double], r.count == 4 else { return nil }
+            return CGRect(x: r[0], y: r[1], width: r[2], height: r[3])
+        }
+        guard let button = await rect("button"), let field = await rect("field") else {
+            check("the page cannot tell: the probe page's elements have places", false)
+            return
+        }
+        let typed: [Character] = ["a", "B"]
+        let keys = typed.compactMap { PageInput.key(typing: $0) }
+        if keys.count != typed.count {
+            skip("the page cannot tell: keys as a keyboard gives them", "this Mac's keyboard layout types no \"a\" or \"B\"")
+        }
+        // Another app in front: the window is in the background, as automation's usually are.
+        func background() async -> Bool {
+            NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first?.activate()
+            return await waitUntil(timeout: 3) { !NSApp.isActive && controller.window?.isKeyWindow != true }
+        }
+        func sleep(_ seconds: Double) async { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
+
+        func run(_ fault: PageInput.Fault?) async -> (log: InputLog?, background: Bool) {
+            PageInput.fault = nil
+            let behind = await background()
+            _ = try? await js(webView, "return __reset();")
+            PageInput.fault = fault
+            let input = PageInput(webView: webView)
+            input.holdFocus()
+            await sleep(0.3)
+            let start = CGPoint(x: button.midX + 140, y: button.midY + 70)
+            for target in [button, field] {
+                let point = CGPoint(x: target.midX + 3.4, y: target.midY + 1.6)
+                await input.move(along: input.path(to: point, from: start, steps: 9), interval: 0.03)
+                await sleep(0.15)
+                await input.click(hold: 0.09)
+                await sleep(0.25)
+            }
+            for key in keys {
+                await input.press(key, hold: 0.08)
+                await sleep(0.12)
+            }
+            for _ in 0..<3 {
+                input.wheel(40)
+                await sleep(0.05)
+            }
+            await sleep(0.6)
+            input.releaseFocus()
+            PageInput.fault = nil
+            guard let text = try? await js(webView, "return __take();") as? String,
+                  let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { return (nil, behind) }
+            return (InputLog(events: object["events"] as? [[String: Any]] ?? [], field: object["field"] as? String ?? ""), behind)
+        }
+
+        // The rules: what a person's mouse and keyboard always give (each with what it saw).
+        let expectedField = keys.count == typed.count ? String(typed) : ""
+        typealias Rule = (InputLog) -> (Bool, String)
+        let moves: Rule = { log in
+            guard let down = log.events.firstIndex(where: { $0["type"] as? String == "pointerdown" }) else { return (false, "no pointerdown") }
+            let before = log.events[..<down]
+            let count = before.filter { $0["type"] as? String == "pointermove" }.count
+            let over = before.last { $0["type"] as? String == "pointerover" && $0["target"] as? String == "button" }
+            let gap = (log.double(log.events[down], "t") ?? 0) - (over.flatMap { log.double($0, "t") } ?? .infinity)
+            return (count >= 4 && gap >= 20, "\(count) moves before the press, over the button \(over == nil ? "never" : "\(Int(gap)) ms") before it")
+        }
+        let buttons: Rule = { log in
+            let downs = log.all("mousedown"), presses = log.all("pointerdown")
+            let ok = downs.count == 2 && downs.allSatisfy { log.double($0, "buttons") == 1 }
+                && presses.count == 2 && presses.allSatisfy { log.double($0, "pressure") == 0.5 }
+            return (ok, "mousedown buttons \(downs.map { log.double($0, "buttons") ?? -1 }), pointerdown pressure \(presses.map { log.double($0, "pressure") ?? -1 })")
+        }
+        let wheelTime: Rule = { log in
+            let wheels = log.all("wheel"), lastPress = log.all("pointerdown").last.flatMap { log.double($0, "t") } ?? 0
+            let times = wheels.compactMap { log.double($0, "t") }
+            return (wheels.count == 3 && times.count == 3 && times.allSatisfy { $0 > 0 && $0 >= lastPress }, "wheel times \(times), last press \(lastPress)")
+        }
+        let wheelPlace: Rule = { log in
+            guard let press = log.all("pointerdown").last else { return (false, "no press") }
+            func offset(_ e: [String: Any]) -> [Double] {
+                [(log.double(e, "screenX") ?? .nan) - (log.double(e, "clientX") ?? .nan), (log.double(e, "screenY") ?? .nan) - (log.double(e, "clientY") ?? .nan)]
+            }
+            let wheels = log.all("wheel")
+            let ok = wheels.count == 3 && wheels.allSatisfy { wheel in
+                zip(offset(wheel), offset(press)).allSatisfy { abs($0 - $1) <= 1 }
+                    && abs((log.double(wheel, "clientX") ?? .nan) - (log.double(press, "clientX") ?? .nan)) <= 1.5
+                    && abs((log.double(wheel, "clientY") ?? .nan) - (log.double(press, "clientY") ?? .nan)) <= 1.5
+            }
+            return (ok, "wheel client/screen \(wheels.map { [log.double($0, "clientX") ?? -1, log.double($0, "clientY") ?? -1, log.double($0, "screenX") ?? -1, log.double($0, "screenY") ?? -1] }), press \(offset(press)) apart")
+        }
+        let focus: Rule = { log in
+            let acted = log.events.filter { ["pointerdown", "keydown", "wheel"].contains($0["type"] as? String ?? "") }
+            let focused = !acted.isEmpty && acted.allSatisfy { $0["hasFocus"] as? Bool == true }
+            let clicked = log.all("click").map { $0["target"] as? String ?? "?" }
+            let windowBlur = log.events.contains { $0["type"] as? String == "blur" && ($0["target"] as? String ?? "").hasPrefix("[object Window") }
+            return (focused && clicked == ["button", "field"] && !windowBlur && log.field == expectedField,
+                    "focus \(acted.map { $0["hasFocus"] as? Bool == true ? 1 : 0 }), clicks on \(clicked), window blur \(windowBlur), field \"\(log.field)\"")
+        }
+        let trusted: Rule = { log in
+            let untrusted = log.events.filter { $0["trusted"] as? Bool != true }.map { $0["type"] as? String ?? "?" }
+            return (!log.events.isEmpty && untrusted.isEmpty, "\(log.events.count) events, untrusted: \(untrusted)")
+        }
+        let keysRule: Rule = { log in
+            let seen = log.events.filter { ["keydown", "keyup"].contains($0["type"] as? String ?? "") }.map {
+                "\($0["type"] as? String == "keydown" ? "↓" : "↑")\($0["key"] as? String ?? "?")/\($0["code"] as? String ?? "?")/\(log.double($0, "keyCode").map { Int($0) } ?? -1)\($0["shiftKey"] as? Bool == true ? "⇧" : "")"
+            }
+            let expected = ["↓a/KeyA/65", "↑a/KeyA/65", "↓Shift/ShiftLeft/16⇧", "↓B/KeyB/66⇧", "↑B/KeyB/66⇧", "↑Shift/ShiftLeft/16"]
+            return (seen == expected && log.field == "aB", "\(seen) field \"\(log.field)\"")
+        }
+
+        let (whole, behind) = await run(nil)
+        info("the page cannot tell: window in the background for the run: \(behind) (app active: \(NSApp.isActive))")
+        guard let whole else {
+            check("the page cannot tell: the probe page's record is read", false)
+            return
+        }
+        // Each kind with its own fix left out.
+        for (name, rule, fault) in [("pointer moves come before a press, as a hand moves the mouse", moves, PageInput.Fault.moves),
+                                    ("a press holds the button (buttons 1, pressure 0.5)", buttons, .buttons),
+                                    ("wheel events have the time of the events around them", wheelTime, .wheelTime),
+                                    ("wheel events are where the pointer is, on the screen as on the page", wheelPlace, .wheelPlace)] {
+            let (good, saw) = rule(whole)
+            let (control, broken) = await run(fault)
+            let (controlPassed, controlSaw) = control.map(rule) ?? (true, "no record")
+            check("the page cannot tell: \(name) — and without the fix (\(fault.rawValue)) the check sees it",
+                  good && !controlPassed, "with: \(saw); without: \(controlSaw) (background \(broken))")
+        }
+        // Focus: the control needs a window really in the background.
+        let (focusGood, focusSaw) = focus(whole)
+        if behind {
+            let (control, _) = await run(.focus)
+            let (controlPassed, controlSaw) = control.map(focus) ?? (true, "no record")
+            check("the page cannot tell: a page in a window behind another app keeps its focus, and the clicks and keys reach it — and without the fix (focus) the check sees it",
+                  focusGood && !controlPassed, "with: \(focusSaw); without: \(controlSaw)")
+        } else {
+            check("the page cannot tell: the page keeps its focus, and the clicks and keys reach it", focusGood, focusSaw)
+            skip("the page cannot tell: without the focus fix the check sees it", "no other app could be put in front of the self-test here")
+        }
+        // Trusted, and keys as a keyboard gives them: against events a page script makes.
+        _ = try? await js(webView, "return __reset();")
+        _ = try? await js(webView, """
+            const b = document.getElementById('button'), f = document.getElementById('field');
+            b.dispatchEvent(new MouseEvent('mousedown', {bubbles: true})); b.click(); f.focus();
+            for (const key of ['a', 'B']) { f.dispatchEvent(new KeyboardEvent('keydown', {key, bubbles: true})); f.value += key;
+              f.dispatchEvent(new KeyboardEvent('keyup', {key, bubbles: true})); }
+            return true;
+            """)
+        let scripted = (try? await js(webView, "return __take();") as? String).flatMap {
+            try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
+        }.map { InputLog(events: $0["events"] as? [[String: Any]] ?? [], field: $0["field"] as? String ?? "") }
+        let (trustedGood, trustedSaw) = trusted(whole)
+        let (scriptedTrusted, scriptedSaw) = scripted.map(trusted) ?? (true, "no record")
+        check("the page cannot tell: every event is trusted — and a page script's events are seen as not", trustedGood && !scriptedTrusted,
+              "with: \(trustedSaw); script: \(scriptedSaw)")
+        if keys.count == typed.count {
+            let (keysGood, keysSaw) = keysRule(whole)
+            let (scriptedKeys, scriptedKeysSaw) = scripted.map(keysRule) ?? (true, "no record")
+            check("the page cannot tell: keys as a keyboard gives them (key, code, keyCode, Shift held around the capital) — and a page script's keys are seen as not",
+                  keysGood && !scriptedKeys, "with: \(keysSaw); script: \(scriptedKeysSaw)")
+        }
+    }
+
     private func warmUp(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
             skip("warm-up: a plan's pages visited, dwelt on, scrolled and followed as the plan says", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves and times the pages)")
