@@ -1146,6 +1146,11 @@ final class AppModel: ObservableObject {
             while self?.isSyncing == true { try? await Task.sleep(nanoseconds: 100_000_000) }
         }
         handler.onChange = { [weak self] in self?.refresh() }
+        handler.allowsAutomation = { [weak self] in self?.license.allowsAutomation ?? false }
+        handler.savedScenario = { [weak self] name in
+            let matching = self?.scenarios.scenarios.filter { $0.name == name } ?? []
+            return matching.count == 1 ? matching[0] : nil
+        }
         let server = AutomationServer(settings: settings, handler: handler)
         server.onStateChange = { [weak self] state in self?.automationState = state }
         automationServer = server

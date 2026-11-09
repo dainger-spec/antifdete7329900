@@ -1201,6 +1201,8 @@ final class SelfTest {
         manager.onError = { _ in }
         let token = AutomationSettings.newToken()
         let handler = AutomationHandler(manager: manager, repository: repository)
+        var automationInPlan = false
+        handler.allowsAutomation = { automationInPlan }
         let server = AutomationServer(settings: AutomationSettings(isEnabled: true, port: 0, token: token), handler: handler)
         server.start()
         defer { server.stop() }
@@ -1263,6 +1265,35 @@ final class SelfTest {
               "\(exported.status) \(exported.body.prefix(300))")
         check("automation: only an http or https address is opened",
               await call("POST", base + "/open", body: "{\"url\": \"file:///etc/passwd\"}").status == 400)
+        // Scenarios through the API: refused, with the reason, while the plan has no automation.
+        let refusedRun = await call("POST", base + "/scenario", body: "{\"source\": \"log('x')\"}")
+        let refusedState = await call("GET", base + "/scenario")
+        check("automation: without automation in the plan, the scenario routes refuse and say why (403 automation_not_in_plan)",
+              refusedRun.status == 403 && refusedRun.body.contains("automation_not_in_plan") && refusedState.status == 403
+                  && manager.scenarioRuns[profile.id] == nil,
+              "\(refusedRun.status) \(refusedRun.body.prefix(160)) / \(refusedState.status)")
+        automationInPlan = true
+        let ran = await call("POST", base + "/scenario",
+                             body: "{\"source\": \"log('from the API', params.n); await sleep(50);\", \"params\": {\"n\": 3}}")
+        _ = await waitUntil(timeout: 20) { manager.scenarioRuns[profile.id]?.isRunning == false }
+        let state = await call("GET", base + "/scenario")
+        check("automation: a scenario sent through the API runs with its parameters, and its log and end are read back",
+              ran.status == 202 && state.status == 200 && state.body.contains("\"outcome\" : \"finished\"")
+                  && state.body.contains("from the API 3"),
+              "\(ran.status) \(ran.body.prefix(120)) / \(state.status) \(state.body.prefix(400))")
+        let unknown = await call("POST", base + "/scenario", body: "{\"scenario\": \"no such \(run)\"}")
+        check("automation: a saved scenario that is not there is not found", unknown.status == 404 && unknown.body.contains("no_scenario"),
+              "\(unknown.status) \(unknown.body.prefix(160))")
+        let looping = await call("POST", base + "/scenario", body: "{\"source\": \"while (true) { await sleep(100); }\"}")
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        let stopping = await call("POST", base + "/scenario/stop")
+        _ = await waitUntil(timeout: 10) { manager.scenarioRuns[profile.id]?.isRunning == false }
+        let stoppedState = await call("GET", base + "/scenario")
+        check("automation: a run is stopped through the API",
+              looping.status == 202 && stopping.status == 202 && stoppedState.body.contains("\"outcome\" : \"stopped\"")
+                  && stoppedState.body.contains("byUser"),
+              "\(looping.status) \(stopping.status) \(stoppedState.body.prefix(300))")
+
         let stopped = await call("POST", base + "/stop")
         check("automation: the profile stops", stopped.status == 200 && !manager.isRunning(profile.id), "\(stopped.status)")
 
