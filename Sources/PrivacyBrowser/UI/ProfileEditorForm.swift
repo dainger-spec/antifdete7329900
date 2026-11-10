@@ -79,6 +79,8 @@ struct ProfileEditorForm: View {
     var onChooseCameraVideo: () -> Void = {}
     /// The system virtual camera's install state, for the delivery choice (`SystemCamera`).
     @ObservedObject private var systemCamera = SystemCamera.shared
+    /// Opens the separate camera preview window (`CameraPreviewWindowController`).
+    var onOpenCameraPreview: () -> Void = {}
     /// Saved, and its cookies being imported: Save waits.
     var isSaving = false
     /// The profile's settings could not be read: Save would put the form's defaults in their place.
@@ -783,7 +785,13 @@ struct ProfileEditorForm: View {
     private var cameraSubstitution: some View {
         VStack(alignment: .leading, spacing: 14) {
             CameraPreviewView(camera: draft.camera)
-            EditorNote(L("editor.camera.preview.note"))
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                EditorNote(L("editor.camera.preview.note"))
+                Spacer(minLength: 8)
+                Button(L("editor.camera.preview.open")) { onOpenCameraPreview() }
+                    .buttonStyle(.lumenSecondary)
+                    .fixedSize()
+            }
             EditorRow(L("editor.camera.delivery")) {
                 Picker(L("editor.camera.delivery"), selection: $draft.camera.delivery) {
                     Text(L("editor.camera.delivery.shim")).tag(CameraSubstitution.Delivery.jsShim)

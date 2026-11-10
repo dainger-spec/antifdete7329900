@@ -36,6 +36,19 @@ enum CameraPreview {
         return NSImage(cgImage: frame, size: NSSize(width: width, height: height))
     }
 
+    /// The whole source — the chosen image, or a video's first frame — for the crop tool to drag a
+    /// rectangle over; nil for a colour or the test pattern (there is nothing to crop).
+    static func sourceImage(for camera: CameraSubstitution) -> NSImage? {
+        let cgImage: CGImage?
+        switch camera.source {
+        case .image: cgImage = camera.imageData.flatMap(decode)
+        case .video: cgImage = videoFrame(for: camera)
+        case .color, .bars: cgImage = nil
+        }
+        guard let cgImage else { return nil }
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+    }
+
     private static func drawBase(_ context: CGContext, camera: CameraSubstitution, width: Int, height: Int, sequence: UInt64) {
         let bg = color(camera.colorHex)
         context.setFillColor(red: bg.r, green: bg.g, blue: bg.b, alpha: 1)
@@ -157,6 +170,13 @@ enum CameraPreview {
         guard text.count == 6, let value = UInt32(text, radix: 16) else { return (0.12, 0.13, 0.19) }
         return (CGFloat((value >> 16) & 0xFF) / 255, CGFloat((value >> 8) & 0xFF) / 255, CGFloat(value & 0xFF) / 255)
     }
+}
+
+/// Carries the camera settings to the separate preview window, so it updates live as the editor
+/// changes them (a `Binding` snapshot would not).
+@MainActor
+final class CameraMirror: ObservableObject {
+    @Published var camera: CameraSubstitution = .off
 }
 
 /// A live preview of what a page would get, redrawn a few times a second so motion (the test

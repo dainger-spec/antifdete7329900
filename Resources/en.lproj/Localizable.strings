@@ -268,6 +268,9 @@
 "editor.camera.label.note" = "Set this to match your real camera so a page cannot tell them apart — “Match this Mac” fills its exact name and resolution.";
 "editor.camera.matchMac" = "Match this Mac";
 "editor.camera.preview.note" = "Live preview of what a page gets — it updates as you change the source, crop and adjustments. A video shows its first frame here.";
+"editor.camera.preview.open" = "Open preview";
+"editor.camera.preview.window" = "Camera preview";
+"editor.camera.preview.result" = "Result";
 "editor.camera.filters" = "Adjustments";
 "editor.camera.filter.brightness" = "Brightness";
 "editor.camera.filter.contrast" = "Contrast";
@@ -282,6 +285,7 @@
 "editor.camera.crop" = "Crop";
 "editor.camera.crop.enabled" = "Crop the source";
 "editor.camera.crop.detail" = "Take only a rectangle of the image or video into the frame.";
+"editor.camera.crop.reset" = "Reset crop";
 "editor.camera.crop.x" = "Left";
 "editor.camera.crop.y" = "Top";
 "editor.camera.crop.width" = "Width";

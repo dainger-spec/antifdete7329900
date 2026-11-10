@@ -461,6 +461,8 @@ struct ProfileEditorView: View {
     @State private var choosingCookieFile = false
     @State private var choosingCameraImage = false
     @State private var choosingCameraVideo = false
+    /// Feeds the separate camera preview window live (`CameraPreviewWindowController`).
+    @StateObject private var cameraMirror = CameraMirror()
     /// The cookies pasted are being imported after Save: no second Save meanwhile.
     @State private var savingCookies = false
     /// The profile's settings could not be read: the form shows defaults, not them, and is never
@@ -485,6 +487,7 @@ struct ProfileEditorView: View {
             }
         }
         .onAppear(perform: load)
+        .onChange(of: draft.camera) { cameraMirror.camera = draft.camera }
         .sheet(isPresented: $showingGuard) { NetworkGuardSettingsView() }
         .sheet(isPresented: $showingWhatSitesSee) {
             if case .existing(let profile) = target {
@@ -537,6 +540,15 @@ struct ProfileEditorView: View {
         }
     }
 
+    /// Opens the separate live preview window, which follows these settings and writes the crop back.
+    private func openCameraPreview() {
+        cameraMirror.camera = draft.camera
+        let cropBinding = $draft.camera.crop
+        CameraPreviewWindowController.shared.present(mirror: cameraMirror) { crop in
+            cropBinding.wrappedValue = crop
+        }
+    }
+
     /// A cookie file chosen or dropped, read as Import Cookies reads one.
     private func readCookieFile(_ url: URL) {
         Task {
@@ -554,6 +566,7 @@ struct ProfileEditorView: View {
                           onChooseCookieFile: { choosingCookieFile = true }, onDropCookieFile: readCookieFile,
                           onChooseCameraImage: { choosingCameraImage = true },
                           onChooseCameraVideo: { choosingCameraVideo = true },
+                          onOpenCameraPreview: openCameraPreview,
                           isSaving: savingCookies, saveRefused: settingsUnreadable,
                           keptVersions: keptVersions, onUseVersion: useVersion, onRemoveVersion: { removingVersion = $0 },
                           onWhatSitesSee: target.isNew ? nil : { showingWhatSitesSee = true })
