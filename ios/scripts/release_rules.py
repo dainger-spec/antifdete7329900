@@ -49,10 +49,12 @@ WORDS = {
     "multi-account": r"multi-?\s?account",
 }
 LITERAL = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
-# Keys anyone knows: the development server's (the server's CONTRACT.md §7.2) and the testbed's
-# stand-in's (ios/testbed/account.py --key) — each by its id and by the key itself.
+# Keys anyone knows: the development server's (the server's CONTRACT.md §7.2), the test vectors'
+# (its docs/entitlement-test-vectors.json; the lead, 10 November) and the testbed's stand-in's
+# (ios/testbed/account.py --key) — each by its id and by the key itself.
 KNOWN_KEYS = {
     "the development server's key": ("445c6300da0205b1", "/+/sbiH55nmy+2gRqQz12E0spl9L/YDWvjnecaN2M1c="),
+    "the test vectors' key": ("eaae27700d8b08a3", "iiZ+mIsNmJjmQ/RMlcV8EFhoNUtJoTZrsP52U52qcf4="),
     "the testbed's key": ("cbbc653cdb8bd787", "dNOl9JtGQJg6VOEIn3+1dscg5hWYkx9XUqm+qJ5CnZc="),
 }
 

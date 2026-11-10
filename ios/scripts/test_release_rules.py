@@ -95,8 +95,8 @@ for name, (key_id, key) in KNOWN_KEYS.items():
         plistlib.dump({"CFBundleIdentifier": "io.lumenbrowser.ios", "PBEntitlementPublicKeys": {key_id: key}}, f)
     check(f"red — {name} in the built app's Info.plist: found", any(f[1] == "known-key" for f in scan(IOS, app)))
 with open(os.path.join(app, "Info.plist"), "wb") as f:
-    plistlib.dump({"CFBundleIdentifier": "io.lumenbrowser.ios", "PBEntitlementPublicKeys": {"eaae27700d8b08a3": "iiZ+mIsNmJjmQ/RMlcV8EFhoNUtJoTZrsP52U52qcf4="}}, f)
-check("another key in the built app is not taken for a known one", not any(f[1] == "known-key" for f in scan(IOS, app)))
+    plistlib.dump({"CFBundleIdentifier": "io.lumenbrowser.ios", "PBEntitlementPublicKeys": {"63a9a50f8cc6f129": "bOCnaE4nVmmeqieu9CNIo0AY86OOYqe65OwSJbTwYn0="}}, f)
+check("the production key in the built app is not taken for a known one", not any(f[1] == "known-key" for f in scan(IOS, app)))
 
 # Nothing offers a plan or leads to the site's prices.
 for what, line in [
@@ -135,7 +135,7 @@ def built(binary, info):
     return root
 
 
-OWNERS = {"PBEntitlementPublicKeys": {"eaae27700d8b08a3": "iiZ+mIsNmJjmQ/RMlcV8EFhoNUtJoTZrsP52U52qcf4="}}
+OWNERS = {"PBEntitlementPublicKeys": {"63a9a50f8cc6f129": "bOCnaE4nVmmeqieu9CNIo0AY86OOYqe65OwSJbTwYn0="}}
 check("a release with a key and no switch passes", not scan_release(built(b"\x00code\x00Lumen\x00", OWNERS)), "")
 for what, app_dir, rule in [
     ("the plan's switch in the release's binary", built(b"\x00LUMEN_TEST_ACCESS\x00", OWNERS), "test-switch"),

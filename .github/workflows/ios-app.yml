@@ -54,6 +54,17 @@ jobs:
           TEST_RUNNER_LUMEN_E2E_PASSWORD: ${{ matrix.suite == 'RealServerTests' && secrets.LUMEN_E2E_PASSWORD || '' }}
           TEST_RUNNER_LUMEN_E2E_REQUIRED: ${{ matrix.suite == 'RealServerTests' && '1' || '' }}
         run: ios/scripts/ci.sh build/ios-app "${{ inputs.ios || 'newest' }}"
+      # The repository is public, and an artifact is not masked the way the log is: before anything
+      # of the real server's run is uploaded, the test account's address and password are wiped from
+      # every file, and what could picture them (screenshots, the testbed's records) is left out.
+      - name: Wipe the test account from what is uploaded
+        if: always() && matrix.suite == 'RealServerTests'
+        env:
+          LUMEN_E2E_EMAIL: ${{ secrets.LUMEN_E2E_EMAIL }}
+          LUMEN_E2E_PASSWORD: ${{ secrets.LUMEN_E2E_PASSWORD }}
+        run: |
+          rm -rf build/ios-app/screens build/ios-app/testbed
+          python3 ios/scripts/wipe_secrets.py build/ios-app LUMEN_E2E_EMAIL LUMEN_E2E_PASSWORD
       - uses: actions/upload-artifact@v4
         if: always()
         with:

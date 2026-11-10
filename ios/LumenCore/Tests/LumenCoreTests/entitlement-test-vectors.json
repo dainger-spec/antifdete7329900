@@ -11,6 +11,28 @@
     "keychainID": "ios-vectors: a random id the app keeps in the keychain",
     "machineID": "6c906b2ae8164e1105ca866d6f9aac257f7c6dd4701953f1ddcd8d76c0c60dd4"
   },
+  "profileTokens": {
+    "comment": "docs/CONTRACT.md §6.2: K = HKDF-SHA256(VMK, the vault's salt, info, 32 bytes); token = hex of the first 16 bytes of HMAC-SHA256(K, \"profile/\" + profileUUID), profileUUID as UUID.uuidString: UPPER case, with hyphens. The salt here is the 16 bytes of saltUUID. A lower-case UUID gives another token: the profile would count twice.",
+    "vmkHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "saltUUID": "6F1E2D3C-4B5A-4978-8695-A4B3C2D1E0F1",
+    "saltHex": "6f1e2d3c4b5a49788695a4b3c2d1e0f1",
+    "info": "sync-profile-count",
+    "kHex": "1620daa771076c8a1ca3abae1927b4f0fa1bd2485c736467df5be2ace12cdbd3",
+    "cases": [
+      {
+        "profileUUID": "6B0E3C1F-9A2D-4E7B-8C15-0D4F6A7B8C9D",
+        "token": "750d110fc23ef5dbfb2a9b045c3711ed",
+        "right": true,
+        "note": "the token"
+      },
+      {
+        "profileUUID": "6b0e3c1f-9a2d-4e7b-8c15-0d4f6a7b8c9d",
+        "token": "83704598564a09440dd9cfcc2ca6dd5a",
+        "right": false,
+        "note": "the same profile, its UUID in lower case: NOT its token — what an app must never send"
+      }
+    ]
+  },
   "cases": [
     {
       "name": "valid",

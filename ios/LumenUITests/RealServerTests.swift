@@ -4,8 +4,9 @@ import XCTest
 /// signs in, the document of rights is checked with the production key, the plan's rights open,
 /// they hold over a restart, and signing out frees the phone's place. Run by hand only (the
 /// "RealServerTests" suite of ios-app.yml) — it talks to production. The account's address and
-/// password come from the runner's environment (the repository's secrets), never from the sources;
-/// no screenshot is taken while the address is on the screen.
+/// password come from the runner's environment (the repository's secrets), never from the sources.
+/// The repository is public: no screenshot is taken while the address is on the screen, no message
+/// of a failure holds it, and the workflow wipes both from what it uploads (ios-app.yml).
 final class RealServerTests: LumenUITestCase {
     func testSigningInOnTheRealServer() throws {
         let environment = ProcessInfo.processInfo.environment
@@ -34,7 +35,8 @@ final class RealServerTests: LumenUITestCase {
             XCTFail("not signed in on the real server; the form says: \(said)")
             return
         }
-        XCTAssertEqual(app.staticTexts["accountEmail"].label.lowercased(), email.lowercased())
+        // The repository is public: the address is in no message of a failure.
+        XCTAssertTrue(app.staticTexts["accountEmail"].label.lowercased() == email.lowercased(), "the signed-in address is the test account's")
         paidPlanShown("signed in")
 
         // The document is kept and checked again at the start: the rights hold over a restart.

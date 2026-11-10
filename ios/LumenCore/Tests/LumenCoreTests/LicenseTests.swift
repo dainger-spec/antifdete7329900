@@ -335,29 +335,73 @@ final class LicenseTests: XCTestCase {
 
 /// The labels of synced profiles (`profileTokens`, the server's CONTRACT.md §6.2).
 final class ProfileTokenTests: XCTestCase {
-    /// The lead's control value (10 November 2026): the vault key is the bytes 00…1f, the salt is
-    /// the bytes of a UUID, and the profile's UUID is written in upper case, as the Mac writes it.
+    struct Vectors: Decodable {
+        struct Tokens: Decodable {
+            struct Case: Decodable {
+                var profileUUID: String
+                var token: String
+                var right: Bool
+            }
+            var vmkHex: String
+            var saltUUID: String
+            var saltHex: String
+            var info: String
+            var kHex: String
+            var cases: [Case]
+        }
+        var profileTokens: Tokens
+    }
+
+    static func bytes(hex: String) -> Data {
+        var data = Data()
+        var rest = Substring(hex)
+        while rest.count >= 2 {
+            data.append(UInt8(rest.prefix(2), radix: 16) ?? 0)
+            rest = rest.dropFirst(2)
+        }
+        return data
+    }
+
+    /// The server's control values (its docs/entitlement-test-vectors.json, `profileTokens`, commit
+    /// 0c35d54): the vault key, the salt — the 16 bytes of a UUID — the key of the labels, and a
+    /// profile's label from its UUID in upper case; the same UUID in lower case is the wrong one.
     func testTheControlValue() throws {
-        let vaultKey = Data((0..<32).map { UInt8($0) })
-        let saltID = try XCTUnwrap(UUID(uuidString: "6F1E2D3C-4B5A-4978-8695-A4B3C2D1E0F1"))
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("entitlement-test-vectors.json")
+        let vectors = try JSONDecoder().decode(Vectors.self, from: Data(contentsOf: url)).profileTokens
+        let vaultKey = Self.bytes(hex: vectors.vmkHex)
+        XCTAssertEqual(vaultKey.count, 32)
+        let saltID = try XCTUnwrap(UUID(uuidString: vectors.saltUUID))
         let salt = withUnsafeBytes(of: saltID.uuid) { Data($0) }
-        XCTAssertEqual(salt.map { String(format: "%02x", $0) }.joined(), "6f1e2d3c4b5a49788695a4b3c2d1e0f1", "the salt is the UUID's 16 bytes")
-        let profile = try XCTUnwrap(UUID(uuidString: "6b0e3c1f-9a2d-4e7b-8c15-0d4f6a7b8c9d"))
+        XCTAssertEqual(salt, Self.bytes(hex: vectors.saltHex), "the salt is the UUID's 16 bytes")
+        XCTAssertEqual(vectors.info, "sync-profile-count")
         let key = ProfileTokens.key(vaultKey: vaultKey, salt: salt)
-        XCTAssertEqual(ProfileTokens.token(profile: profile, key: key), "750d110fc23ef5dbfb2a9b045c3711ed",
-                       "the label is made of the UUID in upper case")
-        // In lower case it is another label: the server would count the profile twice.
-        let lower = HMAC<SHA256>.authenticationCode(for: Data("profile/6b0e3c1f-9a2d-4e7b-8c15-0d4f6a7b8c9d".utf8), using: key)
-        XCTAssertEqual(lower.prefix(16).map { String(format: "%02x", $0) }.joined(), "83704598564a09440dd9cfcc2ca6dd5a")
-        XCTAssertNotEqual(ProfileTokens.token(profile: profile, key: key), "83704598564a09440dd9cfcc2ca6dd5a")
+        XCTAssertEqual(key.withUnsafeBytes { Data($0) }, Self.bytes(hex: vectors.kHex), "the key of the labels")
+        let right = vectors.cases.filter(\.right), wrong = vectors.cases.filter { !$0.right }
+        XCTAssertFalse(right.isEmpty)
+        XCTAssertFalse(wrong.isEmpty, "the vectors hold the wrong example too")
+        for example in right {
+            let profile = try XCTUnwrap(UUID(uuidString: example.profileUUID))
+            XCTAssertEqual(example.profileUUID, profile.uuidString, "the vectors write the UUID as UUID.uuidString does")
+            XCTAssertEqual(ProfileTokens.token(profile: profile, key: key), example.token, "the label is made of the UUID in upper case")
+        }
+        // The same profile, its UUID written in lower case: the app makes the right label all the
+        // same, never the wrong one — the server would count the profile twice.
+        for example in wrong {
+            let profile = try XCTUnwrap(UUID(uuidString: example.profileUUID))
+            let lower = HMAC<SHA256>.authenticationCode(for: Data(("profile/" + example.profileUUID).utf8), using: key)
+            XCTAssertEqual(lower.prefix(16).map { String(format: "%02x", $0) }.joined(), example.token, "the wrong example is what lower case gives")
+            XCTAssertNotEqual(ProfileTokens.token(profile: profile, key: key), example.token, "the label is made of the UUID in upper case")
+            XCTAssertTrue(right.contains { $0.token == ProfileTokens.token(profile: profile, key: key) })
+        }
         // A list: one label a profile, whatever the order and the repeats.
+        let profile = try XCTUnwrap(UUID(uuidString: right[0].profileUUID))
         let other = try XCTUnwrap(UUID(uuidString: "00000000-0000-4000-8000-000000000001"))
         let labels = ProfileTokens.tokens(profiles: [other, profile, profile], vaultKey: vaultKey, salt: salt)
         XCTAssertEqual(labels.count, 2)
-        XCTAssertTrue(labels.contains("750d110fc23ef5dbfb2a9b045c3711ed"))
+        XCTAssertTrue(labels.contains(right[0].token))
         XCTAssertTrue(labels.allSatisfy { label in label.count == 32 && label.allSatisfy { character in "0123456789abcdef".contains(character) } })
         // Another vault's salt gives another label: labels of two vaults cannot be matched.
-        XCTAssertNotEqual(ProfileTokens.tokens(profiles: [profile], vaultKey: vaultKey, salt: Data(repeating: 1, count: 16)), ["750d110fc23ef5dbfb2a9b045c3711ed"])
+        XCTAssertNotEqual(ProfileTokens.tokens(profiles: [profile], vaultKey: vaultKey, salt: Data(repeating: 1, count: 16)), [right[0].token])
     }
 
     /// The production key of the documents of rights (server v2026.11.10.3) is the one the app
