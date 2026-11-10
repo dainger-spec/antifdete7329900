@@ -18,7 +18,12 @@ set -euo pipefail
 
 dir="${1:?the folder of an NE=check build, e.g. build/unsandboxed}"
 app="$dir/Lumen.app"
-extension="$(find "$dir" -maxdepth 1 -name '*.systemextension' -type d | head -1)"
+# The network guard's own extension, never the system camera's: a CAM=check build lays its camera
+# extension (…​.Camera.systemextension) in this same folder, and this check is only about the guard
+# (…​.PacketTunnel.systemextension). Pick the guard by name, falling back to any non-camera one.
+extensions="$(find "$dir" -maxdepth 1 -name '*.systemextension' -type d)"
+extension="$(printf '%s\n' "$extensions" | grep -E '\.PacketTunnel\.systemextension$' | head -1)"
+[[ -n "$extension" ]] || extension="$(printf '%s\n' "$extensions" | grep -viE '\.camera\.systemextension$' | head -1)"
 [[ -d "$app" ]] || { echo "error: no $app" >&2; exit 1; }
 [[ -n "$extension" ]] || { echo "error: no extension beside $app (NE=check lays it there)" >&2; exit 1; }
 identifier="$(basename "$extension" .systemextension)"
