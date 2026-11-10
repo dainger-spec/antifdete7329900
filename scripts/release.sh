@@ -30,6 +30,12 @@
 #                              proxy (docs/TUNNEL.md). The two Developer ID provisioning profiles of
 #                              docs/IDENTITY.md; build-app.sh embeds and signs the extension. Without
 #                              NE the release has no guard, and a proxied profile keeps WebRTC off.
+#   CAM=1 CAMERA_PROFILE=path  with the system virtual camera: the substituted camera is a real
+#                              device at the system level, undetectable by a page's JavaScript
+#                              (docs/CAMERA.md). build-app.sh embeds and signs its extension; with
+#                              NE=1 the release then carries two system extensions (the guard and the
+#                              camera), each signed by TEAM_ID. Without CAM the camera is the in-page
+#                              shim only. Needs its own Developer ID provisioning profile.
 #   NOTES_FILE=path            the release notes, plain text
 #   OUT=build/release          where everything goes
 #
@@ -262,13 +268,40 @@ if [[ "${NE:-0}" == "1" ]]; then
   shopt -s nullglob
   SYSTEM_EXTENSIONS=("$APP"/Contents/Library/SystemExtensions/*.systemextension)
   shopt -u nullglob
-  [[ ${#SYSTEM_EXTENSIONS[@]} -eq 1 ]] || { echo "error: NE=1, but the app holds ${#SYSTEM_EXTENSIONS[@]} system extensions, not one" >&2; exit 1; }
-  codesign --verify --strict "${SYSTEM_EXTENSIONS[0]}" \
+  # The app's own system extensions, by bundle id: the network guard (BUNDLE_ID.PacketTunnel) is
+  # always required with NE=1; the system virtual camera (BUNDLE_ID.Camera) is allowed as a second
+  # one only with CAM=1 (docs/CAMERA.md). Any other system extension is unexpected and fails the
+  # release. The ids follow build-app.sh's defaults, overridable with the same env.
+  APP_BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")"
+  GUARD_EXT_ID="${EXTENSION_ID:-$APP_BUNDLE_ID.PacketTunnel}"
+  CAMERA_EXT_ID="${CAMERA_EXTENSION_ID:-$APP_BUNDLE_ID.Camera}"
+  GUARD_SYSEXT=""
+  CAMERA_SYSEXT=""
+  for ext in "${SYSTEM_EXTENSIONS[@]}"; do
+    case "$(basename "$ext" .systemextension)" in
+      "$GUARD_EXT_ID") GUARD_SYSEXT="$ext" ;;
+      "$CAMERA_EXT_ID") CAMERA_SYSEXT="$ext" ;;
+      *) echo "error: NE=1, but the app holds an unexpected system extension: $(basename "$ext")" >&2; exit 1 ;;
+    esac
+  done
+  [[ -n "$GUARD_SYSEXT" ]] || { echo "error: NE=1, but the app holds no network guard extension ($GUARD_EXT_ID)" >&2; exit 1; }
+  codesign --verify --strict "$GUARD_SYSEXT" \
     || { echo "error: the network guard's extension is not validly signed" >&2; exit 1; }
-  [[ "$(codesign -dv "${SYSTEM_EXTENSIONS[0]}" 2>&1 | awk -F= '/^TeamIdentifier=/ { print $2 }')" == "$TEAM_ID" ]] \
+  [[ "$(codesign -dv "$GUARD_SYSEXT" 2>&1 | awk -F= '/^TeamIdentifier=/ { print $2 }')" == "$TEAM_ID" ]] \
     || { echo "error: the network guard's extension is not signed by team $TEAM_ID" >&2; exit 1; }
+  if [[ "${CAM:-0}" == "1" ]]; then
+    [[ -n "$CAMERA_SYSEXT" ]] || { echo "error: CAM=1, but the app holds no camera extension ($CAMERA_EXT_ID)" >&2; exit 1; }
+    codesign --verify --strict "$CAMERA_SYSEXT" \
+      || { echo "error: the camera's extension is not validly signed" >&2; exit 1; }
+    [[ "$(codesign -dv "$CAMERA_SYSEXT" 2>&1 | awk -F= '/^TeamIdentifier=/ { print $2 }')" == "$TEAM_ID" ]] \
+      || { echo "error: the camera's extension is not signed by team $TEAM_ID" >&2; exit 1; }
+  else
+    [[ -z "$CAMERA_SYSEXT" ]] || { echo "error: the app holds a camera extension but CAM is not 1" >&2; exit 1; }
+  fi
   rm -f "$APP_SIGNED"
-  GUARD="in this release ($(basename "${SYSTEM_EXTENSIONS[0]}")): WebRTC in a proxied profile through its proxy, once the person installs the guard (Settings › WebRTC through proxies)"
+  GUARD="in this release ($(basename "$GUARD_SYSEXT")): WebRTC in a proxied profile through its proxy, once the person installs the guard (Settings › WebRTC through proxies)"
+  [[ -z "$CAMERA_SYSEXT" ]] \
+    || GUARD="$GUARD; system camera ($(basename "$CAMERA_SYSEXT")): the substituted camera is a real device at the system level"
 fi
 # An executable that declares macOS 15's SDK or newer gets WebKit's network loader, and with it, on
 # macOS 27, this Mac fetched a certificate's missing intermediate outside a profile's proxy: every
