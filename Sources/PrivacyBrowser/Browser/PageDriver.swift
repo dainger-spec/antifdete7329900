@@ -354,7 +354,8 @@ final class PageDriver {
             let off = CGPoint(x: (probe.x - seen[0].doubleValue) * scale, y: (probe.y - seen[1].doubleValue) * scale)
             if abs(off.x) >= 0.5 || abs(off.y) >= 0.5 {
                 input.viewportOrigin = CGPoint(x: input.viewportOrigin.x + off.x, y: input.viewportOrigin.y + off.y)
-                Self.log.notice("The viewport starts \(Int(input.viewportOrigin.x.rounded()), privacy: .public), \(Int(input.viewportOrigin.y.rounded()), privacy: .public) pt into its web view")
+                let x = Int(input.viewportOrigin.x.rounded()), y = Int(input.viewportOrigin.y.rounded())
+                Self.log.notice("The viewport starts \(x, privacy: .public), \(y, privacy: .public) pt into its web view")
             }
             measuredFor = (document, size)
             return
