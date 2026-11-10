@@ -65,6 +65,9 @@ struct ProfileDraft {
     var cameraWidth = "1280"
     var cameraHeight = "720"
     var cameraFrameRate = "30"
+    /// Video trim, in seconds, as the editor holds them (0 end = to the end).
+    var cameraVideoStart = "0"
+    var cameraVideoEnd = "0"
     /// The name of a freshly chosen image or video, for the editor to show; nil when none was
     /// chosen this session (its bytes may still be set, from the stored profile).
     var cameraImageName: String?
@@ -189,6 +192,8 @@ struct ProfileDraft {
         cameraWidth = String(c.cameraSubstitution.width)
         cameraHeight = String(c.cameraSubstitution.height)
         cameraFrameRate = String(c.cameraSubstitution.frameRate)
+        cameraVideoStart = String(format: "%g", c.cameraSubstitution.playback.startOffset)
+        cameraVideoEnd = String(format: "%g", c.cameraSubstitution.playback.endOffset)
         ephemeral = c.ephemeral
         safeBrowsing = c.safeBrowsingEnabled
         historyEnabled = c.historyEnabled
@@ -261,6 +266,8 @@ struct ProfileDraft {
         cam.width = width
         cam.height = height
         cam.frameRate = rate
+        cam.playback.startOffset = max(0, Double(cameraVideoStart.trimmingCharacters(in: .whitespaces)) ?? 0)
+        cam.playback.endOffset = max(0, Double(cameraVideoEnd.trimmingCharacters(in: .whitespaces)) ?? 0)
         if cam.deviceSecret.isEmpty { cam.deviceSecret = CameraSubstitution.newDeviceSecret() }
         return cam
     }

@@ -74,6 +74,20 @@ enum PrivacyScripts {
             var secret: String
             var imageURL: String?
             var videoURL: String?
+            /// A sub-rectangle of the source (normalised 0…1); nil when the whole source is used.
+            var crop: Crop?
+            /// A canvas-filter look; nil when it is the identity (nothing drawn over the source).
+            var filters: Filters?
+            /// Playback of the `.video` source; nil for any other source.
+            var playback: Playback?
+
+            struct Crop: Encodable { var x: Double; var y: Double; var width: Double; var height: Double }
+            struct Filters: Encodable {
+                var brightness: Double; var contrast: Double; var saturate: Double
+                var blur: Double; var hueRotate: Double; var sepia: Double; var invert: Double
+                var opacity: Double; var grayscale: Bool
+            }
+            struct Playback: Encodable { var loop: Bool; var paused: Bool; var rate: Double; var start: Double; var end: Double }
         }
 
         struct Phone: Encodable {
@@ -141,7 +155,21 @@ enum PrivacyScripts {
                      audio: camera.audio.rawValue, screenShare: camera.alsoScreenShare,
                      secret: camera.deviceSecret.isEmpty ? "lumen" : camera.deviceSecret,
                      imageURL: camera.source == .image ? camera.imageDataURL : nil,
-                     videoURL: camera.source == .video ? camera.videoDataURL : nil)
+                     videoURL: camera.source == .video ? camera.videoDataURL : nil,
+                     crop: camera.crop.enabled
+                        ? .init(x: camera.crop.x, y: camera.crop.y, width: camera.crop.width, height: camera.crop.height)
+                        : nil,
+                     filters: camera.filters.isIdentity
+                        ? nil
+                        : .init(brightness: camera.filters.brightness, contrast: camera.filters.contrast,
+                                saturate: camera.filters.saturation, blur: camera.filters.blur,
+                                hueRotate: camera.filters.hueRotate, sepia: camera.filters.sepia,
+                                invert: camera.filters.invert, opacity: camera.filters.opacity,
+                                grayscale: camera.filters.grayscale),
+                     playback: camera.source == .video
+                        ? .init(loop: camera.playback.loop, paused: camera.playback.paused, rate: camera.playback.rate,
+                                start: camera.playback.startOffset, end: camera.playback.endOffset)
+                        : nil)
     }
 
     /// What the full disguise's script presents of the phone; nil for a Mac or iPad profile and
@@ -1419,12 +1447,44 @@ function patchCamera(w, cam) {
     if (sharedVideo || !cam.videoURL || !doc) return sharedVideo;
     try {
       const v = doc.createElement('video');
-      v.src = cam.videoURL; v.loop = true; v.muted = true; v.defaultMuted = true;
-      v.autoplay = true; v.playsInline = true;
-      v.play().then(function () {}, function () {});
+      const pb = cam.playback;
+      const paused = !!(pb && pb.paused);
+      v.src = cam.videoURL; v.muted = true; v.defaultMuted = true; v.playsInline = true;
+      v.loop = pb ? !!pb.loop : true;
+      v.autoplay = !paused;
+      if (pb && pb.rate) { try { v.playbackRate = pb.rate; } catch (e) {} }
+      const seekStart = function () { if (pb && pb.start) { try { v.currentTime = pb.start; } catch (e) {} } };
+      v.addEventListener('loadedmetadata', seekStart);
+      // Trim: loop or stop at the chosen end, and keep to the chosen start.
+      v.addEventListener('timeupdate', function () {
+        if (!pb) return;
+        const end = pb.end > 0 ? pb.end : (v.duration || 0);
+        if (end > 0 && v.currentTime >= end) {
+          if (pb.loop) { try { v.currentTime = pb.start || 0; } catch (e) {} }
+          else { try { v.pause(); } catch (e) {} }
+        }
+      });
+      if (paused) { seekStart(); } else { v.play().then(function () {}, function () {}); }
       sharedVideo = v;
     } catch (e) { sharedVideo = null; }
     return sharedVideo;
+  }
+
+  // The source look as one canvas-filter pass (what the engine already has), or 'none'.
+  function filterString() {
+    const f = cam.filters;
+    if (!f) return 'none';
+    const parts = [];
+    if (f.brightness !== 1) parts.push('brightness(' + f.brightness + ')');
+    if (f.contrast !== 1) parts.push('contrast(' + f.contrast + ')');
+    if (f.saturate !== 1) parts.push('saturate(' + f.saturate + ')');
+    if (f.blur > 0) parts.push('blur(' + f.blur + 'px)');
+    if (f.hueRotate !== 0) parts.push('hue-rotate(' + f.hueRotate + 'deg)');
+    if (f.sepia > 0) parts.push('sepia(' + f.sepia + ')');
+    if (f.invert > 0) parts.push('invert(' + f.invert + ')');
+    if (f.opacity !== 1) parts.push('opacity(' + f.opacity + ')');
+    if (f.grayscale) parts.push('grayscale(1)');
+    return parts.length ? parts.join(' ') : 'none';
   }
 
   function parseColor(hex) {
@@ -1433,34 +1493,52 @@ function patchCamera(w, cam) {
   }
   const barColors = ['#c0c0c0', '#c0c000', '#00c0c0', '#00c000', '#c000c0', '#c00000', '#0000c0'];
 
-  function drawSource(ctx, cw, ch) {
-    const color = parseColor(cam.color);
-    if (cam.source === 'bars') {
-      const band = cw / barColors.length;
-      for (let i = 0; i < barColors.length; i++) { ctx.fillStyle = barColors[i]; ctx.fillRect(i * band, 0, band + 1, ch * 0.72); }
-      ctx.fillStyle = color; ctx.fillRect(0, ch * 0.72, cw, ch * 0.28);
-      const t = (w.Date.now() % 4000) / 4000;
-      ctx.fillStyle = 'rgba(255,255,255,0.65)'; ctx.fillRect(t * cw, 0, Math.max(3, cw * 0.012), ch * 0.72);
-      ctx.fillStyle = '#ffffff';
-      ctx.font = Math.max(12, (ch * 0.07) | 0) + 'px -apple-system, Helvetica, sans-serif';
-      ctx.textBaseline = 'middle';
-      try { ctx.fillText(new w.Date().toTimeString().slice(0, 8), cw * 0.04, ch * 0.86); } catch (e) {}
-      return;
-    }
+  function drawBars(ctx, cw, ch, color) {
+    const band = cw / barColors.length;
+    for (let i = 0; i < barColors.length; i++) { ctx.fillStyle = barColors[i]; ctx.fillRect(i * band, 0, band + 1, ch * 0.72); }
+    ctx.fillStyle = color; ctx.fillRect(0, ch * 0.72, cw, ch * 0.28);
+    const t = (w.Date.now() % 4000) / 4000;
+    ctx.fillStyle = 'rgba(255,255,255,0.65)'; ctx.fillRect(t * cw, 0, Math.max(3, cw * 0.012), ch * 0.72);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = Math.max(12, (ch * 0.07) | 0) + 'px -apple-system, Helvetica, sans-serif';
+    ctx.textBaseline = 'middle';
+    try { ctx.fillText(new w.Date().toTimeString().slice(0, 8), cw * 0.04, ch * 0.86); } catch (e) {}
+  }
+
+  function drawMedia(ctx, cw, ch, media, color) {
     ctx.fillStyle = color; ctx.fillRect(0, 0, cw, ch);
-    const media = cam.source === 'image' ? image() : (cam.source === 'video' ? video() : null);
-    if (!media) return;
     const sw = media.videoWidth || media.naturalWidth || media.width || 0;
     const sh = media.videoHeight || media.naturalHeight || media.height || 0;
     if (!sw || !sh) return;
+    // Crop: a sub-rectangle of the source (normalised) is what the frame is built from.
+    const crop = cam.crop;
+    const sx = crop ? crop.x * sw : 0, sy = crop ? crop.y * sh : 0;
+    const ssw = crop ? Math.max(1, crop.width * sw) : sw, ssh = crop ? Math.max(1, crop.height * sh) : sh;
     let dw = cw, dh = ch, dx = 0, dy = 0;
     if (cam.fit !== 'stretch') {
-      const scale = cam.fit === 'contain' ? Math.min(cw / sw, ch / sh) : Math.max(cw / sw, ch / sh);
-      dw = sw * scale; dh = sh * scale; dx = (cw - dw) / 2; dy = (ch - dh) / 2;
+      const scale = cam.fit === 'contain' ? Math.min(cw / ssw, ch / ssh) : Math.max(cw / ssw, ch / ssh);
+      dw = ssw * scale; dh = ssh * scale; dx = (cw - dw) / 2; dy = (ch - dh) / 2;
     }
     ctx.save();
     if (cam.mirror) { ctx.translate(cw, 0); ctx.scale(-1, 1); }
-    try { ctx.drawImage(media, dx, dy, dw, dh); } catch (e) {}
+    try { ctx.drawImage(media, sx, sy, ssw, ssh, dx, dy, dw, dh); } catch (e) {}
+    ctx.restore();
+  }
+
+  function drawSource(ctx, cw, ch) {
+    const color = parseColor(cam.color);
+    // The filters are the source look, one canvas-filter pass; the grain after this is unfiltered.
+    ctx.save();
+    ctx.filter = filterString();
+    if (cam.source === 'bars') {
+      drawBars(ctx, cw, ch, color);
+    } else if (cam.source === 'image' || cam.source === 'video') {
+      const media = cam.source === 'image' ? image() : video();
+      if (media) drawMedia(ctx, cw, ch, media, color);
+      else { ctx.fillStyle = color; ctx.fillRect(0, 0, cw, ch); }
+    } else {
+      ctx.fillStyle = color; ctx.fillRect(0, 0, cw, ch);
+    }
     ctx.restore();
   }
 
@@ -1483,9 +1561,12 @@ function patchCamera(w, cam) {
     return s;
   }
   function capabilities() {
+    // A built-in camera's fixed caps, as a superset of what this profile reports — so a page that
+    // checks the settings fall inside the capabilities (a real browser's do) sees they do.
+    const maxW = Math.max(1920, cam.width), maxH = Math.max(1080, cam.height), maxF = Math.max(30, cam.frameRate);
     const c = { deviceId: deviceId, groupId: groupId,
-                width: { min: 1, max: 3840 }, height: { min: 1, max: 2160 },
-                aspectRatio: { min: 1 / 2160, max: 3840 }, frameRate: { min: 0, max: 60 },
+                width: { min: 1, max: maxW }, height: { min: 1, max: maxH },
+                aspectRatio: { min: 1 / maxH, max: maxW }, frameRate: { min: 0, max: maxF },
                 resizeMode: ['none', 'crop-and-scale'] };
     if (cam.facingMode) c.facingMode = [cam.facingMode];
     return c;

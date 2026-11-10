@@ -38,6 +38,10 @@ not `.off`, so a profile that never used it is stored as before (`ProfileConfigu
   `video` (a chosen clip, looped).
 - **width / height / frameRate** — what the track reports and the stream is drawn at.
 - **facing**, **fit** (cover / contain / stretch), **mirror**, **deviceLabel**, **colorHex**.
+- **crop** — a normalised rectangle of the source taken into the frame, before `fit`.
+- **filters** — a camera look over the source (brightness, contrast, saturation, blur, hue,
+  sepia, invert, opacity, black-and-white), applied as one canvas-filter pass.
+- **playback** — for the `.video` source: loop, freeze the picture, speed, and trim (start/end).
 - **audio** — the real microphone, a silent track, or none, when a page asks for audio.
 - **alsoScreenShare** — substitute `getDisplayMedia` with the same stream, too.
 - **deviceSecret** — a random secret kept with the profile; the shim derives a stable, per-origin
@@ -54,7 +58,11 @@ already turned into a `data:` URL by the app, so the shim never reads a file). B
 same bar as the rest of the file:
 
 - a real `canvas.captureStream()` video track — so `getSettings`, `getCapabilities`,
-  `applyConstraints`, `stop`, `onended` are the engine's own;
+  `applyConstraints`, `stop`, `onended` are the engine's own, the look drawn before the grain so
+  the frame the page reads carries it;
+- a believable built-in camera: the default label is "FaceTime HD Camera", `getCapabilities`
+  reports a fixed built-in's ranges that the reported `getSettings` fall inside (what a real
+  browser's do), `facingMode` `user`;
 - the replaced methods (`getUserMedia`, `enumerateDevices`, the track's `getSettings` and the rest)
   print as native code (one registry per page), carry the right `name`/`length`, and keep the
   engine's receiver checks; a real track or a real `MediaDeviceInfo` falls through untouched;
@@ -63,10 +71,32 @@ same bar as the rest of the file:
 - faint, moving sensor-like grain on every frame, so the picture is never frozen (the first thing a
   virtual-camera check looks for), and `bars` also carries a moving bar and a running clock.
 
+## The system camera (planned)
+
+For a feed that is indistinguishable at the JavaScript layer — recognised as a genuine built-in
+camera, past liveness and anti-bot checks — the frames must come from the OS capture pipeline, not
+a canvas. That is a **CMIO Camera Extension**: a signed system extension, bundled in the app,
+activated through `SystemExtensions`, that registers a virtual capture device the whole Mac sees.
+WebKit then builds the frames its own way, so a page cannot tell it from the built-in camera.
+
+Two things to know about that path:
+
+- It is **global, not per-profile**: the virtual device is visible to every app and to this Mac's
+  real Safari, and to every profile, as one device. So the per-profile layer here is still needed —
+  to hide the device from `enumerateDevices` for profiles that are not using it (and from the
+  "Compare with Safari" measurement), and to name it believably — otherwise the device itself is a
+  cross-profile fingerprint. The system extension is the frame engine; this layer is the gate.
+- It needs the app's Apple Developer signing (the `com.apple.developer.system-extension.install`
+  entitlement, a provisioning profile, notarization), and it builds and activates only on a Mac.
+
+The frame pipeline here — source, crop, filters, playback — is the same pixels such an extension
+would push, so it is built once and feeds both.
+
 ## Limitations
 
-- The frames are drawn, not from a sensor. A check that watches for focus hunting, exposure
-  changes or a real face/room can still tell.
+- In the JavaScript-shim path, the frames are drawn, not from a sensor. A check that watches for
+  focus hunting, exposure changes or a real face/room can still tell. The system-camera path above
+  is the answer to that.
 - Secure context only (above).
 - A worker never calls `getUserMedia`, so there is nothing to do in one (`substitutesInWorkers` is
   unaffected).

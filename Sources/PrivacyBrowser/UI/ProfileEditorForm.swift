@@ -778,8 +778,23 @@ struct ProfileEditorForm: View {
         }
     }
 
-    @ViewBuilder
     private var cameraSubstitution: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            cameraSourceControls
+            cameraDeviceControls
+            EditorDivider()
+            EditorGroupTitle(L("editor.camera.filters"))
+            cameraFilters
+            EditorDivider()
+            EditorGroupTitle(L("editor.camera.crop"))
+            cameraCrop
+            cameraPlaybackSection
+            EditorNote(L("editor.camera.secure.note"))
+        }
+    }
+
+    @ViewBuilder
+    private var cameraSourceControls: some View {
         EditorRow(L("editor.camera.source")) {
             Picker(L("editor.camera.source"), selection: $draft.camera.source) {
                 Text(L("editor.camera.source.color")).tag(CameraSubstitution.Source.color)
@@ -831,6 +846,10 @@ struct ProfileEditorForm: View {
             .labelsHidden()
             .fixedSize()
         }
+    }
+
+    @ViewBuilder
+    private var cameraDeviceControls: some View {
         EditorRow(L("editor.camera.facing")) {
             Picker(L("editor.camera.facing"), selection: $draft.camera.facing) {
                 Text(L("editor.camera.facing.user")).tag(CameraSubstitution.Facing.user)
@@ -846,6 +865,7 @@ struct ProfileEditorForm: View {
                       prompt: Text(verbatim: "FaceTime HD Camera"))
                 .lumenField("FaceTime HD Camera", isEmpty: draft.camera.deviceLabel.isEmpty)
         }
+        EditorNote(L("editor.camera.label.note"))
         EditorRow(L("editor.camera.audio")) {
             Picker(L("editor.camera.audio"), selection: $draft.camera.audio) {
                 Text(L("editor.camera.audio.real")).tag(CameraSubstitution.Audio.real)
@@ -857,7 +877,104 @@ struct ProfileEditorForm: View {
         }
         EditorToggle(L("editor.camera.screenShare"), detail: L("editor.camera.screenShare.detail"),
                      isOn: $draft.camera.alsoScreenShare)
-        EditorNote(L("editor.camera.secure.note"))
+    }
+
+    /// The source look: brightness/contrast/saturation and the rest, as sliders. The list drives a
+    /// single ForEach, so the block stays one view however many sliders there are.
+    private var cameraFilters: some View {
+        let f = $draft.camera.filters
+        let rows: [(key: String, value: Binding<Double>, range: ClosedRange<Double>, suffix: String)] = [
+            ("editor.camera.filter.brightness", f.brightness, 0...2, "%"),
+            ("editor.camera.filter.contrast", f.contrast, 0...2, "%"),
+            ("editor.camera.filter.saturation", f.saturation, 0...2, "%"),
+            ("editor.camera.filter.blur", f.blur, 0...20, "px"),
+            ("editor.camera.filter.hue", f.hueRotate, 0...360, "°"),
+            ("editor.camera.filter.sepia", f.sepia, 0...1, "%"),
+            ("editor.camera.filter.invert", f.invert, 0...1, "%"),
+            ("editor.camera.filter.opacity", f.opacity, 0...1, "%"),
+        ]
+        return VStack(alignment: .leading, spacing: 10) {
+            ForEach(rows.indices, id: \.self) { index in
+                cameraSlider(rows[index].key, rows[index].value, range: rows[index].range, suffix: rows[index].suffix)
+            }
+            EditorToggle(L("editor.camera.filter.grayscale"), isOn: $draft.camera.filters.grayscale)
+            HStack {
+                Spacer(minLength: 0)
+                Button(L("editor.camera.filter.reset")) { draft.camera.filters = .none }
+                    .buttonStyle(.lumenGhost)
+                    .disabled(draft.camera.filters.isIdentity)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var cameraCrop: some View {
+        EditorToggle(L("editor.camera.crop.enabled"), detail: L("editor.camera.crop.detail"),
+                     isOn: $draft.camera.crop.enabled)
+        if draft.camera.crop.enabled {
+            cameraSlider("editor.camera.crop.x", $draft.camera.crop.x, range: 0...1, suffix: "%")
+            cameraSlider("editor.camera.crop.y", $draft.camera.crop.y, range: 0...1, suffix: "%")
+            cameraSlider("editor.camera.crop.width", $draft.camera.crop.width, range: 0...1, suffix: "%")
+            cameraSlider("editor.camera.crop.height", $draft.camera.crop.height, range: 0...1, suffix: "%")
+        }
+    }
+
+    @ViewBuilder
+    private var cameraPlaybackSection: some View {
+        if draft.camera.source == .video {
+            EditorDivider()
+            EditorGroupTitle(L("editor.camera.playback"))
+            cameraPlayback
+        }
+    }
+
+    private var cameraPlayback: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            EditorToggle(L("editor.camera.playback.loop"), isOn: $draft.camera.playback.loop)
+            EditorToggle(L("editor.camera.playback.paused"), detail: L("editor.camera.playback.paused.detail"),
+                         isOn: $draft.camera.playback.paused)
+            cameraSlider("editor.camera.playback.rate", $draft.camera.playback.rate, range: 0.25...4, suffix: "×")
+            HStack(alignment: .top, spacing: 12) {
+                EditorField(L("editor.camera.playback.start")) {
+                    TextField(L("editor.camera.playback.start"), text: $draft.cameraVideoStart, prompt: Text(verbatim: ""))
+                        .lumenField("0", isEmpty: draft.cameraVideoStart.isEmpty)
+                }
+                .frame(width: 120)
+                EditorField(L("editor.camera.playback.end")) {
+                    TextField(L("editor.camera.playback.end"), text: $draft.cameraVideoEnd, prompt: Text(verbatim: ""))
+                        .lumenField("0", isEmpty: draft.cameraVideoEnd.isEmpty)
+                }
+                .frame(width: 120)
+                Spacer(minLength: 0)
+            }
+            EditorNote(L("editor.camera.playback.note"))
+        }
+    }
+
+    /// One labelled slider with a value readout; the readout is a number, not localised text.
+    private func cameraSlider(_ titleKey: String, _ value: Binding<Double>,
+                              range: ClosedRange<Double>, suffix: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(L(titleKey)).font(.lumenSecondary).foregroundStyle(Theme.textSecondary)
+                Spacer(minLength: 8)
+                Text(verbatim: Self.sliderReadout(value.wrappedValue, suffix: suffix))
+                    .font(.lumenSecondary).foregroundStyle(Theme.textTertiary)
+                    .monospacedDigit()
+            }
+            Slider(value: value, in: range).controlSize(.small)
+        }
+    }
+
+    /// A slider's number for display (not localised text): a percentage, pixels, degrees, a speed.
+    static func sliderReadout(_ value: Double, suffix: String) -> String {
+        switch suffix {
+        case "%": return "\(Int((value * 100).rounded()))%"
+        case "px": return "\(Int(value.rounded())) px"
+        case "°": return "\(Int(value.rounded()))°"
+        case "×": return String(format: "%.2g×", value)
+        default: return String(format: "%g", value)
+        }
     }
 
     /// A chosen image or video, with Choose / Replace and Remove.

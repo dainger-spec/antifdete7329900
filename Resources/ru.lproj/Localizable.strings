@@ -263,6 +263,35 @@
 "editor.camera.error.numbers" = "Ширина, высота и частота кадров камеры должны быть целыми числами.";
 "editor.camera.error.tooLarge" = "Этот файл больше %d МБ.";
 "editor.camera.error.read" = "Не удалось прочитать %@.";
+
+/* Camera: adjustments, crop, playback */
+"editor.camera.label.note" = "Настоящая камера Mac называется «FaceTime HD Camera»; оставьте пустым для неё.";
+"editor.camera.filters" = "Коррекция";
+"editor.camera.filter.brightness" = "Яркость";
+"editor.camera.filter.contrast" = "Контраст";
+"editor.camera.filter.saturation" = "Насыщенность";
+"editor.camera.filter.blur" = "Размытие";
+"editor.camera.filter.hue" = "Оттенок";
+"editor.camera.filter.sepia" = "Сепия";
+"editor.camera.filter.invert" = "Инверсия";
+"editor.camera.filter.opacity" = "Непрозрачность";
+"editor.camera.filter.grayscale" = "Чёрно-белое";
+"editor.camera.filter.reset" = "Сбросить";
+"editor.camera.crop" = "Обрезка";
+"editor.camera.crop.enabled" = "Обрезать источник";
+"editor.camera.crop.detail" = "Брать в кадр только прямоугольник изображения или видео.";
+"editor.camera.crop.x" = "Слева";
+"editor.camera.crop.y" = "Сверху";
+"editor.camera.crop.width" = "Ширина";
+"editor.camera.crop.height" = "Высота";
+"editor.camera.playback" = "Воспроизведение";
+"editor.camera.playback.loop" = "Повтор";
+"editor.camera.playback.paused" = "Заморозить картинку";
+"editor.camera.playback.paused.detail" = "Поток держит один кадр; зерно сенсора продолжается, чтобы поток был живым.";
+"editor.camera.playback.rate" = "Скорость";
+"editor.camera.playback.start" = "Старт, с";
+"editor.camera.playback.end" = "Конец, с";
+"editor.camera.playback.note" = "Старт и конец обрезают ролик, в секундах (0 в конце — до самого конца).";
 "editor.avatar" = "Значок";
 "editor.avatar.letters" = "Буквы (до 2)";
 "editor.avatar.automatic" = "Цвет, который профиль получил при создании";

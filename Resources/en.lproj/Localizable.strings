@@ -263,6 +263,35 @@
 "editor.camera.error.numbers" = "The camera's width, height and frame rate must be whole numbers.";
 "editor.camera.error.tooLarge" = "That file is larger than %d MB.";
 "editor.camera.error.read" = "Could not read %@.";
+
+/* Camera: adjustments, crop, playback */
+"editor.camera.label.note" = "A real Mac camera is called “FaceTime HD Camera”; leave it empty for that.";
+"editor.camera.filters" = "Adjustments";
+"editor.camera.filter.brightness" = "Brightness";
+"editor.camera.filter.contrast" = "Contrast";
+"editor.camera.filter.saturation" = "Saturation";
+"editor.camera.filter.blur" = "Blur";
+"editor.camera.filter.hue" = "Hue";
+"editor.camera.filter.sepia" = "Sepia";
+"editor.camera.filter.invert" = "Invert";
+"editor.camera.filter.opacity" = "Opacity";
+"editor.camera.filter.grayscale" = "Black and white";
+"editor.camera.filter.reset" = "Reset";
+"editor.camera.crop" = "Crop";
+"editor.camera.crop.enabled" = "Crop the source";
+"editor.camera.crop.detail" = "Take only a rectangle of the image or video into the frame.";
+"editor.camera.crop.x" = "Left";
+"editor.camera.crop.y" = "Top";
+"editor.camera.crop.width" = "Width";
+"editor.camera.crop.height" = "Height";
+"editor.camera.playback" = "Playback";
+"editor.camera.playback.loop" = "Loop";
+"editor.camera.playback.paused" = "Freeze the picture";
+"editor.camera.playback.paused.detail" = "The feed holds one frame; the sensor grain goes on, so the stream stays alive.";
+"editor.camera.playback.rate" = "Speed";
+"editor.camera.playback.start" = "Start, s";
+"editor.camera.playback.end" = "End, s";
+"editor.camera.playback.note" = "Start and end trim the clip, in seconds (0 end = to the very end).";
 "editor.avatar" = "Glyph";
 "editor.avatar.letters" = "Letters (up to 2)";
 "editor.avatar.automatic" = "The colour the profile was given";

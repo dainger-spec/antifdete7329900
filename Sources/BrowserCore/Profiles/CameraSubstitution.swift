@@ -11,9 +11,11 @@ import Foundation
 /// all (https, or a loopback origin). The engine underneath is this Mac's WebKit: the stream is a
 /// real `canvas.captureStream()` track, and the page reads real frames from it, but a test that
 /// correlates the frames with a live sensor (focus hunting, exposure changes, the user moving) can
-/// still tell a drawn frame from a camera's. What is replaced is replaced the way the engine
-/// defines it (native-looking methods, per-origin-salted device ids, sensor-like grain so frames
-/// are not frozen); see `PrivacyScripts.patchCamera`.
+/// still tell a drawn frame from a camera's. The one path that is indistinguishable at the
+/// JavaScript layer is a system virtual camera (a CMIO Camera Extension), which feeds the OS
+/// capture pipeline so WebKit builds the frames its own way; that is a separate, signed system
+/// extension (docs/CAMERA.md). The frame pipeline here — source, crop, filters, playback — is the
+/// same pixels such an extension would push, so it is built once.
 ///
 /// `mode == .off` changes nothing — the page reaches the real camera through WebKit's own capture
 /// path (the window still asks the person for the camera, as before). The field is written only
@@ -71,6 +73,117 @@ public struct CameraSubstitution: Codable, Equatable, Sendable {
         case off
     }
 
+    /// A rectangle of the source taken into the frame (normalised 0…1 of the source's own size),
+    /// before `fit` places it. Disabled: the whole source.
+    public struct Crop: Codable, Equatable, Sendable {
+        public var enabled: Bool
+        public var x: Double
+        public var y: Double
+        public var width: Double
+        public var height: Double
+
+        public init(enabled: Bool = false, x: Double = 0, y: Double = 0, width: Double = 1, height: Double = 1) {
+            self.enabled = enabled; self.x = x; self.y = y; self.width = width; self.height = height
+        }
+
+        public static let none = Crop()
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: Key.self)
+            let d = Crop()
+            enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? d.enabled
+            x = (try? c.decodeIfPresent(Double.self, forKey: .x)) ?? d.x
+            y = (try? c.decodeIfPresent(Double.self, forKey: .y)) ?? d.y
+            width = (try? c.decodeIfPresent(Double.self, forKey: .width)) ?? d.width
+            height = (try? c.decodeIfPresent(Double.self, forKey: .height)) ?? d.height
+        }
+        private enum Key: String, CodingKey { case enabled, x, y, width, height }
+    }
+
+    /// A camera look drawn over the source: identity (all 1/0/false) leaves it untouched. Applied
+    /// with the canvas filter the engine already has (brightness/contrast/saturate/blur/hue-rotate/
+    /// grayscale), so it is one pass, not a pixel loop.
+    public struct Filters: Codable, Equatable, Sendable {
+        /// 1 = unchanged; 0…4.
+        public var brightness: Double
+        public var contrast: Double
+        public var saturation: Double
+        /// Blur radius, in pixels (0…40).
+        public var blur: Double
+        /// Hue rotation, in degrees (0…360).
+        public var hueRotate: Double
+        /// Sepia amount, 0…1.
+        public var sepia: Double
+        /// Colour inversion, 0…1.
+        public var invert: Double
+        /// Overall opacity, 0…1 (1 = opaque).
+        public var opacity: Double
+        public var grayscale: Bool
+
+        public init(brightness: Double = 1, contrast: Double = 1, saturation: Double = 1,
+                    blur: Double = 0, hueRotate: Double = 0, sepia: Double = 0, invert: Double = 0,
+                    opacity: Double = 1, grayscale: Bool = false) {
+            self.brightness = brightness; self.contrast = contrast; self.saturation = saturation
+            self.blur = blur; self.hueRotate = hueRotate; self.sepia = sepia; self.invert = invert
+            self.opacity = opacity; self.grayscale = grayscale
+        }
+
+        public static let none = Filters()
+
+        public var isIdentity: Bool {
+            brightness == 1 && contrast == 1 && saturation == 1 && blur == 0 && hueRotate == 0
+                && sepia == 0 && invert == 0 && opacity == 1 && !grayscale
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: Key.self)
+            let d = Filters()
+            brightness = (try? c.decodeIfPresent(Double.self, forKey: .brightness)) ?? d.brightness
+            contrast = (try? c.decodeIfPresent(Double.self, forKey: .contrast)) ?? d.contrast
+            saturation = (try? c.decodeIfPresent(Double.self, forKey: .saturation)) ?? d.saturation
+            blur = (try? c.decodeIfPresent(Double.self, forKey: .blur)) ?? d.blur
+            hueRotate = (try? c.decodeIfPresent(Double.self, forKey: .hueRotate)) ?? d.hueRotate
+            sepia = (try? c.decodeIfPresent(Double.self, forKey: .sepia)) ?? d.sepia
+            invert = (try? c.decodeIfPresent(Double.self, forKey: .invert)) ?? d.invert
+            opacity = (try? c.decodeIfPresent(Double.self, forKey: .opacity)) ?? d.opacity
+            grayscale = (try? c.decodeIfPresent(Bool.self, forKey: .grayscale)) ?? d.grayscale
+        }
+        private enum Key: String, CodingKey {
+            case brightness, contrast, saturation, blur, hueRotate, sepia, invert, opacity, grayscale
+        }
+    }
+
+    /// Playback of the `.video` source: loop, freeze the picture, speed, and the part played.
+    public struct Playback: Codable, Equatable, Sendable {
+        public var loop: Bool
+        /// Freeze the picture (the sensor grain goes on, so the stream keeps emitting frames).
+        public var paused: Bool
+        public var rate: Double
+        /// Where the clip starts, in seconds.
+        public var startOffset: Double
+        /// Where the clip ends, in seconds; 0 = to the end.
+        public var endOffset: Double
+
+        public init(loop: Bool = true, paused: Bool = false, rate: Double = 1,
+                    startOffset: Double = 0, endOffset: Double = 0) {
+            self.loop = loop; self.paused = paused; self.rate = rate
+            self.startOffset = startOffset; self.endOffset = endOffset
+        }
+
+        public static let standard = Playback()
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: Key.self)
+            let d = Playback()
+            loop = (try? c.decodeIfPresent(Bool.self, forKey: .loop)) ?? d.loop
+            paused = (try? c.decodeIfPresent(Bool.self, forKey: .paused)) ?? d.paused
+            rate = (try? c.decodeIfPresent(Double.self, forKey: .rate)) ?? d.rate
+            startOffset = (try? c.decodeIfPresent(Double.self, forKey: .startOffset)) ?? d.startOffset
+            endOffset = (try? c.decodeIfPresent(Double.self, forKey: .endOffset)) ?? d.endOffset
+        }
+        private enum Key: String, CodingKey { case loop, paused, rate, startOffset, endOffset }
+    }
+
     public var mode: Mode
     public var source: Source
     /// The frame's pixel size the track reports and draws at.
@@ -89,6 +202,12 @@ public struct CameraSubstitution: Codable, Equatable, Sendable {
     public var audio: Audio
     /// Substitute `getDisplayMedia` (screen sharing) with the same stream, too.
     public var alsoScreenShare: Bool
+    /// A rectangle of the source taken into the frame; the whole source by default.
+    public var crop: Crop
+    /// A camera look over the source; none by default.
+    public var filters: Filters
+    /// Playback of the `.video` source.
+    public var playback: Playback
     /// A random secret kept with the profile, from which the shim derives a stable, per-origin
     /// `deviceId`/`groupId` (a real browser salts them per origin). Empty until substitution is
     /// first turned on, when the editor fills it.
@@ -124,6 +243,9 @@ public struct CameraSubstitution: Codable, Equatable, Sendable {
                 colorHex: String = "#1E2130",
                 audio: Audio = .real,
                 alsoScreenShare: Bool = false,
+                crop: Crop = .none,
+                filters: Filters = .none,
+                playback: Playback = .standard,
                 deviceSecret: String = "",
                 imageData: Data? = nil,
                 imageType: String? = nil,
@@ -141,6 +263,9 @@ public struct CameraSubstitution: Codable, Equatable, Sendable {
         self.colorHex = colorHex
         self.audio = audio
         self.alsoScreenShare = alsoScreenShare
+        self.crop = crop
+        self.filters = filters
+        self.playback = playback
         self.deviceSecret = deviceSecret
         self.imageData = imageData
         self.imageType = imageType
@@ -179,6 +304,24 @@ public struct CameraSubstitution: Codable, Equatable, Sendable {
         guard Self.isColorHex(colorHex) else {
             throw CoreError.invalidConfiguration("camera colour must be written like #1E2130")
         }
+        if crop.enabled {
+            let parts = [crop.x, crop.y, crop.width, crop.height]
+            guard parts.allSatisfy({ $0.isFinite && (0...1).contains($0) }), crop.width > 0, crop.height > 0,
+                  crop.x + crop.width <= 1.0001, crop.y + crop.height <= 1.0001 else {
+                throw CoreError.invalidConfiguration("the camera crop must be inside the source")
+            }
+        }
+        let f = filters
+        guard [f.brightness, f.contrast, f.saturation].allSatisfy({ $0.isFinite && (0...4).contains($0) }),
+              f.blur.isFinite, (0...40).contains(f.blur), f.hueRotate.isFinite, (0...360).contains(f.hueRotate),
+              [f.sepia, f.invert, f.opacity].allSatisfy({ $0.isFinite && (0...1).contains($0) }) else {
+            throw CoreError.invalidConfiguration("a camera filter is out of range")
+        }
+        let p = playback
+        guard p.rate.isFinite, (0.1...8).contains(p.rate), p.startOffset.isFinite, p.startOffset >= 0,
+              p.endOffset.isFinite, p.endOffset >= 0, p.endOffset == 0 || p.endOffset > p.startOffset else {
+            throw CoreError.invalidConfiguration("the camera playback is out of range")
+        }
         if let imageData, imageData.count > Self.maxImageBytes {
             throw CoreError.invalidConfiguration("the camera image is larger than \(Self.maxImageBytes / (1024 * 1024)) MB")
         }
@@ -202,5 +345,64 @@ public struct CameraSubstitution: Codable, Equatable, Sendable {
     private static func dataURL(_ data: Data?, _ type: String) -> String? {
         guard let data, !data.isEmpty else { return nil }
         return "data:\(type);base64,\(data.base64EncodedString())"
+    }
+
+    // Tolerant decoding (as `ProfileConfiguration`): a field a later build added and this one does
+    // not know falls back to its default, so a stored substitution keeps decoding; a nested object
+    // that is absent is its default. Written compactly: the media and anything not at its default.
+    private enum CodingKeys: String, CodingKey {
+        case mode, source, width, height, frameRate, facing, fit, mirror, deviceLabel, colorHex,
+             audio, alsoScreenShare, crop, filters, playback, deviceSecret, imageData, imageType,
+             videoData, videoType
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = CameraSubstitution()
+        mode = (try? c.decodeIfPresent(Mode.self, forKey: .mode)) ?? d.mode
+        source = (try? c.decodeIfPresent(Source.self, forKey: .source)) ?? d.source
+        width = (try? c.decodeIfPresent(Int.self, forKey: .width)) ?? d.width
+        height = (try? c.decodeIfPresent(Int.self, forKey: .height)) ?? d.height
+        frameRate = (try? c.decodeIfPresent(Int.self, forKey: .frameRate)) ?? d.frameRate
+        facing = (try? c.decodeIfPresent(Facing.self, forKey: .facing)) ?? d.facing
+        fit = (try? c.decodeIfPresent(Fit.self, forKey: .fit)) ?? d.fit
+        mirror = (try? c.decodeIfPresent(Bool.self, forKey: .mirror)) ?? d.mirror
+        deviceLabel = String(((try? c.decodeIfPresent(String.self, forKey: .deviceLabel)) ?? "").prefix(Self.maxDeviceLabelLength))
+        colorHex = (try? c.decodeIfPresent(String.self, forKey: .colorHex)) ?? d.colorHex
+        audio = (try? c.decodeIfPresent(Audio.self, forKey: .audio)) ?? d.audio
+        alsoScreenShare = (try? c.decodeIfPresent(Bool.self, forKey: .alsoScreenShare)) ?? d.alsoScreenShare
+        crop = (try? c.decodeIfPresent(Crop.self, forKey: .crop)) ?? d.crop
+        filters = (try? c.decodeIfPresent(Filters.self, forKey: .filters)) ?? d.filters
+        playback = (try? c.decodeIfPresent(Playback.self, forKey: .playback)) ?? d.playback
+        deviceSecret = (try? c.decodeIfPresent(String.self, forKey: .deviceSecret)) ?? d.deviceSecret
+        imageData = (try? c.decodeIfPresent(Data.self, forKey: .imageData)) ?? nil
+        imageType = (try? c.decodeIfPresent(String.self, forKey: .imageType)) ?? nil
+        videoData = (try? c.decodeIfPresent(Data.self, forKey: .videoData)) ?? nil
+        videoType = (try? c.decodeIfPresent(String.self, forKey: .videoType)) ?? nil
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        let d = CameraSubstitution()
+        try c.encode(mode, forKey: .mode)
+        try c.encode(source, forKey: .source)
+        try c.encode(width, forKey: .width)
+        try c.encode(height, forKey: .height)
+        try c.encode(frameRate, forKey: .frameRate)
+        if facing != d.facing { try c.encode(facing, forKey: .facing) }
+        if fit != d.fit { try c.encode(fit, forKey: .fit) }
+        if mirror { try c.encode(mirror, forKey: .mirror) }
+        if !deviceLabel.isEmpty { try c.encode(deviceLabel, forKey: .deviceLabel) }
+        if colorHex != d.colorHex { try c.encode(colorHex, forKey: .colorHex) }
+        if audio != d.audio { try c.encode(audio, forKey: .audio) }
+        if alsoScreenShare { try c.encode(alsoScreenShare, forKey: .alsoScreenShare) }
+        if crop != d.crop { try c.encode(crop, forKey: .crop) }
+        if filters != d.filters { try c.encode(filters, forKey: .filters) }
+        if playback != d.playback { try c.encode(playback, forKey: .playback) }
+        if !deviceSecret.isEmpty { try c.encode(deviceSecret, forKey: .deviceSecret) }
+        try c.encodeIfPresent(imageData, forKey: .imageData)
+        try c.encodeIfPresent(imageType, forKey: .imageType)
+        try c.encodeIfPresent(videoData, forKey: .videoData)
+        try c.encodeIfPresent(videoType, forKey: .videoType)
     }
 }
