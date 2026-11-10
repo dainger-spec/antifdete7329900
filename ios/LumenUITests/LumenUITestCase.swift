@@ -12,12 +12,13 @@ class LumenUITestCase: XCTestCase {
     /// `reset`: the app starts with no sessions, proxies or WebKit data at all. `environment`: test
     /// hooks of a DEBUG build, for this launch only.
     @discardableResult
-    func launch(reset: Bool, access: String? = nil, environment: [String: String] = [:], language: String = "ru") -> XCUIApplication {
+    func launch(reset: Bool, access: String? = nil, environment: [String: String] = [:], language: String? = "ru") -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = reset ? ["-LumenResetState"] : []
-        // The app's language: Russian for the tests, which find things by what they say; English in
-        // LanguageTests. (A simulator's own language is English, and the app follows the device.)
-        app.launchArguments += ["-AppleLanguages", "(\(language))", "-AppleLocale", language == "ru" ? "ru_RU" : "en_US"]
+        // The app's texts: Russian for the tests, which find things by what they say (the app is told
+        // so; the simulator stays as it is). `nil`: the device's own language, as a person has it —
+        // a simulator's is English (LanguageTests).
+        if let language { app.launchEnvironment["LUMEN_TEST_LANGUAGE"] = language }
         // The rights the app starts with, DEBUG builds only: everything, for a test that checks
         // something else; "free" — the free level; "none" — a paid period that ended; "account" —
         // nothing fixed: the Lumen account decides, as in a release build (AccountTests).
@@ -36,7 +37,7 @@ class LumenUITestCase: XCTestCase {
         for (name, value) in environment { app.launchEnvironment[name] = value }
         app.launch()
         self.app = app
-        XCTAssertTrue(app.navigationBars[language == "ru" ? "Сессии" : "Sessions"].waitForExistence(timeout: 30), "the sessions list comes up")
+        XCTAssertTrue(app.navigationBars[language == nil ? "Sessions" : "Сессии"].waitForExistence(timeout: 30), "the sessions list comes up")
         return app
     }
 

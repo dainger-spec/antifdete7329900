@@ -11,7 +11,7 @@ final class LanguageTests: LumenUITestCase {
     }
 
     func testTheAppSpeaksEnglish() {
-        launch(reset: true, access: "free", language: "en")
+        launch(reset: true, access: "free", language: nil)
         wait(app.staticTexts["No sessions yet"], "the empty list says so in English")
         assertEnglish("the session list")
 
