@@ -1,5 +1,6 @@
 import Foundation
 import LumenCore
+import UIKit
 import WebKit
 
 /// One tab: a WKWebView of its session's configuration, and what the bar above it shows.
@@ -24,6 +25,9 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         webView = WKWebView(frame: .zero, configuration: configuration)
         self.runtime = runtime
         super.init()
+        // The app is dark whatever the iPhone's appearance is (Theme); a site is told the iPhone's
+        // own appearance, as Safari tells it — not the app's.
+        webView.overrideUserInterfaceStyle = UIScreen.main.traitCollection.userInterfaceStyle
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true

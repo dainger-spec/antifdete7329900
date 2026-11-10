@@ -18,17 +18,26 @@ struct PlansView: View {
         NavigationStack {
             List {
                 if let because {
-                    Section { Text(because).accessibilityIdentifier("plansBecause") }
+                    Section {
+                        Label { Text(because).accessibilityIdentifier("plansBecause") } icon: { Image(systemName: "exclamationmark.triangle") }
+                            .font(.system(size: 15)).foregroundStyle(Theme.warn)
+                    }
+                    .listRowBackground(Theme.warn.opacity(0.1))
                 }
                 // The account: who is signed in on this iPhone, or the way in. (A test that fixed the
                 // rights has no account to show.)
                 if model.fixedAccess == nil {
-                    Section(L("Аккаунт")) {
+                    Section {
                         if let account = model.account {
-                            Text(account.email).accessibilityIdentifier("accountEmail")
-                            if !account.code.isEmpty {
-                                Text(L("Код этого iPhone в кабинете: %@", "\(account.code)")).font(.subheadline).foregroundStyle(.secondary)
-                                    .accessibilityIdentifier("deviceCode")
+                            HStack(spacing: 12) {
+                                InitialBadge(name: account.email, size: 36)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(account.email).foregroundStyle(Theme.text).accessibilityIdentifier("accountEmail")
+                                    if !account.code.isEmpty {
+                                        Text(L("Код этого iPhone в кабинете: %@", "\(account.code)")).font(.system(size: 13)).foregroundStyle(Theme.tertiary)
+                                            .accessibilityIdentifier("deviceCode")
+                                    }
+                                }
                             }
                             Button(refreshing ? L("Обновляем…") : L("Обновить статус")) {
                                 refreshing = true
@@ -42,22 +51,49 @@ struct PlansView: View {
                             Button(L("Выйти"), role: .destructive) { confirmSignOut = true }
                                 .accessibilityIdentifier("signOut")
                         } else {
-                            Text(L("Вход не выполнен")).accessibilityIdentifier("signedOut")
-                            Button(L("Войти")) { signingIn = true }.accessibilityIdentifier("signIn")
+                            HStack(spacing: 12) {
+                                Image(systemName: "person").font(.system(size: 15)).foregroundStyle(Theme.secondary)
+                                    .frame(width: 36, height: 36).background(Color.white.opacity(0.05), in: Circle())
+                                    .accessibilityHidden(true)
+                                Text(L("Вход не выполнен")).foregroundStyle(Theme.secondary).accessibilityIdentifier("signedOut")
+                            }
+                            Button(L("Войти")) { signingIn = true }.fontWeight(.semibold).accessibilityIdentifier("signIn")
                         }
                         if let message = model.accountMessage {
-                            Text(message).font(.subheadline).foregroundStyle(.orange).accessibilityIdentifier("accountNotice")
+                            Text(message).font(.subheadline).foregroundStyle(Theme.warn).accessibilityIdentifier("accountNotice")
+                        }
+                    } header: {
+                        Text(L("Аккаунт"))
+                    } footer: {
+                        Text(L("Аккаунт Lumen — тот же, что в Lumen для Mac."))
+                    }
+                    .glassRow()
+                }
+                // What this iPhone may do: the plan's name when one is paid for, how many profiles of
+                // how many — the bar turns amber when there is no room left — and the proxies.
+                Section(L("На этом iPhone")) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if let plan = model.access.paidPlanTitle {
+                            Text(L("Тариф: %@", "\(plan)")).font(.system(size: 21, weight: .bold)).foregroundStyle(Theme.text)
+                                .accessibilityIdentifier("planName")
+                        }
+                        if let most = model.access.maxProfiles, most > 0 {
+                            Meter(part: Double(model.sessions.count) / Double(most), full: model.sessions.count >= most)
+                        }
+                        HStack {
+                            Text(model.access.profileCounter(model.sessions.count)).font(.system(size: 14)).foregroundStyle(Theme.secondary)
+                                .accessibilityIdentifier("profileCounter")
+                            Spacer()
+                            Text(model.access.proxies ? L("Прокси: есть") : L("Прокси: нет")).font(.system(size: 14))
+                                .foregroundStyle(model.access.proxies ? Theme.ok : Theme.tertiary)
+                                .accessibilityIdentifier("planProxies")
                         }
                     }
+                    .padding(.vertical, 4)
                 }
-                Section(L("На этом iPhone")) {
-                    if let plan = model.access.paidPlanTitle {
-                        Text(L("Тариф: %@", "\(plan)")).font(.headline).accessibilityIdentifier("planName")
-                    }
-                    Text(model.access.profileCounter(model.sessions.count)).accessibilityIdentifier("profileCounter")
-                    Text(model.access.proxies ? L("Прокси: есть") : L("Прокси: нет")).accessibilityIdentifier("planProxies")
-                }
+                .glassRow()
             }
+            .eclipseSheet()
             .navigationTitle(L("Аккаунт"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

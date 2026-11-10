@@ -18,6 +18,7 @@ struct TabsView: View {
                 }
                 .padding()
             }
+            .background(Theme.ground.opacity(0.55).ignoresSafeArea())
             .navigationTitle(L("Вкладки: %@", "\(runtime.tabs.count)"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -44,23 +45,25 @@ struct TabCard: View {
         ZStack(alignment: .topTrailing) {
             Button(action: select) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Image(systemName: tab.url == nil ? "plus.square.dashed" : "doc.richtext")
-                        .font(.largeTitle).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 90)
-                    Text(tab.title.isEmpty ? L("Новая вкладка") : tab.title).font(.subheadline.bold()).lineLimit(1)
-                    Text(tab.url?.host() ?? " ").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Image(systemName: tab.url == nil ? "plus" : "globe")
+                        .font(.system(size: 24)).foregroundStyle(Theme.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 110)
+                    Text(tab.title.isEmpty ? L("Новая вкладка") : tab.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1)
+                    Text(tab.url?.host() ?? " ").font(.system(size: 12)).foregroundStyle(Theme.tertiary).lineLimit(1)
                 }
-                .padding(10)
+                .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(selected ? Color.accentColor : .clear, lineWidth: 2))
+                .glassPane(radius: 24)
+                // The tab on the screen now: a white edge.
+                .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(selected ? Theme.text : .clear, lineWidth: 2))
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("tab-\(index)")
             Button(action: close) {
-                Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary)
+                Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundStyle(Theme.text)
+                    .frame(width: 28, height: 28).background(Color.white.opacity(0.12), in: Circle())
             }
-            .padding(6)
+            .padding(8)
             .accessibilityIdentifier("closeTab-\(index)")
             .accessibilityLabel(L("Закрыть вкладку"))
         }
@@ -77,20 +80,26 @@ struct HistoryView: View {
             List {
                 if runtime.history.isEmpty {
                     ContentUnavailableView(L("История пуста"), systemImage: "clock")
+                        .listRowBackground(Color.clear).listRowSeparator(.hidden)
                 }
                 ForEach(runtime.history.reversed()) { entry in
                     Button {
                         runtime.open(entry.url)
                         dismiss()
                     } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(entry.title.isEmpty ? entry.url : entry.title).lineLimit(1)
-                            Text(entry.url).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        HStack(spacing: 12) {
+                            InitialBadge(name: URL(string: entry.url)?.host()?.replacingOccurrences(of: "www.", with: "") ?? entry.url, size: 34)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.title.isEmpty ? entry.url : entry.title).foregroundStyle(Theme.text).lineLimit(1)
+                                Text(entry.url).font(.system(size: 13)).foregroundStyle(Theme.tertiary).lineLimit(1)
+                            }
                         }
                     }
                     .accessibilityIdentifier("historyRow")
+                    .glassRow()
                 }
             }
+            .eclipseSheet()
             .navigationTitle(L("История"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -208,6 +217,7 @@ struct SessionSettingsView: View {
                         }
                     }
                 }
+                .glassRow()
                 Section(L("Браузер (строка User-Agent)")) {
                     Picker(L("Строка браузера"), selection: userAgentTag) {
                         Text(L("Как Safari этого iPhone")).tag("device")
@@ -225,6 +235,7 @@ struct SessionSettingsView: View {
                             .accessibilityIdentifier("customUA")
                     }
                 }
+                .glassRow()
                 Section {
                     Picker(L("Часовой пояс и язык"), selection: localeTag) {
                         Text(L("По стране прокси")).tag("proxy")
@@ -232,12 +243,13 @@ struct SessionSettingsView: View {
                     }
                     .pickerStyle(.segmented)
                     .accessibilityIdentifier("localeMode")
-                    Text(localeSummary).font(.footnote).foregroundStyle(.secondary).accessibilityIdentifier("localeSummary")
+                    Text(localeSummary).font(.footnote).foregroundStyle(Theme.secondary).accessibilityIdentifier("localeSummary")
                 } header: {
                     Text(L("Часовой пояс и язык"))
                 } footer: {
                     Text(L("Язык страницы меняется только в navigator.language: заголовок Accept-Language WebKit на iPhone задаёт один на всё приложение."))
                 }
+                .glassRow()
                 Section {
                     Picker(L("Профиль устройства"), selection: $settings.profileLevel) {
                         Text(L("Полный")).tag(SessionSettings.ProfileLevel.full)
@@ -254,6 +266,7 @@ struct SessionSettingsView: View {
                 } footer: {
                     Text(L("Полный: канвас, WebGL и звук у профиля свои. Упрощённый: только строка браузера, часовой пояс и язык."))
                 }
+                .glassRow()
                 Section(L("Поисковик")) {
                     Picker(L("Поисковик"), selection: $settings.searchEngine) {
                         ForEach(SearchEngine.allCases) { engine in
@@ -264,7 +277,9 @@ struct SessionSettingsView: View {
                     .labelsHidden()
                     .accessibilityIdentifier("searchEnginePicker")
                 }
+                .glassRow()
             }
+            .eclipseSheet()
             .navigationTitle(L("Настройки сессии"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

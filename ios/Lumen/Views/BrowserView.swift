@@ -42,6 +42,7 @@ struct BrowserView: View {
             }
             #endif
         }
+        .background(Theme.ground)
         .navigationTitle(runtime.session.name)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $sheet) { which in
@@ -76,9 +77,13 @@ struct AddressBar: View {
                 .accessibilityIdentifier("addressBar")
             if tab.isLoading { ProgressView().accessibilityIdentifier("loading") }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.bar)
+        .font(.system(size: 15))
+        .padding(.horizontal, 16)
+        .frame(height: 46)
+        .glassPane(radius: 23)
+        .padding(.horizontal, 16)
+        .padding(.top, 4).padding(.bottom, 10)
+        .background(Theme.ground)
         .onAppear { text = tab.url?.absoluteString ?? "" }
         .onChange(of: tab.url) { _, url in if !focused { text = url?.absoluteString ?? "" } }
         .onChange(of: focused) { _, isFocused in if !isFocused { text = tab.url?.absoluteString ?? text } }
@@ -91,13 +96,14 @@ struct StartPage: View {
 
     var body: some View {
         if tab.url == nil {
-            VStack(spacing: 8) {
-                Image(systemName: "globe").font(.largeTitle).foregroundStyle(.secondary)
-                Text(L("Новая вкладка")).font(.title3)
-                Text(L("Введите адрес или запрос")).foregroundStyle(.secondary)
+            VStack(spacing: 12) {
+                Image(systemName: "globe").font(.system(size: 28)).foregroundStyle(Theme.secondary)
+                    .frame(width: 72, height: 72).glassPane(radius: 36)
+                Text(L("Новая вкладка")).font(.system(size: 22, weight: .bold)).foregroundStyle(Theme.text).padding(.top, 4)
+                Text(L("Введите адрес или запрос")).font(.system(size: 16)).foregroundStyle(Theme.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(.systemBackground))
+            .background(EclipseBackground())
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("startPage")
         }
@@ -121,8 +127,8 @@ struct BottomBar: View {
                 .disabled(tab.url == nil).accessibilityIdentifier("reload").accessibilityLabel(L("Обновить"))
             Spacer()
             Button { show(.tabs) } label: {
-                Text("\(tabCount)").font(.footnote.bold()).frame(minWidth: 22, minHeight: 22)
-                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(lineWidth: 1.5))
+                Text("\(tabCount)").font(.system(size: 12, weight: .bold)).frame(minWidth: 22, minHeight: 22)
+                    .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(lineWidth: 1.6))
             }
             .accessibilityIdentifier("tabsButton").accessibilityLabel(L("Вкладки: %@", "\(tabCount)"))
             Spacer()
@@ -132,10 +138,14 @@ struct BottomBar: View {
             Button { show(.settings) } label: { Image(systemName: "slider.horizontal.3") }
                 .accessibilityIdentifier("settingsButton").accessibilityLabel(L("Настройки сессии"))
         }
-        .font(.title3)
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .background(.bar)
+        .font(.system(size: 19))
+        .foregroundStyle(Theme.text)
+        .padding(.horizontal, 22)
+        .frame(height: 60)
+        .glassPane(radius: 30)
+        .padding(.horizontal, 14)
+        .padding(.top, 8).padding(.bottom, 4)
+        .background(Theme.ground)
     }
 }
 

@@ -31,22 +31,34 @@ struct SignInView: View {
                     } footer: {
                         Text(L("Аккаунт Lumen — тот же, что в Lumen для Mac."))
                     }
+                    .glassRow()
                     Section {
                         Button(L("Войти")) { submit(robotToken: nil) }
+                            .buttonStyle(PrimaryButtonStyle())
                             .disabled(busy || email.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty)
                             .accessibilityIdentifier("submitSignIn")
+                            .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
+                    }
+                    Section {
                         Button(L("Забыли пароль?")) { openURL(AccountClient.site.appendingPathComponent("reset-password")) }
+                            .foregroundStyle(Theme.secondary)
                             .accessibilityIdentifier("forgotPassword")
                     }
+                    .glassRow()
                 } else {
                     Section {
                         Text(AccountText.checkEmail)
                         TextField(L("Код из письма"), text: $code).keyboardType(.numberPad).accessibilityIdentifier("signInCode")
                     }
+                    .glassRow()
                     Section {
                         Button(L("Подтвердить")) { confirm() }
+                            .buttonStyle(PrimaryButtonStyle())
                             .disabled(busy || code.trimmingCharacters(in: .whitespaces).isEmpty)
                             .accessibilityIdentifier("submitCode")
+                            .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
+                    }
+                    Section {
                         Button(L("Отправить код ещё раз")) { resend() }.disabled(busy).accessibilityIdentifier("resendCode")
                         Button(L("Ввести пароль заново")) {
                             challenge = nil
@@ -54,14 +66,20 @@ struct SignInView: View {
                             message = nil
                         }
                     }
+                    .glassRow()
                 }
                 if let message {
-                    Section { Text(message).foregroundStyle(.red).accessibilityIdentifier("signInMessage") }
+                    Section {
+                        Label { Text(message).accessibilityIdentifier("signInMessage") } icon: { Image(systemName: "exclamationmark.circle") }
+                            .font(.system(size: 15)).foregroundStyle(Theme.bad)
+                    }
+                    .listRowBackground(Theme.bad.opacity(0.1))
                 }
                 if busy {
-                    Section { ProgressView().accessibilityIdentifier("signInBusy") }
+                    Section { ProgressView().accessibilityIdentifier("signInBusy") }.glassRow()
                 }
             }
+            .eclipseSheet()
             .navigationTitle(L("Вход"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

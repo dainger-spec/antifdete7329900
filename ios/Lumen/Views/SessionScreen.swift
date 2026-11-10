@@ -17,6 +17,7 @@ struct SessionScreen: View {
                 }
             } else {
                 ContentUnavailableView(L("Сессия удалена"), systemImage: "trash")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity).background(EclipseBackground())
             }
         }
         .onAppear { model.markOpened(sessionID) }
@@ -30,13 +31,21 @@ struct LockedSessionView: View {
     var forProxy = true
 
     var body: some View {
-        ContentUnavailableView {
-            Label(L("Профиль заперт"), systemImage: "lock.fill")
-        } description: {
+        VStack(spacing: 16) {
+            Image(systemName: "lock.fill").font(.system(size: 34)).foregroundStyle(Theme.warn)
+                .frame(width: 92, height: 92)
+                .background(Theme.warn.opacity(0.12), in: Circle())
+                .overlay(Circle().strokeBorder(Theme.warn.opacity(0.3), lineWidth: 0.5))
+                .accessibilityHidden(true)
+            Text(L("Профиль заперт")).font(.system(size: 26, weight: .bold)).foregroundStyle(Theme.text).padding(.top, 8)
             Text(forProxy
                  ? L("%@ Этот профиль работал через прокси и без него не откроется: сайты увидели бы настоящий адрес устройства. Данные профиля сохранены.", "\(reason)")
                  : reason)
+                .font(.system(size: 16)).foregroundStyle(Theme.secondary).multilineTextAlignment(.center)
         }
+        .padding(.horizontal, 34)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(EclipseBackground())
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("lockedSession")
     }

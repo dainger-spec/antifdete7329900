@@ -13,18 +13,25 @@ struct ProxiesView: View {
             if model.proxies.isEmpty {
                 ContentUnavailableView(L("Прокси пока нет"), systemImage: "network",
                                        description: Text(L("Добавьте прокси и назначьте его сессии в её настройках.")))
+                    .listRowBackground(Color.clear).listRowSeparator(.hidden)
             }
             ForEach(model.proxies) { entry in
                 ProxyRow(entry: entry, checking: model.checking.contains(entry.id))
                     .contentShape(Rectangle())
                     .onTapGesture { editing = entry }
                     .accessibilityIdentifier("proxy-\(entry.displayName)")
+                    .padding(.horizontal, 14).padding(.vertical, 13)
+                    .glassPane(radius: 24)
+                    .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
                     .swipeActions {
                         Button(L("Удалить"), systemImage: "trash", role: .destructive) { model.deleteProxy(entry.id) }
-                        Button(L("Проверить"), systemImage: "arrow.clockwise") { model.check(entry.id) }.tint(.blue)
+                        Button(L("Проверить"), systemImage: "arrow.clockwise") { model.check(entry.id) }.tint(.gray)
                     }
             }
         }
+        .listStyle(.plain)
+        .eclipseScreen()
         .navigationTitle(L("Прокси"))
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -42,18 +49,32 @@ struct ProxyRow: View {
     let checking: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 5) {
             HStack {
-                Text(entry.displayName).font(.headline)
+                Text(entry.displayName).font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.text)
                 Spacer()
-                Text(entry.kind == .socks5 ? "SOCKS5" : "HTTP").font(.caption.bold()).foregroundStyle(.secondary)
+                Text(entry.kind == .socks5 ? "SOCKS5" : "HTTP").font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Theme.secondary)
+                    .padding(.horizontal, 9).frame(height: 24)
+                    .background(Color.white.opacity(0.06), in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5))
             }
             Text("\(entry.host):\(entry.port)" + (entry.username.isEmpty ? "" : " · \(entry.username)"))
-                .font(.subheadline).foregroundStyle(.secondary)
-            Text(status).font(.subheadline)
-            Text(udp).font(.caption).foregroundStyle(.secondary)
+                .font(.system(size: 14, design: .monospaced)).foregroundStyle(Theme.secondary)
+            // The state in a colour that says it: green works, red does not answer, grey is not known.
+            HStack(spacing: 8) {
+                Circle().fill(statusColor).frame(width: 7, height: 7).accessibilityHidden(true)
+                Text(status).font(.system(size: 14)).foregroundStyle(statusColor)
+            }
+            Text(udp).font(.system(size: 14)).foregroundStyle(Theme.tertiary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
+    }
+
+    private var statusColor: Color {
+        if checking { return Theme.secondary }
+        guard let check = entry.check else { return Theme.secondary }
+        return check.alive ? Theme.ok : Theme.bad
     }
 
     private var status: String {
@@ -113,17 +134,21 @@ struct ProxyEditor: View {
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                     TextField(L("Порт"), text: $port).accessibilityIdentifier("proxyPort").keyboardType(.numberPad)
                 }
+                .glassRow()
                 Section(L("Вход")) {
                     TextField(L("Логин"), text: $username).accessibilityIdentifier("proxyUser")
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                     SecureField(L("Пароль"), text: $password).accessibilityIdentifier("proxyPassword")
                 }
+                .glassRow()
                 if let entry {
                     Section {
                         Button(L("Удалить прокси"), role: .destructive) { model.deleteProxy(entry.id); close() }
                     }
+                    .glassRow()
                 }
             }
+            .eclipseSheet()
             .navigationTitle(entry == nil ? L("Новый прокси") : L("Прокси"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -19,10 +19,20 @@ struct LumenApp: App {
                 if model.ready {
                     SessionsView()
                 } else {
-                    ProgressView(L("Подготовка…"))
+                    // The launch: the mark on the ground, and what is going on under it.
+                    ZStack {
+                        EclipseBackground()
+                        VStack(spacing: 28) {
+                            LumenMark().fill(Theme.text).frame(width: 104, height: 104).accessibilityHidden(true)
+                            Text(L("Подготовка…")).font(.system(size: 15)).foregroundStyle(Theme.tertiary)
+                        }
+                    }
                 }
             }
             .environmentObject(model)
+            // Eclipse is a dark look, whatever the iPhone's appearance; white is its accent.
+            .preferredColorScheme(.dark)
+            .tint(Theme.text)
             // Back in front: the account's decision again, and a fresh document if it is due.
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { model.accountTick() }
