@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreImage
 import CoreVideo
 import Foundation
 import ImageIO
@@ -21,6 +22,13 @@ struct CameraExtensionConfig {
     var crop: (x: Double, y: Double, width: Double, height: Double)?
     /// The adjustments drawn over the frame (`CameraFilterChain`).
     var filters: CameraFiltersConfig
+    /// The video file in the app group for the `video` source, and its playback (`CameraVideoSource`).
+    var videoFile: String?
+    var videoLoop = true
+    var videoPaused = false
+    var videoRate = 1.0
+    var videoStart = 0.0
+    var videoEnd = 0.0
 
     /// The fixed CoreMediaIO device name (the shim's sentinel). Matches
     /// `CameraSubstitution.systemDeviceName` in BrowserCore; kept as a literal here so the
@@ -52,14 +60,24 @@ struct CameraExtensionConfig {
             func d(_ key: String, _ fb: Double) -> Double { (c[key] as? NSNumber)?.doubleValue ?? fb }
             crop = (d("x", 0), d("y", 0), d("width", 1), d("height", 1))
         }
-        return CameraExtensionConfig(source: string("source", fallback.source),
-                                     colorHex: string("color", fallback.colorHex),
-                                     width: int("width", fallback.width), height: int("height", fallback.height),
-                                     frameRate: int("frameRate", fallback.frameRate),
-                                     fit: string("fit", fallback.fit),
-                                     mirror: (object["mirror"] as? NSNumber)?.boolValue ?? false,
-                                     crop: crop,
-                                     filters: CameraFiltersConfig(object["filters"] as? [String: Any]) ?? .none)
+        var config = CameraExtensionConfig(source: string("source", fallback.source),
+                                           colorHex: string("color", fallback.colorHex),
+                                           width: int("width", fallback.width), height: int("height", fallback.height),
+                                           frameRate: int("frameRate", fallback.frameRate),
+                                           fit: string("fit", fallback.fit),
+                                           mirror: (object["mirror"] as? NSNumber)?.boolValue ?? false,
+                                           crop: crop,
+                                           filters: CameraFiltersConfig(object["filters"] as? [String: Any]) ?? .none)
+        config.videoFile = object["videoFile"] as? String
+        if let playback = object["playback"] as? [String: Any] {
+            func d(_ key: String, _ fb: Double) -> Double { (playback[key] as? NSNumber)?.doubleValue ?? fb }
+            config.videoLoop = (playback["loop"] as? NSNumber)?.boolValue ?? true
+            config.videoPaused = (playback["paused"] as? NSNumber)?.boolValue ?? false
+            config.videoRate = d("rate", 1)
+            config.videoStart = d("startOffset", 0)
+            config.videoEnd = d("endOffset", 0)
+        }
+        return config
     }
 }
 
@@ -76,6 +94,14 @@ enum CameraFrameRenderer {
     private static var cachedImageDate: Date?
     // A scratch buffer for the filtered path: the base is drawn here, then filtered into the output.
     private static var scratch: CVPixelBuffer?
+    // The video decoder for the `video` source (one serial render queue, so no locking).
+    private static let videoSource = CameraVideoSource()
+
+    /// A CGImage of a decoded video frame, so it draws with crop, fit and mirror like the image.
+    private static func cgImage(from pixelBuffer: CVPixelBuffer) -> CGImage? {
+        let image = CIImage(cvPixelBuffer: pixelBuffer)
+        return CameraFilterChain.context.createCGImage(image, from: image.extent)
+    }
 
     static func render(into pixelBuffer: CVPixelBuffer, config: CameraExtensionConfig, sequence: UInt64) {
         let width = CVPixelBufferGetWidth(pixelBuffer)
@@ -103,6 +129,10 @@ enum CameraFrameRenderer {
             if config.source == "bars" {
                 drawBars(context, width: width, height: height, background: (br, bg, bb), sequence: sequence)
             } else if config.source == "image", let image = loadImage() {
+                context.setFillColor(red: br, green: bg, blue: bb, alpha: 1)
+                context.fill(CGRect(x: 0, y: 0, width: Double(width), height: Double(height)))
+                drawImage(context, image: image, width: width, height: height, config: config)
+            } else if config.source == "video", let frame = videoSource.frame(for: config), let image = cgImage(from: frame) {
                 context.setFillColor(red: br, green: bg, blue: bb, alpha: 1)
                 context.fill(CGRect(x: 0, y: 0, width: Double(width), height: Double(height)))
                 drawImage(context, image: image, width: width, height: height, config: config)

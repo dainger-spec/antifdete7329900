@@ -299,13 +299,14 @@ public struct CameraSubstitution: Codable, Equatable, Sendable {
     /// a page reads (`deviceLabel`) is applied JavaScript-side (docs/CAMERA.md).
     public static let systemDeviceName = "Lumen Camera"
 
-    /// The source name the system-camera extension understands: it draws a colour, the test
-    /// pattern or the chosen image (video and the adjustments are the in-page shim's for now).
+    /// The source name the system-camera extension understands (colour, test pattern, image or
+    /// video — all with crop, fit, mirror and the adjustments).
     public var systemCameraSource: String {
         switch source {
         case .color: return "color"
         case .image: return "image"
-        case .bars, .video: return "bars"
+        case .video: return "video"
+        case .bars: return "bars"
         }
     }
 

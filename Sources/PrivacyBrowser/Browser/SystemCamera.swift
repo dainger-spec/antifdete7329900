@@ -106,6 +106,14 @@ final class SystemCamera: NSObject, ObservableObject {
 
     static let imageFileName = "camera-image.bin"
 
+    private static func videoFileName(for type: String?) -> String {
+        switch type {
+        case "video/quicktime": return "camera-video.mov"
+        case "video/mp4", "video/mpeg": return "camera-video.mp4"
+        default: return "camera-video.mp4"
+        }
+    }
+
     /// Writes what the extension should draw for `camera` to the shared app group — the render
     /// settings, and the image's bytes for the image source. The device is one and global, so the
     /// last profile to launch with the system camera sets what it shows.
@@ -128,12 +136,26 @@ final class SystemCamera: NSObject, ObservableObject {
                                  "opacity": f.opacity, "grayscale": f.grayscale]
         }
         let imageURL = container.appendingPathComponent(Self.imageFileName)
+        let videoName = Self.videoFileName(for: camera.videoType)
+        let videoURL = container.appendingPathComponent(videoName)
+        if camera.source == .video, camera.videoData != nil {
+            let p = camera.playback
+            config["videoFile"] = videoName
+            config["playback"] = ["loop": p.loop, "paused": p.paused, "rate": p.rate,
+                                  "startOffset": p.startOffset, "endOffset": p.endOffset]
+        }
         do {
             try JSONSerialization.data(withJSONObject: config).write(to: container.appendingPathComponent(Self.configFileName), options: .atomic)
+            // Keep only the file the current source needs; drop a stale one of the other kind.
             if camera.source == .image, let image = camera.imageData {
                 try image.write(to: imageURL, options: .atomic)
             } else {
                 try? FileManager.default.removeItem(at: imageURL)
+            }
+            if camera.source == .video, let video = camera.videoData {
+                try video.write(to: videoURL, options: .atomic)
+            } else {
+                try? FileManager.default.removeItem(at: videoURL)
             }
         } catch {
             log.error("could not write the camera config: \(error.localizedDescription, privacy: .private)")

@@ -150,11 +150,20 @@ order (`CameraFilters`). The base frame is drawn into a scratch buffer, filtered
 and the grain laid over it (`CameraFrameRenderer`). The editor shows the filters for both
 deliveries now.
 
-### Stage 5 (next, on a Mac): video in the extension
+### Stage 5 (here): the video in the extension
 
-A **video** source is still the JavaScript shim's; drawing it in the extension needs AVFoundation
-(to decode, loop, trim and time the clip), fed from the app through the app group. The shim's
-pipeline is the reference.
+The extension now draws a **video** source too, so the system camera matches the JavaScript shim
+in full: colour, test pattern, image and video — each with crop, fit, mirror, the adjustments and
+(for video) loop, freeze, speed and trim. `CameraVideoSource` decodes the clip headless with
+`AVAssetReader` (no `AVPlayer`/run loop), on the one serial render queue: it reads the file the app
+wrote to the app group, advances one or more frames per tick scaled by the speed, and re-opens the
+reader at the trim start to loop. The app writes the video's bytes to `<group>/camera-video.<ext>`
+and its playback settings to `camera.json`.
+
+What a page reads is still gated per profile (`patchSystemCamera`); the frames are WebKit's own, so
+a video delivered this way is indistinguishable at the JavaScript layer. The only limits left are
+the ones above: the system camera is one global device (the last profile to launch with it sets
+what it shows), and the gate takes effect once a page is granted the camera.
 
 ## Limitations
 

@@ -794,7 +794,7 @@ struct ProfileEditorForm: View {
             cameraDeviceControls
             if draft.camera.delivery == .systemCamera { systemCameraSection }
             cameraCropAndFilters
-            if draft.camera.delivery == .jsShim { cameraPlaybackSection }
+            cameraPlaybackSection
             EditorNote(L("editor.camera.secure.note"))
         }
     }
