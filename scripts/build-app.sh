@@ -53,6 +53,7 @@ SANDBOX="${SANDBOX:-1}"
 APP_DIR="${APP_DIR:-build}"
 APP="$APP_DIR/Lumen.app"
 NE="${NE:-0}"
+CAM="${CAM:-0}"
 EXTENSION_ID="${EXTENSION_ID:-$BUNDLE_ID.PacketTunnel}"
 if [[ "$NE" == "1" ]]; then
   : "${TEAM_ID:?NE=1 needs TEAM_ID (your Apple Developer team)}"
