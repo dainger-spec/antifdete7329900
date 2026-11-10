@@ -65,7 +65,10 @@ extension AppModel {
             return "Не удаётся связаться с сервером Lumen. Lumen работает как обычно\(until). Проверьте соединение."
         case .unverified, .unreachable, .periodEnded:
             return license.access.reason
-        case .full, .notSignedIn:
+        case .full:
+            // The document itself says the paid period ended, or the account is blocked: said as it is.
+            return ["expired", "disabled"].contains(license.access.plan) ? license.access.reason : nil
+        case .notSignedIn:
             return nil
         }
     }

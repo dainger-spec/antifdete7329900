@@ -187,7 +187,12 @@ final class LicenseTests: XCTestCase {
         XCTAssertTrue(free.access.browse)
         XCTAssertFalse(free.access.proxies)
         XCTAssertEqual(free.access.plan, "free")
-        XCTAssertEqual(free.access.reason, "Прокси доступны на платных тарифах.")
+        XCTAssertEqual(free.access.reason, "Прокси недоступны.")
+        XCTAssertNil(free.access.paidPlanTitle, "no plan is named to an account that has paid for none")
+        XCTAssertNil(Access.free.paidPlanTitle)
+        XCTAssertNil(Access.expired.paidPlanTitle)
+        XCTAssertEqual(state(TestSigner.payload(plan: "pro")).access.paidPlanTitle, "Профессиональный")
+        XCTAssertEqual(state(TestSigner.payload(plan: "trial")).access.paidPlanTitle, "7 дней бесплатно")
         // A paid period that ended, as the server says it.
         let ended = state(TestSigner.payload(plan: "personal", status: "export_only", reason: "period_ended", features: ["browse"],
                                              profiles: 2, period: "2026-10-31T00:00:00Z")).access

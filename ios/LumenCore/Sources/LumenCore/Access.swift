@@ -44,7 +44,7 @@ public struct Access: Equatable, Sendable {
     public static var free: Access {
         // The planted fault: the free plan's proxies left on.
         Access(plan: "free", proxies: Faults.isActive(.freePlanProxies), maxProfiles: freeProfiles,
-               reason: "Прокси доступны на платных тарифах.")
+               reason: "Прокси недоступны.")
     }
 
     /// A paid period that ended: the free level's limits. Its profiles that lived behind a proxy stay
@@ -74,6 +74,14 @@ public struct Access: Equatable, Sendable {
         case "full": return "Все возможности (проверочная сборка)"
         default: return plan
         }
+    }
+
+    /// The plan's name when it is paid for (or the trial) and running — the only time a plan is named
+    /// to the person (the owner, 10 November: nothing here offers a plan). Nil otherwise.
+    public var paidPlanTitle: String? {
+        // The planted fault: a plan is named whatever it is — "Бесплатный" among them.
+        if Faults.isActive(.unpaidPlanNamed) { return planTitle }
+        return ["trial", "personal", "pro", "team"].contains(plan) ? planTitle : nil
     }
 
     /// "Профили: 2 из 2", or "Профили: 5" with no limit.

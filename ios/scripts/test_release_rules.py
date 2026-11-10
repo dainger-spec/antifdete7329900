@@ -98,6 +98,16 @@ with open(os.path.join(app, "Info.plist"), "wb") as f:
     plistlib.dump({"CFBundleIdentifier": "io.lumenbrowser.ios", "PBEntitlementPublicKeys": {"eaae27700d8b08a3": "iiZ+mIsNmJjmQ/RMlcV8EFhoNUtJoTZrsP52U52qcf4="}}, f)
 check("another key in the built app is not taken for a known one", not any(f[1] == "known-key" for f in scan(IOS, app)))
 
+# Nothing offers a plan or leads to the site's prices.
+for what, line in [
+    ("a button to the site's plans", 'Button("Выбрать тариф на сайте") {}'),
+    ("the site's pricing page", 'let url = site.appendingPathComponent("pricing")'),
+    ("a list of plans", 'Section("Тарифы") {}'),
+    ("an offer to buy", 'Text("Купить можно на сайте")'),
+]:
+    check(f"red — {what}: found", any(f[1] == "offer" for f in scan(planted(line))))
+check("a paid plan's own name is allowed", not any(f[1] == "offer" for f in scan(planted('Text("Тариф: Профессиональный")'))))
+
 # No test switch in a release: in the sources outside #if DEBUG, and in a built release.
 for what, line, file in [
     ("the plan's switch read outside #if DEBUG", 'let plan = ProcessInfo.processInfo.environment["LUMEN_TEST_ACCESS"]', "Lumen/AppModel.swift"),

@@ -43,7 +43,7 @@ public enum Fault: String, CaseIterable, Sendable {
     // Plans (rights from Access)
     case profileLimitIgnored     // the plan's profile limit is not kept: a free iPhone makes a third profile
     case freePlanProxies         // the free plan's proxies left on: a free profile goes through a proxy
-    case upgradeOpensInApp       // the plans' site opens inside the app, not in Safari
+    case unpaidPlanNamed         // a plan is named to a person who has paid for none ("Бесплатный")
     // The account (rights from the server's signed document)
     case signatureNotChecked     // a document's signature is not checked: anyone's payload is taken
     case wrongDeviceAccepted     // a document of another device or another iPhone is taken

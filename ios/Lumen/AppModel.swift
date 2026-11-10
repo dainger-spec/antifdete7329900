@@ -37,17 +37,6 @@ enum AccessSource {
         return nil
         #endif
     }
-
-    /// The site where plans are chosen and paid for: `<site>/pricing`, opened in Safari, never in
-    /// the app (the owner, 8 November). A test points it at its testbed (DEBUG builds only).
-    static var pricingURL: URL {
-        #if DEBUG
-        if let value = ProcessInfo.processInfo.environment["LUMEN_TEST_SITE_URL"], let url = URL(string: value) {
-            return url.appendingPathComponent("pricing")
-        }
-        #endif
-        return AccountClient.site.appendingPathComponent("pricing")
-    }
 }
 
 /// The app's state: the session catalogue and the proxy list, saved as they change.

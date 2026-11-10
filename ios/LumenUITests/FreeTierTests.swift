@@ -3,11 +3,11 @@ import XCTest
 /// The free plan (the owner, 8 November), from Access as a test sets it (LUMEN_TEST_ACCESS=free —
 /// signing in to a Lumen account fills it once the account server is there): two profiles, no proxies,
 /// each profile a whole one — its own storage, its own device profile. The plan's screen counts the
-/// profiles, and the plans' site opens in Safari, never inside the app.
+/// profiles, names no plan to a person who has paid for none, and offers none.
 final class FreeTierTests: LumenUITestCase {
     func testFreePlan() {
         let run = String(UUID().uuidString.prefix(6)).lowercased()
-        launch(reset: true, access: "free", environment: ["LUMEN_TEST_SITE_URL": "http://127.0.0.1:28380/plans-\(run)"])
+        launch(reset: true, access: "free")
         // A proxy may be kept in the list (for a paid plan); no profile goes through it.
         app.buttons["proxiesButton"].tap()
         wait(app.navigationBars["Прокси"], "the proxy list opens")
@@ -59,21 +59,16 @@ final class FreeTierTests: LumenUITestCase {
         XCTAssertNotEqual(first, second, "each free profile has its own device profile (its own canvas noise): \(first) / \(second)")
         backToList()
 
-        // The plan's screen, and its site in Safari.
+        // The account's screen: the count and the proxies; no plan is named to a person who has paid
+        // for none, and nothing there offers one or leads to the site.
         app.buttons["plansButton"].tap()
-        wait(app.staticTexts["planName"], "the plan opens")
-        XCTAssertEqual(app.staticTexts["planName"].label, "Бесплатный")
-        XCTAssertEqual(app.staticTexts["planProxies"].label, "Прокси: нет")
+        wait(app.staticTexts["profileCounter"], "the account's screen opens")
         XCTAssertEqual(app.staticTexts["profileCounter"].label, "Профили: 2 из 2")
-        shot("62 the plan")
-        app.buttons["upgrade"].tap()
-        let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
-        let outside = safari.wait(for: .runningForeground, timeout: 20)
-        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        attachment.name = "63 the plans' site"
-        attachment.lifetime = .keepAlways
-        add(attachment)
-        XCTAssertTrue(outside, "the site opens in Safari, outside the app (Safari: \(safari.state.rawValue))")
-        app.activate()
+        XCTAssertEqual(app.staticTexts["planProxies"].label, "Прокси: нет")
+        XCTAssertFalse(app.staticTexts["planName"].exists, "no plan is named on the free level: \(app.staticTexts["planName"].exists ? app.staticTexts["planName"].label : "")")
+        XCTAssertFalse(app.buttons["upgrade"].exists, "nothing offers a plan")
+        let texts = screenLabels().joined(separator: " | ")
+        XCTAssertFalse(texts.contains("на сайте") || texts.contains("Тарифы") || texts.contains("Выбрать тариф"), "nothing leads to the site: \(texts)")
+        shot("62 the account's screen, free")
     }
 }

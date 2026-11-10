@@ -19,7 +19,7 @@ final class AccountTests: LumenUITestCase {
 
     func openPlan() {
         app.buttons["plansButton"].tap()
-        wait(app.staticTexts["planName"], "the plan's screen opens")
+        wait(app.staticTexts["profileCounter"], "the account's screen opens")
     }
 
     func closePlan() {
@@ -74,7 +74,7 @@ final class AccountTests: LumenUITestCase {
         // Nobody signed in: the free level.
         openPlan()
         wait(app.staticTexts["signedOut"], "nobody is signed in")
-        XCTAssertEqual(app.staticTexts["planName"].label, "Бесплатный")
+        XCTAssertFalse(app.staticTexts["planName"].exists, "no plan is named to a person who is not signed in")
         XCTAssertEqual(app.staticTexts["planProxies"].label, "Прокси: нет")
         XCTAssertEqual(app.staticTexts["profileCounter"].label, "Профили: 0 из 2")
 
@@ -82,7 +82,7 @@ final class AccountTests: LumenUITestCase {
         signIn(email)
         wait(app.staticTexts["accountEmail"], "signed in: the activation said it is an iPhone's", timeout: 30)
         XCTAssertEqual(app.staticTexts["accountEmail"].label, email)
-        waitLabel("planName", "Профессиональный", "the plan is the document's")
+        waitLabel("planName", "Тариф: Профессиональный", "the plan is the document's")
         XCTAssertEqual(app.staticTexts["planProxies"].label, "Прокси: есть")
         XCTAssertEqual(app.staticTexts["profileCounter"].label, "Профили: 0 из 50")
         XCTAssertFalse(passwordOffer.exists, "no offer to keep the account's password among the person's own")
@@ -112,8 +112,9 @@ final class AccountTests: LumenUITestCase {
         backToList()
         openPlan()
         reveal(app.buttons["refreshAccount"], "the plan's screen asks the server again").tap()
-        waitLabel("planName", "Оплаченный период закончился", "a fresh document that gives less is taken")
-        XCTAssertEqual(app.staticTexts["planProxies"].label, "Прокси: нет")
+        waitLabel("planProxies", "Прокси: нет", "a fresh document that gives less is taken")
+        XCTAssertFalse(app.staticTexts["planName"].exists, "a plan whose period ended is not named as one")
+        XCTAssertEqual(app.staticTexts["accountNotice"].label, "Оплаченный период закончился. Прокси недоступны.")
         XCTAssertEqual(app.staticTexts["profileCounter"].label, "Профили: 3 из 2")
         shot("71 the paid period over")
         closePlan()
@@ -136,7 +137,7 @@ final class AccountTests: LumenUITestCase {
         reveal(app.buttons["refreshAccount"], "the plan's screen asks the server again").tap()
         wait(app.staticTexts["signedOut"], "an iPhone unlinked on the server is signed out", timeout: 30)
         XCTAssertEqual(app.staticTexts["accountNotice"].label, "Этот iPhone отключён от аккаунта. Войдите снова.")
-        XCTAssertEqual(app.staticTexts["planName"].label, "Бесплатный")
+        XCTAssertFalse(app.staticTexts["planName"].exists)
         shot("72 unlinked on the server")
         closePlan()
 
@@ -212,20 +213,21 @@ final class AccountTests: LumenUITestCase {
         // A paid plan whose document names no proxies has none: the features decide, not the name.
         signIn("browseonly-\(run)@lumen.test")
         wait(app.staticTexts["accountEmail"], "signed in", timeout: 30)
-        waitLabel("planName", "Профессиональный", "the plan's name is the document's")
+        waitLabel("planName", "Тариф: Профессиональный", "the plan's name is the document's")
         XCTAssertEqual(app.staticTexts["planProxies"].label, "Прокси: нет", "no proxies without the feature")
         signOut()
 
         // An account without a plan: the free level, as the document writes it. The trial: both.
         signIn("free-\(run)@lumen.test")
         wait(app.staticTexts["accountEmail"], "signed in", timeout: 30)
-        waitLabel("planName", "Бесплатный", "an account without a plan is free")
+        waitLabel("profileCounter", "Профили: 0 из 2", "an account without a plan has the free level")
         XCTAssertEqual(app.staticTexts["planProxies"].label, "Прокси: нет")
+        XCTAssertFalse(app.staticTexts["planName"].exists, "no plan is named to an account that has paid for none")
         XCTAssertEqual(app.staticTexts["profileCounter"].label, "Профили: 0 из 2")
         signOut()
         signIn("trial-\(run)@lumen.test")
         wait(app.staticTexts["accountEmail"], "signed in", timeout: 30)
-        waitLabel("planName", "7 дней бесплатно", "a running trial works on the iPhone")
+        waitLabel("planName", "Тариф: 7 дней бесплатно", "a running trial works on the iPhone")
         XCTAssertEqual(app.staticTexts["planProxies"].label, "Прокси: есть")
         XCTAssertEqual(app.staticTexts["profileCounter"].label, "Профили: 0 из 3")
         shot("75 the trial")

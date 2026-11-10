@@ -62,7 +62,7 @@ struct SessionsView: View {
                     Button {
                         // One more profile than the plan allows: the plans, saying why.
                         let target: EditorTarget = model.mayCreateSession ? .new
-                            : .plans(because: "На этом тарифе профилей не больше \(model.access.maxProfiles ?? model.sessions.count).")
+                            : .plans(because: "На этом iPhone можно держать не больше \(model.access.maxProfiles ?? model.sessions.count) профилей.")
                         editor = target
                     } label: { Image(systemName: "plus") }
                         .accessibilityIdentifier("newSession")
@@ -73,7 +73,7 @@ struct SessionsView: View {
                         .accessibilityIdentifier("proxiesButton")
                 }
                 ToolbarItem(placement: .topBarLeading) {
-                    Button { editor = .plans(because: nil) } label: { Label("Тариф", systemImage: "person.crop.circle") }
+                    Button { editor = .plans(because: nil) } label: { Label("Аккаунт", systemImage: "person.crop.circle") }
                         .accessibilityIdentifier("plansButton")
                 }
                 ToolbarItem(placement: .topBarTrailing) { DebugProbeLink() }

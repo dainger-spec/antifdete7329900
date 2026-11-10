@@ -61,6 +61,11 @@ KNOWN_KEYS = {
 SWITCH = re.compile(r'LUMEN_TEST_[A-Z_]+|LUMEN_FAULTS|-LumenFaults|-LumenResetState')
 
 
+# Rule 5 (the owner, 10 November): nothing in the app offers a plan, names where to buy one or leads
+# to the site's prices. A plan is named only as the paid plan a person already has.
+OFFER = re.compile(r"pricing|выбрать тариф|тариф\w* на сайте|тарифы|купить|оплатит", re.IGNORECASE)
+
+
 def outside_debug(path):
     """(line number, line) of every line of a Swift file that is not inside #if DEBUG."""
     stack = []   # for each open #if: whether its current branch is compiled only in DEBUG
@@ -142,6 +147,8 @@ def scan(ios, app=None):
         for number, line in enumerate(open(path, encoding="utf-8"), 1):
             for text in LITERAL.findall(line):
                 judge(f"{rel}:{number}", text)
+                if OFFER.search(text):
+                    found.append((f"{rel}:{number}", "offer", text))
             if known_key_in(line):
                 found.append((f"{rel}:{number}", "known-key", f"{known_key_in(line)}: {line.strip()}"))
             code = LITERAL.sub('""', line).split("//", 1)[0]   # the code itself: no literals, no comment

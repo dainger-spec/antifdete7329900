@@ -66,12 +66,13 @@ clockRollbackTrusted	core	LumenCoreTests.LicenseTests/testTheClockSetBackBringsN
 overLimitOpens	core	LumenCoreTests.LicenseTests/testProfilesOverTheLimitAreLocked	the two made first stay open
 activationWithoutPlatform	core	LumenCoreTests.LicenseTests/testAnActivationSaysItIsAnIPhone	the activation names its platform
 phoneLimitUnexplained	core	LumenCoreTests.LicenseTests/testRefusalsAreSaidWithTheirReason	the limit of phones is said with its reason
+unpaidPlanNamed	core	LumenCoreTests.LicenseTests/testTheFreeLevelComesFromTheDocument	no plan is named
 profileDefaultsReal	ui	LumenUITests/SettingsTests/testANewSessionHasTheFullProfile	a new session's device profile is full by default
 profileLimitIgnored	ui	LumenUITests/FreeTierTests/testFreePlan	the plans open instead of a third profile
 freePlanProxies	ui	LumenUITests/FreeTierTests/testFreePlan	a free profile goes without a proxy
 sharedStore	ui	LumenUITests/FreeTierTests/testFreePlan	free profiles are isolated
 profileDefaultsReal	ui	LumenUITests/FreeTierTests/testFreePlan	each free profile has its own device profile
-upgradeOpensInApp	ui	LumenUITests/FreeTierTests/testFreePlan	the site opens in Safari
+unpaidPlanNamed	ui	LumenUITests/FreeTierTests/testFreePlan	no plan is named
 # The account, end to end against the testbed's stand-in for the server.
 activationWithoutPlatform	ui	LumenUITests/AccountTests/testSigningInOpensThePlan	the activation said it is an iPhone
 overLimitOpens	ui	LumenUITests/AccountTests/testSigningInOpensThePlan	a profile beyond the plan

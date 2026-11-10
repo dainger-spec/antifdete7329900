@@ -203,8 +203,8 @@ struct SessionSettingsView: View {
                 } footer: {
                     if !model.access.proxies {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(model.access.reason ?? "Прокси на этом тарифе нет.").accessibilityIdentifier("proxiesNotOnPlan")
-                            Button("Тарифы") { showPlans = true }.accessibilityIdentifier("plansFromSettings")
+                            Text(model.access.reason ?? "Прокси недоступны.").accessibilityIdentifier("proxiesNotOnPlan")
+                            Button("Аккаунт") { showPlans = true }.accessibilityIdentifier("plansFromSettings")
                         }
                     }
                 }

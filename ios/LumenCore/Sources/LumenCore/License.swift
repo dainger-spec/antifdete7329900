@@ -90,7 +90,7 @@ public enum License {
         if browse && proxies { return nil }
         if p.status == .exportOnly {
             switch p.exportReason {
-            case "no_license": return browse ? "Прокси доступны на платных тарифах." : "Выберите тариф, чтобы работать с профилями."
+            case "no_license": return browse ? "Прокси недоступны." : "Профили на этом iPhone сейчас не открываются."
             case "account_disabled": return "Аккаунт заблокирован, напишите в поддержку."
             default: return browse ? "Оплаченный период закончился. Прокси недоступны." : "Оплаченный период закончился."
             }
