@@ -810,6 +810,7 @@ struct ProfileEditorForm: View {
                     .buttonStyle(.lumenSecondary)
                     .fixedSize()
             }
+            EditorNote(L("editor.camera.plan.requirement"))
             EditorRow(L("editor.camera.delivery")) {
                 Picker(L("editor.camera.delivery"), selection: $draft.camera.delivery) {
                     Text(L("editor.camera.delivery.shim")).tag(CameraSubstitution.Delivery.jsShim)

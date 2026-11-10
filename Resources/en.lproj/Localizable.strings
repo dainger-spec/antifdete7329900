@@ -224,6 +224,7 @@
 "editor.camera.mode" = "Mode";
 "editor.camera.plan.title" = "A professional-plan feature";
 "editor.camera.plan.note" = "Camera substitution is part of the Pro and Team plans. On a lower plan these settings are unavailable, and a profile's camera stays off — pages reach this Mac's real camera as usual. Upgrade to Pro to use it.";
+"editor.camera.plan.requirement" = "Works only while a Pro or Team plan is active. If a page still opens your real camera, check that your plan is active in Settings → Account (sign in again if it looks out of date).";
 "editor.camera.mode.off" = "Real camera";
 "editor.camera.mode.block" = "No camera";
 "editor.camera.mode.substitute" = "Substitute";
