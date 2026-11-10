@@ -3,15 +3,15 @@ import BrowserCore
 import SwiftUI
 
 /// A separate window that shows a big live preview of the substituted camera and lets the person
-/// drag a crop rectangle over the source. Opened from the editor's "Open preview" button; it
-/// follows the editor's settings through a `CameraMirror` and writes the crop back through
-/// `setCrop`. One window is reused.
+/// drag a crop rectangle over the source and adjust the look. Opened from the editor's "Open
+/// preview" button; it follows the editor's settings through a `CameraMirror` and writes changes
+/// back through `update`. One window is reused.
 @MainActor
 final class CameraPreviewWindowController: NSWindowController {
     static let shared = CameraPreviewWindowController()
 
     private init() {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 520),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 640),
                               styleMask: [.titled, .closable, .resizable, .miniaturizable],
                               backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -21,8 +21,8 @@ final class CameraPreviewWindowController: NSWindowController {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func present(mirror: CameraMirror, setCrop: @escaping (CameraSubstitution.Crop) -> Void) {
-        window?.contentView = NSHostingView(rootView: CameraPreviewWindowView(mirror: mirror, setCrop: setCrop))
+    func present(mirror: CameraMirror, update: @escaping (CameraSubstitution) -> Void) {
+        window?.contentView = NSHostingView(rootView: CameraPreviewWindowView(mirror: mirror, update: update))
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -31,7 +31,7 @@ final class CameraPreviewWindowController: NSWindowController {
 
 struct CameraPreviewWindowView: View {
     @ObservedObject var mirror: CameraMirror
-    let setCrop: (CameraSubstitution.Crop) -> Void
+    let update: (CameraSubstitution) -> Void
 
     var body: some View {
         VStack(spacing: 12) {
@@ -51,7 +51,7 @@ struct CameraPreviewWindowView: View {
                     }
                     .padding(8)
                 } else {
-                    CameraPreviewView(camera: mirror.camera, height: 320)
+                    CameraPreviewView(camera: mirror.camera, height: 300)
                         .padding(8)
                 }
             }
@@ -60,20 +60,79 @@ struct CameraPreviewWindowView: View {
             // What the page actually gets (crop, fit, mirror and the adjustments applied).
             VStack(alignment: .leading, spacing: 4) {
                 Text(L("editor.camera.preview.result")).font(.caption).foregroundStyle(.secondary)
-                CameraPreviewView(camera: mirror.camera, height: 120)
+                CameraPreviewView(camera: mirror.camera, height: 110)
             }
 
             HStack {
                 Toggle(L("editor.camera.crop.enabled"), isOn: Binding(
                     get: { mirror.camera.crop.enabled },
-                    set: { var crop = mirror.camera.crop; crop.enabled = $0; setCrop(crop) }))
+                    set: { enabled in var crop = mirror.camera.crop; crop.enabled = enabled; setCrop(crop) }))
                     .toggleStyle(.switch)
                 Spacer()
                 Button(L("editor.camera.crop.reset")) { setCrop(.none) }
             }
+
+            Divider()
+            adjustments
         }
         .padding(14)
-        .frame(minWidth: 420, minHeight: 460)
+        .frame(minWidth: 420, minHeight: 540)
+    }
+
+    /// The source look (brightness/contrast/… and grayscale), the same adjustments as the editor,
+    /// written straight back so the preview and the profile stay in step.
+    private var adjustments: some View {
+        let rows: [(key: String, path: WritableKeyPath<CameraSubstitution.Filters, Double>, range: ClosedRange<Double>)] = [
+            ("editor.camera.filter.brightness", \.brightness, 0...2),
+            ("editor.camera.filter.contrast", \.contrast, 0...2),
+            ("editor.camera.filter.saturation", \.saturation, 0...2),
+            ("editor.camera.filter.blur", \.blur, 0...20),
+            ("editor.camera.filter.hue", \.hueRotate, 0...360),
+            ("editor.camera.filter.sepia", \.sepia, 0...1),
+            ("editor.camera.filter.invert", \.invert, 0...1),
+            ("editor.camera.filter.opacity", \.opacity, 0...1),
+        ]
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(L("editor.camera.preview.adjust")).font(.caption).foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(rows.indices, id: \.self) { index in
+                        HStack {
+                            Text(L(rows[index].key)).font(.caption).frame(width: 90, alignment: .leading)
+                            Slider(value: filterBinding(rows[index].path), in: rows[index].range)
+                        }
+                    }
+                    HStack {
+                        Toggle(L("editor.camera.filter.grayscale"), isOn: grayscaleBinding)
+                            .toggleStyle(.switch)
+                        Spacer()
+                        Button(L("editor.camera.filter.reset")) {
+                            var next = mirror.camera; next.filters = .none; update(next)
+                        }
+                        .disabled(mirror.camera.filters.isIdentity)
+                    }
+                }
+            }
+            .frame(maxHeight: 180)
+        }
+    }
+
+    private func filterBinding(_ path: WritableKeyPath<CameraSubstitution.Filters, Double>) -> Binding<Double> {
+        Binding(
+            get: { mirror.camera.filters[keyPath: path] },
+            set: { var next = mirror.camera; next.filters[keyPath: path] = $0; update(next) })
+    }
+
+    private var grayscaleBinding: Binding<Bool> {
+        Binding(
+            get: { mirror.camera.filters.grayscale },
+            set: { var next = mirror.camera; next.filters.grayscale = $0; update(next) })
+    }
+
+    private func setCrop(_ crop: CameraSubstitution.Crop) {
+        var next = mirror.camera
+        next.crop = crop
+        update(next)
     }
 
     /// The largest rectangle of `aspect` that fits in `size`, centred.

@@ -265,12 +265,14 @@
 "editor.camera.error.read" = "Не удалось прочитать %@.";
 
 /* Camera: adjustments, crop, playback */
-"editor.camera.label.note" = "Поставь как у реальной камеры, чтобы страница не отличила — «Как у этого Mac» подставит её точное имя и разрешение.";
+"editor.camera.label.note" = "Поставь как у реальной камеры, чтобы страница не отличила — кнопка подстановки впишет точное имя и разрешение устройства (собственной камеры этого Mac или типичной фронтальной камеры iPhone для мобильного профиля).";
 "editor.camera.matchMac" = "Как у этого Mac";
-"editor.camera.preview.note" = "Живое превью того, что получит страница — обновляется при смене источника, обрезки и коррекции. Видео здесь показано первым кадром.";
+"editor.camera.matchMobile" = "Как у iPhone";
+"editor.camera.preview.note" = "Живое превью того, что получит страница — обновляется при смене источника, обрезки и коррекции. Видео здесь проигрывается по кругу.";
 "editor.camera.preview.open" = "Открыть превью";
 "editor.camera.preview.window" = "Превью камеры";
 "editor.camera.preview.result" = "Результат";
+"editor.camera.preview.adjust" = "Коррекция";
 "editor.camera.filters" = "Коррекция";
 "editor.camera.filter.brightness" = "Яркость";
 "editor.camera.filter.contrast" = "Контраст";

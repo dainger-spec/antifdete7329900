@@ -3,12 +3,13 @@ import AVFoundation
 import BrowserCore
 import CoreImage
 import ImageIO
+import QuartzCore
 import SwiftUI
 
 /// Draws one frame of what a page would be handed for a `CameraSubstitution`, for the editor's live
 /// preview — the same pipeline the system-camera extension and the in-page shim draw (source, crop,
-/// fit, mirror, the adjustments), so the preview matches the real feed. A video source shows its
-/// first frame; a running feed is not captured here, the frame is rebuilt from the settings.
+/// fit, mirror, the adjustments), so the preview matches the real feed. A video source is played and
+/// looped so the preview moves like the real feed.
 enum CameraPreview {
     private static let ciContext = CIContext()
     private static let bars: [(r: CGFloat, g: CGFloat, b: CGFloat)] = [
@@ -16,6 +17,8 @@ enum CameraPreview {
         (0.75, 0.0, 0.75), (0.75, 0.0, 0.0), (0.0, 0.0, 0.75),
     ]
     private static var cachedVideoFrame: (key: Int, image: CGImage?)?
+    // A looping player for the live video preview, keyed by the video's bytes.
+    private static var livePlayer: (key: Int, player: AVPlayer, output: AVPlayerItemVideoOutput, last: CGImage?)?
 
     static func frame(for camera: CameraSubstitution, width: Int, height: Int, sequence: UInt64) -> CGImage? {
         guard width > 0, height > 0,
@@ -114,8 +117,42 @@ enum CameraPreview {
         return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 
-    /// The first frame of the chosen video (cached), via a temporary file.
+    /// The live frame of the chosen video, played and looped, for the preview; falls back to the
+    /// first frame until the player has one.
     private static func videoFrame(for camera: CameraSubstitution) -> CGImage? {
+        guard let data = camera.videoData else { return nil }
+        let key = data.count
+        if livePlayer?.key != key {
+            livePlayer?.player.pause()
+            livePlayer = nil
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("pb-cam-live.mov")
+            if (try? data.write(to: url)) != nil {
+                let item = AVPlayerItem(url: url)
+                let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+                item.add(output)
+                let player = AVPlayer(playerItem: item)
+                player.isMuted = true
+                player.play()
+                livePlayer = (key, player, output, firstVideoFrame(for: camera))
+            }
+        }
+        guard var state = livePlayer else { return firstVideoFrame(for: camera) }
+        let time = state.output.itemTime(forHostTime: CACurrentMediaTime())
+        if state.output.hasNewPixelBuffer(forItemTime: time),
+           let pixelBuffer = state.output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) {
+            let ci = CIImage(cvPixelBuffer: pixelBuffer)
+            state.last = ciContext.createCGImage(ci, from: ci.extent) ?? state.last
+            livePlayer = state
+        }
+        if let item = state.player.currentItem, item.duration.isNumeric,
+           CMTimeGetSeconds(state.player.currentTime()) >= CMTimeGetSeconds(item.duration) - 0.05 {
+            state.player.seek(to: .zero)
+        }
+        return livePlayer?.last
+    }
+
+    /// The first frame of the chosen video (cached), via a temporary file.
+    private static func firstVideoFrame(for camera: CameraSubstitution) -> CGImage? {
         guard let data = camera.videoData else { return nil }
         let key = data.count
         if let cachedVideoFrame, cachedVideoFrame.key == key { return cachedVideoFrame.image }

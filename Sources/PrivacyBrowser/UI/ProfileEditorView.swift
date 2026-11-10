@@ -540,12 +540,13 @@ struct ProfileEditorView: View {
         }
     }
 
-    /// Opens the separate live preview window, which follows these settings and writes the crop back.
+    /// Opens the separate live preview window, which follows these settings and writes the crop and
+    /// adjustments back.
     private func openCameraPreview() {
         cameraMirror.camera = draft.camera
-        let cropBinding = $draft.camera.crop
-        CameraPreviewWindowController.shared.present(mirror: cameraMirror) { crop in
-            cropBinding.wrappedValue = crop
+        let cameraBinding = $draft.camera
+        CameraPreviewWindowController.shared.present(mirror: cameraMirror) { camera in
+            cameraBinding.wrappedValue = camera
         }
     }
 

@@ -927,7 +927,7 @@ struct ProfileEditorForm: View {
                 TextField(L("editor.camera.label"), text: $draft.camera.deviceLabel,
                           prompt: Text(verbatim: "FaceTime HD Camera"))
                     .lumenField("FaceTime HD Camera", isEmpty: draft.camera.deviceLabel.isEmpty)
-                Button(L("editor.camera.matchMac")) { matchThisMac() }
+                Button(matchDeviceTitle) { matchDeviceCamera() }
                     .buttonStyle(.lumenSecondary)
                     .fixedSize()
             }
@@ -1067,13 +1067,32 @@ struct ProfileEditorForm: View {
         }
     }
 
-    /// Fills the camera's name and resolution from this Mac's own built-in camera, so a page sees
-    /// exactly what the real one reports (`HostCamera`).
-    private func matchThisMac() {
-        guard let builtin = HostCamera.builtin() else { return }
-        draft.camera.deviceLabel = builtin.name
-        draft.cameraWidth = String(builtin.width)
-        draft.cameraHeight = String(builtin.height)
+    /// The "match" button's title, following the profile's device: this Mac for a Mac profile, an
+    /// iPhone/iPad for a mobile one.
+    private var matchDeviceTitle: String {
+        switch DeviceGenerations.resolved(id: draft.deviceGenerationID).platform {
+        case .macOS: return L("editor.camera.matchMac")
+        case .iOS, .iPadOS: return L("editor.camera.matchMobile")
+        }
+    }
+
+    /// Fills the camera's name, resolution and facing to match the profile's device. A Mac profile
+    /// copies this Mac's own built-in camera exactly (`HostCamera`), so a page sees what the real
+    /// one reports. An iOS/iPadOS profile cannot read an iPhone's camera from the build machine, so
+    /// it uses the believable default a real device reports — the front camera, 1280×720, user-facing.
+    private func matchDeviceCamera() {
+        switch DeviceGenerations.resolved(id: draft.deviceGenerationID).platform {
+        case .macOS:
+            guard let builtin = HostCamera.builtin() else { return }
+            draft.camera.deviceLabel = builtin.name
+            draft.cameraWidth = String(builtin.width)
+            draft.cameraHeight = String(builtin.height)
+        case .iOS, .iPadOS:
+            draft.camera.deviceLabel = "Front Camera"
+            draft.cameraWidth = "1280"
+            draft.cameraHeight = "720"
+            draft.camera.facing = .user
+        }
     }
 
     /// The substituted camera's colour as a SwiftUI `Color`, kept in the draft as "#RRGGBB".
