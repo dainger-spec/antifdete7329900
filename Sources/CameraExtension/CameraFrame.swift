@@ -203,9 +203,8 @@ enum CameraFrameRenderer {
         let destination = CGRect(x: (frameWidth - destinationWidth) / 2, y: (frameHeight - destinationHeight) / 2,
                                  width: destinationWidth, height: destinationHeight)
         context.saveGState()
-        // Flip to a top-left origin so the image is upright in the pixel buffer's rows, and mirror.
-        context.translateBy(x: 0, y: frameHeight)
-        context.scaleBy(x: 1, y: -1)
+        // The CGContext over the pixel buffer reads top-first like the preview's, so the image is
+        // upright without a vertical flip; only the mirror (left-right) is applied.
         if config.mirror {
             context.translateBy(x: frameWidth, y: 0)
             context.scaleBy(x: -1, y: 1)

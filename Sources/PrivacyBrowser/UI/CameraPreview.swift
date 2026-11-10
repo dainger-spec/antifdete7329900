@@ -103,8 +103,6 @@ enum CameraPreview {
         let destination = CGRect(x: (frameWidth - destinationWidth) / 2, y: (frameHeight - destinationHeight) / 2,
                                  width: destinationWidth, height: destinationHeight)
         context.saveGState()
-        context.translateBy(x: 0, y: frameHeight)
-        context.scaleBy(x: 1, y: -1)
         if camera.mirror { context.translateBy(x: frameWidth, y: 0); context.scaleBy(x: -1, y: 1) }
         context.interpolationQuality = .high
         context.draw(source, in: destination)
