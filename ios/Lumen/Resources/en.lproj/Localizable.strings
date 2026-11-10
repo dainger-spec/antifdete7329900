@@ -177,3 +177,14 @@
 "часов" = "hours";
 "Сессия %@" = "Session %@";
 "Яндекс" = "Yandex";
+
+/* A proxy written as one line (ProxyLine): what is wrong with it. */
+"Введите адрес прокси." = "Enter the proxy’s address.";
+"Здесь один прокси: одна строка." = "One proxy goes here: a single line.";
+"В адресе прокси не бывает пробелов." = "A proxy’s address has no spaces.";
+"Вид прокси «%@» не поддерживается: подойдут socks5 и http." = "The proxy type “%@” is not supported: use socks5 or http.";
+"У адреса прокси нет пути после порта." = "A proxy’s address has no path after the port.";
+"Перед паролем нужен логин." = "A password needs a login before it.";
+"Это не адрес прокси: нужен адрес и порт." = "This is not a proxy’s address: it needs a host and a port.";
+"Порт — число от 1 до 65535." = "The port is a number from 1 to 65535.";
+"Укажите порт: адрес:порт." = "Add the port: host:port.";
