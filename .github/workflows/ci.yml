@@ -93,6 +93,12 @@ jobs:
       # GitHub's API — none, running, failed, another commit, the fast pipeline's, not GitHub's: no.
       - name: A release only on a commit the full pipeline passed (its gate, against saved answers)
         run: scripts/test_full_run_gate.sh
+      # No release while the server signs no automation into the documents of rights (the owner and
+      # the lead, 9 November): the gate against made-up vectors — the decision shown: yes; the server's
+      # vectors before the field and every departure from the decision: no — and release.sh, asked for
+      # a signed release, stopping on the app's copy of the vectors while they show none.
+      - name: No release while the server's vectors show no automation signed by plan (the gate and release.sh's stop)
+        run: scripts/test_automation_plan_gate.sh
 
   macos-checks:
     name: Fast — build, core tests, the release's dry run, and the checks that stop a release

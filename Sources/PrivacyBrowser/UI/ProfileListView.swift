@@ -111,6 +111,7 @@ private struct SkipLayer: View {
 struct ProfileListView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
     @State private var editing: ProfileEditorView.Target?
     @State private var passwordsFor: ProfileSummary?
     @State private var importingCookiesFor: ProfileSummary?
@@ -266,6 +267,10 @@ struct ProfileListView: View {
         }
         commands.append(Command(id: "proxies", title: L("palette.proxies"), symbol: "network", run: actions.openProxies))
         commands.append(Command(id: "warmQueue", title: L("profiles.menu.warmUpSeveral"), symbol: "flame", run: actions.warmUpQueue))
+        commands.append(Command(id: "scenarios", title: L("palette.scenarios"), symbol: "play.rectangle", shortcut: "⇧⌘E",
+                                run: actions.openScenarios))
+        commands.append(Command(id: "automation", title: L("profiles.menu.automation"), symbol: "terminal", run: actions.openAutomation))
+        commands.append(Command(id: "help", title: L("menu.help"), symbol: "book", shortcut: "⌘?", run: actions.openHelp))
         if let syncNow = actions.syncNow {
             commands.append(Command(id: "sync", title: L("palette.syncNow"), symbol: "arrow.triangle.2.circlepath", run: syncNow))
         }
@@ -535,7 +540,10 @@ struct ProfileListView: View {
             warmUpSeveral: { ids in warmUpSeveral(ids) },
             assignProxies: { ids in assigningProxies = ProxyAssignView.Request(profileIDs: Set(ids), proxyIDs: []) },
             deleteSeveral: { ids in pendingBulkDelete = ids },
-            setTagColor: { tag, color in model.setTagColor(color, for: tag) })
+            setTagColor: { tag, color in model.setTagColor(color, for: tag) },
+            openPalette: { model.showingPalette = true },
+            openScenarios: { openWindow(id: "scenarios") },
+            openHelp: { openWindow(id: "help") })
     }
 }
 
@@ -757,6 +765,11 @@ struct ProfileActions {
     var deleteSeveral: ([UUID]) -> Void = { _ in }
     /// A tag's colour for the whole vault (`TagColors`); nil takes it away.
     var setTagColor: (String, Int?) -> Void = { _, _ in }
+    /// The sidebar's own rows (the owner, 10 November: in the interface, not behind a menu): the
+    /// command palette (⌘K), the scenario editor's window, the app's help.
+    var openPalette: () -> Void = {}
+    var openScenarios: () -> Void = {}
+    var openHelp: () -> Void = {}
 }
 
 // MARK: - The screen
@@ -1361,29 +1374,37 @@ private struct ProfilesSidebar: View {
             Color.clear.frame(height: 44)
             LumenLockup.sidebar
                 .padding(.leading, 8)
-                .padding(.bottom, 20)
+                .padding(.bottom, 16)
+            paletteButton
+                .padding(.bottom, 10)
             item(.all, title: L("profiles.title"))
             if let proxyCount { proxiesItem(proxyCount) }
-            caption(L("profiles.filters"))
-            item(.running)
-            item(.proxied)
-            item(.direct)
-            item(.ephemeral)
-            let tags = ProfileFilter.tags(of: rows)
-            if !tags.isEmpty {
-                caption(L("profiles.tags"))
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 2) {
+            // What was behind a menu, in the interface (the owner, 10 November): the scenario
+            // editor, the automation API's settings, the app's help.
+            toolItem(symbol: "play.rectangle", title: L("scenarios.title"), action: actions.openScenarios)
+            toolItem(symbol: "terminal", title: L("settings.section.automation"), action: actions.openAutomation)
+            toolItem(symbol: "book", title: L("sidebar.help"), action: actions.openHelp)
+            // The collections and the tags take what the window has left and scroll within it:
+            // what is above and the foot keep their places. Rows of a fixed number pushed Lock and
+            // Settings out at the window's foot (CI run 557, a 1024 × 768 screen; the window may be
+            // 560 pt tall).
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    caption(L("profiles.filters"))
+                    item(.running)
+                    item(.proxied)
+                    item(.direct)
+                    item(.ephemeral)
+                    let tags = ProfileFilter.tags(of: rows)
+                    if !tags.isEmpty {
+                        caption(L("profiles.tags"))
                         ForEach(tags, id: \.self) { tag in tagItem(tag) }
                     }
                 }
-                .scrollIndicators(.automatic)
-                // Up to eight rows, then the rest scrolls; fewer in a short window, never fewer
-                // than two — a fixed eight pushed Lock and Settings out at the window's foot (CI
-                // run 557, a 1024 × 768 screen; the window may be 560 pt tall).
-                .frame(minHeight: CGFloat(min(tags.count, 2)) * 32, maxHeight: CGFloat(min(tags.count, 8)) * 32)
             }
-            Spacer(minLength: 16)
+            .scrollIndicators(.automatic)
+            .frame(maxHeight: .infinity)
+            .padding(.bottom, 12)
             SyncStatusButton(sync: sync, action: actions.openSync)
                 .padding(.bottom, rights == nil ? 8 : 2)
             if let rights {
@@ -1416,6 +1437,37 @@ private struct ProfilesSidebar: View {
             .padding(.top, 20)
             .padding(.bottom, 6)
             .accessibilityAddTraits(.isHeader)
+    }
+
+    /// The command palette, where a person looks for a way to anything: a field's look, its keys
+    /// at the end, and a click opens it.
+    private var paletteButton: some View {
+        Button(action: actions.openPalette) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textTertiary)
+                Text(L("sidebar.palette"))
+                    .font(.lumenBody)
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                KeyCap(keys: "⌘K", small: true) // l10n: not text
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.field))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.fieldBorder, lineWidth: 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(L("sidebar.palette.help"))
+    }
+
+    /// A row that opens a window or a sheet of its own, not a section of this one: no count, never
+    /// the chosen one.
+    private func toolItem(symbol: String, title: String, action: @escaping () -> Void) -> some View {
+        SidebarItem(symbol: symbol, title: title, count: nil, selected: false, action: action)
     }
 
     private func item(_ value: ProfileFilter, title: String? = nil) -> some View {
@@ -1489,7 +1541,8 @@ private struct SidebarItem: View {
     /// A tag's colour: its dot in place of the symbol.
     var dot: Int?
     let title: String
-    let count: Int
+    /// Nil: a row that counts nothing (the scenario editor, the automation API, Help).
+    let count: Int?
     var alert = false
     let selected: Bool
     let action: () -> Void
@@ -1517,10 +1570,12 @@ private struct SidebarItem: View {
                     if alert {
                         Circle().fill(Theme.danger).frame(width: 5, height: 5)
                     }
-                    Text(verbatim: "\(count)")
-                        .font(.lumenSecondary)
-                        .foregroundStyle(alert ? Theme.danger : Theme.textTertiary)
-                        .monospacedDigit()
+                    if let count {
+                        Text(verbatim: "\(count)")
+                            .font(.lumenSecondary)
+                            .foregroundStyle(alert ? Theme.danger : Theme.textTertiary)
+                            .monospacedDigit()
+                    }
                 }
             }
             .padding(.horizontal, 10)

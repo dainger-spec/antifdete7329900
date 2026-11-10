@@ -62,6 +62,7 @@ final class PageDriver {
 
     /// The driver's content world.
     static let world = WKContentWorld.world(name: "PBAutomation")
+    private static let log = Logger(subsystem: "PrivacyBrowser", category: "PageDriver")
 
     let webView: WKWebView
     let input: PageInput
@@ -308,6 +309,7 @@ final class PageDriver {
         let size = webView.bounds.size
         let start = CGPoint(x: Double.random(in: 0.2...0.8, using: &generator) * size.width,
                             y: Double.random(in: 0.3...0.9, using: &generator) * size.height)
+        await measureViewport(entering: start)
         let from = input.pointerViewportPoint() ?? start
         let distance = hypot(point.x - from.x, point.y - from.y)
         let steps = max(4, min(60, Int(distance / Double.random(in: 9...15, using: &generator))))
@@ -315,6 +317,48 @@ final class PageDriver {
                                      interval: Double.random(in: 0.012...0.02, using: &generator))
         guard moved else { throw Failure.noWindow }
         try await pause(0.08...0.22)
+    }
+
+    // MARK: Where the viewport is
+
+    /// The document and the size of the web view the viewport's place was last measured for.
+    private var measuredFor: (document: Double, size: CGSize)?
+
+    /// Finds where the viewport is in the web view (`PageInput.viewportOrigin`), once for a document
+    /// and a size of the view. In a window of ours the viewport starts where the view does; in
+    /// Safari's the page may run under the toolbar (docs/PAGE_INPUT.md), and a press aimed by the
+    /// view's top would land that much off. Measured, not read from the web view: the page is asked
+    /// — from the driver's own world, which only listens — where it saw a move of this input, and
+    /// the difference is kept. The move is the pointer where it is, or coming onto the page at
+    /// `point` the first time, where a hand's would. A page that reports no move (the pointer over
+    /// a frame of another site) keeps what was measured before.
+    private func measureViewport(entering point: CGPoint) async {
+        let size = webView.bounds.size
+        let document = try? await isolated("""
+            if (globalThis.__pbMoves === undefined) {
+              globalThis.__pbMoves = {mark: Math.random(), x: null, y: null};
+              addEventListener('mousemove', (e) => { __pbMoves.x = e.clientX; __pbMoves.y = e.clientY; }, {capture: true, passive: true});
+            }
+            __pbMoves.x = null;
+            return __pbMoves.mark;
+            """) as? Double
+        guard let document else { return }
+        if let measuredFor, measuredFor.document == document, measuredFor.size == size { return }
+        let probe = input.pointerViewportPoint() ?? point
+        guard await input.move(along: [probe], interval: 0) else { return }
+        let scale = webView.pageZoom * webView.magnification
+        for _ in 0..<15 {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            let seen = try? await isolated("return __pbMoves.x === null ? null : [__pbMoves.x, __pbMoves.y];") as? [NSNumber]
+            guard let seen, seen.count == 2 else { continue }
+            let off = CGPoint(x: (probe.x - seen[0].doubleValue) * scale, y: (probe.y - seen[1].doubleValue) * scale)
+            if abs(off.x) >= 0.5 || abs(off.y) >= 0.5 {
+                input.viewportOrigin = CGPoint(x: input.viewportOrigin.x + off.x, y: input.viewportOrigin.y + off.y)
+                Self.log.notice("The viewport starts \(Int(self.input.viewportOrigin.x.rounded()), privacy: .public), \(Int(self.input.viewportOrigin.y.rounded()), privacy: .public) pt into its web view")
+            }
+            measuredFor = (document, size)
+            return
+        }
     }
 
     // MARK: The wheel

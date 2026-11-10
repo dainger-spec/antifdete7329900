@@ -76,5 +76,9 @@ to fail:
 - Timing and paths compared with people's (step 7, humanity settings); the owner's one-time
   capture of a real mouse trajectory.
 - A web view with toolbar insets (Safari's window): the viewport's top may sit below the view's.
+  Not assumed either way since 10 November: `PageDriver.measureViewport` asks the page where it saw
+  a move and keeps the difference (`PageInput.viewportOrigin`); `Lumen --scenario-safari-check`
+  holds a click in Safari's window to the button it aimed at. What the difference is on each macOS
+  is in that check's log and the app's ("The viewport starts …").
 - Real user input at the same moment (the input queue).
 - Typing characters the current layout has no key for.

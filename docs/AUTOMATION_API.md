@@ -77,11 +77,20 @@ It reads the token from `PB_API_TOKEN` and the port from `PB_API_PORT` (default 
 
 ## The plan
 
-The whole API is part of the plan with automation (the document of rights' `features` names
-`automation`). The token is checked first — without it, or with a wrong one, **401** — and then the
+The whole API is part of the Professional and Team plans, and of the trial (the document of rights'
+`features` names `automation`; Personal has none). The token is checked first — without it, or with a wrong one, **401** — and then the
 plan: without automation every route, the profile list, start, stop, open, cookies and scenarios
 alike, answers **403** `automation_not_in_plan`, with the reason, before anything of the request is
 read.
+
+The server signs the field from its release after v2026.11.09.3. Until the app's copy of the
+server's vectors shows it — an active trial, Professional and Team document each with `automation`,
+an active Personal one without — `scripts/release.sh` makes no signed or published release (its
+step 0a, `scripts/automation_plan_gate.py`; docs/CI.md, "Before a release"): against a server that
+signs no `features` the API would refuse everyone. The copy
+(`Tests/BrowserCoreTests/Fixtures/entitlement-test-vectors.json`) is replaced with the server's when
+that release is the one deployed; `LicenseTests` then holds every valid document there to the rule
+with the app's own verifier (until then that test is skipped, and says why).
 
 ## Scenarios
 
@@ -90,7 +99,7 @@ pointer, wheel and keyboard, which pages cannot tell from a person's.
 
 | Request | Does |
 |---|---|
-| `POST /v1/profiles/{profile}/scenario` `{"source": "…JavaScript…", "params": {…}}` | Runs that text on the running profile, in a window of its own; **202** `{"runID": …}`. `params` is optional (the script's `params`) |
+| `POST /v1/profiles/{profile}/scenario` `{"source": "…JavaScript…", "params": {…}}` | Runs that text on the running profile, in a window of its own — Safari's where the profile's process hosts Safari's chrome, the app's elsewhere (docs/AUTOMATION.md); **202** `{"runID": …}`. `params` is optional (the script's `params`) |
 | `POST /v1/profiles/{profile}/scenario` `{"scenario": "Sign in"}` | Runs the saved scenario of that exact name (**404** `no_scenario` when there is not one) |
 | `GET /v1/profiles/{profile}/scenario` | The profile's last run: `running`, `outcome` (`finished`, `failed`, `stopped`), `reason`, and its `lines` (`at`, `kind`, `text`) |
 | `POST /v1/profiles/{profile}/scenario/stop` | Stops it: a command under way finishes first |

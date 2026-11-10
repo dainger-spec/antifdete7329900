@@ -1565,6 +1565,26 @@ enum SafariChrome {
         return controller
     }
 
+    /// The tab of the window `openWindow` just opened: what a scenario's run goes to addresses
+    /// through (`load(_:in:)`). Nil when this Safari hands out no tabs.
+    static func newestTab() -> NSObject? {
+        guard let windowClass: AnyObject = NSClassFromString("BrowserWindowController") else { return nil }
+        return firstTab(of: windowClass)
+    }
+
+    /// Navigates `tab` to `address` the way the address bar does (`loadURL:`), so that the chrome's
+    /// own bookkeeping follows. False when this Safari's tab does not take it.
+    @discardableResult
+    static func load(_ address: URL, in tab: NSObject) -> Bool {
+        let selector = NSSelectorFromString("loadURL:")
+        guard tab.responds(to: selector) else { return false }
+        if let exception = PBCatchException({ _ = tab.perform(selector, with: address as NSURL) }) {
+            log.error("Safari's tab threw \(exception.name.rawValue, privacy: .public) loading an address: \(exception.reason ?? "", privacy: .private)")
+            return false
+        }
+        return true
+    }
+
     /// The tab of the window just opened. Safari hands out its tabs per process, newest last.
     private static func firstTab(of windowClass: AnyObject) -> NSObject? {
         let selector = NSSelectorFromString("allBrowserTabViewItemsFromAllWindows")

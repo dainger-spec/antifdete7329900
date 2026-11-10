@@ -75,6 +75,17 @@ DRY RUN block. Start a full run on the commit to release with
 the commit, a failed attempt then a passed one: yes; none, running, failed, cancelled, another
 commit, the fast pipeline's run, an answer that is not GitHub's, a short SHA: no.)
 
+It also stops (step 0a) while the server signs no automation into the documents of rights: the
+automation API and scenario runs are the plan's (docs/AUTOMATION_API.md, "The plan"), and an app with
+that gate, released against a server without `features`, would refuse them to everyone (the owner
+and the lead, 9 November). `scripts/automation_plan_gate.py` reads the app's copy of the server's
+vectors (`Tests/BrowserCoreTests/Fixtures/entitlement-test-vectors.json`) and says yes only when
+they show an active trial, Professional and Team document each with `automation`, an active Personal
+one without, and an export-only one; the stop lifts when the server's vectors with the field are
+copied in, which is done when that server release is the one deployed — the vectors say what the
+server's code signs, not what the live server runs. (`scripts/test_automation_plan_gate.sh`: the
+gate against made-up vectors, and `release.sh` with a made-up Developer ID stopping there.)
+
 GitHub starts a schedule, and offers Run workflow, only for a workflow the repository's default
 branch has, and a schedule runs that branch's code. The default branch could not be changed (GitHub:
 "Could not change default branch", the owner, 4 November), so the same `full.yml` is also on it

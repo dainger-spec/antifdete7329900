@@ -329,7 +329,7 @@ final class AutomationHandler {
 
     /// The scenario routes without automation in the plan: said, with the reason.
     private static let notInPlan = AutomationHTTP.Response.error(403, "automation_not_in_plan",
-        "The automation API is part of the plan with automation; this license's plan does not include it.")
+        "The automation API is part of the Professional and Team plans; this license's plan does not include it.")
 
     private struct ScenarioAnswer: Encodable {
         var runID: String

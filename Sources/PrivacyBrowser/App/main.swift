@@ -122,6 +122,12 @@ MainActor.assumeIsolated {
         // SafariMenuWalkCheck, SafariMenuWalk; scripts/menu_walk.py compares it with the record).
         Localization.applyProcessLanguage()
         SafariMenuWalkCheck.start(arguments: arguments)
+    } else if arguments.contains("--scenario-safari-check") {
+        // A scenario's run in a profile's own process, in Safari's window: its click must land on
+        // the button it was aimed at, as the page itself saw it (CI; ScenarioSafariCheck;
+        // scripts/scenario_safari_check.sh starts the proxy that serves the page).
+        Localization.applyProcessLanguage()
+        ScenarioSafariCheck.start(arguments: arguments)
     } else if arguments.contains("--default-browser-check") {
         // Whether Safari's own question about the default browser throws in a profile's process of
         // this app, and what the system answers about http and https (SafariChrome; CI runs it on

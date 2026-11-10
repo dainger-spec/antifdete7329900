@@ -73,7 +73,8 @@ final class ProfileProcess {
     func send(_ command: ProfileCommand) {
         guard let commands, process.isRunning, let data = ProfileChannel.encode(command) else { return }
         switch command {
-        case .activate, .openWindow, .openURL, .showLibrary, .showPasswords: isForWarmUpOnly = false
+        // A scenario's run opens a window the person sees.
+        case .activate, .openWindow, .openURL, .showLibrary, .showPasswords, .runScenario: isForWarmUpOnly = false
         default: break
         }
         do {

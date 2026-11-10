@@ -118,6 +118,12 @@ jobs:
       # GitHub's API — none, running, failed, another commit, the fast pipeline's, not GitHub's: no.
       - name: A release only on a commit the full pipeline passed (its gate, against saved answers)
         run: scripts/test_full_run_gate.sh
+      # No release while the server signs no automation into the documents of rights (the owner and
+      # the lead, 9 November): the gate against made-up vectors — the decision shown: yes; the server's
+      # vectors before the field and every departure from the decision: no — and release.sh, asked for
+      # a signed release, stopping on the app's copy of the vectors while they show none.
+      - name: No release while the server's vectors show no automation signed by plan (the gate and release.sh's stop)
+        run: scripts/test_automation_plan_gate.sh
 
   macos-27:
     if: github.event_name != 'schedule'
@@ -350,6 +356,12 @@ jobs:
           python3 scripts/menu_walk.py --app build/unsandboxed/Lumen.app --out build/egress27/menu-walk \
             --title "macOS 27 - Safari's menu" --record "docs/menu-walk/safari-$major.json" --check \
             --ignore "$HOME/Library/Logs:$HOME/actions-runner:$HOME/runners" --safari-sentinels
+      - name: macOS 27 - a scenario's run in Safari 27's window — its click on the button it aimed at (reported)
+        # scripts/scenario_safari_check.sh, as in the macOS 26 job: fails the step, not the job.
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 10
+        run: TITLE="macOS 27 - a scenario in Safari's window" scripts/scenario_safari_check.sh build/unsandboxed/Lumen.app build/egress27/scenario-safari
       - name: macOS 27 - a profile's data through signing out, into other accounts and back (it must fail when lost)
         # scripts/account_switch_check.py, as in the macOS 26 job, with its control.
         if: always()
@@ -1009,6 +1021,22 @@ jobs:
         with:
           name: menu-walk
           path: build/menu-walk
+          if-no-files-found: ignore
+      - name: A scenario's run in Safari's window — its click on the button it aimed at, as the page saw it
+        # scripts/scenario_safari_check.sh (Lumen --scenario-safari-check): a profile started without
+        # a window, as the scenario editor's Run starts one, runs a scenario on the self-test proxy's
+        # form in a window of Safari's opened for the run. The page's own record must hold a trusted
+        # click on the button inside the button's box (the viewport's place in Safari's web view,
+        # which may run under the toolbar, found right), the button must count it and the field hold
+        # what was typed. The owner, 10 November: a run in a window of the app's own is not Safari.
+        if: always()
+        timeout-minutes: 10
+        run: scripts/scenario_safari_check.sh build/unsandboxed/Lumen.app build/scenario-safari
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scenario-safari
+          path: build/scenario-safari
           if-no-files-found: ignore
       - name: The license's renewals, as the account server sees them (they must fail when broken)
         # scripts/license_renewal_check.py: a stand-in account server on 127.0.0.1 answers the

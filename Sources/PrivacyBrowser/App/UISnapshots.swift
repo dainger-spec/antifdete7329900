@@ -294,6 +294,13 @@ enum UISnapshots {
         problems += await Shot(name: "palette-search", size: CommandPaletteView.size, titled: false) {
             CommandPaletteView(commands: paletteCommands, query: "north")
         }.capture(into: folder)
+        // The app's help (HelpView), as the sidebar's Help, the scenario editor's Commands and the
+        // automation settings open it: a page of steps and code, the commands' table, the requests'.
+        for topic in [HelpTopic.scenarios, .commands, .api] {
+            problems += await Shot(name: "help-\(topic.rawValue)", size: CGSize(width: 1040, height: 760)) {
+                HelpView(topic: .constant(topic))
+            }.capture(into: folder)
+        }
         // A profile's window that is not Safari's: what its chip's popover says, for a structural
         // piece missing and for the sandboxed build (SimplifiedModeNotice).
         problems += await Shot(name: "simplified-mode", size: CGSize(width: 360, height: 290), titled: false) {

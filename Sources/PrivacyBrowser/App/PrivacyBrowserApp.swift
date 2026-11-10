@@ -68,6 +68,9 @@ struct PrivacyBrowserApp: App {
                 Button(L("menu.showHistory")) { keyBrowserWindow?.showHistory() }
                     .keyboardShortcut("y")
             }
+            CommandGroup(replacing: .help) {
+                HelpMenuButton()
+            }
         }
         // The scenario editor (docs/AUTOMATION.md): File › Scenarios.
         Window(L("window.scenarios.title"), id: "scenarios") {
@@ -80,6 +83,16 @@ struct PrivacyBrowserApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1100, height: 760)
+        // The app's own help (HelpView): Help › Lumen Help (⌘?), and Help in the Profiles window.
+        Window(L("window.help.title"), id: "help") {
+            HelpView(topic: $model.helpTopic)
+                .preferredColorScheme(.dark)
+                .background(WindowReader { window in
+                    Theme.applyAppWindow(to: window)
+                })
+        }
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 1040, height: 760)
         // ⌘, and the app menu's Settings…; also ⋯ → Settings… in the Profiles window.
         Settings {
             SettingsView()
@@ -196,6 +209,16 @@ private struct ScenariosMenuButton: View {
         Button(L("menu.scenarios")) { openWindow(id: "scenarios") }
             .keyboardShortcut("e", modifiers: [.command, .shift])
             .disabled(model.phase != .unlocked)
+    }
+}
+
+/// Help › Lumen Help (⌘?): the app's own help, with the vault locked or open.
+private struct HelpMenuButton: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button(L("menu.help")) { openWindow(id: "help") }
+            .keyboardShortcut("?", modifiers: .command)
     }
 }
 
