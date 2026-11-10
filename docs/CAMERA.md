@@ -71,7 +71,7 @@ same bar as the rest of the file:
 - faint, moving sensor-like grain on every frame, so the picture is never frozen (the first thing a
   virtual-camera check looks for), and `bars` also carries a moving bar and a running clock.
 
-## The system camera (planned)
+## The system camera (a CMIO Camera Extension)
 
 For a feed that is indistinguishable at the JavaScript layer — recognised as a genuine built-in
 camera, past liveness and anti-bot checks — the frames must come from the OS capture pipeline, not
@@ -79,7 +79,7 @@ a canvas. That is a **CMIO Camera Extension**: a signed system extension, bundle
 activated through `SystemExtensions`, that registers a virtual capture device the whole Mac sees.
 WebKit then builds the frames its own way, so a page cannot tell it from the built-in camera.
 
-Two things to know about that path:
+Two things that shape it:
 
 - It is **global, not per-profile**: the virtual device is visible to every app and to this Mac's
   real Safari, and to every profile, as one device. So the per-profile layer here is still needed —
@@ -87,10 +87,41 @@ Two things to know about that path:
   "Compare with Safari" measurement), and to name it believably — otherwise the device itself is a
   cross-profile fingerprint. The system extension is the frame engine; this layer is the gate.
 - It needs the app's Apple Developer signing (the `com.apple.developer.system-extension.install`
-  entitlement, a provisioning profile, notarization), and it builds and activates only on a Mac.
+  entitlement, a provisioning profile, notarization). It builds and activates only on a Mac, so CI
+  compiles it against the SDK (`CAM=check`) but cannot activate it.
 
-The frame pipeline here — source, crop, filters, playback — is the same pixels such an extension
-would push, so it is built once and feeds both.
+### Stage 1 (here): the extension
+
+`Sources/CameraExtension/` is the extension — a standalone SwiftPM executable target, no
+BrowserCore dependency so it stays small:
+
+- `CameraProviderSource` publishes one virtual device; `CameraDeviceSource` owns its output stream
+  and generates frames; `CameraStreamSource` hands start/stop to the device.
+- `CameraFrameRenderer` draws the frame (a solid colour or a moving test pattern, with grain so it
+  is never frozen) into a BGRA pixel buffer, at the configured size and rate.
+- `CameraExtensionConfig` reads a small JSON the app writes to the shared app group
+  (`<group>/camera.json`: label, source, colour, size, frame rate), so the device can read as
+  "FaceTime HD Camera" and show the chosen feed. Absent → a default test pattern.
+
+Packaged like the network guard: `Resources/CameraExtension/Info.plist` (a `CMIOExtension` dict
+with a Mach service under the app group) and `CameraExtension.entitlements` (sandboxed, the app
+group, team identifiers — no network). `scripts/build-app.sh` builds and lays it out beside the app
+unsigned with `CAM=check` (CI compiles it; off by default so an ordinary build is untouched), and
+signs and embeds it under `Contents/Library/SystemExtensions/` with `CAM=1` (needs `CAMERA_PROFILE`
+and the app's signing), mirroring the `NE=1`/`NE=check` network-guard flow.
+
+### Stage 2 (next, on a Mac)
+
+- The app-side activation manager (`OSSystemExtensionManager`, mirroring `NetworkGuard`): install,
+  the user's approval in System Settings, state, and writing the active profile's `camera.json`.
+- A per-profile **delivery** choice (the JavaScript shim here, or the system camera) in the editor.
+- The per-profile gate: the shim hides/renames the virtual device so it does not leak across
+  profiles or into the Safari comparison (above).
+- Richer frames in the extension (an image, a video, filters, crop — the same pixels the shim
+  draws), fed from the app.
+
+The frame pipeline in the shim — source, crop, filters, playback — is the same pixels the extension
+will push, so it is built once and feeds both.
 
 ## Limitations
 
