@@ -64,6 +64,19 @@ Now (`LicenseModel`, `RefreshSchedule`, `LicenseClient.refreshReport`):
   when the network comes back, when the vault opens, and two seconds after the number of profiles
   changes (several changes in a row are one renewal). After a failure, the retries' times: 1, 5,
   15, 30, 60 minutes, then every hour.
+- **The tokens of synced profiles** (`profileTokens`, the server's CONTRACT §6.2 and §8.4, its
+  commit e30f0f3; the lead, 10 November). A profile that sync has on a Mac and an iPhone was counted
+  on each; with a token it takes one place of `limits.profiles`. With sync set up, a renewal also
+  carries the tokens of the profiles that are in the sync vault — in the index here and exchanged
+  with the sync location at least once (`SyncEngine.syncedProfileIDs`; one made since the last sync
+  is counted, not told) — never more than `profileCount` of them: `SyncProfileToken`, the first 16
+  bytes, in lower-case hex, of HMAC-SHA256 under a key of the vault's (HKDF of the VMK with the
+  vault's salt, info `sync-profile-count`) over `profile/<UUID>`, the UUID as in the objects'
+  logical names: `UUID.uuidString`, upper-case with hyphens. The server knows no key of the vault:
+  a token says nothing of a profile. Kept in `account.json` like the number, for a renewal before
+  the vault is open. Refused (`400`, `field: "profileTokens"`), the renewal is sent again without
+  them and none are sent until the app starts again; without sync there is no field, and the server
+  counts as before. Not in the activation's request yet: the first renewal after it carries them.
 - **What.** This Mac's id, the app's version (`<version> (<build>)`), the number of profiles — the
   open vault's, or before it is opened the last number known (`account.json`'s `profileCount`, a
   number only) — and the label only where this Mac has one: the label the activation's answer

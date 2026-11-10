@@ -732,6 +732,69 @@ final class LicenseClientTests: XCTestCase {
         XCTAssertEqual(plain.failure, .server(status: 400, code: "invalid_request"))
     }
 
+    // MARK: The tokens of synced profiles (CONTRACT §6.2, "Метки синхронизируемых профилей")
+
+    func testARenewalCarriesTheSyncedProfilesTokensAndGoesWithoutThemWhenRefused() async throws {
+        let record = try await signedIn()
+        let tokens = ["750d110fc23ef5dbfb2a9b045c3711ed", "762689ee39937d3d5157669683d983b1"]
+        let server = FakeServer { _ in self.ok(["entitlement": self.document(issued: "2026-11-02T10:00:00Z"), "serverTime": "2026-11-02T10:00:00Z"]) }
+        let report = await client(server).refreshReport(record, profileCount: 3, label: "Mac", profileTokens: tokens,
+                                                        wall: time("2026-11-02T10:00:00Z"), uptime: 2_000)
+        XCTAssertEqual(report.result, .accepted(paymentReceived: false))
+        XCTAssertFalse(report.tokensRefused)
+        XCTAssertEqual(server.requests.count, 1)
+        XCTAssertEqual(body(server.requests[0])["profileTokens"] as? [String], tokens)
+        XCTAssertEqual(body(server.requests[0])["profileCount"] as? Int, 3)
+
+        // Without sync there is no field: the request as it was.
+        let plain = FakeServer { _ in self.ok(["entitlement": self.document(issued: "2026-11-02T10:00:00Z"), "serverTime": "2026-11-02T10:00:00Z"]) }
+        _ = await client(plain).refreshReport(record, profileCount: 3, label: "Mac", wall: time("2026-11-02T10:00:00Z"), uptime: 2_000)
+        XCTAssertNil(body(try XCTUnwrap(plain.requests.first))["profileTokens"])
+
+        // More tokens than profiles is refused by the server: the field is left out here.
+        let fewer = FakeServer { _ in self.ok(["entitlement": self.document(issued: "2026-11-02T10:00:00Z"), "serverTime": "2026-11-02T10:00:00Z"]) }
+        _ = await client(fewer).refreshReport(record, profileCount: 1, label: nil, profileTokens: tokens, wall: time("2026-11-02T10:00:00Z"), uptime: 2_000)
+        XCTAssertNil(body(try XCTUnwrap(fewer.requests.first))["profileTokens"])
+        XCTAssertEqual(body(try XCTUnwrap(fewer.requests.first))["profileCount"] as? Int, 1)
+
+        // Refused for the tokens, there was no renewal: again without them, the label kept.
+        let refusing = FakeServer { request in
+            if self.body(request)["profileTokens"] != nil { return self.error(400, "invalid_request", ["field": "profileTokens"]) }
+            return self.ok(["entitlement": self.document(issued: "2026-11-02T10:00:00Z"), "serverTime": "2026-11-02T10:00:00Z"])
+        }
+        let refused = await client(refusing).refreshReport(record, profileCount: 3, label: "Mac", profileTokens: tokens,
+                                                           wall: time("2026-11-02T10:00:00Z"), uptime: 2_000)
+        XCTAssertEqual(refused.result, .accepted(paymentReceived: false))
+        XCTAssertTrue(refused.tokensRefused)
+        XCTAssertFalse(refused.labelRefused)
+        XCTAssertEqual(refusing.requests.count, 2)
+        XCTAssertNil(body(refusing.requests[1])["profileTokens"])
+        XCTAssertEqual(body(refusing.requests[1])["label"] as? String, "Mac")
+
+        // Refused for the label (an older server), the tokens stay in the second request.
+        let labelRefusing = FakeServer { request in
+            if self.body(request)["label"] != nil { return self.error(400, "invalid_request", ["field": "label"]) }
+            return self.ok(["entitlement": self.document(issued: "2026-11-02T10:00:00Z"), "serverTime": "2026-11-02T10:00:00Z"])
+        }
+        let kept = await client(labelRefusing).refreshReport(record, profileCount: 3, label: "Mac", profileTokens: tokens,
+                                                             wall: time("2026-11-02T10:00:00Z"), uptime: 2_000)
+        XCTAssertTrue(kept.labelRefused)
+        XCTAssertFalse(kept.tokensRefused)
+        XCTAssertEqual(body(labelRefusing.requests[1])["profileTokens"] as? [String], tokens)
+        XCTAssertNil(body(labelRefusing.requests[1])["label"])
+    }
+
+    func testTheRecordKeepsTheTokensForARenewalBeforeTheVaultIsOpen() throws {
+        var record = AccountRecord()
+        record.profileCount = 2
+        record.profileTokens = ["750d110fc23ef5dbfb2a9b045c3711ed"]
+        let read = try JSONDecoder().decode(AccountRecord.self, from: JSONEncoder().encode(record))
+        XCTAssertEqual(read.profileTokens, ["750d110fc23ef5dbfb2a9b045c3711ed"])
+        XCTAssertEqual(read.profileCount, 2)
+        // A record from before has none.
+        XCTAssertNil(try JSONDecoder().decode(AccountRecord.self, from: Data("{}".utf8)).profileTokens)
+    }
+
     func testAFailedRenewalSaysWhy() async throws {
         let record = try await signedIn()
         let cases: [(String, () throws -> AccountResponse, LicenseClient.RefreshFailure.Reason, Int?)] = [

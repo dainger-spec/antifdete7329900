@@ -614,7 +614,12 @@ final class AppModel: ObservableObject {
     func refresh() {
         profiles = repository?.list() ?? []
         // The license tells the server the real number with its renewals (the owner, 3 November).
-        if repository != nil { license.profilesKnown(count: profiles.count) }
+        // With sync set up, also the tokens of the profiles that are in the sync vault: such a profile
+        // on a Mac and an iPhone is then one place of the license's (CONTRACT §6.2).
+        if let repository {
+            let tokens = deviceSettings.syncTarget == nil ? nil : SyncProfileToken.tokens(in: repository)
+            license.profilesKnown(count: profiles.count, tokens: tokens)
+        }
         updateIndexNotice()
         let kept = repository?.keptDeletedProfiles() ?? []
         if kept != keptDeletedProfiles { keptDeletedProfiles = kept }

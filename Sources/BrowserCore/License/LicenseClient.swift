@@ -223,12 +223,16 @@ public struct LicenseClient: Sendable {
         /// server that does not know the label in a renewal yet. The app leaves the label out of
         /// its renewals until it starts again.
         public var labelRefused: Bool
+        /// The server refused the request for its `profileTokens` (`400 invalid_request`, `field:
+        /// "profileTokens"`, §6.2) and took it without them: every profile of this Mac is counted.
+        public var tokensRefused: Bool
 
-        public init(record: AccountRecord, result: Refresh, failure: RefreshFailure?, labelRefused: Bool) {
+        public init(record: AccountRecord, result: Refresh, failure: RefreshFailure?, labelRefused: Bool, tokensRefused: Bool = false) {
             self.record = record
             self.result = result
             self.failure = failure
             self.labelRefused = labelRefused
+            self.tokensRefused = tokensRefused
         }
     }
 
@@ -240,25 +244,38 @@ public struct LicenseClient: Sendable {
 
     /// `POST /v1/device/entitlement` (§6.2) with this Mac's `label`, and what its answer makes of
     /// `record` — with why nothing came, when nothing did.
-    public func refreshReport(_ record: AccountRecord, profileCount: Int, label: String?, wall: Date,
+    /// `profileTokens`: the tokens of this Mac's synced profiles (§6.2); never more than
+    /// `profileCount` of them are sent — the server refuses more — and none when nil.
+    public func refreshReport(_ record: AccountRecord, profileCount: Int, label: String?, profileTokens: [String]? = nil, wall: Date,
                               uptime: TimeInterval) async -> RefreshReport {
+        var labelRefused = false
+        var tokensRefused = false
         func report(_ record: AccountRecord, _ result: Refresh, _ failure: RefreshFailure? = nil, labelRefused: Bool = false) -> RefreshReport {
-            RefreshReport(record: record, result: result, failure: failure, labelRefused: labelRefused)
+            RefreshReport(record: record, result: result, failure: failure, labelRefused: labelRefused, tokensRefused: tokensRefused)
         }
         guard let token = record.deviceToken, !token.isEmpty, let deviceID = record.deviceID else { return report(record, .notSignedIn) }
-        var labelRefused = false
+        // More tokens than profiles is a state this Mac should not be in: the field is left out.
+        var tokens = profileTokens.flatMap { $0.count <= profileCount ? $0 : nil }
         let response: AccountResponse
         do {
-            let first = try await transport.send(AccountAPI.refresh(deviceToken: token, machineID: machineID, profileCount: profileCount,
-                                                                    appVersion: appVersion, label: label))
-            if label != nil, first.status == 400 {
+            var answer = try await transport.send(AccountAPI.refresh(deviceToken: token, machineID: machineID, profileCount: profileCount,
+                                                                     appVersion: appVersion, label: label, profileTokens: tokens))
+            if tokens != nil, answer.status == 400,
+               case .failure(.server(let refusal)) = AccountAPI.documentAnswer(from: answer), refusal.field == "profileTokens" {
+                // The tokens were refused and there was no renewal (§6.2): again without them.
+                tokensRefused = true
+                tokens = nil
+                answer = try await transport.send(AccountAPI.refresh(deviceToken: token, machineID: machineID, profileCount: profileCount,
+                                                                     appVersion: appVersion, label: label))
+            }
+            if label != nil, answer.status == 400 {
                 // A server that does not take the label in a renewal yet: the renewal matters more.
                 labelRefused = true
-                response = try await transport.send(AccountAPI.refresh(deviceToken: token, machineID: machineID,
-                                                                       profileCount: profileCount, appVersion: appVersion))
-            } else {
-                response = first
+                answer = try await transport.send(AccountAPI.refresh(deviceToken: token, machineID: machineID,
+                                                                     profileCount: profileCount, appVersion: appVersion,
+                                                                     profileTokens: tokens))
             }
+            response = answer
         } catch {
             let described = error as NSError
             return report(record, .unreachable(retryAfter: nil), .noAnswer(kind: "\(type(of: error)) \(described.domain) \(described.code)"),

@@ -524,6 +524,25 @@ public final class SyncEngine: @unchecked Sendable {
         }
     }
 
+    // MARK: The profiles that are in the sync vault
+
+    /// The profiles of this device that are in the sync vault: listed in the index here, and their
+    /// settings exchanged with the sync location at least once (this device's sync state knows the
+    /// object). A profile made since the last sync is not there yet, and one deleted is in no index.
+    /// Empty before the first sync, and when the state cannot be read (nothing is claimed then).
+    /// What `profileTokens` of a renewal are made of (`SyncProfileToken`).
+    public static func syncedProfileIDs(in repository: ProfileRepository) -> [UUID] {
+        let url = repository.root.appendingPathComponent("sync-state.bin")
+        guard FileManager.default.fileExists(atPath: url.path),
+              let key = try? repository.vault.syncEnvelopeKey,
+              let plaintext = try? AEAD.open(SecureFile.read(url), key: key,
+                                             aad: "sync-state:v1:\(repository.vault.vaultID.uuidString)"),
+              (try? DocumentFormat.check(plaintext, supported: 1, what: "sync-state.bin")) != nil,
+              let state = try? JSONCoding.decoder.decode([String: ItemState].self, from: plaintext) else { return [] }
+        return repository.currentIndex().entries.map(\.summary.id)
+            .filter { state["profile/\($0.uuidString)/\(ProfileSyncFile.config.rawValue)"] != nil }
+    }
+
     // MARK: State
 
     var stateURL: URL { repository.root.appendingPathComponent("sync-state.bin") }

@@ -100,6 +100,10 @@ public struct AccountRecord: Codable, Equatable, Sendable {
     /// How many profiles this Mac had when the vault was last open: what a renewal says before the
     /// vault is opened again (the number is known only inside it). A number, nothing of a profile.
     public var profileCount: Int?
+    /// The tokens of this Mac's profiles that are in the sync vault (`SyncProfileToken`), as last
+    /// known with the vault open: what a renewal says before it is opened again, like the number
+    /// above. Nil without sync. A token says nothing of a profile without the vault's key.
+    public var profileTokens: [String]?
     /// The renewals that failed since the last one that brought a document: since when, the last
     /// one, and why (the owner, 3 November: a failure is said, never silence). Nil after a renewal
     /// that brought one.
@@ -151,7 +155,7 @@ public struct AccountRecord: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case format, deviceID, code, deviceToken, entitlement, floorTime, floorUptime, lastSuccessAt, appOutdated, session, emailLinked
         case signedInWith, signedOutReason, clockSkewSeconds, trialNoticeClosedFor, rememberKey, unlinkCooldownSeconds, periodEndingClosed
-        case label, profileCount, renewalFailure
+        case label, profileCount, profileTokens, renewalFailure
     }
 
     public init(from decoder: Decoder) throws {
@@ -177,6 +181,7 @@ public struct AccountRecord: Codable, Equatable, Sendable {
         periodEndingClosed = try? container.decodeIfPresent(PeriodEndingClosed.self, forKey: .periodEndingClosed)
         label = try? container.decodeIfPresent(String.self, forKey: .label)
         profileCount = try? container.decodeIfPresent(Int.self, forKey: .profileCount)
+        profileTokens = try? container.decodeIfPresent([String].self, forKey: .profileTokens)
         renewalFailure = try? container.decodeIfPresent(RenewalFailure.self, forKey: .renewalFailure)
     }
 
