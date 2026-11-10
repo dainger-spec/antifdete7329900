@@ -913,9 +913,14 @@ struct ProfileEditorForm: View {
         }
         EditorToggle(L("editor.camera.mirror"), isOn: $draft.camera.mirror)
         EditorField(L("editor.camera.label")) {
-            TextField(L("editor.camera.label"), text: $draft.camera.deviceLabel,
-                      prompt: Text(verbatim: "FaceTime HD Camera"))
-                .lumenField("FaceTime HD Camera", isEmpty: draft.camera.deviceLabel.isEmpty)
+            HStack(spacing: 8) {
+                TextField(L("editor.camera.label"), text: $draft.camera.deviceLabel,
+                          prompt: Text(verbatim: "FaceTime HD Camera"))
+                    .lumenField("FaceTime HD Camera", isEmpty: draft.camera.deviceLabel.isEmpty)
+                Button(L("editor.camera.matchMac")) { matchThisMac() }
+                    .buttonStyle(.lumenSecondary)
+                    .fixedSize()
+            }
         }
         EditorNote(L("editor.camera.label.note"))
         EditorRow(L("editor.camera.audio")) {
@@ -1050,6 +1055,15 @@ struct ProfileEditorForm: View {
             }
             Spacer(minLength: 0)
         }
+    }
+
+    /// Fills the camera's name and resolution from this Mac's own built-in camera, so a page sees
+    /// exactly what the real one reports (`HostCamera`).
+    private func matchThisMac() {
+        guard let builtin = HostCamera.builtin() else { return }
+        draft.camera.deviceLabel = builtin.name
+        draft.cameraWidth = String(builtin.width)
+        draft.cameraHeight = String(builtin.height)
     }
 
     /// The substituted camera's colour as a SwiftUI `Color`, kept in the draft as "#RRGGBB".

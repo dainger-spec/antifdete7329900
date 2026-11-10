@@ -265,7 +265,8 @@
 "editor.camera.error.read" = "Could not read %@.";
 
 /* Camera: adjustments, crop, playback */
-"editor.camera.label.note" = "A real Mac camera is called “FaceTime HD Camera”; leave it empty for that.";
+"editor.camera.label.note" = "Set this to match your real camera so a page cannot tell them apart — “Match this Mac” fills its exact name and resolution.";
+"editor.camera.matchMac" = "Match this Mac";
 "editor.camera.filters" = "Adjustments";
 "editor.camera.filter.brightness" = "Brightness";
 "editor.camera.filter.contrast" = "Contrast";

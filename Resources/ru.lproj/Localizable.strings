@@ -265,7 +265,8 @@
 "editor.camera.error.read" = "Не удалось прочитать %@.";
 
 /* Camera: adjustments, crop, playback */
-"editor.camera.label.note" = "Настоящая камера Mac называется «FaceTime HD Camera»; оставьте пустым для неё.";
+"editor.camera.label.note" = "Поставь как у реальной камеры, чтобы страница не отличила — «Как у этого Mac» подставит её точное имя и разрешение.";
+"editor.camera.matchMac" = "Как у этого Mac";
 "editor.camera.filters" = "Коррекция";
 "editor.camera.filter.brightness" = "Яркость";
 "editor.camera.filter.contrast" = "Контраст";
