@@ -20,7 +20,7 @@ on:
         description: iOS runtime (newest, or a version such as 17.5)
         default: newest
       suite:
-        description: one suite only — "core" (the core's tests alone, a few minutes), "core,build" (and the app built), or a test class; empty runs them all
+        description: one suite only — "core" (the core's tests alone, a few minutes), "core,build" (and the app built), or a test class; empty runs them all. "RealServerTests" — the sign-in against the real account server with the test account (secrets LUMEN_E2E_EMAIL, LUMEN_E2E_PASSWORD); by hand only
         default: ""
 
 jobs:
@@ -36,9 +36,23 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+      # The real account server, by hand only: the protocol first (a minute), then the app itself.
+      # The test account is the repository's secret; no other suite is given it.
+      - name: The real account server — sign-in, document, renewal, sign-out
+        if: matrix.suite == 'RealServerTests'
+        env:
+          LUMEN_E2E_EMAIL: ${{ secrets.LUMEN_E2E_EMAIL }}
+          LUMEN_E2E_PASSWORD: ${{ secrets.LUMEN_E2E_PASSWORD }}
+        run: |
+          set -o pipefail
+          mkdir -p build/ios-app
+          python3 ios/scripts/real_server.py | tee build/ios-app/real-server.txt
       - name: Build and test (red runs first)
         env:
           SUITE: ${{ matrix.suite }}
+          TEST_RUNNER_LUMEN_E2E_EMAIL: ${{ matrix.suite == 'RealServerTests' && secrets.LUMEN_E2E_EMAIL || '' }}
+          TEST_RUNNER_LUMEN_E2E_PASSWORD: ${{ matrix.suite == 'RealServerTests' && secrets.LUMEN_E2E_PASSWORD || '' }}
+          TEST_RUNNER_LUMEN_E2E_REQUIRED: ${{ matrix.suite == 'RealServerTests' && '1' || '' }}
         run: ios/scripts/ci.sh build/ios-app "${{ inputs.ios || 'newest' }}"
       - uses: actions/upload-artifact@v4
         if: always()

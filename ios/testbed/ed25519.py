@@ -79,6 +79,34 @@ def sign(seed, message):
     return R + ((r + h * a) % L).to_bytes(32, "little")
 
 
+def _decode(data):
+    y = int.from_bytes(data, "little")
+    sign_bit, y = y >> 255, y & ((1 << 255) - 1)
+    if y >= P:
+        return None
+    xx = (y * y - 1) * pow(D * y * y + 1, P - 2, P) % P
+    x = pow(xx, (P + 3) // 8, P)
+    if (x * x - xx) % P != 0:
+        x = x * I % P
+    if (x * x - xx) % P != 0 or (x == 0 and sign_bit):
+        return None
+    if x & 1 != sign_bit:
+        x = P - x
+    return (x, y, 1, x * y % P)
+
+
+def verify(public, message, signature):
+    """Is `signature` (64 bytes) the signature of `message` under the 32-byte public key?"""
+    if len(public) != 32 or len(signature) != 64:
+        return False
+    A, R = _decode(public), _decode(signature[:32])
+    s = int.from_bytes(signature[32:], "little")
+    if A is None or R is None or s >= L:
+        return False
+    h = int.from_bytes(hashlib.sha512(signature[:32] + public + message).digest(), "little") % L
+    return _encode(_mul(s, B)) == _encode(_add(R, _mul(h, A)))
+
+
 def self_test():
     # RFC 8032, 7.1: TEST 1 (an empty message), TEST 2 (one byte), TEST 3 (two bytes).
     vectors = [
@@ -95,6 +123,12 @@ def self_test():
     for seed, message, public, signature in vectors:
         assert public_key(bytes.fromhex(seed)).hex() == public, "public key"
         assert sign(bytes.fromhex(seed), bytes.fromhex(message)).hex() == signature, "signature"
+        assert verify(bytes.fromhex(public), bytes.fromhex(message), bytes.fromhex(signature)), "verify"
+        # The reds of the check: another message, a changed signature, another key.
+        assert not verify(bytes.fromhex(public), bytes.fromhex(message) + b"x", bytes.fromhex(signature)), "another message passed"
+        changed = bytearray(bytes.fromhex(signature)); changed[40] ^= 1
+        assert not verify(bytes.fromhex(public), bytes.fromhex(message), bytes(changed)), "a changed signature passed"
+        assert not verify(bytes.fromhex(vectors[0][2] if public != vectors[0][2] else vectors[1][2]), bytes.fromhex(message), bytes.fromhex(signature)), "another key passed"
     return len(vectors)
 
 
