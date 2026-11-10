@@ -1,3 +1,4 @@
+import LumenCore
 import SwiftUI
 import UIKit
 
@@ -18,7 +19,7 @@ struct LumenApp: App {
                 if model.ready {
                     SessionsView()
                 } else {
-                    ProgressView("Подготовка…")
+                    ProgressView(L("Подготовка…"))
                 }
             }
             .environmentObject(model)

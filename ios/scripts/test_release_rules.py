@@ -106,6 +106,10 @@ for what, line in [
     ("an offer to buy", 'Text("Купить можно на сайте")'),
 ]:
     check(f"red — {what}: found", any(f[1] == "offer" for f in scan(planted(line))))
+root = planted('let row = Text("Сессии")')
+with open(os.path.join(root, "Lumen", "Resources", "en.lproj", "Localizable.strings"), "a", encoding="utf-8") as f:
+    f.write('"Выбор" = "Choose a plan on the website";\n')
+check("red — an offer in the English table: found", any(f[1] == "offer" for f in scan(root)))
 check("a paid plan's own name is allowed", not any(f[1] == "offer" for f in scan(planted('Text("Тариф: Профессиональный")'))))
 
 # No test switch in a release: in the sources outside #if DEBUG, and in a built release.

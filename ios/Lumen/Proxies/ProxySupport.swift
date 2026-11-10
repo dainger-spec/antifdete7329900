@@ -115,7 +115,7 @@ enum ProxyChecker {
         }
         guard var result = found else {
             NSLog("%@", "Lumen: the check of proxy \(entry.host):\(entry.port) got no answer in \(Int(limit)) s, waiting for \(waiting.now)")
-            return ProxyCheck(alive: false, udp: .unchecked, error: "прокси не ответил за \(Int(limit)) с (ждали \(waiting.now))")
+            return ProxyCheck(alive: false, udp: .unchecked, error: L("прокси не ответил за %@ с (ждали %@)", "\(Int(limit))", "\(waiting.now)"))
         }
         if result.alive { result.udp = await udpSupport(entry, password: password) }
         return result
@@ -141,14 +141,14 @@ enum ProxyChecker {
         let delegate = ProxyAuthAnswer(user: entry.username, password: password)
         let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
         defer { session.invalidateAndCancel() }
-        var lastError = "нет ответа"
+        var lastError = L("нет ответа")
         for url in geoURLs {
             waiting.now = url.host ?? url.absoluteString
             do {
                 let (data, response) = try await session.data(from: url)
                 guard (response as? HTTPURLResponse)?.statusCode == 200,
                       let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    lastError = "ответ \((response as? HTTPURLResponse)?.statusCode ?? 0)"
+                    lastError = L("ответ %@", "\((response as? HTTPURLResponse)?.statusCode ?? 0)")
                     continue
                 }
                 let country = ((json["country"] as? String) ?? (json["country_code"] as? String))?.uppercased()
@@ -173,7 +173,7 @@ enum ProxyChecker {
 /// What a proxy check is waiting for now (a service's host name), said when its time runs out.
 final class Waiting: @unchecked Sendable {
     private let lock = NSLock()
-    private var value = "ответа прокси"
+    private var value = L("ответа прокси")
 
     var now: String {
         get { lock.lock(); defer { lock.unlock() }; return value }

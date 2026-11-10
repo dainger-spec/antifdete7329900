@@ -39,13 +39,13 @@ public enum License {
         guard signedIn else { return LicenseState(mode: .notSignedIn, access: .free) }
         guard let p = entitlement else {
             return LicenseState(mode: .unverified, access: ownFree(plan: "unverified",
-                reason: "Права на этом iPhone не удаётся проверить. Прокси недоступны, пока сервер Lumen не ответит."))
+                reason: L("Права на этом iPhone не удаётся проверить. Прокси недоступны, пока сервер Lumen не ответит.")))
         }
         // The planted fault: a document is in force for ever.
         if !Faults.isActive(.documentNeverExpires) {
             guard t < p.graceEndsAt else {
                 return LicenseState(mode: .unreachable, access: ownFree(plan: "unreachable",
-                    reason: "Lumen давно не получал ответа сервера. Прокси недоступны, пока сервер Lumen не ответит."))
+                    reason: L("Lumen давно не получал ответа сервера. Прокси недоступны, пока сервер Lumen не ответит.")))
             }
             if p.status == .active {
                 // A paid (or trial) period that ended with the server silent: what it opened is over.
@@ -90,12 +90,12 @@ public enum License {
         if browse && proxies { return nil }
         if p.status == .exportOnly {
             switch p.exportReason {
-            case "no_license": return browse ? "Прокси недоступны." : "Профили на этом iPhone сейчас не открываются."
-            case "account_disabled": return "Аккаунт заблокирован, напишите в поддержку."
-            default: return browse ? "Оплаченный период закончился. Прокси недоступны." : "Оплаченный период закончился."
+            case "no_license": return browse ? L("Прокси недоступны.") : L("Профили на этом iPhone сейчас не открываются.")
+            case "account_disabled": return L("Аккаунт заблокирован, напишите в поддержку.")
+            default: return browse ? L("Оплаченный период закончился. Прокси недоступны.") : L("Оплаченный период закончился.")
             }
         }
-        return browse ? "В вашем тарифе нет прокси." : "В вашем тарифе сайты на iPhone не открываются."
+        return browse ? L("В вашем тарифе нет прокси.") : L("В вашем тарифе сайты на iPhone не открываются.")
     }
 
     /// The profiles that stay open when there are more than the plan allows: the first ones by when
@@ -231,49 +231,50 @@ public enum AccountWire {
 /// The server's states in the person's words (§17 — shown as written there, "Mac" read as "iPhone").
 public enum AccountText {
     /// "Unreachable" at sign-in and activation.
-    public static let unreachable = "Сервер Lumen не отвечает. Проверьте соединение и попробуйте ещё раз."
-    public static let revoked = "Этот iPhone отключён от аккаунта. Войдите снова."
-    public static let machineMismatch = "Похоже, данные Lumen перенесены с другого iPhone. Войдите, чтобы подключить этот."
-    public static let outdated = "Обновите Lumen."
-    public static let checkEmail = "У этого аккаунта было много неудачных попыток входа, поэтому мы отправили код на его почту. Введите код из письма."
-    public static let codeResent = "Отправили код ещё раз — тот же, что в прошлом письме."
-    public static let robotCheck = "Подтвердите, что вы не робот, и отправьте ещё раз."
+    public static let unreachable = L("Сервер Lumen не отвечает. Проверьте соединение и попробуйте ещё раз.")
+    public static let revoked = L("Этот iPhone отключён от аккаунта. Войдите снова.")
+    public static let machineMismatch = L("Похоже, данные Lumen перенесены с другого iPhone. Войдите, чтобы подключить этот.")
+    public static let outdated = L("Обновите Lumen.")
+    public static let checkEmail = L("У этого аккаунта было много неудачных попыток входа, поэтому мы отправили код на его почту. Введите код из письма.")
+    public static let codeResent = L("Отправили код ещё раз — тот же, что в прошлом письме.")
+    public static let robotCheck = L("Подтвердите, что вы не робот, и отправьте ещё раз.")
 
     /// A refusal's text by its code; an unknown code is "something went wrong" and goes to the log.
     public static func refusal(_ refusal: AccountWire.Refusal) -> String {
-        let wait = refusal.retryAfter.map { " Повторите через \(duration($0))." } ?? ""
+        let wait = refusal.retryAfter.map { L(" Повторите через %@.", "\(duration($0))") } ?? ""
         switch refusal.code {
-        case "invalid_credentials": return "Неверная почта или пароль."
-        case "unauthorized": return "Сессия закончилась. Войдите снова."
-        case "account_disabled": return "Аккаунт заблокирован, напишите в поддержку."
-        case "account_deletion_pending": return "Аккаунт удаляется. Отменить удаление можно на сайте."
+        case "invalid_credentials": return L("Неверная почта или пароль.")
+        case "unauthorized": return L("Сессия закончилась. Войдите снова.")
+        case "account_disabled": return L("Аккаунт заблокирован, напишите в поддержку.")
+        case "account_deletion_pending": return L("Аккаунт удаляется. Отменить удаление можно на сайте.")
         case "robot_check": return robotCheck
-        case "robot_check_unavailable": return "Проверка «не робот» сейчас недоступна." + wait
-        case "server_busy": return "Сервер Lumen сейчас очень занят." + wait
-        case "rate_limited": return "Слишком много попыток." + wait
-        case "invalid_code": return "Код неверный или устарел."
-        case "login_expired": return "Эта попытка входа закончилась. Введите пароль ещё раз."
-        case "resend_limit": return "Код в этой попытке больше не отправить. Письма нет — проверьте «Спам»."
+        case "robot_check_unavailable": return L("Проверка «не робот» сейчас недоступна.") + wait
+        case "server_busy": return L("Сервер Lumen сейчас очень занят.") + wait
+        case "rate_limited": return L("Слишком много попыток.") + wait
+        case "invalid_code": return L("Код неверный или устарел.")
+        case "login_expired": return L("Эта попытка входа закончилась. Введите пароль ещё раз.")
+        case "resend_limit": return L("Код в этой попытке больше не отправить. Письма нет — проверьте «Спам».")
         case "device_limit_reached", "phone_limit_reached":
             // The planted fault: the refusal shown without its reason.
-            if Faults.isActive(.phoneLimitUnexplained) { return "Что-то пошло не так." }
+            if Faults.isActive(.phoneLimitUnexplained) { return L("Что-то пошло не так.") }
             let count = refusal.phones.map { " (\($0))" } ?? ""
-            return "К этой лицензии уже подключено наибольшее число iPhone\(count). Отключите один из них в кабинете на сайте и войдите снова."
-        default: return "Что-то пошло не так."
+            return L("К этой лицензии уже подключено наибольшее число iPhone%@. Отключите один из них в кабинете на сайте и войдите снова.", "\(count)")
+        default: return L("Что-то пошло не так.")
         }
     }
 
     /// "45 секунд", "2 минуты", "1 час" — a wait the server named, rounded up to whole units.
     public static func duration(_ seconds: Int) -> String {
         let seconds = max(1, seconds)
-        if seconds < 60 { return "\(seconds) " + plural(seconds, "секунду", "секунды", "секунд") }
+        if seconds < 60 { return "\(seconds) " + plural(seconds, L("секунду"), L("секунды"), L("секунд")) }
         let minutes = (seconds + 59) / 60
-        if minutes < 60 { return "\(minutes) " + plural(minutes, "минуту", "минуты", "минут") }
+        if minutes < 60 { return "\(minutes) " + plural(minutes, L("минуту"), L("минуты"), L("минут")) }
         let hours = (minutes + 59) / 60
-        return "\(hours) " + plural(hours, "час", "часа", "часов")
+        return "\(hours) " + plural(hours, L("час"), L("часа"), L("часов"))
     }
 
     static func plural(_ n: Int, _ one: String, _ few: String, _ many: String) -> String {
+        if Localization.isEnglish { return n == 1 ? one : many }   // "1 second", "2 seconds", "21 seconds"
         let tens = n % 100, ones = n % 10
         if tens >= 11 && tens <= 14 { return many }
         if ones == 1 { return one }

@@ -24,31 +24,31 @@ struct SignInView: View {
             Form {
                 if challenge == nil {
                     Section {
-                        TextField("Почта", text: $email)
+                        TextField(L("Почта"), text: $email)
                             .keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
                             .accessibilityIdentifier("signInEmail")
-                        SecureField("Пароль", text: $password).accessibilityIdentifier("signInPassword")
+                        SecureField(L("Пароль"), text: $password).accessibilityIdentifier("signInPassword")
                     } footer: {
-                        Text("Аккаунт Lumen — тот же, что в Lumen для Mac.")
+                        Text(L("Аккаунт Lumen — тот же, что в Lumen для Mac."))
                     }
                     Section {
-                        Button("Войти") { submit(robotToken: nil) }
+                        Button(L("Войти")) { submit(robotToken: nil) }
                             .disabled(busy || email.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty)
                             .accessibilityIdentifier("submitSignIn")
-                        Button("Забыли пароль?") { openURL(AccountClient.site.appendingPathComponent("reset-password")) }
+                        Button(L("Забыли пароль?")) { openURL(AccountClient.site.appendingPathComponent("reset-password")) }
                             .accessibilityIdentifier("forgotPassword")
                     }
                 } else {
                     Section {
                         Text(AccountText.checkEmail)
-                        TextField("Код из письма", text: $code).keyboardType(.numberPad).accessibilityIdentifier("signInCode")
+                        TextField(L("Код из письма"), text: $code).keyboardType(.numberPad).accessibilityIdentifier("signInCode")
                     }
                     Section {
-                        Button("Подтвердить") { confirm() }
+                        Button(L("Подтвердить")) { confirm() }
                             .disabled(busy || code.trimmingCharacters(in: .whitespaces).isEmpty)
                             .accessibilityIdentifier("submitCode")
-                        Button("Отправить код ещё раз") { resend() }.disabled(busy).accessibilityIdentifier("resendCode")
-                        Button("Ввести пароль заново") {
+                        Button(L("Отправить код ещё раз")) { resend() }.disabled(busy).accessibilityIdentifier("resendCode")
+                        Button(L("Ввести пароль заново")) {
                             challenge = nil
                             code = ""
                             message = nil
@@ -62,10 +62,10 @@ struct SignInView: View {
                     Section { ProgressView().accessibilityIdentifier("signInBusy") }
                 }
             }
-            .navigationTitle("Вход")
+            .navigationTitle(L("Вход"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Отмена") { close() }.accessibilityIdentifier("cancelSignIn") }
+                ToolbarItem(placement: .cancellationAction) { Button(L("Отмена")) { close() }.accessibilityIdentifier("cancelSignIn") }
             }
             .sheet(isPresented: $robotCheck) {
                 RobotCheckSheet(url: Self.robotCheckURL) { token in
@@ -151,10 +151,10 @@ struct RobotCheckSheet: View {
     var body: some View {
         NavigationStack {
             RobotCheckPage(url: url, done: done)
-                .navigationTitle("Проверка «не робот»")
+                .navigationTitle(L("Проверка «не робот»"))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Отмена") { done(nil) }.accessibilityIdentifier("cancelRobotCheck") }
+                    ToolbarItem(placement: .cancellationAction) { Button(L("Отмена")) { done(nil) }.accessibilityIdentifier("cancelRobotCheck") }
                 }
         }
     }

@@ -16,7 +16,7 @@ struct SessionScreen: View {
                     BrowserView(runtime: SessionRuntimes.shared.runtime(for: session, model: model))
                 }
             } else {
-                ContentUnavailableView("Сессия удалена", systemImage: "trash")
+                ContentUnavailableView(L("Сессия удалена"), systemImage: "trash")
             }
         }
         .onAppear { model.markOpened(sessionID) }
@@ -31,10 +31,10 @@ struct LockedSessionView: View {
 
     var body: some View {
         ContentUnavailableView {
-            Label("Профиль заперт", systemImage: "lock.fill")
+            Label(L("Профиль заперт"), systemImage: "lock.fill")
         } description: {
             Text(forProxy
-                 ? "\(reason) Этот профиль работал через прокси и без него не откроется: сайты увидели бы настоящий адрес устройства. Данные профиля сохранены."
+                 ? L("%@ Этот профиль работал через прокси и без него не откроется: сайты увидели бы настоящий адрес устройства. Данные профиля сохранены.", "\(reason)")
                  : reason)
         }
         .accessibilityElement(children: .combine)

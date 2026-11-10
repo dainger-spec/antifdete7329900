@@ -73,6 +73,7 @@ freePlanProxies	ui	LumenUITests/FreeTierTests/testFreePlan	a free profile goes w
 sharedStore	ui	LumenUITests/FreeTierTests/testFreePlan	free profiles are isolated
 profileDefaultsReal	ui	LumenUITests/FreeTierTests/testFreePlan	each free profile has its own device profile
 unpaidPlanNamed	ui	LumenUITests/FreeTierTests/testFreePlan	no plan is named
+textsNotTranslated	ui	LumenUITests/LanguageTests/testTheAppSpeaksEnglish	the empty list says so in English
 # The account, end to end against the testbed's stand-in for the server.
 activationWithoutPlatform	ui	LumenUITests/AccountTests/testSigningInOpensThePlan	the activation said it is an iPhone
 overLimitOpens	ui	LumenUITests/AccountTests/testSigningInOpensThePlan	a profile beyond the plan

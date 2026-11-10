@@ -61,8 +61,8 @@ extension AppModel {
         if account.appOutdated { return AccountText.outdated }
         switch license.mode {
         case .grace:
-            let until = entitlement.map { " до \(Self.dateText($0.graceEndsAt))" } ?? ""
-            return "Не удаётся связаться с сервером Lumen. Lumen работает как обычно\(until). Проверьте соединение."
+            let until = entitlement.map { L(" до %@", "\(Self.dateText($0.graceEndsAt))") } ?? ""
+            return L("Не удаётся связаться с сервером Lumen. Lumen работает как обычно%@. Проверьте соединение.", "\(until)")
         case .unverified, .unreachable, .periodEnded:
             return license.access.reason
         case .full:
@@ -75,7 +75,7 @@ extension AppModel {
 
     static func dateText(_ date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.locale = Locale(identifier: Localization.isEnglish ? "en_US" : "ru_RU")
         formatter.dateStyle = .long
         formatter.timeStyle = .short
         return formatter.string(from: date)

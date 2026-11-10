@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: ${{ fromJSON(inputs.suite && format('["{0}"]', inputs.suite) || '["core,SessionsTests,ProxyCheckTests,FreeTierTests", "BrowserTests", "ProxyTests", "SettingsTests", "RelayTests", "AccountTests"]') }}
+        suite: ${{ fromJSON(inputs.suite && format('["{0}"]', inputs.suite) || '["core,SessionsTests,ProxyCheckTests,FreeTierTests,LanguageTests", "BrowserTests", "ProxyTests", "SettingsTests", "RelayTests", "AccountTests"]') }}
     name: Lumen iOS — ${{ matrix.suite }} (${{ inputs.os || 'xcode-27' }}, iOS ${{ inputs.ios || 'newest' }})
     runs-on: ${{ inputs.os || 'xcode-27' }}
     timeout-minutes: 120

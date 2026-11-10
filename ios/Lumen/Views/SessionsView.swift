@@ -34,8 +34,8 @@ struct SessionsView: View {
                     .accessibilityIdentifier("accountMessage")
                 }
                 if model.sessions.isEmpty {
-                    ContentUnavailableView("Сессий пока нет", systemImage: "rectangle.stack.badge.plus",
-                                           description: Text("У каждой сессии свои куки, хранилище, вкладки, история и прокси."))
+                    ContentUnavailableView(L("Сессий пока нет"), systemImage: "rectangle.stack.badge.plus",
+                                           description: Text(L("У каждой сессии свои куки, хранилище, вкладки, история и прокси.")))
                 } else if shown.isEmpty {
                     ContentUnavailableView.search(text: query)
                 }
@@ -46,34 +46,34 @@ struct SessionsView: View {
                     }
                     .accessibilityIdentifier("session-\(session.name)")
                     .contextMenu {
-                        Button("Изменить", systemImage: "pencil") { editor = .edit(session.id) }
-                        Button("Удалить", systemImage: "trash", role: .destructive) { model.deleteSession(session.id) }
+                        Button(L("Изменить"), systemImage: "pencil") { editor = .edit(session.id) }
+                        Button(L("Удалить"), systemImage: "trash", role: .destructive) { model.deleteSession(session.id) }
                     }
                     .swipeActions {
-                        Button("Удалить", systemImage: "trash", role: .destructive) { model.deleteSession(session.id) }
-                        Button("Изменить", systemImage: "pencil") { editor = .edit(session.id) }.tint(.blue)
+                        Button(L("Удалить"), systemImage: "trash", role: .destructive) { model.deleteSession(session.id) }
+                        Button(L("Изменить"), systemImage: "pencil") { editor = .edit(session.id) }.tint(.blue)
                     }
                 }
             }
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Имя, описание, метка, прокси")
-            .navigationTitle("Сессии")
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: L("Имя, описание, метка, прокси"))
+            .navigationTitle(L("Сессии"))
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         // One more profile than the plan allows: the plans, saying why.
                         let target: EditorTarget = model.mayCreateSession ? .new
-                            : .plans(because: "На этом iPhone можно держать не больше \(model.access.maxProfiles ?? model.sessions.count) профилей.")
+                            : .plans(because: L("На этом iPhone можно держать не больше %@ профилей.", "\(model.access.maxProfiles ?? model.sessions.count)"))
                         editor = target
                     } label: { Image(systemName: "plus") }
                         .accessibilityIdentifier("newSession")
-                        .accessibilityLabel("Новая сессия")
+                        .accessibilityLabel(L("Новая сессия"))
                 }
                 ToolbarItem(placement: .topBarLeading) {
-                    NavigationLink { ProxiesView() } label: { Label("Прокси", systemImage: "network") }
+                    NavigationLink { ProxiesView() } label: { Label(L("Прокси"), systemImage: "network") }
                         .accessibilityIdentifier("proxiesButton")
                 }
                 ToolbarItem(placement: .topBarLeading) {
-                    Button { editor = .plans(because: nil) } label: { Label("Аккаунт", systemImage: "person.crop.circle") }
+                    Button { editor = .plans(because: nil) } label: { Label(L("Аккаунт"), systemImage: "person.crop.circle") }
                         .accessibilityIdentifier("plansButton")
                 }
                 ToolbarItem(placement: .topBarTrailing) { DebugProbeLink() }
@@ -106,11 +106,11 @@ struct SessionCard: View {
                 Spacer()
                 Text(exitText).font(.subheadline).foregroundStyle(.secondary)
             }
-            Text(proxy.map { "Прокси: \($0.displayName)" } ?? (session.boundToProxy ? "Прокси удалён" : "Без прокси"))
+            Text(proxy.map { L("Прокси: %@", "\($0.displayName)") } ?? (session.boundToProxy ? L("Прокси удалён") : L("Без прокси")))
                 .font(.subheadline).foregroundStyle(.secondary)
             if case let .locked(reason) = lock {
                 // A profile that lived behind a proxy says the short thing; any other lock, its reason.
-                Label(lockedForProxy ? "Заперт: без прокси не откроется" : "Заперт: \(reason)", systemImage: "lock.fill")
+                Label(lockedForProxy ? L("Заперт: без прокси не откроется") : L("Заперт: %@", "\(reason)"), systemImage: "lock.fill")
                     .font(.caption).foregroundStyle(.orange)
             }
             Text(openedText).font(.caption).foregroundStyle(.secondary)
@@ -126,14 +126,14 @@ struct SessionCard: View {
 
     private var exitText: String {
         guard let proxy else { return "" }
-        guard let check = proxy.check else { return "не проверен" }
-        guard check.alive, let country = check.country else { return "недоступен" }
+        guard let check = proxy.check else { return L("не проверен") }
+        guard check.alive, let country = check.country else { return L("недоступен") }
         return "\(CountryLocale.flag(country)) \(country)"
     }
 
     private var openedText: String {
-        guard let date = session.lastOpenedAt else { return "Ещё не открывали" }
-        return "Открывали " + date.formatted(.relative(presentation: .named))
+        guard let date = session.lastOpenedAt else { return L("Ещё не открывали") }
+        return L("Открывали ") + date.formatted(.relative(presentation: .named))
     }
 }
 
@@ -150,27 +150,27 @@ struct SessionEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Сессия") {
-                    TextField("Имя", text: $name).accessibilityIdentifier("sessionName")
-                    TextField("Описание", text: $notes).accessibilityIdentifier("sessionNotes")
-                    TextField("Метки через запятую", text: $tags).accessibilityIdentifier("sessionTags")
+                Section(L("Сессия")) {
+                    TextField(L("Имя"), text: $name).accessibilityIdentifier("sessionName")
+                    TextField(L("Описание"), text: $notes).accessibilityIdentifier("sessionNotes")
+                    TextField(L("Метки через запятую"), text: $tags).accessibilityIdentifier("sessionTags")
                         .textInputAutocapitalization(.never)
                 }
                 if sessionID != nil {
                     Section {
-                        Button("Удалить сессию", role: .destructive) { confirmDelete = true }
+                        Button(L("Удалить сессию"), role: .destructive) { confirmDelete = true }
                             .accessibilityIdentifier("deleteSession")
                     } footer: {
-                        Text("Удаляются куки, хранилище, кэш, вкладки и история этой сессии.")
+                        Text(L("Удаляются куки, хранилище, кэш, вкладки и история этой сессии."))
                     }
                 }
             }
-            .navigationTitle(sessionID == nil ? "Новая сессия" : "Сессия")
+            .navigationTitle(sessionID == nil ? L("Новая сессия") : L("Сессия"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Отмена") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(L("Отмена")) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Сохранить") {
+                    Button(L("Сохранить")) {
                         if let sessionID {
                             model.updateSession(sessionID, name: name, notes: notes, tags: tags)
                         } else {
@@ -181,8 +181,8 @@ struct SessionEditor: View {
                     .accessibilityIdentifier("saveSession")
                 }
             }
-            .confirmationDialog("Удалить сессию со всеми её данными?", isPresented: $confirmDelete, titleVisibility: .visible) {
-                Button("Удалить", role: .destructive) {
+            .confirmationDialog(L("Удалить сессию со всеми её данными?"), isPresented: $confirmDelete, titleVisibility: .visible) {
+                Button(L("Удалить"), role: .destructive) {
                     if let sessionID { model.deleteSession(sessionID) }
                     dismiss()
                 }

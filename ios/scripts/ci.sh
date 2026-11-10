@@ -44,6 +44,9 @@ if in_suite core; then
     for t in test_device_pick.py test_capture_look.py test_release_rules.py; do
         python3 "$HERE/scripts/$t" 2>&1 | tee -a "$LOG"; [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "$t failed"; STATUS=1; }
     done
+    # The two languages: every text inside L(…) has its English, none stands outside (and each breach planted).
+    python3 "$HERE/scripts/check_strings.py" --selftest 2>&1 | tee -a "$LOG"; [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "check_strings.py's own reds failed"; STATUS=1; }
+    python3 "$HERE/scripts/check_strings.py" "$HERE" 2>&1 | tee -a "$LOG"; [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "a text has no English"; STATUS=1; }
     # The account server's stand-in signs its documents with the testbed's own Ed25519: RFC 8032's vectors.
     python3 "$HERE/testbed/ed25519.py" 2>&1 | tee -a "$LOG"; [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "the testbed's Ed25519 is wrong"; STATUS=1; }
 fi
@@ -218,6 +221,12 @@ PY
     else
         grep -E "error:|error " "$OUT/build-release.txt" | head -30 | tee -a "$LOG"; say "RELEASE BUILD FAILED"; STATUS=1
     fi
+fi
+# The English table is in the built app (a table left out of the bundle would leave every text Russian).
+if [[ -f "$BUILT_APP/en.lproj/Localizable.strings" ]]; then
+    say "the built app carries its English table (en.lproj)"
+else
+    say "BUILD WRONG: no en.lproj/Localizable.strings in the built app — $(ls "$BUILT_APP" | tr '\n' ' ' | cut -c1-200)"; exit 2
 fi
 if /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity:NSExceptionDomains:geo.lumentest:NSExceptionAllowsInsecureHTTPLoads" "$BUILT_APP/Info.plist" 2>/dev/null | grep -q true; then
     say "the test build lets the proxy check reach http://geo.lumentest"

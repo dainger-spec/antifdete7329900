@@ -44,13 +44,13 @@ public struct Access: Equatable, Sendable {
     public static var free: Access {
         // The planted fault: the free plan's proxies left on.
         Access(plan: "free", proxies: Faults.isActive(.freePlanProxies), maxProfiles: freeProfiles,
-               reason: "Прокси недоступны.")
+               reason: L("Прокси недоступны."))
     }
 
     /// A paid period that ended: the free level's limits. Its profiles that lived behind a proxy stay
     /// locked (SessionLock), their data kept.
     public static let expired = Access(plan: "expired", proxies: false, maxProfiles: freeProfiles,
-                                       reason: "Оплаченный период закончился. Прокси недоступны.")
+                                       reason: L("Оплаченный период закончился. Прокси недоступны."))
 
     /// Whether one more profile may be made where `count` are.
     public func mayCreateProfile(having count: Int) -> Bool {
@@ -62,16 +62,16 @@ public struct Access: Equatable, Sendable {
     /// The plan's name, as the person reads it (the Mac's names for the paid ones).
     public var planTitle: String {
         switch plan {
-        case "free": return "Бесплатный"
-        case "expired": return "Оплаченный период закончился"
-        case "disabled": return "Аккаунт заблокирован"
-        case "unverified": return "Права не проверены"
-        case "unreachable": return "Нет ответа сервера Lumen"
-        case "trial": return "7 дней бесплатно"
-        case "personal": return "Личный"
-        case "pro": return "Профессиональный"
-        case "team": return "Команда"
-        case "full": return "Все возможности (проверочная сборка)"
+        case "free": return L("Бесплатный")
+        case "expired": return L("Оплаченный период закончился")
+        case "disabled": return L("Аккаунт заблокирован")
+        case "unverified": return L("Права не проверены")
+        case "unreachable": return L("Нет ответа сервера Lumen")
+        case "trial": return L("7 дней бесплатно")
+        case "personal": return L("Личный")
+        case "pro": return L("Профессиональный")
+        case "team": return L("Команда")
+        case "full": return L("Все возможности (проверочная сборка)")
         default: return plan
         }
     }
@@ -86,7 +86,7 @@ public struct Access: Equatable, Sendable {
 
     /// "Профили: 2 из 2", or "Профили: 5" with no limit.
     public func profileCounter(_ count: Int) -> String {
-        maxProfiles.map { "Профили: \(count) из \($0)" } ?? "Профили: \(count)"
+        maxProfiles.map { L("Профили: %@ из %@", "\(count)", "\($0)") } ?? L("Профили: %@", "\(count)")
     }
 }
 
@@ -100,16 +100,16 @@ public enum SessionLock: Equatable, Sendable {
     case locked(reason: String)
 
     public static func of(_ session: Session, proxyExists: Bool, access: Access, overLimit: Bool = false) -> SessionLock {
-        if !access.browse { return .locked(reason: access.reason ?? "Сайты сейчас не открываются.") }
+        if !access.browse { return .locked(reason: access.reason ?? L("Сайты сейчас не открываются.")) }
         if overLimit {
             let limit = access.maxProfiles.map { " (\($0))" } ?? ""
-            return .locked(reason: "Профиль сверх числа профилей тарифа\(limit). Он и его данные сохранены.")
+            return .locked(reason: L("Профиль сверх числа профилей тарифа%@. Он и его данные сохранены.", "\(limit)"))
         }
         // The planted fault: a locked profile opens as one without a proxy — directly.
         if Faults.isActive(.lockedOpensDirect) { return .open }
         guard session.boundToProxy else { return .open }
-        if !access.proxies { return .locked(reason: access.reason ?? "Прокси сейчас недоступны.") }
-        if session.proxyID == nil || !proxyExists { return .locked(reason: "Прокси этого профиля больше нет в списке.") }
+        if !access.proxies { return .locked(reason: access.reason ?? L("Прокси сейчас недоступны.")) }
+        if session.proxyID == nil || !proxyExists { return .locked(reason: L("Прокси этого профиля больше нет в списке.")) }
         return .open
     }
 

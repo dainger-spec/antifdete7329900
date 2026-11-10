@@ -31,11 +31,11 @@ struct BrowserView: View {
                 HStack(spacing: 16) {
                     Text(verbatim: runtime.relayPort.map { "relay \($0)" } ?? "relay down")
                         .accessibilityIdentifier("debugRelayPort")
-                    Button("сеть") { runtime.drill(.networkChange) }
+                    Button(L("сеть")) { runtime.drill(.networkChange) }
                         .accessibilityIdentifier("debugNetworkChange")
-                    Button("смерть") { runtime.drill(.death) }
+                    Button(L("смерть")) { runtime.drill(.death) }
                         .accessibilityIdentifier("debugRelayDeath")
-                    Button("перезапуск") { runtime.drill(.restart) }
+                    Button(L("перезапуск")) { runtime.drill(.restart) }
                         .accessibilityIdentifier("debugRelayRestart")
                 }
                 .font(.caption2)
@@ -63,7 +63,7 @@ struct AddressBar: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            TextField("Адрес или поиск", text: $text)
+            TextField(L("Адрес или поиск"), text: $text)
                 .focused($focused)
                 .keyboardType(.webSearch)
                 .textInputAutocapitalization(.never)
@@ -93,8 +93,8 @@ struct StartPage: View {
         if tab.url == nil {
             VStack(spacing: 8) {
                 Image(systemName: "globe").font(.largeTitle).foregroundStyle(.secondary)
-                Text("Новая вкладка").font(.title3)
-                Text("Введите адрес или запрос").foregroundStyle(.secondary)
+                Text(L("Новая вкладка")).font(.title3)
+                Text(L("Введите адрес или запрос")).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(.systemBackground))
@@ -112,25 +112,25 @@ struct BottomBar: View {
     var body: some View {
         HStack {
             Button { if !Faults.isActive(.backIgnored) { tab.webView.goBack() } } label: { Image(systemName: "chevron.backward") }
-                .disabled(!tab.canGoBack).accessibilityIdentifier("back").accessibilityLabel("Назад")
+                .disabled(!tab.canGoBack).accessibilityIdentifier("back").accessibilityLabel(L("Назад"))
             Spacer()
             Button { if !Faults.isActive(.forwardIgnored) { tab.webView.goForward() } } label: { Image(systemName: "chevron.forward") }
-                .disabled(!tab.canGoForward).accessibilityIdentifier("forward").accessibilityLabel("Вперёд")
+                .disabled(!tab.canGoForward).accessibilityIdentifier("forward").accessibilityLabel(L("Вперёд"))
             Spacer()
             Button { if !Faults.isActive(.reloadIgnored) { tab.webView.reload() } } label: { Image(systemName: "arrow.clockwise") }
-                .disabled(tab.url == nil).accessibilityIdentifier("reload").accessibilityLabel("Обновить")
+                .disabled(tab.url == nil).accessibilityIdentifier("reload").accessibilityLabel(L("Обновить"))
             Spacer()
             Button { show(.tabs) } label: {
                 Text("\(tabCount)").font(.footnote.bold()).frame(minWidth: 22, minHeight: 22)
                     .overlay(RoundedRectangle(cornerRadius: 5).stroke(lineWidth: 1.5))
             }
-            .accessibilityIdentifier("tabsButton").accessibilityLabel("Вкладки: \(tabCount)")
+            .accessibilityIdentifier("tabsButton").accessibilityLabel(L("Вкладки: %@", "\(tabCount)"))
             Spacer()
             Button { show(.history) } label: { Image(systemName: "clock") }
-                .accessibilityIdentifier("historyButton").accessibilityLabel("История")
+                .accessibilityIdentifier("historyButton").accessibilityLabel(L("История"))
             Spacer()
             Button { show(.settings) } label: { Image(systemName: "slider.horizontal.3") }
-                .accessibilityIdentifier("settingsButton").accessibilityLabel("Настройки сессии")
+                .accessibilityIdentifier("settingsButton").accessibilityLabel(L("Настройки сессии"))
         }
         .font(.title3)
         .padding(.horizontal, 20)

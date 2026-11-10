@@ -23,14 +23,14 @@ struct PlansView: View {
                 // The account: who is signed in on this iPhone, or the way in. (A test that fixed the
                 // rights has no account to show.)
                 if model.fixedAccess == nil {
-                    Section("Аккаунт") {
+                    Section(L("Аккаунт")) {
                         if let account = model.account {
                             Text(account.email).accessibilityIdentifier("accountEmail")
                             if !account.code.isEmpty {
-                                Text("Код этого iPhone в кабинете: \(account.code)").font(.subheadline).foregroundStyle(.secondary)
+                                Text(L("Код этого iPhone в кабинете: %@", "\(account.code)")).font(.subheadline).foregroundStyle(.secondary)
                                     .accessibilityIdentifier("deviceCode")
                             }
-                            Button(refreshing ? "Обновляем…" : "Обновить статус") {
+                            Button(refreshing ? L("Обновляем…") : L("Обновить статус")) {
                                 refreshing = true
                                 Task {
                                     await model.refreshAccount()
@@ -39,37 +39,37 @@ struct PlansView: View {
                             }
                             .disabled(refreshing)
                             .accessibilityIdentifier("refreshAccount")
-                            Button("Выйти", role: .destructive) { confirmSignOut = true }
+                            Button(L("Выйти"), role: .destructive) { confirmSignOut = true }
                                 .accessibilityIdentifier("signOut")
                         } else {
-                            Text("Вход не выполнен").accessibilityIdentifier("signedOut")
-                            Button("Войти") { signingIn = true }.accessibilityIdentifier("signIn")
+                            Text(L("Вход не выполнен")).accessibilityIdentifier("signedOut")
+                            Button(L("Войти")) { signingIn = true }.accessibilityIdentifier("signIn")
                         }
                         if let message = model.accountMessage {
                             Text(message).font(.subheadline).foregroundStyle(.orange).accessibilityIdentifier("accountNotice")
                         }
                     }
                 }
-                Section("На этом iPhone") {
+                Section(L("На этом iPhone")) {
                     if let plan = model.access.paidPlanTitle {
-                        Text("Тариф: \(plan)").font(.headline).accessibilityIdentifier("planName")
+                        Text(L("Тариф: %@", "\(plan)")).font(.headline).accessibilityIdentifier("planName")
                     }
                     Text(model.access.profileCounter(model.sessions.count)).accessibilityIdentifier("profileCounter")
-                    Text(model.access.proxies ? "Прокси: есть" : "Прокси: нет").accessibilityIdentifier("planProxies")
+                    Text(model.access.proxies ? L("Прокси: есть") : L("Прокси: нет")).accessibilityIdentifier("planProxies")
                 }
             }
-            .navigationTitle("Аккаунт")
+            .navigationTitle(L("Аккаунт"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Готово") { dismiss() }.accessibilityIdentifier("plansDone") }
+                ToolbarItem(placement: .confirmationAction) { Button(L("Готово")) { dismiss() }.accessibilityIdentifier("plansDone") }
             }
             .sheet(isPresented: $signingIn) { SignInView() }
-            .confirmationDialog("Выйти из аккаунта на этом iPhone?", isPresented: $confirmSignOut, titleVisibility: .visible) {
-                Button("Выйти", role: .destructive) { Task { await model.signOut() } }
+            .confirmationDialog(L("Выйти из аккаунта на этом iPhone?"), isPresented: $confirmSignOut, titleVisibility: .visible) {
+                Button(L("Выйти"), role: .destructive) { Task { await model.signOut() } }
                     .accessibilityIdentifier("confirmSignOut")
-                Button("Отмена", role: .cancel) {}
+                Button(L("Отмена"), role: .cancel) {}
             } message: {
-                Text("Этот iPhone отключится от аккаунта. Профили останутся здесь; прокси будут недоступны, пока вы не войдёте снова.")
+                Text(L("Этот iPhone отключится от аккаунта. Профили останутся здесь; прокси будут недоступны, пока вы не войдёте снова."))
             }
         }
     }

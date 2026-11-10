@@ -95,8 +95,8 @@ public final class SessionCatalog {
 
     private func nextDefaultName() -> String {
         var n = sessions.count + 1
-        while sessions.contains(where: { $0.name == "Сессия \(n)" }) { n += 1 }
-        return "Сессия \(n)"
+        while sessions.contains(where: { $0.name == L("Сессия %@", "\(n)") }) { n += 1 }
+        return L("Сессия %@", "\(n)")
     }
 
     private func update(_ id: UUID, _ change: (inout Session) -> Void) {

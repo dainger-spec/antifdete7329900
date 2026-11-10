@@ -18,15 +18,15 @@ struct TabsView: View {
                 }
                 .padding()
             }
-            .navigationTitle("Вкладки: \(runtime.tabs.count)")
+            .navigationTitle(L("Вкладки: %@", "\(runtime.tabs.count)"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .bottomBar) {
-                    Button { runtime.newTab(); dismiss() } label: { Label("Новая вкладка", systemImage: "plus") }
+                    Button { runtime.newTab(); dismiss() } label: { Label(L("Новая вкладка"), systemImage: "plus") }
                         .accessibilityIdentifier("newTab")
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Готово") { dismiss() }.accessibilityIdentifier("tabsDone")
+                    Button(L("Готово")) { dismiss() }.accessibilityIdentifier("tabsDone")
                 }
             }
         }
@@ -47,7 +47,7 @@ struct TabCard: View {
                     Image(systemName: tab.url == nil ? "plus.square.dashed" : "doc.richtext")
                         .font(.largeTitle).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, minHeight: 90)
-                    Text(tab.title.isEmpty ? "Новая вкладка" : tab.title).font(.subheadline.bold()).lineLimit(1)
+                    Text(tab.title.isEmpty ? L("Новая вкладка") : tab.title).font(.subheadline.bold()).lineLimit(1)
                     Text(tab.url?.host() ?? " ").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 .padding(10)
@@ -62,7 +62,7 @@ struct TabCard: View {
             }
             .padding(6)
             .accessibilityIdentifier("closeTab-\(index)")
-            .accessibilityLabel("Закрыть вкладку")
+            .accessibilityLabel(L("Закрыть вкладку"))
         }
     }
 }
@@ -76,7 +76,7 @@ struct HistoryView: View {
         NavigationStack {
             List {
                 if runtime.history.isEmpty {
-                    ContentUnavailableView("История пуста", systemImage: "clock")
+                    ContentUnavailableView(L("История пуста"), systemImage: "clock")
                 }
                 ForEach(runtime.history.reversed()) { entry in
                     Button {
@@ -91,12 +91,12 @@ struct HistoryView: View {
                     .accessibilityIdentifier("historyRow")
                 }
             }
-            .navigationTitle("История")
+            .navigationTitle(L("История"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Готово") { dismiss() }.accessibilityIdentifier("historyDone") }
+                ToolbarItem(placement: .confirmationAction) { Button(L("Готово")) { dismiss() }.accessibilityIdentifier("historyDone") }
                 ToolbarItem(placement: .destructiveAction) {
-                    Button("Очистить", role: .destructive) { runtime.clearHistory() }.disabled(runtime.history.isEmpty)
+                    Button(L("Очистить"), role: .destructive) { runtime.clearHistory() }.disabled(runtime.history.isEmpty)
                 }
             }
         }
@@ -145,16 +145,16 @@ struct SessionSettingsView: View {
         current.settings = settings
         let locale = PageSettings.locale(of: current, proxy: model.proxy(proxyID))
         if locale.timeZone == nil && locale.language == nil {
-            return settings.locale == .device ? "Как у устройства" : "Нет проверенного прокси: как у устройства"
+            return settings.locale == .device ? L("Как у устройства") : L("Нет проверенного прокси: как у устройства")
         }
         return [locale.timeZone, locale.language].compactMap { $0 }.joined(separator: " · ")
     }
 
     private func modePicker(_ title: String, _ value: Binding<FingerprintMode>, id: String) -> some View {
         Picker(title, selection: value) {
-            Text("Выкл").tag(FingerprintMode.off)
-            Text("Настоящий").tag(FingerprintMode.real)
-            Text("Шум").tag(FingerprintMode.noise)
+            Text(L("Выкл")).tag(FingerprintMode.off)
+            Text(L("Настоящий")).tag(FingerprintMode.real)
+            Text(L("Шум")).tag(FingerprintMode.noise)
         }
         .pickerStyle(.segmented)
         .accessibilityIdentifier(id)
@@ -167,7 +167,7 @@ struct SessionSettingsView: View {
                     // A plan without proxies (the free plan) offers none: the profile goes without one.
                     // One that lived behind a proxy keeps its choice (it is locked and not shown here).
                     if model.access.proxies || model.session(sessionID)?.boundToProxy == true {
-                        Picker("Прокси", selection: Binding(get: { proxyID }, set: { chosen in
+                        Picker(L("Прокси"), selection: Binding(get: { proxyID }, set: { chosen in
                             // A session that lived behind a proxy goes without one only when the person
                             // says so, knowing what it means; otherwise it stays bound (and locked).
                             if chosen == nil, model.session(sessionID)?.boundToProxy == true {
@@ -177,7 +177,7 @@ struct SessionSettingsView: View {
                             proxyID = chosen
                             model.setProxy(sessionID, proxyID: chosen)
                         })) {
-                            Text("Без прокси").tag(UUID?.none)
+                            Text(L("Без прокси")).tag(UUID?.none)
                             ForEach(model.proxies) { entry in
                                 Text(entry.displayName).tag(UUID?.some(entry.id))
                             }
@@ -185,40 +185,40 @@ struct SessionSettingsView: View {
                         .pickerStyle(.inline)
                         .labelsHidden()
                         .accessibilityIdentifier("proxyPicker")
-                        .confirmationDialog("Профиль работал через прокси", isPresented: $confirmUnbind, titleVisibility: .visible) {
-                            Button("Открывать без прокси", role: .destructive) {
+                        .confirmationDialog(L("Профиль работал через прокси"), isPresented: $confirmUnbind, titleVisibility: .visible) {
+                            Button(L("Открывать без прокси"), role: .destructive) {
                                 proxyID = nil
                                 model.setProxy(sessionID, proxyID: nil, unbind: true)
                             }
                             .accessibilityIdentifier("confirmUnbind")
-                            Button("Оставить прокси", role: .cancel) {}
+                            Button(L("Оставить прокси"), role: .cancel) {}
                         } message: {
-                            Text("Без прокси сайты этого профиля увидят настоящий адрес устройства.")
+                            Text(L("Без прокси сайты этого профиля увидят настоящий адрес устройства."))
                         }
                     } else {
-                        Text("Без прокси").accessibilityIdentifier("proxyNone")
+                        Text(L("Без прокси")).accessibilityIdentifier("proxyNone")
                     }
                 } header: {
-                    Text("Прокси")
+                    Text(L("Прокси"))
                 } footer: {
                     if !model.access.proxies {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(model.access.reason ?? "Прокси недоступны.").accessibilityIdentifier("proxiesNotOnPlan")
-                            Button("Аккаунт") { showPlans = true }.accessibilityIdentifier("plansFromSettings")
+                            Text(model.access.reason ?? L("Прокси недоступны.")).accessibilityIdentifier("proxiesNotOnPlan")
+                            Button(L("Аккаунт")) { showPlans = true }.accessibilityIdentifier("plansFromSettings")
                         }
                     }
                 }
-                Section("Браузер (строка User-Agent)") {
-                    Picker("Строка браузера", selection: userAgentTag) {
-                        Text("Как Safari этого iPhone").tag("device")
+                Section(L("Браузер (строка User-Agent)")) {
+                    Picker(L("Строка браузера"), selection: userAgentTag) {
+                        Text(L("Как Safari этого iPhone")).tag("device")
                         ForEach(UserAgentPreset.all) { preset in Text(preset.title).tag(preset.id) }
-                        Text("Своя").tag("custom")
+                        Text(L("Своя")).tag("custom")
                     }
                     .pickerStyle(.inline)
                     .labelsHidden()
                     .accessibilityIdentifier("userAgentPicker")
                     if case .custom = settings.userAgent {
-                        TextField("Своя строка", text: $customUserAgent)
+                        TextField(L("Своя строка"), text: $customUserAgent)
                             .textInputAutocapitalization(.never).autocorrectionDisabled()
                             .onSubmit { settings.userAgent = .custom(customUserAgent) }
                             .onChange(of: customUserAgent) { _, text in settings.userAgent = .custom(text) }
@@ -226,36 +226,36 @@ struct SessionSettingsView: View {
                     }
                 }
                 Section {
-                    Picker("Часовой пояс и язык", selection: localeTag) {
-                        Text("По стране прокси").tag("proxy")
-                        Text("Как у устройства").tag("device")
+                    Picker(L("Часовой пояс и язык"), selection: localeTag) {
+                        Text(L("По стране прокси")).tag("proxy")
+                        Text(L("Как у устройства")).tag("device")
                     }
                     .pickerStyle(.segmented)
                     .accessibilityIdentifier("localeMode")
                     Text(localeSummary).font(.footnote).foregroundStyle(.secondary).accessibilityIdentifier("localeSummary")
                 } header: {
-                    Text("Часовой пояс и язык")
+                    Text(L("Часовой пояс и язык"))
                 } footer: {
-                    Text("Язык страницы меняется только в navigator.language: заголовок Accept-Language WebKit на iPhone задаёт один на всё приложение.")
+                    Text(L("Язык страницы меняется только в navigator.language: заголовок Accept-Language WebKit на iPhone задаёт один на всё приложение."))
                 }
                 Section {
-                    Picker("Профиль устройства", selection: $settings.profileLevel) {
-                        Text("Полный").tag(SessionSettings.ProfileLevel.full)
-                        Text("Упрощённый").tag(SessionSettings.ProfileLevel.simplified)
-                        if settings.profileLevel == .custom { Text("Свой").tag(SessionSettings.ProfileLevel.custom) }
+                    Picker(L("Профиль устройства"), selection: $settings.profileLevel) {
+                        Text(L("Полный")).tag(SessionSettings.ProfileLevel.full)
+                        Text(L("Упрощённый")).tag(SessionSettings.ProfileLevel.simplified)
+                        if settings.profileLevel == .custom { Text(L("Свой")).tag(SessionSettings.ProfileLevel.custom) }
                     }
                     .pickerStyle(.segmented)
                     .accessibilityIdentifier("profileLevel")
-                    modePicker("Канвас", $settings.canvas, id: "canvasMode")
+                    modePicker(L("Канвас"), $settings.canvas, id: "canvasMode")
                     modePicker("WebGL", $settings.webGL, id: "webglMode")
-                    modePicker("Звук", $settings.audio, id: "audioMode")
+                    modePicker(L("Звук"), $settings.audio, id: "audioMode")
                 } header: {
-                    Text("Профиль устройства")
+                    Text(L("Профиль устройства"))
                 } footer: {
-                    Text("Полный: канвас, WebGL и звук у профиля свои. Упрощённый: только строка браузера, часовой пояс и язык.")
+                    Text(L("Полный: канвас, WebGL и звук у профиля свои. Упрощённый: только строка браузера, часовой пояс и язык."))
                 }
-                Section("Поисковик") {
-                    Picker("Поисковик", selection: $settings.searchEngine) {
+                Section(L("Поисковик")) {
+                    Picker(L("Поисковик"), selection: $settings.searchEngine) {
                         ForEach(SearchEngine.allCases) { engine in
                             Text(engine.title).tag(engine)
                         }
@@ -265,10 +265,10 @@ struct SessionSettingsView: View {
                     .accessibilityIdentifier("searchEnginePicker")
                 }
             }
-            .navigationTitle("Настройки сессии")
+            .navigationTitle(L("Настройки сессии"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Готово") { dismiss() }.accessibilityIdentifier("settingsDone") }
+                ToolbarItem(placement: .confirmationAction) { Button(L("Готово")) { dismiss() }.accessibilityIdentifier("settingsDone") }
             }
             .sheet(isPresented: $showPlans) { PlansView() }
             .onAppear {

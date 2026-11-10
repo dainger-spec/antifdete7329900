@@ -11,8 +11,8 @@ struct ProxiesView: View {
     var body: some View {
         List {
             if model.proxies.isEmpty {
-                ContentUnavailableView("Прокси пока нет", systemImage: "network",
-                                       description: Text("Добавьте прокси и назначьте его сессии в её настройках."))
+                ContentUnavailableView(L("Прокси пока нет"), systemImage: "network",
+                                       description: Text(L("Добавьте прокси и назначьте его сессии в её настройках.")))
             }
             ForEach(model.proxies) { entry in
                 ProxyRow(entry: entry, checking: model.checking.contains(entry.id))
@@ -20,16 +20,16 @@ struct ProxiesView: View {
                     .onTapGesture { editing = entry }
                     .accessibilityIdentifier("proxy-\(entry.displayName)")
                     .swipeActions {
-                        Button("Удалить", systemImage: "trash", role: .destructive) { model.deleteProxy(entry.id) }
-                        Button("Проверить", systemImage: "arrow.clockwise") { model.check(entry.id) }.tint(.blue)
+                        Button(L("Удалить"), systemImage: "trash", role: .destructive) { model.deleteProxy(entry.id) }
+                        Button(L("Проверить"), systemImage: "arrow.clockwise") { model.check(entry.id) }.tint(.blue)
                     }
             }
         }
-        .navigationTitle("Прокси")
+        .navigationTitle(L("Прокси"))
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { adding = true } label: { Image(systemName: "plus") }
-                    .accessibilityIdentifier("newProxy").accessibilityLabel("Новый прокси")
+                    .accessibilityIdentifier("newProxy").accessibilityLabel(L("Новый прокси"))
             }
         }
         .sheet(isPresented: $adding) { ProxyEditor(entry: nil) }
@@ -57,19 +57,19 @@ struct ProxyRow: View {
     }
 
     private var status: String {
-        if checking { return "Проверяется…" }
-        guard let check = entry.check else { return "Не проверен" }
-        guard check.alive else { return "Недоступен: \(check.error ?? "нет ответа")" }
+        if checking { return L("Проверяется…") }
+        guard let check = entry.check else { return L("Не проверен") }
+        guard check.alive else { return L("Недоступен: %@", "\(check.error ?? L("нет ответа"))") }
         let place = [CountryLocale.flag(check.country), check.country ?? "", check.exitIP ?? ""].filter { !$0.isEmpty }.joined(separator: " ")
-        return "Работает · \(place)"
+        return L("Работает · %@", "\(place)")
     }
 
     private var udp: String {
-        if checking { return "UDP: проверяется" }
+        if checking { return L("UDP: проверяется") }
         switch entry.check?.udp ?? .unchecked {
-        case .supported: return "UDP: умеет"
-        case .unsupported: return "UDP: не умеет"
-        case .unchecked: return "UDP: не проверен"
+        case .supported: return L("UDP: умеет")
+        case .unsupported: return L("UDP: не умеет")
+        case .unchecked: return L("UDP: не проверен")
         }
     }
 }
@@ -101,35 +101,35 @@ struct ProxyEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Прокси") {
-                    TextField("Название (необязательно)", text: $name).accessibilityIdentifier("proxyName")
-                    Picker("Тип", selection: $kind) {
+                Section(L("Прокси")) {
+                    TextField(L("Название (необязательно)"), text: $name).accessibilityIdentifier("proxyName")
+                    Picker(L("Тип"), selection: $kind) {
                         Text("SOCKS5").tag(ProxyKind.socks5)
                         Text("HTTP").tag(ProxyKind.http)
                     }
                     .pickerStyle(.segmented)
                     .accessibilityIdentifier("proxyKind")
-                    TextField("Адрес", text: $host).accessibilityIdentifier("proxyHost")
+                    TextField(L("Адрес"), text: $host).accessibilityIdentifier("proxyHost")
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                    TextField("Порт", text: $port).accessibilityIdentifier("proxyPort").keyboardType(.numberPad)
+                    TextField(L("Порт"), text: $port).accessibilityIdentifier("proxyPort").keyboardType(.numberPad)
                 }
-                Section("Вход") {
-                    TextField("Логин", text: $username).accessibilityIdentifier("proxyUser")
+                Section(L("Вход")) {
+                    TextField(L("Логин"), text: $username).accessibilityIdentifier("proxyUser")
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    SecureField("Пароль", text: $password).accessibilityIdentifier("proxyPassword")
+                    SecureField(L("Пароль"), text: $password).accessibilityIdentifier("proxyPassword")
                 }
                 if let entry {
                     Section {
-                        Button("Удалить прокси", role: .destructive) { model.deleteProxy(entry.id); close() }
+                        Button(L("Удалить прокси"), role: .destructive) { model.deleteProxy(entry.id); close() }
                     }
                 }
             }
-            .navigationTitle(entry == nil ? "Новый прокси" : "Прокси")
+            .navigationTitle(entry == nil ? L("Новый прокси") : L("Прокси"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Отмена") { close() } }
+                ToolbarItem(placement: .cancellationAction) { Button(L("Отмена")) { close() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Сохранить") {
+                    Button(L("Сохранить")) {
                         var saved = entry ?? ProxyEntry(kind: kind, host: host, port: 0)
                         saved.name = name.trimmingCharacters(in: .whitespaces)
                         saved.kind = kind

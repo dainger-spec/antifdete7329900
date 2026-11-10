@@ -12,9 +12,12 @@ class LumenUITestCase: XCTestCase {
     /// `reset`: the app starts with no sessions, proxies or WebKit data at all. `environment`: test
     /// hooks of a DEBUG build, for this launch only.
     @discardableResult
-    func launch(reset: Bool, access: String? = nil, environment: [String: String] = [:]) -> XCUIApplication {
+    func launch(reset: Bool, access: String? = nil, environment: [String: String] = [:], language: String = "ru") -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = reset ? ["-LumenResetState"] : []
+        // The app's language: Russian for the tests, which find things by what they say; English in
+        // LanguageTests. (A simulator's own language is English, and the app follows the device.)
+        app.launchArguments += ["-AppleLanguages", "(\(language))", "-AppleLocale", language == "ru" ? "ru_RU" : "en_US"]
         // The rights the app starts with, DEBUG builds only: everything, for a test that checks
         // something else; "free" — the free level; "none" — a paid period that ended; "account" —
         // nothing fixed: the Lumen account decides, as in a release build (AccountTests).
@@ -33,7 +36,7 @@ class LumenUITestCase: XCTestCase {
         for (name, value) in environment { app.launchEnvironment[name] = value }
         app.launch()
         self.app = app
-        XCTAssertTrue(app.navigationBars["Сессии"].waitForExistence(timeout: 30), "the sessions list comes up")
+        XCTAssertTrue(app.navigationBars[language == "ru" ? "Сессии" : "Sessions"].waitForExistence(timeout: 30), "the sessions list comes up")
         return app
     }
 
@@ -95,7 +98,8 @@ class LumenUITestCase: XCTestCase {
         var current = (field.value as? String) ?? ""
         if current == placeholder { current = "" }
         if !current.isEmpty {
-            let clear = field.buttons["Clear text"]
+            // The field's one button, whatever the system calls it in the app's language ("Clear text").
+            let clear = field.buttons.firstMatch
             if clear.waitForExistence(timeout: 8), clear.isHittable {
                 clear.tap()
             } else {

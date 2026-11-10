@@ -11,7 +11,7 @@ public enum SearchEngine: String, Codable, CaseIterable, Identifiable, Sendable 
         case .google: return "Google"
         case .duckDuckGo: return "DuckDuckGo"
         case .bing: return "Bing"
-        case .yandex: return "Яндекс"
+        case .yandex: return L("Яндекс")
         case .startpage: return "Startpage"
         case .brave: return "Brave Search"
         case .ecosia: return "Ecosia"

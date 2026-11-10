@@ -64,6 +64,8 @@ SWITCH = re.compile(r'LUMEN_TEST_[A-Z_]+|LUMEN_FAULTS|-LumenFaults|-LumenResetSt
 # Rule 5 (the owner, 10 November): nothing in the app offers a plan, names where to buy one or leads
 # to the site's prices. A plan is named only as the paid plan a person already has.
 OFFER = re.compile(r"pricing|выбрать тариф|тариф\w* на сайте|тарифы|купить|оплатит", re.IGNORECASE)
+# The same in the English table (its words are too common to look for among the sources' identifiers).
+OFFER_ENGLISH = re.compile(r"choose a plan|\bbuy\b|purchase|\bplans\b|\bprices?\b|pricing", re.IGNORECASE)
 
 
 def outside_debug(path):
@@ -172,6 +174,8 @@ def scan(ios, app=None):
                 for number, line in enumerate(open(path, encoding="utf-8", errors="replace"), 1):
                     for text in LITERAL.findall(line):
                         judge(f"{os.path.relpath(path, ios)}:{number}", text)
+                        if OFFER_ENGLISH.search(text):
+                            found.append((f"{os.path.relpath(path, ios)}:{number}", "offer", text))
     project = os.path.join(ios, "project.yml")
     if os.path.exists(project):
         lines = open(project, encoding="utf-8").read().splitlines()
