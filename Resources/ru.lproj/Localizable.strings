@@ -265,7 +265,14 @@
 "editor.camera.error.read" = "Не удалось прочитать %@.";
 
 /* Camera: adjustments, crop, playback */
-"editor.camera.label.note" = "Настоящая камера Mac называется «FaceTime HD Camera»; оставьте пустым для неё.";
+"editor.camera.label.note" = "Поставь как у реальной камеры, чтобы страница не отличила — кнопка подстановки впишет точное имя и разрешение устройства (собственной камеры этого Mac или типичной фронтальной камеры iPhone для мобильного профиля).";
+"editor.camera.matchMac" = "Как у этого Mac";
+"editor.camera.matchMobile" = "Как у iPhone";
+"editor.camera.preview.note" = "Живое превью того, что получит страница — обновляется при смене источника, обрезки и коррекции. Видео здесь проигрывается по кругу.";
+"editor.camera.preview.open" = "Открыть превью";
+"editor.camera.preview.window" = "Превью камеры";
+"editor.camera.preview.result" = "Результат";
+"editor.camera.preview.adjust" = "Коррекция";
 "editor.camera.filters" = "Коррекция";
 "editor.camera.filter.brightness" = "Яркость";
 "editor.camera.filter.contrast" = "Контраст";
@@ -280,6 +287,7 @@
 "editor.camera.crop" = "Обрезка";
 "editor.camera.crop.enabled" = "Обрезать источник";
 "editor.camera.crop.detail" = "Брать в кадр только прямоугольник изображения или видео.";
+"editor.camera.crop.reset" = "Сбросить обрезку";
 "editor.camera.crop.x" = "Слева";
 "editor.camera.crop.y" = "Сверху";
 "editor.camera.crop.width" = "Ширина";
@@ -292,6 +300,19 @@
 "editor.camera.playback.start" = "Старт, с";
 "editor.camera.playback.end" = "Конец, с";
 "editor.camera.playback.note" = "Старт и конец обрезают ролик, в секундах (0 в конце — до самого конца).";
+
+/* Camera: delivery and the system camera */
+"editor.camera.delivery" = "Доставка";
+"editor.camera.delivery.shim" = "JavaScript-шим";
+"editor.camera.delivery.system" = "Системная камера";
+"editor.camera.system" = "Системная камера";
+"editor.camera.system.note" = "Системная виртуальная камера отдаёт картинку через macOS, поэтому страница не отличит её от встроенной. Это одно устройство на весь Mac, и другие профили его не видят. Расширение рисует ваш источник — цвет, тестовую таблицу, изображение или видео — с обрезкой, вписыванием, зеркалом, коррекцией и воспроизведением видео.";
+"editor.camera.system.notInBuild" = "В этой сборке системной камеры нет; она есть в подписанной сборке.";
+"editor.camera.system.active" = "Системная камера установлена и включена.";
+"editor.camera.system.restart" = "Установлена; macOS включит её после перезапуска.";
+"editor.camera.system.install" = "Установить…";
+"editor.camera.system.settings" = "Открыть «Системные настройки»";
+"editor.camera.system.failed" = "Не удалось установить: %@";
 "editor.avatar" = "Значок";
 "editor.avatar.letters" = "Буквы (до 2)";
 "editor.avatar.automatic" = "Цвет, который профиль получил при создании";
@@ -1800,6 +1821,7 @@
 "help.camera.know.detect" = "Кадры рисуются, а не снимаются сенсором: проверка, ищущая живую камеру, всё же может это заметить.";
 "help.camera.know.permission" = "Страница всё так же спросит у вас камеру в первый раз, как и раньше.";
 "help.camera.know.size" = "Изображение или видео хранится с профилем и синхронизируется, поэтому держите их небольшими.";
+"help.camera.know.system" = "Доставка: кадры рисует JavaScript-шим, либо их отдаёт системная камера (если установлена) через macOS — тогда страница не отличит её от встроенной.";
 
 /* The licensing client: contract.* — the server's docs/CONTRACT.md §17, word for word; license.* — the app's own. */
 "contract.error.unreachable" = "Сервер Lumen не отвечает. Проверьте соединение и попробуйте ещё раз.";

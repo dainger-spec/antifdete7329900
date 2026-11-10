@@ -110,18 +110,60 @@ unsigned with `CAM=check` (CI compiles it; off by default so an ordinary build i
 signs and embeds it under `Contents/Library/SystemExtensions/` with `CAM=1` (needs `CAMERA_PROFILE`
 and the app's signing), mirroring the `NE=1`/`NE=check` network-guard flow.
 
-### Stage 2 (next, on a Mac)
+### Stage 2 (here): the app wiring and the per-profile gate
 
-- The app-side activation manager (`OSSystemExtensionManager`, mirroring `NetworkGuard`): install,
-  the user's approval in System Settings, state, and writing the active profile's `camera.json`.
-- A per-profile **delivery** choice (the JavaScript shim here, or the system camera) in the editor.
-- The per-profile gate: the shim hides/renames the virtual device so it does not leak across
-  profiles or into the Safari comparison (above).
-- Richer frames in the extension (an image, a video, filters, crop — the same pixels the shim
-  draws), fed from the app.
+- `SystemCamera` (mirroring `NetworkGuard`) installs and switches the extension on through
+  `OSSystemExtensionManager`, records in the shared app group whether it is active (so every
+  profile's process can read it), and writes the active profile's render settings to
+  `<group>/camera.json`. The extension publishes itself under a fixed sentinel name
+  (`CameraSubstitution.systemDeviceName`, "Lumen Camera").
+- A per-profile **delivery** choice (`CameraSubstitution.delivery`): the JavaScript shim, or the
+  system camera. In the editor's Camera part, with the extension's install state and an Install
+  button.
+- The per-profile gate (`PrivacyScripts.patchSystemCamera`): the profile that uses the system
+  camera reads the sentinel device under the believable name (`deviceLabel`) with the real cameras
+  hidden, so one camera shows; every other profile hides the sentinel, so the Mac-global device
+  does not leak across profiles or into the Safari comparison. A plain `getUserMedia({video})` in
+  the using profile is routed to the sentinel device. A profile that draws its own camera (the
+  JavaScript shim) already hides every real `videoinput`, so the two shims never both patch
+  `enumerateDevices`.
 
-The frame pipeline in the shim — source, crop, filters, playback — is the same pixels the extension
-will push, so it is built once and feeds both.
+LIMITATION: WebKit returns empty device labels until a page is granted the camera, so the shim can
+only find the sentinel device (to rename or hide it, and to route `getUserMedia` to it) once a page
+is allowed the camera. Before that, a non-using profile may still see the device as a camera with
+an empty label, and the using profile's first `getUserMedia` may fall through to the Mac's default
+camera. This is a limit of WebKit's privacy model, not of the gate.
+
+### Stage 3 (here): the image in the extension
+
+The extension now draws the chosen **image** too (not only a colour or the test pattern), with
+crop, fit and mirror, through CoreGraphics. The app writes the render settings to `camera.json` and
+the image's bytes to `<group>/camera-image.bin` (`SystemCamera.writeRenderConfig`); the extension
+loads the image (cached, reloaded when the file changes) and draws it each frame with the sensor
+grain over it (`CameraFrameRenderer`).
+
+### Stage 4 (here): the filters in the extension
+
+The extension now applies the **filters** too (brightness, contrast, saturation, blur, hue, sepia,
+invert, opacity, black-and-white), as a CoreImage chain matching the shim's CSS filters in the same
+order (`CameraFilters`). The base frame is drawn into a scratch buffer, filtered into the output,
+and the grain laid over it (`CameraFrameRenderer`). The editor shows the filters for both
+deliveries now.
+
+### Stage 5 (here): the video in the extension
+
+The extension now draws a **video** source too, so the system camera matches the JavaScript shim
+in full: colour, test pattern, image and video — each with crop, fit, mirror, the adjustments and
+(for video) loop, freeze, speed and trim. `CameraVideoSource` decodes the clip headless with
+`AVAssetReader` (no `AVPlayer`/run loop), on the one serial render queue: it reads the file the app
+wrote to the app group, advances one or more frames per tick scaled by the speed, and re-opens the
+reader at the trim start to loop. The app writes the video's bytes to `<group>/camera-video.<ext>`
+and its playback settings to `camera.json`.
+
+What a page reads is still gated per profile (`patchSystemCamera`); the frames are WebKit's own, so
+a video delivered this way is indistinguishable at the JavaScript layer. The only limits left are
+the ones above: the system camera is one global device (the last profile to launch with it sets
+what it shows), and the gate takes effect once a page is granted the camera.
 
 ## Limitations
 

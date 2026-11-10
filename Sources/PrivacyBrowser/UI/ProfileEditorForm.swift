@@ -77,6 +77,10 @@ struct ProfileEditorForm: View {
     /// Pick an image or a video for the substituted camera (the host view reads the file).
     var onChooseCameraImage: () -> Void = {}
     var onChooseCameraVideo: () -> Void = {}
+    /// The system virtual camera's install state, for the delivery choice (`SystemCamera`).
+    @ObservedObject private var systemCamera = SystemCamera.shared
+    /// Opens the separate camera preview window (`CameraPreviewWindowController`).
+    var onOpenCameraPreview: () -> Void = {}
     /// Saved, and its cookies being imported: Save waits.
     var isSaving = false
     /// The profile's settings could not be read: Save would put the form's defaults in their place.
@@ -780,16 +784,74 @@ struct ProfileEditorForm: View {
 
     private var cameraSubstitution: some View {
         VStack(alignment: .leading, spacing: 14) {
+            CameraPreviewView(camera: draft.camera)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                EditorNote(L("editor.camera.preview.note"))
+                Spacer(minLength: 8)
+                Button(L("editor.camera.preview.open")) { onOpenCameraPreview() }
+                    .buttonStyle(.lumenSecondary)
+                    .fixedSize()
+            }
+            EditorRow(L("editor.camera.delivery")) {
+                Picker(L("editor.camera.delivery"), selection: $draft.camera.delivery) {
+                    Text(L("editor.camera.delivery.shim")).tag(CameraSubstitution.Delivery.jsShim)
+                    Text(L("editor.camera.delivery.system")).tag(CameraSubstitution.Delivery.systemCamera)
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
             cameraSourceControls
             cameraDeviceControls
-            EditorDivider()
-            EditorGroupTitle(L("editor.camera.filters"))
-            cameraFilters
-            EditorDivider()
-            EditorGroupTitle(L("editor.camera.crop"))
-            cameraCrop
+            if draft.camera.delivery == .systemCamera { systemCameraSection }
+            cameraCropAndFilters
             cameraPlaybackSection
             EditorNote(L("editor.camera.secure.note"))
+        }
+    }
+
+    /// Crop and the filters — both deliveries draw these (the system camera in its extension); only
+    /// the video playback is the JavaScript shim's for now.
+    @ViewBuilder
+    private var cameraCropAndFilters: some View {
+        EditorDivider()
+        EditorGroupTitle(L("editor.camera.crop"))
+        cameraCrop
+        EditorDivider()
+        EditorGroupTitle(L("editor.camera.filters"))
+        cameraFilters
+    }
+
+    /// Delivery through the system virtual camera: its install state and what to do about it.
+    @ViewBuilder
+    private var systemCameraSection: some View {
+        EditorDivider()
+        EditorGroupTitle(L("editor.camera.system"))
+        EditorNote(L("editor.camera.system.note"))
+        switch systemCamera.state {
+        case .notInBuild:
+            EditorNote(L("editor.camera.system.notInBuild"), tone: .warning)
+        case .active:
+            EditorNote(L("editor.camera.system.active"))
+        case .restartNeeded:
+            EditorNote(L("editor.camera.system.restart"), tone: .warning)
+        case .failed(let reason):
+            systemCameraInstallRow
+            EditorNote(String(format: L("editor.camera.system.failed"), reason), tone: .warning)
+        default:
+            systemCameraInstallRow
+        }
+    }
+
+    private var systemCameraInstallRow: some View {
+        HStack(spacing: 10) {
+            Button(L("editor.camera.system.install")) { systemCamera.install() }
+                .buttonStyle(.lumenSecondary)
+            Button(L("editor.camera.system.settings")) { systemCamera.openSystemSettings() }
+                .buttonStyle(.lumenGhost)
+            if systemCamera.state == .installing || systemCamera.state == .awaitingApproval {
+                ProgressView().controlSize(.small)
+            }
+            Spacer(minLength: 0)
         }
     }
 
@@ -861,9 +923,14 @@ struct ProfileEditorForm: View {
         }
         EditorToggle(L("editor.camera.mirror"), isOn: $draft.camera.mirror)
         EditorField(L("editor.camera.label")) {
-            TextField(L("editor.camera.label"), text: $draft.camera.deviceLabel,
-                      prompt: Text(verbatim: "FaceTime HD Camera"))
-                .lumenField("FaceTime HD Camera", isEmpty: draft.camera.deviceLabel.isEmpty)
+            HStack(spacing: 8) {
+                TextField(L("editor.camera.label"), text: $draft.camera.deviceLabel,
+                          prompt: Text(verbatim: "FaceTime HD Camera"))
+                    .lumenField("FaceTime HD Camera", isEmpty: draft.camera.deviceLabel.isEmpty)
+                Button(matchDeviceTitle) { matchDeviceCamera() }
+                    .buttonStyle(.lumenSecondary)
+                    .fixedSize()
+            }
         }
         EditorNote(L("editor.camera.label.note"))
         EditorRow(L("editor.camera.audio")) {
@@ -997,6 +1064,34 @@ struct ProfileEditorForm: View {
                     .foregroundStyle(Theme.textTertiary)
             }
             Spacer(minLength: 0)
+        }
+    }
+
+    /// The "match" button's title, following the profile's device: this Mac for a Mac profile, an
+    /// iPhone/iPad for a mobile one.
+    private var matchDeviceTitle: String {
+        switch DeviceGenerations.resolved(id: draft.deviceGenerationID).platform {
+        case .macOS: return L("editor.camera.matchMac")
+        case .iOS, .iPadOS: return L("editor.camera.matchMobile")
+        }
+    }
+
+    /// Fills the camera's name, resolution and facing to match the profile's device. A Mac profile
+    /// copies this Mac's own built-in camera exactly (`HostCamera`), so a page sees what the real
+    /// one reports. An iOS/iPadOS profile cannot read an iPhone's camera from the build machine, so
+    /// it uses the believable default a real device reports — the front camera, 1280×720, user-facing.
+    private func matchDeviceCamera() {
+        switch DeviceGenerations.resolved(id: draft.deviceGenerationID).platform {
+        case .macOS:
+            guard let builtin = HostCamera.builtin() else { return }
+            draft.camera.deviceLabel = builtin.name
+            draft.cameraWidth = String(builtin.width)
+            draft.cameraHeight = String(builtin.height)
+        case .iOS, .iPadOS:
+            draft.camera.deviceLabel = "Front Camera"
+            draft.cameraWidth = "1280"
+            draft.cameraHeight = "720"
+            draft.camera.facing = .user
         }
     }
 

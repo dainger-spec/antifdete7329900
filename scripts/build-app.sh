@@ -53,6 +53,7 @@ SANDBOX="${SANDBOX:-1}"
 APP_DIR="${APP_DIR:-build}"
 APP="$APP_DIR/Lumen.app"
 NE="${NE:-0}"
+CAM="${CAM:-0}"
 EXTENSION_ID="${EXTENSION_ID:-$BUNDLE_ID.PacketTunnel}"
 if [[ "$NE" == "1" ]]; then
   : "${TEAM_ID:?NE=1 needs TEAM_ID (your Apple Developer team)}"
@@ -320,6 +321,10 @@ if [[ "$CAM" == "1" || "$CAM" == "check" ]]; then
     ENTITLEMENTS="$CAM_APP_ENTITLEMENTS"
     /usr/libexec/PlistBuddy -c "Print :PBCameraExtensionBundleIdentifier" "$PLIST" >/dev/null 2>&1 \
       || /usr/libexec/PlistBuddy -c "Add :PBCameraExtensionBundleIdentifier string $CAMERA_EXTENSION_ID" "$PLIST"
+    # The app group the app and its profiles' processes read the camera's active flag and write its
+    # config through (SystemCamera). The same key the extension carries.
+    /usr/libexec/PlistBuddy -c "Print :PBCameraAppGroup" "$PLIST" >/dev/null 2>&1 \
+      || /usr/libexec/PlistBuddy -c "Add :PBCameraAppGroup string $APP_GROUP" "$PLIST"
   fi
 fi
 

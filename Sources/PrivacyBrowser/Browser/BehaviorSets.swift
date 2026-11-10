@@ -16,13 +16,14 @@ import WebKit
 /// class's navigator and screen values (see `PrivacyScripts`).
 @MainActor
 enum BehaviorSets {
-    static func makeUserContentController(for configuration: ProfileConfiguration) -> WKUserContentController {
+    static func makeUserContentController(for configuration: ProfileConfiguration,
+                                         systemCameraActive: Bool = false) -> WKUserContentController {
         switch configuration.deviceGeneration.behaviorSetID {
         case DeviceGenerations.desktopBehavior, DeviceGenerations.mobileBehavior:
-            return PrivacyScripts.makeUserContentController(for: configuration)
+            return PrivacyScripts.makeUserContentController(for: configuration, systemCameraActive: systemCameraActive)
         default:
             // Unknown behaviour set (e.g. a profile from a newer build): fall back to the shims.
-            return PrivacyScripts.makeUserContentController(for: configuration)
+            return PrivacyScripts.makeUserContentController(for: configuration, systemCameraActive: systemCameraActive)
         }
     }
 }

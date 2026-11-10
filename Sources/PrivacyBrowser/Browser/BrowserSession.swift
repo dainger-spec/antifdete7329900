@@ -96,7 +96,14 @@ final class BrowserSession {
         Logger(subsystem: "PrivacyBrowser", category: "BrowserSession")
             .notice("Profile \(profileName, privacy: .private): has a proxy=\(configuration.proxy != nil, privacy: .public) store proxies=\(store.proxyConfigurations.count, privacy: .public)")
         // Routed through BehaviorSets so a profile's device generation selects its script bundle.
-        self.userContentController = BehaviorSets.makeUserContentController(for: configuration)
+        // With the system camera active, the shim gates the Mac-global device per profile; a profile
+        // that uses it writes what the extension should draw to the shared app group (`SystemCamera`).
+        let systemCameraActive = SystemCamera.shared.isActive
+        if configuration.cameraSubstitution.usesSystemCamera {
+            SystemCamera.shared.writeRenderConfig(for: configuration.cameraSubstitution)
+        }
+        self.userContentController = BehaviorSets.makeUserContentController(for: configuration,
+                                                                            systemCameraActive: systemCameraActive)
         // Loads WebKit would otherwise make outside the proxy, and to this Mac and its network
         // (see ContentRules).
         for list in ContentRules.lists(for: configuration) {
