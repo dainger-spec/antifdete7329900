@@ -300,7 +300,19 @@ while IFS=$'\t' read -r fault kind test expect; do
         break
     done
 done < "$HERE/scripts/faults.tsv"
-if run_ui green "" ${ONLY[@]+"${ONLY[@]}"}; then
+run_ui green "" ${ONLY[@]+"${ONLY[@]}"}; GREEN_CODE=$?
+if [[ $GREEN_CODE -ne 0 ]] && grep -q "never went idle" "$OUT/green.txt"; then
+    # The app stopped going idle for XCTest and the run was stopped (the watchdog above): CI run 35 in a
+    # red, run 44 in the green one — FreeTierTests, a session's first page loaded and on the screen,
+    # nothing moving in the kept screenshot. That says nothing about a check, so the green run, like
+    # a red, runs once more; the first try's log and screen are kept (green-stuck.txt,
+    # screens/stuck-green-first.png), and a second stall fails the job.
+    mv "$OUT/green.txt" "$OUT/green-stuck.txt"
+    [[ -f "$OUT/screens/stuck-green.png" ]] && mv "$OUT/screens/stuck-green.png" "$OUT/screens/stuck-green-first.png"
+    say "again ui green: the app never went idle in the first try, in $(grep -E "Test Case .* started" "$OUT/green-stuck.txt" | tail -1 | sed -E "s/.*-\[([^]]*)\].*/\1/") — screen: screens/stuck-green-first.png"
+    run_ui green "" ${ONLY[@]+"${ONLY[@]}"}; GREEN_CODE=$?
+fi
+if [[ $GREEN_CODE -eq 0 ]]; then
     say "GREEN ui: $(grep -E 'Executed [0-9]+ test' "$OUT/green.txt" | tail -1)"
 else
     grep -E "error: -\[|failed -|Test Case .* failed|never went idle" "$OUT/green.txt" | head -20 | tee -a "$LOG"; say "NOT GREEN ui"; STATUS=1
