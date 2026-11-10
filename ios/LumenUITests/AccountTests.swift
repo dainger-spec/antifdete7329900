@@ -157,6 +157,7 @@ final class AccountTests: LumenUITestCase {
     func testRefusalsChecksAndOtherPlans() {
         let run = String(UUID().uuidString.prefix(6)).lowercased()
         launchWithAccount(run: run)
+        createSession(name: "Проба")
         openPlan()
 
         // A wrong password.
@@ -220,16 +221,30 @@ final class AccountTests: LumenUITestCase {
         // An account without a plan: the free level, as the document writes it. The trial: both.
         signIn("free-\(run)@lumen.test")
         wait(app.staticTexts["accountEmail"], "signed in", timeout: 30)
-        waitLabel("profileCounter", "Профили: 0 из 2", "an account without a plan has the free level")
+        waitLabel("profileCounter", "Профили: 1 из 2", "an account without a plan has the free level")
         XCTAssertEqual(app.staticTexts["planProxies"].label, "Прокси: нет")
         XCTAssertFalse(app.staticTexts["planName"].exists, "no plan is named to an account that has paid for none")
-        XCTAssertEqual(app.staticTexts["profileCounter"].label, "Профили: 0 из 2")
+        closePlan()
+        XCTAssertFalse(sessionCard("Проба").label.contains("Заперт"), "the free level opens its profiles: \(sessionCard("Проба").label)")
+        openPlan()
         signOut()
         signIn("trial-\(run)@lumen.test")
         wait(app.staticTexts["accountEmail"], "signed in", timeout: 30)
         waitLabel("planName", "Тариф: 7 дней бесплатно", "a running trial works on the iPhone")
         XCTAssertEqual(app.staticTexts["planProxies"].label, "Прокси: есть")
-        XCTAssertEqual(app.staticTexts["profileCounter"].label, "Профили: 0 из 3")
+        XCTAssertEqual(app.staticTexts["profileCounter"].label, "Профили: 1 из 3")
         shot("75 the trial")
+        signOut()
+
+        // A blocked account: its document opens nothing (features []) — not the free level.
+        signIn("disabled-\(run)@lumen.test")
+        wait(app.staticTexts["accountEmail"], "signed in", timeout: 30)
+        waitLabel("accountNotice", "Аккаунт заблокирован, напишите в поддержку.", "a blocked account is told so")
+        XCTAssertFalse(app.staticTexts["planName"].exists)
+        closePlan()
+        XCTAssertTrue(sessionCard("Проба").label.contains("Заперт"), "a blocked account opens no profile: \(sessionCard("Проба").label)")
+        sessionCard("Проба").tap()
+        wait(app.descendants(matching: .any)["lockedSession"], "the profile says why it does not open")
+        shot("76 a blocked account")
     }
 }

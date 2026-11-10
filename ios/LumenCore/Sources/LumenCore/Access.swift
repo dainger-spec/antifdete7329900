@@ -100,7 +100,8 @@ public enum SessionLock: Equatable, Sendable {
     case locked(reason: String)
 
     public static func of(_ session: Session, proxyExists: Bool, access: Access, overLimit: Bool = false) -> SessionLock {
-        if !access.browse { return .locked(reason: access.reason ?? L("Сайты сейчас не открываются.")) }
+        // (The planted fault: the right to open sites is not looked at.)
+        if !access.browse, !Faults.isActive(.noBrowseOpens) { return .locked(reason: access.reason ?? L("Сайты сейчас не открываются.")) }
         if overLimit {
             let limit = access.maxProfiles.map { " (\($0))" } ?? ""
             return .locked(reason: L("Профиль сверх числа профилей тарифа%@. Он и его данные сохранены.", "\(limit)"))

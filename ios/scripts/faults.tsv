@@ -66,6 +66,7 @@ clockRollbackTrusted	core	LumenCoreTests.LicenseTests/testTheClockSetBackBringsN
 overLimitOpens	core	LumenCoreTests.LicenseTests/testProfilesOverTheLimitAreLocked	the two made first stay open
 activationWithoutPlatform	core	LumenCoreTests.LicenseTests/testAnActivationSaysItIsAnIPhone	the activation names its platform
 phoneLimitUnexplained	core	LumenCoreTests.LicenseTests/testRefusalsAreSaidWithTheirReason	the limit of phones is said with its reason
+noBrowseOpens	core	LumenCoreTests.EntitlementTests/testDecisionsInTimeOnTheServersVectors	a blocked account opens no profile
 unpaidPlanNamed	core	LumenCoreTests.LicenseTests/testTheFreeLevelComesFromTheDocument	no plan is named
 profileDefaultsReal	ui	LumenUITests/SettingsTests/testANewSessionHasTheFullProfile	a new session's device profile is full by default
 profileLimitIgnored	ui	LumenUITests/FreeTierTests/testFreePlan	the plans open instead of a third profile
@@ -82,3 +83,4 @@ phoneLimitUnexplained	ui	LumenUITests/AccountTests/testRefusalsChecksAndOtherPla
 signatureNotChecked	ui	LumenUITests/AccountTests/testRefusalsChecksAndOtherPlans	a document signed with another key is refused
 robotCheckNotShown	ui	LumenUITests/AccountTests/testRefusalsChecksAndOtherPlans	the robot check opens in the app
 featuresFromPlan	ui	LumenUITests/AccountTests/testRefusalsChecksAndOtherPlans	no proxies without the feature
+noBrowseOpens	ui	LumenUITests/AccountTests/testRefusalsChecksAndOtherPlans	a blocked account opens no profile

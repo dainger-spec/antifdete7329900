@@ -20,10 +20,14 @@ docs/CONTRACT.md (§2–§7) and docs/IPHONE.md say an iPhone meets, until the s
     robot                        signing in asks for the robot check first (403 robot_check)
     code                         signing in asks for the code from the email (202 check_email)
     blocked                      403 account_disabled at sign-in
+    disabled                     signs in, and its document says the account is blocked: export-only,
+                                 account_disabled, features [] — nothing opens (CONTRACT.md §8.4а)
     forged                       its document is signed with another key under the trusted key's id
     newkey                       its document is signed with a key the app does not carry
-  An activation that does not say platform "ios" is a Mac's, and the stand-in's licenses have no Mac
-  place left: 409 device_limit_reached.
+  An activation that does not say platform "ios" is a Mac's (CONTRACT.md §6.1), and the stand-in's
+  licenses have no Mac place left: 409 device_limit_reached — a Mac's refusal, which an iPhone does
+  not take for its own. A platform that is neither is 400 invalid_request (field: platform). An
+  iPhone over the license's limit of phones: 409 phone_limit_reached with limits.phones (§4.3).
 
   The testbed's site shows and changes an account (/__account?email=E[&set=S]): S is a plan's name
   from the list above (what the next document says), "revoked" (the device is unlinked: 401
@@ -62,6 +66,7 @@ PLANS = {
     "free": dict(plan="none", status="export_only", reason="no_license", features=["browse"], profiles=2, phones=3, days=None),
     "ended": dict(plan="personal", status="export_only", reason="period_ended", features=["browse"], profiles=2, phones=3, days=-1),
     "browseonly": dict(plan="pro", status="active", reason=None, features=["browse"], profiles=50, phones=3, days=30),
+    "disabled": dict(plan="pro", status="export_only", reason="account_disabled", features=[], profiles=50, phones=3, days=30),
 }
 ACCOUNTS = {}    # email -> account
 SESSIONS = {}    # session token -> email
@@ -195,6 +200,8 @@ def handle(method, path, headers, body):
         event("account", what="activate", email=email, platform=fields.get("platform"), machineID=machine)
         if not re.fullmatch(r"[0-9a-f]{64}", machine):
             return refuse(400, "invalid_request", field="machineID")
+        if fields.get("platform") not in (None, "mac", "ios"):
+            return refuse(400, "invalid_request", field="platform")
         if fields.get("platform") != "ios":
             # A Mac's activation: the stand-in's licenses have no Mac place left.
             return refuse(409, "device_limit_reached", devices=[{"deviceID": str(uuid.uuid4()), "code": "A001"}],

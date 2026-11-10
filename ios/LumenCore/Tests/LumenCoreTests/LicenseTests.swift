@@ -50,7 +50,13 @@ func moment(_ text: String) -> Date { ISO8601DateFormatter().date(from: text)! }
 final class EntitlementTests: XCTestCase {
     struct Vectors: Decodable {
         var trustedKeys: [String: String]
+        var phoneMachineIDExample: PhoneExample
         var cases: [Case]
+    }
+
+    struct PhoneExample: Decodable {
+        var keychainID: String
+        var machineID: String
     }
 
     struct Case: Decodable {
@@ -77,7 +83,10 @@ final class EntitlementTests: XCTestCase {
         let vectors = try vectors()
         let keys = EntitlementKeys.from(vectors.trustedKeys)
         XCTAssertEqual(keys.count, vectors.trustedKeys.count, "each trusted key's id is its key's")
-        XCTAssertGreaterThanOrEqual(vectors.cases.count, 14)
+        XCTAssertGreaterThanOrEqual(vectors.cases.count, 19)
+        // The iPhone's id as the server computes it from the same identifier (CONTRACT.md §4.1).
+        XCTAssertEqual(PhoneID.machineID(of: vectors.phoneMachineIDExample.keychainID), vectors.phoneMachineIDExample.machineID,
+                       "the iPhone's id is the server's for the same identifier")
         for vector in vectors.cases {
             let check = EntitlementVerifier.check(Data(vector.document.utf8), keys: keys, deviceID: vector.deviceID, machineID: vector.machineID)
             XCTAssertEqual(check.name, vector.verify, vector.name)
@@ -112,10 +121,27 @@ final class EntitlementTests: XCTestCase {
                 } else {
                     XCTAssertFalse(state.access.proxies, "\(what): no proxies")
                 }
+                // The iPhone's own documents (CONTRACT.md §8.4а): decided by features, not by the status.
+                switch vector.name {
+                case "ios_free", "ios_period_ended":
+                    XCTAssertTrue(state.access.browse, "\(what): the free level opens sites")
+                    XCTAssertEqual(state.access.maxProfiles, 2, what)
+                    XCTAssertEqual(SessionLock.of(Session(name: "Чистый"), proxyExists: false, access: state.access), .open, what)
+                    XCTAssertTrue(SessionLock.of(Session(name: "Счета", proxyID: UUID()), proxyExists: true, access: state.access).isLocked, what)
+                    XCTAssertEqual(state.access.plan, vector.name == "ios_free" ? "free" : "expired", what)
+                case "ios_account_disabled":
+                    XCTAssertFalse(state.access.browse, "\(what): a blocked account opens no sites")
+                    XCTAssertTrue(SessionLock.of(Session(name: "Чистый"), proxyExists: false, access: state.access).isLocked,
+                                  "\(what): a blocked account opens no profile — unlike the free level")
+                    XCTAssertEqual(state.access.plan, "disabled", what)
+                default: break
+                }
                 decided += 1
             }
         }
-        XCTAssertGreaterThanOrEqual(decided, 11)
+        XCTAssertGreaterThanOrEqual(decided, 15)
+        XCTAssertEqual(Set(vectors.cases.map(\.name)).intersection(["ios_active", "ios_free", "ios_period_ended", "ios_account_disabled", "ios_on_another_phone"]).count, 5,
+                       "the iPhone's five vectors are there")
         var plans: Set<String> = []
         for vector in vectors.cases where vector.verify == "ok" {
             let checked = EntitlementVerifier.check(Data(vector.document.utf8), keys: keys, deviceID: vector.deviceID, machineID: vector.machineID)
@@ -276,6 +302,10 @@ final class LicenseTests: XCTestCase {
     }
 
     func testRefusalsAreSaidWithTheirReason() throws {
+        // A Mac's refusal is not the phones' limit: it has no number to show an iPhone.
+        let mac = try XCTUnwrap(AccountWire.refusal(Data(#"{"error":{"code":"device_limit_reached","devices":[{"code":"A001"}]}}"#.utf8)))
+        XCTAssertNil(mac.phones)
+        XCTAssertEqual(AccountText.refusal(mac), "Что-то пошло не так.")
         let limit = try XCTUnwrap(AccountWire.refusal(Data(#"{"error":{"code":"phone_limit_reached","message":"x","limits":{"phones":3}}}"#.utf8)))
         XCTAssertEqual(AccountText.refusal(limit),
                        "К этой лицензии уже подключено наибольшее число iPhone (3). Отключите один из них в кабинете на сайте и войдите снова.",

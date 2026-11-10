@@ -217,7 +217,7 @@ public enum AccountWire {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let error = object["error"] as? [String: Any], let code = error["code"] as? String, !code.isEmpty else { return nil }
         let limits = error["limits"] as? [String: Any]
-        let phones = (error["phones"] as? Int) ?? (limits?["phones"] as? Int) ?? (error["devices"] as? [Any]).flatMap { $0.isEmpty ? nil : $0.count }
+        let phones = limits?["phones"] as? Int
         return Refusal(code: code, retryAfter: error["retryAfter"] as? Int, phones: phones)
     }
 
@@ -254,7 +254,7 @@ public enum AccountText {
         case "invalid_code": return L("Код неверный или устарел.")
         case "login_expired": return L("Эта попытка входа закончилась. Введите пароль ещё раз.")
         case "resend_limit": return L("Код в этой попытке больше не отправить. Письма нет — проверьте «Спам».")
-        case "device_limit_reached", "phone_limit_reached":
+        case "phone_limit_reached":   // CONTRACT.md §4.3: 409 with limits.phones
             // The planted fault: the refusal shown without its reason.
             if Faults.isActive(.phoneLimitUnexplained) { return L("Что-то пошло не так.") }
             let count = refusal.phones.map { " (\($0))" } ?? ""
