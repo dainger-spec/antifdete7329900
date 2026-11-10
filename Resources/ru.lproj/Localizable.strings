@@ -1620,6 +1620,7 @@
 "help.scenarios.example" = "Пример: вход на сайт";
 "help.scenarios.example.code" = "await page.goto('https://shop.example/login');\nawait page.type('#email', 'name@example.com');\nawait page.type('#password', 'ваш пароль');\nawait page.press('Enter');\nawait page.waitFor('text=Мои заказы');\nlog('Вошли:', await page.title());";
 "help.scenarios.know" = "Что важно знать";
+"help.scenarios.know.window" = "Сценарий работает в окне Safari, которое Lumen открывает под запуск: это настоящее окно профиля, с его cookie и прокси. У профиля с видом iPhone или iPad окна Safari нет — там сценарий идёт в собственном окне Lumen.";
 "help.scenarios.know.await" = "Каждая команда page ждёт страницу и возвращает обещание — пишите перед ней await.";
 "help.scenarios.know.errors" = "Команда, которая не удалась, бросает ошибку с причиной. Её можно поймать через try и catch; непойманная завершает запуск.";
 "help.scenarios.know.typed" = "В журнал попадает, сколько символов напечатано, но не сами символы: паролей в нём нет.";

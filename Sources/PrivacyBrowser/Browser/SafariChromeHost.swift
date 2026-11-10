@@ -199,6 +199,55 @@ enum SafariChromeHost {
         return true
     }
 
+    // MARK: A scenario's run in Safari's window
+
+    /// A window of Safari's of its own for a scenario's run (docs/AUTOMATION.md), opened as the
+    /// profile's windows are, on an empty page: the run acts on its tab's web view and goes to
+    /// addresses through the tab, as the address bar does. A run in a window of ours was not
+    /// Safari (the owner, 10 November). Nil when the chrome is not hosted here, or its window gives
+    /// no web view within a few seconds: the run then says so.
+    static func openScenarioPage(session: BrowserSession) async -> (webView: WKWebView, navigate: (URL) -> Void)? {
+        guard isPrepared, canHost(session.configuration), let blank = URL(string: "about:blank") else { return nil }
+        watchWindows()
+        ProfileNetworkGuard.register(session: session)
+        guard let controller = SafariChrome.openWindow(address: blank) else {
+            log.error("Safari's chrome did not open a window for a scenario's run")
+            return nil
+        }
+        let tab = SafariChrome.newestTab()
+        if let window = controller.window, let size = session.configuration.windowSize {
+            WindowSizing.apply(size, to: window)
+        }
+        controller.showWindow(nil)
+        controller.window?.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        HistoryMenuRoute.install(session: session)
+        // Safari builds the tab's web view as it loads the page.
+        for _ in 0..<60 {
+            if let webView = pageWebView(in: controller.window) {
+                log.notice("A scenario's run has a window of Safari's")
+                let navigate: (URL) -> Void = { [weak webView] address in
+                    if let tab, SafariChrome.load(address, in: tab) { return }
+                    _ = webView?.load(URLRequest(url: address))
+                }
+                return (webView, navigate)
+            }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        log.error("Safari's window for a scenario's run has no web view")
+        return nil
+    }
+
+    /// The largest web view shown in `window`: its tab's page.
+    private static func pageWebView(in window: NSWindow?) -> WKWebView? {
+        func webViews(_ view: NSView) -> [WKWebView] {
+            if let webView = view as? WKWebView { return webView.isHiddenOrHasHiddenAncestor ? [] : [webView] }
+            return view.subviews.flatMap(webViews)
+        }
+        guard let content = window?.contentView else { return nil }
+        return webViews(content).max { $0.bounds.width * $0.bounds.height < $1.bounds.width * $1.bounds.height }
+    }
+
     // MARK: Safari's windows as the profile's windows
 
     /// The last of Safari's browser windows has closed: the profile's process quits, which seals

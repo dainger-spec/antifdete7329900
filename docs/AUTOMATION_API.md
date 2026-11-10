@@ -99,7 +99,7 @@ pointer, wheel and keyboard, which pages cannot tell from a person's.
 
 | Request | Does |
 |---|---|
-| `POST /v1/profiles/{profile}/scenario` `{"source": "…JavaScript…", "params": {…}}` | Runs that text on the running profile, in a window of its own; **202** `{"runID": …}`. `params` is optional (the script's `params`) |
+| `POST /v1/profiles/{profile}/scenario` `{"source": "…JavaScript…", "params": {…}}` | Runs that text on the running profile, in a window of its own — Safari's where the profile's process hosts Safari's chrome, the app's elsewhere (docs/AUTOMATION.md); **202** `{"runID": …}`. `params` is optional (the script's `params`) |
 | `POST /v1/profiles/{profile}/scenario` `{"scenario": "Sign in"}` | Runs the saved scenario of that exact name (**404** `no_scenario` when there is not one) |
 | `GET /v1/profiles/{profile}/scenario` | The profile's last run: `running`, `outcome` (`finished`, `failed`, `stopped`), `reason`, and its `lines` (`at`, `kind`, `text`) |
 | `POST /v1/profiles/{profile}/scenario/stop` | Stops it: a command under way finishes first |

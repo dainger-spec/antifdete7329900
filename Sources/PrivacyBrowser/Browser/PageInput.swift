@@ -50,6 +50,11 @@ final class PageInput {
     private static let log = Logger(subsystem: "PrivacyBrowser", category: "PageInput")
 
     weak var webView: WKWebView?
+    /// Where the viewport's top left is in the web view: the view's points from its own top left.
+    /// Zero in a window of ours, where the two start together. In Safari's window the page may run
+    /// under the toolbar (docs/PAGE_INPUT.md): `PageDriver` measures it — the page is asked where
+    /// it saw a move of this input — and a point of the viewport is then found by it.
+    var viewportOrigin = CGPoint.zero
     /// Where the pointer last was, in the web view's window (AppKit's points, bottom-left origin).
     private(set) var pointer: NSPoint?
     /// Mouse events since the last button press, for the click count of a double click.
@@ -67,7 +72,7 @@ final class PageInput {
     func windowPoint(ofViewport point: CGPoint) -> NSPoint? {
         guard let webView, webView.window != nil else { return nil }
         let scale = webView.pageZoom * webView.magnification
-        let x = point.x * scale, y = point.y * scale
+        let x = point.x * scale + viewportOrigin.x, y = point.y * scale + viewportOrigin.y
         let inView = NSPoint(x: x, y: webView.isFlipped ? y : webView.bounds.height - y)
         return webView.convert(inView, to: nil)
     }
@@ -106,7 +111,7 @@ final class PageInput {
         let scale = webView.pageZoom * webView.magnification
         guard scale > 0 else { return nil }
         let y = webView.isFlipped ? inView.y : webView.bounds.height - inView.y
-        return CGPoint(x: inView.x / scale, y: y / scale)
+        return CGPoint(x: (inView.x - viewportOrigin.x) / scale, y: (y - viewportOrigin.y) / scale)
     }
 
     /// Presses the left button where the pointer is. `clickCount` names the press's place in a

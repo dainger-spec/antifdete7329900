@@ -66,7 +66,8 @@ enum HelpContent {
                 .heading("scenarios.example"),
                 .code("scenarios.example.code"),
                 .heading("scenarios.know"),
-                .points(["scenarios.know.await", "scenarios.know.errors", "scenarios.know.typed", "scenarios.know.kept"]),
+                .points(["scenarios.know.window", "scenarios.know.await", "scenarios.know.errors", "scenarios.know.typed",
+                         "scenarios.know.kept"]),
             ]
         case .commands:
             return [

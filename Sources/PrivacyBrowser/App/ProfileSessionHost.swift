@@ -284,6 +284,10 @@ enum ProfileSessionHost {
             case .stopWarmUp:
                 manager?.stopWarmUp(profileID)
             case .runScenario(let request):
+                // The run's window is one the person sees, and this process is then an app with a
+                // Dock tile, as when a window is asked for (a profile started for a run has none).
+                showedWindow = true
+                if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }
                 if manager?.runScenario(profileID, name: request.name, source: request.source,
                                         parametersJSON: request.parametersJSON, runID: request.runID) != true {
                     ProfileSessionHost.send(.scenarioEnded(runID: request.runID, .failed("the profile could not start the run")))

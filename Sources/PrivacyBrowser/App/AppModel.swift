@@ -1016,7 +1016,9 @@ final class AppModel: ObservableObject {
     /// when the plan has no automation, the profile did not start, or a run of it is going.
     func runScenario(_ scenario: Scenario, on id: UUID) async -> Bool {
         guard license.allowsAutomation, manager != nil else { return false }
-        if !isRunning(id) { await launch(id) }
+        // A stopped profile is started without a window of its own: the run opens the one it acts
+        // in. With the profile's as well there were two, one of them empty (the owner, 10 November).
+        if !isRunning(id) { await launch(id, openingWindow: false) }
         guard let manager, isRunning(id) else { return false }
         return manager.runScenario(id, name: scenario.name, source: scenario.source)
     }

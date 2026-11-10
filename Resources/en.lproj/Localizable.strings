@@ -1620,6 +1620,7 @@
 "help.scenarios.example" = "An example: signing in";
 "help.scenarios.example.code" = "await page.goto('https://shop.example/login');\nawait page.type('#email', 'name@example.com');\nawait page.type('#password', 'your password');\nawait page.press('Enter');\nawait page.waitFor('text=My orders');\nlog('Signed in:', await page.title());";
 "help.scenarios.know" = "Worth knowing";
+"help.scenarios.know.window" = "A scenario runs in a window of Safari’s that Lumen opens for the run: the profile’s real window, with its cookies and proxy. A profile seen as an iPhone or iPad has no Safari window: its scenario runs in Lumen’s own.";
 "help.scenarios.know.await" = "Every command of page waits for the page and returns a promise: write await before it.";
 "help.scenarios.know.errors" = "A command that fails throws an error with the reason. try and catch can catch it; one left uncaught ends the run.";
 "help.scenarios.know.typed" = "The log says how many characters were typed, never which: no password is in it.";

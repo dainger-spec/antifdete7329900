@@ -1328,19 +1328,50 @@ final class ProfileManager: ObservableObject {
             return true
         }
         guard let session = sessions[id] else { return false }
-        let controller = session.openWindow(url: nil)
-        guard let tab = controller.selectedTab else { return false }
-        let driver = PageDriver(webView: tab.webView) { [weak tab] url in _ = tab?.load(url) }
+        // Where the run acts. In a profile's own process that hosts Safari's chrome: a window of
+        // Safari's, opened for the run — the profile's real window, as a person has it (the owner,
+        // 10 November: a run in a window of ours is not Safari). Everywhere else — an iPhone or
+        // iPad view, the sandboxed build, a macOS where the chrome is not hosted — a window of ours.
+        if SafariChromeHost.isHosting, SafariChromeHost.canHost(session.configuration) {
+            scenarioRuns[id] = ScenarioRunState(runID: runID, name: name, startedAt: Date(), lines: [], outcome: nil)
+            objectWillChange.send()
+            Task { @MainActor [weak self] in
+                let page = await SafariChromeHost.openScenarioPage(session: session)
+                // Stopped, or the profile gone, while the window was opening: nothing runs.
+                guard let self, let run = self.scenarioRuns[id], run.runID == runID, run.isRunning else { return }
+                guard let page else {
+                    // Safari's window gave no page to act on: the run is not lost for it — it goes
+                    // on in a window of ours, and its log says so.
+                    guard let tab = session.openWindow(url: nil).selectedTab else {
+                        self.scenarioEnded(id, runID, .failed("no window to run in"))
+                        return
+                    }
+                    self.startScenario(id, runID: runID, driver: PageDriver(webView: tab.webView) { [weak tab] url in _ = tab?.load(url) },
+                                       window: "the app's own (Safari's gave no page)", source: source, parametersJSON: parametersJSON)
+                    return
+                }
+                self.startScenario(id, runID: runID, driver: PageDriver(webView: page.webView, navigate: page.navigate),
+                                   window: "Safari's", source: source, parametersJSON: parametersJSON)
+            }
+            return true
+        }
+        guard let tab = session.openWindow(url: nil).selectedTab else { return false }
+        scenarioRuns[id] = ScenarioRunState(runID: runID, name: name, startedAt: Date(), lines: [], outcome: nil)
+        startScenario(id, runID: runID, driver: PageDriver(webView: tab.webView) { [weak tab] url in _ = tab?.load(url) },
+                      window: "the app's own", source: source, parametersJSON: parametersJSON)
+        return true
+    }
+
+    /// The run itself, once it has a page to act on. Its log's first line says which window that is.
+    private func startScenario(_ id: UUID, runID: UUID, driver: PageDriver, window: String, source: String, parametersJSON: String) {
         let runner = ScenarioRunner(driver: driver)
         runner.allowed = { [weak self] in self?.scenariosAllowed() ?? false }
-        scenarioRuns[id] = ScenarioRunState(runID: runID, name: name, startedAt: Date(), lines: [], outcome: nil)
         scenarioRunners[id] = runner
         runner.onLine = { [weak self] line in self?.scenarioLine(id, runID, line) }
         runner.onEnd = { [weak self] outcome in self?.scenarioEnded(id, runID, outcome) }
         let parameters = (try? JSONSerialization.jsonObject(with: Data(parametersJSON.utf8))) as? [String: Any] ?? [:]
-        objectWillChange.send()
+        scenarioLine(id, runID, ScenarioRunner.Line(at: Date(), kind: .command, text: "window: \(window)"))
         runner.start(source, parameters: parameters)
-        return true
     }
 
     /// Stops the profile's run, wherever it runs: a command under way finishes first.
@@ -1350,7 +1381,12 @@ final class ProfileManager: ObservableObject {
             child.send(.stopScenario(reason))
             return
         }
-        scenarioRunners[id]?.stop(reason)
+        if let runner = scenarioRunners[id] {
+            runner.stop(reason)
+        } else if let run = scenarioRuns[id] {
+            // Its window (Safari's) is still opening: nothing ran, and nothing will.
+            scenarioEnded(id, run.runID, .stopped(reason))
+        }
     }
 
     private func scenarioLine(_ id: UUID, _ runID: UUID, _ line: ScenarioRunner.Line) {
