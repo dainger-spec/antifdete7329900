@@ -104,15 +104,31 @@ final class SystemCamera: NSObject, ObservableObject {
         SystemOpen.openSystemSettingsForExtensions()
     }
 
-    /// Writes what the extension should draw for `camera` to the shared app group. The device is
-    /// one and global, so the last profile to launch with the system camera sets what it shows.
+    static let imageFileName = "camera-image.bin"
+
+    /// Writes what the extension should draw for `camera` to the shared app group — the render
+    /// settings, and the image's bytes for the image source. The device is one and global, so the
+    /// last profile to launch with the system camera sets what it shows.
     func writeRenderConfig(for camera: CameraSubstitution) {
         guard let appGroup,
               let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) else { return }
-        let url = container.appendingPathComponent(Self.configFileName)
+        var config: [String: Any] = [
+            "source": camera.systemCameraSource, "color": camera.colorHex,
+            "width": camera.width, "height": camera.height, "frameRate": camera.frameRate,
+            "fit": camera.fit.rawValue, "mirror": camera.mirror,
+        ]
+        if camera.crop.enabled {
+            config["crop"] = ["enabled": true, "x": camera.crop.x, "y": camera.crop.y,
+                              "width": camera.crop.width, "height": camera.crop.height]
+        }
+        let imageURL = container.appendingPathComponent(Self.imageFileName)
         do {
-            let data = try JSONEncoder().encode(camera.systemCameraRender())
-            try data.write(to: url, options: .atomic)
+            try JSONSerialization.data(withJSONObject: config).write(to: container.appendingPathComponent(Self.configFileName), options: .atomic)
+            if camera.source == .image, let image = camera.imageData {
+                try image.write(to: imageURL, options: .atomic)
+            } else {
+                try? FileManager.default.removeItem(at: imageURL)
+            }
         } catch {
             log.error("could not write the camera config: \(error.localizedDescription, privacy: .private)")
         }

@@ -299,25 +299,14 @@ public struct CameraSubstitution: Codable, Equatable, Sendable {
     /// a page reads (`deviceLabel`) is applied JavaScript-side (docs/CAMERA.md).
     public static let systemDeviceName = "Lumen Camera"
 
-    /// The render settings the app writes to the shared app group for the extension to draw (stage
-    /// one: a colour or the moving test pattern). Keys match `CameraExtensionConfig` in the
-    /// extension.
-    public struct SystemCameraRender: Codable, Equatable, Sendable {
-        public var source: String
-        public var color: String
-        public var width: Int
-        public var height: Int
-        public var frameRate: Int
-
-        public init(source: String, color: String, width: Int, height: Int, frameRate: Int) {
-            self.source = source; self.color = color; self.width = width; self.height = height; self.frameRate = frameRate
+    /// The source name the system-camera extension understands: it draws a colour, the test
+    /// pattern or the chosen image (video and the adjustments are the in-page shim's for now).
+    public var systemCameraSource: String {
+        switch source {
+        case .color: return "color"
+        case .image: return "image"
+        case .bars, .video: return "bars"
         }
-    }
-
-    /// What the extension should draw for this profile.
-    public func systemCameraRender() -> SystemCameraRender {
-        SystemCameraRender(source: source == .color ? "color" : "bars", color: colorHex,
-                           width: width, height: height, frameRate: frameRate)
     }
 
     /// This profile delivers its substituted camera through the system virtual camera.

@@ -134,11 +134,20 @@ is allowed the camera. Before that, a non-using profile may still see the device
 an empty label, and the using profile's first `getUserMedia` may fall through to the Mac's default
 camera. This is a limit of WebKit's privacy model, not of the gate.
 
-### Stage 3 (next, on a Mac): richer frames in the extension
+### Stage 3 (here): the image in the extension
 
-The extension draws a colour or the test pattern. An image, a video, filters and crop — the same
-pixels the JavaScript shim already draws — are drawn in the extension next (CoreImage/AVFoundation),
-fed from the app through the app group. The frame pipeline in the shim is the reference for those.
+The extension now draws the chosen **image** too (not only a colour or the test pattern), with
+crop, fit and mirror, through CoreGraphics. The app writes the render settings to `camera.json` and
+the image's bytes to `<group>/camera-image.bin` (`SystemCamera.writeRenderConfig`); the extension
+loads the image (cached, reloaded when the file changes) and draws it each frame with the sensor
+grain over it (`CameraFrameRenderer`).
+
+### Stage 4 (next, on a Mac): video and filters in the extension
+
+A **video** source and the **filters** (brightness, contrast, …) are still the JavaScript shim's;
+drawing them in the extension needs AVFoundation (to decode and time the video) and CoreImage (the
+filter chain), fed from the app through the app group. The shim's pipeline — source, crop, filters,
+playback — is the reference for those.
 
 ## Limitations
 

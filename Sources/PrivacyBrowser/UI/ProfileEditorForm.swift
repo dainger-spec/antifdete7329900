@@ -793,21 +793,21 @@ struct ProfileEditorForm: View {
             cameraSourceControls
             cameraDeviceControls
             if draft.camera.delivery == .systemCamera { systemCameraSection }
+            EditorDivider()
+            EditorGroupTitle(L("editor.camera.crop"))
+            cameraCrop
             if draft.camera.delivery == .jsShim { cameraLookControls }
             EditorNote(L("editor.camera.secure.note"))
         }
     }
 
-    /// The drawing-only controls — they apply to the JavaScript-shim delivery; the system camera
-    /// draws its frames in the extension (stage one: a colour or the test pattern).
+    /// The filters and the video playback — the JavaScript shim draws these; the system camera
+    /// draws a colour, the test pattern or the image (with crop, fit and mirror) in the extension.
     @ViewBuilder
     private var cameraLookControls: some View {
         EditorDivider()
         EditorGroupTitle(L("editor.camera.filters"))
         cameraFilters
-        EditorDivider()
-        EditorGroupTitle(L("editor.camera.crop"))
-        cameraCrop
         cameraPlaybackSection
     }
 
