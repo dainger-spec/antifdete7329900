@@ -101,12 +101,21 @@ class LumenUITestCase: XCTestCase {
         field.tap()
         _ = app.keyboards.firstMatch.waitForExistence(timeout: 10)
         let placeholder = field.placeholderValue ?? ""
-        var current = (field.value as? String) ?? ""
-        if current == placeholder { current = "" }
-        if !current.isEmpty {
+        func held() -> String {
+            let value = (field.value as? String) ?? ""
+            return value == placeholder ? "" : value
+        }
+        // Emptied, and seen to be empty, before anything is typed: a touch on the clear button can be
+        // lost, and a field just back from a relaunch can report nothing for a moment (CI run 60: the
+        // new address was typed after the old one). Up to three goes.
+        for attempt in 0..<3 {
+            if attempt > 0 { usleep(700_000) }
+            let current = held()
+            if current.isEmpty && attempt > 0 { break }
+            if current.isEmpty { continue }
             // The field's one button, whatever the system calls it in the app's language ("Clear text").
             let clear = field.buttons.firstMatch
-            if clear.waitForExistence(timeout: 8), clear.isHittable {
+            if clear.waitForExistence(timeout: attempt == 0 ? 8 : 2), clear.isHittable {
                 clear.tap()
             } else {
                 // No clear button: the cursor to the far end, then delete it all.
