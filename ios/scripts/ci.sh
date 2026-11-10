@@ -184,20 +184,12 @@ if in_suite core; then
     python3 "$HERE/scripts/release_rules.py" "$HERE" --app "$BUILT_APP" 2>&1 | tee -a "$LOG"
     [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "release rules broken in the built app"; STATUS=1; }
     # A release, built as one would be (the lead, 10 November): without an account it must have no
-    # way to the rights a DEBUG build starts with. It is built with a key made for this run in the
-    # owner's key's place (the Mac release's dry run does the same), and its binary and Info.plist
-    # are checked: no test switch, no exception for the testbed, a key for the documents of rights.
-    # The red: the Debug build, given as a release, must be refused.
-    RELEASE_KEY="$(python3 - "$HERE/testbed" <<'PY'
-import base64, hashlib, os, sys
-sys.path.insert(0, sys.argv[1])
-import ed25519
-public = ed25519.public_key(os.urandom(32))
-print(hashlib.sha256(public).digest()[:8].hex() + "=" + base64.b64encode(public).decode())
-PY
-)"
+    # way to the rights a test fixes in a DEBUG build. Its binary and Info.plist are checked: no test
+    # switch, no exception for the testbed, and the production key for the documents of rights —
+    # that one and no other. The red: the Debug build, given as a release, must be refused.
+    PRODUCTION_KEY="63a9a50f8cc6f129=bOCnaE4nVmmeqieu9CNIo0AY86OOYqe65OwSJbTwYn0="
     if xcodebuild build -project "$HERE/Lumen.xcodeproj" -scheme Lumen -configuration Release -destination "$DEST" \
-            -derivedDataPath "$OUT/dd-release" ENTITLEMENT_PUBLIC_KEYS="$RELEASE_KEY" >"$OUT/build-release.txt" 2>&1; then
+            -derivedDataPath "$OUT/dd-release" >"$OUT/build-release.txt" 2>&1; then
         RELEASE_APP="$(find "$OUT/dd-release/Build/Products" -maxdepth 2 -name Lumen.app -type d | head -1)"
         python3 "$HERE/scripts/release_rules.py" "$HERE" --release-app "$RELEASE_APP" 2>&1 | tee -a "$LOG"
         [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "release rules broken in the release build"; STATUS=1; }
@@ -208,14 +200,11 @@ PY
         else
             say "RED OTHER CHECK release rules: the Debug build was refused, but not for LUMEN_TEST_ACCESS — $(head -3 "$OUT/release-red.txt" | tr '\n' ' ')"; STATUS=1
         fi
-        # And a release given no key does not build at all.
-        if xcodebuild build -project "$HERE/Lumen.xcodeproj" -scheme Lumen -configuration Release -destination "$DEST" \
-                -derivedDataPath "$OUT/dd-release" >"$OUT/build-release-nokey.txt" 2>&1; then
-            say "RED DID NOT FAIL: a Release build without ENTITLEMENT_PUBLIC_KEYS was built"; STATUS=1
-        elif grep -q "a Release build needs ENTITLEMENT_PUBLIC_KEYS" "$OUT/build-release-nokey.txt"; then
-            say "red   a Release build without ENTITLEMENT_PUBLIC_KEYS does not build"
+        carried="$(python3 -c 'import plistlib, sys; keys = plistlib.load(open(sys.argv[1] + "/Info.plist", "rb")).get("PBEntitlementPublicKeys") or {}; print(",".join(f"{i}={k}" for i, k in sorted(keys.items())))' "$RELEASE_APP")"
+        if [[ "$carried" == "$PRODUCTION_KEY" ]]; then
+            say "the release build trusts the production key ${PRODUCTION_KEY%%=*} and no other"
         else
-            say "RED OTHER CHECK: the keyless Release build failed for another reason — $(grep -m2 'error' "$OUT/build-release-nokey.txt" | tr '\n' ' ' | cut -c1-200)"; STATUS=1
+            say "RELEASE KEY: the release build's keys are not the production one — ${carried:-none}"; STATUS=1
         fi
         rm -rf "$OUT/dd-release"
     else

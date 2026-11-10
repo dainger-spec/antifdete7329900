@@ -7,10 +7,6 @@ import XCTest
 /// password come from the runner's environment (the repository's secrets), never from the sources;
 /// no screenshot is taken while the address is on the screen.
 final class RealServerTests: LumenUITestCase {
-    /// The production key (server v2026.11.10.3). A Debug build carries no key of its own, so the
-    /// test names it; a release gets the same one at build time (ENTITLEMENT_PUBLIC_KEYS).
-    static let productionKey = "63a9a50f8cc6f129:bOCnaE4nVmmeqieu9CNIo0AY86OOYqe65OwSJbTwYn0="
-
     func testSigningInOnTheRealServer() throws {
         let environment = ProcessInfo.processInfo.environment
         guard let email = environment["LUMEN_E2E_EMAIL"], let password = environment["LUMEN_E2E_PASSWORD"],
@@ -18,9 +14,9 @@ final class RealServerTests: LumenUITestCase {
             if environment["LUMEN_E2E_REQUIRED"] == "1" { XCTFail("the test account is not given: LUMEN_E2E_EMAIL, LUMEN_E2E_PASSWORD") }
             throw XCTSkip("no test account given — the real server is not touched")
         }
-        // Nothing fixed, as a release starts: the account decides. The server and the site are the
-        // app's own (its Info.plist); only the key is named.
-        let settings = ["LUMEN_TEST_ENTITLEMENT_KEYS": Self.productionKey]
+        // Nothing fixed, as a release starts: the account decides. The server, the site and the
+        // key of the documents are the app's own (its Info.plist).
+        let settings: [String: String] = [:]
         launch(reset: true, access: "account", environment: settings)
 
         app.buttons["plansButton"].tap()

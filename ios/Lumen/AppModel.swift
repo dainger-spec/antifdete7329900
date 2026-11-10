@@ -16,22 +16,22 @@ enum LaunchOptions {
 }
 
 /// Where the app's rights come from (`Access`): the Lumen account — the server's signed document of
-/// rights, or the free level while nobody is signed in (Account.swift). That is a release build,
-/// always. A DEBUG build has everything open unless told otherwise (LUMEN_TEST_ACCESS): the account
-/// server does not know iPhones yet, so a build on a real iPhone could not sign in anywhere — until
-/// it does, the account is what a test asks for by name:
-///   account — nothing fixed: the account decides, as in a release build (AccountTests, against the
-///             testbed's stand-in for the server);
-///   free    — the free level; none — a paid period that ended; full, or nothing — everything.
+/// rights, or the free level while nobody is signed in (Account.swift). So it is in a release build,
+/// always, and in a DEBUG build unless a test fixes them by name (LUMEN_TEST_ACCESS) — the server
+/// knows iPhones since v2026.11.10.3, and the mode "everything open by default" is gone with that
+/// (the lead, 10 November 2026):
+///   full    — everything, for a test that checks something else than rights;
+///   free    — the free level; none — a paid period that ended;
+///   account, or nothing — nothing fixed: the account decides.
 enum AccessSource {
     /// The rights fixed for this launch; nil: the account decides.
     static func fixed() -> Access? {
         #if DEBUG
         switch ProcessInfo.processInfo.environment["LUMEN_TEST_ACCESS"] {
-        case "account": return nil
+        case "full": return .full
         case "free": return .free
         case "none": return .expired
-        default: return .full
+        default: return nil
         }
         #else
         return nil
