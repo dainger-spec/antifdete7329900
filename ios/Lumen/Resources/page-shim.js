@@ -51,6 +51,7 @@ function patchWindow(w) {
   if (CONFIG.safariObject) { try { patchSafariObject(w); } catch (e) {} }
   try { patchGeolocation(w, CONFIG.geolocation || { mode: 'deny' }); } catch (e) {}
   try { patchWebRTC(w, CONFIG.webRTC || 'disabled', CONFIG.webRTCRelay); } catch (e) {}
+  if (CONFIG.camera) { try { patchCamera(w, CONFIG.camera); } catch (e) {} }
   try { hookChildWindows(w); } catch (e) {}
 }
 
@@ -1178,6 +1179,411 @@ function hookChildWindows(w) {
 // iOS app always sends a fingerprint object (ios/Lumen/Browser/PageSettings.swift): it counts only
 // with a canvas, WebGL or audio mode other than 'real' (each is 'off', 'real' or 'noise') or a
 // language set — what ios/shim/fingerprint.js changes.
+// ---- Camera (and, with it, the microphone) ----------------------------------------------------
+// What a page's getUserMedia is handed instead of the real camera (`CameraSubstitution`). Only in
+// a secure context, where navigator.mediaDevices exists at all (as a real browser: no camera API
+// over plain http on a public origin). The video is a real canvas.captureStream() track, drawn
+// from the chosen source each frame with faint sensor-like grain so the frames are never frozen;
+// the methods are replaced the way the engine defines them (native text, receiver checks) and only
+// for our own tracks and devices — a real track or a real MediaDeviceInfo falls through to the
+// engine. Device ids are salted per origin, as a real browser salts them. A page that correlates
+// the frames with a live sensor can still tell this from a camera (docs/CAMERA.md).
+function patchCamera(w, cam) {
+  const nav = w.navigator;
+  if (!nav) return;
+  const md = nav.mediaDevices;                 // undefined outside a secure context
+  const MDP = w.MediaDevices && w.MediaDevices.prototype;
+  const doc = w.document;
+  const mode = cam.mode;                        // 'block' | 'substitute'
+  let videoGranted = false;                     // a label shows only after the camera is granted
+
+  // Per-origin salted ids, 64 hex, as a real deviceId: four-plus lanes of FNV-1a over the secret
+  // and the origin, so two origins of the same profile see different ids.
+  function hashHex(str) {
+    let out = '';
+    for (let lane = 0; lane < 8; lane++) {
+      let h = (0x811c9dc5 ^ (lane * 0x01000193)) >>> 0;
+      for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+      out += ('00000000' + (h >>> 0).toString(16)).slice(-8);
+    }
+    return out;
+  }
+  const origin = (function () { try { return String(w.location.origin); } catch (e) { return ''; } })();
+  const deviceId = hashHex(cam.secret + '|video|' + origin);
+  const groupId = hashHex(cam.secret + '|group|' + origin);
+  const defaultLabel = cam.label || 'FaceTime HD Camera';
+
+  const ours = new WeakSet();          // our video tracks
+  const trackData = new WeakMap();     // track -> { settings, capabilities, constraints, cancel }
+  const fakeDevices = new WeakSet();   // our MediaDeviceInfo
+  const deviceData = new WeakMap();    // device -> { deviceId, kind, groupId, labelWhenGranted }
+
+  function notFound() { try { return new w.DOMException('The requested device was not found.', 'NotFoundError'); } catch (e) { return new w.Error('NotFoundError'); } }
+
+  // ---- the drawn source ----
+  let sharedImage = null, sharedVideo = null;
+  function image() {
+    if (sharedImage || !cam.imageURL) return sharedImage;
+    try { sharedImage = new w.Image(); sharedImage.src = cam.imageURL; } catch (e) { sharedImage = null; }
+    return sharedImage;
+  }
+  function video() {
+    if (sharedVideo || !cam.videoURL || !doc) return sharedVideo;
+    try {
+      const v = doc.createElement('video');
+      const pb = cam.playback;
+      const paused = !!(pb && pb.paused);
+      v.src = cam.videoURL; v.muted = true; v.defaultMuted = true; v.playsInline = true;
+      v.loop = pb ? !!pb.loop : true;
+      v.autoplay = !paused;
+      if (pb && pb.rate) { try { v.playbackRate = pb.rate; } catch (e) {} }
+      const seekStart = function () { if (pb && pb.start) { try { v.currentTime = pb.start; } catch (e) {} } };
+      v.addEventListener('loadedmetadata', seekStart);
+      // Trim: loop or stop at the chosen end, and keep to the chosen start.
+      v.addEventListener('timeupdate', function () {
+        if (!pb) return;
+        const end = pb.end > 0 ? pb.end : (v.duration || 0);
+        if (end > 0 && v.currentTime >= end) {
+          if (pb.loop) { try { v.currentTime = pb.start || 0; } catch (e) {} }
+          else { try { v.pause(); } catch (e) {} }
+        }
+      });
+      if (paused) { seekStart(); } else { v.play().then(function () {}, function () {}); }
+      sharedVideo = v;
+    } catch (e) { sharedVideo = null; }
+    return sharedVideo;
+  }
+
+  // The source look as one canvas-filter pass (what the engine already has), or 'none'.
+  function filterString() {
+    const f = cam.filters;
+    if (!f) return 'none';
+    const parts = [];
+    if (f.brightness !== 1) parts.push('brightness(' + f.brightness + ')');
+    if (f.contrast !== 1) parts.push('contrast(' + f.contrast + ')');
+    if (f.saturate !== 1) parts.push('saturate(' + f.saturate + ')');
+    if (f.blur > 0) parts.push('blur(' + f.blur + 'px)');
+    if (f.hueRotate !== 0) parts.push('hue-rotate(' + f.hueRotate + 'deg)');
+    if (f.sepia > 0) parts.push('sepia(' + f.sepia + ')');
+    if (f.invert > 0) parts.push('invert(' + f.invert + ')');
+    if (f.opacity !== 1) parts.push('opacity(' + f.opacity + ')');
+    if (f.grayscale) parts.push('grayscale(1)');
+    return parts.length ? parts.join(' ') : 'none';
+  }
+
+  function parseColor(hex) {
+    const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex || ''));
+    return m ? 'rgb(' + parseInt(m[1], 16) + ',' + parseInt(m[2], 16) + ',' + parseInt(m[3], 16) + ')' : '#1E2130';
+  }
+  const barColors = ['#c0c0c0', '#c0c000', '#00c0c0', '#00c000', '#c000c0', '#c00000', '#0000c0'];
+
+  function drawBars(ctx, cw, ch, color) {
+    const band = cw / barColors.length;
+    for (let i = 0; i < barColors.length; i++) { ctx.fillStyle = barColors[i]; ctx.fillRect(i * band, 0, band + 1, ch * 0.72); }
+    ctx.fillStyle = color; ctx.fillRect(0, ch * 0.72, cw, ch * 0.28);
+    const t = (w.Date.now() % 4000) / 4000;
+    ctx.fillStyle = 'rgba(255,255,255,0.65)'; ctx.fillRect(t * cw, 0, Math.max(3, cw * 0.012), ch * 0.72);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = Math.max(12, (ch * 0.07) | 0) + 'px -apple-system, Helvetica, sans-serif';
+    ctx.textBaseline = 'middle';
+    try { ctx.fillText(new w.Date().toTimeString().slice(0, 8), cw * 0.04, ch * 0.86); } catch (e) {}
+  }
+
+  function drawMedia(ctx, cw, ch, media, color) {
+    ctx.fillStyle = color; ctx.fillRect(0, 0, cw, ch);
+    const sw = media.videoWidth || media.naturalWidth || media.width || 0;
+    const sh = media.videoHeight || media.naturalHeight || media.height || 0;
+    if (!sw || !sh) return;
+    // Crop: a sub-rectangle of the source (normalised) is what the frame is built from.
+    const crop = cam.crop;
+    const sx = crop ? crop.x * sw : 0, sy = crop ? crop.y * sh : 0;
+    const ssw = crop ? Math.max(1, crop.width * sw) : sw, ssh = crop ? Math.max(1, crop.height * sh) : sh;
+    let dw = cw, dh = ch, dx = 0, dy = 0;
+    if (cam.fit !== 'stretch') {
+      const scale = cam.fit === 'contain' ? Math.min(cw / ssw, ch / ssh) : Math.max(cw / ssw, ch / ssh);
+      dw = ssw * scale; dh = ssh * scale; dx = (cw - dw) / 2; dy = (ch - dh) / 2;
+    }
+    ctx.save();
+    if (cam.mirror) { ctx.translate(cw, 0); ctx.scale(-1, 1); }
+    try { ctx.drawImage(media, sx, sy, ssw, ssh, dx, dy, dw, dh); } catch (e) {}
+    ctx.restore();
+  }
+
+  function drawSource(ctx, cw, ch) {
+    const color = parseColor(cam.color);
+    // The filters are the source look, one canvas-filter pass; the grain after this is unfiltered.
+    ctx.save();
+    ctx.filter = filterString();
+    if (cam.source === 'bars') {
+      drawBars(ctx, cw, ch, color);
+    } else if (cam.source === 'image' || cam.source === 'video') {
+      const media = cam.source === 'image' ? image() : video();
+      if (media) drawMedia(ctx, cw, ch, media, color);
+      else { ctx.fillStyle = color; ctx.fillRect(0, 0, cw, ch); }
+    } else {
+      ctx.fillStyle = color; ctx.fillRect(0, 0, cw, ch);
+    }
+    ctx.restore();
+  }
+
+  // Faint moving grain: a camera's sensor noise, and what keeps captureStream emitting frames that
+  // differ when the source itself is still (a colour or a photo).
+  function grain(ctx, cw, ch) {
+    const n = Math.max(24, (cw * ch) >> 12);
+    for (let i = 0; i < n; i++) {
+      const x = (Math.random() * cw) | 0, y = (Math.random() * ch) | 0, v = (Math.random() * 255) | 0;
+      ctx.fillStyle = 'rgba(' + v + ',' + v + ',' + v + ',0.05)';
+      ctx.fillRect(x, y, 2, 2);
+    }
+  }
+
+  function settingsFor(res) {
+    const s = { deviceId: deviceId, groupId: groupId, width: res.width, height: res.height,
+                frameRate: res.frameRate, aspectRatio: Math.round((res.width / res.height) * 10000) / 10000,
+                resizeMode: 'none' };
+    if (res.facingMode) s.facingMode = res.facingMode;
+    return s;
+  }
+  function capabilities() {
+    // A built-in camera's fixed caps, as a superset of what this profile reports — so a page that
+    // checks the settings fall inside the capabilities (a real browser's do) sees they do.
+    const maxW = Math.max(1920, cam.width), maxH = Math.max(1080, cam.height), maxF = Math.max(30, cam.frameRate);
+    const c = { deviceId: deviceId, groupId: groupId,
+                width: { min: 1, max: maxW }, height: { min: 1, max: maxH },
+                aspectRatio: { min: 1 / maxH, max: maxW }, frameRate: { min: 0, max: maxF },
+                resizeMode: ['none', 'crop-and-scale'] };
+    if (cam.facingMode) c.facingMode = [cam.facingMode];
+    return c;
+  }
+  function clampDim(value, fallback) {
+    const n = typeof value === 'number' ? value : (value && (value.exact || value.ideal || value.max || value.min));
+    const i = Math.round(Number(n));
+    return (i >= 16 && i <= 3840) ? i : fallback;
+  }
+  function resolveVideo(request) {
+    const req = (request && typeof request === 'object') ? request : {};
+    const width = clampDim(req.width, cam.width);
+    const height = clampDim(req.height, cam.height);
+    let frameRate = cam.frameRate;
+    const fr = req.frameRate;
+    const frn = typeof fr === 'number' ? fr : (fr && (fr.exact || fr.ideal || fr.max));
+    if (frn && frn >= 1 && frn <= 60) frameRate = Math.round(frn);
+    let facingMode = cam.facingMode || null;
+    const fm = req.facingMode;
+    const fmv = typeof fm === 'string' ? fm : (fm && (fm.exact || fm.ideal));
+    if (fmv === 'user' || fmv === 'environment') facingMode = fmv;
+    return { width: width, height: height, frameRate: frameRate, facingMode: facingMode };
+  }
+
+  function makeVideoTrack(res) {
+    if (!doc) throw notFound();
+    const canvas = doc.createElement('canvas');
+    canvas.width = res.width; canvas.height = res.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw notFound();
+    let stopped = false, handle = 0;
+    const tick = function () {
+      if (stopped) return;
+      try { drawSource(ctx, canvas.width, canvas.height); grain(ctx, canvas.width, canvas.height); } catch (e) {}
+      handle = w.requestAnimationFrame ? w.requestAnimationFrame(tick) : w.setTimeout(tick, 1000 / (res.frameRate || 30));
+    };
+    tick();
+    const stream = canvas.captureStream ? canvas.captureStream(res.frameRate)
+                 : (canvas.mozCaptureStream ? canvas.mozCaptureStream(res.frameRate) : new w.MediaStream());
+    const track = stream.getVideoTracks()[0];
+    const cancel = function () { if (stopped) return; stopped = true; if (w.cancelAnimationFrame) w.cancelAnimationFrame(handle); else w.clearTimeout(handle); };
+    if (!track) { cancel(); throw notFound(); }
+    ours.add(track);
+    trackData.set(track, { settings: settingsFor(res), capabilities: capabilities(), constraints: { video: true }, cancel: cancel });
+    try { track.addEventListener('ended', cancel); } catch (e) {}
+    return track;
+  }
+
+  function silentAudioTrack() {
+    try {
+      const AC = w.AudioContext || w.webkitAudioContext;
+      if (!AC) return null;
+      const ctx = new AC();
+      const dst = ctx.createMediaStreamDestination();
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
+      gain.gain.value = 0; osc.connect(gain); gain.connect(dst); osc.start();
+      return dst.stream.getAudioTracks()[0] || null;
+    } catch (e) { return null; }
+  }
+  async function audioTrack(request, nativeGUM) {
+    if (cam.audio === 'off') return null;
+    if (cam.audio === 'real' && typeof nativeGUM === 'function') {
+      try { const s = await ReflectApply(nativeGUM, md, [{ audio: request }]); return s.getAudioTracks()[0] || null; } catch (e) { return null; }
+    }
+    return silentAudioTrack();
+  }
+
+  // ---- the methods ----
+  if (md && MDP) {
+    const nativeGUM = MDP.getUserMedia;
+    const nativeEnum = MDP.enumerateDevices;
+    const nativeDisplay = MDP.getDisplayMedia;
+
+    if (typeof nativeGUM === 'function') {
+      define(MDP, 'getUserMedia', method('getUserMedia', 1, function (constraints) {
+        const self = this;
+        if (w.MediaDevices && !(self instanceof w.MediaDevices)) return ReflectApply(nativeGUM, self, arguments);
+        const wantVideo = constraints && constraints.video;
+        const wantAudio = constraints && constraints.audio;
+        if (!wantVideo && !wantAudio) return ReflectApply(nativeGUM, self, arguments); // the engine's own TypeError
+        return new w.Promise(function (resolve, reject) {
+          (async function () {
+            try {
+              const tracks = [];
+              if (wantVideo) {
+                if (mode === 'block') { reject(notFound()); return; }
+                tracks.push(makeVideoTrack(resolveVideo(wantVideo)));
+                videoGranted = true;
+              }
+              if (wantAudio) {
+                const a = await audioTrack(wantAudio, nativeGUM);
+                if (a) tracks.push(a);
+                else if (!wantVideo) { reject(notFound()); return; }
+              }
+              resolve(new w.MediaStream(tracks));
+            } catch (e) { reject(e); }
+          })();
+        });
+      }));
+    }
+
+    if (typeof nativeEnum === 'function') {
+      define(MDP, 'enumerateDevices', method('enumerateDevices', 0, function () {
+        const self = this;
+        let real;
+        try { real = ReflectApply(nativeEnum, self, []); } catch (e) { return w.Promise.reject(e); }
+        return real.then(function (list) { return buildDeviceList(list); },
+                         function () { return buildDeviceList([]); });
+      }));
+    }
+
+    if (cam.screenShare && mode === 'substitute' && typeof nativeDisplay === 'function') {
+      define(MDP, 'getDisplayMedia', method('getDisplayMedia', 0, function (constraints) {
+        const self = this;
+        if (w.MediaDevices && !(self instanceof w.MediaDevices)) return ReflectApply(nativeDisplay, self, arguments);
+        return new w.Promise(function (resolve, reject) {
+          try {
+            const res = resolveVideo(constraints && constraints.video);
+            const tracks = [makeVideoTrack(res)];
+            resolve(new w.MediaStream(tracks));
+          } catch (e) { reject(e); }
+        });
+      }));
+    }
+  }
+
+  function buildDeviceList(list) {
+    const out = [];
+    for (let i = 0; i < list.length; i++) { const d = list[i]; if (d && d.kind === 'videoinput') continue; out.push(d); }
+    if (mode === 'substitute') { const fake = makeFakeCamera(); if (fake) out.unshift(fake); }
+    return out;
+  }
+
+  // A MediaDeviceInfo (an InputDeviceInfo, as a videoinput is) of ours: a bare instance of the
+  // prototype whose getters this script serves from `deviceData`; a real one falls through.
+  const Info = w.InputDeviceInfo || w.MediaDeviceInfo;
+  function makeFakeCamera() {
+    if (!Info) return null;
+    const device = Object.create(Info.prototype);
+    fakeDevices.add(device);
+    deviceData.set(device, { deviceId: deviceId, kind: 'videoinput', groupId: groupId, label: defaultLabel });
+    return device;
+  }
+  function serveDeviceGetters() {
+    const proto = w.MediaDeviceInfo && w.MediaDeviceInfo.prototype;
+    if (!proto) return;
+    const keys = ['deviceId', 'kind', 'groupId', 'label'];
+    for (let i = 0; i < keys.length; i++) {
+      (function (key) {
+        const d = Object.getOwnPropertyDescriptor(proto, key);
+        if (!d || !d.get) return;
+        const nativeGet = d.get;
+        const get = getter(key, function () {
+          const native = nativeGet.call(this); // receiver check + the real value
+          if (!fakeDevices.has(this)) return native;
+          const data = deviceData.get(this) || {};
+          if (key === 'label') return videoGranted ? (data.label || '') : '';
+          return data[key];
+        });
+        Object.defineProperty(proto, key, { get: get, set: d.set, enumerable: d.enumerable, configurable: d.configurable });
+      })(keys[i]);
+    }
+    const toJSON = Object.getOwnPropertyDescriptor(proto, 'toJSON');
+    if (toJSON && typeof toJSON.value === 'function') {
+      define(proto, 'toJSON', method('toJSON', 0, function () {
+        if (!fakeDevices.has(this)) return toJSON.value.call(this);
+        return { deviceId: deviceId, kind: 'videoinput', groupId: groupId, label: videoGranted ? defaultLabel : '' };
+      }));
+    }
+    const InputProto = w.InputDeviceInfo && w.InputDeviceInfo.prototype;
+    if (InputProto && typeof InputProto.getCapabilities === 'function') {
+      const nativeCaps = InputProto.getCapabilities;
+      define(InputProto, 'getCapabilities', method('getCapabilities', 0, function () {
+        if (!fakeDevices.has(this)) return ReflectApply(nativeCaps, this, arguments);
+        return capabilities();
+      }));
+    }
+  }
+  if (mode === 'substitute') { try { serveDeviceGetters(); } catch (e) {} }
+
+  // Our tracks' getSettings/getCapabilities/getConstraints/applyConstraints and label; a real
+  // track falls through to the engine.
+  function patchTrackMethod(name, length, provide) {
+    const proto = w.MediaStreamTrack && w.MediaStreamTrack.prototype;
+    if (!proto || typeof proto[name] !== 'function') return;
+    const native = proto[name];
+    define(proto, name, method(name, length, function () {
+      if (!ours.has(this)) return ReflectApply(native, this, arguments);
+      return provide(this, native, arguments);
+    }));
+  }
+  patchTrackMethod('getSettings', 0, function (track) { const d = trackData.get(track); return Object.assign({}, d && d.settings); });
+  patchTrackMethod('getCapabilities', 0, function (track) { const d = trackData.get(track); return Object.assign({}, d && d.capabilities); });
+  patchTrackMethod('getConstraints', 0, function (track) { const d = trackData.get(track); return Object.assign({}, d && d.constraints); });
+  patchTrackMethod('applyConstraints', 1, function (track, native, args) {
+    const d = trackData.get(track);
+    if (d && args[0] && typeof args[0] === 'object') {
+      const res = resolveVideo(args[0].video || args[0]);
+      d.settings = settingsFor(res);
+      d.constraints = Object.assign({}, args[0]);
+    }
+    return w.Promise.resolve();
+  });
+  patchTrackMethod('stop', 0, function (track, native, args) {
+    const d = trackData.get(track); if (d && d.cancel) d.cancel();
+    return ReflectApply(native, track, args);
+  });
+  (function () {
+    const proto = w.MediaStreamTrack && w.MediaStreamTrack.prototype;
+    if (!proto) return;
+    const d = Object.getOwnPropertyDescriptor(proto, 'label');
+    if (!d || !d.get) return;
+    const nativeGet = d.get;
+    const get = getter('label', function () {
+      const native = nativeGet.call(this);
+      return ours.has(this) ? defaultLabel : native;
+    });
+    Object.defineProperty(proto, 'label', { get: get, set: d.set, enumerable: d.enumerable, configurable: d.configurable });
+  })();
+
+  // Legacy navigator.getUserMedia / webkitGetUserMedia, routed through the patched one.
+  const legacyNames = ['getUserMedia', 'webkitGetUserMedia', 'mozGetUserMedia'];
+  for (let i = 0; i < legacyNames.length; i++) {
+    const legacyName = legacyNames[i];
+    if (typeof nav[legacyName] !== 'function' || !md || typeof md.getUserMedia !== 'function') continue;
+    define(nav, legacyName, method(legacyName, 3, function (constraints, success, error) {
+      try { md.getUserMedia(constraints).then(success, typeof error === 'function' ? error : function () {}); }
+      catch (e) { if (typeof error === 'function') error(e); }
+      return undefined;
+    }));
+  }
+}
+
 function substitutesInWorkers(config) {
   const fp = config.fingerprint;
   const fingerprint = !!fp && (!!fp.language || ['canvas', 'webgl', 'audio'].some((k) => !!fp[k] && fp[k] !== 'real'));
