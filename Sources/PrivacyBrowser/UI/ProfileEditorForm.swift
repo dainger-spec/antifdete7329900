@@ -782,6 +782,8 @@ struct ProfileEditorForm: View {
 
     private var cameraSubstitution: some View {
         VStack(alignment: .leading, spacing: 14) {
+            CameraPreviewView(camera: draft.camera)
+            EditorNote(L("editor.camera.preview.note"))
             EditorRow(L("editor.camera.delivery")) {
                 Picker(L("editor.camera.delivery"), selection: $draft.camera.delivery) {
                     Text(L("editor.camera.delivery.shim")).tag(CameraSubstitution.Delivery.jsShim)
