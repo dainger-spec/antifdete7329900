@@ -1511,7 +1511,10 @@ function patchSystemCamera(w, sc) {
           let label = '';
           try { label = String(dev.label); } catch (e) {}
           if (dev && dev.kind === 'videoinput' && label === sc.sentinel) { sentinelDev = dev; continue; }
-          if (sc.usedHere && dev && dev.kind === 'videoinput') continue; // one camera only when using it
+          // One camera only when using it — but only once devices are named. Before the page holds
+          // the camera permission the engine lists a single unnamed placeholder per kind; it stays,
+          // as in Safari, or the page would read "no camera" and may never ask for one.
+          if (sc.usedHere && dev && dev.kind === 'videoinput' && label) continue;
           out.push(dev);
         }
         if (sc.usedHere && sentinelDev) out.unshift(renamed(sentinelDev));
@@ -1521,34 +1524,79 @@ function patchSystemCamera(w, sc) {
   }
 
   // The profile that uses the system camera: route a plain getUserMedia({video}) to the sentinel
-  // device (so the page gets the virtual one, not the Mac's real camera). Best effort — until a
-  // grant, the sentinel's label is empty and it cannot be found, so the first call falls through.
+  // device, so the page gets the virtual one and not the Mac's real camera. The sentinel is found by
+  // its label, which the engine gives only once the page holds the camera permission:
+  //  - with it, the call goes straight to the sentinel;
+  //  - before it, the page's own call is let through so the engine can ask; if what it opened is
+  //    not the sentinel, that stream is stopped before the page ever sees it and the sentinel is
+  //    opened instead (the real camera's light may blink once, at a site's first grant).
   if (sc.usedHere && typeof MDP.getUserMedia === 'function' && typeof nativeEnum === 'function') {
     const nativeGUM = MDP.getUserMedia;
     define(MDP, 'getUserMedia', method('getUserMedia', 1, function (constraints) {
       const self = this;
+      // The page's own arguments, kept here: inside the async function below `arguments` is that
+      // function's own (empty), and getUserMedia() with nothing in it is a TypeError.
+      const args = arguments;
       const wantVideo = constraints && constraints.video;
-      if (!wantVideo) return ReflectApply(nativeGUM, self, arguments);
+      if (!wantVideo) return ReflectApply(nativeGUM, self, args);
       const videoObj = (typeof wantVideo === 'object') ? wantVideo : null;
       const already = videoObj && videoObj.deviceId && (videoObj.deviceId.exact || typeof videoObj.deviceId === 'string');
-      if (already) return ReflectApply(nativeGUM, self, arguments);
+      if (already) return ReflectApply(nativeGUM, self, args);
+      // The page's constraints with the video pinned to the sentinel; everything else as it asked.
+      const onSentinel = function (id) {
+        const merged = {};
+        for (const key in constraints) merged[key] = constraints[key];
+        const vc = {};
+        if (videoObj) { for (const k in videoObj) vc[k] = videoObj[k]; }
+        vc.deviceId = { exact: id };
+        merged.video = vc;
+        return merged;
+      };
+      const sentinelId = async function () {
+        try { const s = findSentinel(await ReflectApply(nativeEnum, self, [])); return s ? String(s.deviceId) : null; } catch (e) { return null; }
+      };
+      const videoDeviceOf = function (stream) {
+        try { const t = stream.getVideoTracks()[0]; const s = t && t.getSettings(); return s ? String(s.deviceId) : null; } catch (e) { return null; }
+      };
+      const stopAll = function (stream) {
+        try { const ts = stream.getTracks(); for (let i = 0; i < ts.length; i++) { try { ts[i].stop(); } catch (e) {} } } catch (e) {}
+      };
       return new w.Promise(function (resolve, reject) {
         (async function () {
           try {
-            let id = null;
-            try { const sentinel = findSentinel(await ReflectApply(nativeEnum, self, [])); if (sentinel) id = sentinel.deviceId; } catch (e) {}
-            if (!id) { resolve(await ReflectApply(nativeGUM, self, arguments)); return; }
-            const merged = {};
-            for (const key in constraints) merged[key] = constraints[key];
-            const vc = videoObj ? {} : {};
-            if (videoObj) { for (const k in videoObj) vc[k] = videoObj[k]; }
-            vc.deviceId = { exact: id };
-            merged.video = vc;
-            resolve(await ReflectApply(nativeGUM, self, [merged]));
+            let id = await sentinelId();
+            if (id) { resolve(await ReflectApply(nativeGUM, self, [onSentinel(id)])); return; }
+            // No permission yet: the engine asks now, with the page's constraints as it passed them.
+            const first = await ReflectApply(nativeGUM, self, args);
+            id = await sentinelId();
+            if (!id || videoDeviceOf(first) === id) { resolve(first); return; }
+            let second = null;
+            try { second = await ReflectApply(nativeGUM, self, [onSentinel(id)]); } catch (e) {}
+            if (!second) { resolve(first); return; }
+            stopAll(first);
+            resolve(second);
           } catch (e) { reject(e); }
         })();
       });
     }));
+  }
+
+  // The track a page holds names its device too (`track.label`, what most camera pages show): the
+  // virtual camera's reads the profile's name, as its entry in enumerateDevices does. Any other
+  // track — the microphone, a real camera a page pinned — is the engine's.
+  if (sc.usedHere) {
+    (function () {
+      const proto = w.MediaStreamTrack && w.MediaStreamTrack.prototype;
+      if (!proto) return;
+      const d = Object.getOwnPropertyDescriptor(proto, 'label');
+      if (!d || !d.get) return;
+      const nativeGet = d.get;
+      const get = getter('label', function () {
+        const native = nativeGet.call(this);
+        return native === sc.sentinel ? sc.label : native;
+      });
+      Object.defineProperty(proto, 'label', { get: get, set: d.set, enumerable: d.enumerable, configurable: d.configurable });
+    })();
   }
 }
 

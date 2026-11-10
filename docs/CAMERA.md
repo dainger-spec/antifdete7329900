@@ -113,10 +113,21 @@ and the app's signing), mirroring the `NE=1`/`NE=check` network-guard flow.
 ### Stage 2 (here): the app wiring and the per-profile gate
 
 - `SystemCamera` (mirroring `NetworkGuard`) installs and switches the extension on through
-  `OSSystemExtensionManager`, records in the shared app group whether it is active (so every
-  profile's process can read it), and writes the active profile's render settings to
-  `<group>/camera.json`. The extension publishes itself under a fixed sentinel name
-  (`CameraSubstitution.systemDeviceName`, "Lumen Camera").
+  `OSSystemExtensionManager`, records in the shared app group whether it is active, and writes the
+  active profile's render settings to `<group>/camera.json`. The extension publishes itself under a
+  fixed sentinel name (`CameraSubstitution.systemDeviceName`, "Lumen Camera") and re-reads the
+  config each time a client starts the stream.
+- **Only the app's own process can reach the app group.** A profile's own process (`LumenProfile`,
+  the one that hosts Safari's window) is signed without the app-group entitlement on purpose
+  (`release.sh` refuses one that has it), so there `containerURL(forSecurityApplicationGroup…)` is
+  nil: the config would not be written and "active" would always read false — the device kept
+  drawing the fallback test pattern and a page auto-picked the real camera (0.1.7, the owner's Mac,
+  11 November). So `ProfileManager.startInOwnProcess`, in the app's own process, writes the config
+  and reads whether the extension is on, and passes that to the child as `PB_SYSTEM_CAMERA_ACTIVE`
+  (`ProfileProcess.systemCameraActiveForThisProcess`), as the plan's camera right is carried
+  (`PB_CAMERA_ALLOWED`). "Active" means the device exists on this Mac at all — never whether this
+  profile uses it: every profile must hide it otherwise. A profile run in the app's own process
+  (the sandboxed build) reads and writes it directly.
 - A per-profile **delivery** choice (`CameraSubstitution.delivery`): the JavaScript shim, or the
   system camera. In the editor's Camera part, with the extension's install state and an Install
   button.
@@ -124,15 +135,29 @@ and the app's signing), mirroring the `NE=1`/`NE=check` network-guard flow.
   camera reads the sentinel device under the believable name (`deviceLabel`) with the real cameras
   hidden, so one camera shows; every other profile hides the sentinel, so the Mac-global device
   does not leak across profiles or into the Safari comparison. A plain `getUserMedia({video})` in
-  the using profile is routed to the sentinel device. A profile that draws its own camera (the
-  JavaScript shim) already hides every real `videoinput`, so the two shims never both patch
-  `enumerateDevices`.
+  the using profile is routed to the sentinel device, and the track it returns names it with the
+  believable name too (`MediaStreamTrack.label`, what most camera pages show). A profile that draws
+  its own camera (the JavaScript shim) already hides every real `videoinput`, so the two shims never
+  both patch `enumerateDevices`.
 
-LIMITATION: WebKit returns empty device labels until a page is granted the camera, so the shim can
-only find the sentinel device (to rename or hide it, and to route `getUserMedia` to it) once a page
-is allowed the camera. Before that, a non-using profile may still see the device as a camera with
-an empty label, and the using profile's first `getUserMedia` may fall through to the Mac's default
-camera. This is a limit of WebKit's privacy model, not of the gate.
+WebKit returns empty device labels (and ids) until a page holds the camera permission — one
+unnamed placeholder per kind, whatever is attached — so the sentinel can be found only after a
+grant. The gate handles both sides of it:
+
+- Before the grant, `enumerateDevices` keeps the unnamed placeholder, as Safari shows it (dropping
+  it would read "no camera", and a page may then never ask). Nothing leaks: the placeholder is the
+  same however many cameras there are.
+- The using profile's first `getUserMedia` on a site is let through with the page's own
+  constraints, so the engine asks for the permission. If what it opened is not the sentinel, that
+  stream is stopped before the page ever holds it and the sentinel is opened instead; the page gets
+  only the virtual camera. The cost: the Mac's real camera opens for a moment, so its light may
+  blink once — at a site's first grant only. With the permission held, calls go straight to the
+  sentinel. (Until 0.1.8 this first call reached the engine as `getUserMedia()` with nothing in it,
+  a TypeError — `arguments` read inside the async helper — and the placeholder was dropped.)
+
+`scripts/test-shims.mjs` covers all of it against a model of WebKit's media devices: the permission
+and before it, the re-routing and that the real stream is stopped unseen, a denial and pinned
+devices staying the engine's, the track's label, and a profile that does not use the device.
 
 ### Stage 3 (here): the image in the extension
 
