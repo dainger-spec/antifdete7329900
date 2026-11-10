@@ -10,7 +10,7 @@ import UniformTypeIdentifiers
 struct ProfileEditorForm: View {
     /// The editor's parts, in the order the screen shows them.
     enum Topic: String, CaseIterable, Identifiable {
-        case profile, connection, identity, window, location, privacy, data
+        case profile, connection, identity, window, location, camera, privacy, data
         var id: String { rawValue }
 
         var titleKey: String {
@@ -20,6 +20,7 @@ struct ProfileEditorForm: View {
             case .identity: return "editor.topic.identity"
             case .window: return "editor.topic.window"
             case .location: return "editor.topic.location"
+            case .camera: return "editor.topic.camera"
             case .privacy: return "editor.topic.privacy"
             case .data: return "editor.topic.data"
             }
@@ -32,6 +33,7 @@ struct ProfileEditorForm: View {
             case .identity: return "safari"
             case .window: return "macwindow"
             case .location: return "location"
+            case .camera: return "camera"
             case .privacy: return "hand.raised"
             case .data: return "externaldrive"
             }
@@ -72,6 +74,9 @@ struct ProfileEditorForm: View {
     var visibleScreen: CGSize?
     var onChooseCookieFile: () -> Void = {}
     var onDropCookieFile: (URL) -> Void = { _ in }
+    /// Pick an image or a video for the substituted camera (the host view reads the file).
+    var onChooseCameraImage: () -> Void = {}
+    var onChooseCameraVideo: () -> Void = {}
     /// Saved, and its cookies being imported: Save waits.
     var isSaving = false
     /// The profile's settings could not be read: Save would put the form's defaults in their place.
@@ -184,6 +189,7 @@ struct ProfileEditorForm: View {
         case .identity: identity
         case .window: windowPart
         case .location: location
+        case .camera: camera
         case .privacy: privacy
         case .data: data
         }
@@ -745,6 +751,157 @@ struct ProfileEditorForm: View {
             EditorToggle(L("editor.safeBrowsing"), isOn: $draft.safeBrowsing)
             EditorNote(L("editor.privacy.footer"))
         }
+    }
+
+    // MARK: Camera
+
+    private var camera: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            EditorRow(L("editor.camera.mode")) {
+                Picker(L("editor.camera.mode"), selection: $draft.camera.mode) {
+                    Text(L("editor.camera.mode.off")).tag(CameraSubstitution.Mode.off)
+                    Text(L("editor.camera.mode.block")).tag(CameraSubstitution.Mode.block)
+                    Text(L("editor.camera.mode.substitute")).tag(CameraSubstitution.Mode.substitute)
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+            switch draft.camera.mode {
+            case .off:
+                EditorNote(L("editor.camera.off.note"))
+            case .block:
+                EditorNote(L("editor.camera.block.note"))
+            case .substitute:
+                cameraSubstitution
+            }
+            EditorNote(L("editor.camera.footer"))
+        }
+    }
+
+    @ViewBuilder
+    private var cameraSubstitution: some View {
+        EditorRow(L("editor.camera.source")) {
+            Picker(L("editor.camera.source"), selection: $draft.camera.source) {
+                Text(L("editor.camera.source.color")).tag(CameraSubstitution.Source.color)
+                Text(L("editor.camera.source.bars")).tag(CameraSubstitution.Source.bars)
+                Text(L("editor.camera.source.image")).tag(CameraSubstitution.Source.image)
+                Text(L("editor.camera.source.video")).tag(CameraSubstitution.Source.video)
+            }
+            .labelsHidden()
+            .fixedSize()
+        }
+        if draft.camera.source == .image {
+            cameraMediaRow(name: draft.cameraImageName, hasData: draft.camera.imageData != nil,
+                           choose: onChooseCameraImage, clear: { draft.clearCameraImage() })
+        }
+        if draft.camera.source == .video {
+            cameraMediaRow(name: draft.cameraVideoName, hasData: draft.camera.videoData != nil,
+                           choose: onChooseCameraVideo, clear: { draft.clearCameraVideo() })
+            EditorNote(L("editor.camera.video.note"))
+        }
+        EditorRow(L("editor.camera.color")) {
+            ColorPicker(L("editor.camera.color"), selection: cameraColor, supportsOpacity: false)
+                .labelsHidden()
+                .fixedSize()
+        }
+        HStack(alignment: .top, spacing: 12) {
+            EditorField(L("editor.camera.width")) {
+                TextField(L("editor.camera.width"), text: $draft.cameraWidth, prompt: Text(verbatim: ""))
+                    .lumenField("1280", isEmpty: draft.cameraWidth.isEmpty)
+            }
+            .frame(width: 110)
+            EditorField(L("editor.camera.height")) {
+                TextField(L("editor.camera.height"), text: $draft.cameraHeight, prompt: Text(verbatim: ""))
+                    .lumenField("720", isEmpty: draft.cameraHeight.isEmpty)
+            }
+            .frame(width: 110)
+            EditorField(L("editor.camera.frameRate")) {
+                TextField(L("editor.camera.frameRate"), text: $draft.cameraFrameRate, prompt: Text(verbatim: ""))
+                    .lumenField("30", isEmpty: draft.cameraFrameRate.isEmpty)
+            }
+            .frame(width: 110)
+            Spacer(minLength: 0)
+        }
+        EditorRow(L("editor.camera.fit")) {
+            Picker(L("editor.camera.fit"), selection: $draft.camera.fit) {
+                Text(L("editor.camera.fit.cover")).tag(CameraSubstitution.Fit.cover)
+                Text(L("editor.camera.fit.contain")).tag(CameraSubstitution.Fit.contain)
+                Text(L("editor.camera.fit.stretch")).tag(CameraSubstitution.Fit.stretch)
+            }
+            .labelsHidden()
+            .fixedSize()
+        }
+        EditorRow(L("editor.camera.facing")) {
+            Picker(L("editor.camera.facing"), selection: $draft.camera.facing) {
+                Text(L("editor.camera.facing.user")).tag(CameraSubstitution.Facing.user)
+                Text(L("editor.camera.facing.environment")).tag(CameraSubstitution.Facing.environment)
+                Text(L("editor.camera.facing.unset")).tag(CameraSubstitution.Facing.unset)
+            }
+            .labelsHidden()
+            .fixedSize()
+        }
+        EditorToggle(L("editor.camera.mirror"), isOn: $draft.camera.mirror)
+        EditorField(L("editor.camera.label")) {
+            TextField(L("editor.camera.label"), text: $draft.camera.deviceLabel,
+                      prompt: Text(verbatim: "FaceTime HD Camera"))
+                .lumenField("FaceTime HD Camera", isEmpty: draft.camera.deviceLabel.isEmpty)
+        }
+        EditorRow(L("editor.camera.audio")) {
+            Picker(L("editor.camera.audio"), selection: $draft.camera.audio) {
+                Text(L("editor.camera.audio.real")).tag(CameraSubstitution.Audio.real)
+                Text(L("editor.camera.audio.silent")).tag(CameraSubstitution.Audio.silent)
+                Text(L("editor.camera.audio.off")).tag(CameraSubstitution.Audio.off)
+            }
+            .labelsHidden()
+            .fixedSize()
+        }
+        EditorToggle(L("editor.camera.screenShare"), detail: L("editor.camera.screenShare.detail"),
+                     isOn: $draft.camera.alsoScreenShare)
+        EditorNote(L("editor.camera.secure.note"))
+    }
+
+    /// A chosen image or video, with Choose / Replace and Remove.
+    @ViewBuilder
+    private func cameraMediaRow(name: String?, hasData: Bool, choose: @escaping () -> Void, clear: @escaping () -> Void) -> some View {
+        HStack(spacing: 10) {
+            Button(hasData ? L("editor.camera.media.replace") : L("editor.camera.media.choose"), action: choose)
+                .buttonStyle(.lumenSecondary)
+            if hasData {
+                Text(verbatim: name ?? L("editor.camera.media.stored"))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Button(L("editor.camera.media.remove"), action: clear)
+                    .buttonStyle(.lumenGhost)
+            } else {
+                Text(L("editor.camera.media.none"))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textTertiary)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// The substituted camera's colour as a SwiftUI `Color`, kept in the draft as "#RRGGBB".
+    private var cameraColor: Binding<Color> {
+        Binding(get: { Self.color(fromHex: draft.camera.colorHex) },
+                set: { draft.camera.colorHex = Self.hex(from: $0) })
+    }
+
+    static func color(fromHex hex: String) -> Color {
+        guard CameraSubstitution.isColorHex(hex) else { return Color(red: 0.12, green: 0.13, blue: 0.19) }
+        let value = UInt32(hex.dropFirst(), radix: 16) ?? 0
+        return Color(red: Double((value >> 16) & 0xFF) / 255, green: Double((value >> 8) & 0xFF) / 255,
+                     blue: Double(value & 0xFF) / 255)
+    }
+
+    static func hex(from color: Color) -> String {
+        let native = NSColor(color).usingColorSpace(.sRGB) ?? .black
+        let r = Int((native.redComponent * 255).rounded())
+        let g = Int((native.greenComponent * 255).rounded())
+        let b = Int((native.blueComponent * 255).rounded())
+        return String(format: "#%02X%02X%02X", max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b)))
     }
 
     static let timeZones = TimeZone.knownTimeZoneIdentifiers.sorted()

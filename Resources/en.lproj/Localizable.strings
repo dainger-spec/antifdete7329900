@@ -218,6 +218,51 @@
 "editor.topic.location" = "Location and Language";
 "editor.topic.privacy" = "Privacy";
 "editor.topic.data" = "Data";
+
+/* Camera substitution (per-profile, editor's Camera part) */
+"editor.topic.camera" = "Camera";
+"editor.camera.mode" = "Mode";
+"editor.camera.mode.off" = "Real camera";
+"editor.camera.mode.block" = "No camera";
+"editor.camera.mode.substitute" = "Substitute";
+"editor.camera.off.note" = "Pages reach this Mac's real camera through WebKit, as before — the window still asks you before a page may use it.";
+"editor.camera.block.note" = "No camera exists for this profile: a page's request is refused with NotFoundError and no camera is listed, as on a Mac with every camera unplugged. The microphone is left alone.";
+"editor.camera.footer" = "A JavaScript shim over the camera API, not a system device: it runs in the profile's pages (a window of Safari's as well as the app's own), only where the page is a secure context (https). The frames are drawn here, so a test that watches for a live sensor can still tell them apart.";
+"editor.camera.source" = "Source";
+"editor.camera.source.color" = "Solid colour";
+"editor.camera.source.bars" = "Test pattern";
+"editor.camera.source.image" = "Image";
+"editor.camera.source.video" = "Video";
+"editor.camera.video.note" = "The video loops. It is kept with the profile and synced, so keep it short.";
+"editor.camera.color" = "Colour";
+"editor.camera.width" = "Width";
+"editor.camera.height" = "Height";
+"editor.camera.frameRate" = "Frame rate";
+"editor.camera.fit" = "Fit";
+"editor.camera.fit.cover" = "Fill";
+"editor.camera.fit.contain" = "Fit whole";
+"editor.camera.fit.stretch" = "Stretch";
+"editor.camera.facing" = "Facing";
+"editor.camera.facing.user" = "Front";
+"editor.camera.facing.environment" = "Back";
+"editor.camera.facing.unset" = "Not reported";
+"editor.camera.mirror" = "Mirror the picture";
+"editor.camera.label" = "Device name pages see";
+"editor.camera.audio" = "Microphone";
+"editor.camera.audio.real" = "Real microphone";
+"editor.camera.audio.silent" = "Silent track";
+"editor.camera.audio.off" = "No audio";
+"editor.camera.screenShare" = "Substitute screen sharing too";
+"editor.camera.screenShare.detail" = "getDisplayMedia is handed the same stream instead of a screen.";
+"editor.camera.secure.note" = "Device ids are salted per site, as a real browser salts them, and the frames carry faint sensor-like grain so they are never frozen.";
+"editor.camera.media.choose" = "Choose a file…";
+"editor.camera.media.replace" = "Replace…";
+"editor.camera.media.remove" = "Remove";
+"editor.camera.media.none" = "No file chosen";
+"editor.camera.media.stored" = "chosen file";
+"editor.camera.error.numbers" = "The camera's width, height and frame rate must be whole numbers.";
+"editor.camera.error.tooLarge" = "That file is larger than %d MB.";
+"editor.camera.error.read" = "Could not read %@.";
 "editor.avatar" = "Glyph";
 "editor.avatar.letters" = "Letters (up to 2)";
 "editor.avatar.automatic" = "The colour the profile was given";
@@ -1699,6 +1744,33 @@
 "help.keys.scenarioEditor" = "In the Scenarios window";
 "help.keys.saveScenario" = "Save the scenario";
 "help.keys.runScenario" = "Run the scenario";
+
+/* Help: the virtual camera */
+"help.topic.camera" = "Virtual Camera";
+"help.camera.intro" = "A profile can hand a page a camera of your choosing instead of this Mac's, when the page asks for one with getUserMedia. You set it per profile in the editor's Camera part.";
+"help.camera.turnOn" = "Turning it on";
+"help.camera.step.edit" = "Open a profile's settings and go to Camera.";
+"help.camera.step.mode" = "Pick Substitute (or No camera to hide it, Real camera to leave it).";
+"help.camera.step.source" = "Choose what it shows: a colour, a test pattern, an image or a video.";
+"help.camera.step.tune" = "Set the resolution, frame rate, device name and microphone.";
+"help.camera.step.save" = "Save. The next time the profile's pages ask for the camera, they get yours.";
+"help.camera.sources" = "What it can show";
+"help.camera.source.color" = "Solid colour — a plain frame in the colour you pick.";
+"help.camera.source.bars" = "Test pattern — colour bars with a moving bar and a running clock.";
+"help.camera.source.image" = "Image — a photo you choose, drawn in every frame.";
+"help.camera.source.video" = "Video — a clip you choose, looped.";
+"help.camera.tuning" = "What you can tune";
+"help.camera.tune.resolution" = "Resolution and frame rate the page is told and the stream is drawn at.";
+"help.camera.tune.label" = "The device name the page reads from the camera list.";
+"help.camera.tune.audio" = "The microphone: the real one, a silent track, or none.";
+"help.camera.tune.mirror" = "Mirror the picture, and how the source fits the frame.";
+"help.camera.tune.screen" = "Whether screen sharing gets the same stream.";
+"help.camera.know" = "Worth knowing";
+"help.camera.secure" = "The camera API exists only in a secure context: a page over plain http on a public address has none to substitute, as in any browser.";
+"help.camera.know.safari" = "It works in the real Safari window as well as the app's own.";
+"help.camera.know.detect" = "The frames are drawn, not from a sensor: a check that looks for a live camera can still tell.";
+"help.camera.know.permission" = "A page still asks you for the camera the first time, as before.";
+"help.camera.know.size" = "An image or video is kept with the profile and synced, so keep it small.";
 
 /* The licensing client: contract.* — the server's docs/CONTRACT.md §17, word for word; license.* — the app's own. */
 "contract.error.unreachable" = "The Lumen server isn’t responding. Check your connection and try again.";

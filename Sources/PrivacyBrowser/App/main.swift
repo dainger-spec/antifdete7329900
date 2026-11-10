@@ -128,6 +128,12 @@ MainActor.assumeIsolated {
         // scripts/scenario_safari_check.sh starts the proxy that serves the page).
         Localization.applyProcessLanguage()
         ScenarioSafariCheck.start(arguments: arguments)
+    } else if arguments.contains("--camera-safari-check") {
+        // A profile that substitutes the camera, in its own process with Safari's window: a secure
+        // loopback page must get our synthetic stream from getUserMedia and list our camera from
+        // enumerateDevices (CI; CameraSafariCheck; scripts/camera_safari_check.sh serves the page).
+        Localization.applyProcessLanguage()
+        CameraSafariCheck.start(arguments: arguments)
     } else if arguments.contains("--default-browser-check") {
         // Whether Safari's own question about the default browser throws in a profile's process of
         // this app, and what the system answers about http and https (SafariChrome; CI runs it on
