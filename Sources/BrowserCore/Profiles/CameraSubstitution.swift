@@ -63,6 +63,19 @@ public struct CameraSubstitution: Codable, Equatable, Sendable {
         case unset
     }
 
+    /// How the substituted camera reaches the page.
+    public enum Delivery: String, Codable, CaseIterable, Sendable {
+        /// A JavaScript shim over `getUserMedia` draws the frames (`PrivacyScripts.patchCamera`).
+        /// Works everywhere the profile's scripts run, but a determined check can tell a drawn
+        /// frame from a sensor's. Default.
+        case jsShim
+        /// The system virtual camera (the CMIO Camera Extension): WebKit builds the frames its own
+        /// way, so the feed is indistinguishable at the JavaScript layer. Needs the extension
+        /// installed and allowed (`SystemCamera`); the device is Mac-global, so the shim still
+        /// gates its visibility per profile (docs/CAMERA.md).
+        case systemCamera
+    }
+
     /// Whether the microphone is substituted along with the camera, when a page asks for audio.
     public enum Audio: String, Codable, CaseIterable, Sendable {
         /// Pass the real microphone through (WebKit asks the person, as before). Default.
@@ -200,6 +213,8 @@ public struct CameraSubstitution: Codable, Equatable, Sendable {
     /// "#RRGGBB" for the `.color` source and the letterboxing of `.contain`.
     public var colorHex: String
     public var audio: Audio
+    /// How the substituted camera reaches the page: the JavaScript shim, or the system camera.
+    public var delivery: Delivery
     /// Substitute `getDisplayMedia` (screen sharing) with the same stream, too.
     public var alsoScreenShare: Bool
     /// A rectangle of the source taken into the frame; the whole source by default.
@@ -242,6 +257,7 @@ public struct CameraSubstitution: Codable, Equatable, Sendable {
                 deviceLabel: String = "",
                 colorHex: String = "#1E2130",
                 audio: Audio = .real,
+                delivery: Delivery = .jsShim,
                 alsoScreenShare: Bool = false,
                 crop: Crop = .none,
                 filters: Filters = .none,
@@ -262,6 +278,7 @@ public struct CameraSubstitution: Codable, Equatable, Sendable {
         self.deviceLabel = String(deviceLabel.prefix(Self.maxDeviceLabelLength))
         self.colorHex = colorHex
         self.audio = audio
+        self.delivery = delivery
         self.alsoScreenShare = alsoScreenShare
         self.crop = crop
         self.filters = filters
@@ -275,6 +292,36 @@ public struct CameraSubstitution: Codable, Equatable, Sendable {
 
     /// Nothing is substituted.
     public static let off = CameraSubstitution()
+
+    /// The fixed CoreMediaIO device name the system camera publishes itself under. Distinctive, so
+    /// it is never confused with a real camera: the shim finds the device by this name to rename it
+    /// (for the profile that uses it) or hide it (for every other profile), and the believable name
+    /// a page reads (`deviceLabel`) is applied JavaScript-side (docs/CAMERA.md).
+    public static let systemDeviceName = "Lumen Camera"
+
+    /// The render settings the app writes to the shared app group for the extension to draw (stage
+    /// one: a colour or the moving test pattern). Keys match `CameraExtensionConfig` in the
+    /// extension.
+    public struct SystemCameraRender: Codable, Equatable, Sendable {
+        public var source: String
+        public var color: String
+        public var width: Int
+        public var height: Int
+        public var frameRate: Int
+
+        public init(source: String, color: String, width: Int, height: Int, frameRate: Int) {
+            self.source = source; self.color = color; self.width = width; self.height = height; self.frameRate = frameRate
+        }
+    }
+
+    /// What the extension should draw for this profile.
+    public func systemCameraRender() -> SystemCameraRender {
+        SystemCameraRender(source: source == .color ? "color" : "bars", color: colorHex,
+                           width: width, height: height, frameRate: frameRate)
+    }
+
+    /// This profile delivers its substituted camera through the system virtual camera.
+    public var usesSystemCamera: Bool { isActive && mode == .substitute && delivery == .systemCamera }
 
     /// The feature is on for this profile.
     public var isActive: Bool { mode != .off }
@@ -352,7 +399,7 @@ public struct CameraSubstitution: Codable, Equatable, Sendable {
     // that is absent is its default. Written compactly: the media and anything not at its default.
     private enum CodingKeys: String, CodingKey {
         case mode, source, width, height, frameRate, facing, fit, mirror, deviceLabel, colorHex,
-             audio, alsoScreenShare, crop, filters, playback, deviceSecret, imageData, imageType,
+             audio, delivery, alsoScreenShare, crop, filters, playback, deviceSecret, imageData, imageType,
              videoData, videoType
     }
 
@@ -370,6 +417,7 @@ public struct CameraSubstitution: Codable, Equatable, Sendable {
         deviceLabel = String(((try? c.decodeIfPresent(String.self, forKey: .deviceLabel)) ?? "").prefix(Self.maxDeviceLabelLength))
         colorHex = (try? c.decodeIfPresent(String.self, forKey: .colorHex)) ?? d.colorHex
         audio = (try? c.decodeIfPresent(Audio.self, forKey: .audio)) ?? d.audio
+        delivery = (try? c.decodeIfPresent(Delivery.self, forKey: .delivery)) ?? d.delivery
         alsoScreenShare = (try? c.decodeIfPresent(Bool.self, forKey: .alsoScreenShare)) ?? d.alsoScreenShare
         crop = (try? c.decodeIfPresent(Crop.self, forKey: .crop)) ?? d.crop
         filters = (try? c.decodeIfPresent(Filters.self, forKey: .filters)) ?? d.filters
@@ -395,6 +443,7 @@ public struct CameraSubstitution: Codable, Equatable, Sendable {
         if !deviceLabel.isEmpty { try c.encode(deviceLabel, forKey: .deviceLabel) }
         if colorHex != d.colorHex { try c.encode(colorHex, forKey: .colorHex) }
         if audio != d.audio { try c.encode(audio, forKey: .audio) }
+        if delivery != d.delivery { try c.encode(delivery, forKey: .delivery) }
         if alsoScreenShare { try c.encode(alsoScreenShare, forKey: .alsoScreenShare) }
         if crop != d.crop { try c.encode(crop, forKey: .crop) }
         if filters != d.filters { try c.encode(filters, forKey: .filters) }

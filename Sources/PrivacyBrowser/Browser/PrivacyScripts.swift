@@ -50,8 +50,23 @@ enum PrivacyScripts {
         var phone: Phone?
 
         /// What a page's `getUserMedia` is handed instead of the real camera (`patchCamera`); nil
-        /// when the profile substitutes nothing (`CameraSubstitution.off`).
+        /// when the profile substitutes nothing, or when it delivers through the system camera
+        /// rather than the JavaScript shim (`CameraSubstitution.delivery`).
         var camera: Camera?
+
+        /// The system virtual camera as this profile should see it (`patchSystemCamera`); nil unless
+        /// the extension is installed. The shim finds the device by `sentinel` to rename it (when
+        /// `usedHere`) or hide it (otherwise), so a Mac-global device does not leak across profiles.
+        var systemCamera: SystemCamera?
+
+        struct SystemCamera: Encodable {
+            /// The fixed device name the extension publishes (`CameraSubstitution.systemDeviceName`).
+            var sentinel: String
+            /// This profile delivers its camera through the system one.
+            var usedHere: Bool
+            /// The believable name a page reads when this profile uses it.
+            var label: String
+        }
 
         /// The camera substitution as the shim reads it. Mirrors `CameraSubstitution`, with the
         /// chosen media already turned into data: URLs (the app reads the file; the shim never
@@ -113,7 +128,8 @@ enum PrivacyScripts {
     }
 
     @MainActor
-    static func shimConfiguration(for configuration: ProfileConfiguration) -> ShimConfiguration {
+    static func shimConfiguration(for configuration: ProfileConfiguration,
+                                  systemCameraActive: Bool = false) -> ShimConfiguration {
         let webRTC: String
         var relay: ShimConfiguration.Relay?
         switch configuration.webRTCRouting {
@@ -139,13 +155,29 @@ enum PrivacyScripts {
                                  safariObject: namedSafariGivesOne,
                                  storageQuota: safariStorageQuota,
                                  phone: phoneScript(for: configuration),
-                                 camera: cameraScript(for: configuration))
+                                 camera: cameraScript(for: configuration),
+                                 systemCamera: systemCameraScript(for: configuration, active: systemCameraActive))
     }
 
-    /// What the camera shim is given; nil for a profile that substitutes nothing.
+    /// The system virtual camera as this profile should see it; nil unless the extension is
+    /// installed. Built for every profile when it is, so a profile that does not use the device
+    /// still hides it (`patchSystemCamera`).
+    static func systemCameraScript(for configuration: ProfileConfiguration, active: Bool) -> ShimConfiguration.SystemCamera? {
+        guard active else { return nil }
+        let camera = configuration.cameraSubstitution
+        // A profile that draws its own camera (jsShim) already hides every real videoinput — the
+        // sentinel among them (`patchCamera`) — so it needs no system-camera handling, and the two
+        // shims never both patch `enumerateDevices`.
+        if camera.isActive && camera.delivery == .jsShim { return nil }
+        let label = camera.deviceLabel.isEmpty ? "FaceTime HD Camera" : camera.deviceLabel
+        return .init(sentinel: CameraSubstitution.systemDeviceName, usedHere: camera.usesSystemCamera, label: label)
+    }
+
+    /// What the drawing camera shim is given; nil for a profile that substitutes nothing, or that
+    /// delivers through the system camera rather than the JavaScript shim.
     static func cameraScript(for configuration: ProfileConfiguration) -> ShimConfiguration.Camera? {
         let camera = configuration.cameraSubstitution
-        guard camera.isActive else { return nil }
+        guard camera.isActive, camera.delivery == .jsShim else { return nil }
         return .init(mode: camera.mode == .block ? "block" : "substitute",
                      source: camera.source.rawValue,
                      width: camera.width, height: camera.height, frameRate: camera.frameRate,
@@ -203,9 +235,10 @@ enum PrivacyScripts {
     }
 
     @MainActor
-    static func makeUserContentController(for configuration: ProfileConfiguration) -> WKUserContentController {
+    static func makeUserContentController(for configuration: ProfileConfiguration,
+                                         systemCameraActive: Bool = false) -> WKUserContentController {
         let controller = WKUserContentController()
-        controller.addUserScript(WKUserScript(source: source(for: configuration),
+        controller.addUserScript(WKUserScript(source: source(for: configuration, systemCameraActive: systemCameraActive),
                                               injectionTime: .atDocumentStart,
                                               forMainFrameOnly: false,
                                               in: .page))
@@ -213,8 +246,9 @@ enum PrivacyScripts {
     }
 
     @MainActor
-    static func source(for configuration: ProfileConfiguration) -> String {
-        let json = (try? String(data: JSONEncoder().encode(shimConfiguration(for: configuration)), encoding: .utf8)) ?? "{}"
+    static func source(for configuration: ProfileConfiguration, systemCameraActive: Bool = false) -> String {
+        let configured = shimConfiguration(for: configuration, systemCameraActive: systemCameraActive)
+        let json = (try? String(data: JSONEncoder().encode(configured), encoding: .utf8)) ?? "{}"
         return "(function install(CONFIG) {\n" + shimBody + "\n})(" + json + ");"
     }
 
@@ -268,6 +302,7 @@ function patchWindow(w) {
   try { patchGeolocation(w, CONFIG.geolocation || { mode: 'deny' }); } catch (e) {}
   try { patchWebRTC(w, CONFIG.webRTC || 'disabled', CONFIG.webRTCRelay); } catch (e) {}
   if (CONFIG.camera) { try { patchCamera(w, CONFIG.camera); } catch (e) {} }
+  if (CONFIG.systemCamera) { try { patchSystemCamera(w, CONFIG.systemCamera); } catch (e) {} }
   try { hookChildWindows(w); } catch (e) {}
 }
 
@@ -1395,6 +1430,128 @@ function hookChildWindows(w) {
 // iOS app always sends a fingerprint object (ios/Lumen/Browser/PageSettings.swift): it counts only
 // with a canvas, WebGL or audio mode other than 'real' (each is 'off', 'real' or 'noise') or a
 // language set — what ios/shim/fingerprint.js changes.
+// ---- The system virtual camera (the CMIO Camera Extension) -------------------------------------
+// The device is Mac-global: WebKit shows it to every profile under its fixed sentinel name. This
+// gates it per profile — the profile that uses it reads it under a believable name with the real
+// cameras hidden (so one camera shows), every other profile hides it (so it does not leak across
+// profiles or into the Safari comparison). WebKit returns empty device labels until a page is
+// granted the camera, so the match takes effect once a page is allowed it — a limit of WebKit's
+// privacy, not of this (docs/CAMERA.md). The frames themselves are WebKit's own: nothing is drawn.
+function patchSystemCamera(w, sc) {
+  const nav = w.navigator;
+  if (!nav) return;
+  const md = nav.mediaDevices;
+  const MDP = w.MediaDevices && w.MediaDevices.prototype;
+  if (!md || !MDP) return;
+  const Info = w.InputDeviceInfo || w.MediaDeviceInfo;
+  const fakeDevices = new WeakSet();
+  const deviceData = new WeakMap();
+
+  // A MediaDeviceInfo of ours that copies the real device's ids but reads the believable label, so
+  // getUserMedia with that deviceId still reaches the real (virtual) device.
+  function renamed(real) {
+    if (!Info) return real;
+    const device = Object.create(Info.prototype);
+    fakeDevices.add(device);
+    let id = '', group = '';
+    try { id = String(real.deviceId); } catch (e) {}
+    try { group = String(real.groupId); } catch (e) {}
+    deviceData.set(device, { deviceId: id, kind: 'videoinput', groupId: group, label: sc.label });
+    return device;
+  }
+  function serveDeviceGetters() {
+    const proto = w.MediaDeviceInfo && w.MediaDeviceInfo.prototype;
+    if (!proto) return;
+    const keys = ['deviceId', 'kind', 'groupId', 'label'];
+    for (let i = 0; i < keys.length; i++) {
+      (function (key) {
+        const d = Object.getOwnPropertyDescriptor(proto, key);
+        if (!d || !d.get) return;
+        const nativeGet = d.get;
+        const get = getter(key, function () {
+          // Our fakes are bare Object.create(prototype) with no internal slot, so the native getter
+          // would throw on them: serve our value first, and reach the engine only for a real one.
+          if (fakeDevices.has(this)) return (deviceData.get(this) || {})[key];
+          return nativeGet.call(this);
+        });
+        Object.defineProperty(proto, key, { get: get, set: d.set, enumerable: d.enumerable, configurable: d.configurable });
+      })(keys[i]);
+    }
+    const toJSON = Object.getOwnPropertyDescriptor(proto, 'toJSON');
+    if (toJSON && typeof toJSON.value === 'function') {
+      define(proto, 'toJSON', method('toJSON', 0, function () {
+        if (!fakeDevices.has(this)) return toJSON.value.call(this);
+        const dd = deviceData.get(this) || {};
+        return { deviceId: dd.deviceId, kind: 'videoinput', groupId: dd.groupId, label: dd.label };
+      }));
+    }
+  }
+  try { serveDeviceGetters(); } catch (e) {}
+
+  const nativeEnum = MDP.enumerateDevices;
+  function findSentinel(list) {
+    for (let i = 0; i < list.length; i++) {
+      const dev = list[i];
+      let label = '';
+      try { label = String(dev.label); } catch (e) {}
+      if (dev && dev.kind === 'videoinput' && label === sc.sentinel) return dev;
+    }
+    return null;
+  }
+  if (typeof nativeEnum === 'function') {
+    define(MDP, 'enumerateDevices', method('enumerateDevices', 0, function () {
+      const self = this;
+      let real;
+      try { real = ReflectApply(nativeEnum, self, []); } catch (e) { return w.Promise.reject(e); }
+      return real.then(function (list) {
+        const out = [];
+        let sentinelDev = null;
+        for (let i = 0; i < list.length; i++) {
+          const dev = list[i];
+          let label = '';
+          try { label = String(dev.label); } catch (e) {}
+          if (dev && dev.kind === 'videoinput' && label === sc.sentinel) { sentinelDev = dev; continue; }
+          if (sc.usedHere && dev && dev.kind === 'videoinput') continue; // one camera only when using it
+          out.push(dev);
+        }
+        if (sc.usedHere && sentinelDev) out.unshift(renamed(sentinelDev));
+        return out;
+      });
+    }));
+  }
+
+  // The profile that uses the system camera: route a plain getUserMedia({video}) to the sentinel
+  // device (so the page gets the virtual one, not the Mac's real camera). Best effort — until a
+  // grant, the sentinel's label is empty and it cannot be found, so the first call falls through.
+  if (sc.usedHere && typeof MDP.getUserMedia === 'function' && typeof nativeEnum === 'function') {
+    const nativeGUM = MDP.getUserMedia;
+    define(MDP, 'getUserMedia', method('getUserMedia', 1, function (constraints) {
+      const self = this;
+      const wantVideo = constraints && constraints.video;
+      if (!wantVideo) return ReflectApply(nativeGUM, self, arguments);
+      const videoObj = (typeof wantVideo === 'object') ? wantVideo : null;
+      const already = videoObj && videoObj.deviceId && (videoObj.deviceId.exact || typeof videoObj.deviceId === 'string');
+      if (already) return ReflectApply(nativeGUM, self, arguments);
+      return new w.Promise(function (resolve, reject) {
+        (async function () {
+          try {
+            let id = null;
+            try { const sentinel = findSentinel(await ReflectApply(nativeEnum, self, [])); if (sentinel) id = sentinel.deviceId; } catch (e) {}
+            if (!id) { resolve(await ReflectApply(nativeGUM, self, arguments)); return; }
+            const merged = {};
+            for (const key in constraints) merged[key] = constraints[key];
+            const vc = videoObj ? {} : {};
+            if (videoObj) { for (const k in videoObj) vc[k] = videoObj[k]; }
+            vc.deviceId = { exact: id };
+            merged.video = vc;
+            resolve(await ReflectApply(nativeGUM, self, [merged]));
+          } catch (e) { reject(e); }
+        })();
+      });
+    }));
+  }
+}
+
 // ---- Camera (and, with it, the microphone) ----------------------------------------------------
 // What a page's getUserMedia is handed instead of the real camera (`CameraSubstitution`). Only in
 // a secure context, where navigator.mediaDevices exists at all (as a real browser: no camera API
@@ -1720,11 +1877,14 @@ function patchCamera(w, cam) {
         if (!d || !d.get) return;
         const nativeGet = d.get;
         const get = getter(key, function () {
-          const native = nativeGet.call(this); // receiver check + the real value
-          if (!fakeDevices.has(this)) return native;
-          const data = deviceData.get(this) || {};
-          if (key === 'label') return videoGranted ? (data.label || '') : '';
-          return data[key];
+          // Our fakes are bare Object.create(prototype) with no internal slot, so the native getter
+          // would throw on them: serve our value first, and reach the engine only for a real one.
+          if (fakeDevices.has(this)) {
+            const data = deviceData.get(this) || {};
+            if (key === 'label') return videoGranted ? (data.label || '') : '';
+            return data[key];
+          }
+          return nativeGet.call(this); // receiver check + the real value
         });
         Object.defineProperty(proto, key, { get: get, set: d.set, enumerable: d.enumerable, configurable: d.configurable });
       })(keys[i]);

@@ -292,6 +292,19 @@
 "editor.camera.playback.start" = "Старт, с";
 "editor.camera.playback.end" = "Конец, с";
 "editor.camera.playback.note" = "Старт и конец обрезают ролик, в секундах (0 в конце — до самого конца).";
+
+/* Camera: delivery and the system camera */
+"editor.camera.delivery" = "Доставка";
+"editor.camera.delivery.shim" = "JavaScript-шим";
+"editor.camera.delivery.system" = "Системная камера";
+"editor.camera.system" = "Системная камера";
+"editor.camera.system.note" = "Системная виртуальная камера отдаёт картинку через macOS, поэтому страница не отличит её от встроенной. Это одно устройство на весь Mac, и другие профили его не видят. Пока расширение рисует цвет или тестовую таблицу; изображение, видео и коррекцию рисует JavaScript-шим.";
+"editor.camera.system.notInBuild" = "В этой сборке системной камеры нет; она есть в подписанной сборке.";
+"editor.camera.system.active" = "Системная камера установлена и включена.";
+"editor.camera.system.restart" = "Установлена; macOS включит её после перезапуска.";
+"editor.camera.system.install" = "Установить…";
+"editor.camera.system.settings" = "Открыть «Системные настройки»";
+"editor.camera.system.failed" = "Не удалось установить: %@";
 "editor.avatar" = "Значок";
 "editor.avatar.letters" = "Буквы (до 2)";
 "editor.avatar.automatic" = "Цвет, который профиль получил при создании";
@@ -1800,6 +1813,7 @@
 "help.camera.know.detect" = "Кадры рисуются, а не снимаются сенсором: проверка, ищущая живую камеру, всё же может это заметить.";
 "help.camera.know.permission" = "Страница всё так же спросит у вас камеру в первый раз, как и раньше.";
 "help.camera.know.size" = "Изображение или видео хранится с профилем и синхронизируется, поэтому держите их небольшими.";
+"help.camera.know.system" = "Доставка: кадры рисует JavaScript-шим, либо их отдаёт системная камера (если установлена) через macOS — тогда страница не отличит её от встроенной.";
 
 /* The licensing client: contract.* — the server's docs/CONTRACT.md §17, word for word; license.* — the app's own. */
 "contract.error.unreachable" = "Сервер Lumen не отвечает. Проверьте соединение и попробуйте ещё раз.";

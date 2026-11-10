@@ -6,7 +6,6 @@ import Foundation
 /// (`<group>/camera.json`). Absent or unreadable → a default test pattern, so the device always
 /// has a live feed. The app group's identifier is in the extension's Info.plist (`PBCameraAppGroup`).
 struct CameraExtensionConfig {
-    var label: String
     /// "color" or "bars" in this stage (docs/CAMERA.md).
     var source: String
     var colorHex: String
@@ -14,8 +13,13 @@ struct CameraExtensionConfig {
     var height: Int
     var frameRate: Int
 
-    static let fallback = CameraExtensionConfig(label: "FaceTime HD Camera", source: "bars",
-                                                colorHex: "#1E2130", width: 1280, height: 720, frameRate: 30)
+    /// The fixed CoreMediaIO device name (the shim's sentinel). Matches
+    /// `CameraSubstitution.systemDeviceName` in BrowserCore; kept as a literal here so the
+    /// extension needs no BrowserCore dependency.
+    static let deviceName = "Lumen Camera"
+
+    static let fallback = CameraExtensionConfig(source: "bars", colorHex: "#1E2130",
+                                                width: 1280, height: 720, frameRate: 30)
 
     static var appGroup: String? {
         Bundle.main.object(forInfoDictionaryKey: "PBCameraAppGroup") as? String
@@ -34,7 +38,7 @@ struct CameraExtensionConfig {
         else { return fallback }
         func string(_ key: String, _ fallback: String) -> String { (object[key] as? String) ?? fallback }
         func int(_ key: String, _ fallback: Int) -> Int { (object[key] as? NSNumber)?.intValue ?? fallback }
-        return CameraExtensionConfig(label: string("label", fallback.label), source: string("source", fallback.source),
+        return CameraExtensionConfig(source: string("source", fallback.source),
                                      colorHex: string("color", fallback.colorHex),
                                      width: int("width", fallback.width), height: int("height", fallback.height),
                                      frameRate: int("frameRate", fallback.frameRate))

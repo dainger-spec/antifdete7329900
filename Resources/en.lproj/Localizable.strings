@@ -292,6 +292,19 @@
 "editor.camera.playback.start" = "Start, s";
 "editor.camera.playback.end" = "End, s";
 "editor.camera.playback.note" = "Start and end trim the clip, in seconds (0 end = to the very end).";
+
+/* Camera: delivery and the system camera */
+"editor.camera.delivery" = "Delivery";
+"editor.camera.delivery.shim" = "JavaScript shim";
+"editor.camera.delivery.system" = "System camera";
+"editor.camera.system" = "System camera";
+"editor.camera.system.note" = "The system virtual camera feeds the picture through macOS, so a page cannot tell it from the built-in camera. It is one device for the whole Mac, and other profiles do not see it. The extension draws a colour or a test pattern for now; an image, a video and the adjustments are drawn by the JavaScript shim.";
+"editor.camera.system.notInBuild" = "This build does not include the system camera; it comes in a signed build.";
+"editor.camera.system.active" = "The system camera is installed and on.";
+"editor.camera.system.restart" = "Installed; macOS switches it on after a restart.";
+"editor.camera.system.install" = "Install…";
+"editor.camera.system.settings" = "Open System Settings";
+"editor.camera.system.failed" = "Could not install: %@";
 "editor.avatar" = "Glyph";
 "editor.avatar.letters" = "Letters (up to 2)";
 "editor.avatar.automatic" = "The colour the profile was given";
@@ -1800,6 +1813,7 @@
 "help.camera.know.detect" = "The frames are drawn, not from a sensor: a check that looks for a live camera can still tell.";
 "help.camera.know.permission" = "A page still asks you for the camera the first time, as before.";
 "help.camera.know.size" = "An image or video is kept with the profile and synced, so keep it small.";
+"help.camera.know.system" = "Delivery: the JavaScript shim draws the frames, or the system camera (if installed) feeds them through macOS, so a page cannot tell it from the built-in camera.";
 
 /* The licensing client: contract.* — the server's docs/CONTRACT.md §17, word for word; license.* — the app's own. */
 "contract.error.unreachable" = "The Lumen server isn’t responding. Check your connection and try again.";

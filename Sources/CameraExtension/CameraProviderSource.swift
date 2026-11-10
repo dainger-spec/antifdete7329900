@@ -11,7 +11,9 @@ final class CameraProviderSource: NSObject, CMIOExtensionProviderSource {
     init(clientQueue: DispatchQueue?) {
         super.init()
         provider = CMIOExtensionProvider(source: self, clientQueue: clientQueue)
-        deviceSource = CameraDeviceSource(localizedName: CameraExtensionConfig.current().label)
+        // A fixed, distinctive device name — the sentinel the app's shim finds it by to rename or
+        // hide per profile (docs/CAMERA.md). The believable name a page reads is applied JS-side.
+        deviceSource = CameraDeviceSource(localizedName: CameraExtensionConfig.deviceName)
         do {
             try provider.addDevice(deviceSource.device)
         } catch {

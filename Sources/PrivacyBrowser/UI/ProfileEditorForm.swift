@@ -77,6 +77,8 @@ struct ProfileEditorForm: View {
     /// Pick an image or a video for the substituted camera (the host view reads the file).
     var onChooseCameraImage: () -> Void = {}
     var onChooseCameraVideo: () -> Void = {}
+    /// The system virtual camera's install state, for the delivery choice (`SystemCamera`).
+    @ObservedObject private var systemCamera = SystemCamera.shared
     /// Saved, and its cookies being imported: Save waits.
     var isSaving = false
     /// The profile's settings could not be read: Save would put the form's defaults in their place.
@@ -780,16 +782,66 @@ struct ProfileEditorForm: View {
 
     private var cameraSubstitution: some View {
         VStack(alignment: .leading, spacing: 14) {
+            EditorRow(L("editor.camera.delivery")) {
+                Picker(L("editor.camera.delivery"), selection: $draft.camera.delivery) {
+                    Text(L("editor.camera.delivery.shim")).tag(CameraSubstitution.Delivery.jsShim)
+                    Text(L("editor.camera.delivery.system")).tag(CameraSubstitution.Delivery.systemCamera)
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
             cameraSourceControls
             cameraDeviceControls
-            EditorDivider()
-            EditorGroupTitle(L("editor.camera.filters"))
-            cameraFilters
-            EditorDivider()
-            EditorGroupTitle(L("editor.camera.crop"))
-            cameraCrop
-            cameraPlaybackSection
+            if draft.camera.delivery == .systemCamera { systemCameraSection }
+            if draft.camera.delivery == .jsShim { cameraLookControls }
             EditorNote(L("editor.camera.secure.note"))
+        }
+    }
+
+    /// The drawing-only controls — they apply to the JavaScript-shim delivery; the system camera
+    /// draws its frames in the extension (stage one: a colour or the test pattern).
+    @ViewBuilder
+    private var cameraLookControls: some View {
+        EditorDivider()
+        EditorGroupTitle(L("editor.camera.filters"))
+        cameraFilters
+        EditorDivider()
+        EditorGroupTitle(L("editor.camera.crop"))
+        cameraCrop
+        cameraPlaybackSection
+    }
+
+    /// Delivery through the system virtual camera: its install state and what to do about it.
+    @ViewBuilder
+    private var systemCameraSection: some View {
+        EditorDivider()
+        EditorGroupTitle(L("editor.camera.system"))
+        EditorNote(L("editor.camera.system.note"))
+        switch systemCamera.state {
+        case .notInBuild:
+            EditorNote(L("editor.camera.system.notInBuild"), tone: .warning)
+        case .active:
+            EditorNote(L("editor.camera.system.active"))
+        case .restartNeeded:
+            EditorNote(L("editor.camera.system.restart"), tone: .warning)
+        case .failed(let reason):
+            systemCameraInstallRow
+            EditorNote(String(format: L("editor.camera.system.failed"), reason), tone: .warning)
+        default:
+            systemCameraInstallRow
+        }
+    }
+
+    private var systemCameraInstallRow: some View {
+        HStack(spacing: 10) {
+            Button(L("editor.camera.system.install")) { systemCamera.install() }
+                .buttonStyle(.lumenSecondary)
+            Button(L("editor.camera.system.settings")) { systemCamera.openSystemSettings() }
+                .buttonStyle(.lumenGhost)
+            if systemCamera.state == .installing || systemCamera.state == .awaitingApproval {
+                ProgressView().controlSize(.small)
+            }
+            Spacer(minLength: 0)
         }
     }
 

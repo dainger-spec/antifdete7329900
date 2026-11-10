@@ -321,6 +321,10 @@ if [[ "$CAM" == "1" || "$CAM" == "check" ]]; then
     ENTITLEMENTS="$CAM_APP_ENTITLEMENTS"
     /usr/libexec/PlistBuddy -c "Print :PBCameraExtensionBundleIdentifier" "$PLIST" >/dev/null 2>&1 \
       || /usr/libexec/PlistBuddy -c "Add :PBCameraExtensionBundleIdentifier string $CAMERA_EXTENSION_ID" "$PLIST"
+    # The app group the app and its profiles' processes read the camera's active flag and write its
+    # config through (SystemCamera). The same key the extension carries.
+    /usr/libexec/PlistBuddy -c "Print :PBCameraAppGroup" "$PLIST" >/dev/null 2>&1 \
+      || /usr/libexec/PlistBuddy -c "Add :PBCameraAppGroup string $APP_GROUP" "$PLIST"
   fi
 fi
 
