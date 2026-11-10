@@ -244,8 +244,13 @@ class LumenUITestCase: XCTestCase {
         sleep(8)
         // The page's own "at:" line says "напрямую" when it came directly (the testbed): found where the
         // "via:" paragraph sometimes is not (CI runs 20, 21).
-        let shown = webText("?t=\(name)")
+        // By the queries, and by the screen's whole tree where they see nothing: a page that is on
+        // the screen is not always in the web view's query (CI runs 37, 42 and 58 — there the page that
+        // had gone direct was missed here, and only the testbed's count caught it).
+        let labels = screenLabels()
+        let shown = webText("?t=\(name)") ?? labels.first { $0.contains("?t=\(name)") && $0.hasPrefix("at: ") }
         let direct = webText("напрямую") ?? (shown?.contains("напрямую") == true ? shown : nil)
+            ?? labels.first { $0.contains("напрямую") }
         XCTAssertTrue(direct == nil, "\(name): the page did not go direct (\(oneLine(direct)))", file: file, line: line)
         XCTAssertTrue(shown == nil, "\(name): the page did not load (\(oneLine(shown)))", file: file, line: line)
     }
