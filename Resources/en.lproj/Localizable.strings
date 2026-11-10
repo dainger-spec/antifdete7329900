@@ -312,7 +312,9 @@
 "editor.camera.system.note" = "The system virtual camera feeds the picture through macOS, so a page cannot tell it from the built-in camera. It is one device for the whole Mac, and other profiles do not see it. The extension draws your source — a colour, the test pattern, an image or a video — with crop, fit, mirror, the adjustments and the video playback.";
 "editor.camera.system.notInBuild" = "This build does not include the system camera; it comes in a signed build.";
 "editor.camera.system.active" = "The system camera is installed and on.";
-"editor.camera.system.restart" = "Installed; macOS switches it on after a restart.";
+"editor.camera.system.restart" = "Installed; macOS switches it on after a restart — restart the Mac, then open Lumen again.";
+"editor.camera.system.notActive" = "Not installed yet — until the extension is installed and on, a page opens your real camera (not the substitution). Install it with the steps below, or use the JavaScript shim, which needs no install.";
+"editor.camera.system.steps" = "1. Press “Install…”.  2. In System Settings → General → Login Items & Extensions → Lumen, turn on the “Media extension” (that is the camera).  3. Come back here — it should say “installed and on”.  4. Stop the profile and start it again. A leftover older copy can block the install — then restart the Mac and try once more.";
 "editor.camera.system.install" = "Install…";
 "editor.camera.system.settings" = "Open System Settings";
 "editor.camera.system.failed" = "Could not install: %@";

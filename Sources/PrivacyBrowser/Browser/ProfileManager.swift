@@ -387,13 +387,27 @@ final class ProfileManager: ObservableObject {
             WebContentLanguage.decide(language)
         }
         noteLanguageMismatch(for: id, wanted: language)
+        // The system camera's render config and its "active" flag live in the app group. A profile's
+        // own process is kept out of it, so there the parent already wrote the config and passed the
+        // flag (`startInOwnProcess`); the app's own process (sandboxed, in-window) reads and writes it
+        // here (docs/CAMERA.md).
+        let systemCameraActive: Bool
+        if runsInProfileProcess {
+            systemCameraActive = ProfileProcess.systemCameraActiveForThisProcess
+        } else {
+            if configuration.cameraSubstitution.usesSystemCamera {
+                SystemCamera.shared.writeRenderConfig(for: configuration.cameraSubstitution)
+            }
+            systemCameraActive = SystemCamera.shared.isActive
+        }
         let session: BrowserSession
         do {
             let passwordSettings = ProfilePasswordSettings(repository: repository, profileID: id, profileName: summary.name,
                                                            launchConfiguration: stored)
             passwordSettings.showManager = { [weak self] in self?.onShowPasswords?(id) }
             session = try BrowserSession(profileID: id, profileName: summary.name, configuration: configuration,
-                                         passwordVault: passwords, passwordSettings: passwordSettings, library: library)
+                                         passwordVault: passwords, passwordSettings: passwordSettings, library: library,
+                                         systemCameraActive: systemCameraActive)
             // The engine as saved now, read at each search: a change in the editor applies at once.
             session.searchEngine = { [repository, configuration] in
                 (try? repository.loadConfiguration(id, key: key))?.searchEngine ?? configuration.searchEngine ?? .standard
@@ -478,6 +492,16 @@ final class ProfileManager: ObservableObject {
         // the child builds its window — before the launch inside the child unseals the WebKit data.
         let key = try repository.profileKey(for: id)
         try safariHomeVault.prepareForLaunch(profileID: id, key: key)
+        // The system camera's render config and its "active" flag live in the app group, which a
+        // profile's own process is kept out of (`ProfileExecutable`, no app-group entitlement). So the
+        // parent — which can reach it — writes the config and reads whether the extension is on, and
+        // passes the answer to the child (docs/CAMERA.md). Off below the plan (cameraAllowed) or when
+        // the profile does not use the system camera.
+        var systemCameraActive = false
+        if cameraAllowed(), stored.cameraSubstitution.usesSystemCamera {
+            SystemCamera.shared.writeRenderConfig(for: stored.cameraSubstitution)
+            systemCameraActive = SystemCamera.shared.isActive
+        }
         let child = try ProfileProcess.start(
             profileID: id,
             executable: executable,
@@ -492,7 +516,8 @@ final class ProfileManager: ObservableObject {
             preferences: BrowsingPreferences.current.forProfileProcess,
             menusInAppLanguage: stored.menusInAppLanguage,
             processorCores: stored.deviceGeneration.processorCores,
-            cameraAllowed: cameraAllowed())
+            cameraAllowed: cameraAllowed(),
+            systemCameraActive: systemCameraActive)
         child.onEvent = { [weak self] event in
             guard let self else { return }
             switch event {

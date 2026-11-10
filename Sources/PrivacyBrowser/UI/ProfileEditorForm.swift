@@ -852,11 +852,17 @@ struct ProfileEditorForm: View {
         case .active:
             EditorNote(L("editor.camera.system.active"))
         case .restartNeeded:
+            EditorNote(L("editor.camera.system.notActive"), tone: .warning)
             EditorNote(L("editor.camera.system.restart"), tone: .warning)
-        case .failed(let reason):
             systemCameraInstallRow
+        case .failed(let reason):
+            EditorNote(L("editor.camera.system.notActive"), tone: .warning)
             EditorNote(String(format: L("editor.camera.system.failed"), reason), tone: .warning)
+            EditorNote(L("editor.camera.system.steps"))
+            systemCameraInstallRow
         default:
+            EditorNote(L("editor.camera.system.notActive"), tone: .warning)
+            EditorNote(L("editor.camera.system.steps"))
             systemCameraInstallRow
         }
     }
@@ -1096,22 +1102,37 @@ struct ProfileEditorForm: View {
     }
 
     /// Fills the camera's name, resolution and facing to match the profile's device. A Mac profile
-    /// copies this Mac's own built-in camera exactly (`HostCamera`), so a page sees what the real
-    /// one reports. An iOS/iPadOS profile cannot read an iPhone's camera from the build machine, so
-    /// it uses the believable default a real device reports — the front camera, 1280×720, user-facing.
+    /// takes this Mac's real resolution (`HostCamera`); an iOS/iPadOS profile cannot read an iPhone's
+    /// camera from the build machine, so it uses a believable default (front camera, 1280×720, user).
+    /// The name follows the profile's own language, never this Mac's — so a profile that claims, say,
+    /// the US does not get this Mac's Russian camera name (the owner, 11 November).
     private func matchDeviceCamera() {
         switch DeviceGenerations.resolved(id: draft.deviceGenerationID).platform {
         case .macOS:
-            guard let builtin = HostCamera.builtin() else { return }
-            draft.camera.deviceLabel = builtin.name
-            draft.cameraWidth = String(builtin.width)
-            draft.cameraHeight = String(builtin.height)
+            if let builtin = HostCamera.builtin() {
+                draft.cameraWidth = String(builtin.width)
+                draft.cameraHeight = String(builtin.height)
+            }
+            draft.camera.deviceLabel = Self.macCameraName(forLanguage: draft.language)
         case .iOS, .iPadOS:
-            draft.camera.deviceLabel = "Front Camera"
+            draft.camera.deviceLabel = Self.mobileCameraName(forLanguage: draft.language)
             draft.cameraWidth = "1280"
             draft.cameraHeight = "720"
             draft.camera.facing = .user
         }
+    }
+
+    /// A believable built-in-camera name in the profile's own language. "FaceTime HD Camera" is a
+    /// real, common Mac camera name shown identically on every Mac whatever its language, so it leaks
+    /// none; a Russian profile gets the localised "Камера (…)" macOS shows there. `language` is the
+    /// profile's override ("" means this Mac's language — then the neutral name, which never misleads).
+    static func macCameraName(forLanguage language: String) -> String {
+        language.lowercased().hasPrefix("ru") ? "Камера (MacBook Air)" : "FaceTime HD Camera"
+    }
+
+    /// The same for a mobile profile's front camera.
+    static func mobileCameraName(forLanguage language: String) -> String {
+        language.lowercased().hasPrefix("ru") ? "Фронтальная камера" : "Front Camera"
     }
 
     /// The substituted camera's colour as a SwiftUI `Color`, kept in the draft as "#RRGGBB".
