@@ -6,7 +6,9 @@ import XCTest
 final class LanguageTests: LumenUITestCase {
     /// Every label on the screen now; fails if one has a Russian letter in it.
     func assertEnglish(_ screen: String, file: StaticString = #filePath, line: UInt = #line) {
-        let russian = screenLabels().filter { $0.range(of: "[А-Яа-яЁё]", options: .regularExpression) != nil }
+        // The way to the network probe is a developer's tool of a DEBUG build, named in Russian; a
+        // release build has nothing there (DebugProbeLink), so it is not a text a person reads.
+        let russian = screenLabels().filter { $0.range(of: "[А-Яа-яЁё]", options: .regularExpression) != nil && $0 != "Замер сети" }
         XCTAssertTrue(russian.isEmpty, "\(screen): every text is English — \(russian.prefix(5).joined(separator: " | "))", file: file, line: line)
     }
 

@@ -37,7 +37,12 @@ class LumenUITestCase: XCTestCase {
         for (name, value) in environment { app.launchEnvironment[name] = value }
         app.launch()
         self.app = app
-        XCTAssertTrue(app.navigationBars[language == nil ? "Sessions" : "Сессии"].waitForExistence(timeout: 30), "the sessions list comes up")
+        // In the device's own language the list is "Sessions" — or still "Сессии" when a planted fault
+        // leaves the texts untranslated: that is for the test's own check to catch, not for this one.
+        let bar = language == nil
+            ? app.navigationBars.matching(NSPredicate(format: "identifier IN %@", ["Sessions", "Сессии"])).firstMatch
+            : app.navigationBars["Сессии"]
+        XCTAssertTrue(bar.waitForExistence(timeout: 30), "the sessions list comes up")
         return app
     }
 
