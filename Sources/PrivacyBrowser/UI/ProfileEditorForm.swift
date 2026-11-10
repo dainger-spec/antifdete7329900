@@ -128,6 +128,10 @@ struct ProfileEditorForm: View {
                         guard topic != .profile else { return }
                         DispatchQueue.main.async { scroller.scrollTo(topic, anchor: .top) }
                     }
+                    // Moved to a part from outside the index (Save refused for the system camera).
+                    .onChange(of: topic) {
+                        withAnimation(Theme.appearAnimation) { scroller.scrollTo(topic, anchor: .top) }
+                    }
                 }
             }
             footer
@@ -828,8 +832,7 @@ struct ProfileEditorForm: View {
         }
     }
 
-    /// Crop and the filters — both deliveries draw these (the system camera in its extension); only
-    /// the video playback is the JavaScript shim's for now.
+    /// Crop and the filters — both deliveries draw these (the system camera in its extension).
     @ViewBuilder
     private var cameraCropAndFilters: some View {
         EditorDivider()
@@ -840,19 +843,24 @@ struct ProfileEditorForm: View {
         cameraFilters
     }
 
-    /// Delivery through the system virtual camera: its install state and what to do about it.
+    /// Delivery through the system virtual camera: its install state and what to do about it. Until
+    /// it is installed and on, a profile set to it gets no camera, and Save refuses it
+    /// (`ProfileEditorView.save`), so every state but "on" says what to do.
     @ViewBuilder
     private var systemCameraSection: some View {
         EditorDivider()
         EditorGroupTitle(L("editor.camera.system"))
         EditorNote(L("editor.camera.system.note"))
+        EditorNote(L("editor.camera.system.formats"))
         switch systemCamera.state {
         case .notInBuild:
             EditorNote(L("editor.camera.system.notInBuild"), tone: .warning)
         case .active:
             EditorNote(L("editor.camera.system.active"))
+            if !systemCamera.devicePresent {
+                EditorNote(L("editor.camera.system.notRunning"), tone: .warning)
+            }
         case .restartNeeded:
-            EditorNote(L("editor.camera.system.notActive"), tone: .warning)
             EditorNote(L("editor.camera.system.restart"), tone: .warning)
             systemCameraInstallRow
         case .failed(let reason):

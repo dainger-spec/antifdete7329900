@@ -395,10 +395,11 @@ final class ProfileManager: ObservableObject {
         if runsInProfileProcess {
             systemCameraActive = ProfileProcess.systemCameraActiveForThisProcess
         } else {
-            if configuration.cameraSubstitution.usesSystemCamera {
+            let usesSystemCamera = configuration.cameraSubstitution.usesSystemCamera
+            if usesSystemCamera {
                 SystemCamera.shared.writeRenderConfig(for: configuration.cameraSubstitution)
             }
-            systemCameraActive = SystemCamera.shared.isActive
+            systemCameraActive = SystemCamera.shared.activeForLaunch(usesSystemCamera: usesSystemCamera)
         }
         let session: BrowserSession
         do {
@@ -497,13 +498,14 @@ final class ProfileManager: ObservableObject {
         // parent — which can reach it — writes the config and reads whether the extension is on, and
         // passes the answer to the child (docs/CAMERA.md). Off below the plan (cameraAllowed) or when
         // the profile does not use the system camera.
-        if cameraAllowed(), stored.cameraSubstitution.usesSystemCamera {
+        let usesSystemCamera = cameraAllowed() && stored.cameraSubstitution.usesSystemCamera
+        if usesSystemCamera {
             SystemCamera.shared.writeRenderConfig(for: stored.cameraSubstitution)
         }
-        // Whether the device exists on this Mac at all — never whether this profile uses it: a profile
-        // that does not must still hide it, or a page sees a stray "Lumen Camera" among its devices
-        // (`PrivacyScripts.systemCameraScript`).
-        let systemCameraActive = SystemCamera.shared.isActive
+        // A profile that does not use the device must still hide it whenever it may be there, or a
+        // page sees a stray "Lumen Camera" among its devices; one that uses it is told only whether
+        // the device is listed now — else it gets no camera at once (`SystemCamera.activeForLaunch`).
+        let systemCameraActive = SystemCamera.shared.activeForLaunch(usesSystemCamera: usesSystemCamera)
         let child = try ProfileProcess.start(
             profileID: id,
             executable: executable,

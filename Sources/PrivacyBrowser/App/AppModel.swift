@@ -404,6 +404,9 @@ final class AppModel: ObservableObject {
         // Camera substitution is the plan's (docs/CAMERA.md): a profile's camera is neutralised at
         // launch when the plan does not open it (pro and team), in this process and in the child.
         manager.cameraAllowed = { [weak self] in self?.license.allowsCamera ?? false }
+        // The system camera asks macOS where it stands — and replaces the copy an earlier version of
+        // the app installed — now, before a profile starts, not at the first one's launch.
+        _ = SystemCamera.shared
         license.vaultOpened(vault)
         ExpiryNotifications.update(at: .stateChanged, license: license)
         manager.onError = { [weak self] message in self?.showError(message) }

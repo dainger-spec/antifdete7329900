@@ -722,8 +722,13 @@ test('WebRTC unrestricted', () => {
 // per kind (Media Capture and Streams, "device information exposure"), after it every device with
 // its id and label. getUserMedia opens the device a deviceId pins, else the Mac's default camera;
 // with nothing asked it is a TypeError, as in the engine. Every call and stop is recorded.
-const cameraPrelude = ({ granted = false, defaultCamera = 'real-cam', withVirtual = true, deny = false } = {}) => `(() => {
+const cameraPrelude = ({ granted = false, micGranted = false, defaultCamera = 'real-cam', withVirtual = true, deny = false,
+                        virtualFails = false } = {}) => `(() => {
   const reject = (o, C) => { if (!(o instanceof C)) throw new TypeError('illegal invocation'); };
+  // The engine's DOMException (a bare vm realm has none).
+  if (typeof globalThis.DOMException !== 'function') {
+    globalThis.DOMException = class DOMException extends Error { constructor(message, name) { super(message); this.name = name || 'Error'; } };
+  }
   const info = new WeakMap();
   class MediaDeviceInfo { constructor() { throw new TypeError('Illegal constructor'); } }
   for (const k of ['deviceId', 'kind', 'groupId', 'label']) {
@@ -733,7 +738,8 @@ const cameraPrelude = ({ granted = false, defaultCamera = 'real-cam', withVirtua
   class InputDeviceInfo extends MediaDeviceInfo {}
   globalThis.MediaDeviceInfo = MediaDeviceInfo; globalThis.InputDeviceInfo = InputDeviceInfo;
   const device = (id, label, kind) => { const d = Object.create(InputDeviceInfo.prototype); info.set(d, { deviceId: id, kind, groupId: id ? 'g-' + id : '', label }); return d; };
-  const camera = { granted: ${granted}, calls: [], opened: [], stopped: [] };
+  // granted: the camera permission (and with it the microphone's); micGranted: the microphone's alone.
+  const camera = { granted: ${granted}, micGranted: ${micGranted}, calls: [], opened: [], stopped: [] };
   globalThis.__camera = camera;
   const devices = [{ id: 'real-cam', label: 'Камера (MacBook Air)', kind: 'videoinput' }];
   if (${withVirtual}) devices.push({ id: 'lumen-cam', label: 'Lumen Camera', kind: 'videoinput' });
@@ -749,26 +755,35 @@ const cameraPrelude = ({ granted = false, defaultCamera = 'real-cam', withVirtua
     enumerable: true, configurable: true });
   globalThis.MediaStreamTrack = MediaStreamTrack;
   class MediaStream {
-    constructor(tracks) { this.tracks = tracks; }
+    constructor(tracks) { this.tracks = tracks || []; }
     getTracks() { return this.tracks.slice(); }
     getVideoTracks() { return this.tracks.filter((t) => t.kind === 'video'); }
+    getAudioTracks() { return this.tracks.filter((t) => t.kind === 'audio'); }
   }
+  globalThis.MediaStream = MediaStream;
   class MediaDevices {
     enumerateDevices() {
       reject(this, MediaDevices);
-      if (!camera.granted) return Promise.resolve([device('', '', 'videoinput'), device('', '', 'audioinput')]);
-      return Promise.resolve(devices.map((d) => device(d.id, d.label, d.kind)));
+      // Per kind: a kind the page holds no permission for is one unnamed placeholder.
+      const out = [];
+      for (const kind of ['videoinput', 'audioinput']) {
+        const held = kind === 'videoinput' ? camera.granted : (camera.granted || camera.micGranted);
+        if (held) { for (const d of devices) if (d.kind === kind) out.push(device(d.id, d.label, kind)); }
+        else out.push(device('', '', kind));
+      }
+      return Promise.resolve(out);
     }
     getUserMedia(constraints) {
       reject(this, MediaDevices);
       camera.calls.push(constraints === undefined ? null : JSON.parse(JSON.stringify(constraints)));
       if (!constraints || (!constraints.video && !constraints.audio)) return Promise.reject(new TypeError('At least one of audio and video must be requested'));
       if (${deny}) { const e = new Error('The request is not allowed'); e.name = 'NotAllowedError'; return Promise.reject(e); }
-      camera.granted = true;
+      if (constraints.video) camera.granted = true; else camera.micGranted = true;
       const tracks = [];
       if (constraints.video) {
         const pin = constraints.video.deviceId;
         const id = typeof pin === 'string' ? pin : (pin && pin.exact) || '${defaultCamera}';
+        if (${virtualFails} && id === 'lumen-cam') { const e = new Error('Could not start video source'); e.name = 'NotReadableError'; return Promise.reject(e); }
         camera.opened.push(id);
         tracks.push(new MediaStreamTrack('video', id));
       }
@@ -818,10 +833,40 @@ test('system camera, first visit: when the Mac\'s default already is the virtual
   assert.deepEqual(state.stopped, []);
 });
 
-test('system camera, first visit: no virtual device on this Mac → the page keeps what it asked for, with its constraints', async () => {
+test('system camera, first visit: no virtual device after the grant → NotFoundError, the real stream stopped unseen', async () => {
   const w = makeWindow(systemCamera(true), null, cameraPrelude({ withVirtual: false }));
-  assert.deepEqual(await openedBy(w, { video: true }), [['video', 'real-cam', 'live']]);
-  assert.deepEqual(cameraState(w).calls, [{ video: true }]);
+  await assert.rejects(run(w, `navigator.mediaDevices.getUserMedia({ video: true })`), (e) => e.name === 'NotFoundError');
+  const state = cameraState(w);
+  assert.deepEqual(state.calls, [{ video: true }]);   // the page's own constraints, to ask
+  assert.deepEqual(state.stopped, ['real-cam']);      // and what it opened is closed again
+});
+
+test('system camera: a page that holds only the microphone permission still gets the virtual camera, asked for as on a first visit', async () => {
+  const w = makeWindow(systemCamera(true), null, cameraPrelude({ micGranted: true }));
+  // Its microphones are named, its cameras not yet: that is no sign the virtual camera is missing.
+  assert.deepEqual(await listed(w), [['videoinput', '', ''], ['audioinput', 'mic', 'MacBook Air Microphone']]);
+  assert.deepEqual(await openedBy(w, { video: true }), [['video', 'lumen-cam', 'live']]);
+  const state = cameraState(w);
+  assert.deepEqual(state.calls, [{ video: true }, { video: { deviceId: { exact: 'lumen-cam' } } }]);
+  assert.deepEqual(state.stopped, ['real-cam']);
+});
+
+test('system camera, with the permission but no virtual device: NotFoundError, and the real camera is not even opened', async () => {
+  const w = makeWindow(systemCamera(true), null, cameraPrelude({ granted: true, withVirtual: false }));
+  await assert.rejects(run(w, `navigator.mediaDevices.getUserMedia({ video: true, audio: true })`), (e) => e.name === 'NotFoundError');
+  const state = cameraState(w);
+  assert.deepEqual(state.calls, []);
+  assert.deepEqual(state.opened, []);
+  // And the list agrees: no camera at all, as the call said.
+  assert.deepEqual(await listed(w), [['audioinput', 'mic', 'MacBook Air Microphone']]);
+});
+
+test('system camera, first visit: a virtual camera that will not open → its error, never the real camera', async () => {
+  const w = makeWindow(systemCamera(true), null, cameraPrelude({ virtualFails: true }));
+  await assert.rejects(run(w, `navigator.mediaDevices.getUserMedia({ video: true })`), (e) => e.name === 'NotReadableError');
+  const state = cameraState(w);
+  assert.deepEqual(state.opened, ['real-cam']);
+  assert.deepEqual(state.stopped, ['real-cam']);
 });
 
 test('system camera: a denial, a call without video and a pinned device are the engine\'s own', async () => {
@@ -845,6 +890,20 @@ test('system camera: the track a page holds names the virtual camera with the pr
   // The accessor stays the engine's shape.
   assert.equal(run(w, `Object.getOwnPropertyNames(Object.getOwnPropertyDescriptor(MediaStreamTrack.prototype, 'label').get).join()`), 'length,name');
   assert.match(run(w, `Function.prototype.toString.call(Object.getOwnPropertyDescriptor(MediaStreamTrack.prototype, 'label').get)`), /\[native code\]/);
+});
+
+// "No camera" — the drawing shim's block mode, which a substitution through a system camera that is
+// not on also falls back to (PrivacyScripts.cameraScript): as a Mac with every camera unplugged.
+const noCamera = { ...base, camera: { mode: 'block', source: 'color', width: 1280, height: 720, frameRate: 30, fit: 'cover', mirror: false,
+                                      label: '', color: '#1E2130', audio: 'real', screenShare: false, secret: 'lumen' } };
+
+test('"No camera": none listed before the permission or after, a camera request is NotFoundError, the microphone is left alone', async () => {
+  assert.deepEqual(await listed(makeWindow(noCamera, null, cameraPrelude())), [['audioinput', '', '']]);
+  const w = makeWindow(noCamera, null, cameraPrelude({ granted: true }));
+  assert.deepEqual(await listed(w), [['audioinput', 'mic', 'MacBook Air Microphone']]);
+  await assert.rejects(run(w, `navigator.mediaDevices.getUserMedia({ video: true, audio: true })`), (e) => e.name === 'NotFoundError');
+  assert.deepEqual(cameraState(w).opened, []);   // no camera opened for it
+  assert.deepEqual(await openedBy(w, { audio: true }), [['audio', 'mic', 'live']]);
 });
 
 test('system camera installed, not this profile\'s: the virtual device is hidden, the Mac\'s camera stays as it is', async () => {

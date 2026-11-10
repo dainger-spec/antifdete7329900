@@ -312,8 +312,11 @@
 "editor.camera.system.note" = "The system virtual camera feeds the picture through macOS, so a page cannot tell it from the built-in camera. It is one device for the whole Mac, and other profiles do not see it. The extension draws your source — a colour, the test pattern, an image or a video — with crop, fit, mirror, the adjustments and the video playback.";
 "editor.camera.system.notInBuild" = "This build does not include the system camera; it comes in a signed build.";
 "editor.camera.system.active" = "The system camera is installed and on.";
-"editor.camera.system.restart" = "Installed; macOS switches it on after a restart — restart the Mac, then open Lumen again.";
-"editor.camera.system.notActive" = "Not installed yet — until the extension is installed and on, a page opens your real camera (not the substitution). Install it with the steps below, or use the JavaScript shim, which needs no install.";
+"editor.camera.system.restart" = "Installed; macOS switches it on after a restart — restart the Mac, then open Lumen again. Until then a profile set to it gets no camera.";
+"editor.camera.system.notActive" = "Not installed yet. Until the extension is installed and on, a profile set to it gets no camera at all — neither the substitution nor your real one — and Save refuses it. Install it with the steps below, or choose the JavaScript shim, which needs no install.";
+"editor.camera.system.notRunning" = "Installed and on, but macOS has not started the camera yet — after an update this can wait for a restart. Until it appears, a profile set to it gets no camera; restart the Mac if it does not appear in a minute.";
+"editor.camera.system.formats" = "Like a built-in camera, it offers 1920×1080, 1280×720 and 640×480 at up to 30 frames a second, and the page picks one — the width and height above are for the JavaScript shim.";
+"editor.camera.system.error.notActive" = "The system camera is not installed and on: install it (Camera, the steps are there) or choose the JavaScript shim.";
 "editor.camera.system.steps" = "1. Press “Install…”.  2. In System Settings → General → Login Items & Extensions → Lumen, turn on the “Media extension” (that is the camera).  3. Come back here — it should say “installed and on”.  4. Stop the profile and start it again. A leftover older copy can block the install — then restart the Mac and try once more.";
 "editor.camera.system.install" = "Install…";
 "editor.camera.system.settings" = "Open System Settings";
@@ -1828,6 +1831,7 @@
 "help.camera.know.permission" = "A page still asks you for the camera the first time, as before.";
 "help.camera.know.size" = "An image or video is kept with the profile and synced, so keep it small.";
 "help.camera.know.system" = "Delivery: the JavaScript shim draws the frames, or the system camera (if installed) feeds them through macOS, so a page cannot tell it from the built-in camera.";
+"help.camera.know.systemInstall" = "The system camera is installed once: Camera → System camera → Install…, then switch on “Media extension” for Lumen in System Settings → General → Login Items & Extensions. Until it is on, a profile set to it gets no camera and cannot be saved with it; after an app update Lumen replaces it by itself.";
 
 /* The licensing client: contract.* — the server's docs/CONTRACT.md §17, word for word; license.* — the app's own. */
 "contract.error.unreachable" = "The Lumen server isn’t responding. Check your connection and try again.";

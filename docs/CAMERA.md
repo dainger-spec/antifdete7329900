@@ -96,12 +96,22 @@ Two things that shape it:
 BrowserCore dependency so it stays small:
 
 - `CameraProviderSource` publishes one virtual device; `CameraDeviceSource` owns its output stream
-  and generates frames; `CameraStreamSource` hands start/stop to the device.
+  and generates frames; `CameraStreamSource` hands start/stop, and the size a client picks, to the
+  device.
+- The device offers what a built-in MacBook camera (FaceTime HD, 1080p) offers: **1280×720** (the
+  default), **1920×1080** and **640×480**, at up to **30** frames a second. A page's constraints
+  pick among them as on the real camera (WebKit sets the active format; `setStreamProperties`), the
+  frames are drawn at the picked size, and the track's capabilities read the same range. Until
+  0.1.8 it offered one fixed 1280×720 at up to 60 — a range no MacBook camera has.
+- Its identity (`deviceID`) is fixed across restarts and updates, as a real device's is: a site that
+  remembers the camera it was given finds it again (pages see it only hashed per site). Until 0.1.8
+  it was new at every start of the extension.
 - `CameraFrameRenderer` draws the frame (a solid colour or a moving test pattern, with grain so it
-  is never frozen) into a BGRA pixel buffer, at the configured size and rate.
+  is never frozen) into a BGRA pixel buffer, at the picked size and the configured rate.
 - `CameraExtensionConfig` reads a small JSON the app writes to the shared app group
-  (`<group>/camera.json`: label, source, colour, size, frame rate), so the device can read as
-  "FaceTime HD Camera" and show the chosen feed. Absent → a default test pattern.
+  (`<group>/camera.json`: source, colour, frame rate, fit, mirror, crop, filters, playback) and shows
+  the chosen feed. Absent → a default test pattern. The device's name stays the fixed sentinel; the
+  believable name is applied in the page (below).
 
 Packaged like the network guard: `Resources/CameraExtension/Info.plist` (a `CMIOExtension` dict
 with a Mach service under the app group) and `CameraExtension.entitlements` (sandboxed, the app
@@ -117,6 +127,21 @@ and the app's signing), mirroring the `NE=1`/`NE=check` network-guard flow.
   active profile's render settings to `<group>/camera.json`. The extension publishes itself under a
   fixed sentinel name (`CameraSubstitution.systemDeviceName`, "Lumen Camera") and re-reads the
   config each time a client starts the stream.
+- **It learns where the extension stands from macOS** (`refresh`: a properties request, no prompts)
+  when the vault opens, and again whenever the app comes back to the front — from System Settings,
+  where the person switches it on or off. Its answers are told apart by identity: a properties
+  request also finishes as `.completed`, which must not read as an install, and a removal's
+  completion is not an install either. (Until 0.1.8 the editor learned the state only from an
+  install's answer, so after every relaunch an installed camera read "not installed".)
+- **It replaces the copy an earlier version installed.** macOS replaces a system extension only on
+  an activation request, so after an app update the old camera would draw on indefinitely. As the
+  network guard does, an enabled copy whose `bundleVersion` is not the bundled one (a new one per
+  build) is replaced at once, without a new approval — once a run; one that fails keeps the copy
+  that works, and one that completes only at a restart keeps the camera on while the old copy runs.
+- **It checks the device itself** (`isDevicePresent`): macOS's device list (no permission, no
+  capture, as `HostCamera`), live through `AVCaptureDevice` connect/disconnect notifications. The
+  editor says so when the extension is on but the device is not there yet (a replaced copy waiting
+  for a restart).
 - **Only the app's own process can reach the app group.** A profile's own process (`LumenProfile`,
   the one that hosts Safari's window) is signed without the app-group entitlement on purpose
   (`release.sh` refuses one that has it), so there `containerURL(forSecurityApplicationGroup…)` is
@@ -125,9 +150,12 @@ and the app's signing), mirroring the `NE=1`/`NE=check` network-guard flow.
   11 November). So `ProfileManager.startInOwnProcess`, in the app's own process, writes the config
   and reads whether the extension is on, and passes that to the child as `PB_SYSTEM_CAMERA_ACTIVE`
   (`ProfileProcess.systemCameraActiveForThisProcess`), as the plan's camera right is carried
-  (`PB_CAMERA_ALLOWED`). "Active" means the device exists on this Mac at all — never whether this
-  profile uses it: every profile must hide it otherwise. A profile run in the app's own process
-  (the sandboxed build) reads and writes it directly.
+  (`PB_CAMERA_ALLOWED`). What "active" means depends on the profile (`SystemCamera.activeForLaunch`):
+  for one that does not use the device, that it may be there at all (listed now, or this build
+  carries the extension, which may be installed while the profile runs) — every such profile must
+  hide it; for the one that uses it, that the device is listed now — else it gets no camera at once
+  (below). A profile run in the app's own process (the
+  sandboxed build) decides the same there.
 - A per-profile **delivery** choice (`CameraSubstitution.delivery`): the JavaScript shim, or the
   system camera. In the editor's Camera part, with the extension's install state and an Install
   button.
@@ -154,10 +182,35 @@ grant. The gate handles both sides of it:
   blink once — at a site's first grant only. With the permission held, calls go straight to the
   sentinel. (Until 0.1.8 this first call reached the engine as `getUserMedia()` with nothing in it,
   a TypeError — `arguments` read inside the async helper — and the placeholder was dropped.)
+- Only named **cameras** count as "the permission is held": a page that holds just the microphone
+  may see its microphones named while its cameras are still the placeholder, and is handled as a
+  first visit.
+
+**It fails closed — never the real camera.** A profile set to the system camera gets no camera at
+all when the virtual one is not there, the same as "No camera":
+
+- not installed, not on, or not listed at launch → `PrivacyScripts.cameraScript` gives the drawing
+  shim's block mode (`NotFoundError`, no `videoinput` listed), whatever the delivery;
+- the permission held and the devices named, none the sentinel → `NotFoundError`, and the real
+  camera is not even opened;
+- a first visit whose grant shows no sentinel → what the engine opened is stopped unseen,
+  `NotFoundError`; a sentinel that will not open → its error, the real stream stopped.
+
+Until 0.1.8 each of these handed the page the Mac's real camera — a substitution that silently did
+not happen. "No camera" itself now blocks whatever the delivery was last set to (the editor keeps
+it while hiding the picker); until 0.1.8 it did nothing with the system-camera delivery.
+
+**The editor refuses to save a profile set to the system camera until it is installed and on**
+(`ProfileEditorView.save`): the footer says what to do and the form goes to the Camera part, where
+each state explains itself — not installed (the steps), waiting for approval, a restart needed,
+on but the device not there yet. (The owner saved one before the extension was on, the page got
+the real camera, and it read as broken — 11 November.) Below the plan nothing is refused: the
+camera is off at launch whatever it holds.
 
 `scripts/test-shims.mjs` covers all of it against a model of WebKit's media devices: the permission
-and before it, the re-routing and that the real stream is stopped unseen, a denial and pinned
-devices staying the engine's, the track's label, and a profile that does not use the device.
+(per kind) and before it, the re-routing and that the real stream is stopped unseen, every
+fail-closed case above, a denial and pinned devices staying the engine's, the track's label, and a
+profile that does not use the device.
 
 ### Stage 3 (here): the image in the extension
 
@@ -217,6 +270,11 @@ The same shape as scenario automation (`allowsAutomation`, docs/AUTOMATION.md).
 - A worker never calls `getUserMedia`, so there is nothing to do in one (`substitutesInWorkers` is
   unaffected).
 - The embedded image/video is capped and syncs with the profile.
+- The system camera: a site's first grant may blink the real camera's light once (above); it is one
+  device for the whole Mac (the last profile to launch with it sets what it shows); the believable
+  name is applied in the page, so other apps on the Mac see "Lumen Camera"; the width and height of
+  the editor are the JavaScript shim's — the system camera offers its three sizes and the page
+  picks.
 
 ## The check — `--camera-safari-check`
 

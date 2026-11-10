@@ -155,7 +155,7 @@ enum PrivacyScripts {
                                  safariObject: namedSafariGivesOne,
                                  storageQuota: safariStorageQuota,
                                  phone: phoneScript(for: configuration),
-                                 camera: cameraScript(for: configuration),
+                                 camera: cameraScript(for: configuration, systemCameraActive: systemCameraActive),
                                  systemCamera: systemCameraScript(for: configuration, active: systemCameraActive))
     }
 
@@ -165,20 +165,26 @@ enum PrivacyScripts {
     static func systemCameraScript(for configuration: ProfileConfiguration, active: Bool) -> ShimConfiguration.SystemCamera? {
         guard active else { return nil }
         let camera = configuration.cameraSubstitution
-        // A profile that draws its own camera (jsShim) already hides every real videoinput — the
-        // sentinel among them (`patchCamera`) — so it needs no system-camera handling, and the two
-        // shims never both patch `enumerateDevices`.
-        if camera.isActive && camera.delivery == .jsShim { return nil }
+        // A profile whose drawing shim is on — substituting through it, or with "No camera" whatever
+        // its delivery (`cameraScript`) — already hides every real videoinput, the sentinel among
+        // them (`patchCamera`): it needs no system-camera handling, and the two shims never both
+        // patch `enumerateDevices`.
+        if camera.isActive && (camera.mode == .block || camera.delivery == .jsShim) { return nil }
         let label = camera.deviceLabel.isEmpty ? "FaceTime HD Camera" : camera.deviceLabel
         return .init(sentinel: CameraSubstitution.systemDeviceName, usedHere: camera.usesSystemCamera, label: label)
     }
 
-    /// What the drawing camera shim is given; nil for a profile that substitutes nothing, or that
-    /// delivers through the system camera rather than the JavaScript shim.
-    static func cameraScript(for configuration: ProfileConfiguration) -> ShimConfiguration.Camera? {
+    /// What the drawing camera shim is given; nil for a profile that substitutes nothing, or whose
+    /// substitution the system camera delivers (`systemCameraScript`). "No camera" blocks whatever
+    /// the delivery was last set to (the editor keeps it while hiding the picker). A substitution
+    /// through the system camera while it is not on falls back to "No camera" too: the page then
+    /// gets no camera, never the Mac's real one.
+    static func cameraScript(for configuration: ProfileConfiguration, systemCameraActive: Bool = false) -> ShimConfiguration.Camera? {
         let camera = configuration.cameraSubstitution
-        guard camera.isActive, camera.delivery == .jsShim else { return nil }
-        return .init(mode: camera.mode == .block ? "block" : "substitute",
+        guard camera.isActive else { return nil }
+        let blocks = camera.mode == .block || (camera.delivery == .systemCamera && !systemCameraActive)
+        if !blocks && camera.delivery == .systemCamera { return nil }
+        return .init(mode: blocks ? "block" : "substitute",
                      source: camera.source.rawValue,
                      width: camera.width, height: camera.height, frameRate: camera.frameRate,
                      facingMode: camera.facing == .unset ? nil : camera.facing.rawValue,
@@ -1446,6 +1452,8 @@ function patchSystemCamera(w, sc) {
   const Info = w.InputDeviceInfo || w.MediaDeviceInfo;
   const fakeDevices = new WeakSet();
   const deviceData = new WeakMap();
+  // The engine's own error for a camera that is not there (as `patchCamera`'s).
+  function notFound() { try { return new w.DOMException('The requested device was not found.', 'NotFoundError'); } catch (e) { return new w.Error('NotFoundError'); } }
 
   // A MediaDeviceInfo of ours that copies the real device's ids but reads the believable label, so
   // getUserMedia with that deviceId still reaches the real (virtual) device.
@@ -1524,12 +1532,14 @@ function patchSystemCamera(w, sc) {
   }
 
   // The profile that uses the system camera: route a plain getUserMedia({video}) to the sentinel
-  // device, so the page gets the virtual one and not the Mac's real camera. The sentinel is found by
-  // its label, which the engine gives only once the page holds the camera permission:
-  //  - with it, the call goes straight to the sentinel;
+  // device, so the page gets the virtual one and never the Mac's real camera. The sentinel is found
+  // by its label, which the engine gives only once the page holds the camera permission:
+  //  - with it, the call goes straight to the sentinel; if the devices are named and none is the
+  //    sentinel, the virtual camera is gone: NotFoundError, and the real one is not even opened;
   //  - before it, the page's own call is let through so the engine can ask; if what it opened is
   //    not the sentinel, that stream is stopped before the page ever sees it and the sentinel is
-  //    opened instead (the real camera's light may blink once, at a site's first grant).
+  //    opened instead (the real camera's light may blink once, at a site's first grant). No sentinel
+  //    after the grant, or one that will not open: the error, never the real camera.
   if (sc.usedHere && typeof MDP.getUserMedia === 'function' && typeof nativeEnum === 'function') {
     const nativeGUM = MDP.getUserMedia;
     define(MDP, 'getUserMedia', method('getUserMedia', 1, function (constraints) {
@@ -1552,8 +1562,17 @@ function patchSystemCamera(w, sc) {
         merged.video = vc;
         return merged;
       };
-      const sentinelId = async function () {
-        try { const s = findSentinel(await ReflectApply(nativeEnum, self, [])); return s ? String(s.deviceId) : null; } catch (e) { return null; }
+      const devices = async function () {
+        try { return await ReflectApply(nativeEnum, self, []); } catch (e) { return []; }
+      };
+      const idOf = function (list) { const s = findSentinel(list); return s ? String(s.deviceId) : null; };
+      // Named cameras are what the page sees once it holds the camera permission; before it, none
+      // is. Cameras only: a page that holds just the microphone may see its microphones named.
+      const named = function (list) {
+        for (let i = 0; i < list.length; i++) {
+          try { if (list[i].kind === 'videoinput' && String(list[i].label)) return true; } catch (e) {}
+        }
+        return false;
       };
       const videoDeviceOf = function (stream) {
         try { const t = stream.getVideoTracks()[0]; const s = t && t.getSettings(); return s ? String(s.deviceId) : null; } catch (e) { return null; }
@@ -1564,15 +1583,18 @@ function patchSystemCamera(w, sc) {
       return new w.Promise(function (resolve, reject) {
         (async function () {
           try {
-            let id = await sentinelId();
-            if (id) { resolve(await ReflectApply(nativeGUM, self, [onSentinel(id)])); return; }
+            const before = await devices();
+            const known = idOf(before);
+            if (known) { resolve(await ReflectApply(nativeGUM, self, [onSentinel(known)])); return; }
+            if (named(before)) { reject(notFound()); return; }
             // No permission yet: the engine asks now, with the page's constraints as it passed them.
             const first = await ReflectApply(nativeGUM, self, args);
-            id = await sentinelId();
-            if (!id || videoDeviceOf(first) === id) { resolve(first); return; }
-            let second = null;
-            try { second = await ReflectApply(nativeGUM, self, [onSentinel(id)]); } catch (e) {}
-            if (!second) { resolve(first); return; }
+            const id = idOf(await devices());
+            if (id && videoDeviceOf(first) === id) { resolve(first); return; }
+            if (!id) { stopAll(first); reject(notFound()); return; }
+            let second;
+            try { second = await ReflectApply(nativeGUM, self, [onSentinel(id)]); }
+            catch (e) { stopAll(first); reject(e); return; }
             stopAll(first);
             resolve(second);
           } catch (e) { reject(e); }

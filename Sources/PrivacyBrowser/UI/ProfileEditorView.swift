@@ -694,6 +694,15 @@ struct ProfileEditorView: View {
     private func save() {
         guard !checking, !savingCookies, !settingsUnreadable else { return }
         error = nil
+        // A profile set to the system camera is not saved until the camera is installed and on: it
+        // would get no camera, which reads as broken (the owner, 11 November). The form goes to the
+        // Camera part, where the steps are. Below the plan the camera is off at launch whatever it
+        // holds, so nothing is refused there.
+        if model.allowsCamera, draft.camera.usesSystemCamera, SystemCamera.shared.state != .active {
+            topic = .camera
+            error = L("editor.camera.system.error.notActive")
+            return
+        }
         // A line without a scheme whose type no check has found: Save checks it first — both
         // handshakes are tried, and the one that answers is the type. A proxy that answers neither
         // way is not saved; the field says why.

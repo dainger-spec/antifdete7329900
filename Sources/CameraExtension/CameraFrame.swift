@@ -9,7 +9,7 @@ import ImageIO
 /// Absent or unreadable → a default test pattern, so the device always has a live feed. The app
 /// group's identifier is in the extension's Info.plist (`PBCameraAppGroup`).
 struct CameraExtensionConfig {
-    /// "color", "bars" or "image" (video and filters are drawn by the in-page shim for now).
+    /// "color", "bars", "image" or "video".
     var source: String
     var colorHex: String
     var width: Int
