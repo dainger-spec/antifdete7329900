@@ -313,11 +313,12 @@ class LumenUITestCase: XCTestCase {
         }
         wait(field, "the new proxy form opens (for \(name))")
         typeInto(field, name)
-        app.segmentedControls["proxyKind"].buttons[kind].tap()
-        typeInto(app.textFields["proxyHost"], host)
-        typeInto(app.textFields["proxyPort"], port)
-        typeInto(app.textFields["proxyUser"], user)
-        typeInto(app.secureTextFields["proxyPassword"], password)
+        // The proxy as one line, its type in the scheme — as a person pastes what a provider gave.
+        let scheme = kind == "HTTP" ? "http" : "socks5"
+        let credentials = user.isEmpty ? "" : "\(user):\(password)@"
+        let line = app.descendants(matching: .any).matching(identifier: "proxyLine").firstMatch
+        typeInto(wait(line, "the form takes the proxy as one line"), "\(scheme)://\(credentials)\(host):\(port)")
+        XCTAssertFalse(app.staticTexts["proxyLineProblem"].exists, "the line of \(name) is read as a proxy")
         // A touch while the keyboard still moves is lost (CI run 29: the form of the second proxy stayed
         // open): if the form is still there after 5 s, its button is touched again.
         let save = app.buttons["saveProxy"]

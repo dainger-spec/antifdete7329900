@@ -25,7 +25,6 @@ public enum Fault: String, CaseIterable, Sendable {
     case proxyChangeKeepsConnections // a proxy change leaves the relay's open connections on their old route
     case proxyChangeDropsTabs    // a proxy change closes the session's tabs and opens one empty tab
     case proxyPasswordNotSaved   // the password is not kept
-    case passwordAutofill        // the proxy form closes with its login and password still in it: iOS offers to save them
     case checkWithoutDeadline    // the proxy check has no deadline of its own: one that gets no answer spins for ever
     // A dead proxy: the most dangerous breakage is a session quietly going direct
     case deadHTTPDropped         // an HTTP proxy whose check failed is left off: its session goes direct

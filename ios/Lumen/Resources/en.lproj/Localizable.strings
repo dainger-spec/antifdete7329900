@@ -32,9 +32,6 @@
 "UDP: не проверен" = "UDP: not checked";
 "Название (необязательно)" = "Name (optional)";
 "Тип" = "Type";
-"Адрес" = "Address";
-"Порт" = "Port";
-"Логин" = "Username";
 "Удалить прокси" = "Delete Proxy";
 "Сохранить" = "Save";
 "Аккаунт" = "Account";
@@ -188,3 +185,8 @@
 "Это не адрес прокси: нужен адрес и порт." = "This is not a proxy’s address: it needs a host and a port.";
 "Порт — число от 1 до 65535." = "The port is a number from 1 to 65535.";
 "Укажите порт: адрес:порт." = "Add the port: host:port.";
+
+/* The proxy's form: one line. */
+"Прокси одной строкой" = "The proxy as one line";
+"Подойдёт любой привычный вид: со схемой или без, логин и пароль до адреса или после него." = "Any usual form works: with a scheme or without, the login and password before the address or after it.";
+"Пароль не показан. Строка без пароля оставит прежний." = "The password is not shown. A line without one keeps the password as it is.";

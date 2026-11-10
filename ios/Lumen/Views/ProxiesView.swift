@@ -1,7 +1,7 @@
 import LumenCore
 import SwiftUI
 
-/// The proxy list, as on the Mac: address, port, user, password, SOCKS5 or HTTP; each checked when
+/// The proxy list, as on the Mac: a proxy entered as one line, SOCKS5 or HTTP; each checked when
 /// added: alive or not, the address it exits from, its country, and whether it relays UDP.
 struct ProxiesView: View {
     @EnvironmentObject var model: AppModel
@@ -95,50 +95,98 @@ struct ProxyRow: View {
     }
 }
 
+/// A proxy, entered as one line (the owner's design, 10 November 2026) — in any form providers hand
+/// them out, read by the Mac's rules (`ProxyLine`). The type is the line's scheme; a line without one
+/// leaves it to the person. The name is the proxy's own field, or what follows " #" in the line.
+/// A saved proxy's line is shown without its password, which is never shown again: a line that
+/// holds no password keeps the one the proxy has.
+///
+/// The line is a plain field, not a login and a password: iOS has nothing here to take for a
+/// sign-in and offer to keep among the person's own passwords (CI runs 12 and 13 did, with the two
+/// separate fields). The password is kept in this app's own Keychain item only (ProxyPasswords).
 struct ProxyEditor: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
-
-    /// Closes the form with its login and password emptied first. A proxy's credentials are not the
-    /// person's own login: iOS takes a form that leaves the screen with a login and a password in it
-    /// for a sign-in and offers to keep them in the person's Passwords (iCloud Keychain) — CI runs 12
-    /// and 13: "Save Password?" after every proxy, also with the password marked as a one-time code.
-    /// The password is kept in this app's own Keychain item only (ProxyPasswords).
-    private func close() {
-        if !Faults.isActive(.passwordAutofill) {
-            username = ""
-            password = ""
-        }
-        DispatchQueue.main.async { dismiss() }   // after the emptied fields are on screen
-    }
     let entry: ProxyEntry?
     @State private var name = ""
     @State private var kind = ProxyKind.socks5
-    @State private var host = ""
-    @State private var port = ""
-    @State private var username = ""
-    @State private var password = ""
+    @State private var line = ""
+
+    private var read: Result<ProxyLine, ProxyLine.Problem> { ProxyLine.read(line) }
+
+    private var parsed: ProxyLine? {
+        if case let .success(proxy) = read { return proxy }
+        return nil
+    }
+
+    /// What is wrong with the line, once something is written in it.
+    private var problem: String? {
+        guard !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, case let .failure(problem) = read else { return nil }
+        return problem.text
+    }
+
+    private func close() {
+        line = ""   // nothing of the line stays on a screen that is leaving
+        DispatchQueue.main.async { dismiss() }
+    }
+
+    private func save(_ proxy: ProxyLine) {
+        var saved = entry ?? ProxyEntry(kind: proxy.kind ?? kind, host: proxy.host, port: proxy.port)
+        let ownName = name.trimmingCharacters(in: .whitespaces)
+        saved.name = ownName.isEmpty ? proxy.label : ownName
+        saved.kind = proxy.kind ?? kind
+        saved.host = proxy.host
+        saved.port = proxy.port
+        // A line without a password, for the same login as before: the proxy keeps the one it has.
+        var password = proxy.password ?? ""
+        if let entry, password.isEmpty, proxy.username == entry.username {
+            password = model.password(for: entry.id) ?? ""
+        }
+        saved.username = proxy.username
+        model.saveProxy(saved, password: password)
+        close()
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section(L("Прокси")) {
-                    TextField(L("Название (необязательно)"), text: $name).accessibilityIdentifier("proxyName")
-                    Picker(L("Тип"), selection: $kind) {
-                        Text("SOCKS5").tag(ProxyKind.socks5)
-                        Text("HTTP").tag(ProxyKind.http)
-                    }
-                    .pickerStyle(.segmented)
-                    .accessibilityIdentifier("proxyKind")
-                    TextField(L("Адрес"), text: $host).accessibilityIdentifier("proxyHost")
+                Section {
+                    TextField("socks5://user:pass@host:port", text: $line, axis: .vertical)
+                        .font(.system(size: 15, design: .monospaced))
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                    TextField(L("Порт"), text: $port).accessibilityIdentifier("proxyPort").keyboardType(.numberPad)
+                        .accessibilityIdentifier("proxyLine")
+                    PasteButton(payloadType: String.self) { strings in
+                        if let pasted = strings.first { line = pasted.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    }
+                    .accessibilityIdentifier("pasteProxy")
+                } header: {
+                    Text(L("Прокси одной строкой"))
+                } footer: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let problem {
+                            Text(problem).foregroundStyle(Theme.bad).accessibilityIdentifier("proxyLineProblem")
+                        }
+                        Text(L("Подойдёт любой привычный вид: со схемой или без, логин и пароль до адреса или после него."))
+                        if entry != nil {
+                            Text(L("Пароль не показан. Строка без пароля оставит прежний."))
+                        }
+                    }
                 }
                 .glassRow()
-                Section(L("Вход")) {
-                    TextField(L("Логин"), text: $username).accessibilityIdentifier("proxyUser")
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    SecureField(L("Пароль"), text: $password).accessibilityIdentifier("proxyPassword")
+                // The type, when the line does not say it.
+                if let parsed, parsed.kind == nil {
+                    Section {
+                        Picker(L("Тип"), selection: $kind) {
+                            Text("SOCKS5").tag(ProxyKind.socks5)
+                            Text("HTTP").tag(ProxyKind.http)
+                        }
+                        .pickerStyle(.segmented)
+                        .accessibilityIdentifier("proxyKind")
+                    }
+                    .glassRow()
+                }
+                Section {
+                    TextField(L("Название (необязательно)"), text: $name).accessibilityIdentifier("proxyName")
                 }
                 .glassRow()
                 if let entry {
@@ -155,16 +203,9 @@ struct ProxyEditor: View {
                 ToolbarItem(placement: .cancellationAction) { Button(L("Отмена")) { close() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(L("Сохранить")) {
-                        var saved = entry ?? ProxyEntry(kind: kind, host: host, port: 0)
-                        saved.name = name.trimmingCharacters(in: .whitespaces)
-                        saved.kind = kind
-                        saved.host = host.trimmingCharacters(in: .whitespaces)
-                        saved.port = Int(port) ?? 0
-                        saved.username = username
-                        model.saveProxy(saved, password: password)
-                        close()
+                        if let parsed { save(parsed) }
                     }
-                    .disabled(host.trimmingCharacters(in: .whitespaces).isEmpty || !(1...65535).contains(Int(port) ?? 0))
+                    .disabled(parsed == nil)
                     .accessibilityIdentifier("saveProxy")
                 }
             }
@@ -172,10 +213,7 @@ struct ProxyEditor: View {
                 guard let entry else { return }
                 name = entry.name
                 kind = entry.kind
-                host = entry.host
-                port = String(entry.port)
-                username = entry.username
-                password = model.password(for: entry.id) ?? ""
+                line = ProxyLine.write(kind: entry.kind, host: entry.host, port: entry.port, username: entry.username)
             }
         }
     }
