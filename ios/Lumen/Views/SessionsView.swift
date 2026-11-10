@@ -69,6 +69,7 @@ struct SessionsView: View {
             .eclipseScreen()
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: L("Имя, описание, метка, прокси"))
             .navigationTitle(L("Сессии"))
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { openNew() } label: { Image(systemName: "plus") }
@@ -76,7 +77,7 @@ struct SessionsView: View {
                         .accessibilityLabel(L("Новая сессия"))
                 }
                 ToolbarItem(placement: .topBarLeading) {
-                    NavigationLink { ProxiesView() } label: { Label(L("Прокси"), systemImage: "network") }
+                    NavigationLink { ProxiesView() } label: { Label(L("Прокси"), systemImage: "network").labelStyle(.titleAndIcon) }
                         .accessibilityIdentifier("proxiesButton")
                 }
                 ToolbarItem(placement: .topBarLeading) {

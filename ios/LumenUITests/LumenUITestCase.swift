@@ -147,7 +147,8 @@ class LumenUITestCase: XCTestCase {
 
     func backToList() {
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        wait(app.navigationBars["Сессии"], "back on the session list")
+        // Under either name: a test in the device's own language (LanguageTests) comes back here too.
+        wait(app.navigationBars.matching(NSPredicate(format: "identifier IN %@", ["Сессии", "Sessions"])).firstMatch, "back on the session list")
     }
 
     /// Types into the address bar and goes.
