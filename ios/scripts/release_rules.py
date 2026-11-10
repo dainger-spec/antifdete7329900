@@ -12,7 +12,15 @@ in the built app.
    Neither the development server's key nor the testbed's — keys anyone knows — may be in the app's
    sources, in project.yml or in the built Info.plist: with one, anyone could sign themselves a plan.
 
-    python3 ios/scripts/release_rules.py [ios-dir] [--app Lumen.app]   -> exit 0, or 1 listing each breach
+4. No test switch in a release (the lead, 10 November): a DEBUG build is open in full unless a test
+   says otherwise (LUMEN_TEST_ACCESS) — a release build must have no way into that. Every test switch
+   (LUMEN_TEST_…, LUMEN_FAULTS, -LumenFaults, -LumenResetState) is named in the sources only inside
+   #if DEBUG; the built release has none of them in its binary, no exception of App Transport Security
+   for the testbed, and a key for the documents of rights (the owner's: the same as the Mac release's).
+
+    python3 ios/scripts/release_rules.py [ios-dir] [--app Lumen.app] [--release-app Lumen.app]
+        -> exit 0, or 1 listing each breach. --app: any build's Info.plist (rules 1–3).
+           --release-app: a Release build, its binary and Info.plist too (rule 4).
 
 What is scanned: every string literal of the app's Swift sources (ios/Lumen, without Debug/, which a
 release build does not contain) — texts, screen names, accessibility labels and identifiers alike —,
@@ -47,6 +55,44 @@ KNOWN_KEYS = {
     "the development server's key": ("445c6300da0205b1", "/+/sbiH55nmy+2gRqQz12E0spl9L/YDWvjnecaN2M1c="),
     "the testbed's key": ("cbbc653cdb8bd787", "dNOl9JtGQJg6VOEIn3+1dscg5hWYkx9XUqm+qJ5CnZc="),
 }
+
+
+# The switches only tests use. None may be read by a release build.
+SWITCH = re.compile(r'LUMEN_TEST_[A-Z_]+|LUMEN_FAULTS|-LumenFaults|-LumenResetState')
+
+
+def outside_debug(path):
+    """(line number, line) of every line of a Swift file that is not inside #if DEBUG."""
+    stack = []   # for each open #if: whether its current branch is compiled only in DEBUG
+    for number, line in enumerate(open(path, encoding="utf-8"), 1):
+        text = line.strip()
+        if text.startswith("#if"):
+            stack.append(bool(re.match(r"#if\s+DEBUG\b", text)))
+        elif text.startswith("#elseif"):
+            if stack:
+                stack[-1] = False
+        elif text.startswith("#else"):
+            if stack:
+                stack[-1] = False   # the other branch of #if DEBUG is the release's
+        elif text.startswith("#endif"):
+            if stack:
+                stack.pop()
+        elif not any(stack):
+            yield number, line
+
+
+def core_files(ios):
+    for folder, _, files in os.walk(os.path.join(ios, "LumenCore", "Sources")):
+        for name in files:
+            if name.endswith(".swift"):
+                yield os.path.join(folder, name)
+
+
+def all_app_files(ios):
+    for folder, _, files in os.walk(os.path.join(ios, "Lumen")):
+        for name in files:
+            if name.endswith(".swift"):
+                yield os.path.join(folder, name)
 
 
 def known_key_in(text):
@@ -101,6 +147,17 @@ def scan(ios, app=None):
             code = LITERAL.sub('""', line).split("//", 1)[0]   # the code itself: no literals, no comment
             if "limitsNavigationsToAppBoundDomains" in code and not re.search(r"limitsNavigationsToAppBoundDomains\s*=\s*false", code):
                 found.append((f"{rel}:{number}", "app-bound", line.strip()))
+    # Rule 4 in the sources (the app's, Debug/ included, and the core's): a test switch is named in
+    # code only inside #if DEBUG, and so is the access that opens everything.
+    for path in list(all_app_files(ios)) + list(core_files(ios)):
+        rel = os.path.relpath(path, ios)
+        for number, line in outside_debug(path):
+            code = line.split("//", 1)[0]
+            for text in LITERAL.findall(code):
+                if SWITCH.search(text):
+                    found.append((f"{rel}:{number}", "test-switch", line.strip()))
+            if re.search(r"\bAccess\.full\b", LITERAL.sub('""', code)):
+                found.append((f"{rel}:{number}", "test-switch", "Access.full outside #if DEBUG: " + line.strip()))
     for folder, _, files in os.walk(os.path.join(ios, "Lumen")):
         for name in files:
             if name.endswith(".strings"):
@@ -141,22 +198,54 @@ def scan(ios, app=None):
     return found
 
 
+def scan_release(app):
+    """Rule 4 in a built Release app: every breach as (where, rule, text)."""
+    found = []
+    name = os.path.basename(app)
+    with open(os.path.join(app, "Info.plist"), "rb") as f:
+        info = plistlib.load(f)
+    binary = os.path.join(app, info.get("CFBundleExecutable", "Lumen"))
+    if not os.path.exists(binary) or not os.path.getsize(binary):
+        found.append((name, "test-switch", "no binary to check"))
+    # Every file of the bundle, not the executable alone: a Debug build keeps its code in a library
+    # beside it (Lumen.debug.dylib), and a release must not carry a switch anywhere.
+    for folder, _, files in os.walk(app):
+        for file in files:
+            path = os.path.join(folder, file)
+            data = open(path, "rb").read()
+            for switch in sorted(set(m.decode() for m in re.findall(SWITCH.pattern.encode(), data))):
+                found.append((f"{name}/{os.path.relpath(path, app)}", "test-switch", f"names {switch}"))
+    if "lumentest" in repr(info.get("NSAppTransportSecurity", {})):
+        found.append((f"{name}/Info.plist NSAppTransportSecurity", "test-switch", "an exception for the testbed (lumentest)"))
+    keys = info.get("PBEntitlementPublicKeys")
+    if not isinstance(keys, dict) or not keys:
+        found.append((f"{name}/Info.plist PBEntitlementPublicKeys", "no-key", "a release trusts no key: nobody could sign in"))
+    return found
+
+
 def main(argv):
     args = argv[1:]
-    app = None
+    app = release = None
     if "--app" in args:
         i = args.index("--app")
         app = args[i + 1]
         del args[i:i + 2]
+    if "--release-app" in args:
+        i = args.index("--release-app")
+        release = args[i + 1]
+        del args[i:i + 2]
     ios = os.path.abspath(args[0] if args else os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-    found = scan(ios, app)
+    found = scan(ios, app or release)
+    if release:
+        found += scan_release(release)
     if found:
         print("RELEASE RULES BROKEN:", file=sys.stderr)
         for where, rule, text in found:
             print(f"  [{rule}] {where}: {text}", file=sys.stderr)
         return 1
-    print("release rules: none of the positioning words, no App-Bound Domains, no key anyone knows"
-          + (f" (and {os.path.basename(app)})" if app else ""))
+    print("release rules: none of the positioning words, no App-Bound Domains, no key anyone knows, no test switch outside DEBUG"
+          + (f" (and {os.path.basename(app)})" if app else "")
+          + (f" (and the release build {os.path.basename(release)}: no test switch in it, a key for the documents of rights)" if release else ""))
     return 0
 
 

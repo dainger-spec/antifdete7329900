@@ -77,7 +77,7 @@ final class EntitlementTests: XCTestCase {
         let vectors = try vectors()
         let keys = EntitlementKeys.from(vectors.trustedKeys)
         XCTAssertEqual(keys.count, vectors.trustedKeys.count, "each trusted key's id is its key's")
-        XCTAssertGreaterThanOrEqual(vectors.cases.count, 11)
+        XCTAssertGreaterThanOrEqual(vectors.cases.count, 14)
         for vector in vectors.cases {
             let check = EntitlementVerifier.check(Data(vector.document.utf8), keys: keys, deviceID: vector.deviceID, machineID: vector.machineID)
             XCTAssertEqual(check.name, vector.verify, vector.name)
@@ -103,10 +103,25 @@ final class EntitlementTests: XCTestCase {
                 default: XCTAssertTrue(p.status == .exportOnly || state.mode == .unreachable || state.mode == .periodEnded, what)
                 }
                 XCTAssertEqual(p.allowedProfilesHere, decision.allowedProfilesHere, what)
+                // The rights are the document's features: every plan that runs (the trial, Personal,
+                // Professional, a member of a Team) opens sites and proxies; a period that ended, neither.
+                if decision.mode == "full" || decision.mode == "grace" {
+                    XCTAssertTrue(state.access.browse && state.access.proxies, "\(what): a running plan opens sites and proxies")
+                    XCTAssertEqual(state.access.plan, p.plan, what)
+                    XCTAssertEqual(state.access.maxProfiles, decision.allowedProfilesHere, what)
+                } else {
+                    XCTAssertFalse(state.access.proxies, "\(what): no proxies")
+                }
                 decided += 1
             }
         }
-        XCTAssertGreaterThanOrEqual(decided, 8)
+        XCTAssertGreaterThanOrEqual(decided, 11)
+        var plans: Set<String> = []
+        for vector in vectors.cases where vector.verify == "ok" {
+            let checked = EntitlementVerifier.check(Data(vector.document.utf8), keys: keys, deviceID: vector.deviceID, machineID: vector.machineID)
+            if let p = checked.entitlement, p.status == .active { plans.insert(p.plan) }
+        }
+        XCTAssertEqual(plans, ["trial", "personal", "pro", "team"], "the vectors have a running document of every plan")
     }
 
     func testKeysAndThePhonesID() {

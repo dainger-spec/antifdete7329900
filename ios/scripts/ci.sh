@@ -180,6 +180,44 @@ BUILT_APP="$(find "$OUT/dd/Build/Products" -maxdepth 2 -name Lumen.app -type d |
 if in_suite core; then
     python3 "$HERE/scripts/release_rules.py" "$HERE" --app "$BUILT_APP" 2>&1 | tee -a "$LOG"
     [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "release rules broken in the built app"; STATUS=1; }
+    # A release, built as one would be (the lead, 10 November): without an account it must have no
+    # way to the rights a DEBUG build starts with. It is built with a key made for this run in the
+    # owner's key's place (the Mac release's dry run does the same), and its binary and Info.plist
+    # are checked: no test switch, no exception for the testbed, a key for the documents of rights.
+    # The red: the Debug build, given as a release, must be refused.
+    RELEASE_KEY="$(python3 - "$HERE/testbed" <<'PY'
+import base64, hashlib, os, sys
+sys.path.insert(0, sys.argv[1])
+import ed25519
+public = ed25519.public_key(os.urandom(32))
+print(hashlib.sha256(public).digest()[:8].hex() + "=" + base64.b64encode(public).decode())
+PY
+)"
+    if xcodebuild build -project "$HERE/Lumen.xcodeproj" -scheme Lumen -configuration Release -destination "$DEST" \
+            -derivedDataPath "$OUT/dd-release" ENTITLEMENT_PUBLIC_KEYS="$RELEASE_KEY" >"$OUT/build-release.txt" 2>&1; then
+        RELEASE_APP="$(find "$OUT/dd-release/Build/Products" -maxdepth 2 -name Lumen.app -type d | head -1)"
+        python3 "$HERE/scripts/release_rules.py" "$HERE" --release-app "$RELEASE_APP" 2>&1 | tee -a "$LOG"
+        [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "release rules broken in the release build"; STATUS=1; }
+        if python3 "$HERE/scripts/release_rules.py" "$HERE" --release-app "$BUILT_APP" >"$OUT/release-red.txt" 2>&1; then
+            say "RED DID NOT FAIL release rules: the Debug build passed as a release"; STATUS=1
+        elif grep -q "test-switch.*LUMEN_TEST_ACCESS" "$OUT/release-red.txt"; then
+            say "red   release rules: the Debug build is refused as a release — $(grep -c 'test-switch' "$OUT/release-red.txt") test switches in it, LUMEN_TEST_ACCESS among them"
+        else
+            say "RED OTHER CHECK release rules: the Debug build was refused, but not for LUMEN_TEST_ACCESS — $(head -3 "$OUT/release-red.txt" | tr '\n' ' ')"; STATUS=1
+        fi
+        # And a release given no key does not build at all.
+        if xcodebuild build -project "$HERE/Lumen.xcodeproj" -scheme Lumen -configuration Release -destination "$DEST" \
+                -derivedDataPath "$OUT/dd-release" >"$OUT/build-release-nokey.txt" 2>&1; then
+            say "RED DID NOT FAIL: a Release build without ENTITLEMENT_PUBLIC_KEYS was built"; STATUS=1
+        elif grep -q "a Release build needs ENTITLEMENT_PUBLIC_KEYS" "$OUT/build-release-nokey.txt"; then
+            say "red   a Release build without ENTITLEMENT_PUBLIC_KEYS does not build"
+        else
+            say "RED OTHER CHECK: the keyless Release build failed for another reason — $(grep -m2 'error' "$OUT/build-release-nokey.txt" | tr '\n' ' ' | cut -c1-200)"; STATUS=1
+        fi
+        rm -rf "$OUT/dd-release"
+    else
+        grep -E "error:|error " "$OUT/build-release.txt" | head -30 | tee -a "$LOG"; say "RELEASE BUILD FAILED"; STATUS=1
+    fi
 fi
 if /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity:NSExceptionDomains:geo.lumentest:NSExceptionAllowsInsecureHTTPLoads" "$BUILT_APP/Info.plist" 2>/dev/null | grep -q true; then
     say "the test build lets the proxy check reach http://geo.lumentest"

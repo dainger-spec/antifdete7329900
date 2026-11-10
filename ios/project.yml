@@ -46,8 +46,10 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         # The Lumen account (the server's CONTRACT.md §2, §7.2): the server, the site, and the keys
         # documents of rights are trusted by — key id -> base64 of the raw Ed25519 public key. The
-        # release build gets the owner's key(s) here (none yet: the iPhone has had no release); a
-        # test's stand-in key comes with the test (DEBUG builds only), never from this file.
+        # server signs every document with one key, so a release carries the same key(s) as the Mac
+        # release (the lead, 10 November): given at build time, as there — ENTITLEMENT_PUBLIC_KEYS,
+        # the build phase below; a Release build without it does not build. A test's stand-in key
+        # comes with the test (DEBUG builds only), never from this file.
         PBAccountServerURL: https://api.lumenbrowser.io
         PBAccountSiteURL: https://lumenbrowser.io
         PBEntitlementPublicKeys: {}
@@ -75,6 +77,30 @@ targets:
           pb "Add :NSAppTransportSecurity:NSExceptionDomains:geo.lumentest:NSExceptionAllowsInsecureHTTPLoads bool true"
           pb "Add :NSAppTransportSecurity:NSExceptionDomains:account.lumentest dict"
           pb "Add :NSAppTransportSecurity:NSExceptionDomains:account.lumentest:NSExceptionAllowsInsecureHTTPLoads bool true"
+      # The keys documents of rights are trusted by, as the Mac release takes them (scripts/build-app.sh):
+      #   xcodebuild … -configuration Release ENTITLEMENT_PUBLIC_KEYS="<key id>=<base64>[,<key id>=<base64>]"
+      # (`lumen-api pubkey` on the owner's server). A Release build that is given none stops here: it
+      # could sign nobody in. A Debug build needs none.
+      - name: "The keys of the documents of rights (ENTITLEMENT_PUBLIC_KEYS)"
+        basedOnDependencyAnalysis: false
+        inputFiles:
+          - $(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)
+        script: |
+          keys="${ENTITLEMENT_PUBLIC_KEYS:-}"
+          if [ -z "$keys" ]; then
+            [ "$CONFIGURATION" = "Release" ] || exit 0
+            echo "error: a Release build needs ENTITLEMENT_PUBLIC_KEYS=<key id>=<base64>[,...]: the owner's key(s), the same as the Mac release's (lumen-api pubkey)" >&2
+            exit 1
+          fi
+          plist="$TARGET_BUILD_DIR/$INFOPLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Delete :PBEntitlementPublicKeys" "$plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :PBEntitlementPublicKeys dict" "$plist"
+          old_ifs="$IFS"; IFS=','
+          for entry in $keys; do
+            id="${entry%%=*}"; key="${entry#*=}"
+            /usr/libexec/PlistBuddy -c "Add :PBEntitlementPublicKeys:$id string $key" "$plist"
+          done
+          IFS="$old_ifs"
   LumenUITests:
     type: bundle.ui-testing
     platform: iOS

@@ -17,7 +17,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 IOS = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
-from release_rules import WORDS, scan  # noqa: E402
+from release_rules import WORDS, scan, scan_release  # noqa: E402
 
 failures = 0
 
@@ -33,6 +33,7 @@ def planted(line, file="Lumen/Views/SessionsView.swift"):
     root = tempfile.mkdtemp()
     shutil.copytree(os.path.join(IOS, "Lumen"), os.path.join(root, "Lumen"))
     shutil.copy(os.path.join(IOS, "project.yml"), os.path.join(root, "project.yml"))
+    shutil.copytree(os.path.join(IOS, "LumenCore", "Sources"), os.path.join(root, "LumenCore", "Sources"))
     with open(os.path.join(root, file), "a", encoding="utf-8") as f:
         f.write("\n" + line + "\n")
     return root
@@ -96,6 +97,41 @@ for name, (key_id, key) in KNOWN_KEYS.items():
 with open(os.path.join(app, "Info.plist"), "wb") as f:
     plistlib.dump({"CFBundleIdentifier": "io.lumenbrowser.ios", "PBEntitlementPublicKeys": {"eaae27700d8b08a3": "iiZ+mIsNmJjmQ/RMlcV8EFhoNUtJoTZrsP52U52qcf4="}}, f)
 check("another key in the built app is not taken for a known one", not any(f[1] == "known-key" for f in scan(IOS, app)))
+
+# No test switch in a release: in the sources outside #if DEBUG, and in a built release.
+for what, line, file in [
+    ("the plan's switch read outside #if DEBUG", 'let plan = ProcessInfo.processInfo.environment["LUMEN_TEST_ACCESS"]', "Lumen/AppModel.swift"),
+    ("the faults read outside #if DEBUG (the core)", 'let faults = ProcessInfo.processInfo.environment["LUMEN_FAULTS"]', "LumenCore/Sources/LumenCore/Access.swift"),
+    ("the reset argument read outside #if DEBUG", 'let reset = CommandLine.arguments.contains("-LumenResetState")', "Lumen/LumenApp.swift"),
+    ("the access that opens everything used outside #if DEBUG", "let open = Access.full", "Lumen/AppModel.swift"),
+    ("a switch in the release branch of #if DEBUG", '#if DEBUG\nlet a = 1\n#else\nlet b = ProcessInfo.processInfo.environment["LUMEN_TEST_SITE_URL"]\n#endif', "Lumen/AppModel.swift"),
+]:
+    check(f"red — {what}: found", any(f[1] == "test-switch" for f in scan(planted(line, file))))
+inside = scan(planted('#if DEBUG\nlet plan = ProcessInfo.processInfo.environment["LUMEN_TEST_ACCESS"]\nlet open = Access.full\n#endif', "Lumen/AppModel.swift"))
+check("a switch inside #if DEBUG is allowed", not any(f[1] == "test-switch" for f in inside), repr(inside[:2]))
+
+
+def built(binary, info):
+    """A stand-in for a built app: its binary's bytes and its Info.plist."""
+    root = tempfile.mkdtemp(suffix=".app")
+    with open(os.path.join(root, "Lumen"), "wb") as f:
+        f.write(binary)
+    with open(os.path.join(root, "Info.plist"), "wb") as f:
+        plistlib.dump(dict({"CFBundleIdentifier": "io.lumenbrowser.ios", "CFBundleExecutable": "Lumen"}, **info), f)
+    return root
+
+
+OWNERS = {"PBEntitlementPublicKeys": {"eaae27700d8b08a3": "iiZ+mIsNmJjmQ/RMlcV8EFhoNUtJoTZrsP52U52qcf4="}}
+check("a release with a key and no switch passes", not scan_release(built(b"\x00code\x00Lumen\x00", OWNERS)), "")
+for what, app_dir, rule in [
+    ("the plan's switch in the release's binary", built(b"\x00LUMEN_TEST_ACCESS\x00", OWNERS), "test-switch"),
+    ("the faults in the release's binary", built(b"\x00LUMEN_FAULTS\x00-LumenFaults\x00", OWNERS), "test-switch"),
+    ("the testbed's exception in the release's Info.plist",
+     built(b"\x00", dict(OWNERS, NSAppTransportSecurity={"NSExceptionDomains": {"account.lumentest": {"NSExceptionAllowsInsecureHTTPLoads": True}}})), "test-switch"),
+    ("a release that trusts no key", built(b"\x00", {"PBEntitlementPublicKeys": {}}), "no-key"),
+    ("a release without the keys' entry", built(b"\x00", {}), "no-key"),
+]:
+    check(f"red — {what}: found", any(f[1] == rule for f in scan_release(app_dir)))
 
 allowed = scan(planted('let x = [Text("Сессии"), Text("Изоляция сессий"), Text("Профиль устройства"), Text("Тестирование сайтов"), Text("Доступно на тарифе выше")]'))
 check("the app's own words are allowed (сессии, изоляция, профиль устройства, тестирование)", not allowed, repr(allowed))
