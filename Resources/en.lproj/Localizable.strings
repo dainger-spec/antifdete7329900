@@ -298,7 +298,7 @@
 "editor.camera.delivery.shim" = "JavaScript shim";
 "editor.camera.delivery.system" = "System camera";
 "editor.camera.system" = "System camera";
-"editor.camera.system.note" = "The system virtual camera feeds the picture through macOS, so a page cannot tell it from the built-in camera. It is one device for the whole Mac, and other profiles do not see it. The extension draws a colour, the test pattern or your image (with crop, fit and mirror); a video and the filters are drawn by the JavaScript shim.";
+"editor.camera.system.note" = "The system virtual camera feeds the picture through macOS, so a page cannot tell it from the built-in camera. It is one device for the whole Mac, and other profiles do not see it. The extension draws a colour, the test pattern or your image, with crop, fit, mirror and the adjustments; a video is drawn by the JavaScript shim for now.";
 "editor.camera.system.notInBuild" = "This build does not include the system camera; it comes in a signed build.";
 "editor.camera.system.active" = "The system camera is installed and on.";
 "editor.camera.system.restart" = "Installed; macOS switches it on after a restart.";

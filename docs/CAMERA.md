@@ -142,12 +142,19 @@ the image's bytes to `<group>/camera-image.bin` (`SystemCamera.writeRenderConfig
 loads the image (cached, reloaded when the file changes) and draws it each frame with the sensor
 grain over it (`CameraFrameRenderer`).
 
-### Stage 4 (next, on a Mac): video and filters in the extension
+### Stage 4 (here): the filters in the extension
 
-A **video** source and the **filters** (brightness, contrast, …) are still the JavaScript shim's;
-drawing them in the extension needs AVFoundation (to decode and time the video) and CoreImage (the
-filter chain), fed from the app through the app group. The shim's pipeline — source, crop, filters,
-playback — is the reference for those.
+The extension now applies the **filters** too (brightness, contrast, saturation, blur, hue, sepia,
+invert, opacity, black-and-white), as a CoreImage chain matching the shim's CSS filters in the same
+order (`CameraFilters`). The base frame is drawn into a scratch buffer, filtered into the output,
+and the grain laid over it (`CameraFrameRenderer`). The editor shows the filters for both
+deliveries now.
+
+### Stage 5 (next, on a Mac): video in the extension
+
+A **video** source is still the JavaScript shim's; drawing it in the extension needs AVFoundation
+(to decode, loop, trim and time the clip), fed from the app through the app group. The shim's
+pipeline is the reference.
 
 ## Limitations
 

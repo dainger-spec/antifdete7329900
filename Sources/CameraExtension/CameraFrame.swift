@@ -19,6 +19,8 @@ struct CameraExtensionConfig {
     var mirror: Bool
     /// A sub-rectangle of the image (normalised 0…1), or nil for the whole image.
     var crop: (x: Double, y: Double, width: Double, height: Double)?
+    /// The adjustments drawn over the frame (`CameraFilterChain`).
+    var filters: CameraFiltersConfig
 
     /// The fixed CoreMediaIO device name (the shim's sentinel). Matches
     /// `CameraSubstitution.systemDeviceName` in BrowserCore; kept as a literal here so the
@@ -28,7 +30,7 @@ struct CameraExtensionConfig {
 
     static let fallback = CameraExtensionConfig(source: "bars", colorHex: "#1E2130",
                                                 width: 1280, height: 720, frameRate: 30,
-                                                fit: "cover", mirror: false, crop: nil)
+                                                fit: "cover", mirror: false, crop: nil, filters: .none)
 
     static var appGroup: String? {
         Bundle.main.object(forInfoDictionaryKey: "PBCameraAppGroup") as? String
@@ -56,7 +58,8 @@ struct CameraExtensionConfig {
                                      frameRate: int("frameRate", fallback.frameRate),
                                      fit: string("fit", fallback.fit),
                                      mirror: (object["mirror"] as? NSNumber)?.boolValue ?? false,
-                                     crop: crop)
+                                     crop: crop,
+                                     filters: CameraFiltersConfig(object["filters"] as? [String: Any]) ?? .none)
     }
 }
 
@@ -71,32 +74,66 @@ enum CameraFrameRenderer {
     // The loaded image, cached and reloaded only when the file changes (one serial timer queue).
     private static var cachedImage: CGImage?
     private static var cachedImageDate: Date?
+    // A scratch buffer for the filtered path: the base is drawn here, then filtered into the output.
+    private static var scratch: CVPixelBuffer?
 
     static func render(into pixelBuffer: CVPixelBuffer, config: CameraExtensionConfig, sequence: UInt64) {
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        if config.filters.isIdentity {
+            drawBase(into: pixelBuffer, config: config, sequence: sequence)
+        } else if let scratchBuffer = scratchBuffer(width: width, height: height) {
+            // Draw the base into the scratch buffer, filter it into the output, then grain over it.
+            drawBase(into: scratchBuffer, config: config, sequence: sequence)
+            let source = CIImage(cvPixelBuffer: scratchBuffer)
+            let filtered = CameraFilterChain.apply(config.filters, to: source)
+            CameraFilterChain.context.render(filtered, to: pixelBuffer,
+                                             bounds: CGRect(x: 0, y: 0, width: width, height: height),
+                                             colorSpace: CGColorSpaceCreateDeviceRGB())
+        } else {
+            drawBase(into: pixelBuffer, config: config, sequence: sequence)
+        }
+        withContext(pixelBuffer) { context, width, height in grain(context, width: width, height: height) }
+    }
+
+    /// The source itself (colour, test pattern or image) drawn into `pixelBuffer`.
+    private static func drawBase(into pixelBuffer: CVPixelBuffer, config: CameraExtensionConfig, sequence: UInt64) {
+        withContext(pixelBuffer) { context, width, height in
+            let (br, bg, bb) = color(config.colorHex)
+            if config.source == "bars" {
+                drawBars(context, width: width, height: height, background: (br, bg, bb), sequence: sequence)
+            } else if config.source == "image", let image = loadImage() {
+                context.setFillColor(red: br, green: bg, blue: bb, alpha: 1)
+                context.fill(CGRect(x: 0, y: 0, width: Double(width), height: Double(height)))
+                drawImage(context, image: image, width: width, height: height, config: config)
+            } else {
+                context.setFillColor(red: br, green: bg, blue: bb, alpha: 1)
+                context.fill(CGRect(x: 0, y: 0, width: Double(width), height: Double(height)))
+            }
+        }
+    }
+
+    /// Runs `body` with a CoreGraphics context over a locked BGRA pixel buffer.
+    private static func withContext(_ pixelBuffer: CVPixelBuffer, _ body: (CGContext, Int, Int) -> Void) {
         CVPixelBufferLockBaseAddress(pixelBuffer, [])
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
         guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return }
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
-        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
         let bitmapInfo = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
         guard let context = CGContext(data: base, width: width, height: height, bitsPerComponent: 8,
-                                      bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: bitmapInfo) else { return }
+                                      bytesPerRow: CVPixelBufferGetBytesPerRow(pixelBuffer),
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: bitmapInfo) else { return }
+        body(context, width, height)
+    }
 
-        let (br, bg, bb) = color(config.colorHex)
-        if config.source == "bars" {
-            drawBars(context, width: width, height: height, background: (br, bg, bb), sequence: sequence)
-        } else if config.source == "image", let image = loadImage() {
-            context.setFillColor(red: br, green: bg, blue: bb, alpha: 1)
-            context.fill(CGRect(x: 0, y: 0, width: Double(width), height: Double(height)))
-            drawImage(context, image: image, width: width, height: height, config: config)
-        } else {
-            context.setFillColor(red: br, green: bg, blue: bb, alpha: 1)
-            context.fill(CGRect(x: 0, y: 0, width: Double(width), height: Double(height)))
-        }
-
-        grain(context, width: width, height: height)
+    private static func scratchBuffer(width: Int, height: Int) -> CVPixelBuffer? {
+        if let scratch, CVPixelBufferGetWidth(scratch) == width, CVPixelBufferGetHeight(scratch) == height { return scratch }
+        let attributes: [String: Any] = [kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any]()]
+        var buffer: CVPixelBuffer?
+        CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA, attributes as CFDictionary, &buffer)
+        scratch = buffer
+        return buffer
     }
 
     private static func drawBars(_ context: CGContext, width: Int, height: Int,

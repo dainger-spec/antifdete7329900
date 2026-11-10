@@ -121,6 +121,12 @@ final class SystemCamera: NSObject, ObservableObject {
             config["crop"] = ["enabled": true, "x": camera.crop.x, "y": camera.crop.y,
                               "width": camera.crop.width, "height": camera.crop.height]
         }
+        if !camera.filters.isIdentity {
+            let f = camera.filters
+            config["filters"] = ["brightness": f.brightness, "contrast": f.contrast, "saturation": f.saturation,
+                                 "blur": f.blur, "hueRotate": f.hueRotate, "sepia": f.sepia, "invert": f.invert,
+                                 "opacity": f.opacity, "grayscale": f.grayscale]
+        }
         let imageURL = container.appendingPathComponent(Self.imageFileName)
         do {
             try JSONSerialization.data(withJSONObject: config).write(to: container.appendingPathComponent(Self.configFileName), options: .atomic)
