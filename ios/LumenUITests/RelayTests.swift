@@ -103,6 +103,7 @@ final class RelayTests: LumenUITestCase {
         shot("42 the relay is dead: nothing loads")
         // Back, on a new port: through the proxy again.
         let second = relayPort(other: first, timeout: 55)
+        assertNothingLoaded("deadrelay", after: 1)
         openPage("http://relay-\(run).lumentest:28380/whoami?t=back")
         page("via: прокси B")
 
@@ -113,6 +114,10 @@ final class RelayTests: LumenUITestCase {
         go("http://gap-\(run).lumentest:28380/whoami?t=gap")
         assertNothingLoaded("gap")
         _ = relayPort(other: second, timeout: 55)
+        // And still nothing once the relay is back: a page that found its way out late — after the
+        // first look, while the relay was still down — is on the screen by now (CI runs 58 and 60:
+        // with the gap left open the testbed counted the request, and the first look had seen nothing).
+        assertNothingLoaded("gap", after: 1)
         openPage("http://relay-\(run).lumentest:28380/whoami?t=after")
         page("via: прокси B")
         shot("43 the relay is back: through the proxy")

@@ -249,8 +249,8 @@ class LumenUITestCase: XCTestCase {
 
     /// Nothing of the page `name` is on the screen a while later: not its "at:" line, and no
     /// "via: напрямую" (what a page that went around its proxy shows here).
-    func assertNothingLoaded(_ name: String, file: StaticString = #filePath, line: UInt = #line) {
-        sleep(8)
+    func assertNothingLoaded(_ name: String, after seconds: UInt32 = 8, file: StaticString = #filePath, line: UInt = #line) {
+        sleep(seconds)
         // The page's own "at:" line says "напрямую" when it came directly (the testbed): found where the
         // "via:" paragraph sometimes is not (CI runs 20, 21).
         // By the queries, and by the screen's whole tree where they see nothing: a page that is on
