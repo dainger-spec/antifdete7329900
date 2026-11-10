@@ -235,18 +235,36 @@ run_ui() { # result-name, fault ('' for none), -only-testing args...
     # in the app kept animating, every step then waited XCTest's 60 s for it, the red took 69 minutes
     # and the job ran out of time). After three such waits its screen is kept and the run is stopped:
     # it says nothing about the check (lost(), below), and the screen shows what kept it busy.
+    # CI runs 44 and 46: the green runs of two jobs stalled so, each after a page's address was
+    # entered, with the page loaded and nothing moving on the kept screen. So at the first such wait
+    # the app's own threads are sampled (what is animating, by its stack) and two screens are taken
+    # a second apart; and the line that says the run was stopped is written once xcodebuild has
+    # gone — written while it ran, xcodebuild's last lines overwrote its beginning (run 44).
+    local stuck="" waits app_pid
     while kill -0 "$pid" 2>/dev/null; do
         sleep 10
-        if [[ "$(grep -c 'animations complete notification not received' "$OUT/$name.txt" 2>/dev/null)" -ge 3 ]]; then
+        waits="$(grep -c 'animations complete notification not received' "$OUT/$name.txt" 2>/dev/null)"
+        if [[ "${waits:-0}" -ge 1 && ! -f "$OUT/stuck-$name-sample.txt" ]]; then
             mkdir -p "$OUT/screens"
+            app_pid="$(pgrep -f 'Lumen\.app/Lumen' | head -1)"
+            if [[ -n "$app_pid" ]]; then sample "$app_pid" 3 -file "$OUT/stuck-$name-sample.txt" >/dev/null 2>&1; fi
+            [[ -f "$OUT/stuck-$name-sample.txt" ]] || echo "no sample: the app's process was not found" >"$OUT/stuck-$name-sample.txt"
+            xcrun simctl io "$UDID" screenshot "$OUT/screens/stuck-$name-a.png" >/dev/null 2>&1
+            sleep 1
+            xcrun simctl io "$UDID" screenshot "$OUT/screens/stuck-$name-b.png" >/dev/null 2>&1
+        fi
+        if [[ "${waits:-0}" -ge 3 ]]; then
             xcrun simctl io "$UDID" screenshot "$OUT/screens/stuck-$name.png" >/dev/null 2>&1
-            echo "LUMEN CI: the app never went idle (three 60 s waits) — stopped; screen: screens/stuck-$name.png" >>"$OUT/$name.txt"
+            stuck=1
             kill "$pid" 2>/dev/null; sleep 5; kill -9 "$pid" 2>/dev/null
             break
         fi
     done
     wait "$pid"
     local code=$?
+    if [[ -n "$stuck" ]]; then
+        echo "LUMEN CI: the app never went idle (three 60 s waits) — stopped; screen: screens/stuck-$name.png, threads: stuck-$name-sample.txt" >>"$OUT/$name.txt"
+    fi
     # The relays' own lines (Documents/relay.log, DEBUG builds): where a slow page spent its time.
     local data; data="$(xcrun simctl get_app_container "$UDID" io.lumenbrowser.ios data 2>/dev/null)"
     [[ -n "$data" && -f "$data/Documents/relay.log" ]] && cp "$data/Documents/relay.log" "$OUT/$name-relay.log"
@@ -309,6 +327,7 @@ if [[ $GREEN_CODE -ne 0 ]] && grep -q "never went idle" "$OUT/green.txt"; then
     # screens/stuck-green-first.png), and a second stall fails the job.
     mv "$OUT/green.txt" "$OUT/green-stuck.txt"
     [[ -f "$OUT/screens/stuck-green.png" ]] && mv "$OUT/screens/stuck-green.png" "$OUT/screens/stuck-green-first.png"
+    [[ -f "$OUT/stuck-green-sample.txt" ]] && mv "$OUT/stuck-green-sample.txt" "$OUT/stuck-green-first-sample.txt"
     say "again ui green: the app never went idle in the first try, in $(grep -E "Test Case .* started" "$OUT/green-stuck.txt" | tail -1 | sed -E "s/.*-\[([^]]*)\].*/\1/") — screen: screens/stuck-green-first.png"
     run_ui green "" ${ONLY[@]+"${ONLY[@]}"}; GREEN_CODE=$?
 fi
