@@ -332,3 +332,40 @@ final class LicenseTests: XCTestCase {
         XCTAssertTrue(RefreshSchedule.refreshDue(entitlement: nil, at: inForce))
     }
 }
+
+/// The labels of synced profiles (`profileTokens`, the server's CONTRACT.md §6.2).
+final class ProfileTokenTests: XCTestCase {
+    /// The lead's control value (10 November 2026): the vault key is the bytes 00…1f, the salt is
+    /// the bytes of a UUID, and the profile's UUID is written in upper case, as the Mac writes it.
+    func testTheControlValue() throws {
+        let vaultKey = Data((0..<32).map { UInt8($0) })
+        let saltID = try XCTUnwrap(UUID(uuidString: "6F1E2D3C-4B5A-4978-8695-A4B3C2D1E0F1"))
+        let salt = withUnsafeBytes(of: saltID.uuid) { Data($0) }
+        XCTAssertEqual(salt.map { String(format: "%02x", $0) }.joined(), "6f1e2d3c4b5a49788695a4b3c2d1e0f1", "the salt is the UUID's 16 bytes")
+        let profile = try XCTUnwrap(UUID(uuidString: "6b0e3c1f-9a2d-4e7b-8c15-0d4f6a7b8c9d"))
+        let key = ProfileTokens.key(vaultKey: vaultKey, salt: salt)
+        XCTAssertEqual(ProfileTokens.token(profile: profile, key: key), "750d110fc23ef5dbfb2a9b045c3711ed",
+                       "the label is made of the UUID in upper case")
+        // In lower case it is another label: the server would count the profile twice.
+        let lower = HMAC<SHA256>.authenticationCode(for: Data("profile/6b0e3c1f-9a2d-4e7b-8c15-0d4f6a7b8c9d".utf8), using: key)
+        XCTAssertEqual(lower.prefix(16).map { String(format: "%02x", $0) }.joined(), "83704598564a09440dd9cfcc2ca6dd5a")
+        XCTAssertNotEqual(ProfileTokens.token(profile: profile, key: key), "83704598564a09440dd9cfcc2ca6dd5a")
+        // A list: one label a profile, whatever the order and the repeats.
+        let other = try XCTUnwrap(UUID(uuidString: "00000000-0000-4000-8000-000000000001"))
+        let labels = ProfileTokens.tokens(profiles: [other, profile, profile], vaultKey: vaultKey, salt: salt)
+        XCTAssertEqual(labels.count, 2)
+        XCTAssertTrue(labels.contains("750d110fc23ef5dbfb2a9b045c3711ed"))
+        XCTAssertTrue(labels.allSatisfy { label in label.count == 32 && label.allSatisfy { character in "0123456789abcdef".contains(character) } })
+        // Another vault's salt gives another label: labels of two vaults cannot be matched.
+        XCTAssertNotEqual(ProfileTokens.tokens(profiles: [profile], vaultKey: vaultKey, salt: Data(repeating: 1, count: 16)), ["750d110fc23ef5dbfb2a9b045c3711ed"])
+    }
+
+    /// The production key of the documents of rights (server v2026.11.10.3) is the one the app
+    /// carries in its Info.plist: its id is its key's, and it is not the development key.
+    func testTheProductionKey() throws {
+        let key = try XCTUnwrap(Data(base64Encoded: "bOCnaE4nVmmeqieu9CNIo0AY86OOYqe65OwSJbTwYn0="))
+        XCTAssertEqual(EntitlementKeys.keyID(of: key), "63a9a50f8cc6f129")
+        XCTAssertNotEqual(EntitlementKeys.keyID(of: key), EntitlementKeys.developmentKeyID)
+        XCTAssertEqual(EntitlementKeys.from(["63a9a50f8cc6f129": "bOCnaE4nVmmeqieu9CNIo0AY86OOYqe65OwSJbTwYn0="]).count, 1)
+    }
+}

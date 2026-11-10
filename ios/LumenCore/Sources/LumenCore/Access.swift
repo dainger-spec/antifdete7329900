@@ -29,7 +29,7 @@ public struct Access: Equatable, Sendable {
     }
 
     #if DEBUG
-    /// Everything: what a DEBUG build has unless a test asks otherwise (LUMEN_TEST_ACCESS). A release
+    /// Everything: what a DEBUG build has only when a test asks for it by name (LUMEN_TEST_ACCESS=full). A release
     /// build has no such value at all — there the rights come from the account, or are the free
     /// level (the lead, 10 November); ios/scripts/release_rules.py checks the built release too.
     public static let full = Access(proxies: true)
