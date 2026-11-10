@@ -222,6 +222,8 @@
 /* Camera substitution (per-profile, editor's Camera part) */
 "editor.topic.camera" = "Camera";
 "editor.camera.mode" = "Mode";
+"editor.camera.plan.title" = "A professional-plan feature";
+"editor.camera.plan.note" = "Camera substitution is part of the Pro and Team plans. On a lower plan these settings are unavailable, and a profile's camera stays off — pages reach this Mac's real camera as usual. Upgrade to Pro to use it.";
 "editor.camera.mode.off" = "Real camera";
 "editor.camera.mode.block" = "No camera";
 "editor.camera.mode.substitute" = "Substitute";
@@ -1798,6 +1800,7 @@
 /* Help: the virtual camera */
 "help.topic.camera" = "Virtual Camera";
 "help.camera.intro" = "A profile can hand a page a camera of your choosing instead of this Mac's, when the page asks for one with getUserMedia. You set it per profile in the editor's Camera part.";
+"help.camera.plan" = "Camera substitution is part of the Pro and Team plans. On a lower plan the Camera settings are unavailable and a profile's camera stays off.";
 "help.camera.turnOn" = "Turning it on";
 "help.camera.step.edit" = "Open a profile's settings and go to Camera.";
 "help.camera.step.mode" = "Pick Substitute (or No camera to hide it, Real camera to leave it).";

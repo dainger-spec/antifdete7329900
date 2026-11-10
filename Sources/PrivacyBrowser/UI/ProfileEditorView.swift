@@ -568,6 +568,7 @@ struct ProfileEditorView: View {
                           onChooseCameraImage: { choosingCameraImage = true },
                           onChooseCameraVideo: { choosingCameraVideo = true },
                           onOpenCameraPreview: openCameraPreview,
+                          cameraAllowed: model.allowsCamera,
                           isSaving: savingCookies, saveRefused: settingsUnreadable,
                           keptVersions: keptVersions, onUseVersion: useVersion, onRemoveVersion: { removingVersion = $0 },
                           onWhatSitesSee: target.isNew ? nil : { showingWhatSitesSee = true })

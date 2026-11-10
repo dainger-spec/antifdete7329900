@@ -49,6 +49,10 @@ final class ProfileManager: ObservableObject {
     /// Whether the plan has automation, asked before each command of a run in this process. In a
     /// profile's own process it stays true: the manager sends a stop when the plan loses it.
     var scenariosAllowed: () -> Bool = { true }
+    /// Whether the plan has camera substitution (docs/CAMERA.md), asked when a profile launches. The
+    /// parent reads it from the license and carries the answer to the child (`PB_CAMERA_ALLOWED`);
+    /// the child's manager reads it back from there. False neutralises a profile's camera at launch.
+    var cameraAllowed: () -> Bool = { true }
     /// Told of each line and the end of a run in this process (a profile's process passes them on).
     var onScenarioLine: ((UUID, UUID, ScenarioRunner.Line) -> Void)?
     var onScenarioEnded: ((UUID, UUID, ScenarioRunner.Outcome) -> Void)?
@@ -365,6 +369,12 @@ final class ProfileManager: ObservableObject {
         if let lookup { proxyLookupFinished(lookup, for: id, name: summary.name, stored: stored) }
         var configuration = stored.applying(location)
         configuration.webRTCRelay = await webRTCRelay(for: id, configuration)
+        // Camera substitution is the plan's (docs/CAMERA.md). Below pro/team the profile's camera is
+        // turned off here — before the session's shim or the system camera's config is built from it —
+        // so a stored camera never reaches a page on a plan that does not open it.
+        if configuration.cameraSubstitution.mode != .off, !cameraAllowed() {
+            configuration.cameraSubstitution = .off
+        }
         // Before the first web view of the run: WebKit reads its language list only once. The
         // profile's own language when one is set, else its proxy country's.
         let language = stored.webLanguage(for: location)
@@ -481,7 +491,8 @@ final class ProfileManager: ObservableObject {
             proxyLocationFound: proxyLocationFound,
             preferences: BrowsingPreferences.current.forProfileProcess,
             menusInAppLanguage: stored.menusInAppLanguage,
-            processorCores: stored.deviceGeneration.processorCores)
+            processorCores: stored.deviceGeneration.processorCores,
+            cameraAllowed: cameraAllowed())
         child.onEvent = { [weak self] event in
             guard let self else { return }
             switch event {

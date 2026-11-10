@@ -140,6 +140,7 @@ enum HelpContent {
         case .camera:
             return [
                 .paragraph("camera.intro"),
+                .note("camera.plan"),
                 .heading("camera.turnOn"),
                 .steps(["camera.step.edit", "camera.step.mode", "camera.step.source", "camera.step.tune", "camera.step.save"]),
                 .heading("camera.sources"),

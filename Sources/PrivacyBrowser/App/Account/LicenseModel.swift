@@ -175,6 +175,15 @@ final class LicenseModel: ObservableObject {
         return entitlement.allowsAutomation
     }
 
+    /// Camera substitution (docs/CAMERA.md): the plan's `camera` feature (pro and team), in a mode
+    /// that works. Licensing off (a development build): allowed, as every profile opens.
+    var allowsCamera: Bool {
+        guard isConfigured else { return true }
+        recompute()
+        guard let state, state.mode.allowsWork, let entitlement = state.entitlement else { return false }
+        return entitlement.allowsCamera
+    }
+
     /// A profile of this Mac may open fully: a working mode, and among the first by creation time
     /// when there are more than the plan allows here (§8.4). Licensing off: every profile.
     func refusalToOpen(_ id: UUID) -> LicenseRefusal? {

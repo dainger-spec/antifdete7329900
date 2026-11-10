@@ -165,6 +165,24 @@ a video delivered this way is indistinguishable at the JavaScript layer. The onl
 the ones above: the system camera is one global device (the last profile to launch with it sets
 what it shows), and the gate takes effect once a page is granted the camera.
 
+## Plan gating — a paid feature
+
+Camera substitution belongs to the **pro** and **team** plans (`Entitlement.allowsCamera`: those
+plans, or the server naming the `camera` feature, while the license is active). The gate is enforced
+in two places, so a stored camera on a plan that does not open it never reaches a page:
+
+- **The editor** shows the Camera part's settings only when `AppModel.allowsCamera`
+  (`LicenseModel.allowsCamera`); below pro/team it shows just that it is a paid feature
+  (`editor.camera.plan.*`), and nothing of the camera can be set.
+- **At launch**, `ProfileManager` turns a profile's camera off (`cameraSubstitution = .off`) before
+  the session's shim or the system camera's config is built, whenever `cameraAllowed()` is false.
+  The parent reads the right from the license and carries it to a profile's own process through
+  `PB_CAMERA_ALLOWED`; the child's manager (`ProfileSessionHost`) reads it back
+  (`ProfileProcess.cameraAllowedForThisProcess`). Absent means allowed, so a development build
+  (licensing off) and the self-test are not blocked.
+
+The same shape as scenario automation (`allowsAutomation`, docs/AUTOMATION.md).
+
 ## Limitations
 
 - In the JavaScript-shim path, the frames are drawn, not from a sensor. A check that watches for

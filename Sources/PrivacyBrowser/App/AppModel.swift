@@ -401,6 +401,9 @@ final class AppModel: ObservableObject {
         manager.launchGate = { [weak self] id in self?.license.refusalToOpen(id) }
         // Scenario automation is the plan's (docs/AUTOMATION.md): asked before each command.
         manager.scenariosAllowed = { [weak self] in self?.license.allowsAutomation ?? false }
+        // Camera substitution is the plan's (docs/CAMERA.md): a profile's camera is neutralised at
+        // launch when the plan does not open it (pro and team), in this process and in the child.
+        manager.cameraAllowed = { [weak self] in self?.license.allowsCamera ?? false }
         license.vaultOpened(vault)
         ExpiryNotifications.update(at: .stateChanged, license: license)
         manager.onError = { [weak self] message in self?.showError(message) }
@@ -1008,6 +1011,10 @@ final class AppModel: ObservableObject {
 
     /// Whether this plan has scenario automation.
     var allowsAutomation: Bool { license.allowsAutomation }
+
+    /// Whether this plan has camera substitution (docs/CAMERA.md): the editor shows the camera
+    /// settings only then, and a profile's camera is applied only then.
+    var allowsCamera: Bool { license.allowsCamera }
 
     /// The last run of a scenario on profile `id`, if any.
     func scenarioRun(of id: UUID) -> ProfileManager.ScenarioRunState? { manager?.scenarioRuns[id] }

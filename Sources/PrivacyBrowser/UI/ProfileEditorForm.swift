@@ -81,6 +81,9 @@ struct ProfileEditorForm: View {
     @ObservedObject private var systemCamera = SystemCamera.shared
     /// Opens the separate camera preview window (`CameraPreviewWindowController`).
     var onOpenCameraPreview: () -> Void = {}
+    /// Whether the plan opens camera substitution (pro and team). When false the camera section shows
+    /// only that it is a paid feature, and nothing of it can be set (docs/CAMERA.md).
+    var cameraAllowed: Bool = true
     /// Saved, and its cookies being imported: Save waits.
     var isSaving = false
     /// The profile's settings could not be read: Save would put the form's defaults in their place.
@@ -759,26 +762,41 @@ struct ProfileEditorForm: View {
 
     // MARK: Camera
 
+    @ViewBuilder
     private var camera: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            EditorRow(L("editor.camera.mode")) {
-                Picker(L("editor.camera.mode"), selection: $draft.camera.mode) {
-                    Text(L("editor.camera.mode.off")).tag(CameraSubstitution.Mode.off)
-                    Text(L("editor.camera.mode.block")).tag(CameraSubstitution.Mode.block)
-                    Text(L("editor.camera.mode.substitute")).tag(CameraSubstitution.Mode.substitute)
+        if cameraAllowed {
+            VStack(alignment: .leading, spacing: 14) {
+                EditorRow(L("editor.camera.mode")) {
+                    Picker(L("editor.camera.mode"), selection: $draft.camera.mode) {
+                        Text(L("editor.camera.mode.off")).tag(CameraSubstitution.Mode.off)
+                        Text(L("editor.camera.mode.block")).tag(CameraSubstitution.Mode.block)
+                        Text(L("editor.camera.mode.substitute")).tag(CameraSubstitution.Mode.substitute)
+                    }
+                    .labelsHidden()
+                    .fixedSize()
                 }
-                .labelsHidden()
-                .fixedSize()
+                switch draft.camera.mode {
+                case .off:
+                    EditorNote(L("editor.camera.off.note"))
+                case .block:
+                    EditorNote(L("editor.camera.block.note"))
+                case .substitute:
+                    cameraSubstitution
+                }
+                EditorNote(L("editor.camera.footer"))
             }
-            switch draft.camera.mode {
-            case .off:
-                EditorNote(L("editor.camera.off.note"))
-            case .block:
-                EditorNote(L("editor.camera.block.note"))
-            case .substitute:
-                cameraSubstitution
-            }
-            EditorNote(L("editor.camera.footer"))
+        } else {
+            cameraPlanLocked
+        }
+    }
+
+    /// Shown in place of the camera settings when the plan does not open them: the camera is a feature
+    /// of the professional and team plans (docs/CAMERA.md). A stored camera stays stored but, below
+    /// those plans, is turned off at launch, so nothing here is set.
+    private var cameraPlanLocked: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            EditorGroupTitle(L("editor.camera.plan.title"))
+            EditorNote(L("editor.camera.plan.note"))
         }
     }
 

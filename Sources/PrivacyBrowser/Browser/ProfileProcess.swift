@@ -102,7 +102,8 @@ final class ProfileProcess {
                       proxyLocationFound: Bool = false,
                       preferences: BrowsingPreferences = BrowsingPreferences(),
                       menusInAppLanguage: Bool = false,
-                      processorCores: Int? = nil) throws -> ProfileProcess {
+                      processorCores: Int? = nil,
+                      cameraAllowed: Bool = true) throws -> ProfileProcess {
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
 
         let process = Process()
@@ -119,7 +120,7 @@ final class ProfileProcess {
                                                    vaultRoot: vaultRoot, timeZone: timeZone, forWarmUpOnly: forWarmUpOnly,
                                                    proxyLocationFound: proxyLocationFound,
                                                    preferences: preferences, menusInAppLanguage: menusInAppLanguage,
-                                                   processorCores: processorCores)
+                                                   processorCores: processorCores, cameraAllowed: cameraAllowed)
 
         let keyPipe = Pipe()
         process.standardInput = keyPipe
@@ -186,7 +187,19 @@ final class ProfileProcess {
         processorCoresVariable,
         menusInAppLanguageVariable,
         browsingPreferencesVariable,
+        proxyLocationFoundVariable,
+        cameraAllowedVariable,
     ])
+
+    /// Whether the plan opens camera substitution (docs/CAMERA.md). The parent sets it from the
+    /// license; the child's manager reads it back (`cameraAllowedForThisProcess`) to gate a profile's
+    /// camera. Absent means allowed, so a path that does not set it (the self-test) is not blocked.
+    static let cameraAllowedVariable = "PB_CAMERA_ALLOWED"
+
+    /// Read in a profile's own process: its plan opens the camera unless the parent said otherwise.
+    static var cameraAllowedForThisProcess: Bool {
+        ProcessInfo.processInfo.environment[cameraAllowedVariable] != "0"
+    }
 
     /// The processor count the WebKit processes a profile's process starts are given (WebKit's
     /// own `WTF_numberOfProcessorCores`, read once by each of them), `__XPC_`-prefixed as `__XPC_TZ`.
@@ -218,7 +231,8 @@ final class ProfileProcess {
     static func childEnvironment(inheriting parent: [String: String], home: URL, vaultRoot: URL,
                                  timeZone: String?, forWarmUpOnly: Bool, proxyLocationFound: Bool = false,
                                  preferences: BrowsingPreferences = BrowsingPreferences(),
-                                 menusInAppLanguage: Bool = false, processorCores: Int? = nil) throws -> [String: String] {
+                                 menusInAppLanguage: Bool = false, processorCores: Int? = nil,
+                                 cameraAllowed: Bool = true) throws -> [String: String] {
         var environment = parent.filter { inheritedEnvironment.contains($0.key) }
         // The interface's language, by name: the child's `-AppleLanguages` is the websites' list,
         // and the two never decide each other (`InterfaceLanguage`; the child fixes it first thing,
@@ -257,6 +271,9 @@ final class ProfileProcess {
         // they follow the websites' list on the command line, and with them the browser's own words
         // a page can read (`ProfileConfiguration.menusInAppLanguage`).
         if menusInAppLanguage { environment[menusInAppLanguageVariable] = "1" }
+        // The plan's camera right, carried to the child so its own manager gates the profile's camera
+        // the same way this process would (docs/CAMERA.md). Set only when withheld; absent means allowed.
+        if !cameraAllowed { environment[cameraAllowedVariable] = "0" }
         if let json = try? JSONEncoder().encode(preferences) {
             environment[browsingPreferencesVariable] = String(decoding: json, as: UTF8.self)
         }
