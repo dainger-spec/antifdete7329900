@@ -96,6 +96,14 @@ targets.append(contentsOf: [
         dependencies: ["NetworkGuardCore"],
         path: "Sources/NetworkGuardExtension"
     ),
+    // The system virtual camera (a CMIO Camera Extension; docs/CAMERA.md). Standalone — it reads a
+    // small JSON config from the shared app group and renders frames; no BrowserCore dependency, so
+    // the extension stays small. Built and laid out beside the app with CAM=check (CI checks it
+    // compiles against the SDK), signed and embedded with CAM=1 (scripts/build-app.sh).
+    .executableTarget(
+        name: "CameraExtension",
+        path: "Sources/CameraExtension"
+    ),
     .target(
         name: "ObjCExceptions",
         path: "Sources/ObjCExceptions"
@@ -124,6 +132,7 @@ targets.append(contentsOf: [
 products.append(.executable(name: "PrivacyBrowser", targets: ["PrivacyBrowser"]))
 products.append(.executable(name: "PrivacyBrowserUpdater", targets: ["PrivacyBrowserUpdater"]))
 products.append(.executable(name: "NetworkGuardExtension", targets: ["NetworkGuardExtension"]))
+products.append(.executable(name: "CameraExtension", targets: ["CameraExtension"]))
 #endif
 
 let package = Package(

@@ -1,5 +1,6 @@
 import BrowserCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Editable, string-based mirror of `ProfileConfiguration` for form binding.
 struct ProfileDraft {
@@ -57,6 +58,20 @@ struct ProfileDraft {
     /// An iPhone view's full disguise (ProfileConfiguration.phoneDisguise); on by default.
     var phoneFullDisguise = true
     var webRTC: WebRTCPolicy = .disabled
+    /// What a page's camera (and, with it, the microphone) is handed; `.off` by default
+    /// (`CameraSubstitution`). Bound field by field in the editor's Camera part.
+    var camera = CameraSubstitution.off
+    /// The resolution and frame rate as the editor holds them, parsed on Save.
+    var cameraWidth = "1280"
+    var cameraHeight = "720"
+    var cameraFrameRate = "30"
+    /// Video trim, in seconds, as the editor holds them (0 end = to the end).
+    var cameraVideoStart = "0"
+    var cameraVideoEnd = "0"
+    /// The name of a freshly chosen image or video, for the editor to show; nil when none was
+    /// chosen this session (its bytes may still be set, from the stored profile).
+    var cameraImageName: String?
+    var cameraVideoName: String?
     var ephemeral = false
     var safeBrowsing = false
     var historyEnabled = true
@@ -173,6 +188,12 @@ struct ProfileDraft {
         menusInAppLanguage = c.menusInAppLanguage
         phoneFullDisguise = c.phoneDisguise == .full
         webRTC = c.webRTCPolicy
+        camera = c.cameraSubstitution
+        cameraWidth = String(c.cameraSubstitution.width)
+        cameraHeight = String(c.cameraSubstitution.height)
+        cameraFrameRate = String(c.cameraSubstitution.frameRate)
+        cameraVideoStart = String(format: "%g", c.cameraSubstitution.playback.startOffset)
+        cameraVideoEnd = String(format: "%g", c.cameraSubstitution.playback.endOffset)
         ephemeral = c.ephemeral
         safeBrowsing = c.safeBrowsingEnabled
         historyEnabled = c.historyEnabled
@@ -229,6 +250,54 @@ struct ProfileDraft {
         latitude = ""
         longitude = ""
         accuracy = "50"
+    }
+
+    /// The camera substitution the profile is to use, with its numbers parsed and a device secret
+    /// made when it is first turned on. Throws, in words for the person, when a number is not one.
+    func makeCamera() throws -> CameraSubstitution {
+        var cam = camera
+        cam.deviceLabel = String(cam.deviceLabel.prefix(CameraSubstitution.maxDeviceLabelLength))
+        guard cam.isActive else { return .off }
+        guard let width = Int(cameraWidth.trimmingCharacters(in: .whitespaces)),
+              let height = Int(cameraHeight.trimmingCharacters(in: .whitespaces)),
+              let rate = Int(cameraFrameRate.trimmingCharacters(in: .whitespaces)) else {
+            throw DraftProblem(L("editor.camera.error.numbers"))
+        }
+        cam.width = width
+        cam.height = height
+        cam.frameRate = rate
+        cam.playback.startOffset = max(0, Double(cameraVideoStart.trimmingCharacters(in: .whitespaces)) ?? 0)
+        cam.playback.endOffset = max(0, Double(cameraVideoEnd.trimmingCharacters(in: .whitespaces)) ?? 0)
+        if cam.deviceSecret.isEmpty { cam.deviceSecret = CameraSubstitution.newDeviceSecret() }
+        return cam
+    }
+
+    /// A chosen image for the substituted camera (its bytes, read by the host view).
+    mutating func takeCameraImage(named name: String, data: Data, type: String) {
+        camera.imageData = data
+        camera.imageType = type
+        camera.source = .image
+        cameraImageName = name
+    }
+
+    /// A chosen video for the substituted camera.
+    mutating func takeCameraVideo(named name: String, data: Data, type: String) {
+        camera.videoData = data
+        camera.videoType = type
+        camera.source = .video
+        cameraVideoName = name
+    }
+
+    mutating func clearCameraImage() {
+        camera.imageData = nil
+        camera.imageType = nil
+        cameraImageName = nil
+    }
+
+    mutating func clearCameraVideo() {
+        camera.videoData = nil
+        camera.videoType = nil
+        cameraVideoName = nil
     }
 
     /// The proxy the profile is to use, when it is chosen and its type is known.
@@ -332,6 +401,7 @@ struct ProfileDraft {
         configuration.menusInAppLanguage = menusInAppLanguage
         configuration.phoneDisguise = phoneFullDisguise ? .full : .engineOnly
         configuration.webRTCPolicy = webRTC
+        configuration.cameraSubstitution = try makeCamera()
         configuration.ephemeral = ephemeral
         configuration.safeBrowsingEnabled = safeBrowsing
         configuration.historyEnabled = historyEnabled
@@ -389,6 +459,8 @@ struct ProfileEditorView: View {
     /// A check run from the editor: Check, or Save finding a proxy's type.
     @State private var checking = false
     @State private var choosingCookieFile = false
+    @State private var choosingCameraImage = false
+    @State private var choosingCameraVideo = false
     /// The cookies pasted are being imported after Save: no second Save meanwhile.
     @State private var savingCookies = false
     /// The profile's settings could not be read: the form shows defaults, not them, and is never
@@ -424,6 +496,12 @@ struct ProfileEditorView: View {
         .fileImporter(isPresented: $choosingCookieFile, allowedContentTypes: [.json, .plainText, .text, .data]) { result in
             if case let .success(url) = result { readCookieFile(url) }
         }
+        .fileImporter(isPresented: $choosingCameraImage, allowedContentTypes: [.image]) { result in
+            if case let .success(url) = result { readCameraMedia(url, isVideo: false) }
+        }
+        .fileImporter(isPresented: $choosingCameraVideo, allowedContentTypes: [.movie, .video, .mpeg4Movie, .quickTimeMovie]) { result in
+            if case let .success(url) = result { readCameraMedia(url, isVideo: true) }
+        }
         .alert(L("editor.versions.removeTitle"), isPresented: Binding(get: { removingVersion != nil },
                                                                       set: { if !$0 { removingVersion = nil } })) {
             Button(L("editor.versions.remove"), role: .destructive) {
@@ -433,6 +511,29 @@ struct ProfileEditorView: View {
             Button(L("common.cancel"), role: .cancel) { removingVersion = nil }
         } message: {
             Text(L("editor.versions.removeMessage"))
+        }
+    }
+
+    /// An image or video chosen for the substituted camera: its bytes are read into the draft (the
+    /// app reads the file; the profile's pages never touch the disk). Too large, or unreadable, and
+    /// the camera part shows why.
+    private func readCameraMedia(_ url: URL, isVideo: Bool) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let limit = isVideo ? CameraSubstitution.maxVideoBytes : CameraSubstitution.maxImageBytes
+        do {
+            let data = try Data(contentsOf: url)
+            guard data.count <= limit else {
+                error = String(format: L("editor.camera.error.tooLarge"), limit / (1024 * 1024))
+                return
+            }
+            let type = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType
+                ?? (isVideo ? "video/mp4" : "image/jpeg")
+            if isVideo { draft.takeCameraVideo(named: url.lastPathComponent, data: data, type: type) }
+            else { draft.takeCameraImage(named: url.lastPathComponent, data: data, type: type) }
+            error = nil
+        } catch {
+            self.error = String(format: L("editor.camera.error.read"), url.lastPathComponent)
         }
     }
 
@@ -451,6 +552,8 @@ struct ProfileEditorView: View {
                           savedProxies: saved, checkingProxy: checking, onCheckProxy: checkProxy,
                           knownTags: knownTags, visibleScreen: WindowSizing.visibleScreen,
                           onChooseCookieFile: { choosingCookieFile = true }, onDropCookieFile: readCookieFile,
+                          onChooseCameraImage: { choosingCameraImage = true },
+                          onChooseCameraVideo: { choosingCameraVideo = true },
                           isSaving: savingCookies, saveRefused: settingsUnreadable,
                           keptVersions: keptVersions, onUseVersion: useVersion, onRemoveVersion: { removingVersion = $0 },
                           onWhatSitesSee: target.isNew ? nil : { showingWhatSitesSee = true })

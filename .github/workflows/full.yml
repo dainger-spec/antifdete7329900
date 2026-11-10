@@ -150,7 +150,7 @@ jobs:
         timeout-minutes: 30
         # NE=check: the app holds the app group, as an NE=1 build holds the app's keychain, and its
         # profiles must not (the self-test's keychain check).
-        run: NE=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+        run: NE=check CAM=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
       - name: The Settings window on macOS 27, as the person gets it (the control must fail)
         # The same check as the macOS 26 job's: SwiftUI's Settings scene drew the title bar's band in
         # another grey here, and hiding the toolbar did not take it away here (CI run 596).
@@ -362,6 +362,12 @@ jobs:
         continue-on-error: true
         timeout-minutes: 10
         run: TITLE="macOS 27 - a scenario in Safari's window" scripts/scenario_safari_check.sh build/unsandboxed/Lumen.app build/egress27/scenario-safari
+      - name: macOS 27 - a substituted camera in Safari 27's window — getUserMedia gets our stream (reported)
+        # scripts/camera_safari_check.sh, as in the macOS 26 job: fails the step, not the job.
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 10
+        run: TITLE="macOS 27 - a substituted camera in Safari's window" scripts/camera_safari_check.sh build/unsandboxed/Lumen.app build/egress27/camera-safari
       - name: macOS 27 - a profile's data through signing out, into other accounts and back (it must fail when lost)
         # scripts/account_switch_check.py, as in the macOS 26 job, with its control.
         if: always()
@@ -477,10 +483,10 @@ jobs:
       - run: swift test
       - name: Build sandboxed app (default)
         run: APP_DIR=build/sandboxed scripts/build-app.sh
-      - name: Build unsandboxed app, and the network guard extension (unsigned, NE=check)
+      - name: Build unsandboxed app, and the network guard and camera extensions (unsigned, NE=check CAM=check)
         # The extension needs a provisioned team to be signed and loaded (NE=1); CI compiles it
         # against this SDK and lays out its bundle so its plists are checked.
-        run: NE=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+        run: NE=check CAM=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
       - name: The account's keychain before the app first runs (a measurement, compared at the end)
         # Before the release check: it runs the app too, and its keychain check keeps items of its
         # own while it looks (in run 662 it stopped before removing them). What the app leaves in the
@@ -1037,6 +1043,21 @@ jobs:
         with:
           name: scenario-safari
           path: build/scenario-safari
+          if-no-files-found: ignore
+      - name: A substituted camera in Safari's window — getUserMedia gets our stream, as the page sees it
+        # scripts/camera_safari_check.sh (Lumen --camera-safari-check): a profile set to substitute
+        # its camera is started without a window, as the editor's Run starts one, and a scenario on
+        # a secure loopback page in Safari's window must get our synthetic stream from getUserMedia
+        # (the right size and label, a per-origin deviceId, native code, frames that are not frozen)
+        # and our one camera from enumerateDevices. The self-test's own windows are not Safari.
+        if: always()
+        timeout-minutes: 10
+        run: scripts/camera_safari_check.sh build/unsandboxed/Lumen.app build/camera-safari
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: camera-safari
+          path: build/camera-safari
           if-no-files-found: ignore
       - name: The license's renewals, as the account server sees them (they must fail when broken)
         # scripts/license_renewal_check.py: a stand-in account server on 127.0.0.1 answers the

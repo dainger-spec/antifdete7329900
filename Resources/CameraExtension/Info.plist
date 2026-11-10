@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The system virtual camera: a CMIO Camera Extension delivered as a system extension, inside
+	     the app (Contents/Library/SystemExtensions/$(EXTENSION_ID).systemextension). Filled in by
+	     CAM=1 scripts/build-app.sh; see docs/CAMERA.md. -->
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Lumen camera</string>
+	<key>CFBundleExecutable</key>
+	<string>CameraExtension</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(EXTENSION_ID)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>LumenCamera</string>
+	<key>CFBundlePackageType</key>
+	<string>SYSX</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<!-- A new one each build: the app replaces an installed camera whose version is not its own. -->
+	<key>CFBundleVersion</key>
+	<string>$(EXTENSION_VERSION)</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>26.0</string>
+	<key>NSHumanReadableCopyright</key>
+	<string></string>
+	<key>NSSystemExtensionUsageDescription</key>
+	<string>Provides a virtual camera for Lumen profiles that substitute their camera, so a page is handed the chosen picture instead of this Mac's real camera. It captures nothing.</string>
+	<!-- A CoreMediaIO extension; its Mach service name must begin with an app group both the app and
+	     the extension are entitled to. -->
+	<key>CMIOExtension</key>
+	<dict>
+		<key>CMIOExtensionMachServiceName</key>
+		<string>$(APP_GROUP).camera</string>
+	</dict>
+	<!-- The app group the extension reads its config from (CameraExtensionConfig). -->
+	<key>PBCameraAppGroup</key>
+	<string>$(APP_GROUP)</string>
+</dict>
+</plist>

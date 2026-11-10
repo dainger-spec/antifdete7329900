@@ -72,6 +72,12 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// `full`; older configurations decode as `full`.
     public var phoneDisguise: PhoneDisguise
 
+    /// APPROXIMATION: what a page's `getUserMedia` is handed instead of the real camera (and, with
+    /// it, the microphone). A JavaScript shim over the media capture APIs (`PrivacyScripts`), in a
+    /// window of Safari's as in the app's own. Default `.off` — nothing is substituted; written
+    /// only when it is not `.off`, so a profile that never used it is stored as before.
+    public var cameraSubstitution: CameraSubstitution
+
     /// AutoFill for user names and passwords, as Safari's setting of that name: after a sign-in the
     /// browser offers to save what was typed, and a login field shows the profile's saved logins
     /// for the site. Off: nothing is offered or saved; the explicit toolbar buttons still work.
@@ -189,7 +195,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 languageOverride: String? = nil,
                 localeSource: LocaleSource? = nil,
                 menusInAppLanguage: Bool = false,
-                phoneDisguise: PhoneDisguise = .full) {
+                phoneDisguise: PhoneDisguise = .full,
+                cameraSubstitution: CameraSubstitution = .off) {
         self.startURL = startURL
         self.userAgent = userAgent
         self.proxy = proxy
@@ -219,6 +226,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.localeSource = localeSource
         self.menusInAppLanguage = menusInAppLanguage
         self.phoneDisguise = phoneDisguise
+        self.cameraSubstitution = cameraSubstitution
     }
 
     /// Whether this profile's cookies take part in sync (never for an ephemeral profile).
@@ -356,7 +364,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
              safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID,
              matchProxyLocation, lastProxyLocation, warnOnProxyIPChange, passwordAutoFill, passwordNeverSaveSites,
              syncCookies, settingsModifiedAt, searchEngine, tags, notes, avatar, windowSize, safariVersion,
-             localRequests, languageOverride, localeSource, menusInAppLanguage, phoneDisguise
+             localRequests, languageOverride, localeSource, menusInAppLanguage, phoneDisguise,
+             cameraSubstitution
     }
 
     /// Tolerant decoding: fields added in later versions fall back to their defaults, so
@@ -406,6 +415,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         menusInAppLanguage = (try? c.decodeIfPresent(Bool.self, forKey: .menusInAppLanguage)) ?? false
         // One a later build knows and this one does not is the full disguise here.
         phoneDisguise = (try? c.decodeIfPresent(PhoneDisguise.self, forKey: .phoneDisguise)) ?? .full
+        // One a later build wrote that this one cannot read is dropped (the camera as before),
+        // never a reason to fail the profile.
+        cameraSubstitution = (try? c.decodeIfPresent(CameraSubstitution.self, forKey: .cameraSubstitution)) ?? .off
     }
 
     /// Explicit so that `historyRetentionDays: nil` ("keep forever") is written as JSON null
@@ -443,6 +455,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         try c.encode(menusInAppLanguage, forKey: .menusInAppLanguage)
         // Written only when it is not the default: a profile with the full disguise is written as before.
         if phoneDisguise != .full { try c.encode(phoneDisguise, forKey: .phoneDisguise) }
+        // Written only when it is on: a profile that never substituted the camera is written as before.
+        if cameraSubstitution.isActive { try c.encode(cameraSubstitution, forKey: .cameraSubstitution) }
     }
 
     public var historyPolicy: HistoryStore.Policy {
@@ -480,6 +494,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         if let windowSize, !windowSize.isValid {
             throw CoreError.invalidConfiguration("window size must be \(WindowSize.minimumWidth)–\(WindowSize.maximumWidth) × \(WindowSize.minimumHeight)–\(WindowSize.maximumHeight) points")
         }
+        try cameraSubstitution.validate()
     }
 }
 

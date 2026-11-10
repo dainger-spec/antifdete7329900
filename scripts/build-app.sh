@@ -268,6 +268,61 @@ if [[ "$NE" == "1" || "$NE" == "check" ]]; then
   fi
 fi
 
+# The system virtual camera's extension (CAM=1: signed and embedded; CAM=check: built and laid out
+# beside the app, unsigned, so CI checks it compiles against the SDK and its plists are valid).
+# Off by default (CAM unset): an ordinary build is untouched. See docs/CAMERA.md.
+CAMSYSEXT=""
+if [[ "$CAM" == "1" || "$CAM" == "check" ]]; then
+  CAMERA_EXTENSION_ID="${CAMERA_EXTENSION_ID:-$BUNDLE_ID.Camera}"
+  swift build -c "$CONFIG" --product CameraExtension
+  if [[ "$CAM" == "1" ]]; then
+    CAMSYSEXT="$APP/Contents/Library/SystemExtensions/$CAMERA_EXTENSION_ID.systemextension"
+  else
+    CAMSYSEXT="$APP_DIR/$CAMERA_EXTENSION_ID.systemextension"
+    rm -rf "$CAMSYSEXT"
+  fi
+  mkdir -p "$CAMSYSEXT/Contents/MacOS"
+  cp "$BIN_DIR/CameraExtension" "$CAMSYSEXT/Contents/MacOS/CameraExtension"
+  sed -e "s/\$(EXTENSION_ID)/$CAMERA_EXTENSION_ID/g" -e "s/\$(APP_GROUP)/$APP_GROUP/g" \
+    -e "s/\$(EXTENSION_VERSION)/$EXTENSION_VERSION/g" -e "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" \
+    Resources/CameraExtension/Info.plist > "$CAMSYSEXT/Contents/Info.plist"
+  plutil -lint "$CAMSYSEXT/Contents/Info.plist" >/dev/null
+  # The CMIO extension must name its Mach service under an app group both sides are entitled to.
+  [[ "$(/usr/libexec/PlistBuddy -c 'Print :CMIOExtension:CMIOExtensionMachServiceName' "$CAMSYSEXT/Contents/Info.plist")" \
+     == "$APP_GROUP.camera" ]] \
+    || { echo "error: the camera extension's Mach service name is not under the app group" >&2; exit 1; }
+  CAM_ENTITLEMENTS="$(mktemp -t pbcamera).entitlements"
+  sed -e "s/\$(EXTENSION_ID)/$CAMERA_EXTENSION_ID/g" -e "s/\$(APP_GROUP)/$APP_GROUP/g" -e "s/\$(TEAM_ID)/$TEAM_ID/g" \
+    Resources/CameraExtension/CameraExtension.entitlements > "$CAM_ENTITLEMENTS"
+  plutil -lint "$CAM_ENTITLEMENTS" >/dev/null
+  # It captures nothing and opens nothing: like the network guard, it must carry no network entitlement.
+  for key in com.apple.security.network.client com.apple.security.network.server; do
+    if /usr/libexec/PlistBuddy -c "Print :$key" "$CAM_ENTITLEMENTS" >/dev/null 2>&1; then
+      echo "error: the camera extension must not be entitled to open connections ($key)" >&2; exit 1
+    fi
+  done
+  if [[ "$CAM" == "1" ]]; then
+    : "${CAMERA_PROFILE:?CAM=1 needs CAMERA_PROFILE (the provisioning profile for the camera extension)}"
+    cp "$CAMERA_PROFILE" "$CAMSYSEXT/Contents/embedded.provisionprofile"
+    codesign --force --options runtime --timestamp --entitlements "$CAM_ENTITLEMENTS" --sign "$SIGN_IDENTITY" "$CAMSYSEXT"
+    # The app may install the extension and talks to it through the shared app group. Add only what
+    # an NE=1 build did not already add (both use the same app group and the same install right).
+    CAM_APP_ENTITLEMENTS="$(mktemp -t pbappcam).entitlements"
+    cp "$ENTITLEMENTS" "$CAM_APP_ENTITLEMENTS"
+    /usr/libexec/PlistBuddy -c "Print :com.apple.developer.system-extension.install" "$CAM_APP_ENTITLEMENTS" >/dev/null 2>&1 \
+      || /usr/libexec/PlistBuddy -c "Add :com.apple.developer.system-extension.install bool true" "$CAM_APP_ENTITLEMENTS"
+    /usr/libexec/PlistBuddy -c "Print :com.apple.security.application-groups" "$CAM_APP_ENTITLEMENTS" >/dev/null 2>&1 \
+      || /usr/libexec/PlistBuddy -c "Add :com.apple.security.application-groups array" \
+           -c "Add :com.apple.security.application-groups:0 string $APP_GROUP" "$CAM_APP_ENTITLEMENTS"
+    /usr/libexec/PlistBuddy -c "Print :com.apple.application-identifier" "$CAM_APP_ENTITLEMENTS" >/dev/null 2>&1 \
+      || /usr/libexec/PlistBuddy -c "Add :com.apple.application-identifier string $TEAM_ID.$BUNDLE_ID" \
+           -c "Add :com.apple.developer.team-identifier string $TEAM_ID" "$CAM_APP_ENTITLEMENTS"
+    ENTITLEMENTS="$CAM_APP_ENTITLEMENTS"
+    /usr/libexec/PlistBuddy -c "Print :PBCameraExtensionBundleIdentifier" "$PLIST" >/dev/null 2>&1 \
+      || /usr/libexec/PlistBuddy -c "Add :PBCameraExtensionBundleIdentifier string $CAMERA_EXTENSION_ID" "$PLIST"
+  fi
+fi
+
 # DEBUGGABLE=1 adds get-task-allow so lldb can attach. Under the hardened runtime a signature
 # without it refuses the debugger ("Not allowed to attach to process"), and hosting Safari's chrome
 # is debugged by stopping inside Safari's own code. Never for a build that goes anywhere.
@@ -285,7 +340,7 @@ fi
 # LSMinimumSystemVersion is what download.json and the appcast tell people (release.sh), and what macOS
 # refuses an older system by.
 MINIMUM_SYSTEM="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$PLIST")"
-for plist in "$HELPER/Contents/Info.plist" ${SYSEXT:+"$SYSEXT/Contents/Info.plist"}; do
+for plist in "$HELPER/Contents/Info.plist" ${SYSEXT:+"$SYSEXT/Contents/Info.plist"} ${CAMSYSEXT:+"$CAMSYSEXT/Contents/Info.plist"}; do
   [[ "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$plist" 2>/dev/null)" == "$MINIMUM_SYSTEM" ]] \
     || { echo "error: $plist does not need macOS $MINIMUM_SYSTEM as the app does" >&2; exit 1; }
 done
