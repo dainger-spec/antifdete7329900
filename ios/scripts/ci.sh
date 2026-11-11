@@ -49,6 +49,7 @@ if in_suite core; then
     python3 "$HERE/scripts/check_strings.py" "$HERE" 2>&1 | tee -a "$LOG"; [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "a text has no English"; STATUS=1; }
     # The account server's stand-in signs its documents with the testbed's own Ed25519: RFC 8032's vectors.
     python3 "$HERE/testbed/ed25519.py" 2>&1 | tee -a "$LOG"; [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "the testbed's Ed25519 is wrong"; STATUS=1; }
+    python3 "$HERE/testbed/aesgcm.py" 2>&1 | tee -a "$LOG"; [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "the testbed's AES-GCM is wrong"; STATUS=1; }
     python3 "$HERE/scripts/wipe_secrets.py" --selftest 2>&1 | tee -a "$LOG"; [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "wipe_secrets.py does not wipe"; STATUS=1; }
 fi
 
