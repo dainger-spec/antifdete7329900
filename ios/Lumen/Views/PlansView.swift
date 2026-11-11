@@ -13,6 +13,7 @@ struct PlansView: View {
     @State private var signingIn = false
     @State private var confirmSignOut = false
     @State private var refreshing = false
+    @State private var syncing = false
 
     var body: some View {
         NavigationStack {
@@ -62,6 +63,11 @@ struct PlansView: View {
                         if let message = model.accountMessage {
                             Text(message).font(.subheadline).foregroundStyle(Theme.warn).accessibilityIdentifier("accountNotice")
                         }
+                        if model.account != nil {
+                            // The sync with the Mac's vault (its screen says whether the plan has it).
+                            Button { syncing = true } label: { Label(L("Синхронизация"), systemImage: "arrow.triangle.2.circlepath") }
+                                .accessibilityIdentifier("syncButton")
+                        }
                     } header: {
                         Text(L("Аккаунт"))
                     } footer: {
@@ -100,6 +106,7 @@ struct PlansView: View {
                 ToolbarItem(placement: .confirmationAction) { Button(L("Готово")) { dismiss() }.accessibilityIdentifier("plansDone") }
             }
             .sheet(isPresented: $signingIn) { SignInView() }
+            .sheet(isPresented: $syncing) { SyncView() }
             .confirmationDialog(L("Выйти из аккаунта на этом iPhone?"), isPresented: $confirmSignOut, titleVisibility: .visible) {
                 Button(L("Выйти"), role: .destructive) { Task { await model.signOut() } }
                     .accessibilityIdentifier("confirmSignOut")

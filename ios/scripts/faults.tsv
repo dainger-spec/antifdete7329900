@@ -68,6 +68,7 @@ phoneLimitUnexplained	core	LumenCoreTests.LicenseTests/testRefusalsAreSaidWithTh
 noBrowseOpens	core	LumenCoreTests.EntitlementTests/testDecisionsInTimeOnTheServersVectors	a blocked account opens no profile
 unpaidPlanNamed	core	LumenCoreTests.LicenseTests/testTheFreeLevelComesFromTheDocument	no plan is named
 profileTokenLowercase	core	LumenCoreTests.ProfileTokenTests/testTheControlValue	the label is made of the UUID in upper case
+syncHeaderOfAnotherVault	core	LumenCoreTests.DeviceVaultTests/testTheSetupKeepsOnlyThisVaultsKey	another vault's header is not taken
 profileDefaultsReal	ui	LumenUITests/SettingsTests/testANewSessionHasTheFullProfile	a new session's device profile is full by default
 profileLimitIgnored	ui	LumenUITests/FreeTierTests/testFreePlan	the plans open instead of a third profile
 freePlanProxies	ui	LumenUITests/FreeTierTests/testFreePlan	a free profile goes without a proxy

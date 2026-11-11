@@ -46,6 +46,7 @@ public enum Fault: String, CaseIterable, Sendable {
     case textsNotTranslated      // the English table is not asked: an English iPhone reads Russian
     case unpaidPlanNamed         // a plan is named to a person who has paid for none ("Бесплатный")
     case profileTokenLowercase   // a synced profile's label is made of its UUID in lower case (the Mac writes upper)
+    case syncHeaderOfAnotherVault // the sync takes a vault header the server gave for another vault id
     // The account (rights from the server's signed document)
     case signatureNotChecked     // a document's signature is not checked: anyone's payload is taken
     case wrongDeviceAccepted     // a document of another device or another iPhone is taken

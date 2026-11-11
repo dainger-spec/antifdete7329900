@@ -45,8 +45,7 @@ enum SyncKeychain {
     static func keep(_ kept: Kept) -> Bool {
         erase()
         var error: Unmanaged<CFError>?
-        guard let access = SecAccessControlCreateWithFlags(nil, kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly,
-                                                           presenceFlags, &error) else { return false }
+        guard let access = SecAccessControlCreateWithFlags(nil, protection.accessible, protection.flags, &error) else { return false }
         var item = base("unlock-key")
         item[kSecValueData] = kept.unlockKey
         item[kSecAttrAccessControl] = access
@@ -78,12 +77,15 @@ enum SyncKeychain {
         SecItemDelete(base("vault-id") as CFDictionary)
     }
 
-    /// Face ID, Touch ID or the passcode. A DEBUG build's test may keep the key without it
-    /// (LUMEN_TEST_SYNC_NO_PRESENCE): a simulator in a test has no one to look at it.
-    private static var presenceFlags: SecAccessControlCreateFlags {
+    /// Only while a passcode is set, Face ID, Touch ID or the passcode at each read. A DEBUG build's
+    /// test may keep the key without them (LUMEN_TEST_SYNC_NO_PRESENCE): a simulator in a test has
+    /// no passcode and no one to look at it.
+    private static var protection: (accessible: CFString, flags: SecAccessControlCreateFlags) {
         #if DEBUG
-        if ProcessInfo.processInfo.environment["LUMEN_TEST_SYNC_NO_PRESENCE"] == "1" { return [] }
+        if ProcessInfo.processInfo.environment["LUMEN_TEST_SYNC_NO_PRESENCE"] == "1" {
+            return (kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly, [])
+        }
         #endif
-        return .userPresence
+        return (kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly, .userPresence)
     }
 }

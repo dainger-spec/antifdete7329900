@@ -1,4 +1,5 @@
 import BrowserCore
+@testable import LumenCore
 import XCTest
 
 /// The vault on the iPhone (sync step 2; ios/SYNC_PLAN.md, decision 1): the master password entered
@@ -45,4 +46,40 @@ final class DeviceVaultTests: XCTestCase {
         XCTAssertEqual(try SyncProfileToken.token(for: profile, vault: reopened), macToken)
     }
 
+
+    /// The setup screen's core: the account's vaults from the server's answer, and the master
+    /// password turned into the key for exactly the vault asked for.
+    func testTheSetupKeepsOnlyThisVaultsKey() throws {
+        let folder = try folder()
+        let mac = try MasterVault.create(in: folder, password: "vault-pass-1", iterations: 1_000)
+        let header = try Data(contentsOf: MasterVault.headerURL(in: folder))
+
+        let answer = Data("""
+        {"vaults": [{"vaultID": "6f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f1", "changedAt": "2026-11-10T09:30:00Z"},
+                    {"vaultID": "\(mac.vaultID.uuidString.lowercased())", "changedAt": "2026-11-11T09:30:00Z"}]}
+        """.utf8)
+        let vaults = try XCTUnwrap(SyncSetup.vaults(answer))
+        XCTAssertEqual(vaults.map(\.vaultID), [mac.vaultID, UUID(uuidString: "6F1E2D3C-4B5A-4978-8695-A4B3C2D1E0F1")!],
+                       "the last changed first, the lower-case ids read")
+        XCTAssertEqual(SyncSetup.vaults(Data(#"{"vaults": []}"#.utf8)), [])
+        XCTAssertNil(SyncSetup.vaults(Data("<html>".utf8)))
+
+        guard case let .key(key) = SyncSetup.unlockKey(password: "vault-pass-1", header: header, vaultID: mac.vaultID) else {
+            return XCTFail("the right password makes the key")
+        }
+        XCTAssertTrue(SyncSetup.opens(key: key, header: header))
+        XCTAssertEqual(SyncSetup.unlockKey(password: "wrong", header: header, vaultID: mac.vaultID), .wrongPassword)
+        XCTAssertEqual(SyncSetup.unlockKey(password: "vault-pass-1", header: header, vaultID: UUID()), .notThisVault,
+                       "another vault's header is not taken")
+        XCTAssertEqual(SyncSetup.unlockKey(password: "vault-pass-1", header: Data("{}".utf8), vaultID: mac.vaultID), .notThisVault)
+        var newer = try XCTUnwrap(JSONSerialization.jsonObject(with: header) as? [String: Any])
+        newer["format"] = 99
+        XCTAssertEqual(SyncSetup.unlockKey(password: "vault-pass-1", header: try JSONSerialization.data(withJSONObject: newer),
+                                           vaultID: mac.vaultID), .newerApp)
+
+        // The password changed on the Mac: the kept key no longer opens the new header.
+        try mac.changePassword(current: "vault-pass-1", new: "vault-pass-2", iterations: 1_000)
+        let changed = try Data(contentsOf: MasterVault.headerURL(in: folder))
+        XCTAssertFalse(SyncSetup.opens(key: key, header: changed))
+    }
 }

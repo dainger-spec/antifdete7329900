@@ -14,6 +14,8 @@ final class AccountTests: LumenUITestCase {
             "LUMEN_TEST_ACCOUNT_SERVER": "http://account.lumentest:28395",
             "LUMEN_TEST_ENTITLEMENT_KEYS": "cbbc653cdb8bd787:dNOl9JtGQJg6VOEIn3+1dscg5hWYkx9XUqm+qJ5CnZc=",
             "LUMEN_TEST_SITE_URL": "http://127.0.0.1:28380/site-\(run)",
+            // The sync's key kept without Face ID: a simulator has no passcode and no face.
+            "LUMEN_TEST_SYNC_NO_PRESENCE": "1",
         ])
     }
 
@@ -246,5 +248,49 @@ final class AccountTests: LumenUITestCase {
         sessionCard("Проба").tap()
         wait(app.descendants(matching: .any)["lockedSession"], "the profile says why it does not open")
         shot("76 a blocked account")
+    }
+
+    /// The sync's step 2 (ios/SYNC_PLAN.md): the iPhone connects to the account's vault — the one the
+    /// stand-in's Mac made, master password "vault-pass-1" — with the master password asked once and
+    /// only a key kept; a wrong password keeps nothing; "forget" asks for it again. Without a plan
+    /// the sync is a state, not an error.
+    func testSyncConnectsTheMacsVault() {
+        let run = String(UUID().uuidString.prefix(6)).lowercased()
+        launchWithAccount(run: run)
+        openPlan()
+        signIn("pro-\(run)@lumen.test")
+        wait(app.staticTexts["accountEmail"], "signed in", timeout: 30)
+        reveal(app.buttons["syncButton"], "the account's screen offers the sync").tap()
+
+        let field = wait(app.secureTextFields["syncPassword"], "the vault is found and its master password asked", timeout: 30)
+        typeInto(field, "wrong-pass")
+        app.buttons["syncConnect"].tap()
+        waitLabel("syncMessage", "Неверный мастер-пароль.", "a wrong master password keeps nothing")
+        XCTAssertFalse(app.staticTexts["syncConnected"].exists)
+        field.tap()
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 12) + "vault-pass-1")
+        app.buttons["syncConnect"].tap()
+        wait(app.staticTexts["syncConnected"], "the right master password connects the vault", timeout: 30)
+        XCTAssertFalse(passwordOffer.exists, "no offer to keep the master password among the person's own")
+        shot("77 the vault connected")
+
+        // Kept: the screen opened again says so at once, no password asked.
+        app.buttons["syncDone"].tap()
+        reveal(app.buttons["syncButton"], "the sync again").tap()
+        wait(app.staticTexts["syncConnected"], "the kept key: connected without asking", timeout: 15)
+        XCTAssertFalse(app.secureTextFields["syncPassword"].exists)
+        // Forgotten: the password is asked again.
+        app.buttons["syncForget"].tap()
+        wait(app.secureTextFields["syncPassword"], "forgotten: the master password is asked again", timeout: 30)
+        app.buttons["syncDone"].tap()
+        signOut()
+
+        // An account without a plan: the sync is said to be the plan's, nothing asked.
+        signIn("free-\(run)@lumen.test")
+        wait(app.staticTexts["accountEmail"], "signed in without a plan", timeout: 30)
+        reveal(app.buttons["syncButton"], "the sync's screen is there without a plan too").tap()
+        wait(app.staticTexts["syncNotInPlan"], "without a plan the sync says it is the plan's", timeout: 30)
+        XCTAssertFalse(app.secureTextFields["syncPassword"].exists, "no master password is asked without a plan")
+        shot("78 the sync without a plan")
     }
 }

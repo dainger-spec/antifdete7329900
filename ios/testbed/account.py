@@ -9,6 +9,8 @@ docs/CONTRACT.md (§2–§7) and docs/IPHONE.md say an iPhone meets, until the s
     POST /v1/devices/activate      (session) {"machineID", "platform", "profileCount", "appVersion"}
     POST /v1/device/entitlement    (device token) the same body
     DELETE /v1/device              (device token)
+    GET /v1/device/sync/vaults     (device token) the account's vaults (CONTRACT.md §16.1)
+    GET /v1/vaults/{vault}/objects/vault-header   (device token) a vault's header, as a Mac put it there
 
   Every account's password is "correct-horse-1". What an account is, its address says — the part
   before the first "-" or "@" (the rest is the test's own, so that two tests never share one):
@@ -24,6 +26,9 @@ docs/CONTRACT.md (§2–§7) and docs/IPHONE.md say an iPhone meets, until the s
                                  account_disabled, features [] — nothing opens (CONTRACT.md §8.4а)
     forged                       its document is signed with another key under the trusted key's id
     newkey                       its document is signed with a key the app does not carry
+    novault                      a plan, and sync never turned on: no vault
+  An account with a plan has one vault, its master password "vault-pass-1" (PBKDF2, few rounds: a
+  test's vault); free, ended and disabled accounts get 403 sync_not_in_plan for the sync (§16.1).
   An activation that does not say platform "ios" is a Mac's (CONTRACT.md §6.1), and the stand-in's
   licenses have no Mac place left: 409 device_limit_reached — a Mac's refusal, which an iPhone does
   not take for its own. A platform that is neither is 400 invalid_request (field: platform). An
@@ -46,6 +51,7 @@ import time
 import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import aesgcm  # noqa: E402
 import ed25519  # noqa: E402
 
 PORT = 28395
@@ -115,6 +121,30 @@ def document(acc, device):
         seed, key_id = OTHER_SEED, OTHER_KEY_ID
     return {"format": 1, "keyID": key_id, "payload": base64.b64encode(raw).decode(),
             "signature": base64.b64encode(ed25519.sign(seed, raw)).decode()}
+
+
+VAULT_PASSWORD = "vault-pass-1"
+
+
+def vault_of(acc):
+    """The account's vault as a Mac made it (MasterVault.create): its header's JSON, made once."""
+    if "vault" not in acc:
+        vault_id = str(uuid.uuid4()).upper()
+        salt = os.urandom(16)
+        kek = hashlib.pbkdf2_hmac("sha256", VAULT_PASSWORD.encode(), salt, 1000, 32)
+        vmk = os.urandom(32)
+        wrapped = aesgcm.seal(kek, os.urandom(12), vmk, f"vault-master-key:v1:{vault_id}".encode())
+        header = {"format": 2, "vaultID": vault_id,
+                  "kdf": {"algorithm": "pbkdf2-hmac-sha256", "iterations": 1000, "salt": base64.b64encode(salt).decode()},
+                  "wrappedMasterKey": base64.b64encode(wrapped).decode(), "createdAt": stamp(time.time()), "passwordRevision": 0}
+        acc["vault"] = dict(id=vault_id.lower(), header=json.dumps(header).encode(), changedAt=stamp(time.time()))
+    return acc["vault"]
+
+
+def blob(data, revision):
+    head = ["HTTP/1.1 200 OK", "Connection: close", f"Content-Length: {len(data)}", "Content-Type: application/octet-stream",
+            f'ETag: "{revision}"']
+    return ("\r\n".join(head) + "\r\n\r\n").encode() + data
 
 
 def answer(status, body=None):
@@ -221,6 +251,24 @@ def handle(method, path, headers, body):
                                        "appVersion": fields.get("appVersion"), "mine": True, "accountEmail": None, "platform": "ios"},
                             "deviceToken": device_token, "entitlement": document(acc, device), "serverTime": now,
                             "unlinkCooldownSeconds": 604800})
+
+    # The sync (CONTRACT.md §16.1): which vaults the account has, and a vault's header.
+    if method == "GET" and (path == "/v1/device/sync/vaults" or re.fullmatch(r"/v1/vaults/[0-9a-f-]{36}/objects/vault-header", path)):
+        if token not in DEVICES:
+            return refuse(401, "device_revoked" if path.startswith("/v1/device") else "unauthorized")
+        email, _ = DEVICES[token]
+        acc = ACCOUNTS[email]
+        if acc["plan"] in ("free", "ended", "disabled"):
+            return refuse(403, "sync_not_in_plan")
+        event("account", what="sync", email=email, path=path)
+        if acc["kind"] == "novault":
+            return answer(200, {"vaults": []}) if path.endswith("/vaults") else refuse(404, "not_found")
+        vault = vault_of(acc)
+        if path.endswith("/vaults"):
+            return answer(200, {"vaults": [{"vaultID": vault["id"], "changedAt": vault["changedAt"]}]})
+        if path.split("/")[3] != vault["id"]:
+            return refuse(403, "forbidden")
+        return blob(vault["header"], 1)
 
     if path == "/v1/device/entitlement" and method == "POST" or (method, path) == ("DELETE", "/v1/device"):
         if token not in DEVICES:

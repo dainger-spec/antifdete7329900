@@ -193,3 +193,18 @@
 
 /* A new tab: where a search goes. */
 "Поисковик: %@" = "Search engine: %@";
+
+/* The sync with the Mac's vault (SyncView). */
+"Синхронизация" = "Sync";
+"Синхронизация с Mac — в пробном и платном тарифе. Профили на этом iPhone остаются как есть." = "Sync with your Mac comes with a trial or a paid plan. The profiles on this iPhone stay as they are.";
+"Синхронизация ещё не включена. Включите её в Lumen для Mac, затем вернитесь сюда." = "Sync is not turned on yet. Turn it on in Lumen for Mac, then come back here.";
+"Мастер-пароль" = "Master password";
+"Мастер-пароль хранилища Lumen для Mac. Он нужен один раз: на этом iPhone остаётся только ключ, под Face ID или кодом телефона." = "The master password of your Lumen for Mac vault. It is asked once: this iPhone keeps only a key, behind Face ID or its passcode.";
+"Проверяем…" = "Checking…";
+"Подключить" = "Connect";
+"Хранилище подключено" = "Vault connected";
+"Профили с Mac появятся здесь в следующей версии синхронизации." = "Profiles from your Mac will appear here in the next version of sync.";
+"Забыть хранилище" = "Forget the Vault";
+"Войдите в аккаунт Lumen." = "Sign in to your Lumen account.";
+"Задайте код-пароль iPhone в Настройках: без него ключ хранилища не сохранить." = "Set an iPhone passcode in Settings: without one the vault's key cannot be kept.";
+"Неверный мастер-пароль." = "Wrong master password.";
