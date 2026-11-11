@@ -140,6 +140,7 @@ enum HelpContent {
         case .camera:
             return [
                 .paragraph("camera.intro"),
+                .note("camera.plan"),
                 .heading("camera.turnOn"),
                 .steps(["camera.step.edit", "camera.step.mode", "camera.step.source", "camera.step.tune", "camera.step.save"]),
                 .heading("camera.sources"),
@@ -148,7 +149,8 @@ enum HelpContent {
                 .points(["camera.tune.resolution", "camera.tune.label", "camera.tune.audio", "camera.tune.mirror", "camera.tune.screen"]),
                 .heading("camera.know"),
                 .note("camera.secure"),
-                .points(["camera.know.system", "camera.know.safari", "camera.know.detect", "camera.know.permission", "camera.know.size"]),
+                .points(["camera.know.system", "camera.know.systemInstall", "camera.know.safari", "camera.know.detect",
+                         "camera.know.permission", "camera.know.size"]),
             ]
         case .keys:
             return [

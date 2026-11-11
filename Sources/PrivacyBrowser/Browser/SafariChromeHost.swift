@@ -208,6 +208,16 @@ enum SafariChromeHost {
     /// no web view within a few seconds: the run then says so.
     static func openScenarioPage(session: BrowserSession) async -> (webView: WKWebView, navigate: (URL) -> Void)? {
         guard isPrepared, canHost(session.configuration), let blank = URL(string: "about:blank") else { return nil }
+        // The window of the run before, while it is open: a window for each run left as many
+        // windows — and web processes — as there were runs (a script calling the API in a loop).
+        // Whatever tab a person chose in it since, its page is the one acted on, and addresses go
+        // to that page itself.
+        if let window = scenarioWindow, window.isVisible, let webView = pageWebView(in: window) {
+            window.makeKeyAndOrderFront(nil)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            log.notice("A scenario's run has the window of the run before")
+            return (webView, navigation(tab: nil, webView: webView))
+        }
         watchWindows()
         ProfileNetworkGuard.register(session: session)
         guard let controller = SafariChrome.openWindow(address: blank) else {
@@ -226,16 +236,41 @@ enum SafariChromeHost {
         for _ in 0..<60 {
             if let webView = pageWebView(in: controller.window) {
                 log.notice("A scenario's run has a window of Safari's")
-                let navigate: (URL) -> Void = { [weak webView] address in
-                    if let tab, SafariChrome.load(address, in: tab) { return }
-                    _ = webView?.load(URLRequest(url: address))
-                }
-                return (webView, navigate)
+                scenarioWindow = controller.window
+                return (webView, navigation(tab: tab, webView: webView))
             }
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
         log.error("Safari's window for a scenario's run has no web view")
         return nil
+    }
+
+    /// The window the last run opened, for the next one (`openScenarioPage`).
+    private static weak var scenarioWindow: NSWindow?
+
+    /// How a run goes to an address in Safari's window: through the tab (`loadURL:`), as the
+    /// address bar does, so that the chrome's own bookkeeping follows. The tab is the newest one
+    /// Safari names, taken for the window's: if the web view has not started for the address half
+    /// a second later — it was not this window's tab — the address is loaded in the web view
+    /// itself. Without a tab, in the web view at once.
+    private static func navigation(tab: NSObject?, webView: WKWebView) -> (URL) -> Void {
+        { [weak webView, weak tab] address in
+            guard let webView else { return }
+            guard let tab, SafariChrome.load(address, in: tab) else {
+                _ = webView.load(URLRequest(url: address))
+                return
+            }
+            let before = webView.url
+            // The address the page is already at tells nothing by not changing.
+            guard before != address else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak webView] in
+                MainActor.assumeIsolated {
+                    guard let webView, !webView.isLoading, webView.url == before else { return }
+                    log.error("Safari's tab did not take a run's address in its web view: loaded in the web view itself")
+                    _ = webView.load(URLRequest(url: address))
+                }
+            }
+        }
     }
 
     /// The largest web view shown in `window`: its tab's page.

@@ -191,6 +191,9 @@ public final class UnlockedVault: @unchecked Sendable {
     var profileKeyWrappingKey: SymmetricKey { get throws { try vaultKey("profile-key-wrap") } }
     var syncEnvelopeKey: SymmetricKey { get throws { try vaultKey("sync-envelope") } }
     var syncObjectIDKey: SymmetricKey { get throws { try vaultKey("sync-object-id") } }
+    /// The key of the synced profiles' tokens a renewal carries (`SyncProfileToken`; the account
+    /// server's CONTRACT §6.2): the vault's, so the same on every device of the vault.
+    var syncProfileCountKey: SymmetricKey { get throws { try vaultKey("sync-profile-count") } }
     var settingsKey: SymmetricKey { get throws { try vaultKey("device-settings") } }
     /// The proxy list (`proxies.bin`, `ProxyList`): this Mac's, never synced, like the settings.
     var proxyListKey: SymmetricKey { get throws { try vaultKey("proxy-list") } }

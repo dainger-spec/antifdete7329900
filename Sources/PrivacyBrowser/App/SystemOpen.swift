@@ -35,6 +35,9 @@ enum SystemOpen {
         /// System Settings › Notifications: the subscription's reminders were turned off there, and
         /// the person asks, in Settings › Account, to turn them on again.
         case notifications
+        /// System Settings › Privacy & Security › Camera: this app is not allowed the camera, which
+        /// the system camera's feed needs (`SystemCameraFeed`), and the person asks to allow it.
+        case cameraPrivacy
     }
 
     struct Request: Equatable, Sendable {
@@ -126,6 +129,17 @@ enum SystemOpen {
         guard admit(.notifications, url.absoluteString) else { return }
         if let standIn {
             Task { _ = await standIn(.notifications, url) }
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// System Settings at Privacy & Security › Camera, where this app is allowed the camera.
+    static func openSystemSettingsForCamera() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera") else { return }
+        guard admit(.cameraPrivacy, url.absoluteString) else { return }
+        if let standIn {
+            Task { _ = await standIn(.cameraPrivacy, url) }
             return
         }
         NSWorkspace.shared.open(url)

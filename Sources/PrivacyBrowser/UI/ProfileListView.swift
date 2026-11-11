@@ -212,6 +212,13 @@ struct ProfileListView: View {
             .sheet(item: $proxySheet) { _ in
                 ProxyProblemView { id in showProxies(selecting: [id]) }
             }
+            // File › New Profile (⌘N).
+            .onReceive(model.$newProfileRequest) { requested in
+                guard requested else { return }
+                model.newProfileRequest = false
+                section = .profiles
+                editing = .new
+            }
             // Settings → Proxies → the list.
             .onReceive(model.$proxiesRequest) { requested in
                 guard requested else { return }
@@ -373,6 +380,8 @@ struct ProfileListView: View {
                            openSettings()
                        },
                        dismissEngineWarning: { model.engineWarningSeen() },
+                       updateOffer: model.updateOffer,
+                       dismissUpdateOffer: { model.updateOfferSeen() },
                        updatedTo: model.updatedTo,
                        openUpdates: {
                            model.updatedNoticeSeen()
@@ -841,6 +850,10 @@ struct ProfilesScreen: View {
     var openEngineDetails: () -> Void = {}
     var dismissEngineWarning: () -> Void = {}
     /// The version an update installed at the last quit, said once at the launch it made.
+    /// A newer version found by the updater: said here, with the way to Settings › Updates where it
+    /// is installed; Later puts it away until the app starts again.
+    var updateOffer: UpdateOffer?
+    var dismissUpdateOffer: () -> Void = {}
     var updatedTo: String?
     var openUpdates: () -> Void = {}
     var dismissUpdated: () -> Void = {}
@@ -971,6 +984,7 @@ struct ProfilesScreen: View {
         case proxyProblem(ProxyProblemBanner.Item)
         case engines(EngineWarning.Facts)
         case updated(String)
+        case updateOffer(UpdateOffer)
         case keptDeleted
 
         var id: String {
@@ -980,6 +994,7 @@ struct ProfilesScreen: View {
             case .proxyProblem: return "proxy"
             case .engines: return "engines"
             case .updated: return "updated"
+            case .updateOffer: return "update-offer"
             case .keptDeleted: return "kept"
             }
         }
@@ -994,6 +1009,7 @@ struct ProfilesScreen: View {
         if let proxyProblem { banners.append(.proxyProblem(proxyProblem)) }
         banners += licenseBanners.filter { !$0.stopsWork }.map { .license($0) }
         if let engineWarning { banners.append(.engines(engineWarning)) }
+        if let updateOffer { banners.append(.updateOffer(updateOffer)) }
         if let updatedTo { banners.append(.updated(updatedTo)) }
         if !keptDeleted.isEmpty { banners.append(.keptDeleted) }
         return banners
@@ -1035,6 +1051,8 @@ struct ProfilesScreen: View {
             EngineWarningBanner(facts: facts, details: openEngineDetails, done: dismissEngineWarning)
         case let .updated(version):
             UpdatedBanner(version: version, details: openUpdates, done: dismissUpdated)
+        case let .updateOffer(offer):
+            UpdateOfferBanner(offer: offer, open: openUpdates, later: dismissUpdateOffer)
         case .keptDeleted:
             KeptDeletedBox(profiles: keptDeleted, isWorking: isWorking, bringBack: bringBack,
                            removeForGood: removeForGood, reveal: revealKeptDeleted)
@@ -1155,7 +1173,9 @@ struct ProfilesScreen: View {
             if isWorking {
                 ProgressView().controlSize(.small).transition(.opacity)
             }
-            LumenSearchField(text: $search, prompt: L("profiles.search"), shortcut: "⌘K")
+            // No ⌘K here: that is the command palette's (the sidebar's "Commands and Search"), and
+            // this field only filters the list.
+            LumenSearchField(text: $search, prompt: L("profiles.search"))
                 .frame(maxWidth: 280)
             Button {
                 showsInspector.wrappedValue.toggle()
@@ -1193,7 +1213,8 @@ struct ProfilesScreen: View {
                 Label(L("profiles.action.new"), systemImage: "plus")
             }
             .buttonStyle(.lumenPrimary)
-            .keyboardShortcut("n")
+            // ⌘N is the File menu's New Profile, which works from every window.
+            .help(L("profiles.action.new.help"))
         }
         .frame(height: Self.headerHeight)
         .padding(.leading, 28)
@@ -1299,7 +1320,13 @@ struct ProfilesScreen: View {
             ForEach(rows) { row in
                 ProfileRow(row: row, columns: columns, actions: actions, isSelected: selection.contains(row.id),
                            showsCheckbox: selectedRows.count >= 2, height: appearance.density.rowHeight,
-                           onClick: { click in selection.click(row.id, click, order: displayOrder.map(\.id)) })
+                           onClick: { click in selection.click(row.id, click, order: displayOrder.map(\.id)) },
+                           // A double click is what a person opens a thing with: the profile is
+                           // launched, and stays the chosen one.
+                           onDoubleClick: {
+                               selection.select([row.id])
+                               if row.activity == .stopped { actions.launch(row.id) }
+                           })
             }
         }
     }
@@ -1656,6 +1683,7 @@ private struct ProfileRow: View {
     var height: CGFloat = 52
     /// A click on the row itself (not on its buttons or menu): selects it (`ProfileSelection`).
     var onClick: (ProfileSelection.Click) -> Void = { _ in }
+    var onDoubleClick: () -> Void = {}
     @State private var hovered = false
 
     var body: some View {
@@ -1678,7 +1706,9 @@ private struct ProfileRow: View {
                 .padding(.leading, ProfileColumns.rowPadding + ProfileColumns.nameInset - 18)
         }
         .contentShape(Rectangle())
-        // The row's buttons and ⋯ menu take their own clicks; a click anywhere else selects.
+        // The row's buttons and ⋯ menu take their own clicks; a click anywhere else selects, and
+        // a double click launches (each of its clicks is also a click: the first selects).
+        .simultaneousGesture(TapGesture(count: 2).onEnded { onDoubleClick() })
         .onTapGesture { onClick(.current) }
         .onHover { hovered = $0 }
         .animation(Motion.hover(hovered), value: hovered)
@@ -2417,6 +2447,71 @@ struct UpdatedBanner: View {
             }
         }
         .accessibilityIdentifier("updated-banner")
+    }
+}
+
+/// A newer version of the app, as the updater has it (`AppModel.updateOffer`).
+struct UpdateOffer: Equatable {
+    enum Stage: Equatable {
+        /// Found, not downloaded (the "only tell me" policy).
+        case available
+        case downloading
+        /// Downloaded and checked: installed at the next quit, or now from Settings › Updates.
+        case ready
+        /// Found, but the app cannot be replaced where it is (Settings › Updates says why).
+        case blocked
+    }
+
+    var version: String
+    var stage: Stage
+}
+
+/// Above the profiles: a newer version is out. Before, only Settings › Updates said so — and only
+/// to someone who went there (the owner, 11 November). What it says follows the updater: found,
+/// downloading, ready to install, or not installable here; the button goes to Settings › Updates,
+/// where it is installed; Later puts it away until the app starts again.
+struct UpdateOfferBanner: View {
+    let offer: UpdateOffer
+    let open: () -> Void
+    let later: () -> Void
+
+    private var detail: String {
+        switch offer.stage {
+        case .available: return L("updates.offer.available")
+        case .downloading: return L("updates.offer.downloading")
+        case .ready: return L("updates.offer.ready")
+        case .blocked: return L("updates.offer.blocked")
+        }
+    }
+
+    var body: some View {
+        LumenBanner(tone: .info) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(String(format: L("updates.offer.title"), offer.version))
+                        .font(.lumenLabel)
+                        .foregroundStyle(Theme.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(detail)
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Button(offer.stage == .ready ? L("updates.offer.install") : L("updates.banner.details"), action: open)
+                            .buttonStyle(.lumenSecondary)
+                        Button(L("updates.offer.later"), action: later)
+                            .buttonStyle(.lumenGhost)
+                    }
+                    .padding(.top, 4)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .accessibilityIdentifier("update-offer-banner")
     }
 }
 

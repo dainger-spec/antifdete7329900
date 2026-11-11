@@ -27,6 +27,7 @@ struct SyncSettingsView: View {
     @State private var serverURL = ""
     @State private var token = ""
     @State private var loaded = false
+    @State private var confirmingOff = false
 
     var body: some View {
         if embedded {
@@ -44,12 +45,18 @@ struct SyncSettingsView: View {
                 }
                 .scrollBounceBehavior(.basedOnSize)
                 SheetFooter {
-                    Button(L("common.done")) { dismiss() }
+                    Button(L("common.done")) {
+                        // A server typed and not saved is saved: Return closed the sheet without it.
+                        if mode == .server, serverChanged, !serverURL.isEmpty { saveServer() }
+                        dismiss()
+                    }
                         .buttonStyle(.lumenPrimary)
                         .keyboardShortcut(.defaultAction)
                 }
             }
             .sheetFrame(width: 620, height: 640)
+            // Esc closes it as well: Done was Return only.
+            .onExitCommand { dismiss() }
             .background(Theme.raised)
             .onAppear(perform: load)
         }
@@ -64,8 +71,21 @@ struct SyncSettingsView: View {
                     .accessibilityElement(children: .contain)
                     .accessibilityLabel(L("sync.to"))
             }
-            .onChange(of: mode) { _, newValue in
-                if newValue == .off, model.syncTarget != nil { model.clearSyncTarget() }
+            .onChange(of: mode) { oldValue, newValue in
+                // Off forgets the folder or the server and its token: asked first.
+                if newValue == .off, model.syncTarget != nil {
+                    mode = oldValue
+                    confirmingOff = true
+                }
+            }
+            .confirmationDialog(L("sync.off.title"), isPresented: $confirmingOff, titleVisibility: .visible) {
+                Button(L("sync.off.confirm"), role: .destructive) {
+                    model.clearSyncTarget()
+                    mode = .off
+                }
+                Button(L("common.cancel"), role: .cancel) {}
+            } message: {
+                Text(L("sync.off.message"))
             }
 
             switch mode {
@@ -97,11 +117,13 @@ struct SyncSettingsView: View {
                     TextField(L("sync.server.url"), text: $serverURL, prompt: Text(verbatim: ""))
                         .lumenField("https://sync.example.com", isEmpty: serverURL.isEmpty) // l10n: not text
                         .frame(width: 280)
+                        .onSubmit(saveServer)
                 }
                 SettingRow(L("sync.server.token"), detail: nil, effect: nil) {
                     SecureField(L("sync.server.token"), text: $token, prompt: Text(verbatim: ""))
                         .lumenField()
                         .frame(width: 280)
+                        .onSubmit(saveServer)
                 }
                 HStack(alignment: .top, spacing: 16) {
                     Text(L("sync.server.note"))
@@ -109,9 +131,14 @@ struct SyncSettingsView: View {
                         .foregroundStyle(Theme.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Button(L("sync.server.save")) { model.setSyncServer(baseURL: serverURL, token: token) }
+                    if !serverChanged, !serverURL.isEmpty {
+                        Label(L("sync.server.saved"), systemImage: "checkmark")
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.running)
+                    }
+                    Button(L("sync.server.save"), action: saveServer)
                         .buttonStyle(.lumenSecondary)
-                        .disabled(serverURL.isEmpty)
+                        .disabled(serverURL.isEmpty || !serverChanged)
                 }
                 .padding(.bottom, 6)
             }
@@ -197,6 +224,17 @@ struct SyncSettingsView: View {
             serverURL = url.absoluteString
             token = savedToken
         }
+    }
+
+    /// What is typed is not what is saved.
+    private var serverChanged: Bool {
+        guard case let .server(url, savedToken)? = model.syncTarget else { return true }
+        return url.absoluteString != serverURL.trimmingCharacters(in: .whitespaces) || savedToken != token
+    }
+
+    private func saveServer() {
+        guard !serverURL.isEmpty else { return }
+        model.setSyncServer(baseURL: serverURL, token: token)
     }
 
     private func chooseFolder() {

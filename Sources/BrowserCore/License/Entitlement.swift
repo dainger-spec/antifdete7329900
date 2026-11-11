@@ -95,6 +95,15 @@ public struct Entitlement: Equatable, Sendable {
     public static let automationFeature = "automation"
     public var allowsAutomation: Bool { status == .active && features.contains(Self.automationFeature) }
 
+    /// Camera substitution (docs/CAMERA.md): a paid feature, only while the license is active. The
+    /// professional and team plans open it; the server may also open it to another plan by naming the
+    /// `camera` feature (as automation works). Below it — personal, trial, none — the camera is off.
+    public static let cameraFeature = "camera"
+    public static let cameraPlans: Set<String> = ["pro", "team"]
+    public var allowsCamera: Bool {
+        status == .active && (Self.cameraPlans.contains(plan) || features.contains(Self.cameraFeature))
+    }
+
     public init(documentID: String = "", accountID: String = "", licenseID: String = "", deviceID: String, machineID: String,
                 role: String, plan: String, status: Status, exportReason: String?, limits: Limits, profilesOnOtherDevices: Int,
                 periodEndsAt: Date?, issuedAt: Date, refreshAfter: Date, expiresAt: Date, graceEndsAt: Date,

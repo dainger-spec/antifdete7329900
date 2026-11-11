@@ -1,9 +1,10 @@
+import CameraRendering
 import CoreMediaIO
 import Foundation
 
-/// The extension's provider: it publishes one virtual camera device (`CameraDeviceSource`). The
-/// device's name comes from the shared config (the app writes it), so it can read as a built-in
-/// camera ("FaceTime HD Camera") rather than announcing itself.
+/// The extension's provider: it publishes one virtual camera device (`CameraDeviceSource`) under a
+/// fixed name; the believable name a page reads ("FaceTime HD Camera") is the profile's, applied
+/// in the page (`PrivacyScripts.patchSystemCamera`).
 final class CameraProviderSource: NSObject, CMIOExtensionProviderSource {
     private(set) var provider: CMIOExtensionProvider!
     private var deviceSource: CameraDeviceSource!

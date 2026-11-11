@@ -79,6 +79,12 @@ final class LicenseModel: ObservableObject {
     private var knownProfileCount: Int?
     /// The number the last renewal that reached the server carried.
     private var sentProfileCount: Int?
+    /// The tokens of this Mac's synced profiles (`SyncProfileToken`; CONTRACT §6.2) as the open
+    /// vault has them, and as the server was last told; nil without sync.
+    private var knownProfileTokens: [String]?
+    private var sentProfileTokens: [String]?
+    /// The server refused a renewal for its tokens in this run: none are sent until the app starts again.
+    private var tokensRefusedByServer = false
     /// The server refused a renewal with the label (HTTP 400): left out until the app starts again.
     private var labelRefusedByServer = false
     /// Several changes to the profiles in a row are one renewal.
@@ -173,6 +179,15 @@ final class LicenseModel: ObservableObject {
         recompute()
         guard let state, state.mode.allowsWork, let entitlement = state.entitlement else { return false }
         return entitlement.allowsAutomation
+    }
+
+    /// Camera substitution (docs/CAMERA.md): the plan's `camera` feature (pro and team), in a mode
+    /// that works. Licensing off (a development build): allowed, as every profile opens.
+    var allowsCamera: Bool {
+        guard isConfigured else { return true }
+        recompute()
+        guard let state, state.mode.allowsWork, let entitlement = state.entitlement else { return false }
+        return entitlement.allowsCamera
     }
 
     /// A profile of this Mac may open fully: a working mode, and among the first by creation time
@@ -291,14 +306,20 @@ final class LicenseModel: ObservableObject {
     /// The open vault holds `count` profiles — at the unlock and after each change. Kept for the next
     /// start (a renewal before the vault is opened says the last number known), and told to the
     /// server when it is not the number it was last told.
-    func profilesKnown(count: Int) {
+    ///
+    /// `tokens`: the tokens of those of them that are in the sync vault, nil without sync — a
+    /// profile that sync has on a Mac and an iPhone then takes one place of the license's, not two
+    /// (CONTRACT §6.2, §8.4). Kept and told the same way.
+    func profilesKnown(count: Int, tokens: [String]? = nil) {
         let first = knownProfileCount == nil
         knownProfileCount = count
-        if record.profileCount != count {
+        knownProfileTokens = tokens
+        if record.profileCount != count || record.profileTokens != tokens {
             record.profileCount = count
+            record.profileTokens = tokens
             save()
         }
-        guard record.isSignedIn, sentProfileCount != count else { return }
+        guard record.isSignedIn, sentProfileCount != count || sentProfileTokens != tokens else { return }
         profilesRenewal?.cancel()
         let reason: RenewalReason = first ? .unlocked : .profiles
         profilesRenewal = Task { [weak self] in
@@ -345,8 +366,17 @@ final class LicenseModel: ObservableObject {
             log.notice("License renewal: asked (\(reason.rawValue, privacy: .public)), \(Int(count), privacy: .public) profile(s) as last known, the vault not open")
         }
         let before = state?.entitlement
-        let report = await client.refreshReport(record, profileCount: count, label: renewalLabel, wall: Date(),
+        // The synced profiles' tokens: the open vault's, or the last known before it is opened.
+        let tokens = tokensRefusedByServer ? nil : (knownProfileCount != nil ? knownProfileTokens : record.profileTokens)
+        if let tokens {
+            log.notice("License renewal: with the tokens of \(Int(tokens.count), privacy: .public) synced profile(s)")
+        }
+        let report = await client.refreshReport(record, profileCount: count, label: renewalLabel, profileTokens: tokens, wall: Date(),
                                                 uptime: ProcessInfo.processInfo.systemUptime)
+        if report.tokensRefused, !tokensRefusedByServer {
+            tokensRefusedByServer = true
+            log.error("License renewal: the server refused the synced profiles' tokens (HTTP 400, profileTokens) and took the renewal without them; every profile of this Mac is counted, no tokens until the app starts again")
+        }
         if report.labelRefused, !labelRefusedByServer {
             labelRefusedByServer = true
             log.notice("License renewal: the server refused the label (HTTP 400) and took the renewal without it; no label until the app starts again")
@@ -364,6 +394,7 @@ final class LicenseModel: ObservableObject {
             merged.periodEndingClosed = record.periodEndingClosed
             merged.trialNoticeClosedFor = record.trialNoticeClosedFor
             merged.profileCount = record.profileCount
+            merged.profileTokens = record.profileTokens
             if case .signedOut = result {} else {
                 merged.session = record.session
                 merged.emailLinked = record.emailLinked
@@ -380,6 +411,8 @@ final class LicenseModel: ObservableObject {
             failures = 0
             nextRetry = nil
             sentProfileCount = count
+            // What was asked with — refused or not: the same tokens are not a reason to ask again.
+            sentProfileTokens = knownProfileCount != nil ? knownProfileTokens : record.profileTokens
             record.renewalFailure = nil
             save()
             savedFloor = record.floorTime
@@ -527,6 +560,14 @@ final class LicenseModel: ObservableObject {
             record = activation.record
             record.renewalFailure = nil
             sentProfileCount = count
+            // The activation carries no tokens, and what an account before this one refused says
+            // nothing of this one: the first renewal tells them.
+            sentProfileTokens = nil
+            tokensRefusedByServer = false
+            labelRefusedByServer = false
+            if knownProfileCount != nil, knownProfileTokens != nil {
+                Task { [weak self] in await self?.refresh(because: .profiles) }
+            }
             if case .key = credential {
                 record.rememberKey = rememberTypedKey ? nil : false
                 // Not remembered (§10.1): forgotten right after the request that needed it.
@@ -669,6 +710,11 @@ final class LicenseModel: ObservableObject {
         if let vault { try? AccountKeyVault.remove(from: vault) }
         key = nil
         pendingSession = nil
+        // What this account's server was told and refused is not the next one's.
+        sentProfileCount = nil
+        sentProfileTokens = nil
+        tokensRefusedByServer = false
+        labelRefusedByServer = false
         let confirmed = outcome == .signedOut(confirmed: true)
         log.notice("Signed out of the account on this Mac (server confirmed: \(confirmed, privacy: .public))")
         recompute()

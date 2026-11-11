@@ -20,7 +20,10 @@ import WebKit
 /// Any number of profiles can run at once; each has its own data store and proxy.
 @MainActor
 final class ProfileManager: ObservableObject {
-    @Published private(set) var runningProfileIDs: Set<UUID> = []
+    @Published private(set) var runningProfileIDs: Set<UUID> = [] {
+        // The system camera is fed while a profile set to it runs (`SystemCameraFeed`).
+        didSet { if !runsInProfileProcess { SystemCameraFeed.shared.keep(only: runningProfileIDs) } }
+    }
     /// Profiles currently being launched or sealed (UI shows a spinner, actions disabled).
     @Published private(set) var busyProfileIDs: Set<UUID> = []
 
@@ -49,6 +52,10 @@ final class ProfileManager: ObservableObject {
     /// Whether the plan has automation, asked before each command of a run in this process. In a
     /// profile's own process it stays true: the manager sends a stop when the plan loses it.
     var scenariosAllowed: () -> Bool = { true }
+    /// Whether the plan has camera substitution (docs/CAMERA.md), asked when a profile launches. The
+    /// parent reads it from the license and carries the answer to the child (`PB_CAMERA_ALLOWED`);
+    /// the child's manager reads it back from there. False neutralises a profile's camera at launch.
+    var cameraAllowed: () -> Bool = { true }
     /// Told of each line and the end of a run in this process (a profile's process passes them on).
     var onScenarioLine: ((UUID, UUID, ScenarioRunner.Line) -> Void)?
     var onScenarioEnded: ((UUID, UUID, ScenarioRunner.Outcome) -> Void)?
@@ -365,6 +372,12 @@ final class ProfileManager: ObservableObject {
         if let lookup { proxyLookupFinished(lookup, for: id, name: summary.name, stored: stored) }
         var configuration = stored.applying(location)
         configuration.webRTCRelay = await webRTCRelay(for: id, configuration)
+        // Camera substitution is the plan's (docs/CAMERA.md). Below pro/team the profile's camera is
+        // turned off here — before the session's shim or the system camera's config is built from it —
+        // so a stored camera never reaches a page on a plan that does not open it.
+        if configuration.cameraSubstitution.mode != .off, !cameraAllowed() {
+            configuration.cameraSubstitution = .off
+        }
         // Before the first web view of the run: WebKit reads its language list only once. The
         // profile's own language when one is set, else its proxy country's.
         let language = stored.webLanguage(for: location)
@@ -377,13 +390,28 @@ final class ProfileManager: ObservableObject {
             WebContentLanguage.decide(language)
         }
         noteLanguageMismatch(for: id, wanted: language)
+        // The system camera's render config and its "active" flag live in the app group. A profile's
+        // own process is kept out of it, so there the parent already wrote the config and passed the
+        // flag (`startInOwnProcess`); the app's own process (sandboxed, in-window) reads and writes it
+        // here (docs/CAMERA.md).
+        let systemCameraActive: Bool
+        if runsInProfileProcess {
+            systemCameraActive = ProfileProcess.systemCameraActiveForThisProcess
+        } else {
+            let usesSystemCamera = configuration.cameraSubstitution.usesSystemCamera
+            if usesSystemCamera {
+                SystemCamera.shared.writeRenderConfig(for: configuration.cameraSubstitution)
+            }
+            systemCameraActive = SystemCamera.shared.activeForLaunch(usesSystemCamera: usesSystemCamera)
+        }
         let session: BrowserSession
         do {
             let passwordSettings = ProfilePasswordSettings(repository: repository, profileID: id, profileName: summary.name,
                                                            launchConfiguration: stored)
             passwordSettings.showManager = { [weak self] in self?.onShowPasswords?(id) }
             session = try BrowserSession(profileID: id, profileName: summary.name, configuration: configuration,
-                                         passwordVault: passwords, passwordSettings: passwordSettings, library: library)
+                                         passwordVault: passwords, passwordSettings: passwordSettings, library: library,
+                                         systemCameraActive: systemCameraActive)
             // The engine as saved now, read at each search: a change in the editor applies at once.
             session.searchEngine = { [repository, configuration] in
                 (try? repository.loadConfiguration(id, key: key))?.searchEngine ?? configuration.searchEngine ?? .standard
@@ -415,6 +443,10 @@ final class ProfileManager: ObservableObject {
         keys[id] = key
         launchTokens[id] = token
         runningProfileIDs.insert(id)
+        // The system camera's frames are drawn here, in the app's own process (`SystemCameraFeed`).
+        if !runsInProfileProcess, configuration.cameraSubstitution.usesSystemCamera {
+            SystemCameraFeed.shared.use(for: id)
+        }
         // This launch's lookup (also one made only for the exit IP), else what was found before.
         session.exitLocation = lookup?.location ?? stored.rememberedProxyLocation
         // In a per-profile child process, Safari's own chrome is the window and the profile's web
@@ -468,6 +500,19 @@ final class ProfileManager: ObservableObject {
         // the child builds its window — before the launch inside the child unseals the WebKit data.
         let key = try repository.profileKey(for: id)
         try safariHomeVault.prepareForLaunch(profileID: id, key: key)
+        // The system camera's render config and its "active" flag live in the app group, which a
+        // profile's own process is kept out of (`ProfileExecutable`, no app-group entitlement). So the
+        // parent — which can reach it — writes the config and reads whether the extension is on, and
+        // passes the answer to the child (docs/CAMERA.md). Off below the plan (cameraAllowed) or when
+        // the profile does not use the system camera.
+        let usesSystemCamera = cameraAllowed() && stored.cameraSubstitution.usesSystemCamera
+        if usesSystemCamera {
+            SystemCamera.shared.writeRenderConfig(for: stored.cameraSubstitution)
+        }
+        // A profile that does not use the device must still hide it whenever it may be there, or a
+        // page sees a stray "Lumen Camera" among its devices; one that uses it is told only whether
+        // the device is listed now — else it gets no camera at once (`SystemCamera.activeForLaunch`).
+        let systemCameraActive = SystemCamera.shared.activeForLaunch(usesSystemCamera: usesSystemCamera)
         let child = try ProfileProcess.start(
             profileID: id,
             executable: executable,
@@ -481,7 +526,9 @@ final class ProfileManager: ObservableObject {
             proxyLocationFound: proxyLocationFound,
             preferences: BrowsingPreferences.current.forProfileProcess,
             menusInAppLanguage: stored.menusInAppLanguage,
-            processorCores: stored.deviceGeneration.processorCores)
+            processorCores: stored.deviceGeneration.processorCores,
+            cameraAllowed: cameraAllowed(),
+            systemCameraActive: systemCameraActive)
         child.onEvent = { [weak self] event in
             guard let self else { return }
             switch event {
@@ -584,6 +631,9 @@ final class ProfileManager: ObservableObject {
         children[id] = child
         windowsUp.remove(id)
         runningProfileIDs.insert(id)
+        // The profile's own process cannot reach the app group: the app draws its camera's frames
+        // and writes them into the device's sink (`SystemCameraFeed`).
+        if usesSystemCamera { SystemCameraFeed.shared.use(for: id) }
         try? repository.markLaunched(id)
         // The app's settings for browsing, before anything else is asked of it.
         child.send(.preferences(BrowsingPreferences.current.forProfileProcess))

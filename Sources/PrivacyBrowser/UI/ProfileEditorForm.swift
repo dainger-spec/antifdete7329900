@@ -81,6 +81,9 @@ struct ProfileEditorForm: View {
     @ObservedObject private var systemCamera = SystemCamera.shared
     /// Opens the separate camera preview window (`CameraPreviewWindowController`).
     var onOpenCameraPreview: () -> Void = {}
+    /// Whether the plan opens camera substitution (pro and team). When false the camera section shows
+    /// only that it is a paid feature, and nothing of it can be set (docs/CAMERA.md).
+    var cameraAllowed: Bool = true
     /// Saved, and its cookies being imported: Save waits.
     var isSaving = false
     /// The profile's settings could not be read: Save would put the form's defaults in their place.
@@ -124,6 +127,10 @@ struct ProfileEditorForm: View {
                     .onAppear {
                         guard topic != .profile else { return }
                         DispatchQueue.main.async { scroller.scrollTo(topic, anchor: .top) }
+                    }
+                    // Moved to a part from outside the index (Save refused for the system camera).
+                    .onChange(of: topic) {
+                        withAnimation(Theme.appearAnimation) { scroller.scrollTo(topic, anchor: .top) }
                     }
                 }
             }
@@ -759,26 +766,41 @@ struct ProfileEditorForm: View {
 
     // MARK: Camera
 
+    @ViewBuilder
     private var camera: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            EditorRow(L("editor.camera.mode")) {
-                Picker(L("editor.camera.mode"), selection: $draft.camera.mode) {
-                    Text(L("editor.camera.mode.off")).tag(CameraSubstitution.Mode.off)
-                    Text(L("editor.camera.mode.block")).tag(CameraSubstitution.Mode.block)
-                    Text(L("editor.camera.mode.substitute")).tag(CameraSubstitution.Mode.substitute)
+        if cameraAllowed {
+            VStack(alignment: .leading, spacing: 14) {
+                EditorRow(L("editor.camera.mode")) {
+                    Picker(L("editor.camera.mode"), selection: $draft.camera.mode) {
+                        Text(L("editor.camera.mode.off")).tag(CameraSubstitution.Mode.off)
+                        Text(L("editor.camera.mode.block")).tag(CameraSubstitution.Mode.block)
+                        Text(L("editor.camera.mode.substitute")).tag(CameraSubstitution.Mode.substitute)
+                    }
+                    .labelsHidden()
+                    .fixedSize()
                 }
-                .labelsHidden()
-                .fixedSize()
+                switch draft.camera.mode {
+                case .off:
+                    EditorNote(L("editor.camera.off.note"))
+                case .block:
+                    EditorNote(L("editor.camera.block.note"))
+                case .substitute:
+                    cameraSubstitution
+                }
+                EditorNote(L("editor.camera.footer"))
             }
-            switch draft.camera.mode {
-            case .off:
-                EditorNote(L("editor.camera.off.note"))
-            case .block:
-                EditorNote(L("editor.camera.block.note"))
-            case .substitute:
-                cameraSubstitution
-            }
-            EditorNote(L("editor.camera.footer"))
+        } else {
+            cameraPlanLocked
+        }
+    }
+
+    /// Shown in place of the camera settings when the plan does not open them: the camera is a feature
+    /// of the professional and team plans (docs/CAMERA.md). A stored camera stays stored but, below
+    /// those plans, is turned off at launch, so nothing here is set.
+    private var cameraPlanLocked: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            EditorGroupTitle(L("editor.camera.plan.title"))
+            EditorNote(L("editor.camera.plan.note"))
         }
     }
 
@@ -792,6 +814,7 @@ struct ProfileEditorForm: View {
                     .buttonStyle(.lumenSecondary)
                     .fixedSize()
             }
+            EditorNote(L("editor.camera.plan.requirement"))
             EditorRow(L("editor.camera.delivery")) {
                 Picker(L("editor.camera.delivery"), selection: $draft.camera.delivery) {
                     Text(L("editor.camera.delivery.shim")).tag(CameraSubstitution.Delivery.jsShim)
@@ -809,8 +832,7 @@ struct ProfileEditorForm: View {
         }
     }
 
-    /// Crop and the filters — both deliveries draw these (the system camera in its extension); only
-    /// the video playback is the JavaScript shim's for now.
+    /// Crop and the filters — both deliveries draw these (the system camera in its extension).
     @ViewBuilder
     private var cameraCropAndFilters: some View {
         EditorDivider()
@@ -821,23 +843,39 @@ struct ProfileEditorForm: View {
         cameraFilters
     }
 
-    /// Delivery through the system virtual camera: its install state and what to do about it.
+    /// Delivery through the system virtual camera: its install state and what to do about it. Until
+    /// it is installed and on, a profile set to it gets no camera, and Save refuses it
+    /// (`ProfileEditorView.save`), so every state but "on" says what to do.
     @ViewBuilder
     private var systemCameraSection: some View {
         EditorDivider()
         EditorGroupTitle(L("editor.camera.system"))
         EditorNote(L("editor.camera.system.note"))
+        EditorNote(L("editor.camera.system.formats"))
         switch systemCamera.state {
         case .notInBuild:
             EditorNote(L("editor.camera.system.notInBuild"), tone: .warning)
         case .active:
             EditorNote(L("editor.camera.system.active"))
+            if !systemCamera.devicePresent {
+                EditorNote(L("editor.camera.system.notRunning"), tone: .warning)
+            }
+            if systemCamera.cameraAccessDenied {
+                EditorNote(L("editor.camera.system.accessDenied"), tone: .warning)
+                Button(L("editor.camera.system.accessSettings")) { SystemOpen.openSystemSettingsForCamera() }
+                    .buttonStyle(.lumenSecondary)
+            }
         case .restartNeeded:
             EditorNote(L("editor.camera.system.restart"), tone: .warning)
-        case .failed(let reason):
             systemCameraInstallRow
+        case .failed(let reason):
+            EditorNote(L("editor.camera.system.notActive"), tone: .warning)
             EditorNote(String(format: L("editor.camera.system.failed"), reason), tone: .warning)
+            EditorNote(L("editor.camera.system.steps"))
+            systemCameraInstallRow
         default:
+            EditorNote(L("editor.camera.system.notActive"), tone: .warning)
+            EditorNote(L("editor.camera.system.steps"))
             systemCameraInstallRow
         }
     }
@@ -881,6 +919,23 @@ struct ProfileEditorForm: View {
                 .labelsHidden()
                 .fixedSize()
         }
+        // Size and rate are the JavaScript shim's: the system camera offers a built-in camera's
+        // sizes and the page picks (`editor.camera.system.formats`).
+        if draft.camera.delivery == .jsShim {
+            cameraSizeFields
+        }
+        EditorRow(L("editor.camera.fit")) {
+            Picker(L("editor.camera.fit"), selection: $draft.camera.fit) {
+                Text(L("editor.camera.fit.cover")).tag(CameraSubstitution.Fit.cover)
+                Text(L("editor.camera.fit.contain")).tag(CameraSubstitution.Fit.contain)
+                Text(L("editor.camera.fit.stretch")).tag(CameraSubstitution.Fit.stretch)
+            }
+            .labelsHidden()
+            .fixedSize()
+        }
+    }
+
+    private var cameraSizeFields: some View {
         HStack(alignment: .top, spacing: 12) {
             EditorField(L("editor.camera.width")) {
                 TextField(L("editor.camera.width"), text: $draft.cameraWidth, prompt: Text(verbatim: ""))
@@ -899,27 +954,23 @@ struct ProfileEditorForm: View {
             .frame(width: 110)
             Spacer(minLength: 0)
         }
-        EditorRow(L("editor.camera.fit")) {
-            Picker(L("editor.camera.fit"), selection: $draft.camera.fit) {
-                Text(L("editor.camera.fit.cover")).tag(CameraSubstitution.Fit.cover)
-                Text(L("editor.camera.fit.contain")).tag(CameraSubstitution.Fit.contain)
-                Text(L("editor.camera.fit.stretch")).tag(CameraSubstitution.Fit.stretch)
-            }
-            .labelsHidden()
-            .fixedSize()
-        }
     }
 
     @ViewBuilder
     private var cameraDeviceControls: some View {
-        EditorRow(L("editor.camera.facing")) {
-            Picker(L("editor.camera.facing"), selection: $draft.camera.facing) {
-                Text(L("editor.camera.facing.user")).tag(CameraSubstitution.Facing.user)
-                Text(L("editor.camera.facing.environment")).tag(CameraSubstitution.Facing.environment)
-                Text(L("editor.camera.facing.unset")).tag(CameraSubstitution.Facing.unset)
+        // Facing, the microphone and screen sharing are what the JavaScript shim answers a page;
+        // with the system camera the page asks macOS, and they are as in Safari.
+        let shim = draft.camera.delivery == .jsShim
+        if shim {
+            EditorRow(L("editor.camera.facing")) {
+                Picker(L("editor.camera.facing"), selection: $draft.camera.facing) {
+                    Text(L("editor.camera.facing.user")).tag(CameraSubstitution.Facing.user)
+                    Text(L("editor.camera.facing.environment")).tag(CameraSubstitution.Facing.environment)
+                    Text(L("editor.camera.facing.unset")).tag(CameraSubstitution.Facing.unset)
+                }
+                .labelsHidden()
+                .fixedSize()
             }
-            .labelsHidden()
-            .fixedSize()
         }
         EditorToggle(L("editor.camera.mirror"), isOn: $draft.camera.mirror)
         EditorField(L("editor.camera.label")) {
@@ -933,17 +984,19 @@ struct ProfileEditorForm: View {
             }
         }
         EditorNote(L("editor.camera.label.note"))
-        EditorRow(L("editor.camera.audio")) {
-            Picker(L("editor.camera.audio"), selection: $draft.camera.audio) {
-                Text(L("editor.camera.audio.real")).tag(CameraSubstitution.Audio.real)
-                Text(L("editor.camera.audio.silent")).tag(CameraSubstitution.Audio.silent)
-                Text(L("editor.camera.audio.off")).tag(CameraSubstitution.Audio.off)
+        if shim {
+            EditorRow(L("editor.camera.audio")) {
+                Picker(L("editor.camera.audio"), selection: $draft.camera.audio) {
+                    Text(L("editor.camera.audio.real")).tag(CameraSubstitution.Audio.real)
+                    Text(L("editor.camera.audio.silent")).tag(CameraSubstitution.Audio.silent)
+                    Text(L("editor.camera.audio.off")).tag(CameraSubstitution.Audio.off)
+                }
+                .labelsHidden()
+                .fixedSize()
             }
-            .labelsHidden()
-            .fixedSize()
+            EditorToggle(L("editor.camera.screenShare"), detail: L("editor.camera.screenShare.detail"),
+                         isOn: $draft.camera.alsoScreenShare)
         }
-        EditorToggle(L("editor.camera.screenShare"), detail: L("editor.camera.screenShare.detail"),
-                     isOn: $draft.camera.alsoScreenShare)
     }
 
     /// The source look: brightness/contrast/saturation and the rest, as sliders. The list drives a
@@ -1077,22 +1130,37 @@ struct ProfileEditorForm: View {
     }
 
     /// Fills the camera's name, resolution and facing to match the profile's device. A Mac profile
-    /// copies this Mac's own built-in camera exactly (`HostCamera`), so a page sees what the real
-    /// one reports. An iOS/iPadOS profile cannot read an iPhone's camera from the build machine, so
-    /// it uses the believable default a real device reports — the front camera, 1280×720, user-facing.
+    /// takes this Mac's real resolution (`HostCamera`); an iOS/iPadOS profile cannot read an iPhone's
+    /// camera from the build machine, so it uses a believable default (front camera, 1280×720, user).
+    /// The name follows the profile's own language, never this Mac's — so a profile that claims, say,
+    /// the US does not get this Mac's Russian camera name (the owner, 11 November).
     private func matchDeviceCamera() {
         switch DeviceGenerations.resolved(id: draft.deviceGenerationID).platform {
         case .macOS:
-            guard let builtin = HostCamera.builtin() else { return }
-            draft.camera.deviceLabel = builtin.name
-            draft.cameraWidth = String(builtin.width)
-            draft.cameraHeight = String(builtin.height)
+            if let builtin = HostCamera.builtin() {
+                draft.cameraWidth = String(builtin.width)
+                draft.cameraHeight = String(builtin.height)
+            }
+            draft.camera.deviceLabel = Self.macCameraName(forLanguage: draft.language)
         case .iOS, .iPadOS:
-            draft.camera.deviceLabel = "Front Camera"
+            draft.camera.deviceLabel = Self.mobileCameraName(forLanguage: draft.language)
             draft.cameraWidth = "1280"
             draft.cameraHeight = "720"
             draft.camera.facing = .user
         }
+    }
+
+    /// A believable built-in-camera name in the profile's own language. "FaceTime HD Camera" is a
+    /// real, common Mac camera name shown identically on every Mac whatever its language, so it leaks
+    /// none; a Russian profile gets the localised "Камера (…)" macOS shows there. `language` is the
+    /// profile's override ("" means this Mac's language — then the neutral name, which never misleads).
+    static func macCameraName(forLanguage language: String) -> String {
+        language.lowercased().hasPrefix("ru") ? "Камера (MacBook Air)" : "FaceTime HD Camera"
+    }
+
+    /// The same for a mobile profile's front camera.
+    static func mobileCameraName(forLanguage language: String) -> String {
+        language.lowercased().hasPrefix("ru") ? "Фронтальная камера" : "Front Camera"
     }
 
     /// The substituted camera's colour as a SwiftUI `Color`, kept in the draft as "#RRGGBB".

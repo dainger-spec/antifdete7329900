@@ -74,14 +74,29 @@ final class ScenarioRunner {
 
     /// Stops the run: a command under way finishes (a button pressed is let go), then the run
     /// ends; a script between commands ends at once.
+    ///
+    /// A command that is waiting — `sleep`, `waitFor`, a page still loading — stops waiting: it
+    /// was let run to its end, and a script sleeping an hour kept its run "running", and its
+    /// profile closed to another run, for that hour. The plan's end (`rightsEnded`) still lets the
+    /// step under way finish, as it says.
     func stop(_ reason: StopReason = .byUser) {
         guard outcome == nil, thread != nil else { return }
         stopRequest = reason
+        if reason != .rightsEnded { inFlight.values.forEach { $0.cancel() } }
         if commandsInFlight == 0 { end(.stopped(reason)) }
     }
 
+    /// The commands under way, to be cancelled by Stop (`stop`); each takes itself out when it ends.
+    fileprivate var inFlight: [UUID: Task<Void, Never>] = [:]
+    /// The command asked for last: the next waits for it. A script's commands act one at a time
+    /// whatever it awaits — two at once (a forgotten `await`, `Promise.all`) moved one pointer two
+    /// ways and mixed their keys.
+    fileprivate var lastCommand: Task<Void, Never>?
+
     private func add(_ kind: Line.Kind, _ text: String) {
         let line = Line(at: Date(), kind: kind, text: text)
+        // The last lines of a long run are what matter.
+        if lines.count >= 5000 { lines.removeFirst(lines.count - 4999) }
         lines.append(line)
         onLine?(line)
     }
@@ -96,6 +111,8 @@ final class ScenarioRunner {
         case .stopped(.rightsEnded): add(.outcome, "Stopped after its current step: automation is no longer in this plan")
         case .stopped(.profileStopped): add(.outcome, "Stopped: the profile stopped")
         }
+        // What the script left under way — a command it did not await — ends with the run.
+        inFlight.values.forEach { $0.cancel() }
         driver.finish()
         thread?.cancel()
         thread?.perform {}
@@ -121,6 +138,9 @@ final class ScenarioRunner {
         }
         do {
             return .success(try await command(name, arguments))
+        } catch is CancellationError {
+            // Its wait was ended by Stop.
+            return .failure(Stopped())
         } catch {
             return .failure(error)
         }
@@ -223,8 +243,21 @@ final class ScenarioRunner {
                 }
             }
         }
+        // A script that logs in a loop without awaiting made a line a hop to the main thread, without
+        // end: the profile's windows hung and Stop waited behind them. Past `LogGate.limit` lines
+        // waiting, the rest are counted, not queued, and the log says how many it left out.
+        let gate = LogGate()
         let logged: @convention(block) (String) -> Void = { text in
-            DispatchQueue.main.async { MainActor.assumeIsolated { runner?.add(.script, text) } }
+            guard gate.take() else { return }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    let leftOut = gate.shown()
+                    if leftOut > 0 {
+                        runner?.add(.script, "… \(leftOut) lines left out: the script logs faster than they can be shown")
+                    }
+                    runner?.add(.script, text)
+                }
+            }
         }
         let command: @convention(block) (String, JSValue) -> JSValue = { [weak context] name, arguments in
             let values = arguments.toArray() ?? []
@@ -232,9 +265,14 @@ final class ScenarioRunner {
             return JSValue(newPromiseIn: context) { resolve, reject in
                 let resolve = resolve, reject = reject
                 DispatchQueue.main.async {
-                    Task { @MainActor in
+                    let id = UUID()
+                    let previous = MainActor.assumeIsolated { runner?.lastCommand }
+                    let task = Task { @MainActor in
+                        // One at a time, in the order asked.
+                        await previous?.value
                         guard let runner else { return }
                         let result = await runner.perform(name, values)
+                        runner.inFlight[id] = nil
                         thread.perform {
                             switch result {
                             case .success(let value):
@@ -245,6 +283,10 @@ final class ScenarioRunner {
                                 reject?.call(withArguments: [JSValue(newErrorFromMessage: message, in: context) as Any])
                             }
                         }
+                    }
+                    MainActor.assumeIsolated {
+                        runner?.inFlight[id] = task
+                        runner?.lastCommand = task
                     }
                 }
             }
@@ -306,5 +348,36 @@ private final class ScriptThread: Thread, @unchecked Sendable {
         guard let loop else { return }
         CFRunLoopPerformBlock(loop, CFRunLoopMode.defaultMode.rawValue, block)
         CFRunLoopWakeUp(loop)
+    }
+}
+
+/// Lines a script logs, between its thread and the main one: at most `limit` wait to be shown; the
+/// rest are counted and said as one line when the log catches up.
+private final class LogGate: @unchecked Sendable {
+    static let limit = 500
+    private let lock = NSLock()
+    private var waiting = 0
+    private var leftOut = 0
+
+    /// False when too many wait already: this one is counted as left out.
+    func take() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard waiting < Self.limit else {
+            leftOut += 1
+            return false
+        }
+        waiting += 1
+        return true
+    }
+
+    /// One is being shown: how many were left out before it.
+    func shown() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        waiting -= 1
+        let count = leftOut
+        leftOut = 0
+        return count
     }
 }

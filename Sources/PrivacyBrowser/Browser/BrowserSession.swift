@@ -60,7 +60,8 @@ final class BrowserSession {
     /// Throws when the profile's proxy cannot be applied — before any data store exists, so a
     /// profile with a broken proxy never starts on a direct connection (fail-closed).
     init(profileID: UUID, profileName: String, configuration: ProfileConfiguration,
-         passwordVault: PasswordVault, passwordSettings: ProfilePasswordSettings, library: ProfileLibrary) throws {
+         passwordVault: PasswordVault, passwordSettings: ProfilePasswordSettings, library: ProfileLibrary,
+         systemCameraActive: Bool = false) throws {
         let proxies = try ProxyConfigurationFactory.make(configuration.proxy)
         // Without the proxied profile's rule list a page's dns-prefetch would be resolved by this Mac,
         // and without the local-network list a page could reach this Mac and its network: a profile
@@ -96,12 +97,10 @@ final class BrowserSession {
         Logger(subsystem: "PrivacyBrowser", category: "BrowserSession")
             .notice("Profile \(profileName, privacy: .private): has a proxy=\(configuration.proxy != nil, privacy: .public) store proxies=\(store.proxyConfigurations.count, privacy: .public)")
         // Routed through BehaviorSets so a profile's device generation selects its script bundle.
-        // With the system camera active, the shim gates the Mac-global device per profile; a profile
-        // that uses it writes what the extension should draw to the shared app group (`SystemCamera`).
-        let systemCameraActive = SystemCamera.shared.isActive
-        if configuration.cameraSubstitution.usesSystemCamera {
-            SystemCamera.shared.writeRenderConfig(for: configuration.cameraSubstitution)
-        }
+        // With the system camera active, the shim gates the Mac-global device per profile. Whether it
+        // is active, and writing what the extension should draw, both need the shared app group — which
+        // a profile's own process cannot reach — so the caller does it in the app's own process and
+        // passes the flag here (`ProfileManager`, docs/CAMERA.md).
         self.userContentController = BehaviorSets.makeUserContentController(for: configuration,
                                                                             systemCameraActive: systemCameraActive)
         // Loads WebKit would otherwise make outside the proxy, and to this Mac and its network

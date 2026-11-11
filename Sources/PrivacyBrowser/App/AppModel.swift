@@ -77,6 +77,8 @@ final class AppModel: ObservableObject {
     let settings = AppSettings()
     /// The Proxies section is asked for from outside the Profiles window (Settings → Proxies).
     @Published var proxiesRequest = false
+    /// File › New Profile (⌘N): the Profiles window opens its editor for a new one.
+    @Published var newProfileRequest = false
     /// The command palette (⌘K) is open in the Profiles window.
     @Published var showingPalette = false
     /// The Help window's topic (`HelpView`): what opens the window may choose it — the scenario
@@ -93,6 +95,31 @@ final class AppModel: ObservableObject {
 
     /// The version an update installed at the last quit: the profiles' window says it once.
     @Published private(set) var updatedTo: String?
+    /// A newer version the updater found (`AppUpdater.state`), said in the Profiles window and not
+    /// only in Settings › Updates (the owner, 11 November: a release was out and nothing said so).
+    /// Nil when there is none, or once the person put it away for this version, until the app
+    /// starts again.
+    @Published private(set) var updateOffer: UpdateOffer?
+    private var updateOfferPutAway: String?
+    private var updaterObservation: AnyCancellable?
+
+    /// "Later" on the offer: not said again for this version in this run.
+    func updateOfferSeen() {
+        updateOfferPutAway = updateOffer?.version
+        updateOffer = nil
+    }
+
+    private func offer(for state: UpdateState) -> UpdateOffer? {
+        let offer: UpdateOffer?
+        switch state {
+        case .available(let item): offer = UpdateOffer(version: item.version, stage: .available)
+        case .downloading(let item): offer = UpdateOffer(version: item.version, stage: .downloading)
+        case .ready(let item): offer = UpdateOffer(version: item.version, stage: .ready)
+        case .blocked(let item, _): offer = UpdateOffer(version: item.version, stage: .blocked)
+        case .idle, .upToDate, .checking, .failed: offer = nil
+        }
+        return offer?.version == updateOfferPutAway ? nil : offer
+    }
 
     func updatedNoticeSeen() {
         updatedTo = nil
@@ -401,6 +428,12 @@ final class AppModel: ObservableObject {
         manager.launchGate = { [weak self] id in self?.license.refusalToOpen(id) }
         // Scenario automation is the plan's (docs/AUTOMATION.md): asked before each command.
         manager.scenariosAllowed = { [weak self] in self?.license.allowsAutomation ?? false }
+        // Camera substitution is the plan's (docs/CAMERA.md): a profile's camera is neutralised at
+        // launch when the plan does not open it (pro and team), in this process and in the child.
+        manager.cameraAllowed = { [weak self] in self?.license.allowsCamera ?? false }
+        // The system camera asks macOS where it stands — and replaces the copy an earlier version of
+        // the app installed — now, before a profile starts, not at the first one's launch.
+        _ = SystemCamera.shared
         license.vaultOpened(vault)
         ExpiryNotifications.update(at: .stateChanged, license: license)
         manager.onError = { [weak self] message in self?.showError(message) }
@@ -611,7 +644,12 @@ final class AppModel: ObservableObject {
     func refresh() {
         profiles = repository?.list() ?? []
         // The license tells the server the real number with its renewals (the owner, 3 November).
-        if repository != nil { license.profilesKnown(count: profiles.count) }
+        // With sync set up, also the tokens of the profiles that are in the sync vault: such a profile
+        // on a Mac and an iPhone is then one place of the license's (CONTRACT §6.2).
+        if let repository {
+            let tokens = deviceSettings.syncTarget == nil ? nil : SyncProfileToken.tokens(in: repository)
+            license.profilesKnown(count: profiles.count, tokens: tokens)
+        }
         updateIndexNotice()
         let kept = repository?.keptDeletedProfiles() ?? []
         if kept != keptDeletedProfiles { keptDeletedProfiles = kept }
@@ -889,6 +927,8 @@ final class AppModel: ObservableObject {
         do {
             let bookmark = try folder.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
             try updateDeviceSettings { $0.syncTarget = .folder(bookmark: bookmark, path: folder.path) }
+            // With sync a renewal carries the synced profiles' tokens, without it none: the license is told.
+            refresh()
         } catch {
             showError(String(format: L("sync.error.rememberFolder"), errorText(error)))
         }
@@ -902,6 +942,8 @@ final class AppModel: ObservableObject {
             }
             try HTTPSyncTransport.validate(url)
             try updateDeviceSettings { $0.syncTarget = .server(baseURL: url, token: token) }
+            // With sync a renewal carries the synced profiles' tokens, without it none: the license is told.
+            refresh()
         } catch {
             showError(errorText(error))
         }
@@ -910,6 +952,8 @@ final class AppModel: ObservableObject {
     func clearSyncTarget() {
         do {
             try updateDeviceSettings { $0.syncTarget = nil }
+            // With sync a renewal carries the synced profiles' tokens, without it none: the license is told.
+            refresh()
         } catch {
             showError(error.localizedDescription)
         }
@@ -1008,6 +1052,10 @@ final class AppModel: ObservableObject {
 
     /// Whether this plan has scenario automation.
     var allowsAutomation: Bool { license.allowsAutomation }
+
+    /// Whether this plan has camera substitution (docs/CAMERA.md): the editor shows the camera
+    /// settings only then, and a profile's camera is applied only then.
+    var allowsCamera: Bool { license.allowsCamera }
 
     /// The last run of a scenario on profile `id`, if any.
     func scenarioRun(of id: UUID) -> ProfileManager.ScenarioRunState? { manager?.scenarioRuns[id] }
@@ -1186,6 +1234,16 @@ final class AppModel: ObservableObject {
         guard let configuration = AppUpdater.Configuration.main() else { return }
         let updater = AppUpdater(configuration: configuration)
         self.updater = updater
+        // @Published emits before the value changes: the state itself is what is read.
+        updaterObservation = updater.$state.sink { [weak self] state in
+            Task { @MainActor in
+                guard let self else { return }
+                // While a check runs, what was offered stays.
+                if case .checking = state { return }
+                let offer = self.offer(for: state)
+                if self.updateOffer != offer { self.updateOffer = offer }
+            }
+        }
         updater.start()
         switch updater.notice {
         case .outcome(let outcome)?:

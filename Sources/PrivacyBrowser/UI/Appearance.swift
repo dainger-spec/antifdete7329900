@@ -261,6 +261,31 @@ struct LumenRadio: View {
 
 /// A key or a shortcut (the design's `kbd`): `small` — 18 pt, in the search field (⌘K); else
 /// 24 pt, in the list of shortcuts.
+/// The app's errors (`AppModel.showError`) said in the window they were raised from. Only the
+/// Profiles window said them: one raised from Settings or the scenario editor — a wrong password
+/// in Change Password, a sync server not saved, a scenario not written — came up behind, or in a
+/// window that was closed. Said here while this window is the key one; the Profiles window says
+/// it as before.
+private struct ModelErrors: ViewModifier {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.controlActiveState) private var activeState
+
+    func body(content: Content) -> some View {
+        content.alert(L("common.error"),
+                      isPresented: Binding(get: { model.errorMessage != nil && activeState == .key },
+                                           set: { if !$0 { model.errorMessage = nil } })) {
+            Button(L("common.ok"), role: .cancel) {}
+        } message: {
+            Text(model.errorMessage ?? "")
+        }
+    }
+}
+
+extension View {
+    /// The app's errors as an alert of this window while it is the key one (`ModelErrors`).
+    func saysModelErrors() -> some View { modifier(ModelErrors()) }
+}
+
 struct KeyCap: View {
     let keys: String
     var small = false

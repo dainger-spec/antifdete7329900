@@ -273,10 +273,15 @@ public enum AccountAPI {
     /// `POST /v1/device/entitlement` with the device's token (§6.2): no session needed. `label`: this
     /// Mac's label — the one it was connected with, or this Mac's name — sent with each renewal
     /// (the owner, 3 November); nil leaves it out (a server that refused it, `LicenseClient`).
+    /// `profileTokens`: the tokens of this Mac's profiles that are in the sync vault (§6.2, "Метки
+    /// синхронизируемых профилей"; `SyncProfileToken`), so that a profile on several devices takes
+    /// one place; nil — no sync, or a server that refused them — leaves the field out, and the
+    /// server counts every profile of this Mac, as before.
     public static func refresh(deviceToken: ServerToken, machineID: String, profileCount: Int, appVersion: String,
-                               label: String? = nil) -> AccountRequest {
+                               label: String? = nil, profileTokens: [String]? = nil) -> AccountRequest {
         var body: [String: Any] = ["machineID": machineID, "profileCount": profileCount, "appVersion": appVersion]
         if let label { body["label"] = label }
+        if let profileTokens { body["profileTokens"] = profileTokens }
         return AccountRequest(method: .post, path: "/v1/device/entitlement", body: json(body), bearer: deviceToken)
     }
 

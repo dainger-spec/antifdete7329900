@@ -169,6 +169,9 @@ enum ProfileSessionHost {
             }
             let manager = ProfileManager(repository: repository)
             manager.runsInProfileProcess = true
+            // The plan's camera right, as the parent decided it from the license and carried it here
+            // (`PB_CAMERA_ALLOWED`): the manager gates this profile's camera by it (docs/CAMERA.md).
+            manager.cameraAllowed = { ProfileProcess.cameraAllowedForThisProcess }
             manager.onError = { message in
                 ProfileSessionHost.log.error("\(message, privacy: .private)")
                 // Shown by the manager, which is where the user is looking.

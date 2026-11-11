@@ -211,9 +211,10 @@ final class LicenseTests: XCTestCase {
     }
 
     /// The server's own vectors: the trial, Professional and Team open automation; Personal and
-    /// export-only do not. The server signs no `features` yet (checked on v2026.11.09.3: the copy
-    /// here has none); until its vectors carry the field this is skipped, said as such, and
-    /// scripts/automation_plan_gate.py — which reads the same file — keeps a release from being made.
+    /// export-only do not. The copy here is the server's since v2026.11.10 signs `features` (its
+    /// commit 0d30ef2), and the rule runs on it. A copy without the field — an older server's put
+    /// here by mistake — is skipped, said as such, and scripts/automation_plan_gate.py, which reads
+    /// the same file, then keeps a release from being made.
     func testTheServersVectorsOpenAutomationToTheTrialProfessionalAndTeamOnly() throws {
         let vectors = try vectors()
         let keys = EntitlementKeys.fromInfoPlist(vectors.trustedKeys)

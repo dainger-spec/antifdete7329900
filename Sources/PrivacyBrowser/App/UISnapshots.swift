@@ -408,6 +408,10 @@ enum UISnapshots {
         problems += await Shot(name: "profiles-updated", size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: 620), edges: true) {
             ProfilesPreview(rows: rows, sync: .off, updatedTo: "0.1.5") // l10n: not text
         }.capture(into: folder)
+        // A newer version is out and ready: said above the profiles, not only in Settings.
+        problems += await Shot(name: "profiles-update-offer", size: CGSize(width: 1180, height: 740), edges: true) {
+            ProfilesPreview(rows: rows, sync: .off, updateOffer: UpdateOffer(version: "0.1.9", stage: .ready)) // l10n: not text
+        }.capture(into: folder)
         problems += await Shot(name: "profiles-guard-banners", size: CGSize(width: 1180, height: 640), edges: true) {
             ProfilesPreview(rows: rows, sync: .off, indexNotice: unlisted, proxyProblem: threeAtOnce, guardNotice: .notInstalled)
         }.capture(into: folder)
@@ -541,6 +545,11 @@ enum UISnapshots {
             ChangePasswordView().environmentObject(model)
         }.capture(into: folder)
         problems += await settings(into: folder, model: model)
+        // The scenario editor: a scenario chosen, its code with the commands beside it.
+        let scenario = Scenario(name: L("scenarios.untitled"), source: L("scenarios.template"))
+        problems += await Shot(name: "scenarios", size: CGSize(width: 1100, height: 760)) {
+            ScenariosView(sample: scenario).environmentObject(model)
+        }.capture(into: folder)
         problems += await proxyList(into: folder)
         // A real browser window of a running profile (WebKit, toolbar, tab strip, start page).
         problems += await browserWindows(into: folder)
@@ -1516,6 +1525,7 @@ private struct ProfilesPreview: View {
     var guardNotice: WebRTCProtectionNotice?
     var engineWarning: EngineWarning.Facts?
     var updatedTo: String?
+    var updateOffer: UpdateOffer?
 
     var body: some View {
         ProfilesScreen(rows: rows, isWorking: isWorking, sync: sync, filter: $filter, search: $search, actions: actions,
@@ -1523,7 +1533,7 @@ private struct ProfilesPreview: View {
                        keptDeleted: keptDeleted, showsInspector: .constant(showsInspector), inspectorInfo: inspectorInfo,
                        guardReady: true, initialSelection: selected, initialBannersExpanded: bannersExpanded,
                        proxyProblem: proxyProblem, guardNotice: guardNotice, engineWarning: engineWarning,
-                       updatedTo: updatedTo)
+                       updateOffer: updateOffer, updatedTo: updatedTo)
     }
 }
 

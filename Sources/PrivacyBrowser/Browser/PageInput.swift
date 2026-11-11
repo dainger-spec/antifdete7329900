@@ -148,6 +148,9 @@ final class PageInput {
     }
 
     private func mouse(_ type: NSEvent.EventType, at location: NSPoint, clickCount forced: Int? = nil) {
+        // The button is let go for whoever asks, whatever became of the window meanwhile: held
+        // with the window gone, every page of the process saw a button down from then on.
+        if type == .leftMouseUp { Answers.buttons = 0 }
         guard let webView, let window = webView.window else { return }
         let now = ProcessInfo.processInfo.systemUptime
         var clickCount = 0
@@ -346,6 +349,7 @@ final class PageInput {
         let first = Answers.heldWindows[identifier] == nil
         Answers.heldWindows[identifier, default: 0] += 1
         heldWindow = window
+        heldIdentifier = identifier
         // What WebKit listens for to read the window's key state again.
         if first && !window.isKeyWindowUnanswered {
             NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
@@ -354,28 +358,32 @@ final class PageInput {
 
     /// The window `holdFocus` held: AppKit's own answer again, and WebKit told when that is "not key".
     func releaseFocus() {
-        guard let window = heldWindow else { return }
+        guard let identifier = heldIdentifier else { return }
+        let window = heldWindow
         heldWindow = nil
-        Self.letGo(window)
+        heldIdentifier = nil
+        Self.letGo(identifier, window)
     }
 
     private weak var heldWindow: NSWindow?
+    /// The held window's identity, kept beside the weak reference: a window gone while held is
+    /// still taken off the list (another at its address would have answered "key" for ever).
+    private var heldIdentifier: ObjectIdentifier?
 
-    private static func letGo(_ window: NSWindow) {
-        let identifier = ObjectIdentifier(window)
+    private static func letGo(_ identifier: ObjectIdentifier, _ window: NSWindow?) {
         let count = (Answers.heldWindows[identifier] ?? 1) - 1
         Answers.heldWindows[identifier] = count > 0 ? count : nil
-        if count <= 0 && !window.isKeyWindow {
+        if count <= 0, let window, !window.isKeyWindow {
             NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
         }
     }
 
     deinit {
         // A window still held is let go with its input, on the main actor.
+        guard let identifier = heldIdentifier else { return }
         weak var window = heldWindow
-        guard window != nil else { return }
         Task { @MainActor in
-            if let window { PageInput.letGo(window) }
+            PageInput.letGo(identifier, window)
         }
     }
 

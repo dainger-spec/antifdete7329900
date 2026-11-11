@@ -368,8 +368,10 @@ struct ProfileDraft {
 
     func makeConfiguration() throws -> ProfileConfiguration {
         var configuration = ProfileConfiguration()
-        let trimmedURL = startURL.trimmingCharacters(in: .whitespaces)
+        var trimmedURL = startURL.trimmingCharacters(in: .whitespaces)
         if !trimmedURL.isEmpty {
+            // "example.com", as a person types an address: https, as the address bar would.
+            if !trimmedURL.contains("://"), !trimmedURL.lowercased().hasPrefix("about:") { trimmedURL = "https://" + trimmedURL }
             guard let url = URL(string: trimmedURL) else { throw CoreError.invalidConfiguration(L("editor.error.startURL")) }
             configuration.startURL = url
         }
@@ -379,7 +381,11 @@ struct ProfileDraft {
         }
         configuration.proxy = try makeProxy()
         if geoMode == .fixed {
-            guard let lat = Double(latitude), let lon = Double(longitude), let acc = Double(accuracy) else {
+            // "55,75": a decimal comma, as it is written in Russian, reads as a point.
+            func number(_ text: String) -> Double? {
+                Double(text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: "."))
+            }
+            guard let lat = number(latitude), let lon = number(longitude), let acc = number(accuracy) else {
                 throw CoreError.invalidConfiguration(L("editor.error.coords"))
             }
             configuration.geolocation = .fixed(latitude: lat, longitude: lon, accuracyMeters: acc)
@@ -451,6 +457,9 @@ struct ProfileEditorView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var draft = ProfileDraft()
+    /// The draft as it was loaded, in words (it is not Equatable): what Cancel compares it with.
+    @State private var loadedDraft: String?
+    @State private var confirmingDiscard = false
     @State private var error: String?
     @State private var loaded = false
     @State private var showingGuard = false
@@ -487,6 +496,12 @@ struct ProfileEditorView: View {
             }
         }
         .onAppear(perform: load)
+        // Esc or Cancel with something changed asks first: one Esc lost a whole new profile — its
+        // proxy, its pasted cookies, its notes.
+        .confirmationDialog(L("editor.discard.title"), isPresented: $confirmingDiscard, titleVisibility: .visible) {
+            Button(L("editor.discard.confirm"), role: .destructive) { dismiss() }
+            Button(L("editor.discard.keep"), role: .cancel) {}
+        }
         .onChange(of: draft.camera) { cameraMirror.camera = draft.camera }
         .sheet(isPresented: $showingGuard) { NetworkGuardSettingsView() }
         .sheet(isPresented: $showingWhatSitesSee) {
@@ -561,13 +576,14 @@ struct ProfileEditorView: View {
     private func form(saved: [ProxyListEntry]) -> some View {
         ProfileEditorForm(draft: $draft, topic: $topic, isNew: target.isNew, avatarID: avatarID, error: error,
                           guardReady: networkGuard.state == .ready,
-                          onCancel: { dismiss() }, onSave: save, onGuardSettings: { showingGuard = true },
+                          onCancel: cancel, onSave: save, onGuardSettings: { showingGuard = true },
                           savedProxies: saved, checkingProxy: checking, onCheckProxy: checkProxy,
                           knownTags: knownTags, visibleScreen: WindowSizing.visibleScreen,
                           onChooseCookieFile: { choosingCookieFile = true }, onDropCookieFile: readCookieFile,
                           onChooseCameraImage: { choosingCameraImage = true },
                           onChooseCameraVideo: { choosingCameraVideo = true },
                           onOpenCameraPreview: openCameraPreview,
+                          cameraAllowed: model.allowsCamera,
                           isSaving: savingCookies, saveRefused: settingsUnreadable,
                           keptVersions: keptVersions, onUseVersion: useVersion, onRemoveVersion: { removingVersion = $0 },
                           onWhatSitesSee: target.isNew ? nil : { showingWhatSitesSee = true })
@@ -612,6 +628,18 @@ struct ProfileEditorView: View {
                 draft.setWindowSize(WindowSize.randomSafe(fitting: (Int(visible.width), Int(visible.height)), using: &generator))
                 draft.windowSizeIsRandom = true
             }
+        }
+        // What Cancel compares with, once the form has settled what it fills in by itself.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { loadedDraft = String(describing: draft) }
+    }
+
+    /// Cancel: at once when nothing was changed since the form was loaded, after a question when
+    /// something was.
+    private func cancel() {
+        if let loadedDraft, String(describing: draft) != loadedDraft {
+            confirmingDiscard = true
+        } else {
+            dismiss()
         }
     }
 
@@ -693,6 +721,15 @@ struct ProfileEditorView: View {
     private func save() {
         guard !checking, !savingCookies, !settingsUnreadable else { return }
         error = nil
+        // A profile set to the system camera is not saved until the camera is installed and on: it
+        // would get no camera, which reads as broken (the owner, 11 November). The form goes to the
+        // Camera part, where the steps are. Below the plan the camera is off at launch whatever it
+        // holds, so nothing is refused there.
+        if model.allowsCamera, draft.camera.usesSystemCamera, SystemCamera.shared.state != .active {
+            topic = .camera
+            error = L("editor.camera.system.error.notActive")
+            return
+        }
         // A line without a scheme whose type no check has found: Save checks it first — both
         // handshakes are tried, and the one that answers is the type. A proxy that answers neither
         // way is not saved; the field says why.
