@@ -212,6 +212,19 @@ if in_suite core; then
         grep -E "error:|error " "$OUT/build-release.txt" | head -30 | tee -a "$LOG"; say "RELEASE BUILD FAILED"; STATUS=1
     fi
 fi
+# A probe for the sync (ios/SYNC_STEP1.md): does the Mac's platform-independent core, BrowserCore —
+# its vault, sync engine and formats — build for iOS as it is? Informative only: it never fails
+# the run, and its errors go to the log for the plan.
+if in_suite core; then
+    if (cd "$HERE/.." && xcodebuild build -scheme BrowserCore -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath "$OUT/dd-browsercore" >"$OUT/browsercore-ios.txt" 2>&1); then
+        say "probe: BrowserCore builds for iOS as it is"
+    else
+        say "probe: BrowserCore does not build for iOS as it is — $(grep -c 'error:' "$OUT/browsercore-ios.txt") errors; the first:"
+        grep -m8 'error:' "$OUT/browsercore-ios.txt" | sed 's|.*/Sources/|Sources/|' | tee -a "$LOG"
+    fi
+    rm -rf "$OUT/dd-browsercore"
+fi
 # The English table is in the built app (a table left out of the bundle would leave every text Russian).
 if [[ -f "$BUILT_APP/en.lproj/Localizable.strings" ]]; then
     say "the built app carries its English table (en.lproj)"
