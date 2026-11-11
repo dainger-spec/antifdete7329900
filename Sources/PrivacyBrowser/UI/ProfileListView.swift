@@ -212,6 +212,13 @@ struct ProfileListView: View {
             .sheet(item: $proxySheet) { _ in
                 ProxyProblemView { id in showProxies(selecting: [id]) }
             }
+            // File › New Profile (⌘N).
+            .onReceive(model.$newProfileRequest) { requested in
+                guard requested else { return }
+                model.newProfileRequest = false
+                section = .profiles
+                editing = .new
+            }
             // Settings → Proxies → the list.
             .onReceive(model.$proxiesRequest) { requested in
                 guard requested else { return }
@@ -1206,7 +1213,8 @@ struct ProfilesScreen: View {
                 Label(L("profiles.action.new"), systemImage: "plus")
             }
             .buttonStyle(.lumenPrimary)
-            .keyboardShortcut("n")
+            // ⌘N is the File menu's New Profile, which works from every window.
+            .help(L("profiles.action.new.help"))
         }
         .frame(height: Self.headerHeight)
         .padding(.leading, 28)

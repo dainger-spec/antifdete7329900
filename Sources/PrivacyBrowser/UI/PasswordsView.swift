@@ -62,7 +62,9 @@ struct PasswordListView: View {
             }, buttons: {
                 Button(L("common.done")) { dismiss() }
                     .buttonStyle(.lumenSecondary)
-                    .keyboardShortcut(.cancelAction)
+                    // While a login is being typed, Esc is its Cancel: it closed the whole sheet,
+                    // and the master password was asked again to come back.
+                    .keyboardShortcut(draft == nil ? KeyboardShortcut.cancelAction : nil)
             })
         }
         .sheetFrame(width: 780, height: 560)
@@ -313,6 +315,7 @@ struct PasswordListView: View {
             HStack {
                 Button(L("common.cancel")) { draft = nil }
                     .buttonStyle(.lumenSecondary)
+                    .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button(L("common.save")) { save(binding.wrappedValue) }
                     .buttonStyle(.lumenPrimary)

@@ -1687,6 +1687,14 @@
 "sidebar.palette.help" = "The command palette: any profile, action or section of Settings, by its first letters (⌘K)";
 "palette.scenarios" = "Scenarios…";
 "scenarios.help.how" = "How to Write Scenarios";
+"editor.discard.title" = "Discard the changes?";
+"editor.discard.confirm" = "Discard";
+"editor.discard.keep" = "Keep Editing";
+"profiles.action.new.help" = "New profile (⌘N)";
+"sync.off.title" = "Turn sync off?";
+"sync.off.message" = "The folder, or the server's address and token, will be forgotten on this Mac. What is synced already stays, there and here.";
+"sync.off.confirm" = "Turn Off";
+"sync.server.saved" = "Saved";
 "scenarios.locked" = "The vault is locked. Unlock it in the Profiles window: the scenarios are kept in it.";
 "scenarios.noProfiles" = "No profiles: make one to run a scenario on.";
 "scenarios.commands.title" = "Commands";

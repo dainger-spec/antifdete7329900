@@ -70,6 +70,11 @@ the page's own record.
   `page.url()` and `page.title()` are promises too (in Playwright they are not);
 - `log(...)` for the run's log, `sleep(ms)`, `params` (the run's parameters, read-only).
 
+A script's commands act one at a time, in the order they were asked for, whatever the script awaits
+(two at once — a forgotten `await`, `Promise.all` — moved one pointer two ways). Lines logged faster
+than the app shows them are counted, not queued: past 500 waiting, the log says how many it left out
+(a script logging in a loop used to hold up the profile's windows, and Stop behind them).
+
 A command that fails rejects its promise with the reason (the script may `try`/`catch` it); one left
 uncaught ends the run with it. Stop ends the run at once: a command that is waiting — `sleep`,
 `waitFor`, a page still loading — stops waiting (it used to run to its end: a script sleeping an hour

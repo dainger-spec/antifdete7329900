@@ -27,6 +27,7 @@ struct PrivacyBrowserApp: App {
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {
+                NewProfileMenuButton(model: model)
                 Button(L("menu.newTab")) { keyBrowserWindow?.newTab() }
                     .keyboardShortcut("t")
                 Button(L("menu.reopenClosedTab")) { keyBrowserWindow?.reopenClosedTab() }
@@ -211,6 +212,23 @@ private struct ScenariosMenuButton: View {
         Button(L("menu.scenarios")) { openWindow(id: "scenarios") }
             .keyboardShortcut("e", modifiers: [.command, .shift])
             .disabled(model.phase != .unlocked)
+    }
+}
+
+/// File › New Profile (⌘N): in the menu, where a person looks for it, and from any window of the
+/// app — it was the Profiles window's button alone, and only in its Profiles section.
+private struct NewProfileMenuButton: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button(L("profiles.action.new")) {
+            if model.profilesWindow == nil { openWindow(id: "profiles") }
+            model.activateProfilesWindow()
+            model.newProfileRequest = true
+        }
+        .keyboardShortcut("n")
+        .disabled(model.phase != .unlocked)
     }
 }
 

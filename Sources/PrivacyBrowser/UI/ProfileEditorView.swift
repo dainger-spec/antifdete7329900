@@ -457,6 +457,9 @@ struct ProfileEditorView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var draft = ProfileDraft()
+    /// The draft as it was loaded, in words (it is not Equatable): what Cancel compares it with.
+    @State private var loadedDraft: String?
+    @State private var confirmingDiscard = false
     @State private var error: String?
     @State private var loaded = false
     @State private var showingGuard = false
@@ -493,6 +496,12 @@ struct ProfileEditorView: View {
             }
         }
         .onAppear(perform: load)
+        // Esc or Cancel with something changed asks first: one Esc lost a whole new profile — its
+        // proxy, its pasted cookies, its notes.
+        .confirmationDialog(L("editor.discard.title"), isPresented: $confirmingDiscard, titleVisibility: .visible) {
+            Button(L("editor.discard.confirm"), role: .destructive) { dismiss() }
+            Button(L("editor.discard.keep"), role: .cancel) {}
+        }
         .onChange(of: draft.camera) { cameraMirror.camera = draft.camera }
         .sheet(isPresented: $showingGuard) { NetworkGuardSettingsView() }
         .sheet(isPresented: $showingWhatSitesSee) {
@@ -567,7 +576,7 @@ struct ProfileEditorView: View {
     private func form(saved: [ProxyListEntry]) -> some View {
         ProfileEditorForm(draft: $draft, topic: $topic, isNew: target.isNew, avatarID: avatarID, error: error,
                           guardReady: networkGuard.state == .ready,
-                          onCancel: { dismiss() }, onSave: save, onGuardSettings: { showingGuard = true },
+                          onCancel: cancel, onSave: save, onGuardSettings: { showingGuard = true },
                           savedProxies: saved, checkingProxy: checking, onCheckProxy: checkProxy,
                           knownTags: knownTags, visibleScreen: WindowSizing.visibleScreen,
                           onChooseCookieFile: { choosingCookieFile = true }, onDropCookieFile: readCookieFile,
@@ -619,6 +628,18 @@ struct ProfileEditorView: View {
                 draft.setWindowSize(WindowSize.randomSafe(fitting: (Int(visible.width), Int(visible.height)), using: &generator))
                 draft.windowSizeIsRandom = true
             }
+        }
+        // What Cancel compares with, once the form has settled what it fills in by itself.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { loadedDraft = String(describing: draft) }
+    }
+
+    /// Cancel: at once when nothing was changed since the form was loaded, after a question when
+    /// something was.
+    private func cancel() {
+        if let loadedDraft, String(describing: draft) != loadedDraft {
+            confirmingDiscard = true
+        } else {
+            dismiss()
         }
     }
 

@@ -77,6 +77,8 @@ final class AppModel: ObservableObject {
     let settings = AppSettings()
     /// The Proxies section is asked for from outside the Profiles window (Settings → Proxies).
     @Published var proxiesRequest = false
+    /// File › New Profile (⌘N): the Profiles window opens its editor for a new one.
+    @Published var newProfileRequest = false
     /// The command palette (⌘K) is open in the Profiles window.
     @Published var showingPalette = false
     /// The Help window's topic (`HelpView`): what opens the window may choose it — the scenario
