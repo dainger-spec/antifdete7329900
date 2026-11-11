@@ -74,11 +74,20 @@ final class ScenarioRunner {
 
     /// Stops the run: a command under way finishes (a button pressed is let go), then the run
     /// ends; a script between commands ends at once.
+    ///
+    /// A command that is waiting — `sleep`, `waitFor`, a page still loading — stops waiting: it
+    /// was let run to its end, and a script sleeping an hour kept its run "running", and its
+    /// profile closed to another run, for that hour. The plan's end (`rightsEnded`) still lets the
+    /// step under way finish, as it says.
     func stop(_ reason: StopReason = .byUser) {
         guard outcome == nil, thread != nil else { return }
         stopRequest = reason
+        if reason != .rightsEnded { inFlight.values.forEach { $0.cancel() } }
         if commandsInFlight == 0 { end(.stopped(reason)) }
     }
+
+    /// The commands under way, to be cancelled by Stop (`stop`); each takes itself out when it ends.
+    fileprivate var inFlight: [UUID: Task<Void, Never>] = [:]
 
     private func add(_ kind: Line.Kind, _ text: String) {
         let line = Line(at: Date(), kind: kind, text: text)
@@ -121,6 +130,9 @@ final class ScenarioRunner {
         }
         do {
             return .success(try await command(name, arguments))
+        } catch is CancellationError {
+            // Its wait was ended by Stop.
+            return .failure(Stopped())
         } catch {
             return .failure(error)
         }
@@ -232,9 +244,11 @@ final class ScenarioRunner {
             return JSValue(newPromiseIn: context) { resolve, reject in
                 let resolve = resolve, reject = reject
                 DispatchQueue.main.async {
-                    Task { @MainActor in
+                    let id = UUID()
+                    let task = Task { @MainActor in
                         guard let runner else { return }
                         let result = await runner.perform(name, values)
+                        runner.inFlight[id] = nil
                         thread.perform {
                             switch result {
                             case .success(let value):
@@ -246,6 +260,7 @@ final class ScenarioRunner {
                             }
                         }
                     }
+                    MainActor.assumeIsolated { runner?.inFlight[id] = task }
                 }
             }
         }

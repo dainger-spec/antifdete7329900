@@ -1740,7 +1740,7 @@
 "help.scenarios.step.new" = "Click New Scenario: it comes with an example that works.";
 "help.scenarios.step.write" = "Name the scenario and write its steps. ⌘S saves.";
 "help.scenarios.step.run" = "Choose a profile and click Run (⌘R). Lumen starts a stopped profile itself.";
-"help.scenarios.step.log" = "Follow the log under the code: every command with its time, errors in red. Stop ends the run; a command under way finishes first.";
+"help.scenarios.step.log" = "Follow the log under the code: every command with its time, errors in red. Stop ends the run at once: a wait under way ends, a pressed button or key is let go.";
 "help.scenarios.example" = "An example: signing in";
 "help.scenarios.example.code" = "await page.goto('https://shop.example/login');\nawait page.type('#email', 'name@example.com');\nawait page.type('#password', 'your password');\nawait page.press('Enter');\nawait page.waitFor('text=My orders');\nlog('Signed in:', await page.title());";
 "help.scenarios.know" = "Worth knowing";
@@ -1795,7 +1795,7 @@
 "help.api.request.importCookies" = "Imports the cookies in the body: a JSON or a Netscape file.";
 "help.api.request.scenario" = "Runs a scenario on the running profile: {\"source\": \"…\", \"params\": {…}}, or a saved one, {\"scenario\": \"Its name\"}.";
 "help.api.request.scenarioState" = "The profile’s last run: whether it is running, how it ended, its log.";
-"help.api.request.scenarioStop" = "Stops the run: a command under way finishes first.";
+"help.api.request.scenarioStop" = "Stops the run: a wait under way ends, a pressed button or key is let go.";
 "help.api.scenario" = "A scenario from a script";
 "help.api.scenario.code" = "curl -s -X POST -H \"Authorization: Bearer $PB_API_TOKEN\" -d '{\"source\": \"await page.goto(params.url); log(await page.title());\", \"params\": {\"url\": \"https://example.com/\"}}' http://127.0.0.1:50777/v1/profiles/Shop/scenario";
 "help.api.errors" = "Errors";

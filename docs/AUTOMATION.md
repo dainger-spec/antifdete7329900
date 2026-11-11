@@ -71,8 +71,9 @@ the page's own record.
 - `log(...)` for the run's log, `sleep(ms)`, `params` (the run's parameters, read-only).
 
 A command that fails rejects its promise with the reason (the script may `try`/`catch` it); one left
-uncaught ends the run with it. Stop ends the run at once: a command under way finishes first (a
-pressed button is let go). A script that loops without ever awaiting keeps its thread busy after
+uncaught ends the run with it. Stop ends the run at once: a command that is waiting — `sleep`,
+`waitFor`, a page still loading — stops waiting (it used to run to its end: a script sleeping an hour
+kept its run going for the hour), and a pressed button or key is let go first. A script that loops without ever awaiting keeps its thread busy after
 Stop until the profile stops — the app and the page are not held up.
 
 The plan's `features` must name `automation` (docs: the document of rights, format 1; absent —

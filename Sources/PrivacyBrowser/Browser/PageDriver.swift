@@ -344,21 +344,37 @@ final class PageDriver {
             """) as? Double
         guard let document else { return }
         if let measuredFor, measuredFor.document == document, measuredFor.size == size { return }
-        let probe = input.pointerViewportPoint() ?? point
-        guard await input.move(along: [probe], interval: 0) else { return }
+        // Two moves a few points apart must tell the same: the listener hears every move, a
+        // person's own mouse over the window too, and one of those taken for the probe would aim
+        // every press on the page off. And what they tell must be a place a viewport can be: under
+        // the view's top (a toolbar over the page), never to its side. Anything else is not kept,
+        // and the next way of the pointer measures again.
+        let first = input.pointerViewportPoint() ?? point
+        let second = CGPoint(x: first.x + 7, y: first.y + 5)
+        guard let one = await viewportOffset(seenAt: first), let two = await viewportOffset(seenAt: second),
+              abs(one.x - two.x) <= 1.5, abs(one.y - two.y) <= 1.5 else { return }
+        let origin = CGPoint(x: input.viewportOrigin.x + two.x, y: input.viewportOrigin.y + two.y)
+        guard abs(origin.x) <= 2, origin.y >= -2, origin.y <= size.height / 2 else { return }
+        if abs(two.x) >= 0.5 || abs(two.y) >= 0.5 {
+            input.viewportOrigin = origin
+            Self.log.notice("The viewport starts \(Int(self.input.viewportOrigin.x.rounded()), privacy: .public), \(Int(self.input.viewportOrigin.y.rounded()), privacy: .public) pt into its web view")
+        }
+        measuredFor = (document, size)
+    }
+
+    /// How far from where the input aimed (`probe`, a viewport point) the page saw its move, in the
+    /// view's points; nil when the page reported none (the pointer over a frame of another site).
+    private func viewportOffset(seenAt probe: CGPoint) async -> CGPoint? {
+        _ = try? await isolated("globalThis.__pbMoves.x = null; return true;")
+        guard await input.move(along: [probe], interval: 0) else { return nil }
         let scale = webView.pageZoom * webView.magnification
         for _ in 0..<15 {
             try? await Task.sleep(nanoseconds: 20_000_000)
             let seen = try? await isolated("return __pbMoves.x === null ? null : [__pbMoves.x, __pbMoves.y];") as? [NSNumber]
             guard let seen, seen.count == 2 else { continue }
-            let off = CGPoint(x: (probe.x - seen[0].doubleValue) * scale, y: (probe.y - seen[1].doubleValue) * scale)
-            if abs(off.x) >= 0.5 || abs(off.y) >= 0.5 {
-                input.viewportOrigin = CGPoint(x: input.viewportOrigin.x + off.x, y: input.viewportOrigin.y + off.y)
-                Self.log.notice("The viewport starts \(Int(self.input.viewportOrigin.x.rounded()), privacy: .public), \(Int(self.input.viewportOrigin.y.rounded()), privacy: .public) pt into its web view")
-            }
-            measuredFor = (document, size)
-            return
+            return CGPoint(x: (probe.x - seen[0].doubleValue) * scale, y: (probe.y - seen[1].doubleValue) * scale)
         }
+        return nil
     }
 
     // MARK: The wheel
@@ -424,6 +440,8 @@ final class PageDriver {
     /// key, `delay` between keys. The log says how many characters, never which.
     func type(_ selector: String?, _ text: String, delay: ClosedRange<Double> = 0.06...0.18) async throws {
         onLog?("type \(text.count) characters\(selector.map { " into \($0)" } ?? "")")
+        // Keys given to a web view in no window go nowhere: said, not logged as typed.
+        guard webView.window != nil else { throw Failure.noWindow }
         let keys = try text.map { character -> PageInput.Key in
             guard let key = PageInput.key(typing: character) else { throw Failure.untypeable(String(character)) }
             return key
@@ -443,6 +461,7 @@ final class PageDriver {
     /// Presses a key or a combination: "Enter", "Tab", "Shift+Tab", "Meta+a", "a".
     func press(_ combination: String) async throws {
         onLog?("press \(combination)")
+        guard webView.window != nil else { throw Failure.noWindow }
         var modifiers: NSEvent.ModifierFlags = []
         var parts = combination.split(separator: "+").map(String.init)
         guard let last = parts.popLast() else { throw Failure.untypeable(combination) }

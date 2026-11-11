@@ -1740,7 +1740,7 @@
 "help.scenarios.step.new" = "Нажмите «Новый сценарий»: в нём уже есть рабочий пример.";
 "help.scenarios.step.write" = "Дайте сценарию название и напишите шаги. ⌘S сохраняет.";
 "help.scenarios.step.run" = "Выберите профиль и нажмите «Запустить» (⌘R). Остановленный профиль Lumen запустит сам.";
-"help.scenarios.step.log" = "Следите за журналом под кодом: каждая команда со временем, ошибки — красным. «Остановить» завершает запуск; начатая команда доводится до конца.";
+"help.scenarios.step.log" = "Следите за журналом под кодом: каждая команда со временем, ошибки — красным. «Остановить» завершает запуск сразу: ожидание прерывается, нажатая кнопка или клавиша отпускается.";
 "help.scenarios.example" = "Пример: вход на сайт";
 "help.scenarios.example.code" = "await page.goto('https://shop.example/login');\nawait page.type('#email', 'name@example.com');\nawait page.type('#password', 'ваш пароль');\nawait page.press('Enter');\nawait page.waitFor('text=Мои заказы');\nlog('Вошли:', await page.title());";
 "help.scenarios.know" = "Что важно знать";
@@ -1795,7 +1795,7 @@
 "help.api.request.importCookies" = "Импорт cookie из тела запроса: файл JSON или Netscape.";
 "help.api.request.scenario" = "Запустить сценарий на запущенном профиле: {\"source\": \"…\", \"params\": {…}}, или сохранённый — {\"scenario\": \"Название\"}.";
 "help.api.request.scenarioState" = "Последний запуск профиля: идёт ли он, чем закончился, его журнал.";
-"help.api.request.scenarioStop" = "Остановить запуск: начатая команда доводится до конца.";
+"help.api.request.scenarioStop" = "Остановить запуск: ожидание прерывается, нажатая кнопка или клавиша отпускается.";
 "help.api.scenario" = "Сценарий из скрипта";
 "help.api.scenario.code" = "curl -s -X POST -H \"Authorization: Bearer $PB_API_TOKEN\" -d '{\"source\": \"await page.goto(params.url); log(await page.title());\", \"params\": {\"url\": \"https://example.com/\"}}' http://127.0.0.1:50777/v1/profiles/Shop/scenario";
 "help.api.errors" = "Ошибки";

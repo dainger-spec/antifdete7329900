@@ -258,22 +258,36 @@ public struct LicenseClient: Sendable {
         var tokens = profileTokens.flatMap { $0.count <= profileCount ? $0 : nil }
         let response: AccountResponse
         do {
-            var answer = try await transport.send(AccountAPI.refresh(deviceToken: token, machineID: machineID, profileCount: profileCount,
-                                                                     appVersion: appVersion, label: label, profileTokens: tokens))
-            if tokens != nil, answer.status == 400,
-               case .failure(.server(let refusal)) = AccountAPI.documentAnswer(from: answer), refusal.field == "profileTokens" {
-                // The tokens were refused and there was no renewal (§6.2): again without them.
+            /// The field a `400` names, if it names one.
+            func refusedField(_ answer: AccountResponse) -> String? {
+                guard answer.status == 400, case .failure(.server(let refusal)) = AccountAPI.documentAnswer(from: answer) else { return nil }
+                return refusal.field
+            }
+            func send(label: String?, tokens: [String]?) async throws -> AccountResponse {
+                try await transport.send(AccountAPI.refresh(deviceToken: token, machineID: machineID, profileCount: profileCount,
+                                                            appVersion: appVersion, label: label, profileTokens: tokens))
+            }
+            var answer = try await send(label: label, tokens: tokens)
+            if tokens != nil, refusedField(answer) == "profileTokens" {
+                // The tokens were refused and there was no renewal (§6.2): again without them, the label kept.
                 tokensRefused = true
                 tokens = nil
-                answer = try await transport.send(AccountAPI.refresh(deviceToken: token, machineID: machineID, profileCount: profileCount,
-                                                                     appVersion: appVersion, label: label))
+                answer = try await send(label: label, tokens: nil)
             }
             if label != nil, answer.status == 400 {
                 // A server that does not take the label in a renewal yet: the renewal matters more.
-                labelRefused = true
-                answer = try await transport.send(AccountAPI.refresh(deviceToken: token, machineID: machineID,
-                                                                     profileCount: profileCount, appVersion: appVersion,
-                                                                     profileTokens: tokens))
+                let namedTheLabel = refusedField(answer) == "label"
+                var without = try await send(label: nil, tokens: tokens)
+                if tokens != nil, refusedField(without) == "profileTokens" {
+                    // It took neither: the tokens were named only once the label was gone.
+                    tokensRefused = true
+                    tokens = nil
+                    without = try await send(label: nil, tokens: nil)
+                }
+                // Refused for its label: the server said so, or took the renewal without it. A 400
+                // about something else is not the label's, and the label is sent again next time.
+                labelRefused = namedTheLabel || without.status != 400
+                answer = without
             }
             response = answer
         } catch {

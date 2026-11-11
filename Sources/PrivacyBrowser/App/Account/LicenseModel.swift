@@ -560,6 +560,14 @@ final class LicenseModel: ObservableObject {
             record = activation.record
             record.renewalFailure = nil
             sentProfileCount = count
+            // The activation carries no tokens, and what an account before this one refused says
+            // nothing of this one: the first renewal tells them.
+            sentProfileTokens = nil
+            tokensRefusedByServer = false
+            labelRefusedByServer = false
+            if knownProfileCount != nil, knownProfileTokens != nil {
+                Task { [weak self] in await self?.refresh(because: .profiles) }
+            }
             if case .key = credential {
                 record.rememberKey = rememberTypedKey ? nil : false
                 // Not remembered (§10.1): forgotten right after the request that needed it.
@@ -702,6 +710,11 @@ final class LicenseModel: ObservableObject {
         if let vault { try? AccountKeyVault.remove(from: vault) }
         key = nil
         pendingSession = nil
+        // What this account's server was told and refused is not the next one's.
+        sentProfileCount = nil
+        sentProfileTokens = nil
+        tokensRefusedByServer = false
+        labelRefusedByServer = false
         let confirmed = outcome == .signedOut(confirmed: true)
         log.notice("Signed out of the account on this Mac (server confirmed: \(confirmed, privacy: .public))")
         recompute()

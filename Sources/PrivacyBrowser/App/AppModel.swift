@@ -925,6 +925,8 @@ final class AppModel: ObservableObject {
         do {
             let bookmark = try folder.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
             try updateDeviceSettings { $0.syncTarget = .folder(bookmark: bookmark, path: folder.path) }
+            // With sync a renewal carries the synced profiles' tokens, without it none: the license is told.
+            refresh()
         } catch {
             showError(String(format: L("sync.error.rememberFolder"), errorText(error)))
         }
@@ -938,6 +940,8 @@ final class AppModel: ObservableObject {
             }
             try HTTPSyncTransport.validate(url)
             try updateDeviceSettings { $0.syncTarget = .server(baseURL: url, token: token) }
+            // With sync a renewal carries the synced profiles' tokens, without it none: the license is told.
+            refresh()
         } catch {
             showError(errorText(error))
         }
@@ -946,6 +950,8 @@ final class AppModel: ObservableObject {
     func clearSyncTarget() {
         do {
             try updateDeviceSettings { $0.syncTarget = nil }
+            // With sync a renewal carries the synced profiles' tokens, without it none: the license is told.
+            refresh()
         } catch {
             showError(error.localizedDescription)
         }

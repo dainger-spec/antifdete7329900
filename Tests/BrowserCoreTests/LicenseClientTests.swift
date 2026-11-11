@@ -784,6 +784,33 @@ final class LicenseClientTests: XCTestCase {
         XCTAssertNil(body(labelRefusing.requests[1])["label"])
     }
 
+    func testAServerThatTakesNeitherTheLabelNorTheTokensGetsThePlainRenewal() async throws {
+        let record = try await signedIn()
+        let tokens = ["750d110fc23ef5dbfb2a9b045c3711ed"]
+        // It names the label first, and the tokens once the label is gone.
+        let server = FakeServer { request in
+            if self.body(request)["label"] != nil { return self.error(400, "invalid_request", ["field": "label"]) }
+            if self.body(request)["profileTokens"] != nil { return self.error(400, "invalid_request", ["field": "profileTokens"]) }
+            return self.ok(["entitlement": self.document(issued: "2026-11-02T10:00:00Z"), "serverTime": "2026-11-02T10:00:00Z"])
+        }
+        let report = await client(server).refreshReport(record, profileCount: 3, label: "Mac", profileTokens: tokens,
+                                                        wall: time("2026-11-02T10:00:00Z"), uptime: 2_000)
+        XCTAssertEqual(report.result, .accepted(paymentReceived: false))
+        XCTAssertTrue(report.labelRefused)
+        XCTAssertTrue(report.tokensRefused)
+        XCTAssertEqual(server.requests.count, 3)
+        XCTAssertNil(body(server.requests[2])["label"])
+        XCTAssertNil(body(server.requests[2])["profileTokens"])
+
+        // A 400 that is about neither, with or without the label: not "the label was refused".
+        let refusing = FakeServer { _ in self.error(400, "invalid_request", ["field": "machineID"]) }
+        let other = await client(refusing).refreshReport(record, profileCount: 3, label: "Mac", profileTokens: tokens,
+                                                         wall: time("2026-11-02T10:00:00Z"), uptime: 2_000)
+        XCTAssertFalse(other.labelRefused)
+        XCTAssertFalse(other.tokensRefused)
+        XCTAssertEqual(other.failure, .server(status: 400, code: "invalid_request"))
+    }
+
     func testTheRecordKeepsTheTokensForARenewalBeforeTheVaultIsOpen() throws {
         var record = AccountRecord()
         record.profileCount = 2
