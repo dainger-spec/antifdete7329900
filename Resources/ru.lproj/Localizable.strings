@@ -1116,6 +1116,13 @@
 "updates.banner.title" = "Lumen обновлён до версии %@";
 "updates.banner.details" = "Подробнее";
 "updates.banner.ok" = "Понятно";
+"updates.offer.title" = "Вышла версия Lumen %@";
+"updates.offer.available" = "Её можно скачать и установить в настройках, в разделе «Обновления».";
+"updates.offer.downloading" = "Скачивается. Когда будет готова, установится при выходе из Lumen.";
+"updates.offer.ready" = "Скачана и проверена. Установится при выходе из Lumen — или сейчас.";
+"updates.offer.blocked" = "Установить её там, где лежит приложение, нельзя. Почему и что сделать — в настройках, в разделе «Обновления».";
+"updates.offer.install" = "Установить…";
+"updates.offer.later" = "Позже";
 "updates.notes" = "Что нового в %@";
 "updates.notes.none" = "У этого выпуска нет заметок.";
 "updates.notice.deferred" = "При прошлом выходе обновление не установлено: %@. Оно установится при следующем выходе, когда все профили будут зашифрованы.";

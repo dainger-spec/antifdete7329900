@@ -93,6 +93,31 @@ final class AppModel: ObservableObject {
 
     /// The version an update installed at the last quit: the profiles' window says it once.
     @Published private(set) var updatedTo: String?
+    /// A newer version the updater found (`AppUpdater.state`), said in the Profiles window and not
+    /// only in Settings › Updates (the owner, 11 November: a release was out and nothing said so).
+    /// Nil when there is none, or once the person put it away for this version, until the app
+    /// starts again.
+    @Published private(set) var updateOffer: UpdateOffer?
+    private var updateOfferPutAway: String?
+    private var updaterObservation: AnyCancellable?
+
+    /// "Later" on the offer: not said again for this version in this run.
+    func updateOfferSeen() {
+        updateOfferPutAway = updateOffer?.version
+        updateOffer = nil
+    }
+
+    private func offer(for state: UpdateState) -> UpdateOffer? {
+        let offer: UpdateOffer?
+        switch state {
+        case .available(let item): offer = UpdateOffer(version: item.version, stage: .available)
+        case .downloading(let item): offer = UpdateOffer(version: item.version, stage: .downloading)
+        case .ready(let item): offer = UpdateOffer(version: item.version, stage: .ready)
+        case .blocked(let item, _): offer = UpdateOffer(version: item.version, stage: .blocked)
+        case .idle, .upToDate, .checking, .failed: offer = nil
+        }
+        return offer?.version == updateOfferPutAway ? nil : offer
+    }
 
     func updatedNoticeSeen() {
         updatedTo = nil
@@ -1201,6 +1226,16 @@ final class AppModel: ObservableObject {
         guard let configuration = AppUpdater.Configuration.main() else { return }
         let updater = AppUpdater(configuration: configuration)
         self.updater = updater
+        // @Published emits before the value changes: the state itself is what is read.
+        updaterObservation = updater.$state.sink { [weak self] state in
+            Task { @MainActor in
+                guard let self else { return }
+                // While a check runs, what was offered stays.
+                if case .checking = state { return }
+                let offer = self.offer(for: state)
+                if self.updateOffer != offer { self.updateOffer = offer }
+            }
+        }
         updater.start()
         switch updater.notice {
         case .outcome(let outcome)?:

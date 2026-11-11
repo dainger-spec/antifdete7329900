@@ -1116,6 +1116,13 @@
 "updates.banner.title" = "Lumen was updated to %@";
 "updates.banner.details" = "Details";
 "updates.banner.ok" = "OK";
+"updates.offer.title" = "Lumen %@ is out";
+"updates.offer.available" = "It can be downloaded and installed in Settings, under Updates.";
+"updates.offer.downloading" = "Downloading. Once ready, it installs when you quit Lumen.";
+"updates.offer.ready" = "Downloaded and checked. It installs when you quit Lumen, or now.";
+"updates.offer.blocked" = "It cannot be installed where the app is. Settings, under Updates, says why and what to do.";
+"updates.offer.install" = "Install…";
+"updates.offer.later" = "Later";
 "updates.notes" = "What's new in %@";
 "updates.notes.none" = "This release has no notes.";
 "updates.notice.deferred" = "The update was not installed at the last quit: %@. It installs at the next quit that encrypts every profile.";

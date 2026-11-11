@@ -373,6 +373,8 @@ struct ProfileListView: View {
                            openSettings()
                        },
                        dismissEngineWarning: { model.engineWarningSeen() },
+                       updateOffer: model.updateOffer,
+                       dismissUpdateOffer: { model.updateOfferSeen() },
                        updatedTo: model.updatedTo,
                        openUpdates: {
                            model.updatedNoticeSeen()
@@ -841,6 +843,10 @@ struct ProfilesScreen: View {
     var openEngineDetails: () -> Void = {}
     var dismissEngineWarning: () -> Void = {}
     /// The version an update installed at the last quit, said once at the launch it made.
+    /// A newer version found by the updater: said here, with the way to Settings › Updates where it
+    /// is installed; Later puts it away until the app starts again.
+    var updateOffer: UpdateOffer?
+    var dismissUpdateOffer: () -> Void = {}
     var updatedTo: String?
     var openUpdates: () -> Void = {}
     var dismissUpdated: () -> Void = {}
@@ -971,6 +977,7 @@ struct ProfilesScreen: View {
         case proxyProblem(ProxyProblemBanner.Item)
         case engines(EngineWarning.Facts)
         case updated(String)
+        case updateOffer(UpdateOffer)
         case keptDeleted
 
         var id: String {
@@ -980,6 +987,7 @@ struct ProfilesScreen: View {
             case .proxyProblem: return "proxy"
             case .engines: return "engines"
             case .updated: return "updated"
+            case .updateOffer: return "update-offer"
             case .keptDeleted: return "kept"
             }
         }
@@ -994,6 +1002,7 @@ struct ProfilesScreen: View {
         if let proxyProblem { banners.append(.proxyProblem(proxyProblem)) }
         banners += licenseBanners.filter { !$0.stopsWork }.map { .license($0) }
         if let engineWarning { banners.append(.engines(engineWarning)) }
+        if let updateOffer { banners.append(.updateOffer(updateOffer)) }
         if let updatedTo { banners.append(.updated(updatedTo)) }
         if !keptDeleted.isEmpty { banners.append(.keptDeleted) }
         return banners
@@ -1035,6 +1044,8 @@ struct ProfilesScreen: View {
             EngineWarningBanner(facts: facts, details: openEngineDetails, done: dismissEngineWarning)
         case let .updated(version):
             UpdatedBanner(version: version, details: openUpdates, done: dismissUpdated)
+        case let .updateOffer(offer):
+            UpdateOfferBanner(offer: offer, open: openUpdates, later: dismissUpdateOffer)
         case .keptDeleted:
             KeptDeletedBox(profiles: keptDeleted, isWorking: isWorking, bringBack: bringBack,
                            removeForGood: removeForGood, reveal: revealKeptDeleted)
@@ -2417,6 +2428,71 @@ struct UpdatedBanner: View {
             }
         }
         .accessibilityIdentifier("updated-banner")
+    }
+}
+
+/// A newer version of the app, as the updater has it (`AppModel.updateOffer`).
+struct UpdateOffer: Equatable {
+    enum Stage: Equatable {
+        /// Found, not downloaded (the "only tell me" policy).
+        case available
+        case downloading
+        /// Downloaded and checked: installed at the next quit, or now from Settings › Updates.
+        case ready
+        /// Found, but the app cannot be replaced where it is (Settings › Updates says why).
+        case blocked
+    }
+
+    var version: String
+    var stage: Stage
+}
+
+/// Above the profiles: a newer version is out. Before, only Settings › Updates said so — and only
+/// to someone who went there (the owner, 11 November). What it says follows the updater: found,
+/// downloading, ready to install, or not installable here; the button goes to Settings › Updates,
+/// where it is installed; Later puts it away until the app starts again.
+struct UpdateOfferBanner: View {
+    let offer: UpdateOffer
+    let open: () -> Void
+    let later: () -> Void
+
+    private var detail: String {
+        switch offer.stage {
+        case .available: return L("updates.offer.available")
+        case .downloading: return L("updates.offer.downloading")
+        case .ready: return L("updates.offer.ready")
+        case .blocked: return L("updates.offer.blocked")
+        }
+    }
+
+    var body: some View {
+        LumenBanner(tone: .info) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(String(format: L("updates.offer.title"), offer.version))
+                        .font(.lumenLabel)
+                        .foregroundStyle(Theme.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(detail)
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Button(offer.stage == .ready ? L("updates.offer.install") : L("updates.banner.details"), action: open)
+                            .buttonStyle(.lumenSecondary)
+                        Button(L("updates.offer.later"), action: later)
+                            .buttonStyle(.lumenGhost)
+                    }
+                    .padding(.top, 4)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .accessibilityIdentifier("update-offer-banner")
     }
 }
 
