@@ -48,6 +48,10 @@ def call(server, method, path, body=None, token=None):
         return status, {"notJSON": data[:80].decode("utf-8", "replace")}
 
 
+def uuid_like(text):
+    return isinstance(text, str) and len(text) == 36 and text.count("-") == 4
+
+
 def code_of(answer):
     return (answer.get("error") or {}).get("code") if isinstance(answer, dict) else None
 
@@ -121,6 +125,14 @@ def main():
         status, answer = call(server, "POST", "/v1/device/entitlement", body, token=device_token)
         if check(status == 200, "renewal with the device's token: 200", f"{status} {code_of(answer)}"):
             document(answer.get("entitlement"), device_id, machine_id, "the renewal's document")
+
+        # The sync's list of vaults on the device token (CONTRACT.md §16.1): the test account's plan has it.
+        status, answer = call(server, "GET", "/v1/device/sync/vaults", token=device_token)
+        vaults = answer.get("vaults") if isinstance(answer, dict) else None
+        check(status == 200 and isinstance(vaults, list), "the sync's vaults on the device token: 200 with a list", f"{status} {code_of(answer)}")
+        if isinstance(vaults, list):
+            print(f"      vaults: {len(vaults)}")
+            check(all(set(v) >= {"vaultID", "changedAt"} and uuid_like(v["vaultID"]) for v in vaults), "each vault: an id and when it changed")
 
         tokens = dict(body, profileTokens=[hashlib.sha256(b"e2e").hexdigest()[:32]])
         status, answer = call(server, "POST", "/v1/device/entitlement", tokens, token=device_token)
