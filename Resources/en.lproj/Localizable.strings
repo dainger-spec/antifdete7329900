@@ -1686,8 +1686,6 @@
 "sidebar.palette" = "Commands and Search";
 "sidebar.palette.help" = "The command palette: any profile, action or section of Settings, by its first letters (⌘K)";
 "palette.scenarios" = "Scenarios…";
-"scenarios.help" = "Commands";
-"scenarios.help.hint" = "A scenario’s commands, with examples, in Help";
 "scenarios.help.how" = "How to Write Scenarios";
 "scenarios.commands.title" = "Commands";
 "scenarios.commands.hint" = "Click one to add it at the scenario’s end.";

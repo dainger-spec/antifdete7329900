@@ -6,7 +6,8 @@ goes through the same code as the app's own buttons (`AutomationHandler` → `Pr
 profile started from a script is the profile started from the list: its proxy, its own process,
 its time zone and language, and its data sealed again when it stops.
 
-It is **off** until turned on in **⋯ (in the Profiles window) → Automation API…**, and only in the
+It is **off** until turned on in **Automation API** in the Profiles window's sidebar (also ⋯ →
+Automation API…, and Settings › Automation API), and only in the
 build without the App Sandbox (`SANDBOX=0 scripts/build-app.sh`): the sandboxed build is not
 allowed to accept connections. It listens only while the vault is unlocked.
 

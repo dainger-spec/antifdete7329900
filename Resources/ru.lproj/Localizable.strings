@@ -1686,8 +1686,6 @@
 "sidebar.palette" = "Команды и поиск";
 "sidebar.palette.help" = "Командная палитра: любой профиль, действие или раздел настроек — по первым буквам (⌘K)";
 "palette.scenarios" = "Сценарии…";
-"scenarios.help" = "Команды";
-"scenarios.help.hint" = "Команды сценария с примерами — в справке";
 "scenarios.help.how" = "Как писать сценарии";
 "scenarios.commands.title" = "Команды";
 "scenarios.commands.hint" = "Нажмите — команда добавится в конец сценария.";
