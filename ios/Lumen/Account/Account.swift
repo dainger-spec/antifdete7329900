@@ -224,6 +224,8 @@ extension AppModel {
     /// says or does not; the profiles stay, the ones that lived behind a proxy locked.
     func signOut() async {
         guard fixedAccess == nil, let record = AccountStore.record() else { return }
+        // Signing out forgets the vault on this iPhone too (the sync plan's decision 1).
+        SyncKeychain.erase()
         AccountStore.save(nil)
         accountNotice = nil
         decide()
