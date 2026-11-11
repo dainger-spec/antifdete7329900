@@ -174,7 +174,7 @@ struct BottomBar: View {
         .foregroundStyle(Theme.text)
         .padding(.horizontal, 22)
         .frame(height: 60)
-        .glassPane(radius: 30)
+        .glassPane(radius: 30, smoked: true)
         .padding(.horizontal, 14)
         .padding(.bottom, 6)
     }

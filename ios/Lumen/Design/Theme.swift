@@ -66,13 +66,17 @@ struct EclipseDisc: View {
 /// with a lit edge before that.
 struct GlassPane: ViewModifier {
     var radius: CGFloat
+    /// Smoked glass: over a page that may be white, the pane stays dark and its white signs
+    /// readable (the design's bottom bar).
+    var smoked = false
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         if #available(iOS 26.0, *) {
-            content.glassEffect(.regular, in: shape)
+            content.glassEffect(smoked ? .regular.tint(Theme.ground.opacity(0.7)) : .regular, in: shape)
         } else {
             content
+                .background(smoked ? AnyShapeStyle(Theme.ground.opacity(0.75)) : AnyShapeStyle(.clear), in: shape)
                 .background(.ultraThinMaterial, in: shape)
                 .overlay(shape.strokeBorder(Theme.hairline, lineWidth: 0.5))
         }
@@ -169,7 +173,7 @@ struct LumenMark: Shape {
 
 extension View {
     /// A pane of glass behind this view.
-    func glassPane(radius: CGFloat = 24) -> some View { modifier(GlassPane(radius: radius)) }
+    func glassPane(radius: CGFloat = 24, smoked: Bool = false) -> some View { modifier(GlassPane(radius: radius, smoked: smoked)) }
 
     /// A list or a form on the app's ground: the system's grey gone, the eclipse behind.
     func eclipseScreen() -> some View {
