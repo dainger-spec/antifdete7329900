@@ -126,8 +126,25 @@ def document(acc, device):
 VAULT_PASSWORD = "vault-pass-1"
 
 
+STANDIN = os.environ.get("LUMEN_STANDIN_VAULT")   # a folder the Mac's code wrote (StandInVault)
+
+
+def standin_objects():
+    """The stand-in vault's objects: id -> (revision, blob), as LocalDirectorySyncTransport keeps them."""
+    out = {}
+    for name in os.listdir(STANDIN):
+        if name.endswith(".json") and not name.startswith("."):
+            stored = json.load(open(os.path.join(STANDIN, name)))
+            out[name[:-5]] = (stored["revision"], base64.b64decode(stored["blob"]))
+    return out
+
+
 def vault_of(acc):
-    """The account's vault as a Mac made it (MasterVault.create): its header's JSON, made once."""
+    """The account's vault as a Mac made it (MasterVault.create): its header's JSON, made once — or,
+    when the CI made one with the Mac's own code (LUMEN_STANDIN_VAULT), that vault with its profiles."""
+    if "vault" not in acc and STANDIN and os.path.isdir(STANDIN):
+        header = standin_objects()["vault-header"][1]
+        acc["vault"] = dict(id=json.loads(header)["vaultID"].lower(), header=header, changedAt=stamp(time.time()), standin=True)
     if "vault" not in acc:
         vault_id = str(uuid.uuid4()).upper()
         salt = os.urandom(16)
@@ -253,7 +270,7 @@ def handle(method, path, headers, body):
                             "unlinkCooldownSeconds": 604800})
 
     # The sync (CONTRACT.md §16.1): which vaults the account has, and a vault's header.
-    if method == "GET" and (path == "/v1/device/sync/vaults" or re.fullmatch(r"/v1/vaults/[0-9a-f-]{36}/objects/vault-header", path)):
+    if method == "GET" and (path == "/v1/device/sync/vaults" or re.fullmatch(r"/v1/vaults/[0-9a-f-]{36}/objects(/[0-9a-z-]+)?", path)):
         if token not in DEVICES:
             return refuse(401, "device_revoked" if path.startswith("/v1/device") else "unauthorized")
         email, _ = DEVICES[token]
@@ -268,7 +285,11 @@ def handle(method, path, headers, body):
             return answer(200, {"vaults": [{"vaultID": vault["id"], "changedAt": vault["changedAt"]}]})
         if path.split("/")[3] != vault["id"]:
             return refuse(403, "forbidden")
-        return blob(vault["header"], 1)
+        objects = standin_objects() if vault.get("standin") else {"vault-header": (1, vault["header"])}
+        if path.endswith("/objects"):
+            return answer(200, {"objects": [{"id": k, "revision": r} for k, (r, _) in sorted(objects.items())]})
+        found = objects.get(path.rsplit("/", 1)[1])
+        return blob(found[1], found[0]) if found else refuse(404, "not_found")
 
     if path == "/v1/device/entitlement" and method == "POST" or (method, path) == ("DELETE", "/v1/device"):
         if token not in DEVICES:

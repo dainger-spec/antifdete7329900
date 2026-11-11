@@ -36,6 +36,36 @@ public enum SyncRead {
         public var deferredForSpace: [String]
     }
 
+    /// Why a run did not go through, in the app's terms (the app does not see the Mac's core).
+    public enum Failure: Error, Equatable {
+        /// No trial or paid plan: the sync is the plan's (a state, decision 8).
+        case notInPlan
+        /// The kept key no longer opens the vault: the master password changed on the Mac.
+        case keyNoLongerOpens
+        /// The server's data changed under the run (§16.2): nothing more written; the next run starts afresh.
+        case generationChanged
+        /// The vault is a newer version's.
+        case newerApp
+        case other(String)
+    }
+
+    /// `pull`, its failures said in the app's terms.
+    public static func run(root: URL, key: Data, transport: LumenSyncTransport, keptGeneration: String?) async -> Result<Outcome, Failure> {
+        do {
+            return .success(try await pull(root: root, key: key, transport: transport, keptGeneration: keptGeneration))
+        } catch CoreError.syncServer(403, "sync_not_in_plan") {
+            return .failure(.notInPlan)
+        } catch CoreError.wrongPassword {
+            return .failure(.keyNoLongerOpens)
+        } catch CoreError.syncServer(409, "generation_changed") {
+            return .failure(.generationChanged)
+        } catch CoreError.newerFormat, CoreError.unsupportedFormat {
+            return .failure(.newerApp)
+        } catch {
+            return .failure(.other("\(error)"))
+        }
+    }
+
     public static func pull(root: URL, key: Data, transport: LumenSyncTransport, keptGeneration: String?) async throws -> Outcome {
         let vault: UnlockedVault
         if MasterVault.exists(in: root) {

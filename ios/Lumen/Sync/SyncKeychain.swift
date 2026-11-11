@@ -71,10 +71,25 @@ enum SyncKeychain {
         return Kept(vaultID: vaultID, unlockKey: key)
     }
 
-    /// Forgets the vault on this iPhone: the key and which vault it was.
+    /// Forgets the vault on this iPhone: the key, which vault it was, the iPhone's copy of it and the
+    /// server's generation kept for it. The sessions made from its profiles stay, as the iPhone's own.
     static func erase() {
         SecItemDelete(base("unlock-key") as CFDictionary)
         SecItemDelete(base("vault-id") as CFDictionary)
+        try? FileManager.default.removeItem(at: vaultFolder)
+        UserDefaults.standard.removeObject(forKey: generationKey)
+    }
+
+    /// The iPhone's copy of the vault (the Mac's files, encrypted as on the Mac).
+    static var vaultFolder: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("sync-vault", isDirectory: true)
+    }
+
+    /// The server's generation of the vault, kept for the next run (CONTRACT.md §16.2; nothing secret).
+    static let generationKey = "sync.generation"
+    static var generation: String? {
+        get { UserDefaults.standard.string(forKey: generationKey) }
+        set { UserDefaults.standard.set(newValue, forKey: generationKey) }
     }
 
     /// Only while a passcode is set, Face ID, Touch ID or the passcode at each read. A DEBUG build's

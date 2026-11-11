@@ -203,8 +203,14 @@
 "Проверяем…" = "Checking…";
 "Подключить" = "Connect";
 "Хранилище подключено" = "Vault connected";
-"Профили с Mac появятся здесь в следующей версии синхронизации." = "Profiles from your Mac will appear here in the next version of sync.";
 "Забыть хранилище" = "Forget the Vault";
 "Войдите в аккаунт Lumen." = "Sign in to your Lumen account.";
 "Задайте код-пароль iPhone в Настройках: без него ключ хранилища не сохранить." = "Set an iPhone passcode in Settings: without one the vault's key cannot be kept.";
 "Неверный мастер-пароль." = "Wrong master password.";
+"Профили с Mac появляются в списке сессий. Изменения с iPhone на Mac пока не уходят." = "Profiles from your Mac appear in the list of sessions. Changes made on the iPhone do not go to the Mac yet.";
+"Синхронизация…" = "Syncing…";
+"Синхронизировать" = "Sync Now";
+"Синхронизация с Mac" = "Sync with your Mac";
+"Профилей с Mac: %@, новых: %@" = "Profiles from your Mac: %@, new: %@";
+"Мастер-пароль изменился на Mac. Введите новый." = "The master password changed on your Mac. Enter the new one.";
+"Данные синхронизации на сервере изменились. Синхронизируйте ещё раз." = "The sync data on the server changed. Sync again.";

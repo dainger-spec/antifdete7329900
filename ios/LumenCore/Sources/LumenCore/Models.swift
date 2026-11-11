@@ -16,6 +16,8 @@ public struct Session: Codable, Identifiable, Equatable, Sendable {
     /// never directly (the owner, 8 November — one direct visit after a life behind a proxy burns the
     /// person's account). Set when a proxy is first given to it; cleared only by the person, on purpose.
     public var boundToProxy: Bool
+    /// The Mac's profile this session is (the sync): its id in the vault. Nil: this iPhone's own.
+    public var syncedProfileID: UUID?
 
     public init(id: UUID = UUID(), storeID: UUID = UUID(), name: String, notes: String = "", tags: [String] = [],
                 proxyID: UUID? = nil, settings: SessionSettings = SessionSettings(), createdAt: Date = Date(),
@@ -33,7 +35,7 @@ public struct Session: Codable, Identifiable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, storeID, name, notes, tags, proxyID, settings, createdAt, lastOpenedAt, boundToProxy
+        case id, storeID, name, notes, tags, proxyID, settings, createdAt, lastOpenedAt, boundToProxy, syncedProfileID
     }
 
     /// A session saved before `boundToProxy` existed is bound if it has a proxy.
@@ -49,6 +51,7 @@ public struct Session: Codable, Identifiable, Equatable, Sendable {
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         lastOpenedAt = try c.decodeIfPresent(Date.self, forKey: .lastOpenedAt)
         boundToProxy = try c.decodeIfPresent(Bool.self, forKey: .boundToProxy) ?? (proxyID != nil)
+        syncedProfileID = try c.decodeIfPresent(UUID.self, forKey: .syncedProfileID)
     }
 }
 

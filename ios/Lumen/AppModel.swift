@@ -169,6 +169,34 @@ final class AppModel: ObservableObject {
         }
     }
 
+    // MARK: The sync
+
+    /// The Mac's profiles as the sync read them, made sessions here (ios/SYNC_PLAN.md, step 3). A
+    /// profile's proxy becomes an entry of the list — the one already there for the same address and
+    /// login, its password brought up to date in the Keychain — and the session is bound to it.
+    @discardableResult
+    func applySynced(_ profiles: [SyncedProfile]) -> Int {
+        var added: [UUID] = []
+        let made = catalog.applySynced(profiles) { proxy in
+            if let found = proxies.first(where: { $0.kind == proxy.kind && $0.host == proxy.host && $0.port == proxy.port
+                                                  && $0.username == proxy.username }) {
+                if ProxyPasswords.get(found.id) != proxy.password { ProxyPasswords.set(proxy.password, for: found.id) }
+                return found.id
+            }
+            var entry = ProxyEntry(kind: proxy.kind, host: proxy.host, port: proxy.port, username: proxy.username)
+            entry.hasPassword = !proxy.password.isEmpty
+            ProxyPasswords.set(proxy.password, for: entry.id)
+            proxies.append(entry)
+            added.append(entry.id)
+            return entry.id
+        }
+        if !added.isEmpty { store.saveProxies(proxies) }
+        refresh()
+        refreshRuntimes()
+        added.forEach(check)
+        return made.count
+    }
+
     // MARK: Proxies
 
     /// Adds or changes an entry (the password goes to the Keychain), then checks it.

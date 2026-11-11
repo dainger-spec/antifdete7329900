@@ -48,6 +48,7 @@ public enum Fault: String, CaseIterable, Sendable {
     case profileTokenLowercase   // a synced profile's label is made of its UUID in lower case (the Mac writes upper)
     case syncHeaderOfAnotherVault // the sync takes a vault header the server gave for another vault id
     case spaceRefusalStopsSync    // a 413 or 507 about one object stops the whole sync run
+    case syncedProxyNotBound      // a Mac profile with a proxy comes to the iPhone without it — it would open directly
     // The account (rights from the server's signed document)
     case signatureNotChecked     // a document's signature is not checked: anyone's payload is taken
     case wrongDeviceAccepted     // a document of another device or another iPhone is taken

@@ -71,6 +71,24 @@ enum AccountClient {
         return (http.statusCode, data)
     }
 
+    /// The sync's requests (`LumenSyncTransport`): any method and headers, the device token, the
+    /// answer's headers kept. Throws when there is no answer at all.
+    static func sync(_ method: String, _ path: String, _ body: Data?, _ headers: [String: String], token: String) async throws -> LumenSyncTransport.Answer {
+        var request = URLRequest(url: server.appendingPathComponent(path))
+        request.httpMethod = method
+        request.httpBody = body
+        request.timeoutInterval = 30
+        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        var named: [String: String] = [:]
+        for (key, value) in http.allHeaderFields {
+            if let key = key as? String, let value = value as? String { named[key.lowercased()] = value }
+        }
+        return LumenSyncTransport.Answer(status: http.statusCode, data: data, headers: named)
+    }
+
     /// A JSON object of an answer; nil when the body is not one.
     static func object(_ data: Data) -> [String: Any]? {
         (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]

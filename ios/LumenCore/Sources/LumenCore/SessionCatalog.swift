@@ -99,6 +99,42 @@ public final class SessionCatalog {
         return L("Сессия %@", "\(n)")
     }
 
+    /// The Mac's profiles as the sync read them (step 3 of ios/SYNC_PLAN.md): each one a session here,
+    /// found again by its id in the vault — made the first time, its name, description and tags the
+    /// Mac's after that. A profile with a proxy gets it (`proxyID` gives the entry for it) and is bound
+    /// to proxies at once; one whose proxy the iPhone cannot use comes with none, and bound: locked
+    /// until a proxy is chosen (decision 6). The iPhone's own sessions are not touched; a profile the
+    /// Mac no longer has stays here. Returns the sessions made.
+    @discardableResult
+    public func applySynced(_ profiles: [SyncedProfile], proxyID: (SyncedProfile.Proxy) -> UUID) -> [Session] {
+        var made: [Session] = []
+        for profile in profiles {
+            var session: Session
+            if let found = sessions.first(where: { $0.syncedProfileID == profile.id }) {
+                session = found
+            } else {
+                session = Session(name: profile.name)
+                session.syncedProfileID = profile.id
+                made.append(session)
+                sessions.append(session)
+            }
+            let trimmed = profile.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            session.name = trimmed.isEmpty ? session.name : trimmed
+            session.notes = profile.notes
+            session.tags = Self.normalizedTags(profile.tags)
+            if let proxy = profile.proxy, !Faults.isActive(.syncedProxyNotBound) {
+                session.proxyID = proxyID(proxy)
+                session.boundToProxy = true
+            } else if profile.proxyUnusable {
+                session.proxyID = nil
+                session.boundToProxy = true
+            }
+            if let index = sessions.firstIndex(where: { $0.id == session.id }) { sessions[index] = session }
+        }
+        save()
+        return made
+    }
+
     private func update(_ id: UUID, _ change: (inout Session) -> Void) {
         guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
         change(&sessions[index])

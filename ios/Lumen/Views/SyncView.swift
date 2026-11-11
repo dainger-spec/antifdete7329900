@@ -13,6 +13,8 @@ struct SyncView: View {
     @State private var password = ""
     @State private var working = false
     @State private var message: String?
+    @State private var syncing = false
+    @State private var syncResult: String?
 
     enum Stage: Equatable {
         case loading
@@ -69,9 +71,19 @@ struct SyncView: View {
                         Label(L("Хранилище подключено"), systemImage: "checkmark.circle").foregroundStyle(Theme.ok)
                             .accessibilityIdentifier("syncConnected")
                     } footer: {
-                        Text(L("Профили с Mac появятся здесь в следующей версии синхронизации."))
+                        Text(L("Профили с Mac появляются в списке сессий. Изменения с iPhone на Mac пока не уходят."))
                     }
                     .glassRow()
+                    if let syncResult {
+                        Section { Text(syncResult).accessibilityIdentifier("syncResult") }.glassRow()
+                    }
+                    Section {
+                        Button(syncing ? L("Синхронизация…") : L("Синхронизировать")) { syncNow() }
+                            .buttonStyle(PrimaryButtonStyle())
+                            .disabled(syncing)
+                            .accessibilityIdentifier("syncNow")
+                            .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
+                    }
                     Section {
                         Button(L("Забыть хранилище"), role: .destructive) {
                             SyncKeychain.erase()
@@ -110,6 +122,43 @@ struct SyncView: View {
         }
         // The vault changed last: the Mac in use now (a person with several Macs has one vault each).
         stage = vaults.first.map { .askPassword($0.vaultID) } ?? .noVault
+    }
+
+    /// One run: the Mac's profiles read and made sessions here. The kept key is read behind Face ID or
+    /// the passcode; a key that no longer opens the vault (the master password changed on the Mac) is
+    /// forgotten, and the password asked again.
+    private func syncNow() {
+        guard let record = AccountStore.record() else { return }
+        guard let kept = SyncKeychain.read(reason: L("Синхронизация с Mac")) else { return }
+        syncing = true
+        syncResult = nil
+        let token = record.deviceToken
+        Task {
+            defer { syncing = false }
+            let transport = LumenSyncTransport(vaultID: kept.vaultID) { method, path, body, headers in
+                try await AccountClient.sync(method, path, body, headers, token: token)
+            }
+            switch await SyncRead.run(root: SyncKeychain.vaultFolder, key: kept.unlockKey, transport: transport,
+                                      keptGeneration: SyncKeychain.generation) {
+            case let .success(outcome):
+                SyncKeychain.generation = outcome.generation
+                let made = model.applySynced(outcome.profiles)
+                syncResult = L("Профилей с Mac: %@, новых: %@", "\(outcome.profiles.count)", "\(made)")
+            case .failure(.notInPlan):
+                stage = .notInPlan
+            case .failure(.keyNoLongerOpens):
+                SyncKeychain.erase()
+                await load()
+                message = L("Мастер-пароль изменился на Mac. Введите новый.")
+            case .failure(.generationChanged):
+                syncResult = L("Данные синхронизации на сервере изменились. Синхронизируйте ещё раз.")
+            case .failure(.newerApp):
+                syncResult = AccountText.outdated
+            case let .failure(.other(text)):
+                NSLog("Lumen: the sync's run failed: %@", text)
+                syncResult = AccountText.unreachable
+            }
+        }
     }
 
     private func connect(_ vaultID: UUID) {

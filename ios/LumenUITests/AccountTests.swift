@@ -282,6 +282,25 @@ final class AccountTests: LumenUITestCase {
         XCTAssertFalse(passwordOffer.exists, "no offer to keep the master password among the person's own")
         shot("77 the vault connected")
 
+        // Step 3: one run reads the Mac's profiles (the stand-in's vault, made by the Mac's own code)
+        // and makes them sessions — the one behind a proxy with its proxy, login and password, bound.
+        app.buttons["syncNow"].tap()
+        let result = wait(app.staticTexts["syncResult"], "the run says what came", timeout: 60)
+        XCTAssertTrue(result.label.hasPrefix("Профилей с Mac: 2"), "both of the Mac's profiles came: \(result.label)")
+        shot("79 the Mac's profiles read")
+        app.buttons["syncDone"].tap()
+        closePlan()
+        wait(sessionCard("Магазин с Mac"), "the Mac's profile is a session here")
+        wait(sessionCard("Почта с Mac"), "and the other one")
+        XCTAssertTrue(sessionCard("Магазин с Mac").label.contains("Синхронизирован с Mac"), "its description came: \(sessionCard("Магазин с Mac").label)")
+        openSession("Магазин с Mac")
+        openPage("http://synced-\(run).lumentest:28380/whoami?t=synced")
+        page("via: прокси B")
+        backToList()
+        openPlan()
+        reveal(app.buttons["syncButton"], "the sync's screen again").tap()
+        wait(app.staticTexts["syncConnected"], "still connected", timeout: 15)
+
         // Kept: the screen opened again says so at once, no password asked.
         app.buttons["syncDone"].tap()
         reveal(app.buttons["syncButton"], "the sync again").tap()
