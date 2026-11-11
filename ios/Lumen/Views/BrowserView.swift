@@ -18,12 +18,14 @@ struct BrowserView: View {
             if let tab = runtime.selected {
                 AddressBar(tab: tab) { runtime.open($0) }
                     .id(tab.id)
-                ZStack {
+                // The bar floats over the page (the design): the page scrolls under it, and its end
+                // stays reachable above it (the web view's bottom inset).
+                ZStack(alignment: .bottom) {
                     WebViewContainer(webView: tab.webView)
                     StartPage(tab: tab)
+                    BottomBar(tab: tab, tabCount: runtime.tabs.count) { sheet = $0 }
+                        .id("bar-\(tab.id)")
                 }
-                BottomBar(tab: tab, tabCount: runtime.tabs.count) { sheet = $0 }
-                    .id("bar-\(tab.id)")
             }
             #if DEBUG
             if TestHooks.enabled {
@@ -174,14 +176,15 @@ struct BottomBar: View {
         .frame(height: 60)
         .glassPane(radius: 30)
         .padding(.horizontal, 14)
-        .padding(.top, 8).padding(.bottom, 4)
-        .background(Theme.ground)
+        .padding(.bottom, 6)
     }
 }
 
 /// Hosts the selected tab's WKWebView; switching tabs swaps the view, the pages stay loaded.
 struct WebViewContainer: UIViewRepresentable {
     let webView: WKWebView
+    /// The floating bar's height with its margin (BottomBar).
+    static let barRoom: CGFloat = 72
 
     func makeUIView(context: Context) -> UIView { UIView() }
 
@@ -190,6 +193,9 @@ struct WebViewContainer: UIViewRepresentable {
         container.subviews.forEach { $0.removeFromSuperview() }
         webView.frame = container.bounds
         webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        // Room for the floating bar under the page's end.
+        webView.scrollView.contentInset.bottom = Self.barRoom
+        webView.scrollView.verticalScrollIndicatorInsets.bottom = Self.barRoom
         container.addSubview(webView)
     }
 }

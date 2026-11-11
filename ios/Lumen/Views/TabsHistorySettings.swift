@@ -20,13 +20,21 @@ struct TabsView: View {
                 .padding()
             }
             .background(Theme.ground.opacity(0.55).ignoresSafeArea())
+            // A new tab: a glass capsule with its word, at the bottom (the design).
+            .safeAreaInset(edge: .bottom) {
+                Button { runtime.newTab(); dismiss() } label: {
+                    Label(L("Новая вкладка"), systemImage: "plus").labelStyle(.titleAndIcon)
+                        .font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text)
+                        .padding(.horizontal, 22).frame(height: 50)
+                }
+                .buttonStyle(.plain)
+                .glassPane(radius: 25)
+                .padding(.bottom, 12)
+                .accessibilityIdentifier("newTab")
+            }
             .navigationTitle(L("Вкладки: %@", "\(runtime.tabs.count)"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .bottomBar) {
-                    Button { runtime.newTab(); dismiss() } label: { Label(L("Новая вкладка"), systemImage: "plus").labelStyle(.titleAndIcon) }
-                        .accessibilityIdentifier("newTab")
-                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(L("Готово")) { dismiss() }.accessibilityIdentifier("tabsDone")
                 }
@@ -72,7 +80,8 @@ struct TabCard: View {
             .accessibilityIdentifier("tab-\(index)")
             Button(action: close) {
                 Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundStyle(Theme.text)
-                    .frame(width: 28, height: 28).background(Color.white.opacity(0.12), in: Circle())
+                    .frame(width: 28, height: 28).background(Color.black.opacity(0.55), in: Circle())
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 0.5))
             }
             .padding(8)
             .accessibilityIdentifier("closeTab-\(index)")
