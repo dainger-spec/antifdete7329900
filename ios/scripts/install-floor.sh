@@ -98,7 +98,11 @@ else
 fi
 
 # ---- Green: the app as the project builds it.
-APP="$(build green)" || { say "BUILD FAILED"; exit 2; }
+# The project's own minimum, given to every target: the Mac's core (BrowserCore, the root package,
+# linked since the sync) names no iOS minimum, and an Xcode older than the main CI's takes an old
+# default for it (CI run 8 on macos-26: "SymmetricKey is only available in iOS 13.0 or newer"). It is
+# the project's value, read above from project.yml — the check still reads what the app says.
+APP="$(build green IPHONEOS_DEPLOYMENT_TARGET="$FLOOR")" || { say "BUILD FAILED"; exit 2; }
 MIN="$(minimum "$APP")"
 if [[ "$MIN" == "$FLOOR" ]]; then say "the app says MinimumOSVersion $MIN"; else say "NOT GREEN: the app says MinimumOSVersion '$MIN', the project $FLOOR"; STATUS=1; fi
 if xcrun simctl install "$NEW_DEV" "$APP" >"$OUT/install-new.txt" 2>&1; then
