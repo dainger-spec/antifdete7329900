@@ -33,8 +33,16 @@ final class AccountTests: LumenUITestCase {
     func signIn(_ email: String, password: String? = nil) {
         reveal(app.buttons["signIn"], "the plan's screen offers to sign in").tap()
         typeInto(wait(app.textFields["signInEmail"], "the sign-in form opens"), email)
-        typeInto(app.secureTextFields["signInPassword"], password ?? self.password)
-        reveal(app.buttons["submitSignIn"], "the form has its button").tap()
+        let secret = app.secureTextFields["signInPassword"]
+        typeInto(secret, password ?? self.password)
+        // A secure field's typing can be lost (CI run 74: the second sign-in of a test sent nothing —
+        // the button stayed disabled, its password field empty): typed again once when it is.
+        let submit = app.buttons["submitSignIn"]
+        if !submit.isEnabled || ((secret.value as? String) ?? "").isEmpty {
+            typeInto(secret, password ?? self.password)
+        }
+        XCTAssertTrue(submit.isEnabled, "the sign-in form takes the address and the password")
+        reveal(submit, "the form has its button").tap()
     }
 
     /// The form's own words, once it has an answer.

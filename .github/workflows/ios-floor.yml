@@ -17,7 +17,9 @@ jobs:
   floor:
     name: Does not install below iOS 18 (iOS 17.5 simulator, macos-26)
     runs-on: macos-26
-    timeout-minutes: 60
+    # 90, not 60: with the Mac's core in the app the two builds and the iOS 17.5 runtime's download
+    # took the whole hour (run 10: red OK, green OK, cancelled at 60 minutes before its last step).
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - name: Red (built for 17.0, installs), then green (refused, cannot start)
