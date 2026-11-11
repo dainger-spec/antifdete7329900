@@ -1,5 +1,6 @@
 import LumenCore
 import SwiftUI
+import UIKit
 
 /// The session's tabs as cards: pick one, close one, open a new one.
 struct TabsView: View {
@@ -23,7 +24,7 @@ struct TabsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .bottomBar) {
-                    Button { runtime.newTab(); dismiss() } label: { Label(L("Новая вкладка"), systemImage: "plus") }
+                    Button { runtime.newTab(); dismiss() } label: { Label(L("Новая вкладка"), systemImage: "plus").labelStyle(.titleAndIcon) }
                         .accessibilityIdentifier("newTab")
                 }
                 ToolbarItem(placement: .confirmationAction) {
@@ -45,9 +46,19 @@ struct TabCard: View {
         ZStack(alignment: .topTrailing) {
             Button(action: select) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Image(systemName: tab.url == nil ? "plus" : "globe")
-                        .font(.system(size: 24)).foregroundStyle(Theme.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 110)
+                    // The page as it last finished loading; an empty tab, or one not drawn yet, its sign.
+                    ZStack {
+                        if let thumbnail = tab.thumbnail, tab.url != nil {
+                            Image(uiImage: thumbnail).resizable().scaledToFill()
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        } else {
+                            Image(systemName: tab.url == nil ? "plus" : "globe")
+                                .font(.system(size: 24)).foregroundStyle(Theme.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 130, maxHeight: 130, alignment: .top)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .accessibilityHidden(true)
                     Text(tab.title.isEmpty ? L("Новая вкладка") : tab.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(1)
                     Text(tab.url?.host() ?? " ").font(.system(size: 12)).foregroundStyle(Theme.tertiary).lineLimit(1)
                 }

@@ -28,14 +28,17 @@ struct EclipseBackground: View {
             let width = proxy.size.width, height = proxy.size.height
             ZStack {
                 Theme.ground
-                EclipseDisc(light: CGSize(width: -6, height: 4))
-                    .frame(width: 660, height: 660)
-                    .position(x: width + 130, y: -130)
-                EclipseDisc(light: CGSize(width: 6, height: -4))
-                    .frame(width: 600, height: 600)
-                    .position(x: -140, y: height + 120)
+                // Only the discs are softened: the ground stays the ground, whatever lies behind.
+                ZStack {
+                    EclipseDisc(light: CGSize(width: -6, height: 4))
+                        .frame(width: 660, height: 660)
+                        .position(x: width + 130, y: -130)
+                    EclipseDisc(light: CGSize(width: 6, height: -4))
+                        .frame(width: 600, height: 600)
+                        .position(x: -140, y: height + 120)
+                }
+                .opacity(0.9)
             }
-            .opacity(0.9)
         }
         .ignoresSafeArea()
         .accessibilityHidden(true)

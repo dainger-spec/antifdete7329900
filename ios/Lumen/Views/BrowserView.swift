@@ -122,6 +122,15 @@ struct StartPage: View {
                     .frame(width: 72, height: 72).glassPane(radius: 36)
                 Text(L("Новая вкладка")).font(.system(size: 22, weight: .bold)).foregroundStyle(Theme.text).padding(.top, 4)
                 Text(L("Введите адрес или запрос")).font(.system(size: 16)).foregroundStyle(Theme.secondary)
+                // Where a search goes from here: the session's own engine.
+                if let engine = tab.runtime?.session.settings.searchEngine {
+                    Text(L("Поисковик: %@", engine.title))
+                        .font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.secondary)
+                        .padding(.horizontal, 13).frame(height: 30)
+                        .background(Color.white.opacity(0.06), in: Capsule())
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5))
+                        .padding(.top, 8)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(EclipseBackground())

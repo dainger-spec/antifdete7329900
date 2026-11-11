@@ -14,6 +14,8 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     @Published private(set) var canGoBack = false
     @Published private(set) var canGoForward = false
     @Published private(set) var isLoading = false
+    /// What the page looked like when it last finished loading: the tab's card shows it.
+    @Published private(set) var thumbnail: UIImage?
     private var saved: TabRecord
     private var observations: [NSKeyValueObservation] = []
 
@@ -87,6 +89,16 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         if let url = webView.url { runtime?.recordVisit(url: url, title: webView.title ?? "") }
         saved = record
         runtime?.saveTabs()
+        takeThumbnail()
+    }
+
+    /// A small picture of the page's top, for the tab's card. Kept in memory only.
+    private func takeThumbnail() {
+        let configuration = WKSnapshotConfiguration()
+        configuration.snapshotWidth = 200
+        webView.takeSnapshot(with: configuration) { [weak self] image, _ in
+            Task { @MainActor in if let image { self?.thumbnail = image } }
+        }
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {

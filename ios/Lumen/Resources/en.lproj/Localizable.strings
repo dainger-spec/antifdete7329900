@@ -190,3 +190,6 @@
 "Прокси одной строкой" = "The proxy as one line";
 "Подойдёт любой привычный вид: со схемой или без, логин и пароль до адреса или после него." = "Any usual form works: with a scheme or without, the login and password before the address or after it.";
 "Пароль не показан. Строка без пароля оставит прежний." = "The password is not shown. A line without one keeps the password as it is.";
+
+/* A new tab: where a search goes. */
+"Поисковик: %@" = "Search engine: %@";
