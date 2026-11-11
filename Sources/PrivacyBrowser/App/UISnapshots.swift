@@ -541,6 +541,11 @@ enum UISnapshots {
             ChangePasswordView().environmentObject(model)
         }.capture(into: folder)
         problems += await settings(into: folder, model: model)
+        // The scenario editor: a scenario chosen, its code with the commands beside it.
+        let scenario = Scenario(name: L("scenarios.untitled"), source: L("scenarios.template"))
+        problems += await Shot(name: "scenarios", size: CGSize(width: 1100, height: 760)) {
+            ScenariosView(sample: scenario).environmentObject(model)
+        }.capture(into: folder)
         problems += await proxyList(into: folder)
         // A real browser window of a running profile (WebKit, toolbar, tab strip, start page).
         problems += await browserWindows(into: folder)
