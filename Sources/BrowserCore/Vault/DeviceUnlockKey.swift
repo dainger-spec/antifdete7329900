@@ -32,6 +32,20 @@ extension MasterVault {
         return UnlockedVault(root: root, header: header, masterKey: SymmetricKey(data: raw))
     }
 
+    /// A new device's copy of the vault in `root`, set up from the header the sync location holds and
+    /// a kept key — as `SyncEngine.bootstrap` does with the password.
+    public static func setUp(in root: URL, header: VaultHeader, deviceUnlockKey: Data) throws -> UnlockedVault {
+        guard !exists(in: root) else { throw CoreError.vaultAlreadyExists }
+        let vault = try unlock(header: header, root: root, deviceUnlockKey: deviceUnlockKey)
+        try createHeader(header, in: root)
+        return vault
+    }
+
+    /// The device's copy of the vault in `root`, opened with a kept key.
+    public static func open(in root: URL, deviceUnlockKey: Data) throws -> UnlockedVault {
+        try unlock(header: try readHeader(in: root), root: root, deviceUnlockKey: deviceUnlockKey)
+    }
+
     private static func unwrapMasterKey(header: VaultHeader, kek: SymmetricKey) throws -> Data {
         let raw: Data
         do {
