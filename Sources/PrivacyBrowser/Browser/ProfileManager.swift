@@ -20,7 +20,10 @@ import WebKit
 /// Any number of profiles can run at once; each has its own data store and proxy.
 @MainActor
 final class ProfileManager: ObservableObject {
-    @Published private(set) var runningProfileIDs: Set<UUID> = []
+    @Published private(set) var runningProfileIDs: Set<UUID> = [] {
+        // The system camera is fed while a profile set to it runs (`SystemCameraFeed`).
+        didSet { if !runsInProfileProcess { SystemCameraFeed.shared.keep(only: runningProfileIDs) } }
+    }
     /// Profiles currently being launched or sealed (UI shows a spinner, actions disabled).
     @Published private(set) var busyProfileIDs: Set<UUID> = []
 
@@ -440,6 +443,10 @@ final class ProfileManager: ObservableObject {
         keys[id] = key
         launchTokens[id] = token
         runningProfileIDs.insert(id)
+        // The system camera's frames are drawn here, in the app's own process (`SystemCameraFeed`).
+        if !runsInProfileProcess, configuration.cameraSubstitution.usesSystemCamera {
+            SystemCameraFeed.shared.use(for: id)
+        }
         // This launch's lookup (also one made only for the exit IP), else what was found before.
         session.exitLocation = lookup?.location ?? stored.rememberedProxyLocation
         // In a per-profile child process, Safari's own chrome is the window and the profile's web
@@ -624,6 +631,9 @@ final class ProfileManager: ObservableObject {
         children[id] = child
         windowsUp.remove(id)
         runningProfileIDs.insert(id)
+        // The profile's own process cannot reach the app group: the app draws its camera's frames
+        // and writes them into the device's sink (`SystemCameraFeed`).
+        if usesSystemCamera { SystemCameraFeed.shared.use(for: id) }
         try? repository.markLaunched(id)
         // The app's settings for browsing, before anything else is asked of it.
         child.send(.preferences(BrowsingPreferences.current.forProfileProcess))

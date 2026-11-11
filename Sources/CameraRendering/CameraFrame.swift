@@ -6,15 +6,17 @@ import ImageIO
 
 /// What the virtual camera shows, read from the JSON the app writes to the shared app group
 /// (`<group>/camera.json`), with the image (for the `image` source) in `<group>/camera-image.bin`.
-/// Absent or unreadable → a default test pattern, so the device always has a live feed. The app
-/// group's identifier is in the extension's Info.plist (`PBCameraAppGroup`).
-struct CameraExtensionConfig {
+/// Absent or unreadable → a default test pattern. The app group's identifier is in the bundle's
+/// Info.plist (`PBCameraAppGroup`). Read in the app's own process (`SystemCameraFeed`): the
+/// extension runs as macOS's camera user, whose group container is not the person's, so it never
+/// sees these files (0.1.8, the owner's Mac) and takes its frames from the app instead.
+public struct CameraExtensionConfig {
     /// "color", "bars", "image" or "video".
     var source: String
     var colorHex: String
     var width: Int
     var height: Int
-    var frameRate: Int
+    public var frameRate: Int
     /// "cover", "contain" or "stretch".
     var fit: String
     var mirror: Bool
@@ -33,7 +35,7 @@ struct CameraExtensionConfig {
     /// The fixed CoreMediaIO device name (the shim's sentinel). Matches
     /// `CameraSubstitution.systemDeviceName` in BrowserCore; kept as a literal here so the
     /// extension needs no BrowserCore dependency.
-    static let deviceName = "Lumen Camera"
+    public static let deviceName = "Lumen Camera"
     static let imageFileName = "camera-image.bin"
 
     static let fallback = CameraExtensionConfig(source: "bars", colorHex: "#1E2130",
@@ -49,7 +51,7 @@ struct CameraExtensionConfig {
         return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)
     }
 
-    static func current() -> CameraExtensionConfig {
+    public static func current() -> CameraExtensionConfig {
         guard let url = container?.appendingPathComponent("camera.json"), let data = try? Data(contentsOf: url),
               let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         else { return fallback }
@@ -83,7 +85,7 @@ struct CameraExtensionConfig {
 
 /// Draws one frame into a BGRA pixel buffer. The pattern moves with `sequence`, and faint grain is
 /// laid over it, so the feed is never a frozen image — as the in-page shim does.
-enum CameraFrameRenderer {
+public enum CameraFrameRenderer {
     private static let bars: [(r: Double, g: Double, b: Double)] = [
         (0.75, 0.75, 0.75), (0.75, 0.75, 0.0), (0.0, 0.75, 0.75), (0.0, 0.75, 0.0),
         (0.75, 0.0, 0.75), (0.75, 0.0, 0.0), (0.0, 0.0, 0.75),
@@ -103,7 +105,7 @@ enum CameraFrameRenderer {
         return CameraFilterChain.context.createCGImage(image, from: image.extent)
     }
 
-    static func render(into pixelBuffer: CVPixelBuffer, config: CameraExtensionConfig, sequence: UInt64) {
+    public static func render(into pixelBuffer: CVPixelBuffer, config: CameraExtensionConfig, sequence: UInt64) {
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
         if config.filters.isIdentity {

@@ -9,7 +9,8 @@ import SystemExtensions
 /// installs and switches the extension on through `OSSystemExtensionManager` (as `NetworkGuard`
 /// does the content filter), learns from macOS where it stands (`refresh`) and replaces a copy an
 /// earlier version of the app installed, remembers in the shared app group whether it is active,
-/// and writes the active profile's render settings there for the extension to draw. Only the app's
+/// and writes the active profile's render settings there for the app's feed to draw
+/// (`SystemCameraFeed`, which hands the frames to the extension's sink). Only the app's
 /// own process reaches the app group: a profile's own process is told at its start whether the
 /// device is there (`activeForLaunch`, `ProfileProcess.systemCameraActiveForThisProcess`) and gates
 /// the global device by it (`PrivacyScripts.patchSystemCamera`).
@@ -93,10 +94,12 @@ final class SystemCamera: NSObject, ObservableObject {
                                                                 object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.refresh() }
         })
-        // The device comes and goes with the extension (an install, a replacement, a restart).
+        // The device comes and goes with the extension (an install, a replacement, a restart); the
+        // frames the app feeds it go to the device there is now.
         for name in [AVCaptureDevice.wasConnectedNotification, AVCaptureDevice.wasDisconnectedNotification] {
             observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.devicePresent = SystemCamera.isDevicePresent() }
+                SystemCameraFeed.shared.reconnect()
             })
         }
         DispatchQueue.main.async { self.refresh() }
@@ -233,9 +236,11 @@ final class SystemCamera: NSObject, ObservableObject {
         }
     }
 
-    /// Writes what the extension should draw for `camera` to the shared app group — the render
-    /// settings, and the image's bytes for the image source. The device is one and global, so the
-    /// last profile to launch with the system camera sets what it shows.
+    /// Writes what the camera should show for `camera` to the shared app group — the render
+    /// settings, and the image's or the video's bytes. The app's own feed reads them there and draws
+    /// the frames (`SystemCameraFeed`; the extension itself cannot read the person's app group). The
+    /// device is one and global, so the last profile to launch with the system camera sets what it
+    /// shows.
     func writeRenderConfig(for camera: CameraSubstitution) {
         guard let appGroup,
               let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) else { return }

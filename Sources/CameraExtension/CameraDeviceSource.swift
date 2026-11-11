@@ -1,17 +1,25 @@
+import CameraRendering
+import CoreGraphics
+import CoreImage
 import CoreMedia
 import CoreMediaIO
 import CoreVideo
 import Foundation
 
-/// The virtual camera device and its one output stream. Frames are generated here from the shared
-/// config (`CameraExtensionConfig`) — a colour, the test pattern, an image or a video, with crop,
-/// fit, mirror and the adjustments (`CameraFrameRenderer`) — and sent to the stream while a client
-/// is reading. Like a built-in MacBook camera it offers several sizes (`sizes`), and the frames are
-/// drawn at the one the client picked.
+/// The virtual camera device: its output stream, which pages and apps read, and a sink stream, which
+/// the app writes its frames into (`SystemCameraFeed`). The extension runs as macOS's camera user
+/// (`_cmiodalassistants`), whose app group container is not the person's, so it cannot read the
+/// settings and the media the app wrote (0.1.8, the owner's Mac: the test pattern instead of the
+/// chosen video). The app draws the frames — the source with crop, fit, mirror and the adjustments —
+/// and this passes them on, scaled to the size the client picked. With no frame from the app for a
+/// second (Lumen not running, or no profile set to the camera) it draws its own fallback.
+/// Like a built-in MacBook camera it offers several sizes (`sizes`).
 final class CameraDeviceSource: NSObject, CMIOExtensionDeviceSource {
     private(set) var device: CMIOExtensionDevice!
     private var streamSource: CameraStreamSource!
+    private var sinkSource: CameraSinkStreamSource!
     private let timerQueue = DispatchQueue(label: "io.lumenbrowser.camera.frames", qos: .userInteractive)
+    private let ciContext = CIContext()
     // Read and changed on `timerQueue` only.
     private var pixelBufferPool: CVPixelBufferPool?
     private var poolSize = (width: 0, height: 0)
@@ -19,6 +27,16 @@ final class CameraDeviceSource: NSObject, CMIOExtensionDeviceSource {
     private var timer: DispatchSourceTimer?
     private var sequence: UInt64 = 0
     private var config = CameraExtensionConfig.current()
+    /// The app writing into the sink stream, while it does.
+    private var sinkClient: CMIOExtensionClient?
+    /// A frame asked of the sink and not answered yet.
+    private var consuming = false
+    /// The app's latest frame and when it came (`DispatchTime` nanoseconds).
+    private var latestFrame: CVPixelBuffer?
+    private var latestFrameAt: UInt64 = 0
+
+    /// The size the app draws at and sends to the sink.
+    static let sinkSize = (width: 1280, height: 720)
 
     /// The sizes a built-in MacBook camera (FaceTime HD, 1080p) offers, the first the default: a
     /// page's constraints pick among them as they would on the real camera, and its capabilities
@@ -50,8 +68,22 @@ final class CameraDeviceSource: NSObject, CMIOExtensionDeviceSource {
         streamSource = CameraStreamSource(localizedName: "\(localizedName) Stream", streamID: UUID(),
                                           streamFormats: formats, device: device)
         streamSource.deviceSource = self
+        var sinkDescription: CMFormatDescription?
+        CMVideoFormatDescriptionCreate(allocator: kCFAllocatorDefault, codecType: kCVPixelFormatType_32BGRA,
+                                       width: Int32(Self.sinkSize.width), height: Int32(Self.sinkSize.height),
+                                       extensions: nil, formatDescriptionOut: &sinkDescription)
+        guard let sinkDescription else { fatalError("the sink format could not be made") }
+        let sinkFormat = CMIOExtensionStreamFormat(formatDescription: sinkDescription,
+                                                   maxFrameDuration: CMTime(value: 1, timescale: 1),
+                                                   minFrameDuration: CMTime(value: 1, timescale: Int32(Self.maxFrameRate)),
+                                                   validFrameDurations: nil)
+        sinkSource = CameraSinkStreamSource(localizedName: "\(localizedName) Sink", streamID: UUID(),
+                                            streamFormat: sinkFormat)
+        sinkSource.deviceSource = self
         do {
+            // The output stream first, then the sink: the app finds the sink as the second.
             try device.addStream(streamSource.stream)
+            try device.addStream(sinkSource.stream)
         } catch {
             fatalError("the camera stream could not be added: \(error.localizedDescription)")
         }
@@ -97,8 +129,66 @@ final class CameraDeviceSource: NSObject, CMIOExtensionDeviceSource {
         }
     }
 
+    /// The app started writing into the sink stream.
+    func startSink(client: CMIOExtensionClient) {
+        timerQueue.async {
+            self.sinkClient = client
+            self.consuming = false
+        }
+    }
+
+    func stopSink() {
+        timerQueue.async {
+            self.sinkClient = nil
+            self.consuming = false
+            self.latestFrame = nil
+        }
+    }
+
+    /// Asks the sink for the app's next frame, one at a time and only while a client reads the
+    /// output (the app draws nothing while its queue is full, so an unread camera costs nothing).
+    private func requestSinkFrame() {
+        guard let client = sinkClient, !consuming else { return }
+        consuming = true
+        sinkSource.stream.consumeSampleBuffer(from: client) { [weak self] sampleBuffer, sequenceNumber, _, _, _ in
+            guard let self else { return }
+            var image: CVPixelBuffer?
+            if let sampleBuffer {
+                image = CMSampleBufferGetImageBuffer(sampleBuffer)
+                let now = CMClockGetTime(CMClockGetHostTimeClock())
+                let output = CMIOExtensionScheduledOutput(sequenceNumber: sequenceNumber,
+                                                          hostTimeInNanoseconds: UInt64(now.seconds * Double(NSEC_PER_SEC)))
+                self.sinkSource.stream.notifyScheduledOutputChanged(output)
+            }
+            let frame = image
+            self.timerQueue.async {
+                self.consuming = false
+                if let frame {
+                    self.latestFrame = frame
+                    self.latestFrameAt = DispatchTime.now().uptimeNanoseconds
+                }
+            }
+        }
+    }
+
+    /// The app's frame, scaled to fill `output` (centred; a 4:3 size crops the sides, as a camera
+    /// would).
+    private func draw(_ frame: CVPixelBuffer, into output: CVPixelBuffer) {
+        let width = Double(CVPixelBufferGetWidth(output)), height = Double(CVPixelBufferGetHeight(output))
+        let frameWidth = Double(CVPixelBufferGetWidth(frame)), frameHeight = Double(CVPixelBufferGetHeight(frame))
+        guard frameWidth > 0, frameHeight > 0 else { return }
+        let scale = max(width / frameWidth, height / frameHeight)
+        let image = CIImage(cvPixelBuffer: frame)
+            .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+            .transformed(by: CGAffineTransform(translationX: (width - frameWidth * scale) / 2,
+                                               y: (height - frameHeight * scale) / 2))
+        ciContext.render(image, to: output, bounds: CGRect(x: 0, y: 0, width: width, height: height),
+                         colorSpace: CGColorSpaceCreateDeviceRGB())
+    }
+
     /// One frame, on `timerQueue`: drawn at the picked size (a new pool when the size changed).
     private func emitFrame() {
+        requestSinkFrame()
         let size = Self.sizes[activeFormatIndex]
         if pixelBufferPool == nil || poolSize.width != size.width || poolSize.height != size.height {
             let attributes: [String: Any] = [
@@ -117,7 +207,11 @@ final class CameraDeviceSource: NSObject, CMIOExtensionDeviceSource {
         guard CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &pixelBuffer) == kCVReturnSuccess,
               let pixelBuffer else { return }
         sequence &+= 1
-        CameraFrameRenderer.render(into: pixelBuffer, config: config, sequence: sequence)
+        if let frame = latestFrame, DispatchTime.now().uptimeNanoseconds &- latestFrameAt < 1_000_000_000 {
+            draw(frame, into: pixelBuffer)
+        } else {
+            CameraFrameRenderer.render(into: pixelBuffer, config: config, sequence: sequence)
+        }
 
         var formatDescription: CMFormatDescription?
         CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: pixelBuffer,
@@ -181,4 +275,51 @@ final class CameraStreamSource: NSObject, CMIOExtensionStreamSource {
     func startStream() throws { deviceSource?.startStreaming() }
 
     func stopStream() throws { deviceSource?.stopStreaming() }
+}
+
+/// The sink stream the app writes its frames into (`SystemCameraFeed`); consumed by the device
+/// source while its output is read.
+final class CameraSinkStreamSource: NSObject, CMIOExtensionStreamSource {
+    private(set) var stream: CMIOExtensionStream!
+    weak var deviceSource: CameraDeviceSource?
+    private let streamFormat: CMIOExtensionStreamFormat
+    private var client: CMIOExtensionClient?
+
+    init(localizedName: String, streamID: UUID, streamFormat: CMIOExtensionStreamFormat) {
+        self.streamFormat = streamFormat
+        super.init()
+        stream = CMIOExtensionStream(localizedName: localizedName, streamID: streamID, direction: .sink,
+                                     clockType: .hostTime, source: self)
+    }
+
+    var formats: [CMIOExtensionStreamFormat] { [streamFormat] }
+
+    var availableProperties: Set<CMIOExtensionProperty> {
+        [.streamActiveFormatIndex, .streamFrameDuration, .streamSinkBufferQueueSize, .streamSinkBuffersRequiredForStartup]
+    }
+
+    func streamProperties(forProperties properties: Set<CMIOExtensionProperty>) throws -> CMIOExtensionStreamProperties {
+        let streamProperties = CMIOExtensionStreamProperties(dictionary: [:])
+        if properties.contains(.streamActiveFormatIndex) { streamProperties.activeFormatIndex = 0 }
+        if properties.contains(.streamFrameDuration) {
+            streamProperties.frameDuration = CMTime(value: 1, timescale: Int32(CameraDeviceSource.maxFrameRate))
+        }
+        // One frame queued at a time: what is shown is never older than a frame behind the app.
+        if properties.contains(.streamSinkBufferQueueSize) { streamProperties.sinkBufferQueueSize = 1 }
+        if properties.contains(.streamSinkBuffersRequiredForStartup) { streamProperties.sinkBuffersRequiredForStartup = 1 }
+        return streamProperties
+    }
+
+    func setStreamProperties(_ streamProperties: CMIOExtensionStreamProperties) throws {}
+
+    func authorizedToStartStream(for client: CMIOExtensionClient) -> Bool {
+        self.client = client
+        return true
+    }
+
+    func startStream() throws {
+        if let client { deviceSource?.startSink(client: client) }
+    }
+
+    func stopStream() throws { deviceSource?.stopSink() }
 }

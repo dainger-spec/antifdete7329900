@@ -1,3 +1,4 @@
+import CameraRendering
 import CoreMediaIO
 import Foundation
 

@@ -96,12 +96,20 @@ targets.append(contentsOf: [
         dependencies: ["NetworkGuardCore"],
         path: "Sources/NetworkGuardExtension"
     ),
-    // The system virtual camera (a CMIO Camera Extension; docs/CAMERA.md). Standalone — it reads a
-    // small JSON config from the shared app group and renders frames; no BrowserCore dependency, so
-    // the extension stays small. Built and laid out beside the app with CAM=check (CI checks it
+    // The system virtual camera's frames (docs/CAMERA.md): drawn in the app's own process from the
+    // profile's settings (SystemCameraFeed) and handed to the extension — which runs as macOS's
+    // camera user and cannot read the person's app group — through its sink stream.
+    .target(
+        name: "CameraRendering",
+        path: "Sources/CameraRendering"
+    ),
+    // The system virtual camera (a CMIO Camera Extension; docs/CAMERA.md). It publishes the device
+    // and passes on the frames the app sends to its sink stream; no BrowserCore dependency, so the
+    // extension stays small. Built and laid out beside the app with CAM=check (CI checks it
     // compiles against the SDK), signed and embedded with CAM=1 (scripts/build-app.sh).
     .executableTarget(
         name: "CameraExtension",
+        dependencies: ["CameraRendering"],
         path: "Sources/CameraExtension"
     ),
     .target(
@@ -110,7 +118,7 @@ targets.append(contentsOf: [
     ),
     .executableTarget(
         name: "PrivacyBrowser",
-        dependencies: ["BrowserCore", "TunnelCore", "TunnelTransport", "NetworkGuardCore", "ObjCExceptions"],
+        dependencies: ["BrowserCore", "TunnelCore", "TunnelTransport", "NetworkGuardCore", "ObjCExceptions", "CameraRendering"],
         path: "Sources/PrivacyBrowser"
     ),
     .target(

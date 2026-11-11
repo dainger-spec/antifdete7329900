@@ -212,6 +212,36 @@ camera is off at launch whatever it holds.
 fail-closed case above, a denial and pinned devices staying the engine's, the track's label, and a
 profile that does not use the device.
 
+### The frames come from the app (0.1.8)
+
+The extension runs as macOS's camera user (`_cmiodalassistants`), not as the person: its
+`containerURL(forSecurityApplicationGroupIdentifier:)` is that user's group container
+(`/private/var/db/cmiodalassistants/Library/Group Containers/<group>`), never the person's, so the
+settings and media the app writes (`SystemCamera.writeRenderConfig`) never reached it, and it drew
+its fallback test pattern instead of the chosen video (0.1.7, the owner's Mac, 11 November: `ps`
+showed the extension's process as `_cmiodalassistants`, and that user's group folder empty of ours).
+
+So the frames are drawn in the app's own process and handed over through the device itself, the
+way Apple's camera extensions take frames from their app:
+
+- The renderer (`CameraFrameRenderer`, `CameraVideoSource`, `CameraFilters` — the stages below) is
+  its own library, `Sources/CameraRendering`, used by the app.
+- `SystemCameraFeed` (the app) runs while a profile set to the system camera runs
+  (`ProfileManager`: `use(for:)` at launch, `keep(only:)` as profiles end). It finds the device
+  (AVFoundation's list by name, then CoreMediaIO's by unique ID), opens its **sink stream**
+  (`CMIOStreamCopyBufferQueue`, `CMIODeviceStartStream`), and at 30 frames a second draws a
+  1280×720 frame from the files it wrote and enqueues it — only when the sink's one-frame queue has
+  room. macOS may ask once whether Lumen may use the camera (the sink is a camera's stream).
+- The extension (`CameraDeviceSource`) adds the sink after its output stream, and while a client
+  reads the output it takes the app's latest frame (`consumeSampleBuffer`) and scales it to the size
+  the client picked. Nobody reading → nothing taken → the app's queue stays full and nothing is
+  drawn. No frame from the app for a second (Lumen not running, no such profile) → its own fallback.
+- A new extension (another `deviceID`, a replaced copy) is found again on AVFoundation's
+  connect/disconnect notifications (`SystemCameraFeed.reconnect`).
+
+Any app on the Mac could write into the sink as well; it only changes what this virtual camera
+shows, as any app can publish a camera of its own.
+
 ### Stage 3 (here): the image in the extension
 
 The extension now draws the chosen **image** too (not only a colour or the test pattern), with
