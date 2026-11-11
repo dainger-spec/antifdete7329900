@@ -860,6 +860,11 @@ struct ProfileEditorForm: View {
             if !systemCamera.devicePresent {
                 EditorNote(L("editor.camera.system.notRunning"), tone: .warning)
             }
+            if systemCamera.cameraAccessDenied {
+                EditorNote(L("editor.camera.system.accessDenied"), tone: .warning)
+                Button(L("editor.camera.system.accessSettings")) { SystemOpen.openSystemSettingsForCamera() }
+                    .buttonStyle(.lumenSecondary)
+            }
         case .restartNeeded:
             EditorNote(L("editor.camera.system.restart"), tone: .warning)
             systemCameraInstallRow
@@ -914,6 +919,23 @@ struct ProfileEditorForm: View {
                 .labelsHidden()
                 .fixedSize()
         }
+        // Size and rate are the JavaScript shim's: the system camera offers a built-in camera's
+        // sizes and the page picks (`editor.camera.system.formats`).
+        if draft.camera.delivery == .jsShim {
+            cameraSizeFields
+        }
+        EditorRow(L("editor.camera.fit")) {
+            Picker(L("editor.camera.fit"), selection: $draft.camera.fit) {
+                Text(L("editor.camera.fit.cover")).tag(CameraSubstitution.Fit.cover)
+                Text(L("editor.camera.fit.contain")).tag(CameraSubstitution.Fit.contain)
+                Text(L("editor.camera.fit.stretch")).tag(CameraSubstitution.Fit.stretch)
+            }
+            .labelsHidden()
+            .fixedSize()
+        }
+    }
+
+    private var cameraSizeFields: some View {
         HStack(alignment: .top, spacing: 12) {
             EditorField(L("editor.camera.width")) {
                 TextField(L("editor.camera.width"), text: $draft.cameraWidth, prompt: Text(verbatim: ""))
@@ -932,27 +954,23 @@ struct ProfileEditorForm: View {
             .frame(width: 110)
             Spacer(minLength: 0)
         }
-        EditorRow(L("editor.camera.fit")) {
-            Picker(L("editor.camera.fit"), selection: $draft.camera.fit) {
-                Text(L("editor.camera.fit.cover")).tag(CameraSubstitution.Fit.cover)
-                Text(L("editor.camera.fit.contain")).tag(CameraSubstitution.Fit.contain)
-                Text(L("editor.camera.fit.stretch")).tag(CameraSubstitution.Fit.stretch)
-            }
-            .labelsHidden()
-            .fixedSize()
-        }
     }
 
     @ViewBuilder
     private var cameraDeviceControls: some View {
-        EditorRow(L("editor.camera.facing")) {
-            Picker(L("editor.camera.facing"), selection: $draft.camera.facing) {
-                Text(L("editor.camera.facing.user")).tag(CameraSubstitution.Facing.user)
-                Text(L("editor.camera.facing.environment")).tag(CameraSubstitution.Facing.environment)
-                Text(L("editor.camera.facing.unset")).tag(CameraSubstitution.Facing.unset)
+        // Facing, the microphone and screen sharing are what the JavaScript shim answers a page;
+        // with the system camera the page asks macOS, and they are as in Safari.
+        let shim = draft.camera.delivery == .jsShim
+        if shim {
+            EditorRow(L("editor.camera.facing")) {
+                Picker(L("editor.camera.facing"), selection: $draft.camera.facing) {
+                    Text(L("editor.camera.facing.user")).tag(CameraSubstitution.Facing.user)
+                    Text(L("editor.camera.facing.environment")).tag(CameraSubstitution.Facing.environment)
+                    Text(L("editor.camera.facing.unset")).tag(CameraSubstitution.Facing.unset)
+                }
+                .labelsHidden()
+                .fixedSize()
             }
-            .labelsHidden()
-            .fixedSize()
         }
         EditorToggle(L("editor.camera.mirror"), isOn: $draft.camera.mirror)
         EditorField(L("editor.camera.label")) {
@@ -966,17 +984,19 @@ struct ProfileEditorForm: View {
             }
         }
         EditorNote(L("editor.camera.label.note"))
-        EditorRow(L("editor.camera.audio")) {
-            Picker(L("editor.camera.audio"), selection: $draft.camera.audio) {
-                Text(L("editor.camera.audio.real")).tag(CameraSubstitution.Audio.real)
-                Text(L("editor.camera.audio.silent")).tag(CameraSubstitution.Audio.silent)
-                Text(L("editor.camera.audio.off")).tag(CameraSubstitution.Audio.off)
+        if shim {
+            EditorRow(L("editor.camera.audio")) {
+                Picker(L("editor.camera.audio"), selection: $draft.camera.audio) {
+                    Text(L("editor.camera.audio.real")).tag(CameraSubstitution.Audio.real)
+                    Text(L("editor.camera.audio.silent")).tag(CameraSubstitution.Audio.silent)
+                    Text(L("editor.camera.audio.off")).tag(CameraSubstitution.Audio.off)
+                }
+                .labelsHidden()
+                .fixedSize()
             }
-            .labelsHidden()
-            .fixedSize()
+            EditorToggle(L("editor.camera.screenShare"), detail: L("editor.camera.screenShare.detail"),
+                         isOn: $draft.camera.alsoScreenShare)
         }
-        EditorToggle(L("editor.camera.screenShare"), detail: L("editor.camera.screenShare.detail"),
-                     isOn: $draft.camera.alsoScreenShare)
     }
 
     /// The source look: brightness/contrast/saturation and the rest, as sliders. The list drives a

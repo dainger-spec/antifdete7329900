@@ -49,6 +49,9 @@ final class SystemCamera: NSObject, ObservableObject {
     /// macOS lists the camera device itself right now (`isDevicePresent`). Installed and on, yet not
     /// listed, it waits for a restart (a replaced copy) — the editor says so.
     @Published private(set) var devicePresent = false
+    /// This app is not allowed the camera, so its feed cannot write into the device's sink
+    /// (`SystemCameraFeed`): a page would get the fallback test pattern. Read again at `refresh`.
+    @Published private(set) var cameraAccessDenied = false
 
     /// The extension's bundle identifier, from the app's Info.plist (`CAM=1 scripts/build-app.sh`).
     let extensionIdentifier: String?
@@ -109,6 +112,7 @@ final class SystemCamera: NSObject, ObservableObject {
     /// guard, and records it: the editor's state, and the shared flag a profile's launch reads. Not
     /// while an install is under way — its own answers settle that.
     func refresh() {
+        cameraAccessDenied = Self.isCameraAccessDenied()
         guard let identifier = extensionIdentifier, pendingRequest == nil else { return }
         let request = OSSystemExtensionRequest.propertiesRequest(forExtensionWithIdentifier: identifier, queue: .main)
         request.delegate = self
@@ -161,6 +165,12 @@ final class SystemCamera: NSObject, ObservableObject {
         let name = CameraSubstitution.systemDeviceName
         let discovery = AVCaptureDevice.DiscoverySession(deviceTypes: [.external], mediaType: .video, position: .unspecified)
         return discovery.devices.contains { $0.localizedName == name || $0.modelID == name }
+    }
+
+    /// The person said no to this app's camera access (or a policy did).
+    static func isCameraAccessDenied() -> Bool {
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        return status == .denied || status == .restricted
     }
 
     /// What a profile is told at its launch about the system camera (`PrivacyScripts.cameraScript`,

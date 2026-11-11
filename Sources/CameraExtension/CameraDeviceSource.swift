@@ -186,6 +186,12 @@ final class CameraDeviceSource: NSObject, CMIOExtensionDeviceSource {
                          colorSpace: CGColorSpaceCreateDeviceRGB())
     }
 
+    private func drawBlack(into output: CVPixelBuffer) {
+        let bounds = CGRect(x: 0, y: 0, width: Double(CVPixelBufferGetWidth(output)), height: Double(CVPixelBufferGetHeight(output)))
+        ciContext.render(CIImage(color: CIColor(red: 0, green: 0, blue: 0)).cropped(to: bounds), to: output,
+                         bounds: bounds, colorSpace: CGColorSpaceCreateDeviceRGB())
+    }
+
     /// One frame, on `timerQueue`: drawn at the picked size (a new pool when the size changed).
     private func emitFrame() {
         requestSinkFrame()
@@ -207,8 +213,14 @@ final class CameraDeviceSource: NSObject, CMIOExtensionDeviceSource {
         guard CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &pixelBuffer) == kCVReturnSuccess,
               let pixelBuffer else { return }
         sequence &+= 1
-        if let frame = latestFrame, DispatchTime.now().uptimeNanoseconds &- latestFrameAt < 1_000_000_000 {
+        let fresh = DispatchTime.now().uptimeNanoseconds &- latestFrameAt < 1_000_000_000
+        if let frame = latestFrame, sinkClient != nil || fresh {
+            // The app's frame — the last one while the next is on its way (a page that just turned
+            // the camera on gets the last picture, never the fallback pattern for a moment).
             draw(frame, into: pixelBuffer)
+        } else if sinkClient != nil {
+            // The app is there but has not sent a frame yet: black, as a camera that is starting.
+            drawBlack(into: pixelBuffer)
         } else {
             CameraFrameRenderer.render(into: pixelBuffer, config: config, sequence: sequence)
         }

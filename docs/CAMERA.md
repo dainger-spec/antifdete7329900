@@ -239,6 +239,14 @@ way Apple's camera extensions take frames from their app:
 - A new extension (another `deviceID`, a replaced copy) is found again on AVFoundation's
   connect/disconnect notifications (`SystemCameraFeed.reconnect`).
 
+- Until the app's first frame arrives the extension sends black, as a camera that is starting, and
+  between frames the last one — never a flash of the fallback pattern while Lumen is connected.
+- The editor hides what the system camera does not use — the size and rate fields, facing, the
+  microphone and screen sharing (all the JavaScript shim's; with the system camera the page asks
+  macOS and they are as in Safari) — and warns, with a button to System Settings › Privacy &
+  Security › Camera, when Lumen is not allowed the camera (`SystemCamera.cameraAccessDenied`): the
+  feed cannot write into the sink then, and a page would get the fallback pattern.
+
 Any app on the Mac could write into the sink as well; it only changes what this virtual camera
 shows, as any app can publish a camera of its own.
 
