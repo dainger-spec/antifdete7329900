@@ -50,6 +50,8 @@ struct SyncSettingsView: View {
                 }
             }
             .sheetFrame(width: 620, height: 640)
+            // Esc closes it as well: Done was Return only.
+            .onExitCommand { dismiss() }
             .background(Theme.raised)
             .onAppear(perform: load)
         }

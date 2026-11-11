@@ -1166,7 +1166,9 @@ struct ProfilesScreen: View {
             if isWorking {
                 ProgressView().controlSize(.small).transition(.opacity)
             }
-            LumenSearchField(text: $search, prompt: L("profiles.search"), shortcut: "⌘K")
+            // No ⌘K here: that is the command palette's (the sidebar's "Commands and Search"), and
+            // this field only filters the list.
+            LumenSearchField(text: $search, prompt: L("profiles.search"))
                 .frame(maxWidth: 280)
             Button {
                 showsInspector.wrappedValue.toggle()
@@ -1310,7 +1312,13 @@ struct ProfilesScreen: View {
             ForEach(rows) { row in
                 ProfileRow(row: row, columns: columns, actions: actions, isSelected: selection.contains(row.id),
                            showsCheckbox: selectedRows.count >= 2, height: appearance.density.rowHeight,
-                           onClick: { click in selection.click(row.id, click, order: displayOrder.map(\.id)) })
+                           onClick: { click in selection.click(row.id, click, order: displayOrder.map(\.id)) },
+                           // A double click is what a person opens a thing with: the profile is
+                           // launched, and stays the chosen one.
+                           onDoubleClick: {
+                               selection.select([row.id])
+                               if row.activity == .stopped { actions.launch(row.id) }
+                           })
             }
         }
     }
@@ -1667,6 +1675,7 @@ private struct ProfileRow: View {
     var height: CGFloat = 52
     /// A click on the row itself (not on its buttons or menu): selects it (`ProfileSelection`).
     var onClick: (ProfileSelection.Click) -> Void = { _ in }
+    var onDoubleClick: () -> Void = {}
     @State private var hovered = false
 
     var body: some View {
@@ -1689,7 +1698,9 @@ private struct ProfileRow: View {
                 .padding(.leading, ProfileColumns.rowPadding + ProfileColumns.nameInset - 18)
         }
         .contentShape(Rectangle())
-        // The row's buttons and ⋯ menu take their own clicks; a click anywhere else selects.
+        // The row's buttons and ⋯ menu take their own clicks; a click anywhere else selects, and
+        // a double click launches (each of its clicks is also a click: the first selects).
+        .simultaneousGesture(TapGesture(count: 2).onEnded { onDoubleClick() })
         .onTapGesture { onClick(.current) }
         .onHover { hovered = $0 }
         .animation(Motion.hover(hovered), value: hovered)

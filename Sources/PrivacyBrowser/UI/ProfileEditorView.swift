@@ -368,8 +368,10 @@ struct ProfileDraft {
 
     func makeConfiguration() throws -> ProfileConfiguration {
         var configuration = ProfileConfiguration()
-        let trimmedURL = startURL.trimmingCharacters(in: .whitespaces)
+        var trimmedURL = startURL.trimmingCharacters(in: .whitespaces)
         if !trimmedURL.isEmpty {
+            // "example.com", as a person types an address: https, as the address bar would.
+            if !trimmedURL.contains("://"), !trimmedURL.lowercased().hasPrefix("about:") { trimmedURL = "https://" + trimmedURL }
             guard let url = URL(string: trimmedURL) else { throw CoreError.invalidConfiguration(L("editor.error.startURL")) }
             configuration.startURL = url
         }
@@ -379,7 +381,11 @@ struct ProfileDraft {
         }
         configuration.proxy = try makeProxy()
         if geoMode == .fixed {
-            guard let lat = Double(latitude), let lon = Double(longitude), let acc = Double(accuracy) else {
+            // "55,75": a decimal comma, as it is written in Russian, reads as a point.
+            func number(_ text: String) -> Double? {
+                Double(text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: "."))
+            }
+            guard let lat = number(latitude), let lon = number(longitude), let acc = number(accuracy) else {
                 throw CoreError.invalidConfiguration(L("editor.error.coords"))
             }
             configuration.geolocation = .fixed(latitude: lat, longitude: lon, accuracyMeters: acc)

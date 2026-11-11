@@ -37,6 +37,29 @@ struct ScenariosView: View {
             .background(Theme.surface)
         }
         .frame(minWidth: 900, minHeight: 600)
+        // With the vault locked there are no scenarios to show and none can be written: said, not
+        // an empty editor whose buttons do nothing.
+        .overlay {
+            if sample == nil, model.phase != .unlocked {
+                VStack(spacing: 8) {
+                    Image(systemName: "lock")
+                        .font(.system(size: 22))
+                        .foregroundStyle(Theme.textTertiary)
+                    Text(L("scenarios.locked"))
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Theme.surface)
+            }
+        }
+        // What was typed is kept when the window closes, as when another scenario is chosen.
+        .onDisappear { if sample == nil, edited { save() } }
+        // The profile to run on is one that is there: the first, when the chosen one was deleted.
+        .onChange(of: model.profiles.map(\.id)) { _, ids in
+            if let profileID, !ids.contains(profileID) { self.profileID = ids.first }
+            if profileID == nil { profileID = ids.first }
+        }
         .onAppear {
             if let sample {
                 selection = sample.id
@@ -275,6 +298,11 @@ struct ScenariosView: View {
                 }
             }
             .frame(maxWidth: 320)
+            if model.profiles.isEmpty {
+                Text(L("scenarios.noProfiles"))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textTertiary)
+            }
             Spacer()
             if let run, run.isRunning {
                 Text(L("scenarios.running"))

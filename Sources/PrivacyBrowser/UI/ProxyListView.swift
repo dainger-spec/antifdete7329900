@@ -191,7 +191,7 @@ struct ProxyListPanel: View {
             if proxies.isChecking {
                 ProgressView().controlSize(.small).transition(.opacity)
             }
-            LumenSearchField(text: $search, prompt: L("proxies.search"), shortcut: "⌘K")
+            LumenSearchField(text: $search, prompt: L("proxies.search"))
                 .frame(maxWidth: 240)
             Button {
                 showsInspector.wrappedValue.toggle()

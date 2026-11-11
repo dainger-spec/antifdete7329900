@@ -75,6 +75,7 @@ struct PrivacyBrowserApp: App {
         // The scenario editor (docs/AUTOMATION.md): File › Scenarios.
         Window(L("window.scenarios.title"), id: "scenarios") {
             ScenariosView()
+                .saysModelErrors()
                 .environmentObject(model)
                 .preferredColorScheme(.dark)
                 .background(WindowReader { window in
@@ -96,6 +97,7 @@ struct PrivacyBrowserApp: App {
         // ⌘, and the app menu's Settings…; also ⋯ → Settings… in the Profiles window.
         Settings {
             SettingsView()
+                .saysModelErrors()
                 .environmentObject(model)
                 .preferredColorScheme(.dark)
                 .modifier(SettingsTitleBar())
