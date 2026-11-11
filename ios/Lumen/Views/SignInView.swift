@@ -32,6 +32,13 @@ struct SignInView: View {
                         Text(L("Аккаунт Lumen — тот же, что в Lumen для Mac."))
                     }
                     .glassRow()
+                    if let message {
+                        Section {
+                            Label { Text(message).accessibilityIdentifier("signInMessage") } icon: { Image(systemName: "exclamationmark.circle") }
+                                .font(.system(size: 15)).foregroundStyle(Theme.bad)
+                        }
+                        .listRowBackground(Theme.bad.opacity(0.1))
+                    }
                     Section {
                         Button(L("Войти")) { submit(robotToken: nil) }
                             .buttonStyle(PrimaryButtonStyle())
@@ -51,6 +58,13 @@ struct SignInView: View {
                         TextField(L("Код из письма"), text: $code).keyboardType(.numberPad).accessibilityIdentifier("signInCode")
                     }
                     .glassRow()
+                    if let message {
+                        Section {
+                            Label { Text(message).accessibilityIdentifier("signInMessage") } icon: { Image(systemName: "exclamationmark.circle") }
+                                .font(.system(size: 15)).foregroundStyle(Theme.bad)
+                        }
+                        .listRowBackground(Theme.bad.opacity(0.1))
+                    }
                     Section {
                         Button(L("Подтвердить")) { confirm() }
                             .buttonStyle(PrimaryButtonStyle())
@@ -67,13 +81,6 @@ struct SignInView: View {
                         }
                     }
                     .glassRow()
-                }
-                if let message {
-                    Section {
-                        Label { Text(message).accessibilityIdentifier("signInMessage") } icon: { Image(systemName: "exclamationmark.circle") }
-                            .font(.system(size: 15)).foregroundStyle(Theme.bad)
-                    }
-                    .listRowBackground(Theme.bad.opacity(0.1))
                 }
                 if busy {
                     Section { ProgressView().accessibilityIdentifier("signInBusy") }.glassRow()

@@ -45,6 +45,18 @@ struct BrowserView: View {
         .background(Theme.ground)
         .navigationTitle(runtime.session.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // The session's name, and under it where it goes out: the proxy's country and name.
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 2) {
+                    Text(model.session(runtime.sessionID)?.name ?? runtime.session.name)
+                        .font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.text)
+                    Text(exitLine).font(.system(size: 12)).foregroundStyle(Theme.secondary)
+                        .accessibilityIdentifier("sessionExit")
+                }
+                .lineLimit(1)
+            }
+        }
         .sheet(item: $sheet) { which in
             switch which {
             case .tabs: TabsView(runtime: runtime)
@@ -52,6 +64,15 @@ struct BrowserView: View {
             case .settings: SessionSettingsView(sessionID: runtime.sessionID)
             }
         }
+    }
+}
+
+extension BrowserView {
+    /// "🇩🇪 DE · Berlin 1": the proxy's country, once its check knows it, and its name.
+    var exitLine: String {
+        guard let proxy = model.proxy(model.session(runtime.sessionID)?.proxyID) else { return L("Без прокси") }
+        guard let country = proxy.check?.country, proxy.check?.alive == true else { return proxy.displayName }
+        return "\(CountryLocale.flag(country)) \(country) · \(proxy.displayName)"
     }
 }
 

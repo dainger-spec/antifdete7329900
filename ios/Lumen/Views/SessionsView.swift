@@ -46,13 +46,17 @@ struct SessionsView: View {
                         .listRowBackground(Color.clear).listRowSeparator(.hidden)
                 }
                 ForEach(shown) { session in
-                    NavigationLink(value: session.id) {
+                    // A card is a button, not a row with a chevron (the design): it opens the session.
+                    Button { model.path.append(session.id) } label: {
                         SessionCard(session: session, proxy: model.proxy(session.proxyID), lock: model.lock(session),
                                     lockedForProxy: model.lockedForProxy(session))
+                            .padding(.horizontal, 14).padding(.vertical, 13)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .glassPane(radius: 24)
                     }
+                    .buttonStyle(.plain)
                     .accessibilityIdentifier("session-\(session.name)")
-                    .padding(.horizontal, 14).padding(.vertical, 13)
-                    .glassPane(radius: 24)
                     .listRowBackground(Color.clear).listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
                     .contextMenu {
