@@ -50,6 +50,7 @@ public enum Fault: String, CaseIterable, Sendable {
     case spaceRefusalStopsSync    // a 413 or 507 about one object stops the whole sync run
     case syncedProxyNotBound      // a Mac profile with a proxy comes to the iPhone without it — it would open directly
     case syncReadWrites           // the read-only sync step lets the engine write back to the server
+    case syncCookiesOverwriteLocal // the Mac's cookies applied over a newer change made on the iPhone
     // The account (rights from the server's signed document)
     case signatureNotChecked     // a document's signature is not checked: anyone's payload is taken
     case wrongDeviceAccepted     // a document of another device or another iPhone is taken

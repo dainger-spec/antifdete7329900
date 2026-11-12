@@ -34,6 +34,9 @@ public enum SyncRead {
         public var generation: String?
         /// Objects the server refused for their size or the plan's space (deferred).
         public var deferredForSpace: [String]
+        /// Cookies set in and deleted from the sessions' stores by this run (step 4).
+        public var cookiesSet = 0
+        public var cookiesDeleted = 0
     }
 
     /// Why a run did not go through, in the app's terms (the app does not see the Mac's core).
@@ -50,9 +53,10 @@ public enum SyncRead {
     }
 
     /// `pull`, its failures said in the app's terms.
-    public static func run(root: URL, key: Data, transport: LumenSyncTransport, keptGeneration: String?) async -> Result<Outcome, Failure> {
+    public static func run(root: URL, key: Data, transport: LumenSyncTransport, keptGeneration: String?,
+                           cookies: SyncCookieStores? = nil) async -> Result<Outcome, Failure> {
         do {
-            return .success(try await pull(root: root, key: key, transport: transport, keptGeneration: keptGeneration))
+            return .success(try await pull(root: root, key: key, transport: transport, keptGeneration: keptGeneration, cookies: cookies))
         } catch CoreError.syncServer(403, "sync_not_in_plan") {
             return .failure(.notInPlan)
         } catch CoreError.wrongPassword {
@@ -66,7 +70,11 @@ public enum SyncRead {
         }
     }
 
-    public static func pull(root: URL, key: Data, transport: LumenSyncTransport, keptGeneration: String?) async throws -> Outcome {
+    /// `cookies`: the stores of the sessions already made from the vault's profiles — after the run,
+    /// each gets its profile's cookies by the Mac's rules (step 4). A profile made a session by this
+    /// run gets them at the next one.
+    public static func pull(root: URL, key: Data, transport: LumenSyncTransport, keptGeneration: String?,
+                            cookies: SyncCookieStores? = nil) async throws -> Outcome {
         let vault: UnlockedVault
         if MasterVault.exists(in: root) {
             vault = try MasterVault.open(in: root, deviceUnlockKey: key)
@@ -91,7 +99,13 @@ public enum SyncRead {
             guard let configuration = try? repository.loadConfiguration(summary.id) else { return nil }
             return profile(summary, configuration)
         }
-        return Outcome(profiles: profiles, generation: generation, deferredForSpace: transport.deferredForSpace)
+        var outcome = Outcome(profiles: profiles, generation: generation, deferredForSpace: transport.deferredForSpace)
+        if let cookies {
+            let applied = await SyncCookieRun.run(repository: repository, stores: cookies)
+            outcome.cookiesSet = applied.set
+            outcome.cookiesDeleted = applied.deleted
+        }
+        return outcome
     }
 
     static func profile(_ summary: ProfileSummary, _ configuration: ProfileConfiguration) -> SyncedProfile {
