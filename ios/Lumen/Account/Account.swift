@@ -115,10 +115,14 @@ extension AppModel {
         return await signedIn(email: email, answer: answer)
     }
 
-    /// The code from the email (§5.2), then the activation.
-    func confirmSignIn(email: String, code: String) async -> SignInOutcome {
+    /// The code from the email (§5.2), with the attempt's challenge — the server takes a code only with
+    /// the challenge of the attempt that sent it (the security audit of 12 November 2026, SRV-03) — then
+    /// the activation.
+    func confirmSignIn(email: String, code: String, challenge: String?) async -> SignInOutcome {
         let email = email.trimmingCharacters(in: .whitespaces)
-        let body = (try? JSONSerialization.data(withJSONObject: ["email": email, "code": code.trimmingCharacters(in: .whitespaces)])) ?? Data()
+        var fields: [String: String] = ["email": email, "code": code.trimmingCharacters(in: .whitespaces)]
+        if let challenge { fields["challenge"] = challenge }
+        let body = (try? JSONSerialization.data(withJSONObject: fields)) ?? Data()
         guard let answer = await AccountClient.send("POST", "v1/auth/login/confirm", body: body, token: nil) else {
             return .failed(AccountText.unreachable)
         }

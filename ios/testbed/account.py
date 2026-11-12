@@ -3,7 +3,8 @@ docs/CONTRACT.md (§2–§7) and docs/IPHONE.md say an iPhone meets, until the s
 
   http://127.0.0.1:28395
     POST /v1/auth/login            {"email", "password", "robotToken"?}
-    POST /v1/auth/login/confirm    {"email", "code"}          the code is always 424242
+    POST /v1/auth/login/confirm    {"email", "code", "challenge"}  the code is always 424242; the
+                                   attempt's challenge with it, as the server since 12 November 2026
     POST /v1/auth/login/resend     {"challenge"}
     POST /v1/auth/logout           (session)
     POST /v1/devices/activate      (session) {"machineID", "platform", "profileCount", "appVersion"}
@@ -221,6 +222,12 @@ def handle(method, path, headers, body):
     if (method, path) == ("POST", "/v1/auth/login/confirm"):
         acc = account(str(fields.get("email", "")))
         event("account", what="confirm", email=acc["email"])
+        # As the server since the security audit of 12 November 2026 (SRV-03): a code only with the
+        # challenge of the attempt that sent it.
+        if not fields.get("challenge"):
+            return refuse(400, "code_flow_required")
+        if fields.get("challenge") != "lmc_" + acc["id"]:
+            return refuse(400, "login_expired")
         return session_answer(acc) if str(fields.get("code", "")) == CODE else refuse(400, "invalid_code")
 
     if (method, path) == ("POST", "/v1/auth/login/resend"):

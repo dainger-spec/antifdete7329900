@@ -125,7 +125,7 @@ struct SignInView: View {
         busy = true
         message = nil
         Task {
-            let outcome = await model.confirmSignIn(email: email, code: code)
+            let outcome = await model.confirmSignIn(email: email, code: code, challenge: challenge)
             busy = false
             finish(outcome)
         }
