@@ -254,7 +254,8 @@ struct ScenarioSchedulesPane: View {
     private func problemText(_ schedule: ScenarioSchedule) -> String? {
         switch schedule.lastResult {
         case .failed?: return L("schedule.state.failed")
-        case .notInPlan?: return L("schedule.state.notInPlan")
+        // Only while the plan still has none: once it has, the run that was refused is the past.
+        case .notInPlan?: return allowed ? nil : L("schedule.state.notInPlan")
         case .missed?, .started?, nil: return nil
         }
     }
@@ -336,7 +337,17 @@ struct ScenarioSchedulesPane: View {
                     .keyboardShortcut(.cancelAction)
                 // The switch is the row's: a schedule that was off stays off when its time is changed.
                 Button(L("common.save")) {
-                    if model.saveSchedule(binding.wrappedValue) { draft = nil }
+                    var value = binding.wrappedValue
+                    // The form changes what runs, where and when. The switch and what the clock
+                    // wrote while the form was open — the last run, the next one — are the saved
+                    // schedule's: an old copy of them would run it a second time.
+                    if let saved = schedules.first(where: { $0.id == value.id }) {
+                        value.isEnabled = saved.isEnabled
+                        value.nextRunAt = saved.nextRunAt
+                        value.lastRunAt = saved.lastRunAt
+                        value.lastResult = saved.lastResult
+                    }
+                    if model.saveSchedule(value) { draft = nil }
                 }
                 .buttonStyle(.lumenPrimary)
                 .keyboardShortcut(.defaultAction)

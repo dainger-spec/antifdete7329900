@@ -132,6 +132,9 @@ Record ── AppModel.startRecording(on:) ── the profile started with a win
   button for it is not a second step.
 - **Not recorded:** frames, dragging, file uploads, hovering; a choice in a `<select>` becomes a
   comment (its list is the system's, not the page's).
+- **Only what the person does in a window they see.** A warm-up's pages (its window is in front
+  fully transparent) and the page the profile's check measures with are left out. A recording
+  ends when its profile stops — its window closed, its process ended — with the lines it has.
 - Nothing of the recorder is in a profile's pages before the first recording there. After it the
   script stays, idle: a page's script asks at its start whether a recording is on.
 

@@ -651,13 +651,13 @@
 "check.window.cut" = "The settings ask for a window of %1$@, and this Mac's screen is %2$@: the window opens smaller than asked.";
 "check.window.mobile" = "An iPhone or iPad view: the window is the device's screen in size, not compared with the Mac's screen.";
 "check.window.notMeasured" = "The page did not say the sizes of its window and screen.";
-"check.intro.title" = "This profile has not been checked yet";
+"check.intro.title" = "No result yet";
 "check.progress.page" = "The measuring page in a window of the profile";
 "check.progress.exit" = "Where the profile exits to the internet";
 "check.progress.network" = "Where the profile's process sends its requests";
 "check.progress.note" = "A window of the profile opens for a few seconds. A stopped profile is started first: that is the longest step.";
 "check.failed.title" = "The check could not be made";
-"check.failed.hint" = "The profile's settings were not changed. See that the profile starts and its window opens, and check again.";
+"check.failed.hint" = "The check itself changes no settings. See that the profile starts and its window opens, and check again.";
 "check.group.attention" = "To look at";
 "check.group.unknown" = "Not checked";
 "check.group.ok" = "In order";

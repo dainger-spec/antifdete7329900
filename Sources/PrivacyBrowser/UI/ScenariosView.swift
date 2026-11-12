@@ -33,6 +33,11 @@ struct ScenariosView: View {
 
     /// A recording is going on, in the profile chosen here or in another.
     private var isRecording: Bool { sampleRecording != nil || model.recordingProfile != nil }
+    /// A recording is going on, and its profile no longer runs.
+    private var recordingStopped: Bool {
+        guard let id = model.recordingProfile else { return false }
+        return !model.isRunning(id)
+    }
     private var recordedSteps: [RecordedStep] { sampleRecording ?? model.recorded.steps }
 
     private var selected: Scenario? { sample ?? selection.flatMap { model.scenarios.scenario($0) } }
@@ -82,6 +87,11 @@ struct ScenariosView: View {
             if let profileID, !ids.contains(profileID) { self.profileID = ids.first }
             if profileID == nil { profileID = ids.first }
         }
+        // The profile a recording goes on in has stopped — its window was closed, or its process
+        // ended: the recording ends there, with the lines it has.
+        .onChange(of: recordingStopped) { _, stopped in
+            if stopped { stopRecording() }
+        }
         .onAppear {
             if let sample {
                 selection = sample.id
@@ -93,6 +103,8 @@ struct ScenariosView: View {
             if profileID == nil { profileID = model.profiles.first?.id }
             // A recording going on is of its own profile: the window opened again names that one.
             if let recording = model.recordingProfile { profileID = recording }
+            // One whose profile stopped while this window was closed ends now.
+            if recordingStopped { stopRecording() }
         }
         .confirmationDialog(String(format: L("scenarios.delete.question"), selected?.name ?? ""), isPresented: $confirmingDelete) {
             Button(L("scenarios.delete"), role: .destructive) { delete() }
@@ -485,8 +497,11 @@ struct ScenariosView: View {
     private func scheduleThis() {
         guard let scenario = selected, let profileID else { return }
         if edited { save() }
-        proposedSchedule = ScenarioSchedule(action: .scenario(scenario.id), profileID: profileID,
-                                            when: .daily(hour: 10, minute: 0), jitterMinutes: 15)
+        // One that is there already is in the list, with its Edit: a second form would add its twin.
+        let action = ScenarioSchedule.Action.scenario(scenario.id)
+        let scheduled = model.scenarioSchedules.schedules.contains { $0.action == action && $0.profileID == profileID }
+        proposedSchedule = scheduled ? nil : ScenarioSchedule(action: action, profileID: profileID,
+                                                              when: .daily(hour: 10, minute: 0), jitterMinutes: 15)
         showingSchedules = true
     }
 }

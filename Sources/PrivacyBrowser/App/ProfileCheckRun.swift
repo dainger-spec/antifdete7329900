@@ -65,6 +65,9 @@ final class ProfileCheckRun: ObservableObject {
 
     func run() async {
         guard !isRunning, let environment = environment() else { return }
+        // A fix waits for the profile's next start: checked again while the profile still runs, it
+        // is still waiting ("Restart and Check Again" stops the profile first: nothing waits then).
+        let waiting: Set<ProfileCheck.Fix> = environment.manager()?.isRunning(profileID) == true ? fixesMade : []
         findings = []
         fixError = nil
         step = .page
@@ -101,7 +104,7 @@ final class ProfileCheckRun: ObservableObject {
             facts.network = ProfileCheck.Network(webViewsOffProfile: report.webViewsOffProfile, webViewsWithWebRTC: report.webViewsWithWebRTC,
                                                  webViewsWithDNSPrefetch: report.webViewsWithDNSPrefetch, udpClosed: report.udpClosed)
         }
-        show(ProfileCheck.findings(facts), at: Date())
+        show(ProfileCheck.findings(facts), at: Date(), fixesMade: waiting)
     }
 
     /// A finished check's findings (the UI snapshots show one of sample values).

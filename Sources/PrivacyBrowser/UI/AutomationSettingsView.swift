@@ -126,6 +126,8 @@ struct AutomationSettingsView: View {
                     .buttonStyle(.lumenGhost)
                     // The whole command, with the token, whatever the line above shows.
                     LumenCopyButton(text: exampleCommand(token: settings?.token ?? ""), title: L("automation.example.copy"))
+                        // With the vault locked there is no token: nothing to copy, and nothing to say "Copied" of.
+                        .disabled(settings == nil)
                 }
                 .padding(.top, 10)
             } else {
@@ -157,6 +159,7 @@ struct AutomationSettingsView: View {
                 Button(L(revealed ? "automation.token.hide" : "automation.token.show")) { revealed.toggle() }
                     .buttonStyle(.lumenGhost)
                 LumenCopyButton(text: settings?.token ?? "", title: L("automation.token.copy"))
+                    .disabled(settings == nil)
                 Button(L("automation.token.renew")) { model.renewAutomationToken() }
                     .buttonStyle(.lumenSecondary)
                     .help(L("automation.token.renew.note"))

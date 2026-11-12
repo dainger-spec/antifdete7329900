@@ -27,6 +27,8 @@ struct PasswordListView: View {
     @State private var draft: Draft?
     @State private var revealed = false
     @State private var pendingDelete: PasswordEntry?
+    /// Cancel was pressed over a one-time code that is not saved: asked first.
+    @State private var confirmingDiscard = false
     @State private var error: String?
 
     /// A login being edited (or added: `id` nil).
@@ -41,6 +43,15 @@ struct PasswordListView: View {
         var codeInput = ""
         /// Why Save did not take what is typed for the code: said at its field until it changes.
         var codeProblem: String?
+    }
+
+    /// The editor holds a one-time code that Save has not written yet (its amber note says so).
+    /// One click elsewhere would drop the secret, and the site would then ask for codes nobody can
+    /// make: until Save or Cancel the list and Done wait, and Cancel asks first.
+    private var holdsUnsavedCode: Bool {
+        guard let draft, let code = draft.totp else { return false }
+        let saved: OneTimeCode? = draft.id.flatMap { id in entries.first(where: { $0.id == id })?.totp }
+        return code != saved
     }
 
     /// The moment the one-time code is shown for, for a picture that must not change (the snapshots).
@@ -80,6 +91,7 @@ struct PasswordListView: View {
                     // While a login is being typed, Esc is its Cancel: it closed the whole sheet,
                     // and the master password was asked again to come back.
                     .keyboardShortcut(draft == nil ? KeyboardShortcut.cancelAction : nil)
+                    .disabled(holdsUnsavedCode)
             })
         }
         .sheetFrame(width: 780, height: 620)
@@ -108,7 +120,7 @@ struct PasswordListView: View {
         } message: { entry in
             // A login's one-time code is deleted with it, and without that code the site lets
             // nobody in: the question says so.
-            Text(String(format: entry.totp == nil ? L("passwords.delete.message") : L("passwords.delete.messageWithCode"),
+            Text(String(format: losesCode(deleting: entry) ? L("passwords.delete.messageWithCode") : L("passwords.delete.message"),
                         entry.username.isEmpty ? L("passwords.noUsername") : entry.username, entry.host))
         }
     }
@@ -209,6 +221,7 @@ struct PasswordListView: View {
                     Button {
                         selection = nil
                         revealed = true
+                        error = nil
                         draft = Draft()
                     } label: { Label(L("passwords.add"), systemImage: "plus") }
                     .buttonStyle(.lumenGhost)
@@ -217,6 +230,7 @@ struct PasswordListView: View {
                 if !neverSaved.isEmpty { neverSavedList }
             }
             .frame(width: 300)
+            .disabled(holdsUnsavedCode)
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .card(fill: Theme.raisedInset)
@@ -226,6 +240,7 @@ struct PasswordListView: View {
             if newValue != nil, draft?.id != newValue {
                 draft = nil
                 revealed = false
+                error = nil
             }
         }
     }
@@ -253,6 +268,7 @@ struct PasswordListView: View {
     private var detail: some View {
         if let draft {
             editor(draft)
+                .id(draft.id)
         } else if let id = selection, let entry = entries.first(where: { $0.id == id }) {
             details(entry)
         } else {
@@ -330,13 +346,22 @@ struct PasswordListView: View {
     private func row(_ label: String, _ value: String, copy: String?) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text(label).foregroundStyle(.secondary).frame(width: 132, alignment: .leading)
+            // The value takes the room there is: beside a spacer it was given half, and a note
+            // went onto a second line with the first half empty.
             Text(value).textSelection(.enabled).lineLimit(3)
-            Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
             if let copy {
                 Button { Self.copy(copy, concealed: false) } label: { Image(systemName: "doc.on.doc") }
                     .buttonStyle(.borderless).help(L("passwords.copy"))
             }
         }
+    }
+
+    /// Deleting `entry` takes a one-time code away: not so for a version kept beside a login that
+    /// holds the same code.
+    private func losesCode(deleting entry: PasswordEntry) -> Bool {
+        guard let code = entry.totp else { return false }
+        return !entries.contains { $0.id != entry.id && $0.origin == entry.origin && $0.username == entry.username && $0.totp == code }
     }
 
     /// Opens the login in the editor, its password shown.
@@ -387,9 +412,11 @@ struct PasswordListView: View {
                 .padding(1) // the fields' focus rings, which a scroll view clips at its edge
             }
             HStack {
-                Button(L("common.cancel")) { draft = nil }
-                    .buttonStyle(.lumenSecondary)
-                    .keyboardShortcut(.cancelAction)
+                Button(L("common.cancel")) {
+                    if holdsUnsavedCode { confirmingDiscard = true } else { closeEditor() }
+                }
+                .buttonStyle(.lumenSecondary)
+                .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button(L("common.save")) { save(binding.wrappedValue) }
                     .buttonStyle(.lumenPrimary)
@@ -402,6 +429,20 @@ struct PasswordListView: View {
         // What Save refused is said until the secret is typed again or a code is added another way.
         .onChange(of: draft?.codeInput) { _, _ in draft?.codeProblem = nil }
         .onChange(of: draft?.totp) { _, _ in draft?.codeProblem = nil }
+        .confirmationDialog(L("editor.discard.title"), isPresented: $confirmingDiscard, titleVisibility: .visible) {
+            Button(L("editor.discard.confirm"), role: .destructive) { closeEditor() }
+            Button(L("editor.discard.keep"), role: .cancel) {}
+        } message: {
+            Text(L("passwords.code.unsaved"))
+        }
+    }
+
+    /// The editor closed without saving: the password it showed is hidden again, as after Save, and
+    /// what Save was refused for does not stand under a closed editor.
+    private func closeEditor() {
+        draft = nil
+        revealed = false
+        error = nil
     }
 
     // MARK: Actions

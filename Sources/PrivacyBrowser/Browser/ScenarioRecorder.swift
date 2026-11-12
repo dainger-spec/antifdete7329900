@@ -42,11 +42,19 @@ final class ScenarioRecorder: NSObject, WKScriptMessageHandlerWithReply {
         controller.addScriptMessageHandler(self, contentWorld: Self.world, name: Self.handlerName)
     }
 
+    /// A page a person looks at and acts in: in a window that is shown — not the warm-up's, which
+    /// is in front fully transparent (`BrowserSession.openOffscreenWindow`) — and not the page the
+    /// profile's check measures with, whose address lives only while a snapshot is taken.
+    private static func isSeen(_ page: WKWebView?) -> Bool {
+        guard let page, let window = page.window, window.isVisible, window.alphaValue > 0 else { return false }
+        return page.url.map(SiteSnapshotPage.isMeasuringPage) != true
+    }
+
     /// Begins: the page in front is the recording's first step, and every page shown now is told
     /// to watch (one that has no script yet — it loaded before the first recording — gets it).
     func start(pages: [WKWebView]) {
         isRecording = true
-        let shown = pages.filter { $0.window?.isVisible == true }
+        let shown = pages.filter { Self.isSeen($0) }
         let front = shown.first { $0.window == NSApp.mainWindow } ?? shown.first { $0.window == NSApp.keyWindow } ?? shown.first
         // Only an address of the web begins a recording (`ScenarioRecording.loaded`).
         let scheme = front?.url?.scheme?.lowercased()
@@ -80,7 +88,7 @@ final class ScenarioRecorder: NSObject, WKScriptMessageHandlerWithReply {
         }
         // A page in no window a person sees (a tab behind, a page Safari loads for itself) is not
         // what they are doing.
-        let shown = message.webView?.window?.isVisible == true
+        let shown = Self.isSeen(message.webView)
         if type == "hello" {
             replyHandler(["recording": isRecording && shown], nil)
             // A page that was open when the recording began has not loaded: with a first page

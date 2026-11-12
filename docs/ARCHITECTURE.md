@@ -651,6 +651,13 @@ Check the Profile ── ProfileCheckRun.run()
    Restart and Check Again ── stop, then run() (which starts it)
 ```
 
+A fix is kept. Checked again without a restart, a fix already made is still shown as made, with
+the restart it waits for. And where a fix leaves one of the two — time zone, language — following
+the connection beside a chosen other, which the editor's three choices cannot say, the editor
+keeps it as stored while neither is touched (`ProfileDraft.LocaleMix`) and shows, for the one
+that follows, where the connection was last seen to come out: a save of something else never
+writes this Mac's own time zone into the profile.
+
 What it does not do: a DNS leak is judged from how the profile is built and what its process
 reports, not by asking an outside resolver-echo service — that would be a request to a third party
 made for the check alone. "unknown" is never counted as a finding: no exit found means nothing to

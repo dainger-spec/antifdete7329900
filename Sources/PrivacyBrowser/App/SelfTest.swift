@@ -4367,6 +4367,29 @@ final class SelfTest {
               manualKept && randomKept && connectionKept,
               "manual \(manualSaved.timeZoneIdentifier ?? "-") \(manualSaved.languageOverride ?? "-"), random \(randomSaved.timeZoneIdentifier ?? "-") \(randomSaved.languageOverride ?? "-")")
 
+        // One of the two follows the connection and the other is chosen: what a fix of the profile's
+        // check leaves. A save that touched neither writes it back as it was; shown, the one that
+        // follows is where the connection was last seen to come out, so that a save which changed
+        // the other writes that zone — never this Mac's own.
+        var chosenBoth = ProfileConfiguration()
+        chosenBoth.timeZoneIdentifier = "America/New_York"
+        chosenBoth.languageOverride = "ru-RU"
+        chosenBoth.matchProxyLocation = false
+        var mixed = ProfileCheck.applying(.timeZoneFromConnection, to: chosenBoth)
+        mixed.lastProxyLocation = ProxyLocation(timeZoneIdentifier: "Europe/Berlin", countryCode: "DE", proxyEndpoint: "")
+        let mixedDraft = ProfileDraft(name: "Locale", configuration: mixed)
+        let mixedSaved = try mixedDraft.makeConfiguration()
+        var touched = mixedDraft
+        touched.language = "de-DE"
+        let touchedSaved = try touched.makeConfiguration()
+        let mixKept: Bool = mixedSaved.timeZoneIdentifier == nil && mixedSaved.matchProxyLocation && mixedSaved.languageOverride == "ru-RU"
+        let mixShown: Bool = mixedDraft.timeZone == "Europe/Berlin"
+        let mixTouched: Bool = touchedSaved.timeZoneIdentifier == "Europe/Berlin" && !touchedSaved.matchProxyLocation
+            && touchedSaved.languageOverride == "de-DE"
+        check("editor: a time zone that follows the connection beside a chosen language is kept by a save that touched neither, and a save that changed the language writes the connection's zone, not this Mac's",
+              mixKept && mixShown && mixTouched,
+              "kept \(mixedSaved.timeZoneIdentifier ?? "nil") follows \(mixedSaved.matchProxyLocation) \(mixedSaved.languageOverride ?? "-"); shown \(mixedDraft.timeZone); touched \(touchedSaved.timeZoneIdentifier ?? "nil") follows \(touchedSaved.matchProxyLocation)")
+
         let row = ProfileRowItem(id: UUID(), name: "Northwind", activity: .stopped, exit: .direct, ephemeral: false,
                                  appearsAs: "", lastUsed: nil, tags: ["ads", "US"], notes: "Renews monthly")
         let other = ProfileRowItem(id: UUID(), name: "Research", activity: .stopped, exit: .direct, ephemeral: false,

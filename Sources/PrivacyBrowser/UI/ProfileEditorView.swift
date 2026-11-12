@@ -51,6 +51,18 @@ struct ProfileDraft {
     var timeZone = TimeZone.current.identifier
     var language = ""
     var matchProxyLocation = true
+    /// One of the two follows the connection and the other is chosen: what a fix of the profile's
+    /// check leaves (`ProfileCheck.applying`), and what the three choices cannot say. Kept as it is
+    /// stored, beside what the form shows for it, and written back while neither is touched — a
+    /// save of something else must not put this Mac's own time zone into the profile.
+    struct LocaleMix {
+        var mode: LocaleSource
+        var timeZone: String?
+        var language: String?
+        var shownTimeZone: String
+        var shownLanguage: String
+    }
+    var localeMix: LocaleMix?
     /// Carried through unchanged (a cache for launching; see ProfileConfiguration).
     var lastProxyLocation: ProxyLocation?
     var warnOnProxyIPChange = false
@@ -183,6 +195,19 @@ struct ProfileDraft {
         // With a proxy it does not follow and nothing of its own: this Mac's time zone and
         // languages, which is a choice of its own — Manual, with this Mac's values.
         if localeMode == .connection && !c.matchProxyLocation && c.proxy != nil { localeMode = .manual }
+        // One follows the connection, the other is chosen (`LocaleMix`). The one that follows is
+        // shown as where the connection was last seen to come out — not as this Mac's own, which
+        // a save would then write.
+        if c.matchProxyLocation, localeMode != .connection, c.timeZoneIdentifier == nil || c.languageOverride == nil {
+            let remembered: ProxyLocation? = c.lastProxyLocation.flatMap { location -> ProxyLocation? in
+                guard let proxy = c.proxy else { return location }
+                return location.proxyEndpoint == ProxyLocation.endpoint(of: proxy) ? location : nil
+            }
+            if c.timeZoneIdentifier == nil, let remembered { timeZone = remembered.timeZoneIdentifier }
+            if c.languageOverride == nil, let remembered { language = remembered.webLanguage }
+            localeMix = LocaleMix(mode: localeMode, timeZone: c.timeZoneIdentifier, language: c.languageOverride,
+                                  shownTimeZone: timeZone, shownLanguage: language)
+        }
         lastProxyLocation = c.lastProxyLocation
         warnOnProxyIPChange = c.warnOnProxyIPChange
         menusInAppLanguage = c.menusInAppLanguage
@@ -399,6 +424,12 @@ struct ProfileDraft {
             configuration.timeZoneIdentifier = timeZone
             configuration.languageOverride = language.isEmpty ? nil : language
             configuration.matchProxyLocation = false
+            // Untouched, a profile in which one of the two follows the connection stays so.
+            if let mix = localeMix, mix.mode == localeMode, mix.shownTimeZone == timeZone, mix.shownLanguage == language {
+                configuration.timeZoneIdentifier = mix.timeZone
+                configuration.languageOverride = mix.language
+                configuration.matchProxyLocation = true
+            }
         }
         // Manual and the connection are said by the fields themselves; only Random is written.
         configuration.localeSource = localeMode == .random ? .random : nil

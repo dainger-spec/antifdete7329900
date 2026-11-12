@@ -149,6 +149,9 @@ enum ScenarioRecorderScript {
   }, true);
 
   addEventListener('focusout', () => { if (on) { flush(); } }, true);
+  // A window left for another — the Scenarios window, to stop the recording — may give its field
+  // a blur and no focusout: the typing is over then too.
+  addEventListener('blur', () => { if (on) { flush(); } }, true);
 
   addEventListener('keydown', (event) => {
     if (!on || !event.isTrusted || event.key !== 'Enter' || event.isComposing) { return; }
