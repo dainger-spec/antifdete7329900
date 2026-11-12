@@ -48,6 +48,12 @@ final class SyncReadTests: XCTestCase {
         XCTAssertNil(byName["Почта"]?.proxy)
         XCTAssertEqual(first.generation, server.generation, "the server's generation to keep")
 
+        // Something changed in the iPhone's own copy of the vault (as a cookie run does, step 4): the
+        // engine would push it — the read must not (CI run 84: without a local change the engine
+        // wrote nothing, and the red syncReadWrites could not show).
+        let copy = try ProfileRepository(vault: MasterVault.open(in: phoneRoot, deviceUnlockKey: key))
+        try copy.rename(shop.id, to: "Магазин (iPhone)")
+
         // A second read: the copy opened with the key, the same profiles; and a rename on the Mac comes.
         try repository.rename(mail.id, to: "Почта 2")
         _ = try await SyncEngine(repository: repository, transport: macTransport).sync()
@@ -55,7 +61,7 @@ final class SyncReadTests: XCTestCase {
         XCTAssertGreaterThan(writesBeforeSecond, writesBefore, "the Mac's second sync wrote its rename")
         let second = try await SyncRead.pull(root: phoneRoot, key: key, transport: phoneTransport, keptGeneration: first.generation)
         XCTAssertEqual(server.requests.filter { $0.method == "PUT" }.count, writesBeforeSecond, "nor does the second")
-        XCTAssertEqual(Set(second.profiles.map(\.name)), ["Магазин", "Почта 2"], "a rename on the Mac reaches the iPhone")
+        XCTAssertTrue(second.profiles.contains { $0.name == "Почта 2" }, "a rename on the Mac reaches the iPhone")
 
     }
 

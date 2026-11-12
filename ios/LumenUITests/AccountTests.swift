@@ -309,8 +309,9 @@ final class AccountTests: LumenUITestCase {
         app.buttons["syncDone"].tap()
         closePlan()
         openSession("Магазин с Mac")
-        openPage("http://macstate.lumentest:28380/state")
-        page("cookie: from-mac")
+        // /state says no "at:" line: the cookie's own line is waited for (as BrowserTests do).
+        go("http://macstate.lumentest:28380/state")
+        page("cookie: from-mac", timeout: 30)
         backToList()
         openPlan()
         reveal(app.buttons["syncButton"], "the sync's screen once more").tap()

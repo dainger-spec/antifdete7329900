@@ -71,7 +71,7 @@ profileTokenLowercase	core	LumenCoreTests.ProfileTokenTests/testTheControlValue	
 syncHeaderOfAnotherVault	core	LumenCoreTests.DeviceVaultTests/testTheSetupKeepsOnlyThisVaultsKey	another vault's header is not taken
 spaceRefusalStopsSync	core	LumenCoreTests.SyncTransportTests/testARefusalForSpaceDefersOneObject	a refusal for space defers the one object
 syncedProxyNotBound	core	LumenCoreTests.SyncCatalogTests/testTheMacsProfilesBecomeSessions	the Mac's proxy comes with the profile
-syncReadWrites	core	LumenCoreTests.SyncReadTests/testTheMacsProfilesComeToTheIPhone	the iPhone's first read writes nothing on the server
+syncReadWrites	core	LumenCoreTests.SyncReadTests/testTheMacsProfilesComeToTheIPhone	nor does the second
 syncCookiesOverwriteLocal	core	LumenCoreTests.SyncCookieTests/testTheMacsCookiesComeAndANewerOneHereStays	a newer change made here stays
 profileDefaultsReal	ui	LumenUITests/SettingsTests/testANewSessionHasTheFullProfile	a new session's device profile is full by default
 profileLimitIgnored	ui	LumenUITests/FreeTierTests/testFreePlan	the plans open instead of a third profile
