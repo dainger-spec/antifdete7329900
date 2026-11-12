@@ -111,6 +111,11 @@ final class WebDriverExecutor {
             return try await script(WebDriverScripts.clear, ["id": try need(element)])
         case "sendKeys":
             guard let text = body["text"] as? String else { throw WebDriverError.invalidArgument("text is needed") }
+            // Keys may come before any click: the web view is made its window's first responder, as
+            // a click makes it (a new window may have something else there, its address field).
+            // The page then has focus when the element takes it, and its keys come to a focused
+            // page, as a person's do.
+            await driver.input.takeFirstResponder()
             _ = try await script(WebDriverScripts.focus, ["id": try need(element)])
             for stroke in try WebDriverKeys.strokes(text) {
                 switch stroke {
@@ -145,7 +150,7 @@ final class WebDriverExecutor {
                 try await self.script(code, ["args": String(decoding: arguments, as: UTF8.self)])
             }
 
-        case "getCookies": return Self.json(try await cookies().map(Self.describe))
+        case "getCookies": return Self.json(try await cookies().map { Self.describe($0) })
         case "getCookie":
             guard let cookie = try await cookies().first(where: { $0.name == name }) else {
                 throw WebDriverError.noSuchCookie("the page has no cookie named \(name ?? "")")
@@ -247,15 +252,30 @@ final class WebDriverExecutor {
                 "width": Int(window.frame.width), "height": Int(window.frame.height)]
     }
 
+    /// `body`'s value, or the protocol's "script timeout" when it has none after `seconds`.
     private func withTimeout(_ seconds: TimeInterval, _ body: @escaping () async throws -> String) async throws -> String {
-        try await withThrowingTaskGroup(of: String.self) { group in
-            group.addTask { @MainActor in try await body() }
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-                throw WebDriverError.scriptTimeout("the script did not finish in \(Int(seconds)) s")
+        // Not a task group: a group returns only when every child has ended, and a script that
+        // never settles never ends (the page's answer is a continuation, which cancelling does
+        // not resume) — the timeout would then never be said. Whichever of the two comes first
+        // answers; the other finds the answer given. Both on the main actor, one after the other.
+        final class Race { var waiting: CheckedContinuation<String, Error>? }
+        let race = Race()
+        // No longer than the clock counts: a client's "no timeout" is the protocol's largest number.
+        let nanoseconds = UInt64(min(seconds, 1_000_000_000) * 1_000_000_000)
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+            race.waiting = continuation
+            let timer = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: nanoseconds)
+                race.waiting?.resume(throwing: WebDriverError.scriptTimeout("the script did not finish in \(Int(seconds)) s"))
+                race.waiting = nil
             }
-            defer { group.cancelAll() }
-            return try await group.next() ?? "null"
+            Task { @MainActor in
+                let result: Result<String, Error>
+                do { result = .success(try await body()) } catch { result = .failure(error) }
+                race.waiting?.resume(with: result)
+                race.waiting = nil
+                timer.cancel()
+            }
         }
     }
 
