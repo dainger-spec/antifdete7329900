@@ -18,7 +18,9 @@ public enum AccountNotices {
     }
 
     public static func periodEndingText(_ end: Date, dateText: (Date) -> String) -> String {
-        L("Оплаченный период заканчивается %@.", dateText(end))
+        let text = L("Оплаченный период заканчивается %@.", dateText(end))
+        // A date that ends with its own full stop ("1 декабря 2026 г.") takes no second one (CI run 91).
+        return text.hasSuffix("..") ? String(text.dropLast()) : text
     }
 
     /// `clock.skew`: nil within ten minutes.

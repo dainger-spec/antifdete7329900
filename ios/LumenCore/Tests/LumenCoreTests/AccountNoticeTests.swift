@@ -19,7 +19,8 @@ final class AccountNoticeTests: XCTestCase {
         XCTAssertNil(AccountNotices.periodEnding(document(endsIn: nil, now: now), now: now), "no period, nothing to end")
         XCTAssertNil(AccountNotices.periodEnding(nil, now: now))
         let text = AccountNotices.periodEndingText(now) { _ in "1 декабря 2026 г." }
-        XCTAssertEqual(text, "Оплаченный период заканчивается 1 декабря 2026 г.")
+        XCTAssertEqual(text, "Оплаченный период заканчивается 1 декабря 2026 г.", "a date with its own full stop takes no second one")
+        XCTAssertEqual(AccountNotices.periodEndingText(now) { _ in "01.12.2026" }, "Оплаченный период заканчивается 01.12.2026.")
     }
 
     func testTheClockOffTheServers() {
