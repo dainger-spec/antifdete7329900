@@ -221,6 +221,26 @@ if in_suite core; then
         grep -E "error:|error " "$OUT/build-release.txt" | head -30 | tee -a "$LOG"; say "RELEASE BUILD FAILED"; STATUS=1
     fi
 fi
+# The App Store build as the release script makes it (ios/scripts/build-release.sh): an archive for
+# devices, unsigned until the team exists, and its checks — version, build, keys, privacy manifest,
+# release rules with the binary. The red: a key anyone knows, given for the documents of rights, is
+# refused before anything is built.
+if in_suite core; then
+    if OUT="$OUT/release" APP_VERSION=0.1.0 APP_BUILD=42 "$HERE/scripts/build-release.sh" >"$OUT/build-release-archive.txt" 2>&1; then
+        say "release script: $(grep '^archived:' "$OUT/build-release-archive.txt")"
+    else
+        tail -15 "$OUT/build-release-archive.txt" | tee -a "$LOG"; say "RELEASE SCRIPT FAILED"; STATUS=1
+    fi
+    rm -rf "$OUT/release/dd"
+    if CHECK_ONLY=1 ENTITLEMENT_PUBLIC_KEYS="445c6300da0205b1=/+/sbiH55nmy+2gRqQz12E0spl9L/YDWvjnecaN2M1c=" \
+            "$HERE/scripts/build-release.sh" >"$OUT/release-key-red.txt" 2>&1; then
+        say "RED DID NOT FAIL release script: the development server's key was taken"; STATUS=1
+    elif grep -q "REFUSED: ENTITLEMENT_PUBLIC_KEYS holds the development server's key" "$OUT/release-key-red.txt"; then
+        say "red   release script: the development server's key is refused before the build"
+    else
+        say "RED OTHER CHECK release script: $(tail -1 "$OUT/release-key-red.txt")"; STATUS=1
+    fi
+fi
 # A probe for the sync (ios/SYNC_STEP1.md): does the Mac's platform-independent core, BrowserCore —
 # its vault, sync engine and formats — build for iOS as it is? Informative only: it never fails
 # the run, and its errors go to the log for the plan.
