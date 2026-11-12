@@ -214,7 +214,7 @@
             </div>
             <div data-k="cand" style="margin-top:16px;padding:14px 16px;border-radius:14px;background:var(--field);box-shadow:inset 0 0 0 1px var(--line2);font-family:var(--mono);font-size:15px;color:var(--t2);line-height:1.6">
               <div style="color:var(--t3);font-family:var(--font);font-size:13px;margin-bottom:2px">Кандидат ICE, который видит собеседник</div>
-              <span style="color:#AFC2F5">typ</span> relay · <span style="color:var(--t1)">203.0.113.47</span>:<span class="num">51 734</span></div>
+              <span style="color:#AFC2F5">typ</span> relay · <span style="color:var(--t1)">203.0.113.47</span>:<span class="num">51734</span></div>
           </div></div>`;
       this.k = {};
       F.$$(el, '[data-k]').forEach((e) => (this.k[e.dataset.k] = e));
