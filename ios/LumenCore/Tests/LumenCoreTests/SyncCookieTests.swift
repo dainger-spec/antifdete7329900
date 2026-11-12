@@ -71,6 +71,7 @@ final class SyncCookieTests: XCTestCase {
         XCTAssertEqual(second.cookiesSet, 0)
 
         // A profile with no session here is passed over.
-        XCTAssertNil(await stores.persistentCookies(profileID: UUID()))
+        let none = await stores.persistentCookies(profileID: UUID())
+        XCTAssertNil(none)
     }
 }
