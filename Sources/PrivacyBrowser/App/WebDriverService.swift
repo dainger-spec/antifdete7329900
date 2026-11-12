@@ -45,6 +45,11 @@ final class WebDriverService {
         case .success(let found): profile = found
         case .failure: return fail(WebDriverError("unknown error", 404, "The address names no profile of this vault (its id, or its exact name)."))
         }
+        // A session whose profile was stopped under it is over: a client that ended without
+        // quitting must not keep the profile from its next session.
+        if !manager.isRunning(profile.id) {
+            for (id, session) in sessions where session.profileID == profile.id { sessions[id] = nil }
+        }
         switch request.command {
         case "status":
             let free = !sessions.values.contains { $0.profileID == profile.id }

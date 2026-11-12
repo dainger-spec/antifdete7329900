@@ -29,6 +29,9 @@ final class ScenarioRecorder: NSObject, WKScriptMessageHandlerWithReply {
     }
 
     var onEvent: ((Event) -> Void)?
+    /// The page that was in front when the recording began, when it had an address of the web:
+    /// that address is the recording's first step.
+    private weak var frontPage: WKWebView?
     private let log = Logger(subsystem: "PrivacyBrowser", category: "ScenarioRecorder")
 
     func install(in controller: WKUserContentController) {
@@ -45,8 +48,13 @@ final class ScenarioRecorder: NSObject, WKScriptMessageHandlerWithReply {
         isRecording = true
         let shown = pages.filter { $0.window?.isVisible == true }
         let front = shown.first { $0.window == NSApp.mainWindow } ?? shown.first { $0.window == NSApp.keyWindow } ?? shown.first
+        // Only an address of the web begins a recording (`ScenarioRecording.loaded`).
+        let scheme = front?.url?.scheme?.lowercased()
+        frontPage = scheme == "http" || scheme == "https" ? front : nil
         if let address = front?.url?.absoluteString { onEvent?(.loaded(address)) }
-        let source = "if (globalThis.__pbRecorder) { globalThis.__pbRecorder.set(true); } else {\n\(Self.script.source)\n}"
+        // A page given the script here says so in its hello (`late`): it was open, it did not load.
+        let source = "if (globalThis.__pbRecorder) { globalThis.__pbRecorder.set(true); } else {\n"
+            + "globalThis.__pbRecorderLate = true;\n\(Self.script.source)\n}"
         for page in shown {
             page.callAsyncJavaScript(source, arguments: [:], in: nil, in: Self.world) { _ in }
         }
@@ -75,7 +83,13 @@ final class ScenarioRecorder: NSObject, WKScriptMessageHandlerWithReply {
         let shown = message.webView?.window?.isVisible == true
         if type == "hello" {
             replyHandler(["recording": isRecording && shown], nil)
-            if isRecording, shown, let address = body["url"] as? String { onEvent?(.loaded(address)) }
+            // A page that was open when the recording began has not loaded: with a first page
+            // already, only that one's hello counts — another window's would be a second opening
+            // step, and what was done in the first replayed on it.
+            let late = body["late"] as? Bool == true
+            if isRecording, shown, !late || frontPage == nil || message.webView === frontPage, let address = body["url"] as? String {
+                onEvent?(.loaded(address))
+            }
             return
         }
         replyHandler(nil, nil)

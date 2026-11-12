@@ -38,6 +38,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var scenarios = ScenarioLibrary()
     /// `scenarios.bin` is a newer version's: shown as none, and nothing is written over it.
     private var scenariosRefused = false
+    /// `scenarios.bin` did not open at this unlock (a newer version's, or unreadable): `scenarios`
+    /// is empty, not the library — no schedule is dropped for a scenario that is not in it.
+    private var scenariosUnread = false
     /// The last unlock attempt failed with a wrong password (the unlock screen then shows which
     /// vault it tried).
     @Published private(set) var unlockFailed = false
@@ -462,9 +465,25 @@ final class AppModel: ObservableObject {
         // Scenarios and warm-ups by the clock, while the vault is open.
         let schedules = ScenarioScheduleCoordinator(vault: vault, actions: .init(
             allowsAutomation: { [weak self] in self?.allowsAutomation ?? false },
-            profiles: { [weak self] in Set(self?.profiles.map(\.id) ?? []) },
+            profiles: { [weak self] in
+                // Only an index that was read says a profile is gone (`ProfileRepository.IndexState`):
+                // with it missing or unreadable the list is empty, and every schedule keeps its profile.
+                guard let self, let repository = self.repository, repository.indexState == .read else {
+                    return Set(self?.scenarioSchedules.schedules.map(\.profileID) ?? [])
+                }
+                return Set(self.profiles.map(\.id))
+            },
             scenario: { [weak self] in self?.scenarios.scenario($0) },
-            scenarios: { [weak self] in Set(self?.scenarios.scenarios.map(\.id) ?? []) },
+            scenarios: { [weak self] in
+                // Nor does a library that did not open say a scenario is gone (`scenariosUnread`).
+                guard let self, !self.scenariosUnread else {
+                    return Set((self?.scenarioSchedules.schedules ?? []).compactMap { schedule -> UUID? in
+                        if case let .scenario(id) = schedule.action { return id }
+                        return nil
+                    })
+                }
+                return Set(self.scenarios.scenarios.map(\.id))
+            },
             isBusy: { [weak self] id in
                 guard let self else { return true }
                 return self.isBusy(id) || self.scenarioRun(of: id)?.isRunning == true || self.recordingProfile == id
@@ -597,6 +616,7 @@ final class AppModel: ObservableObject {
         tagColorsRefused = false
         scenarios = ScenarioLibrary()
         scenariosRefused = false
+        scenariosUnread = false
         managerObservation = nil
         manager = nil
         repository = nil
@@ -1055,8 +1075,10 @@ final class AppModel: ObservableObject {
         do {
             scenarios = try ScenarioLibrary.load(from: vault)
             scenariosRefused = false
+            scenariosUnread = false
         } catch {
             scenarios = ScenarioLibrary()
+            scenariosUnread = true
             if case CoreError.newerFormat = error {
                 scenariosRefused = true
                 showError(errorText(error))
@@ -1134,8 +1156,13 @@ final class AppModel: ObservableObject {
             case let .acted(step): _ = self.recorded.acted(step)
             }
         }
-        guard manager.startRecording(id) else { return false }
+        // Set before the recording begins: a profile run in this process says its first page —
+        // the one in front — as it begins, and what is said of another profile is dropped above.
         recordingProfile = id
+        guard manager.startRecording(id) else {
+            recordingProfile = nil
+            return false
+        }
         return true
     }
 
@@ -1287,6 +1314,11 @@ final class AppModel: ObservableObject {
 
     /// Listens with the saved settings when the API is on (and the vault unlocked), else not.
     private func restartAutomation() {
+        // The listener goes, and with it the WebDriver sessions it knew: their windows are closed
+        // and the profiles they started are stopped, since no client can reach them any more.
+        if let sessions = automationServer?.webDriver {
+            Task { @MainActor in await sessions.endAll() }
+        }
         automationServer?.stop()
         automationServer = nil
         guard let settings = deviceSettings.automation, settings.isEnabled, let manager, let repository else {

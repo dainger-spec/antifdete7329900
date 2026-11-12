@@ -28,7 +28,10 @@ enum ScenarioRecorderScript {
     try { return Promise.resolve(handler.postMessage(message)); } catch (e) { return Promise.resolve(null); }
   };
   globalThis.__pbRecorder = { set(value) { on = !!value; if (!on) { dirty = null; } } };
-  post({ type: 'hello', url: location.href }).then((reply) => { on = !!(reply && reply.recording); }, () => {});
+  // `late`: the app put the script into a page that was open already (`ScenarioRecorder.start`) —
+  // the page did not load just now.
+  post({ type: 'hello', url: location.href, late: globalThis.__pbRecorderLate === true })
+    .then((reply) => { on = !!(reply && reply.recording); }, () => {});
 
   // The element an event is about, inside open shadow roots too.
   const targetOf = (event) => {
@@ -71,10 +74,12 @@ enum ScenarioRecorderScript {
   }
 
   // From the nearest ancestor that can be named, down by position among siblings of its kind.
+  // Six steps up at most with no such ancestor — and further while those steps are also the way
+  // to another element (two cards of one shape): a replay takes the first that a selector finds.
   function byPath(el) {
     const parts = [];
     let node = el;
-    while (node && node !== document.body && node.nodeType === 1 && parts.length < 6) {
+    while (node && node !== document.body && node.nodeType === 1 && (parts.length < 6 || count(parts.join(' > ')) !== 1)) {
       const named = node === el ? null : byAttributes(node);
       if (named) { return named + ' > ' + parts.join(' > '); }
       const tag = node.tagName.toLowerCase();
@@ -166,6 +171,8 @@ enum ScenarioRecorderScript {
     // the step, and a replay that clicked as well would send the form twice.
     if (event.detail === 0 && performance.now() - enterAt < 400) { return; }
     flush();
+    // A click on the page itself, beside everything in it, names nothing a replay could find.
+    if (el === document.body || el === document.documentElement) { return; }
     // A label's click is followed by its control's own: one of the two is enough.
     if (el instanceof HTMLLabelElement && el.control && event.detail !== 0) { return; }
     post({ type: 'click', selector: selectorOf(el) });

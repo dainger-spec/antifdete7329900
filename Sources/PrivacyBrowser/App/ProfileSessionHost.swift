@@ -300,8 +300,13 @@ enum ProfileSessionHost {
             case .stopScenario(let reason):
                 manager?.stopScenario(profileID, reason: reason)
             case .startRecording:
-                // What is recorded is what the person does in a window: the process is then an app
-                // with a Dock tile, as when a window is asked for.
+                // What is recorded is what the person does in a window: a profile that has none (it
+                // was started for a warm-up alone) gets one, and the process is then an app with a
+                // Dock tile, as when a window is asked for.
+                if !showedWindow, let session = manager?.session(for: profileID) {
+                    NSApp.activate(ignoringOtherApps: true)
+                    openWindow(of: session)
+                }
                 showedWindow = true
                 if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }
                 manager?.startRecording(profileID)

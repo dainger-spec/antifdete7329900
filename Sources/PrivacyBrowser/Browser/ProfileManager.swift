@@ -1248,6 +1248,9 @@ final class ProfileManager: ObservableObject {
             scenarioEnded(id, run.runID, .stopped(.profileStopped))
         }
         if let child = children.removeValue(forKey: id) {
+            // Its exit is not heard from here on (`onExit` is taken away below): the WebDriver
+            // calls still waiting for this process get their answer now.
+            endWebDriver(of: id)
             runningProfileIDs.remove(id)
             releaseWebRTC(of: id, pid: child.processIdentifier)
             windowsUp.remove(id)

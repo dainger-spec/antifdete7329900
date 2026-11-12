@@ -1,4 +1,5 @@
 import BrowserCore
+import Combine
 import Foundation
 
 /// A profile's check, run (`ProfileCheck` judges; this gathers): the profile's own page says what
@@ -67,6 +68,9 @@ final class ProfileCheckRun: ObservableObject {
         findings = []
         fixError = nil
         step = .page
+        // A snapshot under way — the signals tab's, or Safari's being compared — is waited for:
+        // `take` does nothing while one is, and its page's answer would be read here as none.
+        while snapshot.isTaking, !Task.isCancelled { try? await Task.sleep(nanoseconds: 100_000_000) }
         await snapshot.take()
         guard let values = snapshot.profileSnapshot?.values else {
             if case let .failed(reason) = snapshot.step { step = .failed(reason) } else { step = .failed(L("whatSites.error.profileSilent")) }

@@ -79,7 +79,9 @@ final class ScenarioScheduleCoordinator {
         do {
             try next.save(to: vault)
             schedules = next
-            onChange?(next)
+            // After a lock the app has put its copy away: a run that was starting then is written
+            // down, and the app is not handed the schedules again.
+            if !isShutDown { onChange?(next) }
             return true
         } catch {
             log.error("scenario-schedules.bin could not be written: \(error.logKind, privacy: .public)")
@@ -99,6 +101,9 @@ final class ScenarioScheduleCoordinator {
         }
         for schedule in due.run {
             guard !isShutDown else { return }
+            // One removed, switched off or changed while an earlier one's profile was starting is
+            // not run as it was: the next look at the clock takes it as it is now.
+            guard schedules.schedules.contains(schedule) else { continue }
             guard actions.allowsAutomation() else {
                 change { $0.record(schedule.id, .notInPlan, at: now) }
                 continue
