@@ -363,6 +363,12 @@ jobs:
         continue-on-error: true
         timeout-minutes: 10
         run: TITLE="macOS 27 - a scenario in Safari's window" scripts/scenario_safari_check.sh build/unsandboxed/Lumen.app build/egress27/scenario-safari
+      - name: macOS 27 - Selenium against a profile in Safari 27's window (WebDriver; reported)
+        # scripts/webdriver_check.sh, as in the macOS 26 job: fails the step, not the job.
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 12
+        run: TITLE="macOS 27 - Selenium against a profile" scripts/webdriver_check.sh build/unsandboxed/Lumen.app build/egress27/webdriver
       - name: macOS 27 - a substituted camera in Safari 27's window — getUserMedia gets our stream (reported)
         # scripts/camera_safari_check.sh, as in the macOS 26 job: fails the step, not the job.
         if: always()
@@ -1044,6 +1050,25 @@ jobs:
         with:
           name: scenario-safari
           path: build/scenario-safari
+          if-no-files-found: ignore
+      - name: Selenium against a profile — a session starts it, finds, types, clicks and reads in Safari's window (WebDriver)
+        # scripts/webdriver_check.sh (Lumen --webdriver-serve, scripts/webdriver_check.py): the
+        # WebDriver's listener over a temporary vault, and a client as a team would write one —
+        # Selenium's own, installed into a virtual environment for the check (the protocol by hand
+        # when it cannot be installed; the result says which). A new session starts the profile in
+        # a process of its own; the form is opened, its field found by CSS and typed into, its
+        # button found by XPath and clicked, the text read; then a script with an element, a
+        # cookie, a screenshot, the window's size, and the session's end.
+        if: always()
+        timeout-minutes: 12
+        run: scripts/webdriver_check.sh build/unsandboxed/Lumen.app build/webdriver
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: webdriver
+          path: |
+            build/webdriver
+            !build/webdriver/venv
           if-no-files-found: ignore
       - name: A substituted camera in Safari's window — getUserMedia gets our stream, as the page sees it
         # scripts/camera_safari_check.sh (Lumen --camera-safari-check): a profile set to substitute

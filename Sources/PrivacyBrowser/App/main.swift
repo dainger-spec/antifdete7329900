@@ -122,6 +122,11 @@ MainActor.assumeIsolated {
         // SafariMenuWalkCheck, SafariMenuWalk; scripts/menu_walk.py compares it with the record).
         Localization.applyProcessLanguage()
         SafariMenuWalkCheck.start(arguments: arguments)
+    } else if arguments.contains("--webdriver-serve") {
+        // The WebDriver's listener over a temporary vault, for a real client to drive (CI;
+        // WebDriverCheck; scripts/webdriver_check.sh runs Selenium against it).
+        Localization.applyProcessLanguage()
+        WebDriverCheck.start(arguments: arguments)
     } else if arguments.contains("--scenario-safari-check") {
         // A scenario's run in a profile's own process, in Safari's window: its click must land on
         // the button it was aimed at, as the page itself saw it (CI; ScenarioSafariCheck;

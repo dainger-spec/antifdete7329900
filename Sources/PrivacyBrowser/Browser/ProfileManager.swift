@@ -155,6 +155,10 @@ final class ProfileManager: ObservableObject {
     /// A cookie import sent to a profile's own process, waiting for its answer.
     private var pendingCookieExports: [UUID: CheckedContinuation<[ImportedCookie], Error>] = [:]
     private var pendingCookieImports: [UUID: CheckedContinuation<CookieImportOutcome, Error>] = [:]
+    /// WebDriver calls sent to profiles' own processes, waiting for their answers (by the call's id).
+    private var pendingWebDriver: [UUID: (profile: UUID, continuation: CheckedContinuation<WebDriverAnswer, Never>)] = [:]
+    /// The WebDriver's page of each profile run in this process that has a session (`webDriver`).
+    private var webDriverExecutors: [UUID: WebDriverExecutor] = [:]
     /// A network report asked of a profile's own process and awaited (`networkReport(of:)`).
     private var pendingNetworkReports: [UUID: [CheckedContinuation<ProfileNetworkReport?, Never>]] = [:]
     /// Where the warm-up of each profile running in its own process has got to, as that process
@@ -552,6 +556,8 @@ final class ProfileManager: ObservableObject {
                 self.objectWillChange.send()
             case .recorded(let event):
                 self.onRecorded?(id, event)
+            case .webDriverAnswer(let answer):
+                self.pendingWebDriver.removeValue(forKey: answer.id)?.continuation.resume(returning: answer)
             case .scenarioLine(let runID, let line):
                 self.scenarioLine(id, runID, line)
             case .scenarioEnded(let runID, let outcome):
@@ -605,6 +611,7 @@ final class ProfileManager: ObservableObject {
             self.pendingCookieImports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
             self.pendingCookieExports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
             self.children[id] = nil
+            self.endWebDriver(of: id)
             self.releaseWebRTC(of: id, pid: child.processIdentifier)
             self.windowsUp.remove(id)
             self.resumeWindowWaiters(of: id, up: false)
@@ -1019,6 +1026,75 @@ final class ProfileManager: ObservableObject {
         return true
     }
 
+    // MARK: WebDriver
+
+    /// A WebDriver command done to profile `id`'s page (docs/AUTOMATION.md, "WebDriver"): in the
+    /// profile's own process when it has one, else here. The first command of a session ("open")
+    /// opens the page it acts in — a window of Safari's where the profile's process hosts Safari's
+    /// chrome, as a scenario's run; "close" closes it.
+    func webDriver(_ id: UUID, _ call: WebDriverCall) async -> WebDriverAnswer {
+        func refused(_ error: WebDriverError) -> WebDriverAnswer { WebDriverAnswer(id: call.id, value: nil, error: error) }
+        guard scenariosAllowed() else { return refused(.unsupported("the plan has no automation")) }
+        guard !isShuttingDown else { return refused(.noSuchWindow("the profile is stopping")) }
+        if let child = children[id] {
+            return await withCheckedContinuation { continuation in
+                pendingWebDriver[call.id] = (id, continuation)
+                child.send(.webDriver(call))
+                // A page load can take its whole timeout; past that the process is not answering.
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: 330_000_000_000)
+                    self?.pendingWebDriver.removeValue(forKey: call.id)?.continuation
+                        .resume(returning: refused(.timeout("the profile's process did not answer")))
+                }
+            }
+        }
+        guard let session = sessions[id] else { return refused(.noSuchWindow("the profile is not running")) }
+        if call.command == "close" {
+            webDriverExecutors.removeValue(forKey: id)?.close()
+            return WebDriverAnswer(id: call.id, value: "null", error: nil)
+        }
+        do {
+            let executor = try await webDriverExecutor(for: id, session)
+            return WebDriverAnswer(id: call.id, value: try await executor.perform(call), error: nil)
+        } catch let error as WebDriverError {
+            return refused(error)
+        } catch {
+            return refused(.unknown(String(describing: error)))
+        }
+    }
+
+    /// The profile's process is gone, or its session here: calls still waiting for it get their
+    /// answer now — the window is closed — and the page it had is forgotten.
+    private func endWebDriver(of id: UUID) {
+        webDriverExecutors[id] = nil
+        for (call, waiting) in pendingWebDriver where waiting.profile == id {
+            pendingWebDriver[call] = nil
+            waiting.continuation.resume(returning: WebDriverAnswer(id: call, value: nil, error: .noSuchWindow("the profile stopped")))
+        }
+    }
+
+    /// The page a WebDriver session of profile `id` acts in: the one it has, while its window is
+    /// there; else a new one, where a scenario's run would get its own.
+    private func webDriverExecutor(for id: UUID, _ session: BrowserSession) async throws -> WebDriverExecutor {
+        if let executor = webDriverExecutors[id], executor.driver.webView.window != nil { return executor }
+        webDriverExecutors.removeValue(forKey: id)?.close()
+        if SafariChromeHost.isHosting, SafariChromeHost.canHost(session.configuration),
+           let page = await SafariChromeHost.openScenarioPage(session: session) {
+            let window = page.webView.window
+            let executor = WebDriverExecutor(driver: PageDriver(webView: page.webView, navigate: page.navigate), windowKind: "Safari's") {
+                [weak window] in window?.performClose(nil)
+            }
+            webDriverExecutors[id] = executor
+            return executor
+        }
+        let controller = session.openWindow(url: nil)
+        guard let tab = controller.selectedTab else { throw WebDriverError.sessionNotCreated("the profile gave no window to act in") }
+        let executor = WebDriverExecutor(driver: PageDriver(webView: tab.webView) { [weak tab] url in _ = tab?.load(url) },
+                                         windowKind: "the app's own") { [weak controller] in controller?.close() }
+        webDriverExecutors[id] = executor
+        return executor
+    }
+
     /// Begins recording a scenario from what the person does in profile `id`'s windows; what is
     /// seen comes through `onRecorded`. False when the plan has no automation or the profile is
     /// not running.
@@ -1190,6 +1266,7 @@ final class ProfileManager: ObservableObject {
             return
         }
         guard let session = sessions.removeValue(forKey: id) else { return }
+        endWebDriver(of: id)
         // First of all, before anything waits: the robot must not act in a session going away
         // (a tab it opened now would get no store, proxy or scripts of the profile).
         warmUpRobots[id]?.stop(.profileStopped)

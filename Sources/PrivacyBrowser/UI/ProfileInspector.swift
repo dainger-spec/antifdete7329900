@@ -8,6 +8,18 @@ struct InspectorInfo {
     var details: ProfileDetails?
     var counts: ProfileCounts?
     var proxyCheck: ProxyCheckResult?
+    /// The profile's WebDriver address, or why there is none to show; nil: not shown at all (a
+    /// build without the automation API).
+    var webDriver: WebDriver?
+
+    enum WebDriver: Equatable {
+        /// The address a WebDriver client (Selenium) is given for this profile.
+        case address(String)
+        /// The automation API is off: turned on, it listens here.
+        case apiOff
+        /// The plan has no automation.
+        case notInPlan
+    }
 }
 
 /// The inspector at the right of the Profiles window (the design's `insp`): what the selected profile
@@ -59,6 +71,7 @@ struct ProfileInspectorView: View {
                         fact(L("inspector.window"), details.window)
                     }
                 }
+                if let webDriver = info.webDriver { automation(webDriver) }
                 links
             }
         }
@@ -235,6 +248,50 @@ struct ProfileInspectorView: View {
         guard details.proxyCarriesUDP else { return L("inspector.webRTC.offHTTP") }
         if guardReady { return L("inspector.webRTC.viaProxy") }
         return BuildKind.carriesGuard ? L("inspector.webRTC.guardNotReady") : L("inspector.webRTC.noGuardInBuild")
+    }
+
+    // MARK: Automation
+
+    /// The address a WebDriver client drives this profile at, to copy (docs/AUTOMATION.md,
+    /// "WebDriver") — or what stands between the person and one.
+    private func automation(_ webDriver: InspectorInfo.WebDriver) -> some View {
+        section(L("inspector.webDriver")) {
+            switch webDriver {
+            case let .address(address):
+                Text(address)
+                    .font(.lumenMono)
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.field))
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.fieldBorder, lineWidth: 1))
+                HStack(spacing: 8) {
+                    CopyButton(text: address)
+                    Text(L("inspector.webDriver.note"))
+                        .font(.lumenCaption)
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 8)
+            case .apiOff:
+                Text(L("inspector.webDriver.off"))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(L("inspector.webDriver.turnOn")) { actions.openAutomation() }
+                    .buttonStyle(.lumenSecondary)
+                    .padding(.top, 8)
+            case .notInPlan:
+                Text(L("inspector.webDriver.notInPlan"))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     // MARK: What it keeps
@@ -473,5 +530,26 @@ private extension View {
     @ViewBuilder
     func help(ifAny text: String?) -> some View {
         if let text { help(text) } else { self }
+    }
+}
+
+/// "Copy", which says "Copied" for a moment: the address holds the API's token, so it goes to the
+/// clipboard marked as concealed, as a password does (clipboard managers skip it).
+private struct CopyButton: View {
+    let text: String
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
+            pasteboard.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+            copied = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { copied = false }
+        } label: {
+            Label(copied ? L("passwords.code.copied") : L("passwords.copy"), systemImage: copied ? "checkmark" : "doc.on.doc")
+        }
+        .buttonStyle(.lumenSecondary)
     }
 }

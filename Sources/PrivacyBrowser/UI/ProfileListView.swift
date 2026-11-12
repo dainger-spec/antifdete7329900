@@ -348,7 +348,8 @@ struct ProfileListView: View {
                            let check = details?.proxyIdentity.flatMap { identity in
                                proxyEntries.first { ProxyList.identity(of: $0.proxy) == identity }?.lastCheck
                            }
-                           return InspectorInfo(details: details, counts: model.inspectorCounts[id], proxyCheck: check)
+                           return InspectorInfo(details: details, counts: model.inspectorCounts[id], proxyCheck: check,
+                                                webDriver: model.webDriverInfo(for: id))
                        },
                        onInspect: { model.loadInspectorCounts(for: $0) },
                        guardReady: networkGuard.state == .ready,

@@ -1384,7 +1384,8 @@ enum UISnapshots {
         check.udp = .unsupported
         return InspectorInfo(details: ProfileDetails(configuration),
                              counts: ProfileCounts(logins: 6, bookmarks: 41, historyEntries: 271, syncedCookies: 1_284),
-                             proxyCheck: check)
+                             proxyCheck: check,
+                             webDriver: .address("http://127.0.0.1:50777/wd/kT3vQ9mXw2LrB7sYp0Zc/6B0E3C1F-9A2D-4E7B-8C15-0D4F6A7B8C9D"))
     }
 
     /// The sample vault's tags' colours: some coloured, some not, as a person leaves them.

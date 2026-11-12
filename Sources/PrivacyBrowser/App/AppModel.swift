@@ -1259,6 +1259,15 @@ final class AppModel: ObservableObject {
         saveAutomation(settings)
     }
 
+    /// What a profile's inspector says of WebDriver: the address a client (Selenium) is given for
+    /// it while the API listens, else what stands in the way. Nil in a build without the API.
+    func webDriverInfo(for id: UUID) -> InspectorInfo.WebDriver? {
+        guard AutomationServer.isAvailable else { return nil }
+        guard allowsAutomation else { return .notInPlan }
+        guard case let .listening(port) = automationState, let token = automationSettings?.token else { return .apiOff }
+        return .address(WebDriverRoute.address(port: port, token: token, profile: id))
+    }
+
     /// A new token: scripts holding the old one are refused from now on.
     func renewAutomationToken() {
         var settings = deviceSettings.automation ?? AutomationSettings()
@@ -1295,6 +1304,23 @@ final class AppModel: ObservableObject {
             return matching.count == 1 ? matching[0] : nil
         }
         let server = AutomationServer(settings: settings, handler: handler)
+        // WebDriver, on the same listener: a session starts a profile as the API's start does.
+        let webDriver = WebDriverService(manager: manager, repository: repository)
+        webDriver.allowsAutomation = { [weak self] in self?.license.allowsAutomation ?? false }
+        webDriver.onChange = { [weak self] in self?.refresh() }
+        webDriver.launch = { [weak self, weak manager] id in
+            guard let self, let manager else { return "the vault is locked" }
+            while self.isSyncing { try? await Task.sleep(nanoseconds: 100_000_000) }
+            do {
+                // Without a window of its own: the session opens the one it acts in.
+                try await manager.launch(id, openingWindow: false)
+                return nil
+            } catch {
+                return error.localizedDescription
+            }
+        }
+        webDriver.stop = { [weak self] id in await self?.stop(id) }
+        server.webDriver = webDriver
         server.onStateChange = { [weak self] state in self?.automationState = state }
         automationServer = server
         server.start()

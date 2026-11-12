@@ -307,6 +307,16 @@ enum ProfileSessionHost {
                 manager?.startRecording(profileID)
             case .stopRecording:
                 manager?.stopRecording(profileID)
+            case .webDriver(let call):
+                // The session's window is one the person sees, as a scenario's is.
+                showedWindow = true
+                if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }
+                let profileID = profileID
+                Task { @MainActor [weak manager] in
+                    let answer = await manager?.webDriver(profileID, call)
+                        ?? WebDriverAnswer(id: call.id, value: nil, error: .noSuchWindow("the profile is stopping"))
+                    ProfileSessionHost.send(.webDriverAnswer(answer))
+                }
             case .checkNetwork(let probe):
                 Task { @MainActor in
                     ProfileSessionHost.send(.networkReport(await ProfileNetworkGuard.report(probe: probe)))
