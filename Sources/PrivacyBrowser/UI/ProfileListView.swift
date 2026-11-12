@@ -1707,9 +1707,14 @@ private struct ProfileRow: View {
         }
         .contentShape(Rectangle())
         // The row's buttons and ⋯ menu take their own clicks; a click anywhere else selects, and
-        // a double click launches (each of its clicks is also a click: the first selects).
-        .simultaneousGesture(TapGesture(count: 2).onEnded { onDoubleClick() })
-        .onTapGesture { onClick(.current) }
+        // the second click of a double click, made with no modifier, launches (the first selected).
+        // One gesture, told apart by the event's click count: a second gesture beside it, for two
+        // taps, also heard clicks on the row's checkbox — two quick ones there dropped the whole
+        // selection for that one row and launched it (the owner, 12 November).
+        .onTapGesture {
+            let click = ProfileSelection.Click.current
+            if click == .plain, (NSApp.currentEvent?.clickCount ?? 1) == 2 { onDoubleClick() } else { onClick(click) }
+        }
         .onHover { hovered = $0 }
         .animation(Motion.hover(hovered), value: hovered)
         .opacity(row.activity == .sealing ? 0.6 : 1)
