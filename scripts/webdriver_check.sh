@@ -31,8 +31,10 @@ fail() {
 }
 : > "$OUT/check.txt"
 nc -z 127.0.0.1 "$PORT" || fail "the self-test proxy did not start (see $OUT/proxy.txt)"
+# The app and the client both write here: both appending, so that neither writes over the other.
+: > "$OUT/stderr.txt"
 PRIVACYBROWSER_LANG=en PB_SELFTEST_HTTP_PROXY_PORT="$PORT" "$APP/Contents/MacOS/Lumen" --webdriver-serve \
-  > "$OUT/serve.txt" 2> "$OUT/stderr.txt" &
+  > "$OUT/serve.txt" 2>> "$OUT/stderr.txt" &
 SERVE=$!
 ADDRESS=""
 for attempt in $(seq 1 120); do

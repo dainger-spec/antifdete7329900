@@ -121,10 +121,13 @@ def main():
             problems.append("the cookie added is not among the page's cookies")
         if driver.screenshot()[:8] != b"\x89PNG\r\n\x1a\n":
             problems.append("the screenshot is not a PNG")
-        driver.set_window_size(1100, 760)
+        # A size the CI runner's screen holds (1024 x 768; scripts/live_compare.py asks for the
+        # same): AppKit makes a window that does not fit smaller, and the size read back would
+        # then not be the one set.
+        driver.set_window_size(1000, 600)
         size = driver.window_size()
-        if abs(size[0] - 1100) > 2 or abs(size[1] - 760) > 2:
-            problems.append(f"the window set to 1100 x 760 is {size[0]} x {size[1]}")
+        if abs(size[0] - 1000) > 2 or abs(size[1] - 600) > 2:
+            problems.append(f"the window set to 1000 x 600 is {size[0]} x {size[1]}")
     except Exception as error:  # noqa: BLE001 — whatever the client raises is the finding
         problems.append(f"{type(error).__name__}: {str(error)[:400]}")
     finally:
