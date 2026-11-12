@@ -32,10 +32,8 @@ final class SyncReadTests: XCTestCase {
         let header = try VaultHeader.decodeChecked(XCTUnwrap(server.objects["vault-header"]?.data))
         let key = try MasterVault.deviceUnlockKey(password: "vault-pass-1", header: header)
         let phoneRoot = try folder().appendingPathComponent("vault")
-        let writesBefore = server.requests.filter { $0.method == "PUT" }.count
         let phoneTransport = LumenSyncTransport(vaultID: mac.vaultID) { m, p, b, h in server.answer(m, p, b, h) }
         let first = try await SyncRead.pull(root: phoneRoot, key: key, transport: phoneTransport, keptGeneration: nil)
-        XCTAssertEqual(server.requests.filter { $0.method == "PUT" }.count, writesBefore, "the read writes nothing on the server: the first")
 
         let byName = Dictionary(uniqueKeysWithValues: first.profiles.map { ($0.name, $0) })
         XCTAssertEqual(Set(byName.keys), ["Магазин", "Почта"], "both of the Mac's profiles came")
@@ -48,21 +46,26 @@ final class SyncReadTests: XCTestCase {
         XCTAssertNil(byName["Почта"]?.proxy)
         XCTAssertEqual(first.generation, server.generation, "the server's generation to keep")
 
-        // Something changed in the iPhone's own copy of the vault (as a cookie run does, step 4): the
-        // engine would push it — the read must not (CI run 84: without a local change the engine
-        // wrote nothing, and the red syncReadWrites could not show).
-        let copy = try ProfileRepository(vault: MasterVault.open(in: phoneRoot, deviceUnlockKey: key))
-        try copy.rename(shop.id, to: "Магазин (iPhone)")
-
-        // A second read: the copy opened with the key, the same profiles; and a rename on the Mac comes.
+        // Step 5: a rename on the Mac comes to the iPhone, and one made on the iPhone goes to the Mac —
+        // each on its own profile, so neither is the other's conflict.
         try repository.rename(mail.id, to: "Почта 2")
         _ = try await SyncEngine(repository: repository, transport: macTransport).sync()
-        let writesBeforeSecond = server.requests.filter { $0.method == "PUT" }.count
-        XCTAssertGreaterThan(writesBeforeSecond, writesBefore, "the Mac's second sync wrote its rename")
-        let second = try await SyncRead.pull(root: phoneRoot, key: key, transport: phoneTransport, keptGeneration: first.generation)
-        XCTAssertEqual(server.requests.filter { $0.method == "PUT" }.count, writesBeforeSecond, "the read writes nothing on the server: the second")
+        let edit = SyncedEdit(profileID: shop.id, name: "Магазин (iPhone)", notes: "С iPhone", tags: ["shop", "de", "iphone"])
+        let second = try await SyncRead.pull(root: phoneRoot, key: key, transport: phoneTransport, keptGeneration: first.generation,
+                                             edits: [edit])
         XCTAssertTrue(second.profiles.contains { $0.name == "Почта 2" }, "a rename on the Mac reaches the iPhone")
+        XCTAssertTrue(second.profiles.contains { $0.name == "Магазин (iPhone)" && $0.notes == "С iPhone" }, "the iPhone's own edit stays here")
+        XCTAssertEqual(second.profileTokens.count, 2, "a token for each synced profile, for the renewal")
+        XCTAssertTrue(second.profileTokens.allSatisfy { $0.count == 32 })
 
+        _ = try await SyncEngine(repository: repository, transport: macTransport).sync()
+        XCTAssertEqual(try repository.summary(for: shop.id).name, "Магазин (iPhone)", "the iPhone's rename reaches the Mac")
+        let config = try repository.loadConfiguration(shop.id)
+        XCTAssertEqual(config.notes, "С iPhone")
+        XCTAssertEqual(config.tags, ["shop", "de", "iphone"])
+        XCTAssertNotNil(config.proxy, "the proxy the Mac had stays: the iPhone sent only its edit")
+        // The tokens are the Mac's own for the same vault (SyncProfileToken): one place per profile.
+        XCTAssertEqual(Set(second.profileTokens), Set(try [shop.id, mail.id].map { try SyncProfileToken.token(for: $0, vault: mac) }))
     }
 
     func testAProxyTheIPhoneCannotUseComesBoundAndLocked() throws {

@@ -184,8 +184,12 @@ public struct AccountRecord: Codable, Equatable, Sendable {
 public enum AccountWire {
     /// The body of an activation (§6.1) and of a refresh (§6.2): an iPhone says it is one
     /// (`platform: "ios"`, `docs/IPHONE.md` §2.1) — it takes no Mac's place in the license.
-    public static func deviceBody(machineID: String, profileCount: Int, appVersion: String) -> Data {
+    /// `profileTokens`: the synced profiles' tokens (CONTRACT.md §6.2) — at most `profileCount`,
+    /// each 32 lowercase hex; none without the sync.
+    public static func deviceBody(machineID: String, profileCount: Int, appVersion: String, profileTokens: [String] = []) -> Data {
         var body: [String: Any] = ["machineID": machineID, "profileCount": profileCount, "appVersion": appVersion]
+        let tokens = Array(Set(profileTokens.filter { $0.count == 32 && $0.allSatisfy { "0123456789abcdef".contains($0) } })).sorted()
+        if !tokens.isEmpty, tokens.count <= profileCount { body["profileTokens"] = tokens }
         // The planted fault: the platform left out — the server would count this iPhone as a Mac.
         if !Faults.isActive(.activationWithoutPlatform) { body["platform"] = "ios" }
         return (try? JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])) ?? Data()
@@ -205,11 +209,14 @@ public enum AccountWire {
         public var retryAfter: Int?
         /// With a refusal for the license's limit of phones: how many it allows, when the server says.
         public var phones: Int?
+        /// With `invalid_request`: the field the server refused.
+        public var field: String?
 
-        public init(code: String, retryAfter: Int? = nil, phones: Int? = nil) {
+        public init(code: String, retryAfter: Int? = nil, phones: Int? = nil, field: String? = nil) {
             self.code = code
             self.retryAfter = retryAfter
             self.phones = phones
+            self.field = field
         }
     }
 
@@ -218,7 +225,7 @@ public enum AccountWire {
               let error = object["error"] as? [String: Any], let code = error["code"] as? String, !code.isEmpty else { return nil }
         let limits = error["limits"] as? [String: Any]
         let phones = limits?["phones"] as? Int
-        return Refusal(code: code, retryAfter: error["retryAfter"] as? Int, phones: phones)
+        return Refusal(code: code, retryAfter: error["retryAfter"] as? Int, phones: phones, field: error["field"] as? String)
     }
 
     /// Time as the server writes it (§2): RFC 3339, UTC, no fractions of a second.

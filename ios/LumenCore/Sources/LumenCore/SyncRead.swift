@@ -24,6 +24,21 @@ public struct SyncedProfile: Equatable, Sendable {
     public var proxyUnusable: Bool
 }
 
+/// A change made on the iPhone to a session made from the vault, to go to the vault.
+public struct SyncedEdit: Equatable, Sendable {
+    public var profileID: UUID
+    public var name: String
+    public var notes: String
+    public var tags: [String]
+
+    public init(profileID: UUID, name: String, notes: String, tags: [String]) {
+        self.profileID = profileID
+        self.name = name
+        self.notes = notes
+        self.tags = tags
+    }
+}
+
 /// One read of the vault: the iPhone's copy of it set up (or opened) with the kept key, one run of
 /// the Mac's own engine through the iPhone's transport, and the profiles as they now are. The iPhone
 /// changes nothing in the vault in this step, so the run writes nothing to the server.
@@ -37,6 +52,9 @@ public enum SyncRead {
         /// Cookies set in and deleted from the sessions' stores by this run (step 4).
         public var cookiesSet = 0
         public var cookiesDeleted = 0
+        /// The tokens of the synced profiles, for the renewal of the document of rights (CONTRACT.md
+        /// §6.2: a profile on the Mac and on the iPhone takes one place of the license).
+        public var profileTokens: [String] = []
     }
 
     /// Why a run did not go through, in the app's terms (the app does not see the Mac's core).
@@ -54,9 +72,10 @@ public enum SyncRead {
 
     /// `pull`, its failures said in the app's terms.
     public static func run(root: URL, key: Data, transport: LumenSyncTransport, keptGeneration: String?,
-                           cookies: SyncCookieStores? = nil) async -> Result<Outcome, Failure> {
+                           edits: [SyncedEdit] = [], cookies: SyncCookieStores? = nil) async -> Result<Outcome, Failure> {
         do {
-            return .success(try await pull(root: root, key: key, transport: transport, keptGeneration: keptGeneration, cookies: cookies))
+            return .success(try await pull(root: root, key: key, transport: transport, keptGeneration: keptGeneration,
+                                           edits: edits, cookies: cookies))
         } catch CoreError.syncServer(403, "sync_not_in_plan") {
             return .failure(.notInPlan)
         } catch CoreError.wrongPassword {
@@ -73,8 +92,11 @@ public enum SyncRead {
     /// `cookies`: the stores of the sessions already made from the vault's profiles — after the run,
     /// each gets its profile's cookies by the Mac's rules (step 4). A profile made a session by this
     /// run gets them at the next one.
+    /// `edits`: what was changed here in the sessions made from the vault (their name, description,
+    /// tags) — written into the iPhone's copy before the run, as an edit made now, and so sent by
+    /// the run (step 5). The Mac's newer-wins rule decides between an edit here and one there.
     public static func pull(root: URL, key: Data, transport: LumenSyncTransport, keptGeneration: String?,
-                            cookies: SyncCookieStores? = nil) async throws -> Outcome {
+                            edits: [SyncedEdit] = [], cookies: SyncCookieStores? = nil) async throws -> Outcome {
         let vault: UnlockedVault
         if MasterVault.exists(in: root) {
             vault = try MasterVault.open(in: root, deviceUnlockKey: key)
@@ -90,16 +112,28 @@ public enum SyncRead {
         _ = try await transport.listObjects()
         let generation = SyncGeneration.reconcile(root: root, listed: transport.generation, kept: keptGeneration)
         let repository = try ProfileRepository(vault: vault)
-        // This step only reads: whatever the engine would write back (CI run 80: one object at each
-        // read) is withheld, never sent — the iPhone changes nothing on the server.
-        transport.readOnly = !Faults.isActive(.syncReadWrites)
-        defer { transport.readOnly = false }
+        if !Faults.isActive(.syncEditNotSent) {
+            for edit in edits where repository.list().contains(where: { $0.id == edit.profileID }) {
+                let name = edit.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty, (try? repository.summary(for: edit.profileID).name) != name {
+                    try repository.rename(edit.profileID, to: name)
+                }
+                var configuration = try repository.loadConfiguration(edit.profileID)
+                if configuration.notes != edit.notes || configuration.tags != edit.tags {
+                    configuration.notes = edit.notes
+                    configuration.tags = edit.tags
+                    configuration.settingsModifiedAt = Date()
+                    try repository.saveConfiguration(configuration, for: edit.profileID)
+                }
+            }
+        }
         _ = try await SyncEngine(repository: repository, transport: transport).sync()
         let profiles = repository.list().compactMap { summary -> SyncedProfile? in
             guard let configuration = try? repository.loadConfiguration(summary.id) else { return nil }
             return profile(summary, configuration)
         }
         var outcome = Outcome(profiles: profiles, generation: generation, deferredForSpace: transport.deferredForSpace)
+        outcome.profileTokens = SyncProfileToken.tokens(in: repository)
         if let cookies {
             let applied = await SyncCookieRun.run(repository: repository, stores: cookies)
             outcome.cookiesSet = applied.set

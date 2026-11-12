@@ -78,6 +78,7 @@ enum SyncKeychain {
         SecItemDelete(base("vault-id") as CFDictionary)
         try? FileManager.default.removeItem(at: vaultFolder)
         UserDefaults.standard.removeObject(forKey: generationKey)
+        UserDefaults.standard.removeObject(forKey: tokensKey)
     }
 
     /// The iPhone's copy of the vault (the Mac's files, encrypted as on the Mac).
@@ -87,6 +88,13 @@ enum SyncKeychain {
 
     /// The server's generation of the vault, kept for the next run (CONTRACT.md §16.2; nothing secret).
     static let generationKey = "sync.generation"
+    static let tokensKey = "sync.profileTokens"
+    /// The synced profiles' tokens from the last run, for the renewal (nothing secret: the server sees
+    /// them, and they tell nothing without the vault's key).
+    static var profileTokens: [String] {
+        get { UserDefaults.standard.stringArray(forKey: tokensKey) ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: tokensKey) }
+    }
     static var generation: String? {
         get { UserDefaults.standard.string(forKey: generationKey) }
         set { UserDefaults.standard.set(newValue, forKey: generationKey) }

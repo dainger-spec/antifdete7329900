@@ -122,6 +122,7 @@ public final class SessionCatalog {
             session.name = trimmed.isEmpty ? session.name : trimmed
             session.notes = profile.notes
             session.tags = Self.normalizedTags(profile.tags)
+            session.syncedState = SyncedState(name: session.name, notes: session.notes, tags: session.tags)
             if let proxy = profile.proxy, !Faults.isActive(.syncedProxyNotBound) {
                 session.proxyID = proxyID(proxy)
                 session.boundToProxy = true
@@ -133,6 +134,16 @@ public final class SessionCatalog {
         }
         save()
         return made
+    }
+
+    /// What was changed here in the sessions made from the vault since the last run: their name,
+    /// description and tags, to go to the vault (step 5).
+    public func localEdits() -> [SyncedEdit] {
+        sessions.compactMap { session in
+            guard let profileID = session.syncedProfileID, let state = session.syncedState else { return nil }
+            let now = SyncedState(name: session.name, notes: session.notes, tags: session.tags)
+            return now == state ? nil : SyncedEdit(profileID: profileID, name: now.name, notes: now.notes, tags: now.tags)
+        }
     }
 
     private func update(_ id: UUID, _ change: (inout Session) -> Void) {

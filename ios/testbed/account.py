@@ -196,10 +196,10 @@ def handle(method, path, headers, body):
     """One request, as the server would answer it."""
     auth = headers.get("authorization", "")
     token = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
-    if body and "application/json" not in headers.get("content-type", ""):
+    if body and method != "PUT" and "application/json" not in headers.get("content-type", ""):
         return refuse(415, "unsupported_media_type")
     try:
-        fields = json.loads(body) if body else {}
+        fields = json.loads(body) if body and method != "PUT" else {}
         assert isinstance(fields, dict)
     except Exception:
         return refuse(400, "invalid_request")
@@ -269,6 +269,30 @@ def handle(method, path, headers, body):
                             "deviceToken": device_token, "entitlement": document(acc, device), "serverTime": now,
                             "unlinkCooldownSeconds": 604800})
 
+    # A write to the stand-in vault (the sync's step 5), compare-and-swap as SYNC_SERVER_API.md says,
+    # kept in the folder transport's layout so the Mac's own code could read it back.
+    m = re.fullmatch(r"/v1/vaults/([0-9a-f-]{36})/objects/([0-9a-z-]+)", path)
+    if method == "PUT" and m:
+        if token not in DEVICES:
+            return refuse(401, "unauthorized")
+        acc = ACCOUNTS[DEVICES[token][0]]
+        vault = vault_of(acc)
+        if not vault.get("standin") or m.group(1) != vault["id"]:
+            return refuse(403, "forbidden")
+        objects = standin_objects()
+        current = objects.get(m.group(2), (None, b""))[0]
+        if_match = headers.get("if-match", "").strip('"')
+        if (headers.get("if-none-match") == "*" and current is not None) or (if_match and str(current) != if_match):
+            return ("HTTP/1.1 412 Precondition Failed\r\nConnection: close\r\nContent-Length: 0\r\n"
+                    f'ETag: "{current or 0}"\r\n\r\n').encode()
+        revision = int(headers.get("x-pb-revision", "0") or 0)
+        with open(os.path.join(STANDIN, m.group(2) + ".json"), "w") as f:
+            json.dump({"revision": revision, "blob": base64.b64encode(body).decode()}, f)
+        acc["syncWrites"] = acc.get("syncWrites", 0) + 1
+        event("account", what="sync-write", email=acc["email"], object=m.group(2))
+        return ("HTTP/1.1 201 Created\r\nConnection: close\r\nContent-Length: 0\r\n"
+                f'ETag: "{revision}"\r\n\r\n').encode()
+
     # The sync (CONTRACT.md §16.1): which vaults the account has, and a vault's header.
     if method == "GET" and (path == "/v1/device/sync/vaults" or re.fullmatch(r"/v1/vaults/[0-9a-f-]{36}/objects(/[0-9a-z-]+)?", path)):
         if token not in DEVICES:
@@ -308,8 +332,13 @@ def handle(method, path, headers, body):
             return answer(204)
         if str(fields.get("machineID", "")) != device["machineID"]:
             return refuse(409, "machine_mismatch")
+        tokens = fields.get("profileTokens")
+        if tokens is not None and (not isinstance(tokens, list) or len(tokens) > int(fields.get("profileCount") or 0)
+                                   or not all(isinstance(t, str) and re.fullmatch(r"[0-9a-f]{32}", t) for t in tokens)):
+            return refuse(400, "invalid_request", field="profileTokens")
         acc["refreshes"] += 1
         acc["lastProfileCount"] = fields.get("profileCount")
+        acc["lastTokens"] = len(tokens or [])
         event("account", what="refresh", email=email, platform=fields.get("platform"), profileCount=fields.get("profileCount"))
         return answer(200, {"entitlement": document(acc, device), "serverTime": stamp(time.time()), "unlinkCooldownSeconds": 604800})
 
@@ -339,6 +368,8 @@ def control(query):
         f"label: {last.get('label') if last.get('label') is not None else 'none'}",
         f"profiles sent: {acc.get('lastProfileCount', last.get('profileCount', 'none'))}",
         f"refreshes: {acc['refreshes']}",
+        f"profile tokens: {acc.get('lastTokens', 'none')}",
+        f"sync writes: {acc.get('syncWrites', 0)}",
         f"session logouts: {acc['logouts']}",
         f"device signouts: {acc['signouts']}",
         f"sessions open: {sum(1 for e in SESSIONS.values() if e == acc['email'])}",

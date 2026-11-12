@@ -71,7 +71,7 @@ struct SyncView: View {
                         Label(L("Хранилище подключено"), systemImage: "checkmark.circle").foregroundStyle(Theme.ok)
                             .accessibilityIdentifier("syncConnected")
                     } footer: {
-                        Text(L("Профили с Mac появляются в списке сессий. Изменения с iPhone на Mac пока не уходят."))
+                        Text(L("Профили с Mac появляются в списке сессий. Имя, описание и метки, изменённые на iPhone, уходят на Mac."))
                     }
                     .glassRow()
                     if let syncResult {
@@ -144,9 +144,11 @@ struct SyncView: View {
             if model.path.contains(where: { id in synced.contains { $0.id == id } }) { model.path = [] }
             synced.forEach { SessionRuntimes.shared.close($0.id) }
             switch await SyncRead.run(root: SyncKeychain.vaultFolder, key: kept.unlockKey, transport: transport,
-                                      keptGeneration: SyncKeychain.generation, cookies: CookieBridge(sessions: synced)) {
+                                      keptGeneration: SyncKeychain.generation, edits: model.catalog.localEdits(),
+                                      cookies: CookieBridge(sessions: synced)) {
             case let .success(outcome):
                 SyncKeychain.generation = outcome.generation
+                SyncKeychain.profileTokens = outcome.profileTokens
                 let made = model.applySynced(outcome.profiles)
                 syncResult = L("Профилей с Mac: %@, новых: %@", "\(outcome.profiles.count)", "\(made)")
                     + (outcome.cookiesSet + outcome.cookiesDeleted > 0 ? "\n" + L("Куки обновлены: %@", "\(outcome.cookiesSet + outcome.cookiesDeleted)") : "")

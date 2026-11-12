@@ -317,6 +317,21 @@ final class AccountTests: LumenUITestCase {
         reveal(app.buttons["syncButton"], "the sync's screen once more").tap()
         wait(app.staticTexts["syncConnected"], "still connected", timeout: 15)
 
+        // Step 5: the renewal carries the synced profiles' tokens (CONTRACT.md §6.2) — one place each
+        // for a profile on the Mac and here.
+        app.buttons["syncDone"].tap()
+        reveal(app.buttons["refreshAccount"], "the account's screen refreshes").tap()
+        wait(app.staticTexts["accountEmail"], "still signed in after the renewal", timeout: 30)
+        sleep(2)
+        closePlan()
+        openSession("Почта с Mac")
+        openPage("http://site.lumentest:28380/__account?email=pro-\(run)@lumen.test&t=tokens")
+        XCTAssertEqual(pageLine("profile tokens: "), "profile tokens: 2", "the renewal said which profiles are synced")
+        backToList()
+        openPlan()
+        reveal(app.buttons["syncButton"], "the sync's screen after the renewal").tap()
+        wait(app.staticTexts["syncConnected"], "still connected", timeout: 15)
+
         // Kept: the screen opened again says so at once, no password asked.
         app.buttons["syncDone"].tap()
         reveal(app.buttons["syncButton"], "the sync again").tap()

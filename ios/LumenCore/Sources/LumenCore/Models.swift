@@ -1,5 +1,18 @@
 import Foundation
 
+/// A synced session's name, description and tags as the vault had them at the last run.
+public struct SyncedState: Codable, Equatable, Sendable {
+    public var name: String
+    public var notes: String
+    public var tags: [String]
+
+    public init(name: String, notes: String, tags: [String]) {
+        self.name = name
+        self.notes = notes
+        self.tags = tags
+    }
+}
+
 /// One session: its own WebKit data store (cookies, storage, cache), tabs, history, proxy and
 /// settings. The store is `WKWebsiteDataStore(forIdentifier: storeID)` (iOS 17).
 public struct Session: Codable, Identifiable, Equatable, Sendable {
@@ -18,6 +31,9 @@ public struct Session: Codable, Identifiable, Equatable, Sendable {
     public var boundToProxy: Bool
     /// The Mac's profile this session is (the sync): its id in the vault. Nil: this iPhone's own.
     public var syncedProfileID: UUID?
+    /// The name, description and tags the vault had at the last run: what differs from them now was
+    /// changed here, and goes to the vault at the next run (step 5).
+    public var syncedState: SyncedState?
 
     public init(id: UUID = UUID(), storeID: UUID = UUID(), name: String, notes: String = "", tags: [String] = [],
                 proxyID: UUID? = nil, settings: SessionSettings = SessionSettings(), createdAt: Date = Date(),
@@ -35,7 +51,7 @@ public struct Session: Codable, Identifiable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, storeID, name, notes, tags, proxyID, settings, createdAt, lastOpenedAt, boundToProxy, syncedProfileID
+        case id, storeID, name, notes, tags, proxyID, settings, createdAt, lastOpenedAt, boundToProxy, syncedProfileID, syncedState
     }
 
     /// A session saved before `boundToProxy` existed is bound if it has a proxy.
@@ -52,6 +68,7 @@ public struct Session: Codable, Identifiable, Equatable, Sendable {
         lastOpenedAt = try c.decodeIfPresent(Date.self, forKey: .lastOpenedAt)
         boundToProxy = try c.decodeIfPresent(Bool.self, forKey: .boundToProxy) ?? (proxyID != nil)
         syncedProfileID = try c.decodeIfPresent(UUID.self, forKey: .syncedProfileID)
+        syncedState = try c.decodeIfPresent(SyncedState.self, forKey: .syncedState)
     }
 }
 

@@ -168,10 +168,17 @@ extension AppModel {
         refreshing = true
         defer { refreshing = false }
         let machineID = AccountStore.machineID
-        let body = AccountWire.deviceBody(machineID: machineID, profileCount: sessions.count, appVersion: AccountClient.appVersion)
-        guard let answer = await AccountClient.send("POST", "v1/device/entitlement", body: body, token: record.deviceToken) else {
-            return refreshFailed()
+        // The synced profiles' tokens (CONTRACT.md §6.2): a profile on the Mac and here takes one place.
+        // Refused for them (400 field profileTokens), the renewal is made again without them.
+        var answer = await AccountClient.send("POST", "v1/device/entitlement", token: record.deviceToken,
+                                              body: AccountWire.deviceBody(machineID: machineID, profileCount: sessions.count,
+                                                                           appVersion: AccountClient.appVersion, profileTokens: SyncKeychain.profileTokens))
+        if let refused = answer, refused.status == 400, AccountWire.refusal(refused.data)?.field == "profileTokens" {
+            answer = await AccountClient.send("POST", "v1/device/entitlement", token: record.deviceToken,
+                                              body: AccountWire.deviceBody(machineID: machineID, profileCount: sessions.count,
+                                                                           appVersion: AccountClient.appVersion))
         }
+        guard let answer else { return refreshFailed() }
         // Signed out, or signed in anew, while the request was on its way: its answer is nobody's.
         guard var kept = AccountStore.record(), kept.deviceToken == record.deviceToken else { return false }
         if answer.status == 200 {

@@ -89,6 +89,11 @@ enum AccountClient {
         return LumenSyncTransport.Answer(status: http.statusCode, data: data, headers: named)
     }
 
+    /// `send` with the body last, for a call that builds it in place.
+    static func send(_ method: String, _ path: String, token: String?, body: Data?) async -> (status: Int, data: Data)? {
+        await send(method, path, body: body, token: token)
+    }
+
     /// A JSON object of an answer; nil when the body is not one.
     static func object(_ data: Data) -> [String: Any]? {
         (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
