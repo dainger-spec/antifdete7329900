@@ -82,6 +82,10 @@ public enum SyncRead {
         _ = try await transport.listObjects()
         let generation = SyncGeneration.reconcile(root: root, listed: transport.generation, kept: keptGeneration)
         let repository = try ProfileRepository(vault: vault)
+        // This step only reads: whatever the engine would write back (CI run 80: one object at each
+        // read) is withheld, never sent — the iPhone changes nothing on the server.
+        transport.readOnly = !Faults.isActive(.syncReadWrites)
+        defer { transport.readOnly = false }
         _ = try await SyncEngine(repository: repository, transport: transport).sync()
         let profiles = repository.list().compactMap { summary -> SyncedProfile? in
             guard let configuration = try? repository.loadConfiguration(summary.id) else { return nil }

@@ -18,7 +18,6 @@ final class SyncCatalogTests: XCTestCase {
             SyncedProfile(id: tlsID, name: "TLS", notes: "", tags: [], proxy: nil, proxyUnusable: true),
         ]) { asked.append($0); return entryID }
         XCTAssertEqual(made.count, 3)
-        XCTAssertEqual(asked, [proxy])
 
         let shop = try XCTUnwrap(catalog.sessions.first { $0.syncedProfileID == shopID })
         XCTAssertEqual(shop.name, "Магазин")
@@ -26,6 +25,7 @@ final class SyncCatalogTests: XCTestCase {
         XCTAssertEqual(shop.tags, SessionCatalog.normalizedTags(["shop", "DE"]))
         XCTAssertEqual(shop.proxyID, entryID, "the Mac's proxy comes with the profile")
         XCTAssertTrue(shop.boundToProxy, "and binds it: it never opens directly")
+        XCTAssertEqual(asked, [proxy], "the entry is asked for the one proxy")
         let mail = try XCTUnwrap(catalog.sessions.first { $0.syncedProfileID == mailID })
         XCTAssertNil(mail.proxyID)
         XCTAssertFalse(mail.boundToProxy)

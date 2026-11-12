@@ -38,6 +38,8 @@ public final class LumenSyncTransport: SyncTransport, @unchecked Sendable {
     private let lock = NSLock()
     private var _generation: String?
     private var _deferredForSpace: [String] = []
+    private var _readOnly = false
+    private var _withheld: [String] = []
 
     public init(vaultID: UUID, send: @escaping Send) {
         self.vaultID = vaultID
@@ -49,6 +51,13 @@ public final class LumenSyncTransport: SyncTransport, @unchecked Sendable {
     public var generation: String? { lock.withLock { _generation } }
     /// Objects the server refused for their size or the plan's space in this run (deferred).
     public var deferredForSpace: [String] { lock.withLock { _deferredForSpace } }
+    /// A run that only reads (the sync's step 3): every write the engine asks for is withheld — never
+    /// sent — and deferred, as after a lost compare-and-swap. Which ones, `withheld` says.
+    public var readOnly: Bool {
+        get { lock.withLock { _readOnly } }
+        set { lock.withLock { _readOnly = newValue } }
+    }
+    public var withheld: [String] { lock.withLock { _withheld } }
 
     private var base: String { "v1/vaults/\(vaultID.uuidString.lowercased())/objects" }
 
@@ -83,6 +92,10 @@ public final class LumenSyncTransport: SyncTransport, @unchecked Sendable {
 
     public func store(objectID: String, revision: Int, data: Data, expectedRevision: Int?) async throws {
         guard SyncObjectID.isValid(objectID) else { throw CoreError.corruptData("invalid object ID") }
+        if readOnly {
+            lock.withLock { _withheld.append(objectID) }
+            throw CoreError.syncConflict(objectID: objectID, remoteRevision: expectedRevision ?? 0)
+        }
         var headers = ["Content-Type": "application/octet-stream", "X-PB-Revision": String(revision)]
         if let expectedRevision { headers["If-Match"] = "\"\(expectedRevision)\"" } else { headers["If-None-Match"] = "*" }
         if let generation { headers[Self.generationHeader] = generation }
