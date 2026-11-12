@@ -1,16 +1,16 @@
 import BrowserCore
 import SwiftUI
 
-/// One thing a profile's circle can show instead of the first letter of its name: an emoji, a
-/// currency's sign, or a company's two letters with the palette's colour nearest its own.
+/// One thing a profile's circle can show instead of the first letter of its name: an emoji or a
+/// currency's sign.
 ///
-/// A company is its letters, never its logo: a logo is the company's drawing and mark, which the
-/// app has no right to carry. `glyph` is at most `ProfileAvatarStyle.maximumLetters` characters
-/// with no space, so it is kept, synced and shown as the letters a person types are — nothing new
-/// is stored (an emoji or a flag is one character).
+/// No company is among them, neither by its logo nor by its letters (the owner, 12 November: a
+/// logo is the company's mark, and nothing is to come of carrying one). `glyph` is at most
+/// `ProfileAvatarStyle.maximumLetters` characters with no space, so it is kept, synced and shown
+/// as the letters a person types are — nothing new is stored (an emoji or a flag is one character).
 struct AvatarGlyph: Identifiable, Equatable {
     let glyph: String
-    /// What it stands for: a company's or a currency's own name, the same in every language.
+    /// What it stands for, in a word; shown under the pointer.
     let name: String
     /// The palette's colour chosen with it (`ProfileAvatar.palette`); nil: the colour stays.
     var color: Int?
@@ -29,8 +29,6 @@ struct AvatarGlyphSection: Identifiable, Equatable {
     /// The end of its title's key (`editor.avatar.section.<key>`).
     let key: String
     let symbol: String
-    /// Shown with their names beside them (companies: two letters alone say little).
-    var named = false
     let glyphs: [AvatarGlyph]
 
     var id: String { key }
@@ -42,11 +40,11 @@ struct AvatarGlyphSection: Identifiable, Equatable {
             AvatarGlyph("₿", "Bitcoin", color: 2), AvatarGlyph("Ξ", "Ethereum", color: 3), AvatarGlyph("₮", "Tether", color: 1),
             AvatarGlyph("◎", "Solana", color: 3), AvatarGlyph("Ł", "Litecoin", color: 4), AvatarGlyph("Ð", "Dogecoin", color: 2),
             AvatarGlyph("✕", "XRP", color: 4), AvatarGlyph("₳", "Cardano", color: 0), AvatarGlyph("ɱ", "Monero", color: 2),
-            AvatarGlyph("BN", "BNB", color: 2), AvatarGlyph("TN", "TON", color: 0), AvatarGlyph("TR", "TRON", color: 6),
-            AvatarGlyph("UC", "USDC", color: 0), AvatarGlyph("MM", "MetaMask", color: 2), AvatarGlyph("🪙", "Coin"),
+            AvatarGlyph("🪙", "Coin"),
             AvatarGlyph("💎", "Gem"), AvatarGlyph("⛏️", "Mining"), AvatarGlyph("🔗", "Chain"), AvatarGlyph("🦊", "Fox"),
             AvatarGlyph("🐕", "Dog"), AvatarGlyph("🚀", "Rocket"), AvatarGlyph("🌕", "Moon"), AvatarGlyph("🔑", "Key"),
-            AvatarGlyph("👛", "Wallet"),
+            AvatarGlyph("👛", "Wallet"), AvatarGlyph("🏴‍☠️", "Pirate"), AvatarGlyph("🐂", "Bull"), AvatarGlyph("🐻", "Bear"),
+            AvatarGlyph("🐳", "Whale"), AvatarGlyph("🧊", "Cold"),
         ]),
         AvatarGlyphSection(key: "currency", symbol: "dollarsign.circle", glyphs: [
             AvatarGlyph("$", "USD", color: 1), AvatarGlyph("€", "EUR", color: 0), AvatarGlyph("£", "GBP", color: 3),
@@ -66,48 +64,37 @@ struct AvatarGlyphSection: Identifiable, Equatable {
             AvatarGlyph("🛒", "Shop"), AvatarGlyph("🛍️", "Purchases"), AvatarGlyph("🏷️", "Tag"), AvatarGlyph("📦", "Parcel"),
             AvatarGlyph("🎁", "Gift"), AvatarGlyph("🎰", "Casino"), AvatarGlyph("🎲", "Dice"), AvatarGlyph("⚖️", "Scales"),
         ]),
-        AvatarGlyphSection(key: "payments", symbol: "arrow.left.arrow.right.circle", named: true, glyphs: [
-            AvatarGlyph("PP", "PayPal", color: 0), AvatarGlyph("ST", "Stripe", color: 3), AvatarGlyph("VI", "Visa", color: 0),
-            AvatarGlyph("MC", "Mastercard", color: 6), AvatarGlyph("AX", "American Express", color: 5), AvatarGlyph("AP", "Apple Pay", color: 4),
-            AvatarGlyph("GP", "Google Pay", color: 0), AvatarGlyph("CA", "Cash App", color: 1), AvatarGlyph("VE", "Venmo", color: 0),
-            AvatarGlyph("ZE", "Zelle", color: 3), AvatarGlyph("WI", "Wise", color: 1), AvatarGlyph("RV", "Revolut", color: 4),
-            AvatarGlyph("PY", "Payoneer", color: 6), AvatarGlyph("SK", "Skrill", color: 3), AvatarGlyph("NT", "Neteller", color: 1),
-            AvatarGlyph("KL", "Klarna", color: 6), AvatarGlyph("SQ", "Square", color: 4), AvatarGlyph("AD", "Adyen", color: 1),
-            AvatarGlyph("AF", "Affirm", color: 0), AvatarGlyph("WU", "Western Union", color: 7), AvatarGlyph("CB", "Coinbase", color: 0),
-            AvatarGlyph("BI", "Binance", color: 2), AvatarGlyph("KR", "Kraken", color: 3), AvatarGlyph("BY", "Bybit", color: 2),
-            AvatarGlyph("OK", "OKX", color: 4),
+        AvatarGlyphSection(key: "faces", symbol: "face.smiling", glyphs: [
+            AvatarGlyph("😀", "Smile"), AvatarGlyph("😎", "Cool"), AvatarGlyph("🤓", "Nerd"), AvatarGlyph("🥸", "Disguise"),
+            AvatarGlyph("🤠", "Cowboy"), AvatarGlyph("😇", "Angel"), AvatarGlyph("😈", "Devil"), AvatarGlyph("🤡", "Clown"),
+            AvatarGlyph("👻", "Ghost"), AvatarGlyph("👽", "Alien"), AvatarGlyph("💀", "Skull"), AvatarGlyph("🤖", "Robot"),
+            AvatarGlyph("🥷", "Ninja"), AvatarGlyph("🕵️", "Detective"), AvatarGlyph("🧑‍💻", "Developer"), AvatarGlyph("🧑‍💼", "Office"),
+            AvatarGlyph("🧑‍🎨", "Artist"), AvatarGlyph("🧑‍🚀", "Astronaut"), AvatarGlyph("🧙", "Wizard"), AvatarGlyph("🧛", "Vampire"),
+            AvatarGlyph("👑", "Crown"), AvatarGlyph("🎩", "Hat"), AvatarGlyph("🎭", "Masks"), AvatarGlyph("👀", "Eyes"),
         ]),
-        AvatarGlyphSection(key: "banksUS", symbol: "building.columns", named: true, glyphs: [
-            AvatarGlyph("JP", "JPMorgan Chase", color: 0), AvatarGlyph("BA", "Bank of America", color: 6), AvatarGlyph("WF", "Wells Fargo", color: 2),
-            AvatarGlyph("CI", "Citi", color: 0), AvatarGlyph("US", "U.S. Bank", color: 0), AvatarGlyph("PN", "PNC", color: 2),
-            AvatarGlyph("CO", "Capital One", color: 6), AvatarGlyph("TD", "TD Bank", color: 1), AvatarGlyph("TR", "Truist", color: 3),
-            AvatarGlyph("GS", "Goldman Sachs", color: 4), AvatarGlyph("MS", "Morgan Stanley", color: 0), AvatarGlyph("SC", "Charles Schwab", color: 5),
-            AvatarGlyph("DS", "Discover", color: 2), AvatarGlyph("AL", "Ally", color: 3), AvatarGlyph("CZ", "Citizens", color: 1),
-            AvatarGlyph("FT", "Fifth Third", color: 1), AvatarGlyph("KB", "KeyBank", color: 6), AvatarGlyph("NF", "Navy Federal", color: 0),
-            AvatarGlyph("UA", "USAA", color: 0), AvatarGlyph("CH", "Chime", color: 1), AvatarGlyph("SF", "SoFi", color: 5),
-            AvatarGlyph("MR", "Mercury", color: 4),
+        AvatarGlyphSection(key: "animals", symbol: "pawprint", glyphs: [
+            AvatarGlyph("🐶", "Dog"), AvatarGlyph("🐱", "Cat"), AvatarGlyph("🦊", "Fox"), AvatarGlyph("🐻", "Bear"),
+            AvatarGlyph("🐼", "Panda"), AvatarGlyph("🐨", "Koala"), AvatarGlyph("🐯", "Tiger"), AvatarGlyph("🦁", "Lion"),
+            AvatarGlyph("🐺", "Wolf"), AvatarGlyph("🐵", "Monkey"), AvatarGlyph("🐸", "Frog"), AvatarGlyph("🐧", "Penguin"),
+            AvatarGlyph("🦉", "Owl"), AvatarGlyph("🦅", "Eagle"), AvatarGlyph("🦄", "Unicorn"), AvatarGlyph("🐉", "Dragon"),
+            AvatarGlyph("🦈", "Shark"), AvatarGlyph("🐙", "Octopus"), AvatarGlyph("🐝", "Bee"), AvatarGlyph("🦋", "Butterfly"),
+            AvatarGlyph("🐢", "Turtle"), AvatarGlyph("🦖", "Dinosaur"), AvatarGlyph("🐍", "Snake"), AvatarGlyph("🦂", "Scorpion"),
         ]),
-        AvatarGlyphSection(key: "banksEU", symbol: "building.columns.circle", named: true, glyphs: [
-            AvatarGlyph("HS", "HSBC", color: 6), AvatarGlyph("BC", "Barclays", color: 5), AvatarGlyph("LL", "Lloyds", color: 1),
-            AvatarGlyph("NW", "NatWest", color: 3), AvatarGlyph("BN", "BNP Paribas", color: 1), AvatarGlyph("CA", "Crédit Agricole", color: 1),
-            AvatarGlyph("SG", "Société Générale", color: 6), AvatarGlyph("DB", "Deutsche Bank", color: 0), AvatarGlyph("CB", "Commerzbank", color: 2),
-            AvatarGlyph("SA", "Santander", color: 6), AvatarGlyph("BB", "BBVA", color: 0), AvatarGlyph("CX", "CaixaBank", color: 0),
-            AvatarGlyph("IN", "ING", color: 2), AvatarGlyph("AB", "ABN AMRO", color: 1), AvatarGlyph("RB", "Rabobank", color: 2),
-            AvatarGlyph("UC", "UniCredit", color: 6), AvatarGlyph("IS", "Intesa Sanpaolo", color: 1), AvatarGlyph("UB", "UBS", color: 4),
-            AvatarGlyph("ND", "Nordea", color: 0), AvatarGlyph("SE", "SEB", color: 1), AvatarGlyph("DN", "Danske Bank", color: 0),
-            AvatarGlyph("ER", "Erste", color: 0), AvatarGlyph("RF", "Raiffeisen", color: 2), AvatarGlyph("KB", "KBC", color: 0),
-            AvatarGlyph("PK", "PKO BP", color: 0), AvatarGlyph("N2", "N26", color: 5), AvatarGlyph("RV", "Revolut", color: 4),
-            AvatarGlyph("MZ", "Monzo", color: 6), AvatarGlyph("BQ", "bunq", color: 5),
+        AvatarGlyphSection(key: "work", symbol: "briefcase", glyphs: [
+            AvatarGlyph("💼", "Work"), AvatarGlyph("📱", "Phone"), AvatarGlyph("💻", "Laptop"), AvatarGlyph("🖥️", "Desktop"),
+            AvatarGlyph("⌨️", "Keyboard"), AvatarGlyph("🖱️", "Mouse"), AvatarGlyph("📷", "Camera"), AvatarGlyph("🎥", "Video"),
+            AvatarGlyph("🎙️", "Microphone"), AvatarGlyph("🎧", "Headphones"), AvatarGlyph("✉️", "Mail"), AvatarGlyph("📣", "Ads"),
+            AvatarGlyph("📝", "Notes"), AvatarGlyph("📅", "Calendar"), AvatarGlyph("📌", "Pin"), AvatarGlyph("📎", "Clip"),
+            AvatarGlyph("🔍", "Search"), AvatarGlyph("🔧", "Tool"), AvatarGlyph("⚙️", "Settings"), AvatarGlyph("🧪", "Test"),
+            AvatarGlyph("🔒", "Lock"), AvatarGlyph("🛡️", "Shield"), AvatarGlyph("🌐", "Web"), AvatarGlyph("📡", "Signal"),
         ]),
-        AvatarGlyphSection(key: "platforms", symbol: "globe", named: true, glyphs: [
-            AvatarGlyph("G", "Google", color: 0), AvatarGlyph("FB", "Facebook", color: 0), AvatarGlyph("IG", "Instagram", color: 6),
-            AvatarGlyph("TT", "TikTok", color: 4), AvatarGlyph("X", "X", color: 4), AvatarGlyph("YT", "YouTube", color: 6),
-            AvatarGlyph("TG", "Telegram", color: 0), AvatarGlyph("WA", "WhatsApp", color: 1), AvatarGlyph("LI", "LinkedIn", color: 0),
-            AvatarGlyph("RD", "Reddit", color: 6), AvatarGlyph("DC", "Discord", color: 3), AvatarGlyph("SN", "Snapchat", color: 7),
-            AvatarGlyph("PN", "Pinterest", color: 6), AvatarGlyph("AZ", "Amazon", color: 2), AvatarGlyph("EB", "eBay", color: 0),
-            AvatarGlyph("ET", "Etsy", color: 2), AvatarGlyph("SH", "Shopify", color: 1), AvatarGlyph("WM", "Walmart", color: 0),
-            AvatarGlyph("AE", "AliExpress", color: 6), AvatarGlyph("AB", "Airbnb", color: 6), AvatarGlyph("BK", "Booking", color: 0),
-            AvatarGlyph("UB", "Uber", color: 4), AvatarGlyph("MS", "Microsoft", color: 5), AvatarGlyph("GH", "GitHub", color: 4),
+        AvatarGlyphSection(key: "leisure", symbol: "gamecontroller", glyphs: [
+            AvatarGlyph("🎮", "Games"), AvatarGlyph("🕹️", "Joystick"), AvatarGlyph("🎬", "Film"), AvatarGlyph("🎵", "Music"),
+            AvatarGlyph("🎨", "Art"), AvatarGlyph("📚", "Books"), AvatarGlyph("⚽", "Football"), AvatarGlyph("🏀", "Basketball"),
+            AvatarGlyph("🎾", "Tennis"), AvatarGlyph("🏎️", "Racing"), AvatarGlyph("🏋️", "Gym"), AvatarGlyph("🎣", "Fishing"),
+            AvatarGlyph("✈️", "Travel"), AvatarGlyph("🚗", "Car"), AvatarGlyph("🏝️", "Island"), AvatarGlyph("🏔️", "Mountain"),
+            AvatarGlyph("🏠", "Home"), AvatarGlyph("🏙️", "City"), AvatarGlyph("☕", "Coffee"), AvatarGlyph("🍕", "Pizza"),
+            AvatarGlyph("🍔", "Burger"), AvatarGlyph("🍣", "Sushi"), AvatarGlyph("🍺", "Beer"), AvatarGlyph("🍷", "Wine"),
         ]),
         AvatarGlyphSection(key: "flags", symbol: "flag", glyphs: [
             AvatarGlyph("🇺🇸", "US"), AvatarGlyph("🇬🇧", "GB"), AvatarGlyph("🇨🇦", "CA"), AvatarGlyph("🇦🇺", "AU"),
@@ -121,18 +108,20 @@ struct AvatarGlyphSection: Identifiable, Equatable {
         ]),
         AvatarGlyphSection(key: "other", symbol: "star", glyphs: [
             AvatarGlyph("⭐", "Star"), AvatarGlyph("🔥", "Fire"), AvatarGlyph("⚡", "Bolt"), AvatarGlyph("🎯", "Target"),
-            AvatarGlyph("🧪", "Test"), AvatarGlyph("🤖", "Robot"), AvatarGlyph("👤", "Person"), AvatarGlyph("👥", "People"),
-            AvatarGlyph("💼", "Work"), AvatarGlyph("🏠", "Home"), AvatarGlyph("🔒", "Lock"), AvatarGlyph("🛡️", "Shield"),
-            AvatarGlyph("📱", "Phone"), AvatarGlyph("💻", "Laptop"), AvatarGlyph("✉️", "Mail"), AvatarGlyph("📣", "Ads"),
-            AvatarGlyph("🎮", "Games"), AvatarGlyph("🎬", "Video"), AvatarGlyph("🎵", "Music"), AvatarGlyph("✈️", "Travel"),
-            AvatarGlyph("❤️", "Heart"), AvatarGlyph("✅", "Done"), AvatarGlyph("⏳", "Waiting"), AvatarGlyph("🚫", "Blocked"),
+            AvatarGlyph("❤️", "Heart"), AvatarGlyph("💙", "Blue"), AvatarGlyph("💚", "Green"), AvatarGlyph("💛", "Yellow"),
+            AvatarGlyph("💜", "Purple"), AvatarGlyph("🖤", "Black"), AvatarGlyph("🔴", "Red circle"), AvatarGlyph("🟠", "Orange circle"),
+            AvatarGlyph("🟡", "Yellow circle"), AvatarGlyph("🟢", "Green circle"), AvatarGlyph("🔵", "Blue circle"), AvatarGlyph("🟣", "Purple circle"),
+            AvatarGlyph("✅", "Done"), AvatarGlyph("❌", "No"), AvatarGlyph("⚠️", "Warning"), AvatarGlyph("🚫", "Blocked"),
+            AvatarGlyph("⏳", "Waiting"), AvatarGlyph("🆕", "New"), AvatarGlyph("🔝", "Top"), AvatarGlyph("💯", "Hundred"),
+            AvatarGlyph("1️⃣", "One"), AvatarGlyph("2️⃣", "Two"), AvatarGlyph("3️⃣", "Three"), AvatarGlyph("4️⃣", "Four"),
+            AvatarGlyph("5️⃣", "Five"), AvatarGlyph("6️⃣", "Six"), AvatarGlyph("7️⃣", "Seven"), AvatarGlyph("8️⃣", "Eight"),
         ]),
     ]
 }
 
 /// The choice itself: the sections on the left, the chosen one's glyphs on the right. A click puts
-/// the glyph in the profile's circle — and, for a company, its colour — and the window stays, so
-/// several can be tried; the circle above the form shows the result at once.
+/// the glyph in the profile's circle — and, for a sign that has one, its colour — and the window
+/// stays, so several can be tried; the circle above the form shows the result at once.
 struct AvatarGlyphPicker: View {
     @Binding var draft: ProfileDraft
     let avatarID: UUID
@@ -164,10 +153,7 @@ struct AvatarGlyphPicker: View {
                 sections.frame(width: 190)
                 Rectangle().fill(Theme.divider).frame(width: 1)
                 ScrollView {
-                    Group {
-                        if section.named { named } else { grid }
-                    }
-                    .padding(14)
+                    grid.padding(14)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -228,35 +214,6 @@ struct AvatarGlyphPicker: View {
                 .buttonStyle(.plain)
                 .help(Text(verbatim: item.name))
                 .accessibilityLabel(Text(verbatim: item.name))
-                .accessibilityAddTraits(isChosen(item) ? .isSelected : [])
-            }
-        }
-    }
-
-    /// Companies: the circle as the profile will have it, and the company's name beside it.
-    private var named: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), alignment: .leading, spacing: 4) {
-            ForEach(section.glyphs) { item in
-                Button {
-                    choose(item)
-                } label: {
-                    HStack(spacing: 10) {
-                        circle(item, size: 28)
-                        Text(verbatim: item.name)
-                            .font(.system(size: 13))
-                            .foregroundStyle(Theme.textPrimary)
-                            .lineLimit(1)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 8)
-                    .frame(height: 38)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(isChosen(item) ? Theme.rowSelected : Color.clear))
-                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(isChosen(item) ? Theme.strongBorder : Color.clear, lineWidth: 1))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
                 .accessibilityAddTraits(isChosen(item) ? .isSelected : [])
             }
         }

@@ -1275,7 +1275,7 @@ private struct AvatarChoice: View {
             swatch(nil)
             ForEach(0..<ProfileAvatarStyle.colorCount, id: \.self) { index in swatch(index) }
             Spacer(minLength: 16)
-            // Ready ones by section — crypto, currencies, banks, payment companies, flags — beside
+            // Ready ones by section — crypto and currency signs, emoji, flags — beside
             // the field for one's own letters (the owner, 12 November).
             Button {
                 picking = true

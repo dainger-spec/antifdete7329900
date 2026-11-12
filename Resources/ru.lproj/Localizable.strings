@@ -333,10 +333,10 @@
 "editor.avatar.section.crypto" = "Криптовалюты";
 "editor.avatar.section.currency" = "Валюты";
 "editor.avatar.section.money" = "Деньги и покупки";
-"editor.avatar.section.payments" = "Платежи и биржи";
-"editor.avatar.section.banksUS" = "Банки США";
-"editor.avatar.section.banksEU" = "Банки Европы";
-"editor.avatar.section.platforms" = "Сайты и площадки";
+"editor.avatar.section.faces" = "Лица и персонажи";
+"editor.avatar.section.animals" = "Животные";
+"editor.avatar.section.work" = "Работа и техника";
+"editor.avatar.section.leisure" = "Отдых и еда";
 "editor.avatar.section.flags" = "Страны";
 "editor.avatar.section.other" = "Разное";
 "editor.tags" = "Теги";

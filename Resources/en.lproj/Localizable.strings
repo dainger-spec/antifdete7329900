@@ -333,10 +333,10 @@
 "editor.avatar.section.crypto" = "Crypto";
 "editor.avatar.section.currency" = "Currencies";
 "editor.avatar.section.money" = "Money and shopping";
-"editor.avatar.section.payments" = "Payments and exchanges";
-"editor.avatar.section.banksUS" = "US banks";
-"editor.avatar.section.banksEU" = "European banks";
-"editor.avatar.section.platforms" = "Sites and platforms";
+"editor.avatar.section.faces" = "Faces and characters";
+"editor.avatar.section.animals" = "Animals";
+"editor.avatar.section.work" = "Work and devices";
+"editor.avatar.section.leisure" = "Leisure and food";
 "editor.avatar.section.flags" = "Countries";
 "editor.avatar.section.other" = "Other";
 "editor.tags" = "Tags";

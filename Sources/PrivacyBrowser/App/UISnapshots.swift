@@ -545,7 +545,7 @@ enum UISnapshots {
             ChangePasswordView().environmentObject(model)
         }.capture(into: folder)
         problems += await settings(into: folder, model: model)
-        // The choice of a profile's glyph: a section of emoji and signs, and one of companies.
+        // The choice of a profile's glyph: a section of signs, and one of emoji.
         var glyphDraft = sampleDraft()
         glyphDraft.avatarLetters = "₿"
         glyphDraft.avatarColor = 2
@@ -553,8 +553,8 @@ enum UISnapshots {
         problems += await Shot(name: "avatar-glyphs-crypto", size: CGSize(width: 620, height: 440)) {
             AvatarGlyphPicker(draft: .constant(glyphDraft), avatarID: glyphOwner)
         }.capture(into: folder)
-        problems += await Shot(name: "avatar-glyphs-payments", size: CGSize(width: 620, height: 440)) {
-            AvatarGlyphPicker(draft: .constant(glyphDraft), avatarID: glyphOwner, sectionKey: "payments")
+        problems += await Shot(name: "avatar-glyphs-faces", size: CGSize(width: 620, height: 440)) {
+            AvatarGlyphPicker(draft: .constant(glyphDraft), avatarID: glyphOwner, sectionKey: "faces")
         }.capture(into: folder)
         // The scenario editor: a scenario chosen, its code with the commands beside it.
         let scenario = Scenario(name: L("scenarios.untitled"), source: L("scenarios.template"))
