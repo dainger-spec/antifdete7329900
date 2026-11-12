@@ -234,6 +234,14 @@ if in_suite core; then
     fi
     rm -rf "$OUT/dd-browsercore"
 fi
+# The privacy manifest is in the built app, and reads (App Store: required-reason APIs, collected data).
+if in_suite core; then
+    if [[ -f "$BUILT_APP/PrivacyInfo.xcprivacy" ]] && plutil -lint "$BUILT_APP/PrivacyInfo.xcprivacy" >/dev/null; then
+        say "the built app carries its privacy manifest (PrivacyInfo.xcprivacy)"
+    else
+        say "NO PRIVACY MANIFEST in the built app"; STATUS=1
+    fi
+fi
 # The English table is in the built app (a table left out of the bundle would leave every text Russian).
 if [[ -f "$BUILT_APP/en.lproj/Localizable.strings" ]]; then
     say "the built app carries its English table (en.lproj)"
