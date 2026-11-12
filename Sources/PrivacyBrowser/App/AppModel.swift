@@ -1291,8 +1291,21 @@ final class AppModel: ObservableObject {
     func webDriverInfo(for id: UUID) -> InspectorInfo.WebDriver? {
         guard AutomationServer.isAvailable else { return nil }
         guard allowsAutomation else { return .notInPlan }
-        guard case let .listening(port) = automationState, let token = automationSettings?.token else { return .apiOff }
-        return .address(WebDriverRoute.address(port: port, token: token, profile: id))
+        switch automationState {
+        case let .listening(port):
+            guard let token = automationSettings?.token else { return .apiOff }
+            return .address(WebDriverRoute.address(port: port, token: token, profile: id))
+        // On, but it does not listen (its port is taken, say): not "turn the API on".
+        case .failed: return .apiFailed
+        case .stopped: return .apiOff
+        }
+    }
+
+    /// The API listens and the plan has it: every profile has a WebDriver address (`webDriverInfo`).
+    var webDriverReady: Bool {
+        guard AutomationServer.isAvailable, allowsAutomation, automationSettings?.token != nil else { return false }
+        if case .listening = automationState { return true }
+        return false
     }
 
     /// A new token: scripts holding the old one are refused from now on.

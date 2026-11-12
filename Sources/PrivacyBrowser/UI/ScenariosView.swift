@@ -20,6 +20,8 @@ struct ScenariosView: View {
     @State private var starting = false
     /// The right side shows the runs by the clock instead of a scenario.
     @State private var showingSchedules: Bool
+    /// The schedule that side opens its form with: "On a Schedule…" of the scenario on screen.
+    @State private var proposedSchedule: ScenarioSchedule?
     /// Steps shown as being recorded without a profile (the snapshots).
     var sampleRecording: [RecordedStep]?
 
@@ -46,7 +48,7 @@ struct ScenariosView: View {
             Rectangle().fill(Theme.divider).frame(width: 1)
             Group {
                 if showingSchedules {
-                    ScenarioSchedulesPane()
+                    ScenarioSchedulesPane(proposed: proposedSchedule)
                 } else if selected != nil {
                     editor
                 } else {
@@ -89,6 +91,8 @@ struct ScenariosView: View {
                 select(model.scenarios.sorted.first?.id)
             }
             if profileID == nil { profileID = model.profiles.first?.id }
+            // A recording going on is of its own profile: the window opened again names that one.
+            if let recording = model.recordingProfile { profileID = recording }
         }
         .confirmationDialog(String(format: L("scenarios.delete.question"), selected?.name ?? ""), isPresented: $confirmingDelete) {
             Button(L("scenarios.delete"), role: .destructive) { delete() }
@@ -141,9 +145,12 @@ struct ScenariosView: View {
             // and the app's help.
             Rectangle().fill(Theme.divider).frame(height: 1)
             VStack(alignment: .leading, spacing: 2) {
-                // Scenarios and warm-ups by the clock: the right side becomes their list.
-                footLink("clock", L("schedule.title"), chosen: showingSchedules) {
+                // Scenarios and warm-ups by the clock: the right side becomes their list. The number
+                // is of those switched on.
+                footLink("clock", L("schedule.title"), chosen: showingSchedules,
+                         count: model.scenarioSchedules.schedules.filter(\.isEnabled).count) {
                     if edited { save() }
+                    proposedSchedule = nil
                     showingSchedules = true
                 }
                 footLink("terminal", L("settings.section.automation")) {
@@ -157,7 +164,10 @@ struct ScenariosView: View {
         }
     }
 
-    private func footLink(_ symbol: String, _ title: String, chosen: Bool = false, action: @escaping () -> Void) -> some View {
+    /// A link at the list's foot; `count`, when not zero, at its right edge, as the sidebar's rows
+    /// carry theirs.
+    private func footLink(_ symbol: String, _ title: String, chosen: Bool = false, count: Int = 0,
+                          action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: symbol)
@@ -167,6 +177,12 @@ struct ScenariosView: View {
                     .font(.lumenSecondary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
+                if count > 0 {
+                    Text(verbatim: "\(count)")
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textTertiary)
+                        .monospacedDigit()
+                }
             }
             .foregroundStyle(chosen ? Theme.textPrimary : Theme.textSecondary)
             .padding(.horizontal, 10)
@@ -214,10 +230,13 @@ struct ScenariosView: View {
                         .buttonStyle(.lumenSecondary)
                         .keyboardShortcut("s")
                 }
+                // Not while a recording goes on: with the last scenario deleted there would be no
+                // Stop anywhere.
                 Button { confirmingDelete = true } label: { Image(systemName: "trash") }
                     .buttonStyle(.lumenGhost)
                     .help(L("scenarios.delete"))
                     .accessibilityLabel(L("scenarios.delete"))
+                    .disabled(isRecording)
             }
             .padding(.horizontal, 20)
             .padding(.top, 34)
@@ -329,7 +348,10 @@ struct ScenariosView: View {
                     Text(profile.name).tag(Optional(profile.id))
                 }
             }
-            .frame(maxWidth: 320)
+            .frame(maxWidth: 320, alignment: .leading)
+            // A recording belongs to the profile it began in, and a start to the one it was asked
+            // for: the picker must not name another meanwhile.
+            .disabled(isRecording || starting)
             if model.profiles.isEmpty {
                 Text(L("scenarios.noProfiles"))
                     .font(.lumenSecondary)
@@ -342,11 +364,11 @@ struct ScenariosView: View {
                     Circle().fill(Theme.danger).frame(width: 8, height: 8)
                     Text(String(format: L("scenarios.record.going"), recordedSteps.count))
                         .font(.lumenSecondary)
-                        .foregroundStyle(Theme.textSecondary)
+                        .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
                 }
                 .accessibilityElement(children: .combine)
-                Button(L("scenarios.record.stop"), action: stopRecording)
+                Button(action: stopRecording) { Label(L("scenarios.record.stop"), systemImage: "stop.fill") }
                     .buttonStyle(.lumenPrimary)
             } else if let run, run.isRunning {
                 Text(L("scenarios.running"))
@@ -355,6 +377,22 @@ struct ScenariosView: View {
                 Button(L("scenarios.stop")) { if let profileID { model.stopScenario(on: profileID) } }
                     .buttonStyle(.lumenSecondary)
             } else {
+                // Record and Run start a stopped profile first, which takes a while: said, not
+                // only two dimmed buttons.
+                if starting {
+                    ProgressView().controlSize(.small)
+                    Text(L("scenarios.starting"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+                }
+                // The scenario on screen by the clock: the schedule's form, filled in with it and
+                // the chosen profile. Open in a plan without automation too: the pane says why
+                // nothing can be added there.
+                Button(action: scheduleThis) { Label(L("scenarios.schedule.this"), systemImage: "clock") }
+                    .buttonStyle(.lumenGhost)
+                    .disabled(profileID == nil || starting)
+                    .help(L("scenarios.schedule.this.help"))
                 Button(action: startRecording) {
                     HStack(spacing: 6) {
                         Circle().fill(Theme.danger).frame(width: 8, height: 8)
@@ -412,8 +450,10 @@ struct ScenariosView: View {
         if edited { save() }
         starting = true
         Task { @MainActor in
-            _ = await model.startRecording(on: profileID)
+            let started = await model.startRecording(on: profileID)
             starting = false
+            // A launch that failed has said why; a refusal nobody said is said here.
+            if !started, model.errorMessage == nil { model.showError(L("scenarios.start.failed")) }
         }
     }
 
@@ -422,7 +462,11 @@ struct ScenariosView: View {
         let steps = model.stopRecording()
         guard !steps.isEmpty else { return }
         let lines = steps.map { ScenarioRecording.line(for: $0, passwordNote: L("scenarios.record.password")) }
-        source += (source.isEmpty || source.hasSuffix("\n") ? "" : "\n") + lines.joined(separator: "\n") + "\n"
+        // A scenario that is still the example, or empty, is replaced: a first recording must not
+        // open example.com first.
+        let untouched = source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || source == L("scenarios.template")
+        let before = untouched ? "" : source + (source.hasSuffix("\n") ? "" : "\n")
+        source = before + lines.joined(separator: "\n") + "\n"
     }
 
     private func startRun() {
@@ -430,9 +474,20 @@ struct ScenariosView: View {
         guard let scenario = selected, let profileID else { return }
         starting = true
         Task { @MainActor in
-            _ = await model.runScenario(scenario, on: profileID)
+            let started = await model.runScenario(scenario, on: profileID)
             starting = false
+            if !started, model.errorMessage == nil { model.showError(L("scenarios.start.failed")) }
         }
+    }
+
+    /// Opens the schedules with a form for this scenario on the chosen profile: every day at
+    /// 10:00, give or take a quarter of an hour, to be changed there.
+    private func scheduleThis() {
+        guard let scenario = selected, let profileID else { return }
+        if edited { save() }
+        proposedSchedule = ScenarioSchedule(action: .scenario(scenario.id), profileID: profileID,
+                                            when: .daily(hour: 10, minute: 0), jitterMinutes: 15)
+        showingSchedules = true
     }
 }
 
@@ -556,7 +611,11 @@ struct CodeEditor: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let view = scroll.documentView as? NSTextView, view.string != text else { return }
+        // Text added at the end (a recording, a command of the panel) is brought into view: in a
+        // scenario longer than the editor it would land below the fold, and nothing would show.
+        let appended = !view.string.isEmpty && text.hasPrefix(view.string)
         view.string = text
+        if appended { view.scrollRangeToVisible(NSRange(location: (text as NSString).length, length: 0)) }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(text: $text) }

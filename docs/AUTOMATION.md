@@ -94,7 +94,8 @@ a scenario may say was in this file only): the Profiles window's sidebar has Sce
 API and Help beside Profiles and Proxies, and "Commands and Search" (⌘K) above them; the editor's
 Commands button, the automation settings and Help › Lumen Help (⌘?) open the app's own help
 (`HelpView`) — how a scenario is run, every command with what it takes, the API's requests with
-commands to copy — in the interface's language.
+commands to copy, connecting Selenium — in the interface's language. The Help menu lists the
+topics, so the menu bar's own search finds each by its name.
 
 ## Recording
 
@@ -113,7 +114,8 @@ Record ── AppModel.startRecording(on:) ── the profile started with a win
    ScenarioRecorder ── Event.loaded(address) | .acted(step) ── ProfileEvent.recorded ── the app
    AppModel.recorded: ScenarioRecording ── which loads are steps (the first page and an address
                opened: goto; a page that follows a click or Enter within 5 s: waitForLoadState, once)
-   Stop Recording ── ScenarioRecording.line(for:) per step, added to the scenario's end
+   Stop Recording ── ScenarioRecording.line(for:) per step, added to the scenario's end — or put in
+               place of the example a new scenario begins with, while that example is untouched
 ```
 
 - **Selectors**, in this order: an `id` that is unique and not made for this load only (`:r1:`,
@@ -141,8 +143,11 @@ button without an id, Enter).
 
 ## By the clock
 
-The editor's **Schedule** (bottom left): a scenario, or a profile's warm-up, every day at a time
-or every so many hours, with a random shift either way.
+The editor's **Schedule** (bottom left, with how many are switched on): a scenario, or a
+profile's warm-up, every day at a time or every so many hours, with a random shift either way.
+**On a Schedule…** beside Run opens the same list with the form filled in for the scenario on
+screen and the chosen profile. A row says when its schedule runs next and how the last run went;
+deleting one asks first; saving a change leaves the schedule's switch as it was.
 
 - `ScenarioSchedule` (BrowserCore): what (`.scenario(id)` or `.warmUp`), the profile, when
   (`.daily(hour:minute:)` or `.every(hours:)`), the jitter in minutes, and the next run with its
@@ -156,8 +161,10 @@ or every so many hours, with a random shift either way.
   than six hours late is not made ("missed"); without automation in the plan nothing is run and
   the schedule says so. Schedules of deleted profiles and scenarios go with them.
 - Nothing wakes the Mac or starts the app: a schedule runs while Lumen does.
-- The plan: schedules, like scenarios, need automation (`allowsAutomation`). The warm-up's own
-  "every N hours" (the warm-up screen) is as it was, in every plan.
+- The plan: schedules, like scenarios, need automation (`allowsAutomation`). In a plan without it
+  the saved schedules do not run, and can be switched off or deleted — not added, changed or
+  switched on. The warm-up's own "every N hours" (the warm-up screen) is as it was, in every plan;
+  the form says so when a warm-up by the clock would run beside it.
 
 Checked: `ScenarioScheduleTests` (the next run today or tomorrow, the random part within its
 limits, due, late, a run's record, the file).
@@ -201,7 +208,10 @@ a client (Selenium) ── http://127.0.0.1:<port>/wd/<token>/<profile>/session�
 ```
 
 - **The address** is the API's listener and token plus the profile: one for each profile, shown
-  in its inspector (**WebDriver Address**, with Copy) while the API is on. The token is in the
+  in its inspector (**WebDriver Address**: the token as dots, and Copy, which gives the whole
+  address) and copied from the profile's ⋯ menu (**Copy WebDriver Address**) while the API
+  listens. With the API off, on but not started, or not in the plan, the inspector has a row
+  **Selenium** that says which and opens where that is settled. The token is in the
   path because a WebDriver client sends no header of ours; whoever has the address drives the
   profile, as whoever has the token uses the API. 127.0.0.1 only.
 - **A session is a launch.** One session a profile at a time; ending it closes its window, and

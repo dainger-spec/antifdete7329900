@@ -351,8 +351,10 @@ Safari on this Mac.
 
 ### What sites see (a profile next to this Mac's Safari)
 
-A profile's ⋯ menu (and the command palette) has **What Sites See…**: on its button, one page of
-this Mac opens in a new window of the profile — and only on the person's **Compare with Safari…**,
+A profile's ⋯ menu, its inspector (**Check the profile**) and the command palette open the
+profile's check (docs/ARCHITECTURE.md, "The profile's check"); the sheet's second tab, **All
+signals**, is this snapshot, and the profile editor's **What Sites See…** opens it alone. On its
+button, one page of this Mac opens in a new window of the profile — and only on the person's **Compare with Safari…**,
 whose note says that this Mac's own Safari will open, not a profile, the same page in a new tab of
 Safari — and in each runs the scripts CI's live comparison runs (`scripts/live_compare.py`): the fingerprint probe
 (`Resources/fingerprint_probe.js`), the window's geometry, the request headers in the order the
@@ -1257,7 +1259,7 @@ the browser does it itself, as close to Safari as that allows.
 | Filling fires `input`, then `change` (plain bubbling events) | The same events; React, Vue and Angular forms take the values |
 | `autocomplete="off"` ignored for logins | Ignored |
 | HTTP authentication sheet with **Remember this password** | The same; the next challenge is answered from the vault |
-| Passwords app: locked until authenticated; search, view, copy, edit, delete; excluded websites | **⋯ → Passwords…**: locked until the master password is entered; the same operations, and the "Never" websites with **Remove** |
+| Passwords app: locked until authenticated; search, view, copy, edit, delete; excluded websites | **⋯ → Passwords and Codes…**: locked until the master password is entered; the same operations, and the "Never" websites with **Remove** |
 | AutoFill switch ("User names and passwords") | Per profile: **AutoFill user names and passwords** in the profile editor (on by default) |
 
 **Where it differs, and why**
@@ -1306,6 +1308,9 @@ password). On a page, a field for a code — `autocomplete="one-time-code"`, or 
 (`otp`, `totp`, `2fa`, `mfa`, "verification code", …) — is offered the site's logins that have a
 code, under the field, as a login's fields are; the code is made when the row is chosen, and
 pages with one box a digit get a digit in each. A login may be a code alone, with no password.
+A login without a code has **Add a One-Time Code…**. Nothing of a code is kept until the login is
+saved: the editor says so of a code just added, and of a saved one that Save would remove (with
+**Put the Code Back**); deleting a login that has a code says that the code goes with it.
 
 - **The screen is not captured.** That needs the Screen Recording permission; the clipboard does
   the same for a QR code with none.

@@ -71,6 +71,8 @@ struct PrivacyBrowserApp: App {
             }
             CommandGroup(replacing: .help) {
                 HelpMenuButton()
+                Divider()
+                HelpTopicMenuItems(model: model)
             }
         }
         // The scenario editor (docs/AUTOMATION.md): File › Scenarios.
@@ -239,6 +241,22 @@ private struct HelpMenuButton: View {
     var body: some View {
         Button(L("menu.help")) { openWindow(id: "help") }
             .keyboardShortcut("?", modifiers: .command)
+    }
+}
+
+/// Help › a topic: the Help window at that page. The menu bar's Help search finds each by its name.
+private struct HelpTopicMenuItems: View {
+    /// Only written to: the menu shows nothing of the model.
+    let model: AppModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        ForEach(HelpTopic.allCases) { topic in
+            Button(topic.title) {
+                model.helpTopic = topic
+                openWindow(id: "help")
+            }
+        }
     }
 }
 

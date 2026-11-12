@@ -13,6 +13,7 @@ struct PasswordListView: View {
     let profile: ProfileSummary
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openWindow) private var openWindow
 
     @State private var unlocked = false
     @State private var masterPassword = ""
@@ -38,11 +39,14 @@ struct PasswordListView: View {
         /// What makes the login's one-time codes, and what is typed for it and not added yet.
         var totp: OneTimeCode?
         var codeInput = ""
+        /// Why Save did not take what is typed for the code: said at its field until it changes.
+        var codeProblem: String?
     }
 
     /// The moment the one-time code is shown for, for a picture that must not change (the snapshots).
     var codeDate: Date?
-    /// Opens unlocked on these logins, the first chosen (the snapshots) — `sampleEditing`: being edited.
+    /// Opens unlocked on these logins, the first chosen (the snapshots) — `sampleEditing`: the first
+    /// without a one-time code, being edited.
     var sample: [PasswordEntry]?
     var sampleEditing = false
 
@@ -85,10 +89,13 @@ struct PasswordListView: View {
             entries = sample
             selection = sample.first?.id
             unlocked = true
-            if sampleEditing, let entry = sample.first {
+            // The editor's picture is of a code being added: the sample login that has none
+            // (one that has a code, opened without it, would be a code about to be removed).
+            if sampleEditing, let entry = sample.first(where: { $0.totp == nil }) ?? sample.first {
+                selection = entry.id
                 revealed = true
                 draft = Draft(id: entry.id, website: entry.origin, username: entry.username, password: entry.password,
-                              note: entry.note ?? "", totp: nil, codeInput: "")
+                              note: entry.note ?? "", totp: entry.totp, codeInput: "")
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: PasswordVault.didChangeNotification)) { note in
@@ -99,8 +106,10 @@ struct PasswordListView: View {
                             presenting: pendingDelete) { entry in
             Button(L("common.delete"), role: .destructive) { delete(entry) }
         } message: { entry in
-            Text(String(format: L("passwords.delete.message"), entry.username.isEmpty ? L("passwords.noUsername") : entry.username,
-                        entry.host))
+            // A login's one-time code is deleted with it, and without that code the site lets
+            // nobody in: the question says so.
+            Text(String(format: entry.totp == nil ? L("passwords.delete.message") : L("passwords.delete.messageWithCode"),
+                        entry.username.isEmpty ? L("passwords.noUsername") : entry.username, entry.host))
         }
     }
 
@@ -254,56 +263,62 @@ struct PasswordListView: View {
 
     private func details(_ entry: PasswordEntry) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            if entry.isConflictVersion {
-                Label(L("passwords.conflict.explanation"), systemImage: "exclamationmark.triangle.fill")
-                    .font(.callout)
-                    .foregroundStyle(Theme.warning)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            row(L("passwords.field.website"), entry.origin, copy: entry.origin)
-            row(L("passwords.field.username"), entry.username.isEmpty ? L("passwords.noUsername") : entry.username,
-                copy: entry.username.isEmpty ? nil : entry.username)
-            // A login that is a one-time code alone has no password to show.
-            if !entry.password.isEmpty {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(L("passwords.field.password")).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
-                    Text(revealed ? entry.password : String(repeating: "•", count: 10))
-                        .font(.body.monospaced()).textSelection(.enabled)
-                    Spacer()
-                    Button { revealed.toggle() } label: { Image(systemName: revealed ? "eye.slash" : "eye") }
-                        .buttonStyle(.borderless).help(L(revealed ? "passwords.hide" : "passwords.show"))
-                    Button { Self.copy(entry.password, concealed: true) } label: { Image(systemName: "doc.on.doc") }
-                        .buttonStyle(.borderless).help(L("passwords.copy"))
+            // The login scrolls, the buttons stay, as in the editor: a code's card under a long
+            // note, or a kept version's explanation, is more than the sheet is tall on a small screen.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if entry.isConflictVersion {
+                        Label(L("passwords.conflict.explanation"), systemImage: "exclamationmark.triangle.fill")
+                            .font(.callout)
+                            .foregroundStyle(Theme.warning)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    row(L("passwords.field.website"), entry.origin, copy: entry.origin)
+                    row(L("passwords.field.username"), entry.username.isEmpty ? L("passwords.noUsername") : entry.username,
+                        copy: entry.username.isEmpty ? nil : entry.username)
+                    // A login that is a one-time code alone has no password to show.
+                    if !entry.password.isEmpty {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(L("passwords.field.password")).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
+                            Text(revealed ? entry.password : String(repeating: "•", count: 10))
+                                .font(.body.monospaced()).textSelection(.enabled)
+                            Spacer()
+                            Button { revealed.toggle() } label: { Image(systemName: revealed ? "eye.slash" : "eye") }
+                                .buttonStyle(.borderless).help(L(revealed ? "passwords.hide" : "passwords.show"))
+                            Button { Self.copy(entry.password, concealed: true) } label: { Image(systemName: "doc.on.doc") }
+                                .buttonStyle(.borderless).help(L("passwords.copy"))
+                        }
+                    }
+                    if let generator = entry.totp {
+                        OneTimeCodeCard(generator: generator, at: codeDate)
+                            .padding(.vertical, 2)
+                    } else if !entry.isConflictVersion {
+                        // Seen on the login itself, not only behind Edit: opens the editor, where the code is added.
+                        Button { edit(entry) } label: { Label(L("passwords.code.addToLogin"), systemImage: "lock.rotation") }
+                            .buttonStyle(.lumenGhost)
+                    }
+                    if let note = entry.note, !note.isEmpty { row(L("passwords.field.note"), note, copy: nil) }
+                    Divider()
+                    // Which Mac made this version, and when by that Mac's clock: beside a version kept after a
+                    // conflict, what the person tells the two apart by.
+                    Text(entry.device.map { String(format: L("passwords.updatedOn"), $0, entry.updatedAt.shown(date: .abbreviated, time: .shortened)) }
+                         ?? String(format: L("passwords.updated"), entry.updatedAt.shown(date: .abbreviated, time: .shortened)))
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let used = entry.lastUsedAt {
+                        Text(String(format: L("passwords.lastUsed"), used.shown(date: .abbreviated, time: .shortened)))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if let generator = entry.totp {
-                OneTimeCodeCard(generator: generator, at: codeDate)
-                    .padding(.vertical, 2)
-            }
-            if let note = entry.note, !note.isEmpty { row(L("passwords.field.note"), note, copy: nil) }
-            Divider()
-            // Which Mac made this version, and when by that Mac's clock: beside a version kept after a
-            // conflict, what the person tells the two apart by.
-            Text(entry.device.map { String(format: L("passwords.updatedOn"), $0, entry.updatedAt.shown(date: .abbreviated, time: .shortened)) }
-                 ?? String(format: L("passwords.updated"), entry.updatedAt.shown(date: .abbreviated, time: .shortened)))
-                .font(.caption).foregroundStyle(.secondary)
-            if let used = entry.lastUsedAt {
-                Text(String(format: L("passwords.lastUsed"), used.shown(date: .abbreviated, time: .shortened)))
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
             HStack {
                 if entry.isConflictVersion {
                     // A version kept after a conflict is chosen, or deleted; it is not edited.
                     Button(L("passwords.conflict.keep")) { keepConflictVersion(entry) }
                         .buttonStyle(.lumenSecondary)
                 } else {
-                    Button(L("passwords.edit")) {
-                        revealed = true
-                        draft = Draft(id: entry.id, website: entry.origin, username: entry.username,
-                                      password: entry.password, note: entry.note ?? "", totp: entry.totp)
-                    }
-                    .buttonStyle(.lumenSecondary)
+                    Button(L("passwords.edit")) { edit(entry) }
+                        .buttonStyle(.lumenSecondary)
                 }
                 Spacer()
                 Button(L("common.delete"), role: .destructive) { pendingDelete = entry }
@@ -324,8 +339,17 @@ struct PasswordListView: View {
         }
     }
 
+    /// Opens the login in the editor, its password shown.
+    private func edit(_ entry: PasswordEntry) {
+        revealed = true
+        draft = Draft(id: entry.id, website: entry.origin, username: entry.username,
+                      password: entry.password, note: entry.note ?? "", totp: entry.totp)
+    }
+
     private func editor(_ initial: Draft) -> some View {
         let binding = Binding(get: { draft ?? initial }, set: { draft = $0 })
+        // The code the login is saved with: the code's part says what Save would change.
+        let saved: OneTimeCode? = initial.id.flatMap { id in entries.first(where: { $0.id == id })?.totp }
         return VStack(alignment: .leading, spacing: 10) {
             Text(initial.id == nil ? L("passwords.addTitle") : L("passwords.editTitle"))
                 .font(.lumenSection)
@@ -353,7 +377,12 @@ struct PasswordListView: View {
             TextField(L("passwords.placeholder.note"), text: binding.note, prompt: Text(verbatim: ""), axis: .vertical)
                 .lineLimit(2...4)
                 .lumenField(L("passwords.placeholder.note"), isEmpty: binding.wrappedValue.note.isEmpty, height: nil)
-            OneTimeCodeSetup(generator: binding.totp, input: binding.codeInput)
+            OneTimeCodeSetup(generator: binding.totp, input: binding.codeInput, saved: saved,
+                             saveProblem: binding.wrappedValue.codeProblem,
+                             onHelp: {
+                                 model.helpTopic = .codes
+                                 openWindow(id: "help")
+                             })
                 }
                 .padding(1) // the fields' focus rings, which a scroll view clips at its edge
             }
@@ -370,6 +399,9 @@ struct PasswordListView: View {
                                   && binding.wrappedValue.codeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
             }
         }
+        // What Save refused is said until the secret is typed again or a code is added another way.
+        .onChange(of: draft?.codeInput) { _, _ in draft?.codeProblem = nil }
+        .onChange(of: draft?.totp) { _, _ in draft?.codeProblem = nil }
     }
 
     // MARK: Actions
@@ -393,19 +425,21 @@ struct PasswordListView: View {
     }
 
     private func save(_ draft: Draft) {
+        // What an earlier attempt was refused for does not stand under this one.
+        error = nil
         guard let origin = Self.origin(from: draft.website) else {
             error = L("passwords.error.origin")
             return
         }
         let note = draft.note.trimmingCharacters(in: .whitespacesAndNewlines)
         // A secret typed and not added with its button is added by Save; one that is not a
-        // secret stops the save and says why, rather than be dropped.
+        // secret stops the save and says why at its field, rather than be dropped.
         var generator = draft.totp
         if generator == nil, !draft.codeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             switch OneTimeCodeInput.read(draft.codeInput) {
             case let .generator(found): generator = found
             case let .problem(message):
-                error = message
+                self.draft?.codeProblem = message
                 return
             }
         }

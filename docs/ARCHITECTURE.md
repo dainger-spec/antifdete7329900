@@ -610,7 +610,8 @@ SettingsView (Settings scene: ⌘, — and ⋯ → Settings…) ── AppSettin
 ## What sites see
 
 ```
-⋯ → What Sites See… / ⌘K ── WhatSitesSeeView (sheet) ── WhatSitesSee (one per sheet, @MainActor)
+⋯ → Check the Profile… / the inspector's "Check the profile" / ⌘K
+   ── WhatSitesSeeView (sheet; its second tab, All signals) ── WhatSitesSee (one per sheet, @MainActor)
    take():  the profile started if stopped (AppModel.launch)
             SiteSnapshotServer: NWListener × 2 on 127.0.0.1:any — HTTP (AutomationHTTP.parse, header
               lines in order) and TLS (TLSClientHello.parse, then closed); tokens per side, Host checked
@@ -626,7 +627,12 @@ SettingsView (Settings scene: ⌘, — and ⋯ → Settings…) ── AppSettin
 ### The profile's check
 
 The panel opens on a check of the profile in one go (`ProfileCheckPane`, the first tab; the
-signals one by one are the second). `ProfileCheckRun` gathers, `ProfileCheck` (BrowserCore) judges:
+signals one by one are the second). The pane follows the run's step: before the first check, an
+invitation with the one button; while it runs, its three steps; when it could not be made, why;
+then the verdict and the findings in groups — things to look at first, what could not be
+compared, what is in order. **Restart and Check Again** is offered after a fix, and whenever a
+finding says the running profile is not what its settings say. `ProfileCheckRun` gathers,
+`ProfileCheck` (BrowserCore) judges:
 
 ```
 Check the Profile ── ProfileCheckRun.run()

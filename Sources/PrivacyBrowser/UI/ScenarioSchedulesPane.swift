@@ -8,8 +8,12 @@ struct ScenarioSchedulesPane: View {
     @EnvironmentObject private var model: AppModel
     /// The schedule in the form: a new one, or one being changed.
     @State private var draft: ScenarioSchedule?
+    /// The schedule whose deletion is being asked about.
+    @State private var pendingDelete: ScenarioSchedule?
     /// Shown without a vault (the snapshots): these schedules, and the names they need.
     var sample: Sample?
+    /// A schedule to open the form with: "On a Schedule…" of the scenario editor.
+    var proposed: ScenarioSchedule?
 
     struct Sample {
         var schedules: [ScenarioSchedule]
@@ -22,6 +26,8 @@ struct ScenarioSchedulesPane: View {
     private var scenarios: [Scenario] { sample?.scenarios ?? model.scenarios.sorted }
     private var profiles: [(id: UUID, name: String)] { sample?.profiles ?? model.profiles.map { ($0.id, $0.name) } }
     private var allowed: Bool { sample != nil || model.allowsAutomation }
+    /// The schedules' file is a newer version's or does not open: none is shown and none can be saved.
+    private var refused: Bool { sample == nil && model.scenarioSchedulesRefused }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -33,8 +39,8 @@ struct ScenarioSchedulesPane: View {
                 Button {
                     draft = newSchedule()
                 } label: { Label(L("schedule.add"), systemImage: "plus") }
-                    .buttonStyle(.lumenSecondary)
-                    .disabled(!allowed || profiles.isEmpty || draft != nil)
+                    .buttonStyle(.lumenPrimary)
+                    .disabled(!allowed || refused || profiles.isEmpty || draft != nil)
             }
             .padding(.horizontal, 20)
             .padding(.top, 34)
@@ -57,13 +63,21 @@ struct ScenarioSchedulesPane: View {
                     .padding(.horizontal, 20)
                     .padding(.bottom, 12)
             }
+            // Said, not shown as "no schedules yet" with a Save that ends in an alert.
+            if refused {
+                Label(L("schedule.unreadable"), systemImage: "exclamationmark.triangle.fill")
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 12)
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     if let draft, !schedules.contains(where: { $0.id == draft.id }) { form(draft) }
-                    if schedules.isEmpty, draft == nil {
-                        LumenEmptyHint(symbol: "clock", text: L(profiles.isEmpty ? "schedule.empty.noProfiles" : "schedule.empty"))
-                            .frame(maxWidth: .infinity, minHeight: 260)
-                    }
+                    // Only where one can be added: in a plan without automation, or with a file
+                    // that does not open, the note above stands alone.
+                    if schedules.isEmpty, draft == nil, allowed, !refused { empty }
                     ForEach(schedules) { schedule in
                         if draft?.id == schedule.id, let draft { form(draft) } else { row(schedule) }
                     }
@@ -72,7 +86,50 @@ struct ScenarioSchedulesPane: View {
                 .padding(.bottom, 20)
             }
         }
-        .onAppear { if let editing = sample?.editing { draft = editing } }
+        .onAppear {
+            // The snapshots' form; else the one the scenario editor asked for, where it can be saved.
+            // One that is saved already is not opened again over what the list has of it.
+            if let editing = sample?.editing {
+                draft = editing
+            } else if allowed, !refused, let proposed, !schedules.contains(where: { $0.id == proposed.id }) {
+                draft = proposed
+            }
+        }
+        .confirmationDialog(L("schedule.delete.title"),
+                            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                            presenting: pendingDelete) { schedule in
+            Button(L("common.delete"), role: .destructive) {
+                if model.saveSchedule(schedule, remove: true), draft?.id == schedule.id { draft = nil }
+            }
+        } message: { schedule in
+            Text(String(format: L("schedule.delete.message"), title(schedule.action), profileName(schedule.profileID)))
+        }
+    }
+
+    /// No schedule yet: what one is for, and the button that adds the first.
+    private var empty: some View {
+        VStack(spacing: 0) {
+            IconBadge(symbol: "clock", tint: Theme.textTertiary, size: 44)
+                .padding(.bottom, 12)
+            Text(L("schedule.empty.title"))
+                .font(.lumenSheetTitle)
+                .foregroundStyle(Theme.textPrimary)
+                .padding(.bottom, 6)
+            Text(profiles.isEmpty ? L("schedule.empty.noProfiles") : L("schedule.empty"))
+                .font(.lumenBody)
+                .foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 360)
+                .padding(.bottom, 20)
+            if !profiles.isEmpty {
+                Button {
+                    draft = newSchedule()
+                } label: { Label(L("schedule.add"), systemImage: "plus") }
+                    .buttonStyle(.lumenPrimary)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 320)
     }
 
     // MARK: A schedule
@@ -93,15 +150,50 @@ struct ScenarioSchedulesPane: View {
                     .font(.lumenSecondary)
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(state(schedule))
-                    .font(.lumenCaption)
-                    .foregroundStyle(stateColor(schedule))
-                    .fixedSize(horizontal: false, vertical: true)
+                // How the last run that came due went. One that could not be made is a warning; one
+                // the Mac slept through is not a fault, and is said plainly.
+                if schedule.isEnabled, let problem = problemText(schedule) {
+                    Label(problem, systemImage: "exclamationmark.triangle.fill")
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 2)
+                } else if schedule.isEnabled, schedule.lastResult == .missed {
+                    Text(L("schedule.state.missed"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if schedule.isEnabled, schedule.lastResult == .started, let last = schedule.lastRunAt {
+                    Text(String(format: L("schedule.state.last"), Self.shownRun(last)))
+                        .font(.lumenCaption)
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer(minLength: 12)
-            Button(L("passwords.edit")) { draft = schedule }
-                .buttonStyle(.lumenGhost)
-                .disabled(!allowed || draft != nil)
+            // When it runs next: the row's fact, at its right edge.
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(nextRunText(schedule))
+                    .font(.lumenLabel)
+                    .monospacedDigit()
+                    .foregroundStyle(schedule.isEnabled ? Theme.textPrimary : Theme.textTertiary)
+                if schedule.isEnabled {
+                    Text(L("schedule.row.next"))
+                        .font(.lumenCaption)
+                        .foregroundStyle(Theme.textTertiary)
+                }
+            }
+            .fixedSize()
+            // In a plan without automation a schedule cannot be changed, and does not run: it can
+            // be deleted, and switched off (not on).
+            if allowed {
+                Button(L("passwords.edit")) { draft = schedule }
+                    .buttonStyle(.lumenGhost)
+                    .disabled(draft != nil)
+            } else {
+                Button(L("common.delete"), role: .destructive) { pendingDelete = schedule }
+                    .buttonStyle(.lumenDestructive)
+            }
             Toggle(L("schedule.enabled"), isOn: Binding(get: { schedule.isEnabled }, set: { on in
                 var changed = schedule
                 changed.isEnabled = on
@@ -111,11 +203,14 @@ struct ScenarioSchedulesPane: View {
             }))
             .toggleStyle(.lumenSwitch)
             .labelsHidden()
-            .disabled(!allowed || sample != nil)
+            .disabled(sample != nil || (!allowed && !schedule.isEnabled))
         }
-        .padding(14)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.raisedInset))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
+        .card(padding: 14)
+        .contextMenu {
+            Button(L("passwords.edit")) { draft = schedule }
+                .disabled(!allowed || draft != nil)
+            Button(L("common.delete"), role: .destructive) { pendingDelete = schedule }
+        }
     }
 
     private func symbol(_ action: ScenarioSchedule.Action) -> String {
@@ -144,30 +239,24 @@ struct ScenarioSchedulesPane: View {
         return schedule.jitterMinutes == 0 ? base : base + String(format: L("schedule.when.jitter"), schedule.jitterMinutes)
     }
 
-    /// The next run, and how the last one that came due went.
-    private func state(_ schedule: ScenarioSchedule) -> String {
+    /// "Thu, 12 Nov, 10:07": a run's time without the year. On one line: check_localization.py
+    /// looks for the interface's locale on the line of `.formatted(`.
+    private static func shownRun(_ date: Date) -> String { date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute().locale(Localization.locale)) }
+
+    /// When the schedule runs next, as its row says it: the time, a dash until one is planned, or
+    /// that it is switched off.
+    private func nextRunText(_ schedule: ScenarioSchedule) -> String {
         guard schedule.isEnabled else { return L("schedule.state.off") }
-        var parts: [String] = []
-        if let next = schedule.nextRunAt {
-            parts.append(String(format: L("schedule.state.next"), next.shown(date: .abbreviated, time: .shortened)))
-        }
-        if let result = schedule.lastResult {
-            switch result {
-            case .started:
-                if let last = schedule.lastRunAt {
-                    parts.append(String(format: L("schedule.state.last"), last.shown(date: .abbreviated, time: .shortened)))
-                }
-            case .failed: parts.append(L("schedule.state.failed"))
-            case .missed: parts.append(L("schedule.state.missed"))
-            case .notInPlan: parts.append(L("schedule.state.notInPlan"))
-            }
-        }
-        return parts.joined(separator: " · ")
+        return schedule.nextRunAt.map { Self.shownRun($0) } ?? "—"
     }
 
-    private func stateColor(_ schedule: ScenarioSchedule) -> Color {
-        guard schedule.isEnabled, let result = schedule.lastResult else { return Theme.textTertiary }
-        return result == .failed || result == .notInPlan ? Theme.warning : Theme.textTertiary
+    /// What stopped the last run that came due, in words; nil when nothing did.
+    private func problemText(_ schedule: ScenarioSchedule) -> String? {
+        switch schedule.lastResult {
+        case .failed?: return L("schedule.state.failed")
+        case .notInPlan?: return L("schedule.state.notInPlan")
+        case .missed?, .started?, nil: return nil
+        }
     }
 
     // MARK: The form
@@ -181,19 +270,22 @@ struct ScenarioSchedulesPane: View {
         let binding = Binding(get: { draft ?? initial }, set: { draft = $0 })
         let isNew = !schedules.contains { $0.id == initial.id }
         return VStack(alignment: .leading, spacing: 14) {
-            Text(L(isNew ? "schedule.form.new" : "schedule.form.edit"))
+            Text(isNew ? L("schedule.form.new") : L("schedule.form.edit"))
                 .font(.lumenSection)
                 .foregroundStyle(Theme.textPrimary)
             field(L("schedule.form.what")) {
-                Picker(L("schedule.form.what"), selection: binding.action) {
-                    ForEach(scenarios) { scenario in
-                        Text(String(format: L("schedule.action.scenario"), scenario.name.isEmpty ? L("scenarios.untitled") : scenario.name))
-                            .tag(ScenarioSchedule.Action.scenario(scenario.id))
+                VStack(alignment: .leading, spacing: 6) {
+                    Picker(L("schedule.form.what"), selection: binding.action) {
+                        ForEach(scenarios) { scenario in
+                            Text(String(format: L("schedule.action.scenario"), scenario.name.isEmpty ? L("scenarios.untitled") : scenario.name))
+                                .tag(ScenarioSchedule.Action.scenario(scenario.id))
+                        }
+                        Text(L("schedule.action.warmUp")).tag(ScenarioSchedule.Action.warmUp)
                     }
-                    Text(L("schedule.action.warmUp")).tag(ScenarioSchedule.Action.warmUp)
+                    .labelsHidden()
+                    .frame(maxWidth: 320, alignment: .leading)
+                    actionNotes(binding.wrappedValue)
                 }
-                .labelsHidden()
-                .frame(maxWidth: 320, alignment: .leading)
             }
             field(L("scenarios.profile")) {
                 Picker(L("scenarios.profile"), selection: binding.profileID) {
@@ -205,22 +297,16 @@ struct ScenarioSchedulesPane: View {
             field(L("schedule.form.when")) {
                 VStack(alignment: .leading, spacing: 10) {
                     LumenSegmented(selection: Binding(get: { Self.isDaily(binding.wrappedValue) }, set: { daily in
+                        // A click on the segment that is chosen keeps the time set under it.
+                        guard daily != Self.isDaily(binding.wrappedValue) else { return }
                         binding.wrappedValue.when = daily ? .daily(hour: 10, minute: 0) : .every(hours: 6)
                     }), options: [(value: true, title: L("schedule.form.daily")), (value: false, title: L("schedule.form.every"))])
-                    switch binding.wrappedValue.when {
-                    case let .daily(hour, minute):
-                        HStack(spacing: 6) {
-                            Text(L("schedule.form.at")).font(.lumenBody).foregroundStyle(Theme.textSecondary)
-                            number(hour, in: 0...23, pad: true) { binding.wrappedValue.when = .daily(hour: $0, minute: minute) }
-                            Text(verbatim: ":").foregroundStyle(Theme.textSecondary)
-                            number(minute, in: 0...59, step: 5, pad: true) { binding.wrappedValue.when = .daily(hour: hour, minute: $0) }
-                        }
-                    case let .every(hours):
-                        HStack(spacing: 6) {
-                            Text(L("schedule.form.everyHours")).font(.lumenBody).foregroundStyle(Theme.textSecondary)
-                            number(hours, in: ScenarioSchedule.hoursAllowed) { binding.wrappedValue.when = .every(hours: $0) }
-                            Text(L("schedule.form.hours")).font(.lumenBody).foregroundStyle(Theme.textSecondary)
-                        }
+                    timeChoice(binding)
+                    if binding.wrappedValue.isEnabled {
+                        Text(String(format: L("schedule.form.first"), firstRun(of: binding.wrappedValue).shown(date: .abbreviated, time: .shortened)))
+                            .font(.lumenCaption)
+                            .foregroundStyle(Theme.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
@@ -237,8 +323,10 @@ struct ScenarioSchedulesPane: View {
             }
             HStack(spacing: 8) {
                 if !isNew {
+                    // Asked first, as a scenario's deletion is; the question names the schedule
+                    // as it is saved, not the form's changes.
                     Button(L("common.delete"), role: .destructive) {
-                        if model.saveSchedule(initial, remove: true) { draft = nil }
+                        pendingDelete = schedules.first { $0.id == initial.id } ?? initial
                     }
                     .buttonStyle(.lumenDestructive)
                 }
@@ -246,10 +334,9 @@ struct ScenarioSchedulesPane: View {
                 Button(L("common.cancel")) { draft = nil }
                     .buttonStyle(.lumenSecondary)
                     .keyboardShortcut(.cancelAction)
+                // The switch is the row's: a schedule that was off stays off when its time is changed.
                 Button(L("common.save")) {
-                    var saved = binding.wrappedValue
-                    saved.isEnabled = true
-                    if model.saveSchedule(saved) { draft = nil }
+                    if model.saveSchedule(binding.wrappedValue) { draft = nil }
                 }
                 .buttonStyle(.lumenPrimary)
                 .keyboardShortcut(.defaultAction)
@@ -259,6 +346,83 @@ struct ScenarioSchedulesPane: View {
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.raisedInset))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.strongBorder, lineWidth: 1))
+    }
+
+    /// Under "What to run": why the menu holds the warm-up only, and what a warm-up by the clock
+    /// runs — or that the profile's own repeating warm-up would run beside it.
+    @ViewBuilder private func actionNotes(_ value: ScenarioSchedule) -> some View {
+        if scenarios.isEmpty {
+            Text(L("schedule.form.what.noScenarios"))
+                .font(.lumenCaption)
+                .foregroundStyle(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        if value.action == .warmUp {
+            // The Warm Up window's own "Repeat on a schedule" (WarmUpView) and this one would both run.
+            if let own = model.warmUps?.schedule(for: value.profileID), own.isEnabled {
+                Label(String(format: L("schedule.form.warmUp.twice"), own.everyHours), systemImage: "exclamationmark.triangle.fill")
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(L("schedule.form.warmUp.note"))
+                    .font(.lumenCaption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// The time of day, or the hours between runs: menus, as the warm-up's "every N h".
+    @ViewBuilder private func timeChoice(_ binding: Binding<ScenarioSchedule>) -> some View {
+        switch binding.wrappedValue.when {
+        case let .daily(hour, minute):
+            HStack(spacing: 6) {
+                Text(L("schedule.form.at")).font(.lumenBody).foregroundStyle(Theme.textSecondary)
+                Picker(L("schedule.form.hour"), selection: Binding(get: { hour }, set: { binding.wrappedValue.when = .daily(hour: $0, minute: minute) })) {
+                    ForEach(0..<24, id: \.self) { value in
+                        Text(verbatim: String(format: "%02d", value)).tag(value)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+                Text(verbatim: ":").foregroundStyle(Theme.textSecondary)
+                Picker(L("schedule.form.minute"), selection: Binding(get: { minute }, set: { binding.wrappedValue.when = .daily(hour: hour, minute: $0) })) {
+                    ForEach(Self.choices(Array(stride(from: 0, to: 60, by: 5)), including: minute), id: \.self) { value in
+                        Text(verbatim: String(format: "%02d", value)).tag(value)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+        case let .every(hours):
+            HStack(spacing: 6) {
+                Text(L("schedule.form.everyHours")).font(.lumenBody).foregroundStyle(Theme.textSecondary)
+                Picker(L("schedule.form.every"), selection: Binding(get: { hours }, set: { binding.wrappedValue.when = .every(hours: $0) })) {
+                    ForEach(Self.choices([1, 2, 3, 4, 6, 8, 12, 24, 48, 72, 168], including: hours), id: \.self) { value in
+                        Text(String(format: L("warmup.schedule.hours"), value)).tag(value)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+        }
+    }
+
+    /// The values a menu offers, and the schedule's own if it is another.
+    private static func choices(_ list: [Int], including value: Int) -> [Int] {
+        list.contains(value) ? list : (list + [value]).sorted()
+    }
+
+    /// When the schedule in the form runs next: its own planned time while what decides it is as
+    /// saved, else planned from now, without the random part.
+    private func firstRun(of value: ScenarioSchedule) -> Date {
+        if let saved = schedules.first(where: { $0.id == value.id }), saved.isEnabled, saved.when == value.when,
+           saved.jitterMinutes == value.jitterMinutes, let planned = saved.nextRunAt, planned > Date() { return planned }
+        return value.nextRun(after: Date()) { _ in 0 }
     }
 
     private static func isDaily(_ schedule: ScenarioSchedule) -> Bool {
@@ -276,30 +440,5 @@ struct ScenarioSchedulesPane: View {
             content()
             Spacer(minLength: 0)
         }
-    }
-
-    /// A whole number with − and + beside it.
-    private func number(_ value: Int, in range: ClosedRange<Int>, step: Int = 1, pad: Bool = false, set: @escaping (Int) -> Void) -> some View {
-        HStack(spacing: 2) {
-            Button { set(value - step < range.lowerBound ? range.upperBound - (range.upperBound % step) : value - step) } label: {
-                Image(systemName: "minus").font(.system(size: 10, weight: .semibold)).frame(width: 22, height: 26)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(Theme.textSecondary)
-            .accessibilityLabel(L("schedule.form.less"))
-            Text(verbatim: pad ? String(format: "%02d", value) : String(value))
-                .font(.system(size: 14, weight: .medium, design: .monospaced))
-                .foregroundStyle(Theme.textPrimary)
-                .frame(minWidth: 30)
-            Button { set(value + step > range.upperBound ? range.lowerBound : value + step) } label: {
-                Image(systemName: "plus").font(.system(size: 10, weight: .semibold)).frame(width: 22, height: 26)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(Theme.textSecondary)
-            .accessibilityLabel(L("schedule.form.more"))
-        }
-        .padding(.horizontal, 4)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.field))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.fieldBorder, lineWidth: 1))
     }
 }

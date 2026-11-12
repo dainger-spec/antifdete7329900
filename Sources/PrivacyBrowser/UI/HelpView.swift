@@ -6,7 +6,8 @@ import SwiftUI
 /// the app, in the interface's language. The owner, 10 November: the scenario editor was behind a
 /// menu item, and what a scenario may say was written in the repository's docs only.
 enum HelpTopic: String, CaseIterable, Identifiable {
-    case start, palette, check, scenarios, commands, api, camera, codes, keys
+    // The order of the topic list and of the Help menu: the app, what a profile has, automation, the keys.
+    case start, palette, check, codes, camera, scenarios, commands, api, webdriver, keys
 
     var id: String { rawValue }
     var title: String { L("help.topic.\(rawValue)") }
@@ -18,6 +19,7 @@ enum HelpTopic: String, CaseIterable, Identifiable {
         case .scenarios: return "play.rectangle"
         case .commands: return "chevron.left.forwardslash.chevron.right"
         case .api: return "terminal"
+        case .webdriver: return "link"
         case .camera: return "camera"
         case .codes: return "lock.rotation"
         case .check: return "checkmark.shield"
@@ -50,7 +52,8 @@ enum HelpContent {
                 .heading("start.first"),
                 .steps(["start.step.new", "start.step.launch", "start.step.proxies", "start.step.lock"]),
                 .heading("start.where"),
-                .points(["start.where.palette", "start.where.scenarios", "start.where.api", "start.where.more", "start.where.settings"]),
+                .points(["start.where.palette", "start.where.check", "start.where.codes", "start.where.scenarios", "start.where.api",
+                         "start.where.more", "start.where.settings"]),
             ]
         case .palette:
             return [
@@ -142,13 +145,22 @@ enum HelpContent {
                 .heading("api.scenario"),
                 .code("api.scenario.code"),
                 .heading("api.webdriver"),
-                .paragraph("api.webdriver.text"),
-                .steps(["api.webdriver.step.on", "api.webdriver.step.copy", "api.webdriver.step.script"]),
-                .code("api.webdriver.code"),
-                .points(["api.webdriver.session", "api.webdriver.human", "api.webdriver.scripts", "api.webdriver.limits",
-                         "api.webdriver.playwright"]),
+                .paragraph("api.webdriver.see"),
                 .heading("api.errors"),
                 .paragraph("api.errors.text"),
+                .note("api.token"),
+            ]
+        case .webdriver:
+            return [
+                .paragraph("api.webdriver.text"),
+                .note("webdriver.plan"),
+                .heading("webdriver.connect"),
+                .steps(["api.webdriver.step.on", "api.webdriver.step.copy", "api.webdriver.step.script"]),
+                .heading("webdriver.example"),
+                .code("api.webdriver.code"),
+                .heading("webdriver.know"),
+                .points(["api.webdriver.session", "api.webdriver.human", "api.webdriver.scripts", "api.webdriver.limits",
+                         "api.webdriver.playwright"]),
                 .note("api.token"),
             ]
         case .camera:

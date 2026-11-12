@@ -72,11 +72,13 @@ enum OneTimeCodeInput {
     }
 }
 
-/// The time a code still stands, as a ring that empties: amber in its last five seconds.
+/// The time a code still stands, as a ring that empties: amber in its last five seconds. With
+/// movement reduced the ring steps from second to second.
 private struct CodeCountdown: View {
     let left: Int
     let period: Int
     var size: CGFloat = 34
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let urgent = left <= 5
@@ -86,7 +88,7 @@ private struct CodeCountdown: View {
                 .trim(from: 0, to: CGFloat(left) / CGFloat(max(period, 1)))
                 .stroke(urgent ? Theme.warning : Theme.greenDot, style: StrokeStyle(lineWidth: 3, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-                .animation(.linear(duration: 0.9), value: left)
+                .animation(Motion.isReduced(reduceMotion) ? nil : Animation.linear(duration: 0.9), value: left)
             Text(verbatim: "\(left)")
                 .font(.system(size: size * 0.36, weight: .semibold, design: .rounded))
                 .monospacedDigit()
@@ -110,7 +112,11 @@ struct OneTimeCodeCard: View {
         if let at {
             card(at)
         } else {
-            TimelineView(.periodic(from: .now, by: 1)) { context in card(context.date) }
+            // On the whole second: a tick a fraction of a second late would leave the old code
+            // up after it turned over, and a click would copy it.
+            TimelineView(.periodic(from: Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down)), by: 1)) { context in
+                card(context.date)
+            }
         }
     }
 
@@ -139,7 +145,7 @@ struct OneTimeCodeCard: View {
                     Image(systemName: copied ? "checkmark" : "doc.on.doc").font(.system(size: 11, weight: .medium))
                     Text(copied ? L("passwords.code.copied") : L("passwords.copy")).font(.lumenSecondary)
                 }
-                .foregroundStyle(copied ? Theme.greenDot : (hovered ? Theme.textPrimary : Theme.textSecondary))
+                .foregroundStyle(copied ? Theme.running : (hovered ? Theme.textPrimary : Theme.textSecondary))
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
@@ -149,8 +155,14 @@ struct OneTimeCodeCard: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
+        .animation(Motion.hover(hovered), value: hovered)
+        // "Copied" was said of the code that stood then, not of the one that replaced it.
+        .onChange(of: code) { _, _ in copied = false }
         .help(L("passwords.code.copyHelp"))
         .accessibilityLabel(L("passwords.code.copyHelp"))
+        // The label stands in for the card's content and the ring is hidden: the digits are read
+        // one by one as the button's value.
+        .accessibilityValue(Text(verbatim: code.map { String($0) }.joined(separator: " ")))
     }
 
     /// Whose code it is, as the site's link said; else what the code is for.
@@ -177,32 +189,73 @@ struct OneTimeCodeCard: View {
 /// The one-time code's part of a login being edited. With a generator: its code, live, and
 /// "Remove". Without: a field for the secret or the link, the clipboard, a picture's file — and a
 /// picture dropped anywhere on it. What is typed and not yet added is the caller's to read when
-/// the login is saved (`OneTimeCodeInput.read`).
+/// the login is saved (`OneTimeCodeInput.read`). Nothing here is kept until the login is saved:
+/// a code added and not saved, and a saved code that Save would remove, are both said.
 struct OneTimeCodeSetup: View {
     @Binding var generator: OneTimeCode?
     @Binding var input: String
+    /// The code the login is saved with (nil: none, or a new login): what Save would change is said.
+    var saved: OneTimeCode?
+    /// Why Save did not take what is typed (the caller's: `PasswordListView.save`).
+    var saveProblem: String?
+    /// Opens Help at "One-Time Codes"; nil: no link.
+    var onHelp: (() -> Void)?
     @State private var problem: String?
     @State private var dropping = false
 
+    /// What is wrong with what was given: found here, or by the caller's Save.
+    private var shownProblem: String? { problem ?? saveProblem }
+
     var body: some View {
+        // The box is where a picture is dropped, so it is drawn only while a code can be added:
+        // around a code it would be a third frame, between the login's card and the code's own.
+        let open = generator == nil
         VStack(alignment: .leading, spacing: 8) {
-            Text(L("passwords.code.title"))
-                .font(.lumenSection)
-                .foregroundStyle(Theme.textPrimary)
+            HStack(alignment: .firstTextBaseline) {
+                Text(L("passwords.code.title"))
+                    .font(.lumenSection)
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer(minLength: 8)
+                if let onHelp {
+                    Button(action: onHelp) { Label(L("passwords.code.help"), systemImage: "book") }
+                        .buttonStyle(.lumenGhost)
+                }
+            }
             if let generator {
                 OneTimeCodeCard(generator: generator)
+                if generator != saved { pendingNote(L("passwords.code.unsaved")) }
                 Button {
                     self.generator = nil
                     problem = nil
                 } label: { Label(L("passwords.code.remove"), systemImage: "minus.circle") }
                     .buttonStyle(.lumenGhost)
             } else {
+                if let saved {
+                    HStack(alignment: .top, spacing: 8) {
+                        pendingNote(L("passwords.code.willBeRemoved"))
+                        Spacer(minLength: 8)
+                        Button(L("passwords.code.restore")) {
+                            generator = saved
+                            input = ""
+                            problem = nil
+                        }
+                        .buttonStyle(.lumenGhost)
+                    }
+                }
                 HStack(spacing: 8) {
                     TextField(L("passwords.code.placeholder"), text: $input, prompt: Text(verbatim: ""))
-                        .lumenField(L("passwords.code.placeholder"), isEmpty: input.isEmpty, error: problem != nil)
+                        .lumenField(L("passwords.code.placeholder"), isEmpty: input.isEmpty, error: shownProblem != nil)
                     Button(L("common.add")) { take(OneTimeCodeInput.read(input)) }
                         .buttonStyle(.lumenSecondary)
                         .disabled(input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                // Under the field it is about, and beside the hint rather than in its place: the
+                // instruction is needed most when the attempt failed.
+                if let shownProblem {
+                    Text(shownProblem)
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 HStack(spacing: 4) {
                     Button { take(OneTimeCodeInput.readClipboard()) } label: {
@@ -212,27 +265,48 @@ struct OneTimeCodeSetup: View {
                     Button(action: chooseFile) { Label(L("passwords.code.qrFile"), systemImage: "qrcode.viewfinder") }
                         .buttonStyle(.lumenGhost)
                 }
-                Text(problem ?? L("passwords.code.hint"))
+                Text(L("passwords.code.hint"))
                     .font(.lumenCaption)
-                    .foregroundStyle(problem == nil ? Theme.textTertiary : Theme.danger)
+                    .foregroundStyle(Theme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(dropping ? Theme.rowSelected : Color.clear))
+        .padding(open ? 12 : 0)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(open && dropping ? Theme.rowSelected : Color.clear))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .strokeBorder(dropping ? Theme.strongBorder : Theme.hairline, style: StrokeStyle(lineWidth: 1, dash: dropping ? [4, 3] : [])))
+            .strokeBorder(open ? (dropping ? Theme.strongBorder : Theme.hairline) : Color.clear,
+                          style: StrokeStyle(lineWidth: 1, dash: open && dropping ? [4, 3] : [])))
         .onDrop(of: [.image, .fileURL], isTargeted: $dropping) { providers in
-            guard generator == nil, let provider = providers.first(where: { $0.canLoadObject(ofClass: NSImage.self) }) else { return false }
-            _ = provider.loadObject(ofClass: NSImage.self) { object, _ in
-                let image = object as? NSImage
-                DispatchQueue.main.async {
-                    take(image.map { OneTimeCodeInput.read($0) } ?? .problem(L("passwords.code.error.unreadable")))
+            // Of several things dropped, the one that holds a picture; else the first, which may be a picture's file.
+            guard generator == nil,
+                  let provider = providers.first(where: { $0.canLoadObject(ofClass: NSImage.self) }) ?? providers.first else { return false }
+            if provider.canLoadObject(ofClass: NSImage.self) {
+                _ = provider.loadObject(ofClass: NSImage.self) { object, _ in
+                    let image = object as? NSImage
+                    DispatchQueue.main.async {
+                        take(image.map { OneTimeCodeInput.read($0) } ?? .problem(L("passwords.code.error.unreadable")))
+                    }
+                }
+            } else {
+                // A file dragged from Finder comes as its address alone (as `CookiePaste` takes one).
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    let image = url.flatMap { NSImage(contentsOf: $0) }
+                    DispatchQueue.main.async {
+                        take(image.map { OneTimeCodeInput.read($0) } ?? .problem(L("passwords.code.error.unreadable")))
+                    }
                 }
             }
             return true
         }
         .onChange(of: input) { _, _ in problem = nil }
+    }
+
+    /// What Save would do to the code and has not done yet, in amber.
+    private func pendingNote(_ text: String) -> some View {
+        Label(text, systemImage: "exclamationmark.triangle.fill")
+            .font(.lumenSecondary)
+            .foregroundStyle(Theme.warning)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func take(_ outcome: OneTimeCodeInput.Outcome) {

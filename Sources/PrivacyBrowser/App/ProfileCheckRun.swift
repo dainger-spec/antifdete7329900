@@ -112,6 +112,14 @@ final class ProfileCheckRun: ObservableObject {
         step = .done
     }
 
+    /// A check as it stands at `step`, with nothing found yet: while it runs, or after it could
+    /// not be made (the UI snapshots show both).
+    func show(step: Step) {
+        findings = []
+        fixesMade = []
+        self.step = step
+    }
+
     /// The fix made: the profile's settings changed. The running profile keeps what it started
     /// with; "Restart and check again" shows the result.
     func fix(_ fix: ProfileCheck.Fix) {

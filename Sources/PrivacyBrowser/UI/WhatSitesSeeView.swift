@@ -6,9 +6,10 @@ import SwiftUI
 /// iPhone or iPad view this Mac's Safari is the wrong reference, and the panel says so, with what
 /// it cannot see of the real device, rather than "the same" (the owner's decision).
 ///
-/// With a check (`ProfileCheckRun`) the panel opens on it: one button, a verdict — "All in order"
-/// or "Things to look at (N)" — and a sentence a topic, with "Fix" where the settings can put it
-/// right. The signals, one by one, are its second tab.
+/// With a check (`ProfileCheckRun`) the panel opens on it and is titled as the profile's check:
+/// one button, a verdict — "All in order" or "Things to look at (N)" — and a sentence a topic,
+/// with "Fix" where the settings can put it right. The signals, one by one, are its second tab,
+/// with their own explanation at its top.
 struct WhatSitesSeeView: View {
     enum Tab: Hashable { case check, signals }
 
@@ -43,7 +44,9 @@ struct WhatSitesSeeView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SheetHeader(title: String(format: L("whatSites.title"), name), subtitle: L("whatSites.subtitle"))
+            // By `hasCheck`, not by the tab: the header keeps its height when the tab is switched.
+            SheetHeader(title: String(format: hasCheck ? L("check.title") : L("whatSites.title"), name),
+                        subtitle: hasCheck ? L("check.subtitle") : L("whatSites.subtitle"))
             if hasCheck {
                 LumenSegmented(selection: $tab, options: [(value: Tab.check, title: L("check.tab.check")), (value: Tab.signals, title: L("check.tab.signals"))])
                     .padding(.horizontal, 24)
@@ -69,9 +72,18 @@ struct WhatSitesSeeView: View {
         .background(Theme.raised)
     }
 
-    /// The signals one by one: the snapshot's controls, then the list.
+    /// The signals one by one: the snapshot's controls, then the list. Under a header that
+    /// speaks of the check, what the snapshot is and where it stays is said here first.
     @ViewBuilder
     private var signalsPane: some View {
+            if hasCheck {
+                Text(L("whatSites.subtitle"))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 12)
+            }
             HStack(spacing: 12) {
                 Button {
                     Task { await snapshot.take() }

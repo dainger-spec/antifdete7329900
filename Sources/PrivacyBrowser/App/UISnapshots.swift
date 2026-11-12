@@ -275,6 +275,16 @@ enum UISnapshots {
             ProfileInspectorView(row: rows[1], info: inspected, actions: ProfileActions(), guardReady: true)
                 .background(Theme.sidebar)
         }.capture(into: folder)
+        // With the automation API off: no WebDriver address, and a row that leads to its settings.
+        let apiOff: InspectorInfo = {
+            var info = inspected
+            info.webDriver = .apiOff
+            return info
+        }()
+        problems += await Shot(name: "inspector-alone-api-off", size: CGSize(width: ProfilesScreen.inspectorWidth, height: 760), titled: false) {
+            ProfileInspectorView(row: rows[1], info: apiOff, actions: ProfileActions(), guardReady: true)
+                .background(Theme.sidebar)
+        }.capture(into: folder)
         problems += await Shot(name: "profiles-inspector-unreadable", size: CGSize(width: 1400, height: 860), edges: true) {
             ProfilesPreview(rows: rows, showsInspector: true, selected: [rows[7].id])
         }.capture(into: folder)
@@ -296,7 +306,7 @@ enum UISnapshots {
         }.capture(into: folder)
         // The app's help (HelpView), as the sidebar's Help, the scenario editor's Commands and the
         // automation settings open it: a page of steps and code, the commands' table, the requests'.
-        for topic in [HelpTopic.scenarios, .commands, .api, .codes, .check] {
+        for topic in [HelpTopic.scenarios, .commands, .api, .webdriver, .codes, .check] {
             problems += await Shot(name: "help-\(topic.rawValue)", size: CGSize(width: 1040, height: 760)) {
                 HelpView(topic: .constant(topic))
             }.capture(into: folder)
@@ -347,6 +357,20 @@ enum UISnapshots {
         let checkedAt = Date(timeIntervalSince1970: 1_793_000_000)
         problems += await Shot(name: "profile-check-empty", size: WhatSitesSeeView.size, titled: false) {
             WhatSitesSeeView(name: "Northwind", snapshot: seen(), check: checked([]))
+        }.capture(into: folder)
+        // While it runs — its second step — and a check that could not be made.
+        func stopped(at step: ProfileCheckRun.Step) -> (WhatSitesSee) -> ProfileCheckRun {
+            { taken in
+                let run = ProfileCheckRun(profileID: taken.profileID, snapshot: taken, environment: { nil })
+                run.show(step: step)
+                return run
+            }
+        }
+        problems += await Shot(name: "profile-check-running", size: WhatSitesSeeView.size, titled: false) {
+            WhatSitesSeeView(name: "Northwind", snapshot: seen(), check: stopped(at: .exit))
+        }.capture(into: folder)
+        problems += await Shot(name: "profile-check-failed", size: WhatSitesSeeView.size, titled: false) {
+            WhatSitesSeeView(name: "Northwind", snapshot: seen(), check: stopped(at: .failed(L("whatSites.error.profileSilent"))))
         }.capture(into: folder)
         problems += await Shot(name: "profile-check", size: WhatSitesSeeView.size, titled: false) {
             WhatSitesSeeView(name: "Northwind", snapshot: seen(),
@@ -632,7 +656,7 @@ enum UISnapshots {
         problems += await Shot(name: "scenarios-recording", size: CGSize(width: 1100, height: 760)) {
             ScenariosView(sample: scenario, sampleRecording: recordedSteps).environmentObject(model)
         }.capture(into: folder)
-        // Runs by the clock: two schedules, and the form one is added in.
+        // Runs by the clock: two schedules, none yet, and the form one is added in.
         let clockProfiles = [(id: rows[0].id, name: "Personal"), (id: rows[1].id, name: "Northwind")]
         var daily = ScenarioSchedule(action: .scenario(scenario.id), profileID: rows[1].id, when: .daily(hour: 10, minute: 0), jitterMinutes: 15)
         daily.nextRunAt = Date(timeIntervalSince1970: 1_793_008_000)
@@ -643,6 +667,11 @@ enum UISnapshots {
         hourly.lastResult = .missed
         problems += await Shot(name: "scenarios-schedule", size: CGSize(width: 860, height: 760)) {
             ScenarioSchedulesPane(sample: .init(schedules: [daily, hourly], scenarios: [scenario], profiles: clockProfiles, editing: nil))
+                .background(Theme.surface)
+                .environmentObject(model)
+        }.capture(into: folder)
+        problems += await Shot(name: "scenarios-schedule-empty", size: CGSize(width: 860, height: 760)) {
+            ScenarioSchedulesPane(sample: .init(schedules: [], scenarios: [scenario], profiles: clockProfiles, editing: nil))
                 .background(Theme.surface)
                 .environmentObject(model)
         }.capture(into: folder)
