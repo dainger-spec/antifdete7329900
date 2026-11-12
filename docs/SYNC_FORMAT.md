@@ -325,9 +325,14 @@ _ = try await SyncEngine(repository: repo, transport: t).sync()
     version is ever written over by another.
   - The same website and user name saved apart on two devices (two ids, one account) is folded
     into one login after a merge: the one changed last (a hint, ties by id) stays the login; the
-    other is kept beside it as a version when its password or note differs, and its id is
+    other is kept beside it as a version when its password, note or one-time code differs, and its id is
     tombstoned with the versions it had, so a device still holding it does not bring it back (a
     change it made there since comes back, and is folded again).
+  - A login's one-time code (`totp`: the secret, the hash, the digits, the period) is part of the
+    login and merges with it: adding or removing one is a change of the login like any other. A
+    file that holds one is format 3, which a version from before codes refuses (it would write the
+    login back without it) — that profile's passwords are then not merged on that device until it
+    is updated; nothing of it is written over (docs/UPDATES.md §4).
   - A `passwords.bin.conflict` left by an earlier sync is taken in when the vault opens: each
     version in it that the file neither has, descends from, nor deleted becomes a version kept
     beside its login (one whose login is not there is kept beside its own id; choosing it makes

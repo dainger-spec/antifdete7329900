@@ -659,6 +659,23 @@
 "passwords.show" = "Show password";
 "passwords.title" = "Passwords — %@";
 "passwords.updated" = "Changed %@";
+"passwords.code.title" = "One-time code";
+"passwords.code.subtitle" = "Two-step sign-in code";
+"passwords.code.copied" = "Copied";
+"passwords.code.copyHelp" = "Copy the one-time code";
+"passwords.code.placeholder" = "Secret or otpauth:// link";
+"passwords.code.paste" = "Paste from Clipboard";
+"passwords.code.qrFile" = "QR Code from a File…";
+"passwords.code.remove" = "Remove the Code";
+"passwords.code.hint" = "A site shows the secret when you turn two-step sign-in on, as text or as a QR code. Take the QR code off the screen (⌃⇧⌘4 copies the area you select) and press Paste from Clipboard, choose it as a picture's file, or drop the picture here.";
+"passwords.code.error.empty" = "Enter a secret or an otpauth:// link.";
+"passwords.code.error.notASecret" = "This is not a one-time code's secret. It takes a secret of letters A–Z and digits 2–7, or an otpauth://totp/… link.";
+"passwords.code.error.counterBased" = "This is a counter-based code (HOTP). Lumen makes time-based codes (TOTP): choose an authenticator app on the site.";
+"passwords.code.error.severalAccounts" = "This is an export of several accounts from an authenticator app. It takes one account's secret or QR code, the one the site itself shows.";
+"passwords.code.error.unsupported" = "The link names an algorithm, a number of digits or a period Lumen does not make codes with.";
+"passwords.code.error.noQR" = "No QR code was found in the picture.";
+"passwords.code.error.noImage" = "The clipboard holds neither a secret nor a picture with a QR code.";
+"passwords.code.error.unreadable" = "The picture could not be opened.";
 "profiles.action.lock" = "Lock";
 "profiles.action.lock.help" = "Stop all profiles, encrypt their data, and forget all keys";
 "profiles.action.new" = "New Profile";
@@ -1018,6 +1035,7 @@
 "pw.panel.frameHeader" = "Logins for “%@”";
 "pw.panel.passwords" = "Passwords…";
 "pw.panel.savedPassword" = "Saved password";
+"pw.panel.code" = "Code for “%@”";
 "pw.save.button" = "Save Password";
 "pw.save.message" = "User name: %1$@. The password is stored encrypted with profile “%2$@” and offered the next time you sign in.";
 "pw.save.title" = "Do you want to save your password for “%@”?";
@@ -1873,6 +1891,23 @@
 "help.camera.know.size" = "An image or video is kept with the profile and synced, so keep it small.";
 "help.camera.know.system" = "Delivery: the JavaScript shim draws the frames, or the system camera (if installed) feeds them through macOS, so a page cannot tell it from the built-in camera.";
 "help.camera.know.systemInstall" = "The system camera is installed once: Camera → System camera → Install…, then switch on “Media extension” for Lumen in System Settings → General → Login Items & Extensions. Until it is on, a profile set to it gets no camera and cannot be saved with it; after an app update Lumen replaces it by itself.";
+"help.topic.codes" = "One-Time Codes";
+"help.codes.intro" = "Lumen makes the one-time codes of two-step sign-in itself (the ones an authenticator app on a phone usually shows). A code is kept in the profile beside the password: sealed the same way, and synced with it.";
+"help.codes.add" = "Adding one";
+"help.codes.step.site" = "On the site, turn two-step sign-in on and choose an authenticator app. The site shows a QR code and the secret as text.";
+"help.codes.step.open" = "In Lumen, open the profile's Passwords, select the site's login and press Edit — or Add Password, if there is no login yet.";
+"help.codes.step.secret" = "Under One-time code, paste the secret or the otpauth:// link. Or hand over the QR code: copy an area of the screen (⌃⇧⌘4) and press Paste from Clipboard, choose the picture's file, or drop the picture in.";
+"help.codes.step.save" = "Save. The site asks for a code to confirm: it is already shown in the login.";
+"help.codes.use" = "Using it";
+"help.codes.use.copy" = "In Passwords, a login shows the code that stands now and how many seconds it has left. One click on the code copies it.";
+"help.codes.use.fill" = "When a page asks for a code, the site's logins that have one are listed under the field: choose one and its code is filled in. As with passwords, and in Safari's window too.";
+"help.codes.use.only" = "A login can be a code alone, with no password.";
+"help.codes.know" = "Worth knowing";
+"help.codes.know.screen" = "Lumen does not capture the screen itself: macOS asks for the Screen Recording permission for that. A QR code reaches Lumen through the clipboard, a file or a drop.";
+"help.codes.know.kinds" = "Time-based codes (TOTP) are supported: SHA-1, SHA-256 and SHA-512, 6 to 8 digits. Counter-based codes (HOTP) and an authenticator app's export of several accounts at once are not.";
+"help.codes.know.clock" = "A code depends on the time: the Mac's clock must be right.";
+"help.codes.know.older" = "A profile that holds at least one code is read only by versions of Lumen that have one-time codes. An older version on another Mac does not open that profile's passwords until it is updated, so that it cannot erase the codes.";
+"help.codes.backup" = "A code in Lumen stands in for the phone as the second factor only while you can open the vault. Keep the backup codes the site gives you.";
 
 /* The licensing client: contract.* — the server's docs/CONTRACT.md §17, word for word; license.* — the app's own. */
 "contract.error.unreachable" = "The Lumen server isn’t responding. Check your connection and try again.";

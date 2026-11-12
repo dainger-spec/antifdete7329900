@@ -82,6 +82,18 @@ function looksLikeUsername(el) {
     /user|login|e-?mail|account|ident/i.test((el.name || '') + ' ' + (el.id || ''));
 }
 
+// A field for a one-time code (two-step sign-in): one the page says is that
+// (autocomplete=one-time-code), or one named like it. Never a password's field.
+const CODE_NAMES = /(^|[^a-z])(otp|totp|2fa|mfa)([^a-z]|$)|two.?factor|one.?time|verification.?code|auth(entication|enticator)?.?code|security.?code|passcode/i;
+function isCodeField(el) {
+  if (!isInput(el) || el.readOnly || el.disabled || isPasswordField(el)) return false;
+  if (!(el.type === 'text' || el.type === 'tel' || el.type === 'number')) return false;
+  const autocomplete = autocompleteOf(el);
+  if (/\bone-time-code\b/.test(autocomplete)) return true;
+  if (autocomplete && autocomplete !== 'off' && autocomplete !== 'on') return false;
+  return CODE_NAMES.test([el.name, el.id, el.getAttribute('aria-label'), el.placeholder].filter(Boolean).join(' '));
+}
+
 // Only fields a person can see and use: nothing is filled into, or read from, hidden inputs.
 function visible(el) {
   if (!el.isConnected || el.disabled || el.type === 'hidden') return false;
@@ -223,14 +235,14 @@ function rectOf(el) {
 }
 
 function suggest(el, reason) {
-  const role = loginRole(el);
+  const role = isCodeField(el) ? 'code' : loginRole(el);
   if (!role || !visible(el)) return;
   const pointer = lastPointer && lastPointer.el === el && performance.now() - lastPointer.at < 1500
     ? { x: lastPointer.x, y: lastPointer.y } : null;
   post({ type: 'focus', field: idOf(el), role, reason, rect: rectOf(el), pointer }).then((reply) => {
     suggesting = !!(reply && reply.count > 0);
     // WebKit's own key button in the field, where this world may show it (as Safari does).
-    if (suggesting && 'autofillButtonType' in el) {
+    if (suggesting && role !== 'code' && 'autofillButtonType' in el) {
       try { el.autofillButtonType = 'credentials'; } catch (e) { /* not in this WebKit */ }
     }
   });
@@ -337,6 +349,24 @@ globalThis.__pbPasswords = {
     if (!passwordField && !usernameField) return 'nofield';
     if (usernameField && username) setValue(usernameField, username);
     if (passwordField) setValue(passwordField, password);
+    return 'filled';
+  },
+  // Fills a one-time code into the code's field `field` — or, where the page has one box a
+  // digit, into the boxes. Only into this document, of the origin the app checked.
+  fillCode(token, field, code, origin) {
+    if (token && token !== TOKEN) return 'stale';
+    if (location.origin !== origin) return 'origin';
+    const el = field ? elementOf(field) : null;
+    if (!el || !visible(el) || !isCodeField(el)) return 'nofield';
+    if (el.maxLength === 1) {
+      const boxes = fieldsIn(scopeOf(el)).filter((e) => visible(e) && e.maxLength === 1 && !isPasswordField(e));
+      const from = boxes.length === code.length ? 0 : boxes.indexOf(el);
+      if (from >= 0 && boxes.length - from >= code.length) {
+        for (let i = 0; i < code.length; i += 1) setValue(boxes[from + i], code[i]);
+        return 'filled';
+      }
+    }
+    setValue(el, code);
     return 'filled';
   },
   // The toolbar's Save: what the page's password fields hold, typed or not.

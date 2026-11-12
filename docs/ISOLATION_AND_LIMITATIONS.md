@@ -1283,6 +1283,7 @@ the browser does it itself, as close to Safari as that allows.
   (Chrome and Firefox refuse too; Safari offers it with a warning); ports must match.
 - **Not implemented:** strong-password suggestions for sign-up forms, Touch ID before filling,
   "Recently Deleted", import/export, shared credentials between related domains, passkeys.
+  (One-time codes are: see below.)
 - **Frames.** A frame of another site is offered that site's logins only, under a header that
   names it; the frame's origin always comes from WebKit, never from the page. An opaque origin
   (sandboxed frame, `data:`) gets nothing. Placing the list under a field in a cross-origin
@@ -1295,7 +1296,30 @@ the handler, and cannot replace the prototypes it uses. A page script that write
 submits the form is not offered for saving (self-test). Before writing a value the script checks
 that the document is the one the user focused and that `location.origin` is the frame's.
 
-**Storage.** Entries: origin, user name, password, note, changed and last-used dates. The
+**One-time codes.** A login can hold what makes its one-time codes (TOTP, RFC 6238: SHA-1,
+SHA-256 or SHA-512, 6 to 8 digits; `OneTimeCode` in BrowserCore, checked against the RFC's
+vectors). It is added in the login's editor: the secret as text, an `otpauth://totp/…` link, or
+the site's QR code as a picture — pasted from the clipboard (⌃⇧⌘4 copies a part of the screen),
+chosen as a file, or dropped in; Vision reads it on this Mac. The password manager shows the code
+that stands now with the time it has left, and a click copies it (marked as concealed, like a
+password). On a page, a field for a code — `autocomplete="one-time-code"`, or one named like it
+(`otp`, `totp`, `2fa`, `mfa`, "verification code", …) — is offered the site's logins that have a
+code, under the field, as a login's fields are; the code is made when the row is chosen, and
+pages with one box a digit get a digit in each. A login may be a code alone, with no password.
+
+- **The screen is not captured.** That needs the Screen Recording permission; the clipboard does
+  the same for a QR code with none.
+- **Not generated:** counter-based codes (HOTP), an authenticator app's export of several
+  accounts (`otpauth-migration://`), Steam's and other sites' own schemes. Each is refused with
+  its reason.
+- **The second factor is in the vault.** Whoever opens the vault has both the password and the
+  code; Help says to keep the site's backup codes.
+- **Older versions.** `passwords.bin` is format 3 once a login holds a code (docs/UPDATES.md §4):
+  a version from before codes refuses that profile's passwords rather than write the login back
+  without its code. A profile with no code stays format 2.
+
+**Storage.** Entries: origin, user name, password, note, changed and last-used dates, and the
+one-time code's generator where there is one. The
 "Never" websites and the switch are in the profile's encrypted configuration. The password
 manager asks for the master password (one Argon2id derivation) each time it is opened.
 

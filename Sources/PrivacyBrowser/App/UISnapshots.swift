@@ -296,7 +296,7 @@ enum UISnapshots {
         }.capture(into: folder)
         // The app's help (HelpView), as the sidebar's Help, the scenario editor's Commands and the
         // automation settings open it: a page of steps and code, the commands' table, the requests'.
-        for topic in [HelpTopic.scenarios, .commands, .api] {
+        for topic in [HelpTopic.scenarios, .commands, .api, .codes] {
             problems += await Shot(name: "help-\(topic.rawValue)", size: CGSize(width: 1040, height: 760)) {
                 HelpView(topic: .constant(topic))
             }.capture(into: folder)
@@ -510,11 +510,28 @@ enum UISnapshots {
         // The other sheets, as they open.
         let model = AppModel()
         if let northwind = sampleSummary(name: "Northwind", id: rows[1].id) {
-            problems += await Shot(name: "sheet-passwords-locked", size: CGSize(width: 780, height: 560), titled: false) {
+            problems += await Shot(name: "sheet-passwords-locked", size: CGSize(width: 780, height: 620), titled: false) {
                 PasswordListView(profile: northwind).environmentObject(model)
             }.capture(into: folder)
-            problems += await Shot(name: "narrow-sheet-passwords-locked", size: narrow(CGSize(width: 780, height: 560)), titled: false) {
+            problems += await Shot(name: "narrow-sheet-passwords-locked", size: narrow(CGSize(width: 780, height: 620)), titled: false) {
                 PasswordListView(profile: northwind).environmentObject(model).environment(\.sheetRoom, narrowRoom)
+            }.capture(into: folder)
+            // A login with a one-time code, at a moment that does not move (RFC 6238's own secret
+            // at second 44: the code is 287 082, with sixteen seconds left of thirty), and the
+            // part of the editor a code is added in.
+            let logins = [
+                PasswordEntry(origin: "https://bank.example", username: "alice@example.com", password: "correct horse",
+                              note: "Two-step sign-in turned on in November.", updatedAt: Date(timeIntervalSince1970: 1_760_000_000),
+                              device: "MacBook Air",
+                              totp: OneTimeCode(secret: Data("12345678901234567890".utf8), issuer: "Example Bank", account: "alice@example.com")),
+                PasswordEntry(origin: "https://shop.example", username: "alice", password: "battery staple",
+                              updatedAt: Date(timeIntervalSince1970: 1_760_000_000)),
+            ]
+            problems += await Shot(name: "sheet-passwords-code", size: CGSize(width: 780, height: 620), titled: false) {
+                PasswordListView(profile: northwind, codeDate: Date(timeIntervalSince1970: 44), sample: logins).environmentObject(model)
+            }.capture(into: folder)
+            problems += await Shot(name: "sheet-passwords-code-editor", size: CGSize(width: 780, height: 620), titled: false) {
+                PasswordListView(profile: northwind, sample: logins, sampleEditing: true).environmentObject(model)
             }.capture(into: folder)
             problems += await Shot(name: "sheet-cookie-import", size: CGSize(width: 680, height: 560), titled: false) {
                 CookieImportView(profile: northwind).environmentObject(model)

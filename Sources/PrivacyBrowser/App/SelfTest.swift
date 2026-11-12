@@ -6598,6 +6598,47 @@ final class SelfTest {
               sameSiteListed && AutoFillPanel.current?.titles == ["ann"] && AutoFillPanel.current?.header?.contains("www.selftest.invalid") == true,
               "\(TabPasswordAutoFill.testFocusLog) \(AutoFillPanel.current?.titles ?? []) \(AutoFillPanel.current?.header ?? "nil")")
         AutoFillPanel.current?.dismiss()
+
+        // A one-time code: the site's login that has one is offered under a code's field, and the
+        // code that stands at that moment is filled — into one field, and into six boxes of a digit.
+        guard var withCode = vault.allEntries().first(where: { $0.username == "ann" && !$0.isConflictVersion }),
+              let generator = try? OneTimeCode.parse("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ") else {
+            check("passwords: a one-time code's field lists the site's logins that have a code", false, "no login to give a code to")
+            return
+        }
+        withCode.totp = generator
+        try vault.update(withCode)
+        _ = await open("http://login.selftest.invalid/pb-login?code=1")
+        _ = await autoFillWorld("return globalThis.__pbPasswords.suggest('#code');")
+        let codeListed = await waitUntil(timeout: 5) { AutoFillPanel.current != nil }
+        check("passwords: a one-time code's field lists the site's logins that have a code",
+              codeListed && AutoFillPanel.current?.titles.first?.contains("ann") == true,
+              "\(AutoFillPanel.current?.titles ?? []) focus: \(TabPasswordAutoFill.testFocusLog)")
+        // The code may turn over between the choice and the reading: either side of it is right.
+        let codeBefore = generator.code()
+        AutoFillPanel.current?.choose(at: 0)
+        let codesStanding = [codeBefore, generator.code()]
+        let codeFilled = await eventually(5) {
+            let values = await self.inputValues(webView, ["#code"])
+            return codesStanding.contains(values.first ?? "")
+        }
+        let codeRead = await inputValues(webView, ["#code"]).first ?? ""
+        check("passwords: choosing it fills the code that stands now", codeFilled,
+              "the field holds \(codeRead.count) characters")
+        _ = await autoFillWorld("return globalThis.__pbPasswords.suggest('#d0');")
+        let boxesListed = await waitUntil(timeout: 5) { AutoFillPanel.current != nil }
+        let boxesBefore = generator.code()
+        AutoFillPanel.current?.choose(at: 0)
+        let boxesStanding = [boxesBefore, generator.code()]
+        let boxes = (0..<6).map { "#d\($0)" }
+        let boxesFilled = await eventually(5) {
+            let values = await self.inputValues(webView, boxes)
+            return boxesStanding.contains(values.joined())
+        }
+        let boxesRead = await inputValues(webView, boxes).filter { !$0.isEmpty }.count
+        check("passwords: a page with one box a digit gets a digit of the code in each", boxesListed && boxesFilled,
+              "listed \(boxesListed), \(boxesRead) boxes hold a digit")
+        AutoFillPanel.current?.dismiss()
     }
 
     // MARK: Cookie import

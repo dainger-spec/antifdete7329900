@@ -6,7 +6,7 @@ import SwiftUI
 /// the app, in the interface's language. The owner, 10 November: the scenario editor was behind a
 /// menu item, and what a scenario may say was written in the repository's docs only.
 enum HelpTopic: String, CaseIterable, Identifiable {
-    case start, palette, scenarios, commands, api, camera, keys
+    case start, palette, scenarios, commands, api, camera, codes, keys
 
     var id: String { rawValue }
     var title: String { L("help.topic.\(rawValue)") }
@@ -19,6 +19,7 @@ enum HelpTopic: String, CaseIterable, Identifiable {
         case .commands: return "chevron.left.forwardslash.chevron.right"
         case .api: return "terminal"
         case .camera: return "camera"
+        case .codes: return "lock.rotation"
         case .keys: return "keyboard"
         }
     }
@@ -151,6 +152,17 @@ enum HelpContent {
                 .note("camera.secure"),
                 .points(["camera.know.system", "camera.know.systemInstall", "camera.know.safari", "camera.know.detect",
                          "camera.know.permission", "camera.know.size"]),
+            ]
+        case .codes:
+            return [
+                .paragraph("codes.intro"),
+                .heading("codes.add"),
+                .steps(["codes.step.site", "codes.step.open", "codes.step.secret", "codes.step.save"]),
+                .heading("codes.use"),
+                .points(["codes.use.copy", "codes.use.fill", "codes.use.only"]),
+                .heading("codes.know"),
+                .note("codes.backup"),
+                .points(["codes.know.screen", "codes.know.kinds", "codes.know.clock", "codes.know.older"]),
             ]
         case .keys:
             return [

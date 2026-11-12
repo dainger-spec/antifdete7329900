@@ -5,7 +5,9 @@ import SwiftUI
 /// A profile's saved passwords, as Safari's Passwords: locked until the master password is entered
 /// again (Safari asks for Touch ID or the login password), then a searchable list of website and
 /// user name; the selected login shows its password on request, can be copied, edited and
-/// deleted; new ones can be added. Below the list, the websites passwords are never saved for.
+/// deleted; new ones can be added. A login can hold what makes its one-time codes (two-step
+/// sign-in): the code that stands now is shown with the time it has left, and one click copies it.
+/// Below the list, the websites passwords are never saved for.
 /// Changes apply at once, also to the running profile (it shares this vault).
 struct PasswordListView: View {
     let profile: ProfileSummary
@@ -33,7 +35,16 @@ struct PasswordListView: View {
         var username = ""
         var password = ""
         var note = ""
+        /// What makes the login's one-time codes, and what is typed for it and not added yet.
+        var totp: OneTimeCode?
+        var codeInput = ""
     }
+
+    /// The moment the one-time code is shown for, for a picture that must not change (the snapshots).
+    var codeDate: Date?
+    /// Opens unlocked on these logins, the first chosen (the snapshots) — `sampleEditing`: being edited.
+    var sample: [PasswordEntry]?
+    var sampleEditing = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -67,8 +78,19 @@ struct PasswordListView: View {
                     .keyboardShortcut(draft == nil ? KeyboardShortcut.cancelAction : nil)
             })
         }
-        .sheetFrame(width: 780, height: 560)
+        .sheetFrame(width: 780, height: 620)
         .background(Theme.raised)
+        .onAppear {
+            guard let sample, !unlocked else { return }
+            entries = sample
+            selection = sample.first?.id
+            unlocked = true
+            if sampleEditing, let entry = sample.first {
+                revealed = true
+                draft = Draft(id: entry.id, website: entry.origin, username: entry.username, password: entry.password,
+                              note: entry.note ?? "", totp: nil, codeInput: "")
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: PasswordVault.didChangeNotification)) { note in
             if unlocked, note.userInfo?["profileID"] as? UUID == profile.id { reload() }
         }
@@ -149,6 +171,15 @@ struct PasswordListView: View {
                                       systemImage: "exclamationmark.triangle.fill")
                                     .font(.caption).foregroundStyle(Theme.warning)
                             }
+                        }
+                        if entry.totp != nil {
+                            Spacer(minLength: 4)
+                            // The login has a one-time code.
+                            Image(systemName: "lock.rotation")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Theme.textTertiary)
+                                .help(L("passwords.code.title"))
+                                .accessibilityLabel(L("passwords.code.title"))
                         }
                     }
                     // The design's selected row: the system's, under the app's white tint, was white
@@ -232,15 +263,22 @@ struct PasswordListView: View {
             row(L("passwords.field.website"), entry.origin, copy: entry.origin)
             row(L("passwords.field.username"), entry.username.isEmpty ? L("passwords.noUsername") : entry.username,
                 copy: entry.username.isEmpty ? nil : entry.username)
-            HStack(alignment: .firstTextBaseline) {
-                Text(L("passwords.field.password")).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
-                Text(revealed ? entry.password : String(repeating: "•", count: 10))
-                    .font(.body.monospaced()).textSelection(.enabled)
-                Spacer()
-                Button { revealed.toggle() } label: { Image(systemName: revealed ? "eye.slash" : "eye") }
-                    .buttonStyle(.borderless).help(L(revealed ? "passwords.hide" : "passwords.show"))
-                Button { Self.copy(entry.password, concealed: true) } label: { Image(systemName: "doc.on.doc") }
-                    .buttonStyle(.borderless).help(L("passwords.copy"))
+            // A login that is a one-time code alone has no password to show.
+            if !entry.password.isEmpty {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(L("passwords.field.password")).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
+                    Text(revealed ? entry.password : String(repeating: "•", count: 10))
+                        .font(.body.monospaced()).textSelection(.enabled)
+                    Spacer()
+                    Button { revealed.toggle() } label: { Image(systemName: revealed ? "eye.slash" : "eye") }
+                        .buttonStyle(.borderless).help(L(revealed ? "passwords.hide" : "passwords.show"))
+                    Button { Self.copy(entry.password, concealed: true) } label: { Image(systemName: "doc.on.doc") }
+                        .buttonStyle(.borderless).help(L("passwords.copy"))
+                }
+            }
+            if let generator = entry.totp {
+                OneTimeCodeCard(generator: generator, at: codeDate)
+                    .padding(.vertical, 2)
             }
             if let note = entry.note, !note.isEmpty { row(L("passwords.field.note"), note, copy: nil) }
             Divider()
@@ -263,7 +301,7 @@ struct PasswordListView: View {
                     Button(L("passwords.edit")) {
                         revealed = true
                         draft = Draft(id: entry.id, website: entry.origin, username: entry.username,
-                                      password: entry.password, note: entry.note ?? "")
+                                      password: entry.password, note: entry.note ?? "", totp: entry.totp)
                     }
                     .buttonStyle(.lumenSecondary)
                 }
@@ -292,6 +330,10 @@ struct PasswordListView: View {
             Text(initial.id == nil ? L("passwords.addTitle") : L("passwords.editTitle"))
                 .font(.lumenSection)
                 .foregroundStyle(Theme.textPrimary)
+            // The fields scroll, the buttons stay: with the one-time code's part open, a login
+            // has more to it than the sheet is tall on a small screen.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
             TextField(L("passwords.placeholder.origin"), text: binding.website, prompt: Text(verbatim: ""))
                 .lumenField(L("passwords.placeholder.origin"), isEmpty: binding.wrappedValue.website.isEmpty)
             TextField(L("passwords.placeholder.username"), text: binding.username, prompt: Text(verbatim: ""))
@@ -311,7 +353,10 @@ struct PasswordListView: View {
             TextField(L("passwords.placeholder.note"), text: binding.note, prompt: Text(verbatim: ""), axis: .vertical)
                 .lineLimit(2...4)
                 .lumenField(L("passwords.placeholder.note"), isEmpty: binding.wrappedValue.note.isEmpty, height: nil)
-            Spacer()
+            OneTimeCodeSetup(generator: binding.totp, input: binding.codeInput)
+                }
+                .padding(1) // the fields' focus rings, which a scroll view clips at its edge
+            }
             HStack {
                 Button(L("common.cancel")) { draft = nil }
                     .buttonStyle(.lumenSecondary)
@@ -320,7 +365,9 @@ struct PasswordListView: View {
                 Button(L("common.save")) { save(binding.wrappedValue) }
                     .buttonStyle(.lumenPrimary)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(binding.wrappedValue.password.isEmpty || binding.wrappedValue.website.isEmpty)
+                    .disabled(binding.wrappedValue.website.isEmpty
+                              || (binding.wrappedValue.password.isEmpty && binding.wrappedValue.totp == nil
+                                  && binding.wrappedValue.codeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
             }
         }
     }
@@ -351,6 +398,17 @@ struct PasswordListView: View {
             return
         }
         let note = draft.note.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A secret typed and not added with its button is added by Save; one that is not a
+        // secret stops the save and says why, rather than be dropped.
+        var generator = draft.totp
+        if generator == nil, !draft.codeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            switch OneTimeCodeInput.read(draft.codeInput) {
+            case let .generator(found): generator = found
+            case let .problem(message):
+                error = message
+                return
+            }
+        }
         do {
             let vault = try model.passwordVault(for: profile.id)
             if let id = draft.id, var entry = vault.entry(id: id) {
@@ -358,6 +416,7 @@ struct PasswordListView: View {
                 entry.username = draft.username
                 entry.password = draft.password
                 entry.note = note.isEmpty ? nil : note
+                entry.totp = generator
                 try vault.update(entry)
                 selection = id
             } else {
@@ -365,7 +424,7 @@ struct PasswordListView: View {
                     throw PasswordVaultError.duplicate
                 }
                 let entry = PasswordEntry(origin: origin, username: draft.username, password: draft.password,
-                                          note: note.isEmpty ? nil : note)
+                                          note: note.isEmpty ? nil : note, totp: generator)
                 try vault.upsert(entry)
                 selection = entry.id
             }
