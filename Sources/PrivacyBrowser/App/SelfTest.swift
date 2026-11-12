@@ -357,6 +357,7 @@ final class SelfTest {
         await group("diagnostics") { try await diagnosticsBundle(repository) }
         await group("paste as typed") { try await pasteAsTyped(repository) }
         await group("what sites see") { try await whatSitesSee(repository) }
+        await group("profile check") { try await profileCheck(repository) }
         await group("deleting profiles") { try await deleteProfiles(repository) }
         await group("proxies") { try await proxies(repository) }
         await group("certificates") { try await certificatesWithoutFetching(repository) }
@@ -4695,6 +4696,63 @@ final class SelfTest {
         "paste as typed: the clipboard's text arrives in the page's focused field, as typed",
         "paste as typed: the page sees trusted key events — a key down per character, on its own key (H on KeyH, М on KeyV), Shift around a capital",
     ]
+
+    /// The profile's check, as the panel runs it (`ProfileCheckRun`, with the app's own lookup and
+    /// snapshot): a profile whose time zone is set to New York while its proxy exits in Berlin —
+    /// the mismatch is found, with its fix; the fix changes the settings; and after the restart
+    /// the check makes, the pages are in the exit's time zone and the finding is gone. The exit is
+    /// the self-test proxy's (`/pb-geo.json`: Europe/Berlin, DE), asked through the profile's proxy.
+    private func profileCheck(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("profile check: a time zone set elsewhere than the exit is found, fixed, and gone after a restart",
+                 "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
+            return
+        }
+        let services = ProxyGeoLookup.services
+        defer { ProxyGeoLookup.services = services }
+        ProxyGeoLookup.services = [.init(url: URL(string: "http://geo.selftest.invalid/pb-geo.json")!,
+                                         timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"])]
+        let profile = try repository.create(name: "Profile check", configuration: ProfileConfiguration(
+            proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), timeZoneIdentifier: "America/New_York",
+            ephemeral: true))
+        let id = profile.id
+        let manager = ProfileManager(repository: repository)
+        defer { try? repository.delete(id) }
+        let snapshot = WhatSitesSee(profileID: id, manager: { manager }, launch: { _ = try? await manager.launch($0) })
+        let run = ProfileCheckRun(profileID: id, snapshot: snapshot) {
+            ProfileCheckRun.Environment(
+                configuration: { try repository.loadConfiguration(id) },
+                applyFix: { fix, exit in
+                    let stored = try repository.loadConfiguration(id)
+                    try repository.saveConfiguration(ProfileCheck.applying(fix, to: stored, exit: exit).savingEdit(over: stored), for: id)
+                },
+                manager: { manager },
+                stop: { _ = try? await manager.stop(id) })
+        }
+        func finding(_ topic: ProfileCheck.Topic) -> ProfileCheck.Finding? { run.findings.first { $0.topic == topic } }
+        func said(_ topic: ProfileCheck.Topic) -> String {
+            finding(topic).map { "\($0.key) \($0.values) fix \($0.fix?.rawValue ?? "none")" } ?? "no finding (\(run.step))"
+        }
+
+        await run.run()
+        check("profile check: the proxy's exit is found through the proxy, and named",
+              finding(.proxy)?.key == "check.proxy.alive" && finding(.proxy)?.values.first == "country:DE", said(.proxy))
+        check("profile check: a time zone set elsewhere than the exit is found, with the fix that takes it from the connection",
+              finding(.timeZone)?.key == "check.timeZone.differs" && finding(.timeZone)?.values == ["America/New_York", "Europe/Berlin"]
+                  && finding(.timeZone)?.fix == .timeZoneFromConnection && run.attention >= 1,
+              said(.timeZone))
+
+        run.fix(.timeZoneFromConnection)
+        let fixed = try repository.loadConfiguration(id)
+        check("profile check: the fix changes the profile's settings, and is said to wait for the next start",
+              fixed.timeZoneIdentifier == nil && fixed.matchProxyLocation && run.fixesMade == [.timeZoneFromConnection] && run.fixError == nil,
+              "time zone \(fixed.timeZoneIdentifier ?? "nil"), follows \(fixed.matchProxyLocation), \(run.fixError ?? "no error")")
+
+        await run.restartAndRun()
+        check("profile check: after the restart the pages are in the exit's time zone, and the finding is gone",
+              finding(.timeZone)?.key == "check.timeZone.matches" && run.fixesMade.isEmpty, said(.timeZone))
+        if manager.isRunning(id) { try? await manager.stop(id) }
+    }
 
     /// What sites see, in this process: the snapshot's listener answers only its own pages and
     /// only to this Mac's loopback address; a profile's window (no proxy, its local requests

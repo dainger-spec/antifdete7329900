@@ -153,6 +153,8 @@ final class ProfileManager: ObservableObject {
     /// A cookie import sent to a profile's own process, waiting for its answer.
     private var pendingCookieExports: [UUID: CheckedContinuation<[ImportedCookie], Error>] = [:]
     private var pendingCookieImports: [UUID: CheckedContinuation<CookieImportOutcome, Error>] = [:]
+    /// A network report asked of a profile's own process and awaited (`networkReport(of:)`).
+    private var pendingNetworkReports: [UUID: [CheckedContinuation<ProfileNetworkReport?, Never>]] = [:]
     /// Where the warm-up of each profile running in its own process has got to, as that process
     /// last reported it. The one the manager keeps for a profile it runs itself comes from the
     /// robot instead (`warmUpStatus(of:)`).
@@ -557,6 +559,7 @@ final class ProfileManager: ObservableObject {
                 let pending = self.pendingCookieExports.removeValue(forKey: id)
                 if let cookies { pending?.resume(returning: cookies) } else { pending?.resume(throwing: CookieImportError.busy) }
             case .networkReport(let report):
+                for waiting in self.pendingNetworkReports.removeValue(forKey: id) ?? [] { waiting.resume(returning: report) }
                 self.onNetworkReport?(id, report)
             case .keychainReport(let report):
                 self.onKeychainReport?(id, report)
@@ -1010,6 +1013,24 @@ final class ProfileManager: ObservableObject {
         guard let child = children[id] else { return false }
         child.send(.checkNetwork(probe: probe))
         return true
+    }
+
+    /// What a profile's own process says about where its traffic goes, awaited (the profile's
+    /// check). Nil for a profile that does not run in a process of its own, and for one that
+    /// does not answer in `timeout` seconds.
+    func networkReport(of id: UUID, timeout: TimeInterval = 10) async -> ProfileNetworkReport? {
+        guard children[id] != nil else { return nil }
+        return await withCheckedContinuation { continuation in
+            pendingNetworkReports[id, default: []].append(continuation)
+            guard checkNetwork(id) else {
+                for waiting in pendingNetworkReports.removeValue(forKey: id) ?? [] { waiting.resume(returning: nil) }
+                return
+            }
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                for waiting in self?.pendingNetworkReports.removeValue(forKey: id) ?? [] { waiting.resume(returning: nil) }
+            }
+        }
     }
 
     /// Asks a profile running in its own process to look at the data-protection keychain from

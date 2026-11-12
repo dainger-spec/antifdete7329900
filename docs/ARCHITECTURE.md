@@ -623,6 +623,35 @@ SettingsView (Settings scene: ⌘, — and ⋯ → Settings…) ── AppSettin
    ProfileLibrary.recordVisit skips SiteSnapshotPage.isMeasuringPage
 ```
 
+### The profile's check
+
+The panel opens on a check of the profile in one go (`ProfileCheckPane`, the first tab; the
+signals one by one are the second). `ProfileCheckRun` gathers, `ProfileCheck` (BrowserCore) judges:
+
+```
+Check the Profile ── ProfileCheckRun.run()
+   the page:    WhatSitesSee.take() → ProfileCheck.Page(snapshot:) — time zone, language, User-Agent,
+                  screen and window, as the profile's own page says them (a page of this Mac)
+   the exit:    ProxyGeoLookup.lookUp(proxy:) — through the profile's proxy (or, with none, over this
+                  Mac's connection), the lookup a launch makes anyway: address, country, time zone, and
+                  the place when the service gives one (ProxyExitDetails.latitude/longitude)
+   the network: ProfileManager.networkReport(of:) → ProfileNetworkReport of the profile's own process
+                  (web views off the profile's store, WebRTC on where off, DNS prefetch, UDP closed)
+   ProfileCheck.findings(Facts) → one Finding a topic: proxy, timeZone, language, geolocation,
+                  webRTC, dns, engine, window; each ok / attention / unknown, a sentence's key
+                  (check.<topic>.<code>) with its values, and a Fix where the settings can put it right
+   Fix ── AppModel.applyCheckFix → ProfileCheck.applying(fix, to: configuration) → updateProfile
+          (the settings as an edit saves them; a running profile takes them at its next start)
+   Restart and Check Again ── stop, then run() (which starts it)
+```
+
+What it does not do: a DNS leak is judged from how the profile is built and what its process
+reports, not by asking an outside resolver-echo service — that would be a request to a third party
+made for the check alone. "unknown" is never counted as a finding: no exit found means nothing to
+hold the time zone and the language against. Tests: `ProfileCheckTests` (every rule and fix);
+self-test group "profile check" (a time zone set elsewhere than the proxy's exit is found, fixed,
+and gone after the restart).
+
 ## Concurrency
 
 - UI, `ProfileManager`, `BrowserSession`, window controllers and `WebDataStoreVault` are

@@ -680,6 +680,18 @@ final class AppModel: ObservableObject {
         return try repository.loadConfiguration(id)
     }
 
+    /// A fix of the profile's check (`ProfileCheck.Fix`): the settings changed as an edit changes
+    /// them, taken at the profile's next start. False when the fix had nothing to change.
+    @discardableResult
+    func applyCheckFix(_ fix: ProfileCheck.Fix, to id: UUID, exit: ProfileCheck.Coordinate?) throws -> Bool {
+        guard let repository else { throw CoreError.vaultNotFound }
+        let stored = try repository.loadConfiguration(id)
+        let changed = ProfileCheck.applying(fix, to: stored, exit: exit)
+        guard changed != stored else { return false }
+        try updateProfile(id, name: repository.summary(for: id).name, configuration: changed)
+        return true
+    }
+
     /// Brings a kept deleted profile back as a new profile (`ProfileTransfer.bringBack`), off the
     /// main thread: everything it carries is re-encrypted. The old folder stays, marked brought back.
     func bringBackDeletedProfile(_ id: UUID) async {

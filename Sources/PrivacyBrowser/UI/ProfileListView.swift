@@ -157,7 +157,16 @@ struct ProfileListView: View {
             .sheet(item: $whatSitesSeeFor) { profile in
                 WhatSitesSeeView(name: profile.name, snapshot: WhatSitesSee(profileID: profile.id, manager: { model.manager },
                                                                             launch: { await model.launch($0) }),
-                                 mobileView: (model.details[profile.id]?.deviceGeneration.platform ?? .macOS) != .macOS)
+                                 // The profile's check, on the same snapshot: the panel opens on it.
+                                 check: { taken in ProfileCheckRun(profileID: profile.id, snapshot: taken, model: { [weak model] in model }) },
+                                 mobileView: (model.details[profile.id]?.deviceGeneration.platform ?? .macOS) != .macOS,
+                                 showProxy: model.details[profile.id]?.proxyIdentity == nil ? nil : {
+                                     let identity = model.details[profile.id]?.proxyIdentity
+                                     let entry = identity.flatMap { identity in
+                                         model.proxyList?.entries.first { ProxyList.identity(of: $0.proxy) == identity }
+                                     }
+                                     showProxies(selecting: entry.map { [$0.id] } ?? [])
+                                 })
             }
             .sheet(isPresented: $warmingUpSeveral) { WarmUpQueueView(preselected: queuePreselection) }
             .sheet(item: $exporting) { profile in ProfileExportView(profile: profile) }

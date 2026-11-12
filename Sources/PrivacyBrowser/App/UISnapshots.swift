@@ -296,7 +296,7 @@ enum UISnapshots {
         }.capture(into: folder)
         // The app's help (HelpView), as the sidebar's Help, the scenario editor's Commands and the
         // automation settings open it: a page of steps and code, the commands' table, the requests'.
-        for topic in [HelpTopic.scenarios, .commands, .api, .codes] {
+        for topic in [HelpTopic.scenarios, .commands, .api, .codes, .check] {
             problems += await Shot(name: "help-\(topic.rawValue)", size: CGSize(width: 1040, height: 760)) {
                 HelpView(topic: .constant(topic))
             }.capture(into: folder)
@@ -317,6 +317,48 @@ enum UISnapshots {
                           comparedWithSafari: comparedWithSafari, takenAt: Date(timeIntervalSince1970: 1_793_000_000))
             return snapshot
         }
+        // The profile's check: before it is run; with things to look at — one of them fixed and
+        // waiting for a restart —; and all in order.
+        func checked(_ findings: [ProfileCheck.Finding], fixed: Set<ProfileCheck.Fix> = []) -> (WhatSitesSee) -> ProfileCheckRun {
+            { taken in
+                let run = ProfileCheckRun(profileID: taken.profileID, snapshot: taken, environment: { nil })
+                if !findings.isEmpty { run.show(findings, at: Date(timeIntervalSince1970: 1_793_000_000), fixesMade: fixed) }
+                return run
+            }
+        }
+        var inOrder = ProfileCheck.Facts(configuration: ProfileConfiguration(proxy: ProxySettings(kind: .socks5, host: "203.0.113.7", port: 1080)),
+                                         hostSafariVersion: "26.6.2", webRTC: .throughProxy)
+        inOrder.page = ProfileCheck.Page(timeZone: "Europe/Berlin", language: "de-DE",
+                                         userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Safari/605.1.15",
+                                         screen: .init(width: 1512, height: 982), window: .init(width: 1280, height: 800))
+        inOrder.exit = ProxyLocation(timeZoneIdentifier: "Europe/Berlin", countryCode: "DE", proxyEndpoint: "socks5://203.0.113.7:1080",
+                                     exitIP: "203.0.113.7")
+        inOrder.exitCoordinate = .init(latitude: 52.52, longitude: 13.40)
+        inOrder.lookupAnswered = true
+        inOrder.network = .init()
+        var toLookAt = inOrder
+        toLookAt.configuration.timeZoneIdentifier = "America/New_York"
+        toLookAt.configuration.languageOverride = "ru-RU"
+        toLookAt.configuration.geolocation = .fixed(latitude: 40.71, longitude: -74.0, accuracyMeters: 25)
+        toLookAt.page?.timeZone = "America/New_York"
+        toLookAt.page?.language = "ru-RU"
+        toLookAt.page?.userAgent = inOrder.page?.userAgent?.replacingOccurrences(of: "Version/26.6", with: "Version/18.4")
+        toLookAt.network = nil
+        let checkedAt = Date(timeIntervalSince1970: 1_793_000_000)
+        problems += await Shot(name: "profile-check-empty", size: WhatSitesSeeView.size, titled: false) {
+            WhatSitesSeeView(name: "Northwind", snapshot: seen(), check: checked([]))
+        }.capture(into: folder)
+        problems += await Shot(name: "profile-check", size: WhatSitesSeeView.size, titled: false) {
+            WhatSitesSeeView(name: "Northwind", snapshot: seen(),
+                             check: checked(ProfileCheck.findings(toLookAt, now: checkedAt), fixed: [.timeZoneFromConnection]), showProxy: {})
+        }.capture(into: folder)
+        problems += await Shot(name: "profile-check-ok", size: WhatSitesSeeView.size, titled: false) {
+            WhatSitesSeeView(name: "Northwind", snapshot: seen(), check: checked(ProfileCheck.findings(inOrder, now: checkedAt)))
+        }.capture(into: folder)
+        problems += await Shot(name: "narrow-profile-check", size: narrow(WhatSitesSeeView.size), titled: false) {
+            WhatSitesSeeView(name: "Northwind", snapshot: seen(),
+                             check: checked(ProfileCheck.findings(toLookAt, now: checkedAt))).environment(\.sheetRoom, narrowRoom)
+        }.capture(into: folder)
         problems += await Shot(name: "what-sites-see-empty", size: WhatSitesSeeView.size, titled: false) {
             WhatSitesSeeView(name: "Northwind", snapshot: WhatSitesSee(profileID: UUID(), manager: { nil }, launch: { _ in }))
         }.capture(into: folder)
