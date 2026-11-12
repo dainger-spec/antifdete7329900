@@ -297,8 +297,23 @@ final class AccountTests: LumenUITestCase {
         openPage("http://synced-\(run).lumentest:28380/whoami?t=synced")
         page("via: прокси B")
         backToList()
+
+        // Step 4: the next run brings the Mac's cookies into the session made by the first — the
+        // Mac's sign-in on macstate.lumentest is there.
         openPlan()
         reveal(app.buttons["syncButton"], "the sync's screen again").tap()
+        wait(app.staticTexts["syncConnected"], "still connected", timeout: 15)
+        app.buttons["syncNow"].tap()
+        let second = wait(app.staticTexts["syncResult"], "the second run says what came", timeout: 60)
+        XCTAssertTrue(second.label.contains("Куки обновлены: 1"), "the Mac's cookie went into the session: \(second.label)")
+        app.buttons["syncDone"].tap()
+        closePlan()
+        openSession("Магазин с Mac")
+        openPage("http://macstate.lumentest:28380/state")
+        page("cookie: from-mac")
+        backToList()
+        openPlan()
+        reveal(app.buttons["syncButton"], "the sync's screen once more").tap()
         wait(app.staticTexts["syncConnected"], "still connected", timeout: 15)
 
         // Kept: the screen opened again says so at once, no password asked.

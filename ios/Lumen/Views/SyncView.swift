@@ -138,12 +138,18 @@ struct SyncView: View {
             let transport = LumenSyncTransport(vaultID: kept.vaultID) { method, path, body, headers in
                 try await AccountClient.sync(method, path, body, headers, token: token)
             }
+            // The Mac's rule: a profile's cookies change while it does not run. The sessions made from
+            // the vault are closed first (left, if one is on the screen behind this one).
+            let synced = model.sessions.filter { $0.syncedProfileID != nil }
+            if model.path.contains(where: { id in synced.contains { $0.id == id } }) { model.path = [] }
+            synced.forEach { SessionRuntimes.shared.close($0.id) }
             switch await SyncRead.run(root: SyncKeychain.vaultFolder, key: kept.unlockKey, transport: transport,
-                                      keptGeneration: SyncKeychain.generation) {
+                                      keptGeneration: SyncKeychain.generation, cookies: CookieBridge(sessions: synced)) {
             case let .success(outcome):
                 SyncKeychain.generation = outcome.generation
                 let made = model.applySynced(outcome.profiles)
                 syncResult = L("Профилей с Mac: %@, новых: %@", "\(outcome.profiles.count)", "\(made)")
+                    + (outcome.cookiesSet + outcome.cookiesDeleted > 0 ? "\n" + L("Куки обновлены: %@", "\(outcome.cookiesSet + outcome.cookiesDeleted)") : "")
             case .failure(.notInPlan):
                 stage = .notInPlan
             case .failure(.keyNoLongerOpens):
