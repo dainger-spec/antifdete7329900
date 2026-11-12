@@ -215,3 +215,11 @@
 "Данные синхронизации на сервере изменились. Синхронизируйте ещё раз." = "The sync data on the server changed. Sync again.";
 "Куки обновлены: %@" = "Cookies updated: %@";
 "Профили с Mac появляются в списке сессий. Имя, описание и метки, изменённые на iPhone, уходят на Mac." = "Profiles from your Mac appear in the list of sessions. A name, description or tags changed on the iPhone go to the Mac.";
+
+/* The account's notices of the release (AccountNotices, CONTRACT.md §17.4). */
+"Оплаченный период заканчивается %@." = "The paid period ends on %@.";
+"Часы iPhone расходятся со временем сервера на %@. Исправьте дату и время в Настройках." = "This iPhone’s clock is off from the server’s time by %@. Correct the date and time in Settings.";
+"%@ дн." = "%@ d";
+"%@ ч" = "%@ h";
+"%@ мин" = "%@ min";
+"Скрыть" = "Hide";

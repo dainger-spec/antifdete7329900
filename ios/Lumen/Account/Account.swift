@@ -67,10 +67,29 @@ extension AppModel {
             return license.access.reason
         case .full:
             // The document itself says the paid period ended, or the account is blocked: said as it is.
-            return ["expired", "disabled"].contains(license.access.plan) ? license.access.reason : nil
+            if ["expired", "disabled"].contains(license.access.plan) { return license.access.reason }
+            if let skew = AccountNotices.clockSkew(clockSkew) { return skew }
+            if let ending = endingNotice { return ending.text }
+            return nil
         case .notSignedIn:
             return nil
         }
+    }
+
+    /// `period.ending`, unless the person closed it at this stage of this period's end.
+    var endingNotice: (key: String, text: String)? {
+        guard let entitlement, let end = entitlement.periodEndsAt,
+              let stage = AccountNotices.periodEnding(entitlement, now: Date()) else { return nil }
+        let key = "\(Int(end.timeIntervalSince1970))|\(stage.rawValue)"
+        guard dismissedEnding != key else { return nil }
+        return (key, AccountNotices.periodEndingText(end, dateText: Self.dateText))
+    }
+
+    /// The person closed the notice of the period's end (§8.5: it comes back in the last day).
+    func dismissEndingNotice() {
+        guard let key = endingNotice?.key else { return }
+        dismissedEnding = key
+        UserDefaults.standard.set(key, forKey: "notice.periodEnding")
     }
 
     static func dateText(_ date: Date) -> String {
@@ -147,6 +166,7 @@ extension AppModel {
             return .failed(check.meansAppOutdated ? AccountText.outdated : AccountText.unreachable)
         }
         let serverTime = AccountWire.time(object["serverTime"] as? String) ?? Date()
+        clockSkew = Date().timeIntervalSince(serverTime)
         AccountStore.save(AccountRecord(email: email, deviceID: deviceID, code: device["code"] as? String ?? "", deviceToken: deviceToken,
                                         entitlement: document,
                                         clock: EffectiveClock(floorTime: serverTime, floorUptime: ProcessInfo.processInfo.systemUptime),
@@ -189,6 +209,7 @@ extension AppModel {
             if case .valid = check {
                 // The new document replaces the kept one — also when it gives less (§9.4).
                 let serverTime = AccountWire.time(object["serverTime"] as? String) ?? Date()
+                clockSkew = Date().timeIntervalSince(serverTime)
                 kept.entitlement = document
                 kept.clock = EffectiveClock(floorTime: serverTime, floorUptime: ProcessInfo.processInfo.systemUptime)
                 kept.lastSuccessAt = serverTime

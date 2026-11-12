@@ -73,6 +73,7 @@ spaceRefusalStopsSync	core	LumenCoreTests.SyncTransportTests/testARefusalForSpac
 syncedProxyNotBound	core	LumenCoreTests.SyncCatalogTests/testTheMacsProfilesBecomeSessions	the Mac's proxy comes with the profile
 syncEditNotSent	core	LumenCoreTests.SyncReadTests/testTheMacsProfilesComeToTheIPhone	the iPhone's rename reaches the Mac
 syncCookiesOverwriteLocal	core	LumenCoreTests.SyncCookieTests/testTheMacsCookiesComeAndANewerOneHereStays	a newer change made here stays
+periodEndingSilent	core	LumenCoreTests.AccountNoticeTests/testThePeriodsEndIsSaidTwice	seven days before
 profileDefaultsReal	ui	LumenUITests/SettingsTests/testANewSessionHasTheFullProfile	a new session's device profile is full by default
 profileLimitIgnored	ui	LumenUITests/FreeTierTests/testFreePlan	the plans open instead of a third profile
 freePlanProxies	ui	LumenUITests/FreeTierTests/testFreePlan	a free profile goes without a proxy

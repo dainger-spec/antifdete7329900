@@ -51,6 +51,7 @@ public enum Fault: String, CaseIterable, Sendable {
     case syncedProxyNotBound      // a Mac profile with a proxy comes to the iPhone without it — it would open directly
     case syncEditNotSent          // a rename made on the iPhone to a profile from the Mac never reaches the Mac
     case syncCookiesOverwriteLocal // the Mac's cookies applied over a newer change made on the iPhone
+    case periodEndingSilent       // the paid period's end is never said before it comes
     // The account (rights from the server's signed document)
     case signatureNotChecked     // a document's signature is not checked: anyone's payload is taken
     case wrongDeviceAccepted     // a document of another device or another iPhone is taken

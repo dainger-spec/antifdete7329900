@@ -61,6 +61,10 @@ final class AppModel: ObservableObject {
     @Published private(set) var account: AccountRecord?
     /// What the server last said that the person must read (the iPhone unlinked, …).
     @Published var accountNotice: String?
+    /// This iPhone's clock against the server's at the last answer (§8.3): `clock.skew` beyond ten minutes.
+    @Published var clockSkew: TimeInterval = 0
+    /// The `period.ending` stage the person closed, for which period's end ("<end>|<stage>").
+    @Published var dismissedEnding: String? = UserDefaults.standard.string(forKey: "notice.periodEnding")
     /// The document `license` was decided by, when it passed the check.
     var entitlement: Entitlement?
     var refreshFailures = 0

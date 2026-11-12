@@ -33,6 +33,14 @@ struct SessionsView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .accessibilityIdentifier("accountMessage")
+                    .overlay(alignment: .topTrailing) {
+                        // The notice of the period's end may be closed (§8.5); the others stay while true.
+                        if model.endingNotice != nil, model.accountMessage == model.endingNotice?.text {
+                            Button { model.dismissEndingNotice() } label: { Image(systemName: "xmark").font(.system(size: 12, weight: .bold)) }
+                                .buttonStyle(.plain).foregroundStyle(Theme.warn).padding(8)
+                                .accessibilityIdentifier("dismissNotice").accessibilityLabel(L("Скрыть"))
+                        }
+                    }
                     .padding(.horizontal, 14).padding(.vertical, 12)
                     .background(Theme.warn.opacity(0.1), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .listRowBackground(Color.clear).listRowSeparator(.hidden)
