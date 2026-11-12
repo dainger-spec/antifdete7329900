@@ -143,6 +143,13 @@ A key is the whole account for whoever holds it — no email, no password. So (t
 - **On disk only inside the vault**: `account-key.bin`, AES-GCM under `HKDF(VMK, "account-key")`,
   this Mac's, never synced (`AccountKeyVault`). A profile's own process, opened with a grant,
   cannot derive the key. Never in `account.json`, the defaults, a log or a report.
+- **The account's session token** (`lms_…`, for the account screen) is kept the same way since the
+  security audit of 12 November 2026 (APP-11): `account-session.bin`, AES-GCM under
+  `HKDF(VMK, "account-session")` (`AccountSessionVault`), read back when the vault opens.
+  `account.json` keeps only the session's dates; a file of before with the token in it is written
+  again without it at the first start. The device's token stays in `account.json` — the rights need
+  it before the vault opens — and a profile's own process is refused that file, the sealed files
+  beside it and the other profiles' homes by its sandbox (APP-10, `ProfileNetworkGuard`).
 - **Its text comes out in six places** — the key's own type, the request that carries it, the
   vault's file, the token in `Authorization`, the token's own type, and the new key shown once after
   a replacement (`NewKeyView`: on screen while its sheet is open, copied only at a click and marked

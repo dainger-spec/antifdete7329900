@@ -308,7 +308,7 @@ struct SignInFlow: View {
         problem = nil
         codeNote = nil
         Task {
-            if let failure = await license.confirmLogin(email: email, code: codeText) {
+            if let failure = await license.confirmLogin(email: email, code: codeText, challenge: loginCode?.challenge) {
                 problem = LicenseText.error(failure)
                 waitIfAsked(failure)
                 if case .server(let error) = failure, error.code == "invalid_code", var spent = loginCode {

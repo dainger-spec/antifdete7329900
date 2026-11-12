@@ -844,6 +844,33 @@ final class AccountKeyVaultTests: XCTestCase {
         XCTAssertNil(try AccountKeyVault.load(from: again))
     }
 
+    /// The account's session token between runs (the security audit of 12 November 2026, APP-11): in
+    /// the vault, encrypted, not in account.json; a profile's own process cannot open it.
+    func testTheSessionIsKeptEncryptedAndOnlyTheVaultOpensIt() throws {
+        let vault = try MasterVault.create(in: root, password: "pw", iterations: 1_000)
+        XCTAssertNil(try AccountSessionVault.load(from: vault))
+        let token = ServerToken("lms_0123456789abcdefSESSIONTOKEN")
+        let ends = Date(timeIntervalSince1970: 1_800_000_000)
+        try AccountSessionVault.save(token, expiresAt: ends, to: vault)
+        let kept = try XCTUnwrap(try AccountSessionVault.load(from: vault))
+        XCTAssertEqual(kept.token, token)
+        XCTAssertEqual(kept.expiresAt, ends)
+        let bytes = try Data(contentsOf: root.appendingPathComponent("account-session.bin"))
+        for form in ["lms_0123456789abcdef", "SESSIONTOKEN"] {
+            XCTAssertNil(bytes.range(of: Data(form.utf8)), form)
+        }
+        let again = try MasterVault.unlock(in: root, password: "pw")
+        XCTAssertEqual(try AccountSessionVault.load(from: again)?.token, token)
+        let manager = try ProfileRepository(vault: again)
+        let profile = try manager.create(name: "P", configuration: ProfileConfiguration())
+        let granted = try MasterVault.open(in: root, grant: manager.grant(for: profile.id))
+        XCTAssertThrowsError(try AccountSessionVault.load(from: granted))
+        // Not the license key's file, and not opened with its key.
+        XCTAssertNil(try AccountKeyVault.load(from: again))
+        try AccountSessionVault.remove(from: again)
+        XCTAssertNil(try AccountSessionVault.load(from: again))
+    }
+
     func testAFileThatDoesNotOpenIsNeverWrittenOver() throws {
         let vault = try MasterVault.create(in: root, password: "pw", iterations: 1_000)
         let url = root.appendingPathComponent("account-key.bin")

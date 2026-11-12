@@ -159,7 +159,7 @@ enum ProfileNetworkGuard {
         // With a proxy, every session of the process carries it; with or without, none shares the
         // app's own cookie jar, cache or saved credentials with the other profiles' processes.
         missingHooks += proxyEverySessionConfiguration(proxies, delegate: StoreChallenges(policy: policy))
-        missingHooks += closeTheProcess(udp: !proxies.isEmpty)
+        missingHooks += closeTheProcess(udp: !proxies.isEmpty, profileID: profileID)
         // QUIC goes around any proxy: a profile with one does not run with UDP open.
         if !proxies.isEmpty, !closures.sorted.contains("udp") {
             throw CoreError.invalidConfiguration("UDP could not be closed to the profile's process")
@@ -850,8 +850,17 @@ enum ProfileNetworkGuard {
     ///     profile's process kept an item in the login keychain and every other profile's was shown
     ///     it, and an item the app made under its own signature (KeychainIsolation: CI run 659).
     ///     Every profile's process has it, with or without a proxy, or does not run (`engage`).
-    nonisolated private static func closeTheProcess(udp: Bool) -> [String] {
+    ///   * The account's files beside the vault — `account.json` with the device's token, the
+    ///     session's and the key's sealed files — and the other profiles: their homes, in plaintext
+    ///     while they run, neither read nor written, and nothing written in their folders. Only the
+    ///     app's own process uses the account, and a profile's process opens its own profile alone
+    ///     (`ProfileGrant`); before, its sandbox let it read the account's tokens and read or change
+    ///     another running profile's cookies and history (the security audit of 12 November 2026,
+    ///     APP-10). Its own folder stays open: in a sandbox profile the last rule that matches wins.
+    nonisolated private static func closeTheProcess(udp: Bool, profileID: UUID) -> [String] {
         var rules: [String] = []
+        var vaultRules: [String] = []
+        let vaultNamed = closeTheVault(profileID: profileID, into: &vaultRules)
         if udp { rules.append("(deny network-outbound (remote udp \"*:*\"))") }
         rules.append("(deny mach-lookup (global-name \"com.apple.SecurityServer\") (global-name-regex #\"^com\\.apple\\.securityd\\.\"))")
         if let realHome = SafariPaths.realHome {
@@ -878,7 +887,11 @@ enum ProfileNetworkGuard {
         // CI's inventory), and it reaches the network itself. The kernel refuses them by name
         // (WebKit's own services are com.apple.WebKit.*, and stay).
         let services = "(deny mach-lookup (xpc-service-name-prefix \"com.apple.Safari\"))"
-        for attempt in [rules + [services], rules] where !attempt.isEmpty {
+        // The vault's rules first; should the kernel refuse them, the process is closed without them
+        // rather than not at all, and the report says what stays open.
+        let attempts = vaultRules.isEmpty ? [rules + [services], rules]
+            : [vaultRules + rules + [services], vaultRules + rules, rules + [services], rules]
+        for attempt in attempts where !attempt.isEmpty {
             let profile = "(version 1)(allow default)" + attempt.joined()
             var error: UnsafeMutablePointer<CChar>?
             if sandboxInit(profile, 0, &error) == 0 {
@@ -888,6 +901,11 @@ enum ProfileNetworkGuard {
                 if reached.isEmpty { closures.insert("keychain") } else { missing.append("sandbox: securityd stays reachable (\(reached.joined(separator: ", ")))") }
                 if udp { closures.insert("udp") }
                 if placesClosed { closures.insert("safari-places") }
+                if !vaultRules.isEmpty, attempt.contains(vaultRules[0]) {
+                    closures.insert("other-profiles")
+                } else if vaultNamed {
+                    missing.append("sandbox: the account's files and the other profiles stay open")
+                }
                 logger.notice("The kernel closes to this process: \(closures.sorted.joined(separator: ", "), privacy: .public)")
                 return missing
             }
@@ -898,8 +916,39 @@ enum ProfileNetworkGuard {
         return missing
     }
 
+    /// The rules that close the account's files and the other profiles to this process: the vault is
+    /// the one the manager named (`PRIVACYBROWSER_VAULT_DIR`, `ProfileProcess.childEnvironment`), its
+    /// path as the kernel sees it (symbolic links resolved). False, and no rule, when it is not named
+    /// or its path cannot be written into a rule safely.
+    nonisolated private static func closeTheVault(profileID: UUID, into rules: inout [String]) -> Bool {
+        guard let named = ProcessInfo.processInfo.environment["PRIVACYBROWSER_VAULT_DIR"], !named.isEmpty else { return false }
+        let vault = URL(fileURLWithPath: named, isDirectory: true).resolvingSymlinksInPath().path
+        guard vault.hasPrefix("/"), !vault.contains("\""), !vault.contains("\\"), !vault.contains("\n") else { return false }
+        let profiles = vault + "/profiles"
+        let own = profiles + "/" + profileID.uuidString
+        let pattern = "^" + regexEscaped(profiles) + "/[^/]+/"
+        for name in ["account.json", "account-session.bin", "account-key.bin"] {
+            rules.append("(deny file-read* file-write* (literal \"\(vault)/\(name)\"))")
+        }
+        rules.append("(deny file-read* file-write* (regex #\"\(pattern)home\\.noindex$\"))")
+        rules.append("(deny file-read* file-write* (regex #\"\(pattern)home\\.noindex/\"))")
+        rules.append("(deny file-write* (regex #\"\(pattern)\"))")
+        rules.append("(allow file-read* file-write* (subpath \"\(own)\"))")
+        return true
+    }
+
+    /// `text` as a regular expression that matches it and nothing else.
+    nonisolated static func regexEscaped(_ text: String) -> String {
+        var out = ""
+        for character in text {
+            if "\\.^$|?*+()[]{}".contains(character) { out.append("\\") }
+            out.append(character)
+        }
+        return out
+    }
+
     /// What the kernel closed to this process (`closeTheProcess`): "udp", "safari-places",
-    /// "safari-xpc-services", "keychain".
+    /// "safari-xpc-services", "keychain", "other-profiles".
     nonisolated private static let closures = LockedSet()
 
     // MARK: Lock 2: every other store closed
