@@ -4,6 +4,12 @@ name: iOS app (stage 2)
 # person's path on the iOS Simulator — every planted fault in ios/scripts/faults.tsv first (each must
 # make its test fail), then the green run. Screenshots of what the tests saw are in the artifact.
 # The minimum-version check (does not install below iOS 18) is ios-floor.yml.
+# A newer push to the branch replaces the push run still waiting or running: the macOS machines are
+# few and a run takes about an hour, so a superseded one only delays the next. Manual runs (a suite,
+# the real server) are never cancelled this way.
+concurrency:
+  group: ios-app-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 on:
   push:
     branches: [claude/ios-app]
