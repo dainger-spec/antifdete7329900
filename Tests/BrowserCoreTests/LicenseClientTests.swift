@@ -577,12 +577,17 @@ final class LicenseClientTests: XCTestCase {
 
     func testTheCodeIsConfirmedAndSentAgainByItsChallenge() async throws {
         let confirm = FakeServer { _ in self.ok(["sessionToken": "lms_code", "expiresAt": "2026-12-01T00:00:00Z", "accountID": "a", "idleTimeoutSeconds": 604_800]) }
-        let session = try await client(confirm).confirmLogin(email: "anna@example.com", code: "123456").get()
+        let session = try await client(confirm).confirmLogin(email: "anna@example.com", code: "123456", challenge: ServerToken("lmc_attempt")).get()
         XCTAssertEqual(session.token.unredacted(), "lms_code")
         let confirmRequest = try XCTUnwrap(confirm.requests.first)
         XCTAssertEqual(confirmRequest.path, "/v1/auth/login/confirm")
         XCTAssertEqual(body(confirmRequest)["email"] as? String, "anna@example.com")
         XCTAssertEqual(body(confirmRequest)["code"] as? String, "123456")
+        // The attempt's challenge goes with its code (SRV-03 of the security audit): the server takes
+        // a code only from whoever has it. A server without challenges: the code goes alone.
+        XCTAssertEqual(body(confirmRequest)["challenge"] as? String, "lmc_attempt")
+        _ = await client(confirm).confirmLogin(email: "anna@example.com", code: "123456", challenge: nil)
+        XCTAssertNil(body(try XCTUnwrap(confirm.requests.last))["challenge"])
 
         let resend = FakeServer { _ in
             self.answer(202, ["status": "check_email", "codeValidSeconds": 900, "codeAttempts": 4, "challenge": "lmc_challenge",

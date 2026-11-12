@@ -141,6 +141,16 @@ final class BrowserTab: NSObject, PasswordAutoFillHost, AnswersProfileChallenges
     }
 
     var url: URL? { webView.url }
+    /// The address the person asked this tab to load — the address bar, a bookmark, a new tab with an
+    /// address — until that load commits or fails: the address bar shows it while it loads.
+    private(set) var requestedURL: URL?
+    /// What the address bar shows (the security audit of 12 November 2026, APP-01): the address of the
+    /// document on screen — the back-forward list's current item, which moves only when a navigation
+    /// commits (or within the page, by history.pushState or a fragment) — or, while it loads, the
+    /// address the person asked for. Never `webView.url` alone: during a navigation a page started it
+    /// already names the new address while the page that started it is still on screen, so a page
+    /// could show a bank's address above its own content by navigating to a port that never answers.
+    var addressURL: URL? { requestedURL ?? webView.backForwardList.currentItem?.url }
     var isLoading: Bool { webView.isLoading }
     /// Opened as an empty new tab (not a popup, not with an address): its window shows the start
     /// page over it until it starts loading something.
@@ -154,6 +164,7 @@ final class BrowserTab: NSObject, PasswordAutoFillHost, AnswersProfileChallenges
     func load(_ url: URL) -> WKNavigation? {
         startsEmpty = false
         resumeAfterStop()
+        requestedURL = url
         return webView.load(URLRequest(url: url))
     }
 
@@ -328,6 +339,7 @@ extension BrowserTab: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         if let navigation { committedNavigations.add(navigation) }
+        requestedURL = nil
         passwords.closeSuggestions()
         if let url = webView.url { recordVisit(url) }
     }
@@ -342,6 +354,7 @@ extension BrowserTab: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         if let navigation { abandonedNavigations.add(navigation) }
+        requestedURL = nil
         let nsError = error as NSError
         lastProvisionalError = nsError
         if let reason = proxyAuthFailure {

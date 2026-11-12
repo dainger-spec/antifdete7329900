@@ -412,8 +412,8 @@ enum LicenseSelfTest {
               shown?.challenge == ServerToken(server.challenge) && shown?.codeAttempts == 5 && shown?.resendsLeft == 3 && shown?.canResend == true
               && shown?.codeExpiresAt != nil && !String(describing: shown as Any).contains(server.challenge),
               "\(asked)")
-        let wrongLoginCode = await coded.confirmLogin(email: server.codeEmail, code: "000000")
-        let rightLoginCode = await coded.confirmLogin(email: server.codeEmail, code: server.loginCode)
+        let wrongLoginCode = await coded.confirmLogin(email: server.codeEmail, code: "000000", challenge: shown?.challenge)
+        let rightLoginCode = await coded.confirmLogin(email: server.codeEmail, code: server.loginCode, challenge: shown?.challenge)
         let codedActivation = await coded.activate(label: "", vault: nil)
         check("the letter's code signs in as a password would: a wrong one is refused (error.invalid_code), the right one gives the session,"
               + " which connects this Mac (with Authorization)",
@@ -484,6 +484,13 @@ enum LicenseSelfTest {
               && server.bodies.contains { contains($0, [server.robotToken]) }
               && !server.requests.contains { $0.contains(server.robotToken) || $0.contains(server.challenge) },
               "without: \(unchecked), received \(received), left the site: \(leftTheSite), with it: \(String(describing: withToken))")
+
+        // The session's token is not in account.json (the security audit of 12 November 2026, APP-11):
+        // only its dates; the app holds it in memory, and the vault keeps it between runs.
+        let codedFile = (try? Data(contentsOf: codedFolder.appendingPathComponent("account.json"))) ?? Data()
+        check("account.json after a sign-in with the account's session holds no form of the session's token (the vault keeps it)",
+              !codedFile.isEmpty && !contains(codedFile, [server.sessionToken]) && coded.record.session?.sessionToken != nil,
+              codedFile.isEmpty ? "no account.json" : contains(codedFile, [server.sessionToken]) ? "the token is in it" : "no session in memory")
 
         // Signing out under the unlink cooldown (§6.3): nothing changes and it says until when; after the
         // cooldown it goes through (the control). The confirmation names the cooldown the activation gave.
@@ -803,6 +810,11 @@ final class FakeAccountServer {
             body = ["status": "check_email", "codeValidSeconds": 900, "codeAttempts": 5]
         case "/v1/auth/login":
             body = sessionAnswer()
+        case "/v1/auth/login/confirm" where fields["challenge"] as? String != challenge:
+            // As the server since the security audit of 12 November 2026 (SRV-03): a code only with
+            // the challenge of the attempt that sent it.
+            status = 400
+            body = refusal("code_flow_required")
         case "/v1/auth/login/confirm" where fields["code"] as? String == loginCode:
             body = sessionAnswer()
         case "/v1/auth/login/confirm":

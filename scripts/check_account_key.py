@@ -31,6 +31,8 @@ ALLOWED = {
         "the requests: the key in a request's body (never in an address), the key's lookups",
     os.path.join("BrowserCore", "License", "AccountKeyVault.swift"):
         "the vault's file that keeps the key, encrypted under the vault's key",
+    os.path.join("BrowserCore", "License", "AccountSessionVault.swift"):
+        "the vault's file that keeps the session's token between runs, encrypted under the vault's key (APP-11)",
     os.path.join("PrivacyBrowser", "App", "Account", "AccountHTTP.swift"):
         "the transport: a token in the Authorization header",
     os.path.join("PrivacyBrowser", "UI", "NewKeyView.swift"):

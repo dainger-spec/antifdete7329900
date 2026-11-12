@@ -28,10 +28,13 @@ public struct ServerToken: Codable, Equatable, Hashable, Sendable, CustomStringC
 
 /// This Mac's account state (`account.json`, the server's `docs/CONTRACT.md` §4.2): beside the vault,
 /// outside it — the rights are checked before the vault is unlocked — and outside every profile;
-/// owner-only (0600), read and written only by the app's own process, never a profile's.
+/// owner-only (0600), read and written only by the app's own process; a profile's own process is
+/// refused it by its sandbox (`ProfileNetworkGuard`).
 ///
 /// Never in it: the account's password, a license key (an account without an email keeps its key in
-/// the vault, `AccountKeyVault`), anything of a profile.
+/// the vault, `AccountKeyVault`), the session's token (in the vault too, `AccountSessionVault`, since
+/// the security audit of 12 November 2026 — the file keeps only the session's dates), anything of a
+/// profile.
 public struct AccountRecord: Codable, Equatable, Sendable {
     public static let currentFormat = 1
 

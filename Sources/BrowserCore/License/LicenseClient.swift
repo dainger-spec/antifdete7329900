@@ -80,9 +80,9 @@ public struct LicenseClient: Sendable {
         return AccountAPI.loginAnswer(from: response, receivedAt: now())
     }
 
-    /// `POST /v1/auth/login/confirm`: the code from the letter (§5.2).
-    public func confirmLogin(email: String, code: String) async -> Result<AccountSession, AccountFailure> {
-        guard let response = try? await transport.send(AccountAPI.confirmLogin(email: email, code: code)) else { return .failure(.unreachable) }
+    /// `POST /v1/auth/login/confirm`: the code from the letter, with its attempt's challenge (§5.2).
+    public func confirmLogin(email: String, code: String, challenge: ServerToken?) async -> Result<AccountSession, AccountFailure> {
+        guard let response = try? await transport.send(AccountAPI.confirmLogin(email: email, code: code, challenge: challenge)) else { return .failure(.unreachable) }
         return AccountAPI.session(from: response)
     }
 

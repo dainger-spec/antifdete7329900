@@ -107,6 +107,10 @@ final class LicenseModel: ObservableObject {
         }
         savedFloor = record.floorTime
         floor = record.clock
+        // An account.json of before the security audit (APP-11) holds the session's token in the clear:
+        // it is written again at once without it. The token stays in memory, and goes into the vault
+        // when it opens (`restoreSession`).
+        if record.session?.sessionToken != nil { save() }
         recompute()
     }
 
@@ -492,13 +496,14 @@ final class LicenseModel: ObservableObject {
         }
     }
 
-    /// `POST /v1/auth/login/confirm`: the letter's code (§5.2); its session kept for the activation.
-    func confirmLogin(email: String, code: String) async -> AccountFailure? {
+    /// `POST /v1/auth/login/confirm`: the letter's code with the attempt's challenge (§5.2); its
+    /// session kept for the activation.
+    func confirmLogin(email: String, code: String, challenge: ServerToken?) async -> AccountFailure? {
         guard let client else { return .unreachable }
         isWorking = true
         defer { isWorking = false }
         let digits = code.filter { !$0.isWhitespace }
-        switch await client.confirmLogin(email: email.trimmingCharacters(in: .whitespacesAndNewlines), code: digits) {
+        switch await client.confirmLogin(email: email.trimmingCharacters(in: .whitespacesAndNewlines), code: digits, challenge: challenge) {
         case .success(let session):
             pendingSession = session
             key = nil
@@ -604,6 +609,7 @@ final class LicenseModel: ObservableObject {
     /// one kept before goes now.
     func vaultOpened(_ vault: UnlockedVault) {
         openVault = vault
+        restoreSession(from: vault)
         guard record.isSignedIn, record.signedInWith == .key else { return }
         do {
             if !record.keepsKey {
@@ -615,6 +621,36 @@ final class LicenseModel: ObservableObject {
             }
         } catch {
             log.error("The account's key could not be kept in the vault: \(error.logKind, privacy: .public)")
+        }
+    }
+
+    /// The session's token and the vault, as the vault opens (the security audit of 12 November 2026,
+    /// APP-11): `account.json` keeps no token, so one held in memory — a sign-in made before the vault
+    /// opened, or a token read from an `account.json` of before — goes into the vault now; otherwise the
+    /// token the vault kept is read back, when it is of the session `account.json` names (the same end).
+    /// A session that ended takes its copy out of the vault.
+    private func restoreSession(from vault: UnlockedVault) {
+        do {
+            if let token = record.session?.sessionToken, !token.isEmpty {
+                try AccountSessionVault.save(token, expiresAt: record.session?.expiresAt, to: vault)
+                return
+            }
+            guard record.isSignedIn, record.session != nil, let kept = try AccountSessionVault.load(from: vault),
+                  Self.sameInstant(kept.expiresAt, record.session?.expiresAt) else {
+                try AccountSessionVault.remove(from: vault)
+                return
+            }
+            record.session?.sessionToken = kept.token
+        } catch {
+            log.error("The account's session could not be read from the vault: \(error.logKind, privacy: .public)")
+        }
+    }
+
+    private static func sameInstant(_ a: Date?, _ b: Date?) -> Bool {
+        switch (a, b) {
+        case (nil, nil): return true
+        case let (a?, b?): return abs(a.timeIntervalSince(b)) < 1
+        default: return false
         }
     }
 
@@ -932,6 +968,9 @@ final class LicenseModel: ObservableObject {
         guard !isPreview else { return }
         var written = record
         if let floor { written.clock = floor }
+        // The session's token is never written in the clear (APP-11): only its dates, for
+        // `account.no_session`; the token itself is kept in the vault (`AccountSessionVault`).
+        written.session?.sessionToken = nil
         do {
             try file.save(written)
             savedFloor = written.floorTime
@@ -939,6 +978,16 @@ final class LicenseModel: ObservableObject {
         } catch {
             fileProblem = String(describing: error)
             log.error("account.json could not be written: \(error.logKind, privacy: .public)")
+        }
+        guard let openVault else { return }
+        do {
+            if let token = record.session?.sessionToken, !token.isEmpty {
+                try AccountSessionVault.save(token, expiresAt: record.session?.expiresAt, to: openVault)
+            } else {
+                try AccountSessionVault.remove(from: openVault)
+            }
+        } catch {
+            log.error("The account's session could not be kept in the vault: \(error.logKind, privacy: .public)")
         }
     }
 }

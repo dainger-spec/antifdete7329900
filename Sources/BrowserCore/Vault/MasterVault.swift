@@ -205,6 +205,10 @@ public final class UnlockedVault: @unchecked Sendable {
     /// Mac's, never synced; a profile's own process, opened with a grant, cannot derive it.
     var accountKeyKey: SymmetricKey { get throws { try vaultKey("account-key") } }
 
+    /// The account's session token between runs (`account-session.bin`, `AccountSessionVault`): this
+    /// Mac's, never synced; a profile's own process, opened with a grant, cannot derive it.
+    var accountSessionKey: SymmetricKey { get throws { try vaultKey("account-session") } }
+
     private func vaultKey(_ purpose: String) throws -> SymmetricKey {
         guard let masterKey else { throw CoreError.notGranted(purpose) }
         return masterKey.derive(info: purpose, salt: vaultSalt)

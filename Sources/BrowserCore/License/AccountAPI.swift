@@ -234,9 +234,14 @@ public enum AccountAPI {
         return AccountRequest(method: .post, path: "/v1/auth/login", body: json(body))
     }
 
-    /// `POST /v1/auth/login/confirm`: the code from the letter → a session (§5.2).
-    public static func confirmLogin(email: String, code: String) -> AccountRequest {
-        AccountRequest(method: .post, path: "/v1/auth/login/confirm", body: json(["email": email, "code": code]))
+    /// `POST /v1/auth/login/confirm`: the code from the letter → a session (§5.2), sent with the
+    /// attempt's challenge: the server takes a code only with the challenge of the attempt that sent
+    /// it, so no one who knows only the address can burn it (the security audit of 12 November 2026,
+    /// SRV-03). A server older than v2026.11.04 gives no challenge: then the code goes alone.
+    public static func confirmLogin(email: String, code: String, challenge: ServerToken?) -> AccountRequest {
+        var body: [String: Any] = ["email": email, "code": code]
+        if let challenge { body["challenge"] = challenge.unredacted() }
+        return AccountRequest(method: .post, path: "/v1/auth/login/confirm", body: json(body))
     }
 
     /// `POST /v1/auth/login/resend`: the same code once more, asked with the challenge the password's
