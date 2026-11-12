@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Lumen — рекламный ролик</title>
+<meta name="viewport" content="width=1920">
+<link rel="stylesheet" href="film.css">
+<!-- The mark, the wordmark, flags and symbols: the app's kit (design/prototypes/kit), read-only. -->
+<script src="../../prototypes/kit/wordmark.js"></script>
+<script src="../../prototypes/kit/geometry.js"></script>
+<script src="../../prototypes/kit/icons.js"></script>
+<script src="engine.js"></script>
+<script src="ui.js"></script>
+<script src="scenes/01-open.js"></script>
+<script src="scenes/02-profiles.js"></script>
+<script src="scenes/03-safari.js"></script>
+<script src="scenes/04-udp.js"></script>
+<script src="scenes/05-carousel.js"></script>
+<script src="scenes/06-more.js"></script>
+<script src="scenes/07-final.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+// ?t=12.3 shows that moment; ← → step a frame (with Shift a second); Space plays in real time.
+(async function () {
+  const F = window.Film;
+  await document.fonts.load('600 100px "Inter Display"');
+  await document.fonts.load('700 100px "Inter Display"');
+  await document.fonts.load('400 20px "Inter"');
+  await document.fonts.load('500 20px "Inter"');
+  await document.fonts.load('600 20px "Inter"');
+  await document.fonts.load('400 20px "JetBrains Mono"');
+  await document.fonts.ready;
+  F.build();
+  const params = new URLSearchParams(location.search);
+  let t = parseFloat(params.get('t') || '0');
+  const fit = () => {
+    const s = Math.min(innerWidth / 1920, innerHeight / 1080);
+    document.getElementById('stage').style.transform = params.has('capture') ? '' : `scale(${s})`;
+    document.getElementById('stage').style.transformOrigin = '0 0';
+  };
+  if (!params.has('capture')) { fit(); addEventListener('resize', fit); }
+  F.render(t);
+  window.__ready = true;
+  let playing = false, last = 0;
+  const tick = (now) => {
+    if (!playing) return;
+    t += (now - last) / 1000; last = now;
+    if (t > F.duration()) t = 0;
+    F.render(t);
+    requestAnimationFrame(tick);
+  };
+  addEventListener('keydown', (e) => {
+    if (e.key === ' ') { playing = !playing; last = performance.now(); requestAnimationFrame(tick); }
+    if (e.key === 'ArrowRight') { t += e.shiftKey ? 1 : 1 / 60; F.render(t); }
+    if (e.key === 'ArrowLeft') { t = Math.max(0, t - (e.shiftKey ? 1 : 1 / 60)); F.render(t); }
+    history.replaceState(null, '', '?t=' + t.toFixed(3));
+  });
+})();
+</script>
+</body>
+</html>
