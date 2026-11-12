@@ -1267,15 +1267,37 @@ struct ProfileEditorForm: View {
 private struct AvatarChoice: View {
     @Binding var draft: ProfileDraft
     let avatarID: UUID
+    /// The choice of a ready glyph is open (`AvatarGlyphPicker`).
+    @State private var picking = false
 
     var body: some View {
         HStack(spacing: 8) {
             swatch(nil)
             ForEach(0..<ProfileAvatarStyle.colorCount, id: \.self) { index in swatch(index) }
             Spacer(minLength: 16)
+            // Ready ones by section — crypto, currencies, banks, payment companies, flags — beside
+            // the field for one's own letters (the owner, 12 November).
+            Button {
+                picking = true
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "face.smiling").font(.system(size: 12))
+                    Text(L("editor.avatar.pick")).font(.system(size: 12))
+                }
+                .foregroundStyle(Theme.textPrimary)
+                .padding(.horizontal, 10)
+                .frame(height: 28)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.rowSelected))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $picking, arrowEdge: .bottom) {
+                AvatarGlyphPicker(draft: $draft, avatarID: avatarID, close: { picking = false })
+            }
             TextField(L("editor.avatar.letters"), text: letters, prompt: Text(verbatim: ""))
                 .lumenField(L("editor.avatar.letters"), isEmpty: draft.avatarLetters.isEmpty)
-                .frame(width: 150)
+                .frame(width: 130)
         }
     }
 
