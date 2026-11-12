@@ -36,7 +36,10 @@ public enum ProfileTransfer {
     static let magic = Data("PBPROFILE1\n".utf8)
     /// 2: its saved passwords carry versions, and the versions kept after a conflict — which a
     /// version that reads only 1 would import as ordinary logins, one over another (R4).
-    static let format = 2
+    /// 3: 2 with a one-time code's generator in a saved login (`PasswordEntry.totp`), which a
+    /// version that reads only 2 would import without. Written only for a profile that has one;
+    /// any other profile's export is format 2, as before.
+    static let format = 3
     /// The formats this version imports (R1).
     static let readableFormats = 1...format
 
@@ -132,7 +135,7 @@ public enum ProfileTransfer {
                                 bookmarkCount: documents.bookmarks?.bookmarks.count ?? 0,
                                 hasWebsiteData: kinds.contains(webDataPrefix), hasSafariState: kinds.contains(safariHomeRoot))
         let keys = try Keys(password: password, kdf: kdf)
-        let header = Header(format: format, kdf: kdf,
+        let header = Header(format: documents.passwords.contains { $0.totp != nil } ? 3 : 2, kdf: kdf,
                             manifest: try AEAD.seal(JSONCoding.encoder.encode(manifest), key: keys.manifest, aad: manifestAAD))
         let sealedDocuments = try AEAD.seal(JSONCoding.encoder.encode(documents), key: keys.documents, aad: documentsAAD)
         var prefix = magic
