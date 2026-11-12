@@ -279,7 +279,7 @@ struct PasswordListView: View {
                     // A login that is a one-time code alone has no password to show.
                     if !entry.password.isEmpty {
                         HStack(alignment: .firstTextBaseline) {
-                            Text(L("passwords.field.password")).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
+                            Text(L("passwords.field.password")).foregroundStyle(.secondary).frame(width: 132, alignment: .leading)
                             Text(revealed ? entry.password : String(repeating: "•", count: 10))
                                 .font(.body.monospaced()).textSelection(.enabled)
                             Spacer()
@@ -329,7 +329,7 @@ struct PasswordListView: View {
 
     private func row(_ label: String, _ value: String, copy: String?) -> some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(label).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
+            Text(label).foregroundStyle(.secondary).frame(width: 132, alignment: .leading)
             Text(value).textSelection(.enabled).lineLimit(3)
             Spacer()
             if let copy {

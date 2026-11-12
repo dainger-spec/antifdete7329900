@@ -201,9 +201,9 @@ struct ScenarioSchedulesPane: View {
                 if on { changed.nextRunAt = nil }
                 model.saveSchedule(changed)
             }))
-            .toggleStyle(.lumenSwitch)
-            .labelsHidden()
-            .disabled(sample != nil || (!allowed && !schedule.isEnabled))
+            // The switch alone, at the row's end: its name is VoiceOver's.
+            .toggleStyle(LumenSwitchStyle(showsLabel: false))
+            .disabled(!allowed && !schedule.isEnabled)
         }
         .card(padding: 14)
         .contextMenu {
@@ -340,7 +340,6 @@ struct ScenarioSchedulesPane: View {
                 }
                 .buttonStyle(.lumenPrimary)
                 .keyboardShortcut(.defaultAction)
-                .disabled(sample != nil)
             }
         }
         .padding(16)

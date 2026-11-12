@@ -140,7 +140,9 @@ struct OneTimeCodeCard: View {
                         .foregroundStyle(Theme.textTertiary)
                         .lineLimit(1)
                 }
-                Spacer(minLength: 8)
+                // The texts take the room there is: beside a spacer they were given half of it, and
+                // whose code it is was cut short with room to spare.
+                .frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: 5) {
                     Image(systemName: copied ? "checkmark" : "doc.on.doc").font(.system(size: 11, weight: .medium))
                     Text(copied ? L("passwords.code.copied") : L("passwords.copy")).font(.lumenSecondary)

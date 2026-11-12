@@ -275,13 +275,20 @@ enum UISnapshots {
             ProfileInspectorView(row: rows[1], info: inspected, actions: ProfileActions(), guardReady: true)
                 .background(Theme.sidebar)
         }.capture(into: folder)
-        // With the automation API off: no WebDriver address, and a row that leads to its settings.
+        // The whole inspector, taller than a window shows of it at once: its links and, at its end,
+        // the WebDriver address. And with the automation API off: no address, a row that leads
+        // to its settings.
+        let whole = CGSize(width: ProfilesScreen.inspectorWidth, height: 1500)
+        problems += await Shot(name: "inspector-whole", size: whole, titled: false) {
+            ProfileInspectorView(row: rows[1], info: inspected, actions: ProfileActions(), guardReady: true)
+                .background(Theme.sidebar)
+        }.capture(into: folder)
         let apiOff: InspectorInfo = {
             var info = inspected
             info.webDriver = .apiOff
             return info
         }()
-        problems += await Shot(name: "inspector-alone-api-off", size: CGSize(width: ProfilesScreen.inspectorWidth, height: 760), titled: false) {
+        problems += await Shot(name: "inspector-whole-api-off", size: whole, titled: false) {
             ProfileInspectorView(row: rows[1], info: apiOff, actions: ProfileActions(), guardReady: true)
                 .background(Theme.sidebar)
         }.capture(into: folder)
