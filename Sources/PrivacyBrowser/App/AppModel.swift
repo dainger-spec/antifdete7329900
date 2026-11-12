@@ -459,6 +459,27 @@ final class AppModel: ObservableObject {
         warmUps.forwardChanges(to: self)
         self.warmUps = warmUps
         warmUps.begin()
+        // Scenarios and warm-ups by the clock, while the vault is open.
+        let schedules = ScenarioScheduleCoordinator(vault: vault, actions: .init(
+            allowsAutomation: { [weak self] in self?.allowsAutomation ?? false },
+            profiles: { [weak self] in Set(self?.profiles.map(\.id) ?? []) },
+            scenario: { [weak self] in self?.scenarios.scenario($0) },
+            scenarios: { [weak self] in Set(self?.scenarios.scenarios.map(\.id) ?? []) },
+            isBusy: { [weak self] id in
+                guard let self else { return true }
+                return self.isBusy(id) || self.scenarioRun(of: id)?.isRunning == true || self.recordingProfile == id
+            },
+            runScenario: { [weak self] scenario, id in await self?.runScenario(scenario, on: id) ?? false },
+            warmUp: { [weak self] id in
+                guard let self, let warmUps = self.warmUps else { return false }
+                warmUps.enqueue([id]) { self.warmUpPlan(for: $0).plan }
+                return true
+            }))
+        schedules.onChange = { [weak self] in self?.scenarioSchedules = $0 }
+        scenarioSchedules = schedules.schedules
+        scenarioSchedulesRefused = schedules.isRefused
+        scheduleCoordinator = schedules
+        schedules.begin()
         let proxyList = ProxyListModel(vault: vault) { [weak self] message in self?.showError(message) }
         // The proxies typed into profiles before there was a list are in it from now on (once).
         proxyList.takeIn(profileProxies: repository.profileProxies())
@@ -563,6 +584,11 @@ final class AppModel: ObservableObject {
         // Before the profiles stop: nothing waiting in the warm-up queue may launch one again.
         warmUps?.shutDown()
         warmUps = nil
+        scheduleCoordinator?.shutDown()
+        scheduleCoordinator = nil
+        scenarioSchedules = ScenarioSchedules()
+        recordingProfile = nil
+        recorded = ScenarioRecording()
         await manager?.shutDown()
         proxyList?.stopChecking()
         proxyList = nil
@@ -1085,6 +1111,58 @@ final class AppModel: ObservableObject {
 
     func stopScenario(on id: UUID) {
         manager?.stopScenario(id)
+    }
+
+    // MARK: Recording a scenario
+
+    /// The profile a scenario is being recorded in, and what has been recorded so far.
+    @Published private(set) var recordingProfile: UUID?
+    @Published private(set) var recorded = ScenarioRecording()
+
+    /// Begins recording what the person does in profile `id`'s window, starting the profile first
+    /// when it is not running. False when the plan has no automation, a recording is going
+    /// already, or the profile did not start.
+    func startRecording(on id: UUID) async -> Bool {
+        guard license.allowsAutomation, manager != nil, recordingProfile == nil else { return false }
+        if !isRunning(id) { await launch(id) }
+        guard let manager, isRunning(id) else { return false }
+        recorded = ScenarioRecording()
+        manager.onRecorded = { [weak self] profile, event in
+            guard let self, self.recordingProfile == profile else { return }
+            switch event {
+            case let .loaded(address): _ = self.recorded.loaded(address)
+            case let .acted(step): _ = self.recorded.acted(step)
+            }
+        }
+        guard manager.startRecording(id) else { return false }
+        recordingProfile = id
+        return true
+    }
+
+    /// Ends the recording; its steps are the caller's to put into a scenario.
+    @discardableResult
+    func stopRecording() -> [RecordedStep] {
+        if let id = recordingProfile { manager?.stopRecording(id) }
+        recordingProfile = nil
+        return recorded.steps
+    }
+
+    // MARK: By the clock
+
+    /// This Mac's schedules (`ScenarioScheduleCoordinator` runs them).
+    @Published private(set) var scenarioSchedules = ScenarioSchedules()
+    /// Their file is a newer version's or does not open: none is shown and none can be saved.
+    @Published private(set) var scenarioSchedulesRefused = false
+    private var scheduleCoordinator: ScenarioScheduleCoordinator?
+
+    /// Adds, changes or removes a schedule. False when it could not be written.
+    @discardableResult
+    func saveSchedule(_ schedule: ScenarioSchedule, remove: Bool = false) -> Bool {
+        guard let scheduleCoordinator, scheduleCoordinator.save(schedule, remove: remove) else {
+            showError(L("schedule.error.save"))
+            return false
+        }
+        return true
     }
 
     // MARK: Tags' colours

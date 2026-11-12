@@ -95,3 +95,69 @@ API and Help beside Profiles and Proxies, and "Commands and Search" (⌘K) above
 Commands button, the automation settings and Help › Lumen Help (⌘?) open the app's own help
 (`HelpView`) — how a scenario is run, every command with what it takes, the API's requests with
 commands to copy — in the interface's language.
+
+## Recording
+
+A scenario can be recorded from what a person does (the editor's **Record**, beside Run).
+
+```
+Record ── AppModel.startRecording(on:) ── the profile started with a window if it is stopped
+   ProfileManager.startRecording ── ProfileCommand.startRecording to the profile's own process
+                                    (or BrowserSession.startRecording in this one)
+   BrowserSession: ScenarioRecorder's script and handler go into every content controller of the
+                   profile at the first recording there (and into each made after: applyContent,
+                   restoreContent); the pages shown are told to watch
+   the page ── ScenarioRecorderScript, in a world of its own, the main frame: trusted clicks, what a
+               field holds once the typing is over, Enter in a field → {click | fill | press | note}
+               with a selector; every page's script says "hello" with its address at its start
+   ScenarioRecorder ── Event.loaded(address) | .acted(step) ── ProfileEvent.recorded ── the app
+   AppModel.recorded: ScenarioRecording ── which loads are steps (the first page and an address
+               opened: goto; a page that follows a click or Enter within 5 s: waitForLoadState, once)
+   Stop Recording ── ScenarioRecording.line(for:) per step, added to the scenario's end
+```
+
+- **Selectors**, in this order: an `id` that is unique and not made for this load only (`:r1:`,
+  `ember123`, long runs of digits); `data-testid`, `data-test-id`, `data-test`, `data-qa`,
+  `data-cy`; `name`, `aria-label`, `placeholder`, `title` with the tag; for a link or button, its
+  text (`text=…`) when exactly one element has it; else the path from the nearest ancestor that
+  can be named, by position among siblings of its kind.
+- **A password is never recorded.** The page's side sends no text for a password's field, the
+  profile's process drops any that came, and the line is
+  `await page.type(selector, params.password || '');` with a comment that says so.
+- **Typing over text.** A field that held text when the person came to it gets
+  `click; press('Meta+a'); type` — the typing replaces what was there, as it did.
+- **Enter in a form's field** is `page.press('Enter')`; the click the browser makes on the form's
+  button for it is not a second step.
+- **Not recorded:** frames, dragging, file uploads, hovering; a choice in a `<select>` becomes a
+  comment (its list is the system's, not the page's).
+- Nothing of the recorder is in a profile's pages before the first recording there. After it the
+  script stays, idle: a page's script asks at its start whether a recording is on.
+
+Checked: `ScenarioRecordingTests` (which loads are steps, what typing leaves, each step's line);
+the self-test's "automation commands" (a recording of the driver's own click and typing comes out
+as the lines that repeat them, and nothing is recorded after Stop); the page's script against
+real input in a browser while it was written (the fields, a password, a checkbox's label, a
+button without an id, Enter).
+
+## By the clock
+
+The editor's **Schedule** (bottom left): a scenario, or a profile's warm-up, every day at a time
+or every so many hours, with a random shift either way.
+
+- `ScenarioSchedule` (BrowserCore): what (`.scenario(id)` or `.warmUp`), the profile, when
+  (`.daily(hour:minute:)` or `.every(hours:)`), the jitter in minutes, and the next run with its
+  random part already in it. `ScenarioSchedules` is `scenario-schedules.bin` at the vault's root,
+  sealed under the scenarios' key — a file of its own, so a version from before schedules never
+  sees it and `scenarios.bin` is written as before. This Mac's; not synced.
+- `ScenarioScheduleCoordinator` looks at the clock once a minute while the vault is open: a due
+  scenario is run as the editor's Run runs it (`AppModel.runScenario`), a due warm-up goes into
+  the warm-up queue with the profile's own plan. A profile that is starting, being sealed,
+  running a scenario or being recorded in is looked at again ten minutes on. A run found more
+  than six hours late is not made ("missed"); without automation in the plan nothing is run and
+  the schedule says so. Schedules of deleted profiles and scenarios go with them.
+- Nothing wakes the Mac or starts the app: a schedule runs while Lumen does.
+- The plan: schedules, like scenarios, need automation (`allowsAutomation`). The warm-up's own
+  "every N hours" (the warm-up screen) is as it was, in every plan.
+
+Checked: `ScenarioScheduleTests` (the next run today or tomorrow, the random part within its
+limits, due, late, a run's record, the file).

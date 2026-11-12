@@ -61,6 +61,9 @@ enum ProfileNetworkGuard {
     private static var webViewsCaughtByNet = 0
     /// Every web view this process has built, held weakly, for `report`.
     private static let webViews = NSHashTable<WKWebView>.weakObjects()
+    /// The web views alive in this process that the guard saw made (a scenario's recording tells
+    /// the ones shown to watch).
+    static var liveWebViews: [WKWebView] { webViews.allObjects }
 
     /// Closes the page of every web view still alive in this process (`-[WKWebView _close]`), as
     /// quitting does before the profile's data is sealed: Safari's chrome keeps the web views of

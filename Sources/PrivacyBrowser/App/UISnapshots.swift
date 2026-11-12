@@ -620,6 +620,39 @@ enum UISnapshots {
         problems += await Shot(name: "scenarios", size: CGSize(width: 1100, height: 760)) {
             ScenariosView(sample: scenario).environmentObject(model)
         }.capture(into: folder)
+        // A recording going on: its steps as they come, in place of the run's log.
+        let recordedSteps = [
+            RecordedStep(.goto, value: "https://shop.example/login"),
+            RecordedStep(.fill, selector: "#email", value: "alice@example.com"),
+            RecordedStep(.fill, selector: "input[name=\"password\"]", secret: true),
+            RecordedStep(.click, selector: "text=Sign in"),
+            RecordedStep(.load),
+            RecordedStep(.click, selector: "[data-testid=\"orders\"]"),
+        ]
+        problems += await Shot(name: "scenarios-recording", size: CGSize(width: 1100, height: 760)) {
+            ScenariosView(sample: scenario, sampleRecording: recordedSteps).environmentObject(model)
+        }.capture(into: folder)
+        // Runs by the clock: two schedules, and the form one is added in.
+        let clockProfiles = [(id: rows[0].id, name: "Personal"), (id: rows[1].id, name: "Northwind")]
+        var daily = ScenarioSchedule(action: .scenario(scenario.id), profileID: rows[1].id, when: .daily(hour: 10, minute: 0), jitterMinutes: 15)
+        daily.nextRunAt = Date(timeIntervalSince1970: 1_793_008_000)
+        daily.lastRunAt = Date(timeIntervalSince1970: 1_792_921_000)
+        daily.lastResult = .started
+        var hourly = ScenarioSchedule(action: .warmUp, profileID: rows[0].id, when: .every(hours: 6), jitterMinutes: 30)
+        hourly.nextRunAt = Date(timeIntervalSince1970: 1_793_015_000)
+        hourly.lastResult = .missed
+        problems += await Shot(name: "scenarios-schedule", size: CGSize(width: 860, height: 760)) {
+            ScenarioSchedulesPane(sample: .init(schedules: [daily, hourly], scenarios: [scenario], profiles: clockProfiles, editing: nil))
+                .background(Theme.surface)
+                .environmentObject(model)
+        }.capture(into: folder)
+        problems += await Shot(name: "scenarios-schedule-form", size: CGSize(width: 860, height: 760)) {
+            ScenarioSchedulesPane(sample: .init(schedules: [daily], scenarios: [scenario], profiles: clockProfiles,
+                                                editing: ScenarioSchedule(action: .warmUp, profileID: rows[0].id,
+                                                                          when: .daily(hour: 9, minute: 30), jitterMinutes: 15)))
+                .background(Theme.surface)
+                .environmentObject(model)
+        }.capture(into: folder)
         problems += await proxyList(into: folder)
         // A real browser window of a running profile (WebKit, toolbar, tab strip, start page).
         problems += await browserWindows(into: folder)

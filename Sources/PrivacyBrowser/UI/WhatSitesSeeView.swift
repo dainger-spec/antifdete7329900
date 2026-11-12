@@ -45,7 +45,7 @@ struct WhatSitesSeeView: View {
         VStack(alignment: .leading, spacing: 0) {
             SheetHeader(title: String(format: L("whatSites.title"), name), subtitle: L("whatSites.subtitle"))
             if hasCheck {
-                LumenSegmented(selection: $tab, options: [(Tab.check, L("check.tab.check")), (Tab.signals, L("check.tab.signals"))])
+                LumenSegmented(selection: $tab, options: [(value: Tab.check, title: L("check.tab.check")), (value: Tab.signals, title: L("check.tab.signals"))])
                     .padding(.horizontal, 24)
                     .padding(.bottom, 14)
             }

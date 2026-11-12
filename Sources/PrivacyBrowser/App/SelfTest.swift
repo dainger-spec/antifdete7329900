@@ -7312,6 +7312,37 @@ final class SelfTest {
               navigated == "ok" && atTwo == two && back == "ok" && atForm == form && forward == "ok" && reload == "ok"
                   && driver.url == two && heading == "Page two",
               "link \(navigated) → \(atTwo?.lastPathComponent ?? "nil"); back \(back) → \(atForm?.lastPathComponent ?? "nil"); forward \(forward); reload \(reload) → \(driver.url?.lastPathComponent ?? "nil") \(heading ?? "nil")")
+
+        // Recording: what is done on the page — here by the driver, whose clicks and keys a page
+        // takes for a person's — comes out as a scenario's steps, with selectors that find the
+        // elements again, and the scenario made of them does the same when it is run.
+        var seen = ScenarioRecording()
+        session.startRecording { event in
+            switch event {
+            case let .loaded(address): _ = seen.loaded(address)
+            case let .acted(step): _ = seen.acted(step)
+            }
+        }
+        let recordedRun = await outcome {
+            try await driver.goto(form)
+            try await driver.waitFor("#late")
+            try await driver.click("#button")
+            try await driver.type("#field", "Hi")
+            try await driver.click("#button")
+        }
+        _ = await waitUntil(timeout: 5) { seen.steps.count >= 5 }
+        session.stopRecording()
+        let recordedLines = seen.steps.map { ScenarioRecording.line(for: $0, passwordNote: "") }
+        // The page in front when the recording began (page two) is its first step.
+        check("automation commands: a recording says the pages opened, the click and the typing, each with a selector that finds its element",
+              recordedRun == "ok" && recordedLines == ["await page.goto('\(two.absoluteString)');", "await page.goto('\(form.absoluteString)');",
+                                                      "await page.click('#button');", "await page.type('#field', 'Hi');",
+                                                      "await page.click('#button');"],
+              "\(recordedRun): \(recordedLines)")
+        _ = await outcome { try await driver.click("#button") }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        check("automation commands: after the recording is stopped nothing more is recorded", seen.steps.count == recordedLines.count,
+              "\(seen.steps.count) steps")
     }
 
     // MARK: The page cannot tell (PageInput)

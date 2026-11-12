@@ -59,6 +59,8 @@ final class ProfileManager: ObservableObject {
     /// Told of each line and the end of a run in this process (a profile's process passes them on).
     var onScenarioLine: ((UUID, UUID, ScenarioRunner.Line) -> Void)?
     var onScenarioEnded: ((UUID, UUID, ScenarioRunner.Outcome) -> Void)?
+    /// A scenario is being recorded in a profile: something the person did there, or a page that loaded.
+    var onRecorded: ((UUID, ScenarioRecorder.Event) -> Void)?
     /// A profile's own process reported that it is up, and whether its window is Safari's chrome
     /// (the self-test checks that the chrome's own web views load through the profile's proxy).
     var onProfileRunning: ((UUID, Bool) -> Void)?
@@ -548,6 +550,8 @@ final class ProfileManager: ObservableObject {
                 self.reportedWarmUp[id] = status
                 self.onWarmUpProgress?(id)
                 self.objectWillChange.send()
+            case .recorded(let event):
+                self.onRecorded?(id, event)
             case .scenarioLine(let runID, let line):
                 self.scenarioLine(id, runID, line)
             case .scenarioEnded(let runID, let outcome):
@@ -1013,6 +1017,25 @@ final class ProfileManager: ObservableObject {
         guard let child = children[id] else { return false }
         child.send(.checkNetwork(probe: probe))
         return true
+    }
+
+    /// Begins recording a scenario from what the person does in profile `id`'s windows; what is
+    /// seen comes through `onRecorded`. False when the plan has no automation or the profile is
+    /// not running.
+    @discardableResult
+    func startRecording(_ id: UUID) -> Bool {
+        guard scenariosAllowed() else { return false }
+        if let child = children[id] {
+            child.send(.startRecording)
+            return true
+        }
+        guard let session = sessions[id] else { return false }
+        session.startRecording { [weak self] event in self?.onRecorded?(id, event) }
+        return true
+    }
+
+    func stopRecording(_ id: UUID) {
+        if let child = children[id] { child.send(.stopRecording) } else { sessions[id]?.stopRecording() }
     }
 
     /// What a profile's own process says about where its traffic goes, awaited (the profile's

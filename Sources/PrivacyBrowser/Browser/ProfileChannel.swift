@@ -34,6 +34,9 @@ enum ProfileCommand: Codable {
     case runScenario(ScenarioRunRequest)
     /// Stop it: a command under way finishes first.
     case stopScenario(ScenarioRunner.StopReason)
+    /// Watch what the person does in this profile's pages, for a scenario (`ScenarioRecorder`).
+    case startRecording
+    case stopRecording
     /// Say where this profile's traffic goes (`ProfileNetworkGuard.report`); with `probe`, also
     /// fetch it once by each of the process's own ways of making a request.
     case checkNetwork(probe: URL?)
@@ -102,6 +105,8 @@ enum ProfileEvent: Codable {
     case scenarioLine(runID: UUID, ScenarioRunner.Line)
     /// How a scenario's run ended.
     case scenarioEnded(runID: UUID, ScenarioRunner.Outcome)
+    /// Something the person did, or a page that loaded, while a scenario is being recorded.
+    case recorded(ScenarioRecorder.Event)
     /// The answer to `importCookies`: what the profile's store did with them, or nil when the
     /// profile could not take them (it was starting or stopping).
     case cookiesImported(ProfileManager.CookieImportOutcome?)

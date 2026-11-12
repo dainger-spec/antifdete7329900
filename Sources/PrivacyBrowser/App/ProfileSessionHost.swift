@@ -191,6 +191,8 @@ enum ProfileSessionHost {
             // A scenario's run log and its end, to the manager as they come.
             manager.onScenarioLine = { _, runID, line in ProfileSessionHost.send(.scenarioLine(runID: runID, line)) }
             manager.onScenarioEnded = { _, runID, outcome in ProfileSessionHost.send(.scenarioEnded(runID: runID, outcome)) }
+            // What a recording sees, to the manager as it comes.
+            manager.onRecorded = { _, event in ProfileSessionHost.send(.recorded(event)) }
             manager.onWarmUpProgress = { [weak self, weak manager] id in
                 guard let robot = manager?.warmUpRobot(for: id) else { return }
                 let status = robot.status
@@ -297,6 +299,14 @@ enum ProfileSessionHost {
                 }
             case .stopScenario(let reason):
                 manager?.stopScenario(profileID, reason: reason)
+            case .startRecording:
+                // What is recorded is what the person does in a window: the process is then an app
+                // with a Dock tile, as when a window is asked for.
+                showedWindow = true
+                if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }
+                manager?.startRecording(profileID)
+            case .stopRecording:
+                manager?.stopRecording(profileID)
             case .checkNetwork(let probe):
                 Task { @MainActor in
                     ProfileSessionHost.send(.networkReport(await ProfileNetworkGuard.report(probe: probe)))

@@ -199,8 +199,37 @@ final class BrowserSession {
             controller.add(list)
         }
         PasswordAutoFill.install(in: controller, handler: passwordHandler, script: autoFillScript)
+        // The recorder's, once a recording has been made in this profile (`startRecording`).
+        if recorder.isInstalled { recorder.install(in: controller) }
         Logger(subsystem: "PrivacyBrowser", category: "BrowserSession")
             .notice("Profile scripts and AutoFill installed into a content controller of Safari's chrome")
+    }
+
+    // MARK: Recording a scenario
+
+    /// Watches what a person does in this profile's pages for a scenario (`ScenarioRecorder`).
+    let recorder = ScenarioRecorder()
+
+    /// The pages a person can be acting in: our own tabs', and the ones Safari's chrome made.
+    private var livePages: [WKWebView] {
+        var pages = windows.flatMap { $0.tabs.map(\.webView) }
+        for page in ProfileNetworkGuard.liveWebViews where !pages.contains(where: { $0 === page }) { pages.append(page) }
+        return pages
+    }
+
+    /// Begins a recording: the recorder's script and handler go into every content controller of
+    /// the profile at the first one (and into each made after), and the pages shown are told to watch.
+    func startRecording(onEvent: @escaping (ScenarioRecorder.Event) -> Void) {
+        recorder.onEvent = onEvent
+        if !recorder.isInstalled {
+            recorder.install(in: userContentController)
+            for controller in appliedControllers.all.compactMap({ $0 as? WKUserContentController }) { recorder.install(in: controller) }
+        }
+        recorder.start(pages: livePages)
+    }
+
+    func stopRecording() {
+        recorder.stop(pages: livePages)
     }
 
     /// Puts back into `controller` — one the profile was applied to, which something has just
@@ -211,7 +240,8 @@ final class BrowserSession {
         guard controller !== userContentController, appliedControllers.contains(controller) else { return }
         let present = Set(controller.userScripts.map(\.source))
         var restored = 0
-        for script in profileScripts + [autoFillScript] where !present.contains(script.source) {
+        for script in profileScripts + [autoFillScript] + (recorder.isInstalled ? [ScenarioRecorder.script] : [])
+        where !present.contains(script.source) {
             controller.addUserScript(script)
             restored += 1
         }
@@ -281,6 +311,7 @@ final class BrowserSession {
     private final class WeakSet {
         private let table = NSHashTable<AnyObject>.weakObjects()
         func contains(_ object: AnyObject) -> Bool { table.contains(object) }
+        var all: [AnyObject] { table.allObjects }
         /// True when `object` was not in the set and has been added.
         func add(_ object: AnyObject) -> Bool {
             guard !table.contains(object) else { return false }
