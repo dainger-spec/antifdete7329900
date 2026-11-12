@@ -35,7 +35,7 @@ final class SyncReadTests: XCTestCase {
         let writesBefore = server.requests.filter { $0.method == "PUT" }.count
         let phoneTransport = LumenSyncTransport(vaultID: mac.vaultID) { m, p, b, h in server.answer(m, p, b, h) }
         let first = try await SyncRead.pull(root: phoneRoot, key: key, transport: phoneTransport, keptGeneration: nil)
-        XCTAssertEqual(server.requests.filter { $0.method == "PUT" }.count, writesBefore, "the iPhone's first read writes nothing on the server")
+        XCTAssertEqual(server.requests.filter { $0.method == "PUT" }.count, writesBefore, "the read writes nothing on the server: the first")
 
         let byName = Dictionary(uniqueKeysWithValues: first.profiles.map { ($0.name, $0) })
         XCTAssertEqual(Set(byName.keys), ["Магазин", "Почта"], "both of the Mac's profiles came")
@@ -60,7 +60,7 @@ final class SyncReadTests: XCTestCase {
         let writesBeforeSecond = server.requests.filter { $0.method == "PUT" }.count
         XCTAssertGreaterThan(writesBeforeSecond, writesBefore, "the Mac's second sync wrote its rename")
         let second = try await SyncRead.pull(root: phoneRoot, key: key, transport: phoneTransport, keptGeneration: first.generation)
-        XCTAssertEqual(server.requests.filter { $0.method == "PUT" }.count, writesBeforeSecond, "nor does the second")
+        XCTAssertEqual(server.requests.filter { $0.method == "PUT" }.count, writesBeforeSecond, "the read writes nothing on the server: the second")
         XCTAssertTrue(second.profiles.contains { $0.name == "Почта 2" }, "a rename on the Mac reaches the iPhone")
 
     }
