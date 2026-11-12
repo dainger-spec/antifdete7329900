@@ -63,7 +63,7 @@ if [[ -n "${ASC_KEY_PATH:-}" ]]; then
 fi
 if [[ -n "$TEAM_ID" ]]; then
     SIGNING=(DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic CODE_SIGN_IDENTITY="Apple Distribution")
-    PROVISIONING=(-allowProvisioningUpdates "${AUTH[@]}")
+    PROVISIONING=(-allowProvisioningUpdates ${AUTH[@]+"${AUTH[@]}"})
 else
     SIGNING=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO)
     PROVISIONING=()
@@ -71,7 +71,7 @@ fi
 say "archiving ($([[ -n "$TEAM_ID" ]] && echo "signed for team $TEAM_ID" || echo unsigned))…"
 if ! xcodebuild archive -project "$HERE/Lumen.xcodeproj" -scheme Lumen -configuration Release \
         -destination "generic/platform=iOS" -archivePath "$ARCHIVE" -derivedDataPath "$OUT/dd" \
-        "${PROVISIONING[@]}" "${SIGNING[@]}" \
+        ${PROVISIONING[@]+"${PROVISIONING[@]}"} "${SIGNING[@]}" \
         MARKETING_VERSION="$APP_VERSION" CURRENT_PROJECT_VERSION="$APP_BUILD" \
         ENTITLEMENT_PUBLIC_KEYS="$KEYS" >"$OUT/archive.txt" 2>&1; then
     grep -E "error:|error " "$OUT/archive.txt" | head -30
@@ -113,7 +113,7 @@ cat >"$OUT/ExportOptions.plist" <<EOF
 </dict></plist>
 EOF
 if ! xcodebuild -exportArchive -archivePath "$ARCHIVE" -exportPath "$OUT/export" \
-        -exportOptionsPlist "$OUT/ExportOptions.plist" "${PROVISIONING[@]}" >"$OUT/export.txt" 2>&1; then
+        -exportOptionsPlist "$OUT/ExportOptions.plist" ${PROVISIONING[@]+"${PROVISIONING[@]}"} >"$OUT/export.txt" 2>&1; then
     grep -E "error:|error " "$OUT/export.txt" | head -30
     fail "the export failed (the whole log: $OUT/export.txt)"
 fi
