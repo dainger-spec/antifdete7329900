@@ -30,11 +30,12 @@ jobs:
   core-linux:
     name: Core tests (Linux, swift-crypto)
     runs-on: ubuntu-24.04
+    # Swift's own image, not an installer: setup-swift refreshes Swift's signing keys from
+    # keyserver.ubuntu.com first, and with that server down the job failed before any test
+    # (11 November, four attempts in three hours).
+    container: swift:6.0
     steps:
       - uses: actions/checkout@v4
-      - uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: "6.0"
       - run: swift test
 
   shims:

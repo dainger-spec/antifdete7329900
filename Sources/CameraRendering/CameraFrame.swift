@@ -94,6 +94,11 @@ public enum CameraFrameRenderer {
     // The loaded image, cached and reloaded only when the file changes (one serial timer queue).
     private static var cachedImage: CGImage?
     private static var cachedImageDate: Date?
+    // The still picture as it was last drawn at a frame's size (`drawBase`), and what it was drawn from.
+    private static var still: [UInt8] = []
+    private static var stillKey: String?
+    // When the picture's file was last looked at: once a second, not once a frame.
+    private static var imageCheckedAt: UInt64 = 0
     // A scratch buffer for the filtered path: the base is drawn here, then filtered into the output.
     private static var scratch: CVPixelBuffer?
     // The video decoder for the `video` source (one serial render queue, so no locking).
@@ -131,9 +136,24 @@ public enum CameraFrameRenderer {
             if config.source == "bars" {
                 drawBars(context, width: width, height: height, background: (br, bg, bb), sequence: sequence)
             } else if config.source == "image", let image = loadImage() {
+                // A still picture is scaled once and copied from then on: scaling a photograph at
+                // high quality for each of 30 frames a second kept a core busy (the owner's Mac ran
+                // warm while a page read the camera).
+                let key = "\(cachedImageDate?.timeIntervalSinceReferenceDate ?? 0) \(image.width)x\(image.height) \(width)x\(height) "
+                    + "\(context.bytesPerRow) \(config.colorHex) \(config.fit) \(config.mirror) "
+                    + (config.crop.map { "\($0.x) \($0.y) \($0.width) \($0.height)" } ?? "whole")
+                let count = context.bytesPerRow * height
+                if key == stillKey, still.count == count, let data = context.data {
+                    still.withUnsafeBytes { data.copyMemory(from: $0.baseAddress!, byteCount: count) }
+                    return
+                }
                 context.setFillColor(red: br, green: bg, blue: bb, alpha: 1)
                 context.fill(CGRect(x: 0, y: 0, width: Double(width), height: Double(height)))
                 drawImage(context, image: image, width: width, height: height, config: config)
+                if let data = context.data, count > 0 {
+                    still = [UInt8](UnsafeRawBufferPointer(start: data, count: count))
+                    stillKey = key
+                }
             } else if config.source == "video", let frame = videoSource.frame(for: config), let image = cgImage(from: frame) {
                 context.setFillColor(red: br, green: bg, blue: bb, alpha: 1)
                 context.fill(CGRect(x: 0, y: 0, width: Double(width), height: Double(height)))
@@ -218,6 +238,9 @@ public enum CameraFrameRenderer {
 
     private static func loadImage() -> CGImage? {
         guard let url = CameraExtensionConfig.container?.appendingPathComponent(CameraExtensionConfig.imageFileName) else { return nil }
+        let now = DispatchTime.now().uptimeNanoseconds
+        if let cachedImage, now &- imageCheckedAt < 1_000_000_000 { return cachedImage }
+        imageCheckedAt = now
         let date = (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate]) as? Date
         if let cachedImage, cachedImageDate == date { return cachedImage }
         guard let data = try? Data(contentsOf: url),

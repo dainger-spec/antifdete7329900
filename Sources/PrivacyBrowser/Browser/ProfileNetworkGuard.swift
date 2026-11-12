@@ -639,6 +639,21 @@ enum ProfileNetworkGuard {
             }
             method_setImplementation(method, imp_implementationWithBlock(replacement))
         }
+        // The other way round — what the owner's other devices offer to continue here — Safari
+        // listens for too (UABestAppSuggestionManager). useractivityd refuses a profile's process,
+        // and the manager asks again from its error handler at once, without end: on the owner's
+        // Mac 24 000 refusals a second, useractivityd at 134 % of a core and logd at 57 %, for as
+        // long as a profile ran. A profile takes no suggestion from the owner's devices: it never
+        // starts listening. (Absent on some macOS: nothing to silence, so not counted as missing.)
+        _ = dlopen("/System/Library/PrivateFrameworks/UserActivity.framework/UserActivity", RTLD_LAZY)
+        if let manager = NSClassFromString("UABestAppSuggestionManager"),
+           let method = class_getInstanceMethod(manager, NSSelectorFromString("startListeningForBestAppSuggestions")) {
+            let replacement: @convention(block) (AnyObject) -> Void = { _ in }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        } else {
+            Logger(subsystem: "PrivacyBrowser", category: "ProfileNetworkGuard")
+                .notice("No UABestAppSuggestionManager to silence on this macOS")
+        }
         return missing
     }
 
