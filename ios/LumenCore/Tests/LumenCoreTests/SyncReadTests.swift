@@ -54,7 +54,7 @@ final class SyncReadTests: XCTestCase {
         let second = try await SyncRead.pull(root: phoneRoot, key: key, transport: phoneTransport, keptGeneration: first.generation,
                                              edits: [edit])
         XCTAssertTrue(second.profiles.contains { $0.name == "Почта 2" }, "a rename on the Mac reaches the iPhone")
-        XCTAssertTrue(second.profiles.contains { $0.name == "Магазин (iPhone)" && $0.notes == "С iPhone" }, "the iPhone's own edit stays here")
+        XCTAssertTrue(second.profiles.contains { $0.name == "Магазин (iPhone)" && $0.notes == "С iPhone" }, "the iPhone's rename reaches the Mac: first it is in the iPhone's copy")
         XCTAssertEqual(second.profileTokens.count, 2, "a token for each synced profile, for the renewal")
         XCTAssertTrue(second.profileTokens.allSatisfy { $0.count == 32 })
 
