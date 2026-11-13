@@ -219,6 +219,10 @@ final class DeviceGenerationTests: XCTestCase {
         // Unknown ids fall back to the default rather than crashing.
         XCTAssertEqual(DeviceGenerations.resolved(id: "nope").id, DeviceGenerations.defaultID)
         XCTAssertNil(DeviceGenerations.generation(id: "nope"))
+        // The iPad view is no longer offered for a new choice, but a stored one still resolves.
+        XCTAssertFalse(DeviceGenerations.offered.contains { $0.platform == .iPadOS })
+        XCTAssertEqual(DeviceGenerations.offered.count, DeviceGenerations.all.count - 1)
+        XCTAssertEqual(DeviceGenerations.resolved(id: "ipados-26").platform, .iPadOS)
     }
 
     func testEffectiveUserAgentPrecedence() {

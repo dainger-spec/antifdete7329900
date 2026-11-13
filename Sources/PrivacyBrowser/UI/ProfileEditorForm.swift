@@ -400,7 +400,8 @@ struct ProfileEditorForm: View {
                 Picker(L("editor.generation"), selection: $draft.deviceGenerationID) {
                     // The Mac's generation is this Mac's Safari, by its version (its catalog name
                     // said "macOS 26" on a Mac with Safari 27).
-                    ForEach(DeviceGenerations.all) { generation in
+                    // The iPad view is no longer offered; a profile that has it still shows it.
+                    ForEach(DeviceGenerations.offered + (generation.platform == .iPadOS ? [generation] : [])) { generation in
                         Text(generation.matchesEngine ? String(format: L("gen.macos.host"), HostSafari.version) : L(generation.nameKey))
                             .tag(generation.id)
                     }
