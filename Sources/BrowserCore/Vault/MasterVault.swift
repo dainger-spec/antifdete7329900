@@ -204,6 +204,10 @@ public final class UnlockedVault: @unchecked Sendable {
     /// The person's warm-up templates (`warmup-templates.bin`, `WarmUpTemplates`): this Mac's, not
     /// synced, not exported with a profile.
     var warmUpTemplatesKey: SymmetricKey { get throws { try vaultKey("warm-up-templates") } }
+    /// The virtual machines' profiles (`vms.bin`, `VMProfiles`): this Mac's, never synced — a virtual
+    /// machine is tens of gigabytes on this Mac's disk, and its profile holds its proxy's password.
+    var virtualMachinesKey: SymmetricKey { get throws { try vaultKey("virtual-machines") } }
+
     /// The license's key of an account without an email (`account-key.bin`, `AccountKeyVault`): this
     /// Mac's, never synced; a profile's own process, opened with a grant, cannot derive it.
     var accountKeyKey: SymmetricKey { get throws { try vaultKey("account-key") } }
