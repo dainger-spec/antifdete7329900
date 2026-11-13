@@ -313,8 +313,14 @@ final class WarmUpRobot: ObservableObject {
                 let dwell = dwellTime(plan, using: &generator)
                 update(index, run: run) { $0.dwell = dwell }
                 guard await stay(dwell, scroll: plan.scroll, visit: index, run: run, using: &generator) else { return }
-                if plan.followLinks {
-                    guard await follow(on: page, visit: index, plan: plan, run: run, using: &generator) else { return }
+                // Links one after the other (`plan.hops`, 1–3 by depth): from a search's results to a
+                // site, then on within that site, as a person reads on.
+                var current = page
+                for hop in 0..<plan.hops {
+                    guard let followed = await follow(on: current, visit: index, hop: hop, plan: plan, run: run,
+                                                      using: &generator) else { return }
+                    guard followed, let at = liveTab(run)?.url else { break }
+                    current = WarmUpPlan.Page(url: at, kind: .address)
                 }
             }
             countCookiesSoFar()
@@ -460,15 +466,43 @@ final class WarmUpRobot: ObservableObject {
     private func stay(_ dwell: TimeInterval, scroll: Bool, visit: Int, run: Int,
                       using generator: inout some RandomNumberGenerator) async -> Bool {
         let begun = Date()
-        if scroll {
-            for gesture in WarmUpTiming.gestures(over: dwell, using: &generator) {
-                guard await wait(gesture.at - Date().timeIntervalSince(begun), run: run), let tab = liveTab(run) else { return false }
-                // A tab the user put aside (another tab selected) has no window to scroll in.
-                guard tab.isSelected else { continue }
+        let gestures = scroll ? WarmUpTiming.gestures(over: dwell, using: &generator) : []
+        // The pointer drifts while the page is read, as a hand resting on a mouse does — never
+        // during a gesture (the wheel scrolls where the pointer is).
+        let drifts = WarmUpTiming.pointerMoves(over: dwell, avoiding: gestures, using: &generator)
+        enum Event { case gesture(WarmUpTiming.Gesture), drift }
+        let events = (gestures.map { (at: $0.at, event: Event.gesture($0)) } + drifts.map { (at: $0, event: Event.drift) })
+            .sorted { $0.at < $1.at }
+        for item in events {
+            guard await wait(item.at - Date().timeIntervalSince(begun), run: run), let tab = liveTab(run) else { return false }
+            // A tab the user put aside (another tab selected) has no window to scroll or point in.
+            guard tab.isSelected else { continue }
+            switch item.event {
+            case .gesture(let gesture):
                 if await self.scroll(gesture, in: tab, run: run) { update(visit, run: run) { $0.scrolls += 1 } }
+            case .drift:
+                await drift(in: tab, using: &generator)
             }
         }
         return await wait(dwell - Date().timeIntervalSince(begun), run: run)
+    }
+
+    /// A small move of the pointer to somewhere near where a person reads, on a curved path with a
+    /// hand's tremor (`WarmUpPointerPath`). Only where trusted pointer events reach the page.
+    private func drift(in tab: BrowserTab, using generator: inout some RandomNumberGenerator) async {
+        guard let input, input.webView === tab.webView, tab.webView.window != nil else { return }
+        let size = tab.webView.bounds.size
+        guard size.width > 40, size.height > 40 else { return }
+        let from = input.pointerViewportPoint()
+            ?? CGPoint(x: size.width * Double.random(in: 0.3...0.7, using: &generator), y: size.height * 0.5)
+        let to = CGPoint(x: min(max(from.x + Double.random(in: -220...220, using: &generator), 12), size.width - 12),
+                         y: min(max(from.y + Double.random(in: -140...140, using: &generator), 12), size.height - 12))
+        let distance = hypot(to.x - from.x, to.y - from.y)
+        let steps = max(5, min(30, Int(distance / Double.random(in: 10...16, using: &generator))))
+        let path = WarmUpPointerPath.path(from: WarmUpPoint(x: from.x, y: from.y), to: WarmUpPoint(x: to.x, y: to.y),
+                                          steps: steps, using: &generator)
+            .map { CGPoint(x: $0.x, y: $0.y) }
+        _ = await input.move(along: path, interval: Double.random(in: 0.012...0.022, using: &generator))
     }
 
     private struct ScrollPosition: Equatable {
@@ -530,34 +564,39 @@ final class WarmUpRobot: ObservableObject {
     }
 
     /// Follows one link the policy allows, if the page has one in view, and stays on its page
-    /// half as long; false when the run ended meanwhile.
-    private func follow(on page: WarmUpPlan.Page, visit: Int, plan: WarmUpPlan, run: Int,
-                        using generator: inout some RandomNumberGenerator) async -> Bool {
-        guard let tab = liveTab(run) else { return false }
-        guard tab.isSelected, let pageURL = tab.url else { return true }
+    /// half as long: true then, false when there was nothing to follow (or its page did not load),
+    /// nil when the run ended meanwhile. `hop` counts the links followed from the plan's page.
+    private func follow(on page: WarmUpPlan.Page, visit: Int, hop: Int, plan: WarmUpPlan, run: Int,
+                        using generator: inout some RandomNumberGenerator) async -> Bool? {
+        guard let tab = liveTab(run) else { return nil }
+        guard tab.isSelected, let pageURL = tab.url else { return false }
         let found = await links(in: tab)
-        guard liveTab(run) != nil else { return false }
-        guard let found else { return true }
+        guard liveTab(run) != nil else { return nil }
+        guard let found else { return false }
         // Each link judged by itself: the same address may also be on a link that opens a new
         // window or downloads.
         let viewport = (width: found.width, height: found.height)
         let allowed = found.links.filter { WarmUpLinkPolicy.allows($0.link, on: pageURL, kind: page.kind, viewport: viewport) }
-        guard let choice = allowed.randomElement(using: &generator) else { return true }
+        guard let choice = allowed.randomElement(using: &generator) else { return false }
         let failures = tab.failedNavigations
         let before = tab.url
         // A point inside the link, not always its middle.
         let point = CGPoint(x: choice.link.x + choice.link.width * Double.random(in: 0.3...0.7, using: &generator),
                             y: choice.link.y + choice.link.height * Double.random(in: 0.35...0.65, using: &generator))
-        guard await click(choice, at: point, in: tab, run: run, using: &generator) else { return liveTab(run) != nil }
-        update(visit, run: run) { $0.followed = URL(string: choice.link.href, relativeTo: pageURL)?.absoluteURL }
-        guard let outcome = await waitForPage(in: tab, failuresBefore: failures, urlBefore: before, run: run, startTimeout: 5) else {
-            return false
+        guard await click(choice, at: point, in: tab, run: run, using: &generator) else { return liveTab(run) == nil ? nil : false }
+        let target = URL(string: choice.link.href, relativeTo: pageURL)?.absoluteURL
+        update(visit, run: run) {
+            if hop == 0 { $0.followed = target }
+            if let target { $0.hops.append(target) }
         }
-        update(visit, run: run) { $0.followedOutcome = outcome }
-        if isFailure(outcome) { return true }
+        guard let outcome = await waitForPage(in: tab, failuresBefore: failures, urlBefore: before, run: run, startTimeout: 5) else {
+            return nil
+        }
+        if hop == 0 { update(visit, run: run) { $0.followedOutcome = outcome } }
+        if isFailure(outcome) { return false }
         let dwell = dwellTime(plan, using: &generator) / 2
         update(visit, run: run) { $0.dwell += dwell }
-        return await stay(dwell, scroll: plan.scroll, visit: visit, run: run, using: &generator)
+        return await stay(dwell, scroll: plan.scroll, visit: visit, run: run, using: &generator) ? true : nil
     }
 
     /// The links in view, read in the robot's world (only those the pointer could reach: the
@@ -614,8 +653,9 @@ final class WarmUpRobot: ObservableObject {
             let from = input.pointerViewportPoint() ?? start
             let distance = hypot(point.x - from.x, point.y - from.y)
             let steps = max(6, min(45, Int(distance / Double.random(in: 9...15, using: &generator))))
-            let moved = await input.move(along: input.path(to: point, from: start, steps: steps),
-                                         interval: Double.random(in: 0.012...0.02, using: &generator))
+            let curve = WarmUpPointerPath.path(from: WarmUpPoint(x: from.x, y: from.y), to: WarmUpPoint(x: point.x, y: point.y),
+                                               steps: steps, using: &generator).map { CGPoint(x: $0.x, y: $0.y) }
+            let moved = await input.move(along: curve, interval: Double.random(in: 0.012...0.02, using: &generator))
             guard moved, await wait(Double.random(in: 0.12...0.3, using: &generator), run: run) else { return false }
             let answer = await script(find + """
                  const seen = globalThis.warmUpPointer;

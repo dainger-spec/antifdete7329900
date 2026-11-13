@@ -660,18 +660,24 @@ final class WarmUpCookieCountTests: XCTestCase {
 final class WarmUpScheduleTests: XCTestCase {
     private let start = Date(timeIntervalSince1970: 1_800_000_000)
     private func hours(_ value: Double) -> TimeInterval { value * 3600 }
+    /// When a schedule counted from `from` every `value` hours runs: the interval moved by its
+    /// fixed share of the jitter.
+    private func after(_ from: Date, _ value: Double) -> Date {
+        from + hours(value) * (1 + WarmUpSchedule.jitter * WarmUpSchedule.share(for: from))
+    }
 
     func testTheFirstRunIsOneIntervalAfterTurningItOnAndThenAfterTheLastRun() {
         var schedule = WarmUpSchedule(everyHours: 6, since: start)
         XCTAssertFalse(schedule.isDue(at: start), "not at once: Start is there for a run now")
-        XCTAssertFalse(schedule.isDue(at: start + hours(5.9)))
-        XCTAssertTrue(schedule.isDue(at: start + hours(6)))
+        XCTAssertEqual(schedule.nextRun, after(start, 6))
+        XCTAssertFalse(schedule.isDue(at: schedule.nextRun - 1))
+        XCTAssertTrue(schedule.isDue(at: schedule.nextRun))
         // A run from anywhere (the warm-up screen too) moves the next one.
         schedule.lastRunAt = start + hours(5)
-        XCTAssertEqual(schedule.nextRun, start + hours(11))
+        XCTAssertEqual(schedule.nextRun, after(start + hours(5), 6))
         // So does an attempt that came to nothing: a broken proxy is not launched every minute.
         schedule.lastAttemptAt = start + hours(12)
-        XCTAssertEqual(schedule.nextRun, start + hours(18))
+        XCTAssertEqual(schedule.nextRun, after(start + hours(12), 6))
         // Off: never due, the times kept.
         schedule.isEnabled = false
         XCTAssertFalse(schedule.isDue(at: start + hours(100)))
@@ -684,7 +690,22 @@ final class WarmUpScheduleTests: XCTestCase {
         XCTAssertEqual(scheduler.due(at: wake), [id])
         scheduler.recordRun(id, at: wake + 600)
         XCTAssertEqual(scheduler.due(at: wake + 700), [], "one run, then a whole interval")
-        XCTAssertEqual(scheduler.nextRun(of: id, now: wake + 700), wake + 600 + hours(1))
+        XCTAssertEqual(scheduler.nextRun(of: id, now: wake + 700), after(wake + 600, 1))
+    }
+
+    func testARunMovesUpToAFifteenthOfItsIntervalAndStaysPutWhenAskedAgain() {
+        var shares: [Double] = []
+        for day in 0..<200 {
+            let from = start + hours(Double(day) * 24 + 0.37 * Double(day))
+            let schedule = WarmUpSchedule(everyHours: 24, since: from)
+            let moved = schedule.nextRun.timeIntervalSince(from) / hours(24) - 1
+            XCTAssertLessThanOrEqual(abs(moved), WarmUpSchedule.jitter + 1e-9)
+            XCTAssertEqual(schedule.nextRun, schedule.nextRun, "the same answer each time")
+            shares.append(moved)
+        }
+        // Spread both ways, not all at one end.
+        XCTAssertGreaterThan(shares.filter { $0 > 0.05 }.count, 30)
+        XCTAssertGreaterThan(shares.filter { $0 < -0.05 }.count, 30)
     }
 
     func testTheHoursAreKeptToTheirRange() {
@@ -713,10 +734,12 @@ final class WarmUpScheduleTests: XCTestCase {
         XCTAssertEqual(scheduler.due(at: now + WarmUpScheduler.retryDelay), [late])
         XCTAssertNil(scheduler.nextRun(of: off, now: now))
         XCTAssertEqual(scheduler.nextRun(of: late, now: now), now, "already due: now")
-        XCTAssertEqual(scheduler.nextRun(of: notYet, now: now), start + hours(24))
+        XCTAssertEqual(scheduler.nextRun(of: notYet, now: now), after(start, 24))
         XCTAssertEqual(scheduler.nextCheck(now: now + 300), now + 300, "something is due already")
         scheduler.recordAttempt(late, at: now)
-        XCTAssertEqual(scheduler.nextCheck(now: now), now + hours(2), "the earliest next run of all")
+        XCTAssertEqual(scheduler.nextRun(of: late, now: now), after(now, 2))
+        XCTAssertEqual(scheduler.nextCheck(now: now), [early, late, notYet].compactMap { scheduler.nextRun(of: $0, now: now) }.min(),
+                       "the earliest next run of all")
     }
 
     func testAClockSetBackDoesNotLeaveTheProfileWaitingForATimeAlreadyPast() {
@@ -724,8 +747,8 @@ final class WarmUpScheduleTests: XCTestCase {
         var scheduler = WarmUpScheduler(schedules: [id: WarmUpSchedule(everyHours: 6, since: start, lastRunAt: start + hours(48))])
         let now = start + hours(1) // the clock went back two days
         XCTAssertEqual(scheduler.due(at: now), [])
-        XCTAssertEqual(scheduler.nextRun(of: id, now: now), now + hours(6))
-        XCTAssertEqual(scheduler.due(at: now + hours(6)), [id])
+        XCTAssertEqual(scheduler.nextRun(of: id, now: now), after(now, 6))
+        XCTAssertEqual(scheduler.due(at: after(now, 6)), [id])
     }
 
     func testSchedulesOfDeletedProfilesAreForgotten() {
