@@ -43,7 +43,7 @@ struct ProxiesView: View {
                     Text(L("Добавьте HTTP или SOCKS5 — строкой, как его выдал провайдер."))
                 } actions: {
                     Button(L("Добавить прокси")) { adding = true }
-                        .buttonStyle(.borderedProminent).tint(Theme.accentFill)
+                        .buttonStyle(.borderedProminent).tint(Theme.accentFill).controlSize(.large)
                         .accessibilityIdentifier("newProxyEmpty")
                 }
             }

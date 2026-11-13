@@ -50,11 +50,11 @@ struct LockedSessionView: View {
         } actions: {
             if proxyGone {
                 Button(L("Выбрать прокси")) { choosingProxy = true }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.bordered).controlSize(.large)
                     .accessibilityIdentifier("lockedChooseProxy")
             } else {
                 Button(L("Аккаунт")) { showPlans = true }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.bordered).controlSize(.large)
                     .accessibilityIdentifier("lockedAccount")
             }
         }
