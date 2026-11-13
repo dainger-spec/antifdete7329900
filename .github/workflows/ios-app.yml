@@ -26,7 +26,7 @@ on:
         description: iOS runtime (newest, or a version such as 17.5)
         default: newest
       suite:
-        description: one suite only — "core" (the core's tests alone, a few minutes), "core,build" (and the app built), or a test class; empty runs them all. "RealServerTests" — the sign-in against the real account server with the test account (secrets LUMEN_E2E_EMAIL, LUMEN_E2E_PASSWORD); by hand only
+        description: one suite only — "core" (the core's tests alone, a few minutes), "core,build" (and the app built), or a test class; empty runs them all. "RealServerTests" — the sign-in against the real account server with the test account (secrets LUMEN_E2E_EMAIL, LUMEN_E2E_PASSWORD); "ScreenshotTests" — the App Store's screenshots (iPhone 17 Pro Max, appstore/ in the artifact); both by hand only
         default: ""
 
 jobs:
@@ -82,4 +82,5 @@ jobs:
             build/ios-app/*.log
             build/ios-app/testbed
             build/ios-app/screens
+            build/ios-app/appstore
           if-no-files-found: warn

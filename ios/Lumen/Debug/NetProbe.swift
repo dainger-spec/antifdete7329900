@@ -497,9 +497,11 @@ struct NetProbeView: View {
 struct DebugProbeLink: View {
     var body: some View {
         #if DEBUG
-        NavigationLink { NetProbeView() } label: { Image(systemName: "waveform.path.ecg") }
-            .accessibilityIdentifier("netProbeButton")
-            .accessibilityLabel("Замер сети")
+        if !AppStoreSeed.active {   // not on the App Store's screenshots
+            NavigationLink { NetProbeView() } label: { Image(systemName: "waveform.path.ecg") }
+                .accessibilityIdentifier("netProbeButton")
+                .accessibilityLabel("Замер сети")
+        }
         #else
         EmptyView()
         #endif

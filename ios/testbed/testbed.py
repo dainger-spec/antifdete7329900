@@ -98,6 +98,48 @@ def page(title, body, script=""):
             f"<body>{body}<script>{script}</script></body></html>")
 
 
+
+# The App Store's screenshots (ScreenshotTests, --demo): what a session's own page sees of it — its time
+# zone, language and local time as the page's scripts read them, and whether it came through the proxy
+# (the testbed knows). Served for http://check.example/ (?l=en for English); words of the owner's
+# positioning only (release_rules.py).
+DEMO_TEXT = {
+    "ru": {"title": "Проверка сессии", "through": "Через прокси", "direct": "Напрямую", "zone": "Часовой пояс",
+           "lang": "Язык страницы", "time": "Местное время", "cookies": "Куки этой сессии", "own": "только свои",
+           "note": "Каждая сессия — своё хранилище, свой прокси, свой часовой пояс и язык."},
+    "en": {"title": "Session check", "through": "Through the proxy", "direct": "Direct", "zone": "Time zone",
+           "lang": "Page language", "time": "Local time", "cookies": "This session's cookies", "own": "its own only",
+           "note": "Each session has its own storage, its own proxy, its own time zone and language."},
+}
+
+
+def demo_page(language, via):
+    t = DEMO_TEXT.get(language, DEMO_TEXT["ru"])
+    route = t["direct"] if via == "direct" else t["through"]
+    row = lambda key, value, ident: (f"<div class=row><span>{t[key]}</span><b id={ident}>{value}</b></div>")
+    return (f"<!doctype html><html lang={language}><head><meta charset=utf-8>"
+            "<meta name=viewport content='width=device-width, initial-scale=1'>"
+            f"<title>{t['title']}</title><style>"
+            "body{margin:0;font:17px -apple-system,system-ui;background:#f4f5f8;color:#14161c}"
+            "main{padding:28px 20px} h1{font-size:30px;margin:8px 0 20px}"
+            ".badge{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;"
+            "background:#e3f6ea;color:#127a3e;font-weight:600}"
+            ".badge i{width:9px;height:9px;border-radius:50%;background:#1fb35c;display:inline-block}"
+            ".card{margin-top:22px;background:#fff;border-radius:18px;box-shadow:0 1px 3px rgba(0,0,0,.08)}"
+            ".row{display:flex;justify-content:space-between;padding:16px 18px;border-top:1px solid #eef0f4}"
+            ".row:first-child{border-top:0} .row span{color:#6a7080} p{color:#6a7080;line-height:1.45;margin-top:22px}"
+            "</style></head><body><main>"
+            f"<div class=badge id=route><i></i>{route}</div><h1>{t['title']}</h1><div class=card>"
+            + row("zone", "…", "zone") + row("lang", "…", "lang") + row("time", "…", "time") + row("cookies", t["own"], "cookies")
+            + f"</div><p>{t['note']}</p></main><script>"
+            "const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;"
+            "document.getElementById('zone').textContent = zone;"
+            "document.getElementById('lang').textContent = navigator.language;"
+            "document.getElementById('time').textContent = new Date().toLocaleTimeString(navigator.language,"
+            " {hour: '2-digit', minute: '2-digit', timeZone: zone});"
+            "</script></body></html>")
+
+
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
@@ -261,7 +303,9 @@ async def site(reader, writer, scheme="http"):
                 while await reader.read(4096):
                     pass
                 break
-            if path.startswith("/page/"):
+            if host.split(":")[0] == "check.example":
+                out = reply("200 OK", demo_page(query.get("l", "ru"), via), extra=["Cache-Control: no-store"])
+            elif path.startswith("/page/"):
                 name = urllib.parse.unquote(path[len("/page/"):]) or "page"
                 out = reply("200 OK", page(name, f"<h1>Страница {name}</h1><p><a id=next href='/page/{name}-next'>Дальше</a></p>"))
             elif path == "/state":
@@ -375,6 +419,8 @@ async def pipe(reader, writer):
 
 async def upstream(name, host, port, bind):
     target = "127.0.0.1" if host.endswith(".lumentest") or host.startswith("192.0.2.") else host
+    if host.endswith(".example"):   # the screenshots' demo page (--demo): http://check.example/ is the site
+        target, port = "127.0.0.1", 28380
     local = (bind, 0) if bind and target.startswith("127.") else None
     reader, writer = await asyncio.wait_for(asyncio.open_connection(target, port, local_addr=local), 15)
     sock = writer.get_extra_info("sockname")[:2]
@@ -466,7 +512,7 @@ class LumentestDNS(asyncio.DatagramProtocol):
             return
         name = ".".join(labels).lower()
         event("dns", name=name, qtype=qtype)
-        ours = name == "lumentest" or name.endswith(".lumentest")
+        ours = name == "lumentest" or name.endswith(".lumentest") or name.endswith(".example")   # .example: --demo
         address = LAN_ADDRESS[0] if name.startswith("lan-") else "127.0.0.1"
         answer = b""
         if ours and qtype == 1:
@@ -590,6 +636,7 @@ async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", default="testbed")
     parser.add_argument("--lan-address", default="127.0.0.1", help="what lan-*.lumentest resolves to")
+    parser.add_argument("--demo", action="store_true", help="the screenshots' proxy: HTTP berlin:demo on 8080")
     args = parser.parse_args()
     LAN_ADDRESS[0] = args.lan_address
     os.makedirs(args.out, exist_ok=True)
@@ -599,6 +646,8 @@ async def main():
     await asyncio.start_server(socks_proxy("C", "uc:pc", "", udp=True), "127.0.0.1", 28383)
     switchable("D", 28384, http_proxy("D", "ud:pd", ""))
     await asyncio.start_server(silent_proxy, "127.0.0.1", 28391)
+    if args.demo:   # the App Store's screenshots: the seeded "Berlin" proxy, de.proxy.example:8080 (AppStoreSeed.swift)
+        await asyncio.start_server(http_proxy("demo", "berlin:demo", "127.0.0.2"), "127.0.0.1", 8080)
     await account.start(event)
     await switch("D", True)
     await asyncio.get_running_loop().create_datagram_endpoint(Stun, local_addr=("127.0.0.1", 3478))

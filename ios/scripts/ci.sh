@@ -18,6 +18,8 @@ OUT="${1:?out dir}"; WANT="${2:-newest}"
 # first, then its green. "build" builds the app and its tests and runs none: does it all compile.
 SUITE="${SUITE:-all}"
 in_suite() { [[ "$SUITE" == "all" || ",$SUITE," == *",$1,"* ]]; }   # core | a test class
+# The App Store's screenshots (ScreenshotTests): by hand only, never in "all".
+SCREENS=0; [[ ",$SUITE," == *",ScreenshotTests,"* ]] && SCREENS=1 && export TEST_RUNNER_LUMEN_SCREENS=1
 ONLY=()
 if [[ "$SUITE" != "all" ]]; then
     IFS=',' read -ra PARTS <<<"$SUITE"
@@ -103,6 +105,8 @@ if [[ "$SUITE" != "all" && ${#ONLY[@]} -eq 0 ]] && ! in_suite build; then say "=
 read -r RUNTIME_ID RUNTIME_VERSION TYPE <<<"$(xcrun simctl list -j | python3 -c '
 import json, sys
 want = sys.argv[1]
+# App Store screenshots need the 6.9-inch screen (1320 x 2868): the Pro Max.
+names_wanted = ("iPhone 17 Pro Max", "iPhone 16 Pro Max") if sys.argv[2] == "1" else ("iPhone 17 Pro", "iPhone 16 Pro", "iPhone 15 Pro")
 data = json.load(sys.stdin)
 names = {t["identifier"]: t["name"] for t in data["devicetypes"]}
 rs = [r for r in data["runtimes"] if r.get("platform", "iOS") == "iOS" and r.get("isAvailable", True)]
@@ -111,16 +115,21 @@ if want != "newest":
     rs = [r for r in rs if r["version"] == want or r["version"].startswith(want + ".")]
 for r in rs:
     supported = {t["identifier"] for t in r.get("supportedDeviceTypes", [])} or set(names)
-    for name in ("iPhone 17 Pro", "iPhone 16 Pro", "iPhone 15 Pro"):
+    for name in names_wanted:
         hit = [i for i in supported if names.get(i) == name]
         if hit:
             print(r["identifier"], r["version"], hit[0]); sys.exit()
-' "$WANT")"
+' "$WANT" "$SCREENS")"
 [[ -n "${TYPE:-}" ]] || { say "no iOS runtime $WANT with an iPhone 15/16/17 Pro"; exit 2; }
 UDID="$(xcrun simctl create "Lumen CI" "$TYPE" "$RUNTIME_ID")" || { say "cannot create a simulator"; exit 2; }
 xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b >/dev/null 2>&1
 say "== simulator $UDID: $TYPE, iOS $RUNTIME_VERSION"
-trap 'xcrun simctl shutdown "$UDID" >/dev/null 2>&1; xcrun simctl delete "$UDID" >/dev/null 2>&1; [[ -n "${TESTBED:-}" ]] && kill "$TESTBED" 2>/dev/null; sudo -n rm -f /etc/resolver/lumentest 2>/dev/null; sudo -n pkill -f testbed/dns53.py 2>/dev/null' EXIT
+if [[ "$SCREENS" == 1 ]]; then   # the status bar Apple's own screenshots show
+    xcrun simctl status_bar "$UDID" override --time 9:41 --dataNetwork wifi --wifiMode active --wifiBars 3 \
+        --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100 \
+        || say "the status bar could not be set"
+fi
+trap 'xcrun simctl shutdown "$UDID" >/dev/null 2>&1; xcrun simctl delete "$UDID" >/dev/null 2>&1; [[ -n "${TESTBED:-}" ]] && kill "$TESTBED" 2>/dev/null; sudo -n rm -f /etc/resolver/lumentest /etc/resolver/example 2>/dev/null; sudo -n pkill -f testbed/dns53.py 2>/dev/null' EXIT
 
 # ---- 3. The testbed on this Mac: pages, proxies, a geolocation service, and a DNS server that
 # answers *.lumentest for this Mac's own resolver too — so a page that goes around its proxy loads
@@ -137,10 +146,14 @@ if [[ -f "$HERE/testbed/testbed.py" ]]; then
             && say "$(grep -m1 'stand-in vault:' "$OUT/standin-vault.txt")" \
             || { tail -20 "$OUT/standin-vault.txt" | tee -a "$LOG"; say "the stand-in vault was not made"; STATUS=1; }
     fi
-    python3 "$HERE/testbed/testbed.py" --out "$OUT/testbed" --lan-address "$LAN" >"$OUT/testbed.txt" 2>&1 &
+    DEMO=(); [[ "$SCREENS" == 1 ]] && DEMO=(--demo)   # the screenshots' proxy and page (de.proxy.example, check.example)
+    python3 "$HERE/testbed/testbed.py" --out "$OUT/testbed" --lan-address "$LAN" ${DEMO[@]+"${DEMO[@]}"} >"$OUT/testbed.txt" 2>&1 &
     TESTBED=$!
     sudo -n mkdir -p /etc/resolver && printf 'nameserver 127.0.0.1\nport 28353\n' | sudo -n tee /etc/resolver/lumentest >/dev/null \
         || say "cannot write /etc/resolver/lumentest (sudo?)"
+    if [[ "$SCREENS" == 1 ]]; then
+        printf 'nameserver 127.0.0.1\nport 28353\n' | sudo -n tee /etc/resolver/example >/dev/null || say "cannot write /etc/resolver/example"
+    fi
     sleep 2
     resolve() { dscacheutil -q host -a name "$1" | awk '/ip_address/ {print $2}' | head -1; }   # a new name each time: no cached answer
     say "the testbed's DNS asked directly: $(dig +short +time=2 +tries=1 @127.0.0.1 -p 28353 dig-check.lumentest A 2>&1 | head -1)"
@@ -389,6 +402,32 @@ verdicts ui "$OUT/green.txt"
 # What the person saw: the screenshots the tests attached.
 xcrun xcresulttool export attachments --path "$OUT/green.xcresult" --output-path "$OUT/screens" >/dev/null 2>&1 \
     && say "screenshots: $(ls "$OUT/screens" | wc -l | tr -d ' ') files" || say "no screenshots exported"
+if [[ "$SCREENS" == 1 ]]; then   # the App Store's: appstore/<language>/<NN-name>.png, each checked for its size
+    python3 - "$OUT/screens" "$OUT/appstore" <<'PY' | tee -a "$LOG"
+import json, os, shutil, subprocess, sys
+src, dst = sys.argv[1], sys.argv[2]
+try:
+    manifest = json.load(open(os.path.join(src, "manifest.json")))
+except Exception as e:
+    print("APP STORE SCREENSHOTS: no manifest", e); sys.exit()
+made, sizes = [], set()
+for test in manifest:
+    for a in test.get("attachments", []):
+        name = a.get("suggestedHumanReadableName", "").split("_")[0]
+        if not name[:3] in ("ru-", "en-"):
+            continue
+        language, rest = name[:2], name[3:]
+        os.makedirs(os.path.join(dst, language), exist_ok=True)
+        out = os.path.join(dst, language, rest + ".png")
+        shutil.copy(os.path.join(src, a["exportedFileName"]), out)
+        info = subprocess.run(["sips", "-g", "pixelWidth", "-g", "pixelHeight", out], capture_output=True, text=True).stdout.split()
+        sizes.add(f"{info[-3]}x{info[-1]}" if len(info) >= 4 else "?")
+        made.append(f"{language}/{rest}")
+print(f"app store screenshots: {len(made)} ({', '.join(sorted(made))}), sizes {sorted(sizes)}")
+if sizes - {"1320x2868", "1290x2796"}:
+    print("APP STORE SCREENSHOTS: a size App Store Connect does not take for 6.9-inch")
+PY
+fi
 python3 - "$OUT/testbed/events.json" <<'PY' | tee -a "$LOG"
 import json, sys, collections
 try:

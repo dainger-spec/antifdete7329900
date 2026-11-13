@@ -82,6 +82,9 @@ final class AppModel: ObservableObject {
             ProxyPasswords.removeAll()
             AccountStore.save(nil)   // the iPhone's own identifier stays, as it does through a reinstall
         }
+        #if DEBUG
+        if AppStoreSeed.active { AppStoreSeed.write(to: store) }   // the App Store's screenshots
+        #endif
         catalog = SessionCatalog(store: store)
         refresh()
         startAccount()
