@@ -20,25 +20,45 @@ const captions = JSON.parse(fs.readFileSync(path.join(here, "..", "AppStore", "c
 const W = 1320, H = 2868;
 
 const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\n/g, "<br>");
+// Two looks (STYLE=dark | light): the app's own Eclipse — the phone rises out of an eclipse whose corona
+// lights its edges — or a silver ground with dark letters, where the dark app stands out the most.
+const STYLES = {
+  dark: {
+    ground: "radial-gradient(120% 70% at 50% 8%, #1a1c22 0%, #0b0c0f 55%, #050506 100%)",
+    title: "#f4f4f5", sub: "#9a9aa3",
+    corona: `<div class="corona"></div>`,
+  },
+  light: {
+    ground: "linear-gradient(180deg, #f3f4f7 0%, #e3e5ea 55%, #cfd2d9 100%)",
+    title: "#0b0c0f", sub: "#5d606a",
+    corona: "",
+  },
+};
+const style = STYLES[process.env.STYLE || "dark"];
 const html = (shot, title, sub) => `<!doctype html><html><head><meta charset=utf-8><style>
-  html,body{margin:0;width:${W}px;height:${H}px;overflow:hidden;background:#08090b}
-  body{position:relative;font-family:"Inter Display","Inter",system-ui,sans-serif;color:#f4f4f5}
-  .disc{position:absolute;border-radius:50%;background:#08090b}
-  .disc.a{width:1400px;height:1400px;right:-1000px;top:560px;
-    box-shadow:-14px 10px 0 -2px rgba(236,240,248,.55),-30px 22px 40px rgba(236,240,248,.28),-60px 44px 160px rgba(236,240,248,.14)}
-  .disc.b{width:1300px;height:1300px;left:-1000px;bottom:-420px;
-    box-shadow:14px -10px 0 -2px rgba(236,240,248,.5),30px -22px 40px rgba(236,240,248,.25),60px -44px 160px rgba(236,240,248,.12)}
-  header{position:absolute;left:96px;right:96px;top:150px}
-  h1{margin:0;font-size:104px;line-height:1.04;font-weight:800;letter-spacing:-2.5px}
-  p{margin:34px 0 0;font-size:46px;line-height:1.3;font-weight:500;color:#a1a1aa}
-  .phone{position:absolute;left:50%;transform:translateX(-50%);bottom:90px;width:960px;height:2087px;
-    border-radius:142px;padding:20px;background:#17191e;
-    box-shadow:0 0 0 2px rgba(236,240,248,.22),0 60px 140px rgba(0,0,0,.6)}
-  .phone img{display:block;width:100%;height:100%;border-radius:122px;object-fit:cover}
+  html,body{margin:0;width:${W}px;height:${H}px;overflow:hidden}
+  body{position:relative;background:${style.ground};font-family:"Inter Display","Inter",system-ui,sans-serif}
+  header{position:absolute;left:80px;right:80px;top:170px;text-align:center}
+  h1{margin:0;font-size:92px;line-height:1.06;font-weight:700;letter-spacing:-2.2px;color:${style.title}}
+  p{margin:30px 0 0;font-size:42px;line-height:1.3;font-weight:500;color:${style.sub}}
+  .corona{position:absolute;left:50%;top:640px;width:1180px;height:1180px;margin-left:-590px;border-radius:50%;
+    background:radial-gradient(circle at 50% 50%, #08090b 62%, #101115 69%, transparent 70.5%);
+    box-shadow:0 0 0 2px rgba(236,240,248,.55), 0 0 30px 6px rgba(236,240,248,.35), 0 0 140px 40px rgba(236,240,248,.16),
+      0 0 380px 120px rgba(200,210,235,.08)}
+  .phone{position:absolute;left:50%;top:640px;width:1000px;height:2172px;margin-left:-500px;border-radius:168px;
+    padding:7px;background:linear-gradient(140deg,#9c9fa6 0%,#e9ebef 22%,#6e7178 48%,#d4d6db 74%,#7d8087 100%);
+    box-shadow:0 70px 160px rgba(0,0,0,.55), 0 20px 50px rgba(0,0,0,.35)}
+  .bezel{width:100%;height:100%;border-radius:161px;background:#050506;padding:24px;box-sizing:border-box;position:relative}
+  .bezel img{display:block;width:100%;height:100%;border-radius:138px;object-fit:cover}
+  .island{position:absolute;top:58px;left:50%;width:250px;height:72px;margin-left:-125px;border-radius:36px;background:#000}
+  .btn{position:absolute;width:9px;border-radius:4px;background:linear-gradient(90deg,#6e7178,#cfd1d6)}
 </style></head><body>
-  <div class="disc a"></div><div class="disc b"></div>
+  ${style.corona}
   <header><h1>${esc(title)}</h1><p>${esc(sub)}</p></header>
-  <div class="phone"><img src="data:image/png;base64,${shot.toString("base64")}"></div>
+  <div class="phone"><div class="bezel"><img src="data:image/png;base64,${shot.toString("base64")}"><div class="island"></div></div></div>
+  <div class="btn" style="left:calc(50% - 507px);top:1020px;height:110px"></div>
+  <div class="btn" style="left:calc(50% - 507px);top:1170px;height:200px"></div>
+  <div class="btn" style="left:calc(50% + 498px);top:1120px;height:250px"></div>
 </body></html>`;
 
 const browser = await chromium.launch();
