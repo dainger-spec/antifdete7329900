@@ -182,6 +182,10 @@ final class DesignShotTests: LumenUITestCase {
         // The list, its search, its menu, its dialog, the new session's sheet.
         start()
         snap("k-list")
+        // The title pulled out (diagnostic, not a mockup's state): is the large title only scrolled away?
+        app.cells.firstMatch.swipeDown()
+        sleep(1)
+        snap("diag-k-list-pulled")
         let search = app.searchFields.firstMatch
         if search.waitForExistence(timeout: 5) {
             search.tap()
