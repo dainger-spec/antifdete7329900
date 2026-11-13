@@ -19,47 +19,56 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const captions = JSON.parse(fs.readFileSync(path.join(here, "..", "AppStore", "cards", "captions.json"), "utf8"));
 const W = 1320, H = 2868;
 
-const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\n/g, "<br>");
-// Two looks (STYLE=dark | light): the app's own Eclipse — the phone rises out of an eclipse whose corona
-// lights its edges — or a silver ground with dark letters, where the dark app stands out the most.
+// A short word (у, и, в, a, of…) stays with the word after it, a dash with the word before it.
+const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\s—/g, "&nbsp;—").replace(/(^|\s)([^\s—]{1,2})\s/g, "$1$2&nbsp;").replace(/\n/g, "<br>");
+// The look (STYLE): "eclipse" — black, the eclipse's corona as the light behind the phone, silver
+// letters; "midnight" — a deep blue night with a cold glow. Large letters, a large phone that leaves
+// by the bottom edge (ANCHOR in captions: the screen's part to keep in view).
 const STYLES = {
-  dark: {
-    ground: "radial-gradient(120% 70% at 50% 8%, #1a1c22 0%, #0b0c0f 55%, #050506 100%)",
-    title: "#f4f4f5", sub: "#9a9aa3",
-    corona: `<div class="corona"></div>`,
+  eclipse: {
+    ground: "#040405",
+    glow: `<div class="corona"></div><div class="haze"></div>`,
+    title: "linear-gradient(180deg,#ffffff 0%,#d9dce3 100%)", sub: "#a3a6ae",
   },
-  light: {
-    ground: "linear-gradient(180deg, #f3f4f7 0%, #e3e5ea 55%, #cfd2d9 100%)",
-    title: "#0b0c0f", sub: "#5d606a",
-    corona: "",
+  midnight: {
+    ground: "radial-gradient(90% 55% at 50% 38%, #24345f 0%, #111a33 45%, #070a14 100%)",
+    glow: `<div class="beam"></div>`,
+    title: "linear-gradient(180deg,#ffffff 0%,#c9d6ff 100%)", sub: "#9fb0d9",
   },
 };
-const style = STYLES[process.env.STYLE || "dark"];
+const style = STYLES[process.env.STYLE || "eclipse"];
 const html = (shot, title, sub) => `<!doctype html><html><head><meta charset=utf-8><style>
   html,body{margin:0;width:${W}px;height:${H}px;overflow:hidden}
   body{position:relative;background:${style.ground};font-family:"Inter Display","Inter",system-ui,sans-serif}
-  header{position:absolute;left:80px;right:80px;top:170px;text-align:center}
-  h1{margin:0;font-size:92px;line-height:1.06;font-weight:700;letter-spacing:-2.2px;color:${style.title}}
-  p{margin:30px 0 0;font-size:42px;line-height:1.3;font-weight:500;color:${style.sub}}
-  .corona{position:absolute;left:50%;top:640px;width:1180px;height:1180px;margin-left:-590px;border-radius:50%;
-    background:radial-gradient(circle at 50% 50%, #08090b 62%, #101115 69%, transparent 70.5%);
-    box-shadow:0 0 0 2px rgba(236,240,248,.55), 0 0 30px 6px rgba(236,240,248,.35), 0 0 140px 40px rgba(236,240,248,.16),
-      0 0 380px 120px rgba(200,210,235,.08)}
-  .phone{position:absolute;left:50%;top:640px;width:1000px;height:2172px;margin-left:-500px;border-radius:168px;
-    padding:7px;background:linear-gradient(140deg,#9c9fa6 0%,#e9ebef 22%,#6e7178 48%,#d4d6db 74%,#7d8087 100%);
-    box-shadow:0 70px 160px rgba(0,0,0,.55), 0 20px 50px rgba(0,0,0,.35)}
-  .bezel{width:100%;height:100%;border-radius:161px;background:#050506;padding:24px;box-sizing:border-box;position:relative}
-  .bezel img{display:block;width:100%;height:100%;border-radius:138px;object-fit:cover}
-  .island{position:absolute;top:58px;left:50%;width:250px;height:72px;margin-left:-125px;border-radius:36px;background:#000}
-  .btn{position:absolute;width:9px;border-radius:4px;background:linear-gradient(90deg,#6e7178,#cfd1d6)}
+  header{position:absolute;left:70px;right:70px;top:150px;text-align:center;z-index:3}
+  h1{margin:0;text-wrap:balance;font-size:124px;line-height:1.02;font-weight:800;letter-spacing:-3.6px;
+    background:${style.title};-webkit-background-clip:text;color:transparent}
+  p{margin:40px auto 0;max-width:1100px;text-wrap:balance;font-size:54px;line-height:1.22;font-weight:500;letter-spacing:-.5px;color:${style.sub}}
+  .corona{position:absolute;left:50%;top:600px;width:1500px;height:1500px;margin-left:-750px;border-radius:50%;background:#040405;
+    box-shadow:0 0 0 3px rgba(240,243,250,.85),0 0 24px 6px rgba(240,243,250,.55),0 0 120px 40px rgba(210,220,245,.28),
+      0 0 360px 140px rgba(170,185,230,.13)}
+  .haze{position:absolute;inset:0;background:radial-gradient(70% 40% at 50% 100%, rgba(0,0,0,.0), rgba(0,0,0,.65))}
+  .beam{position:absolute;left:50%;top:420px;width:1600px;height:1600px;margin-left:-800px;border-radius:50%;
+    background:radial-gradient(circle, rgba(140,170,255,.35) 0%, rgba(90,120,220,.12) 35%, transparent 65%)}
+  .phone{position:absolute;left:50%;top:640px;width:1080px;height:2346px;margin-left:-540px;border-radius:184px;z-index:2;
+    padding:8px;background:linear-gradient(150deg,#b9bcc3 0%,#f4f5f8 18%,#5c5f66 46%,#e2e4e8 72%,#8a8d94 100%);
+    box-shadow:0 80px 200px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.08)}
+  .bezel{width:100%;height:100%;border-radius:176px;background:#000;padding:25px;box-sizing:border-box;position:relative;overflow:hidden}
+  .bezel img{display:block;width:100%;height:100%;border-radius:152px;object-fit:cover;object-position:top}
+  .island{position:absolute;top:62px;left:50%;width:280px;height:80px;margin-left:-140px;border-radius:40px;background:#000}
 </style></head><body>
-  ${style.corona}
+  ${style.glow}
   <header><h1>${esc(title)}</h1><p>${esc(sub)}</p></header>
   <div class="phone"><div class="bezel"><img src="data:image/png;base64,${shot.toString("base64")}"><div class="island"></div></div></div>
-  <div class="btn" style="left:calc(50% - 507px);top:1020px;height:110px"></div>
-  <div class="btn" style="left:calc(50% - 507px);top:1170px;height:200px"></div>
-  <div class="btn" style="left:calc(50% + 498px);top:1120px;height:250px"></div>
 </body></html>`;
+// The phone right under the words, however many lines they take (once the font is in); the light behind its top.
+const layout = () => {
+  const top = document.querySelector("header").getBoundingClientRect().bottom + 90;
+  document.querySelector(".phone").style.top = top + "px";
+  for (const [cls, dy] of [[".corona", -170], [".beam", -380]]) {
+    const el = document.querySelector(cls); if (el) el.style.top = (top + dy) + "px";
+  }
+};
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
@@ -70,6 +79,7 @@ for (const [language, items] of Object.entries(captions)) {
     if (!fs.existsSync(file)) { console.log(`missing: ${language}/${name}.png`); continue; }
     await page.setContent(html(fs.readFileSync(file), title, sub), { waitUntil: "load" });
     await page.evaluate(() => document.fonts.ready);
+    await page.evaluate(layout);
     fs.mkdirSync(path.join(out, language), { recursive: true });
     await page.screenshot({ path: path.join(out, language, `${name}.png`) });
     made++;

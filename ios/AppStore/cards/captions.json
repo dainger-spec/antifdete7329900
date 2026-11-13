@@ -1,37 +1,37 @@
 {
   "ru": {
     "01-sessions": [
-      "Каждая сессия —\nотдельный браузер",
-      "Свои куки, хранилище, вкладки и история"
+      "Каждая сессия — отдельный браузер",
+      "Свои куки, вкладки и история"
     ],
     "02-browser": [
-      "Свой прокси\nу каждой сессии",
+      "Свой прокси у каждой сессии",
       "Без прокси страница не откроется"
     ],
     "03-settings": [
-      "Часовой пояс и язык\nстраны прокси",
-      "И свой профиль устройства у каждой сессии"
+      "Время и язык страны прокси",
+      "И свой профиль устройства"
     ],
     "04-proxies": [
-      "Все прокси\nпод контролем",
-      "Работает ли, откуда выходит, пропускает ли UDP"
+      "Все прокси под контролем",
+      "Работает ли, откуда выходит, есть ли UDP"
     ]
   },
   "en": {
     "01-sessions": [
-      "Every session is\na browser of its own",
-      "Its own cookies, storage, tabs and history"
+      "Every session, its own browser",
+      "Its own cookies, tabs and history"
     ],
     "02-browser": [
-      "A proxy\nfor every session",
+      "A proxy for every session",
       "No page opens without it"
     ],
     "03-settings": [
-      "The proxy's country:\nits time and language",
+      "The time and language of its proxy",
       "And a device profile of its own"
     ],
     "04-proxies": [
-      "Know\nyour proxies",
+      "Every proxy in view",
       "Alive, where it exits, whether it carries UDP"
     ]
   }
