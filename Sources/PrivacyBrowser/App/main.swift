@@ -139,6 +139,12 @@ MainActor.assumeIsolated {
         // enumerateDevices (CI; CameraSafariCheck; scripts/camera_safari_check.sh serves the page).
         Localization.applyProcessLanguage()
         CameraSafariCheck.start(arguments: arguments)
+    } else if arguments.contains("--geolocation-safari-check") {
+        // A profile with a fixed place, in its own process with Safari's window: a secure loopback
+        // page must get that place from the engine itself (CI; GeolocationSafariCheck;
+        // scripts/geolocation_safari_check.sh serves the page).
+        Localization.applyProcessLanguage()
+        GeolocationSafariCheck.start(arguments: arguments)
     } else if arguments.contains("--default-browser-check") {
         // Whether Safari's own question about the default browser throws in a profile's process of
         // this app, and what the system answers about http and https (SafariChrome; CI runs it on

@@ -664,6 +664,8 @@ enum ProfileNetworkGuard {
     /// proxy the profile has, is a web view that would have loaded as this Mac without lock 2.
     private static func inspect(_ webView: WKWebView) {
         webViews.add(webView)
+        // The profile's geolocation from the engine itself, where it answers (`NativeGeolocation`).
+        NativeGeolocation.cover(webView)
         webView.allowsLinkPreview = false // and kept off (`HandOffs`)
         HostedPageHistory.follow(webView)
         // The profile's User-Agent, not whatever Safari's code computes (and kept: `pinUserAgent`).

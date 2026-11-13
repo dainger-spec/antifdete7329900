@@ -186,6 +186,7 @@ enum HelpContent {
                 .heading("check.what"),
                 .points(["check.what.proxy", "check.what.timeZone", "check.what.language", "check.what.geolocation",
                          "check.what.webRTC", "check.what.dns", "check.what.engine", "check.what.window"]),
+                .note("check.geolocation.engine"),
                 .heading("check.know"),
                 .note("check.local"),
                 .points(["check.know.restart", "check.know.unknown", "check.know.dns", "check.know.signals"]),

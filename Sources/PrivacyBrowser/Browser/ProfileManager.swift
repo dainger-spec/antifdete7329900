@@ -404,6 +404,9 @@ final class ProfileManager: ObservableObject {
         // here (docs/CAMERA.md).
         let systemCameraActive: Bool
         if runsInProfileProcess {
+            // One profile in this process: its geolocation is the engine's own answer, before any
+            // web view exists (`NativeGeolocation`; the page script answers where WebKit cannot).
+            NativeGeolocation.engage(configuration.geolocation)
             systemCameraActive = ProfileProcess.systemCameraActiveForThisProcess
         } else {
             let usesSystemCamera = configuration.cameraSubstitution.usesSystemCamera

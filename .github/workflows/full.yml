@@ -375,6 +375,12 @@ jobs:
         continue-on-error: true
         timeout-minutes: 10
         run: TITLE="macOS 27 - a substituted camera in Safari's window" scripts/camera_safari_check.sh build/unsandboxed/Lumen.app build/egress27/camera-safari
+      - name: macOS 27 - geolocation from the engine in Safari 27's window (reported)
+        # scripts/geolocation_safari_check.sh, as in the macOS 26 job: fails the step, not the job.
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 10
+        run: TITLE="macOS 27 - geolocation from the engine in Safari's window" scripts/geolocation_safari_check.sh build/unsandboxed/Lumen.app build/egress27/geolocation-safari
       - name: macOS 27 - a profile's data through signing out, into other accounts and back (it must fail when lost)
         # scripts/account_switch_check.py, as in the macOS 26 job, with its control.
         if: always()
@@ -1084,6 +1090,21 @@ jobs:
         with:
           name: camera-safari
           path: build/camera-safari
+          if-no-files-found: ignore
+      - name: Geolocation in Safari's window — the profile's place from the engine itself, as the page sees it
+        # scripts/geolocation_safari_check.sh (Lumen --geolocation-safari-check): a profile with a
+        # fixed place is started without a window, and a scenario on a secure loopback page in
+        # Safari's window must get that place from navigator.geolocation, 'prompt' before it asks and
+        # 'granted' after. In a profile's own process the page script leaves geolocation alone, so
+        # the place can only come from the engine (NativeGeolocation).
+        if: always()
+        timeout-minutes: 10
+        run: scripts/geolocation_safari_check.sh build/unsandboxed/Lumen.app build/geolocation-safari
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: geolocation-safari
+          path: build/geolocation-safari
           if-no-files-found: ignore
       - name: The license's renewals, as the account server sees them (they must fail when broken)
         # scripts/license_renewal_check.py: a stand-in account server on 127.0.0.1 answers the

@@ -515,6 +515,14 @@ test('storage quota: Safari\'s instead of the app default', async () => {
   assert.equal(await run(plain, `navigator.storage.estimate().then((e) => e.quota)`), 1048576000);
 });
 
+test('geolocation native: the engine answers, the page meets its own Geolocation untouched', () => {
+  const keep = 'globalThis.__original = Object.getOwnPropertyDescriptor(Geolocation.prototype, "getCurrentPosition").value;';
+  const same = `String(Object.getOwnPropertyDescriptor(Geolocation.prototype, 'getCurrentPosition').value === __original)`;
+  assert.equal(run(makeWindow({ webRTC: 'disabled', geolocation: { mode: 'native' } }, null, keep), same), 'true');
+  // The control: with 'deny' the script does replace it.
+  assert.equal(run(makeWindow(base, null, keep), same), 'false');
+});
+
 test('geolocation fixed: position objects without own properties', async () => {
   const w = makeWindow({ ...base, geolocation: { mode: 'fixed', latitude: 48.8566, longitude: 2.3522, accuracy: 25 } });
   w.position = await run(w, `new Promise((res) => navigator.geolocation.getCurrentPosition((p) => res(p)))`);
