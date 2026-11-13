@@ -1310,6 +1310,11 @@
 "warmup.group.country" = "By country";
 "warmup.group.general" = "Everyday";
 "warmup.group.interest" = "By interest";
+"warmup.group.user" = "My templates";
+"warmup.card.sites" = "%d sites";
+"warmup.template.name" = "Template name";
+"warmup.template.save" = "Save as template";
+"warmup.template.saved" = "Saved to My templates";
 "warmup.invisible" = "The warm-up runs in a window of the profile placed off every screen: nothing opens in front of you, and closing this sheet does not stop it.";
 "warmup.minutes" = "Time it may take";
 "warmup.note" = "The search uses the profile's search engine, as the address bar does. The robot works in its own hidden window; stopping the profile, or a page asking a question, stops the run.";
