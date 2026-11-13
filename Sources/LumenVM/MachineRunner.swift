@@ -162,6 +162,7 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     private var trafficTimer: Timer?
     private var lastTraffic: VMNetCounters?
     private var lastTrouble: String?
+    private var lastTroubleDetail: String?
     private var lastViaSystemProxy = false
     private var stopping = false
     private var finished = false
@@ -402,6 +403,7 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         // said to the app, and in this window, with the kind of failure — not left to be guessed.
         let report = network.directReport()
         var trouble: String?
+        var troubleDetail: String?
         if let report, report.failedInARow >= VMNetworkTrouble.failuresBeforeSaying, let kind = report.trouble {
             // Kind for kind, so that a new one is not forgotten here.
             let named: VMNetworkTrouble
@@ -413,18 +415,21 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
             case .proxyRefused: named = .proxyRefused
             }
             trouble = named.rawValue
+            troubleDetail = report.detail.map { String($0.prefix(200)) }
         }
         let viaSystemProxy = report?.usesSystemProxy ?? false
-        guard counters != lastTraffic || trouble != lastTrouble || viaSystemProxy != lastViaSystemProxy else { return }
+        guard counters != lastTraffic || trouble != lastTrouble || troubleDetail != lastTroubleDetail
+            || viaSystemProxy != lastViaSystemProxy else { return }
         if trouble != lastTrouble {
             HelperIO.log(trouble.map { "way out: the machine's connections are not being made (\($0))" } ?? "way out: connections are made again")
             window?.subtitle = trouble.map { text("trouble." + $0, "No internet in this machine") } ?? ""
         }
         lastTraffic = counters
         lastTrouble = trouble
+        lastTroubleDetail = troubleDetail
         lastViaSystemProxy = viaSystemProxy
         HelperIO.emit(VMHelperEvent(kind: .traffic, bytesUp: counters.bytesFromGuest, bytesDown: counters.bytesToGuest,
-                                    connections: counters.connectionsActive, trouble: trouble,
+                                    connections: counters.connectionsActive, trouble: trouble, troubleDetail: troubleDetail,
                                     viaSystemProxy: report == nil ? nil : viaSystemProxy))
     }
 

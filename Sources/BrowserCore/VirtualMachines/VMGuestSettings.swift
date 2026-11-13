@@ -155,8 +155,16 @@ public struct VMGuestStatus: Equatable, Sendable {
     public var systemBuild: String?
     public var safariVersion: String?
     public var appliedRevision: String?
+    /// What came of Lumen's desktop picture (tools 4): "off", "none" (no picture in the shared
+    /// folder), "set", "kept" (set at an earlier start and left alone since) or "failed".
+    public var wallpaperState: String?
+    /// With "failed": what the guest's system said, as it said it.
+    public var wallpaperNote: String?
     /// The one-time setup inside the guest has finished (the installer's last line).
     public var setupDone: Bool
+
+    /// The guest could not put Lumen's picture on its desktop.
+    public var wallpaperFailed: Bool { wallpaperState == "failed" }
 
     public init(text: String) {
         var values: [String: String] = [:]
@@ -173,6 +181,8 @@ public struct VMGuestStatus: Equatable, Sendable {
         systemBuild = values["LUMEN_MACOS_BUILD"]
         safariVersion = values["LUMEN_SAFARI_VERSION"]
         appliedRevision = values["LUMEN_APPLIED_REVISION"]
+        wallpaperState = values["LUMEN_WALLPAPER_STATE"]
+        wallpaperNote = values["LUMEN_WALLPAPER_NOTE"]
         setupDone = values["LUMEN_SETUP_DONE"] == "1"
     }
 }

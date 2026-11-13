@@ -15,7 +15,7 @@
 # (lumen-guest.sh), which it puts in its own place and starts: Lumen on the Mac is what made this
 # machine, and a later Lumen's script needs no visit to the base system.
 
-TOOLS_VERSION=3
+TOOLS_VERSION=4
 SHARE="/Volumes/My Shared Files"
 OWN_MOUNT=/var/run/lumen-share
 TAG=com.apple.virtio-fs.automount
@@ -141,40 +141,73 @@ write_status() {
     printf 'LUMEN_MACOS_BUILD=%s\n' "$(/usr/bin/sw_vers -buildVersion 2>/dev/null)"
     printf 'LUMEN_SAFARI_VERSION=%s\n' "$(/usr/bin/defaults read /Applications/Safari.app/Contents/Info CFBundleShortVersionString 2>/dev/null)"
     [ -z "$1" ] || printf 'LUMEN_APPLIED_REVISION=%s\n' "$1"
+    [ -z "$wallpaper_state" ] || printf 'LUMEN_WALLPAPER_STATE=%s\n' "$wallpaper_state"
+    [ -z "$wallpaper_note" ] || printf 'LUMEN_WALLPAPER_NOTE=%s\n' "$wallpaper_note"
     printf 'LUMEN_SETUP_DONE=1\n'
   } > "$share/lumen-status.env" 2>/dev/null
 }
 
-# Lumen's desktop picture, as the app drew it for this machine's screen. It is set once for each
-# picture: a person who then chooses another in the machine keeps theirs. A picture is kept under
-# a name of its own (by its checksum) — macOS shows a changed file of the same name as the old one.
+# Lumen's desktop picture, as the app drew it for this machine's screen. A picture is kept under a
+# name of its own (by its checksum) — macOS shows a changed file of the same name as the old one.
+#
+# It is set at sign-in and looked at again a few times in the machine's first minute and a half:
+# a machine at its first start is a Mac the system has not seen (new hardware, a new display),
+# and what the system then settles on for its desktop can come after the picture was set. Once
+# that time has passed with the picture in place it is left alone for good — a person who then
+# chooses another in the machine keeps theirs.
+#
+# What came of it goes back to Lumen in the status file: LUMEN_WALLPAPER_STATE (off, none — no
+# picture in the shared folder —, set, kept, failed) and, for a failure, what the system said.
 WALLPAPERS=/Users/Shared/Lumen
+wallpaper_state=""
+wallpaper_note=""
+wallpaper_looks=0
+picture=""
 set_wallpaper() {
-  [ "$wallpaper" = 1 ] && [ -n "$share" ] && [ -f "$share/lumen-wallpaper.png" ] || return 0
+  wallpaper_note=""
+  if [ "$wallpaper" != 1 ]; then wallpaper_state=off; return 0; fi
+  if [ -z "$share" ] || [ ! -f "$share/lumen-wallpaper.png" ]; then wallpaper_state=none; return 0; fi
   sum="$(/usr/bin/cksum < "$share/lumen-wallpaper.png" 2>/dev/null | /usr/bin/cut -d ' ' -f 1)"
-  only '0-9' "$sum" || return 0
+  if ! only '0-9' "$sum"; then wallpaper_state=failed; wallpaper_note="the picture could not be read"; return 0; fi
   picture="$WALLPAPERS/wallpaper-$sum.png"
-  [ ! -e "$picture.set" ] || return 0
+  if [ -e "$picture.set" ]; then wallpaper_state=kept; return 0; fi
   if [ ! -f "$picture" ]; then
     /bin/mkdir -p "$WALLPAPERS" && /bin/chmod 755 "$WALLPAPERS"
     /bin/rm -f "$WALLPAPERS"/wallpaper-*.png "$WALLPAPERS"/wallpaper-*.png.set 2>/dev/null
-    /bin/cp "$share/lumen-wallpaper.png" "$picture" 2>/dev/null && /bin/chmod 644 "$picture" || return 0
+    if ! /bin/cp "$share/lumen-wallpaper.png" "$picture" 2>/dev/null; then
+      wallpaper_state=failed; wallpaper_note="the picture could not be copied into the machine"; return 0
+    fi
+    /bin/chmod 644 "$picture"
   fi
   # By the system's own call for it, in the person's session: no other app is told to do it, so
-  # nothing asks the person for a permission.
-  done_it="$(as_user /usr/bin/osascript -l JavaScript -e 'function run(argv) {
+  # nothing asks the person for a permission. A screen that already shows the picture is left.
+  answer="$(as_user /usr/bin/osascript -l JavaScript -e 'function run(argv) {
     ObjC.import("AppKit");
-    var url = $.NSURL.fileURLWithPath(argv[0]);
+    var path = argv[0];
+    var url = $.NSURL.fileURLWithPath(path);
+    var workspace = $.NSWorkspace.sharedWorkspace;
     var screens = $.NSScreen.screens;
-    var ok = screens.count > 0;
-    for (var i = 0; i < screens.count; i++) {
-      ok = $.NSWorkspace.sharedWorkspace.setDesktopImageURLForScreenOptionsError(url, screens.objectAtIndex(i), $.NSDictionary.dictionary, null) && ok;
+    var count = screens.count;
+    if (!(count > 0)) { return "no screen to set it on"; }
+    var answer = "kept";
+    for (var i = 0; i < count; i++) {
+      var screen = screens.objectAtIndex(i);
+      var shown = "";
+      try { shown = ObjC.unwrap(workspace.desktopImageURLForScreen(screen).path); } catch (e) { shown = ""; }
+      if (shown === path) { continue; }
+      if (!workspace.setDesktopImageURLForScreenOptionsError(url, screen, $.NSDictionary.dictionary, null)) { return "the system refused the picture"; }
+      answer = "set";
     }
-    return ok ? "set" : "not set";
-  }' "$picture" 2>/dev/null)"
-  if [ "$done_it" = "set" ]; then
-    : > "$picture.set"
-  fi
+    return answer;
+  }' "$picture" 2>&1)"
+  case "$answer" in
+    set|kept) wallpaper_state=set ;;
+    *)
+      wallpaper_state=failed
+      wallpaper_note="$(printf '%s' "$answer" | /usr/bin/tr -cd 'A-Za-z0-9 .,:()_/-' | /usr/bin/cut -c 1-110)"
+      [ -n "$wallpaper_note" ] || wallpaper_note="no answer from the system"
+      log "wallpaper: $wallpaper_note" ;;
+  esac
 }
 
 # The person's side — the language Safari tells sites, and Safari itself — once someone is signed
@@ -245,8 +278,22 @@ quit_safari() {
 }
 
 write_status ""
+ticks=0
 while :; do
   [ "$user_done" = 1 ] || apply_for_user
+  # The picture again at about 10, 20, 40 and 80 seconds after sign-in; then it is left for good.
+  if [ "$user_done" = 1 ] && [ "$wallpaper_looks" -lt 4 ]; then
+    ticks=$((ticks + 1))
+    case "$ticks" in
+      5|10|20|40)
+        set_wallpaper
+        wallpaper_looks=$((wallpaper_looks + 1))
+        if [ "$wallpaper_looks" -ge 4 ] && [ "$wallpaper_state" = set ] && [ -n "$picture" ]; then
+          : > "$picture.set" 2>/dev/null
+        fi
+        write_status "$revision" ;;
+    esac
+  fi
   if [ -n "$share" ] && [ -e "$share/lumen-shutdown" ]; then
     log "Lumen asked for a shutdown"
     /bin/rm -f "$share/lumen-shutdown" 2>/dev/null

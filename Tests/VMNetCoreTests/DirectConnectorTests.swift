@@ -190,6 +190,103 @@ final class DirectConnectorTests: XCTestCase {
         XCTAssertFalse(VMNetDirectConnector.isPublicIPv6([1, 2, 3]))
     }
 
+    // MARK: - A VPN's own addresses
+
+    /// An address of a private range this machine has itself (on its network), if it has one.
+    private func ownPrivateAddress() -> String? {
+        var list: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&list) == 0 else { return nil }
+        defer { freeifaddrs(list) }
+        var next = list
+        while let entry = next {
+            next = entry.pointee.ifa_next
+            guard let address = entry.pointee.ifa_addr, Int32(address.pointee.sa_family) == AF_INET,
+                  Int(entry.pointee.ifa_flags) & Int(IFF_UP) != 0 else { continue }
+            let value = address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { UInt32(bigEndian: $0.pointee.sin_addr.s_addr) }
+            if VMNetDirectConnector.isPrivateIPv4(VMNetIPv4(value)) { return VMNetIPv4(value).string }
+        }
+        return nil
+    }
+
+    /// Many VPN tools answer every name with an address of their own from a private range and take
+    /// the connection in their tunnel. Such an address is taken; a local network's, this machine
+    /// itself and an address the guest wrote are not.
+    func testAPrivateAddressIsTakenOnlyWhereItGoesIntoATunnel() throws {
+        let own = ownPrivateAddress()
+        let asked = Locked<[String]>([])
+        let names = ["lan.example": ["192.168.1.10"], "self.example": ["127.0.0.1"], "link.example": ["169.254.169.254"],
+                     "vpn.example": [own ?? "100.64.0.7"]]
+        let connector = VMNetDirectConnector(allowsLocalDestinations: false, routesIntoTunnel: { address in
+            asked.update { $0.append(address) }
+            return address == "100.64.0.7" || address == own
+        }) { names[$0] }
+        connectors.append(connector)
+        try connector.start()
+
+        // A local network's address: asked about, and not a tunnel's.
+        XCTAssertEqual(ask(try dial(connector.port), name: "lan.example", port: 80), 5)
+        XCTAssertEqual(connector.report().trouble, .notPublic)
+        let detail = try XCTUnwrap(connector.report().detail)
+        XCTAssertTrue(detail.contains("192.168.0.0/16"), detail)
+        XCTAssertTrue(detail.contains("does not send them into a tunnel"), detail)
+        XCTAssertFalse(detail.contains("192.168.1.10"), detail)
+        XCTAssertEqual(asked.value, ["192.168.1.10"])
+        // This machine itself and a link's own addresses: never, whatever the routes say.
+        for name in ["self.example", "link.example"] {
+            XCTAssertEqual(ask(try dial(connector.port), name: name, port: 80), 5, name)
+            XCTAssertEqual(connector.report().trouble, .notPublic, name)
+        }
+        XCTAssertEqual(asked.value, ["192.168.1.10"])
+        // An address the guest wrote itself is not a resolver's answer: public ones only.
+        XCTAssertEqual(ask(try dial(connector.port), address: [100, 64, 0, 7], port: 80), 5)
+        XCTAssertEqual(asked.value, ["192.168.1.10"])
+
+        // The VPN's: the connection is made. Shown where this machine has a private address to
+        // stand for one (a server of the test on it).
+        guard let own else { return }
+        let origin = TestSocket.listen(on: own)
+        descriptors.append(origin.descriptor)
+        let client = try dial(connector.port)
+        XCTAssertEqual(ask(client, name: "vpn.example", port: origin.port), 0)
+        let served = TestSocket.accept(origin.descriptor, timeout: 3)
+        XCTAssertGreaterThanOrEqual(served, 0)
+        descriptors.append(served)
+        TestSocket.write(client, Array("into the tunnel".utf8))
+        XCTAssertEqual(TestSocket.read(served, exactly: 15), Array("into the tunnel".utf8))
+        XCTAssertNil(connector.report().trouble)
+        XCTAssertNil(connector.report().detail)
+        XCTAssertTrue(asked.value.contains(own))
+    }
+
+    func testWhichAddressesAreAPrivateRanges() {
+        for text in ["10.0.0.1", "10.255.255.254", "100.64.0.1", "100.127.255.254", "172.16.0.1", "172.31.255.254",
+                     "192.168.0.1", "192.0.0.8", "240.0.0.1", "255.255.255.254"] {
+            XCTAssertTrue(VMNetDirectConnector.isPrivateIPv4(try XCTUnwrap(VMNetIPv4(string: text))), text)
+        }
+        // This machine, a link's own addresses, groups, nobody — and the public internet.
+        for text in ["0.0.0.0", "0.1.2.3", "127.0.0.1", "127.8.0.1", "169.254.169.254", "224.0.0.251", "239.255.255.250",
+                     "255.255.255.255", "8.8.8.8", "100.63.255.255", "100.128.0.1", "172.32.0.1", "198.18.0.1"] {
+            XCTAssertFalse(VMNetDirectConnector.isPrivateIPv4(try XCTUnwrap(VMNetIPv4(string: text))), text)
+        }
+    }
+
+    /// The system's own answer about a route. What every machine has: itself, which is no tunnel.
+    /// And, where the test is given a tunnel (VMNET_TUNNEL_PEER: the far end of a point-to-point
+    /// interface that is up), an address this machine does send into one.
+    func testTheSystemsRoutesSayWhatGoesIntoATunnel() throws {
+        XCTAssertFalse(VMNetDirectConnector.goesIntoATunnel(numeric: "127.0.0.1"))
+        XCTAssertFalse(VMNetDirectConnector.goesIntoATunnel(numeric: "::1"))
+        XCTAssertFalse(VMNetDirectConnector.goesIntoATunnel(numeric: "not an address"))
+        if let own = ownPrivateAddress() {
+            XCTAssertFalse(VMNetDirectConnector.goesIntoATunnel(numeric: own), "this machine's own address is not a tunnel's far end")
+        }
+        guard let peer = ProcessInfo.processInfo.environment["VMNET_TUNNEL_PEER"], !peer.isEmpty else { return }
+        XCTAssertTrue(VMNetDirectConnector.goesIntoATunnel(numeric: peer), "\(peer) is not sent into a tunnel")
+        if let local = ProcessInfo.processInfo.environment["VMNET_TUNNEL_LOCAL"], !local.isEmpty {
+            XCTAssertFalse(VMNetDirectConnector.goesIntoATunnel(numeric: local), "the tunnel's near end is this machine")
+        }
+    }
+
     // MARK: - Why a connection was not made
 
     /// What the person is told when a machine has no internet: a kind and a count — never a name

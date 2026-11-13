@@ -192,6 +192,20 @@ on a Mac that runs a VPN or a proxy tool they went nowhere.
 - Public addresses only, as the network itself has it: a name that resolves to this machine or to
   a local network is refused, so a page in a guest cannot reach the Mac's own services by naming
   them.
+- **Except a VPN's own addresses.** Many VPN tools answer every name with an address of their own
+  making from a private range (100.64.0.0/10, 10.0.0.0/8, 240.0.0.0/4, fc00::/7 …) and take the
+  connection to it in their tunnel, where they put the real destination back. To the rule above
+  such an address was a local network's, and on such a Mac a machine without a proxy had no
+  internet at all (the third run on a person's Mac, 13 November: every connection failed as "not
+  a public address"). So a private address **that a name resolved to** is taken when this Mac's
+  route for it is a tunnel: `goesIntoATunnel` "connects" a datagram socket to it — which sends
+  nothing and makes the system choose the address it would send from — and takes it only if
+  every interface with that source address is point-to-point, up and not loopback (a VPN's
+  `utun`), and the source is not the destination (the Mac itself). Never taken, whatever the
+  routes: loopback, link-local, multicast, 0.0.0.0/8, the broadcast address — and a private
+  address the guest wrote itself rather than a name (the network refuses those before the
+  connector hears of them). What this lets through that the rule did not: a name that resolves
+  to an address inside a VPN the Mac is connected to — which the Mac's own browser reaches too.
 - **The Mac's own proxy.** A VPN or proxy tool in its "system proxy" mode takes no packets: it
   writes itself into the Mac's network settings, and the apps that follow them (Safari) ask it.
   A plain socket passes it by — and on a network where only the tool gets out, reaches nothing
@@ -214,7 +228,10 @@ on a Mac that runs a VPN or a proxy tool they went nowhere.
   says there is no internet. The first connection made clears it.
 - A thread per direction of a connection, blocking; at most `maximumConnections` at once.
 - `DirectConnectorTests`: a connection both ways with megabytes and a half-close, a name resolved
-  on this side, what is refused, a destination that is not there, stop and start; each kind of
+  on this side, what is refused, a destination that is not there, stop and start; a private
+  address taken only where it goes into a tunnel, which ranges are private, and the system's own
+  answer about a route (with `VMNET_TUNNEL_PEER` set to the far end of a point-to-point interface
+  that is up, checked against a real one — run so on Linux with a `tun` device); each kind of
   failure and that its note names nothing; a SOCKS and an HTTP proxy of the Mac's settings asked
   for the name, bytes right behind a proxy's answer, a proxy that refuses or is not there, the
   settings' exceptions, a local name not asked of the proxy, the settings' dictionary read — and

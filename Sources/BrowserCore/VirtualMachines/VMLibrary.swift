@@ -210,8 +210,11 @@ public enum VMSetupState: Equatable, Sendable {
 /// visit to the base system.
 ///
 /// 3: Lumen's desktop picture.
+///
+/// 4: the picture is looked at again while a machine's first start settles, and what came of it
+/// is said back in the status file.
 public enum VMGuestTools {
-    public static let version = 3
+    public static let version = 4
     /// From this version on an installed boot script takes a newer copy of itself at a machine's
     /// start: a base with tools this new needs nothing done to it for a later version's settings.
     public static let updatesItselfFrom = 2

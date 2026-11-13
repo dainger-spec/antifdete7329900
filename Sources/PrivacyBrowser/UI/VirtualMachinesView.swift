@@ -442,12 +442,34 @@ private struct VMRow: View {
                         .foregroundStyle(Theme.danger)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if let guest, VMGuestTools.mustBeInstalledAgain(guest.toolsVersion) {
+                    // A machine made from a base with the first tools: its boot script takes no
+                    // newer one, so what later versions set is not applied in it.
+                    Text(L("vm.row.tools.old"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if profile.lumenWallpaper, let guest, guest.wallpaperFailed {
+                    Text(String(format: L("vm.row.wallpaper.failed"), guest.wallpaperNote ?? "—"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.warning)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if let trouble = state?.trouble, state?.phase == .running {
                     // A machine without a proxy that reaches nothing: why, in the person's words.
                     Label(L("vm.row.trouble.\(trouble.rawValue)"), systemImage: "wifi.exclamationmark")
                         .font(.lumenSecondary)
                         .foregroundStyle(Theme.danger)
                         .fixedSize(horizontal: false, vertical: true)
+                    if let detail = state?.troubleDetail, !detail.isEmpty {
+                        // The helper's own words, as they are: for whoever is asked what is wrong.
+                        Text(String(format: L("vm.row.trouble.detail"), detail))
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.textTertiary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 } else if state?.viaSystemProxy == true, state?.phase == .running {
                     Text(L("vm.row.viaSystemProxy"))
                         .font(.lumenSecondary)

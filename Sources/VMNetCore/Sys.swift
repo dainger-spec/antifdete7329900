@@ -11,10 +11,12 @@ import Foundation
 enum Sys {
     #if canImport(Darwin)
     static let streamType = SOCK_STREAM
+    static let datagramType = SOCK_DGRAM
     /// Darwin has no per-call flag against SIGPIPE: `setNoSigPipe` sets it on the socket instead.
     private static let sendFlags = Int32(MSG_DONTWAIT)
     #else
     static let streamType = Int32(SOCK_STREAM.rawValue)
+    static let datagramType = Int32(SOCK_DGRAM.rawValue)
     private static let sendFlags = Int32(MSG_DONTWAIT) | Int32(MSG_NOSIGNAL)
     #endif
 

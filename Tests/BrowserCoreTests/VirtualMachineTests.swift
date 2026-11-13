@@ -192,6 +192,13 @@ final class VMGuestSettingsTests: XCTestCase {
         XCTAssertEqual(status.appliedRevision, "abc123")
         XCTAssertTrue(status.setupDone)
         XCTAssertFalse(VMGuestStatus(text: "garbage\n=\n").setupDone)
+        // Lumen's desktop picture: what came of it, and the system's words for a failure.
+        XCTAssertNil(status.wallpaperState)
+        XCTAssertFalse(status.wallpaperFailed)
+        let failed = VMGuestStatus(text: "LUMEN_TOOLS_VERSION=4\nLUMEN_WALLPAPER_STATE=failed\nLUMEN_WALLPAPER_NOTE=execution error: (-2700)\nLUMEN_SETUP_DONE=1\n")
+        XCTAssertTrue(failed.wallpaperFailed)
+        XCTAssertEqual(failed.wallpaperNote, "execution error: (-2700)")
+        XCTAssertFalse(VMGuestStatus(text: "LUMEN_WALLPAPER_STATE=set\n").wallpaperFailed)
     }
 }
 
@@ -474,6 +481,12 @@ final class VMGuestToolsTests: XCTestCase {
                 XCTAssertTrue(text.contains("'\(key)="), "\(name) does not write \(key)")
             }
             XCTAssertTrue(text.contains("TOOLS_VERSION=\(VMGuestTools.version)\n"), "\(name) is not the tools' version the app expects")
+            if name == "lumen-guest.sh" {
+                // What came of Lumen's desktop picture, and what the system said when nothing did.
+                for key in ["LUMEN_WALLPAPER_STATE", "LUMEN_WALLPAPER_NOTE"] {
+                    XCTAssertTrue(text.contains("'\(key)="), "\(name) does not write \(key)")
+                }
+            }
             XCTAssertTrue(text.contains(VMGuestSettings.statusFileName))
         }
         XCTAssertTrue(try script("lumen-guest.sh").contains("'LUMEN_APPLIED_REVISION="))

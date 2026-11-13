@@ -217,13 +217,13 @@ struct TestRandom: RandomNumberGenerator {
 
 enum TestSocket {
     /// A listening TCP socket on 127.0.0.1 and the port the system gave it.
-    static func listen() -> (descriptor: Int32, port: Int) {
+    static func listen(on address: String = "127.0.0.1") -> (descriptor: Int32, port: Int) {
         var hints = addrinfo()
         hints.ai_family = AF_INET
         hints.ai_socktype = Sys.streamType
         hints.ai_flags = AI_NUMERICHOST | AI_NUMERICSERV | AI_PASSIVE
         var list: UnsafeMutablePointer<addrinfo>?
-        precondition(getaddrinfo("127.0.0.1", "0", &hints, &list) == 0, "no loopback address")
+        precondition(getaddrinfo(address, "0", &hints, &list) == 0, "no such address")
         defer { freeaddrinfo(list) }
         let descriptor = socket(AF_INET, Sys.streamType, 0)
         precondition(descriptor >= 0, "no socket")

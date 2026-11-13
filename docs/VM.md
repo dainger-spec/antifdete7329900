@@ -123,7 +123,7 @@ the person's own.
 
 | profile | where the machine's connections go |
 |---|---|
-| no proxy | made by the helper as this Mac's own apps make theirs (`VMNetDirectConnector`): ordinary sockets, which go through its VPN and by its routes — or, where the Mac's network settings name a proxy (a VPN tool in "system proxy" mode), through that proxy, as Safari on the Mac does. Sites see this Mac's address, or its VPN's. When connections fail one after another, the machine's row and its window say so, with the kind of failure |
+| no proxy | made by the helper as this Mac's own apps make theirs (`VMNetDirectConnector`): ordinary sockets, which go through its VPN and by its routes — or, where the Mac's network settings name a proxy (a VPN tool in "system proxy" mode), through that proxy, as Safari on the Mac does. Sites see this Mac's address, or its VPN's. A VPN that answers names with private addresses of its own is followed into its tunnel (`docs/VM_NETWORK.md`). When connections fail one after another, the machine's row and its window say so, with the kind of failure and the helper's own words for it |
 | a proxy | every connection of the guest — the whole macOS, not only Safari — goes through the profile's proxy, and there is no other way out |
 
 In both, the machine's network card is a socket whose other end is `VMNetCore` in the helper: it
@@ -201,8 +201,14 @@ The wallpaper is a PNG the app leaves in the shared folder (`lumen-wallpaper.png
 start, once for a screen size. The boot script copies it into the guest under a name made of its
 checksum (macOS shows a changed file of the same name as the old one) and sets it in the person's
 session by the system's own call (`NSWorkspace`, from `osascript` — no other app is told to do
-it, so nothing asks for a permission). It is set once for each picture: a person who then chooses
-another in the machine keeps theirs.
+it, so nothing asks for a permission). It is set at sign-in and looked at again about 10, 20, 40
+and 80 seconds later (tools 4): a machine at its first start is a Mac the system has not seen,
+and what it settles on for the desktop can come after the picture was set. After that it is left
+alone for good — a person who then chooses another in the machine keeps theirs. What came of it
+is said back in the status file (`LUMEN_WALLPAPER_STATE`, and `LUMEN_WALLPAPER_NOTE` with the
+system's words for a failure), which the app reads while the machine runs: a picture that was
+not set is said in the machine's row, and so is a machine made with the first tools, whose boot
+script takes no newer one.
 
 ## What machines have in common
 

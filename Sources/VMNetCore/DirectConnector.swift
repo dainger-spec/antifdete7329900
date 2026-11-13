@@ -22,6 +22,14 @@ import Foundation
 /// only: a name that resolves to this Mac, or to somebody's local network, is refused — a page in
 /// a guest must not reach the Mac's own services by naming them.
 ///
+/// With one exception, which is a VPN's: many VPN tools answer every name with an address of
+/// their own making from a private range (100.64.x.x, 10.x.x.x, …) and take the connection to it
+/// in their tunnel, where they put the real destination back. Such an address is not anybody's
+/// local network — this Mac sends it into the tunnel — and refusing it left a machine on such a
+/// Mac with no internet at all (the third run on a person's Mac, 13 November). So a private
+/// address a name resolved to is taken when this Mac's route for it is a tunnel's interface, and
+/// refused when it is the Mac itself or a network the Mac is on.
+///
 /// Where this Mac's own network settings name a proxy (a VPN or proxy tool in its "system proxy"
 /// mode), the connection is asked of that proxy instead, as Safari on this Mac asks it
 /// (`VMNetSystemProxy`): such a tool takes no packets, and a plain socket would pass it by.
@@ -54,6 +62,9 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         public var failedInARow: UInt64 = 0
         /// Why the last connection failed; nil when it was made.
         public var trouble: Trouble?
+        /// The same in the log's words — a kind, a range or an error's name, never a name or an
+        /// address — for whoever is asked what is wrong.
+        public var detail: String?
         /// The last connection made went through the proxy of this Mac's network settings.
         public var usesSystemProxy = false
 
@@ -66,6 +77,9 @@ public final class VMNetDirectConnector: @unchecked Sendable {
     /// The proxy this Mac's network settings name now, if any: asked for every connection, so a
     /// tool switched on while a machine runs is followed from the next connection on.
     private let systemProxy: (@Sendable () -> VMNetSystemProxy?)?
+    /// The tests' own answer to "does this machine send packets for this address into a tunnel"
+    /// (the address as text): nil asks the system (`goesIntoATunnel`).
+    private let routesIntoTunnel: (@Sendable (String) -> Bool)?
 
     private let lock = NSLock()
     private var listener: Int32 = -1
@@ -86,14 +100,16 @@ public final class VMNetDirectConnector: @unchecked Sendable {
     public init(systemProxy: (@Sendable () -> VMNetSystemProxy?)? = nil) {
         allowsLocalDestinations = false
         resolve = nil
+        routesIntoTunnel = nil
         self.systemProxy = systemProxy
     }
 
     /// For the tests: destinations on this machine, and names given their addresses.
     init(allowsLocalDestinations: Bool, systemProxy: (@Sendable () -> VMNetSystemProxy?)? = nil,
-         resolve: (@Sendable (String) -> [String]?)? = nil) {
+         routesIntoTunnel: (@Sendable (String) -> Bool)? = nil, resolve: (@Sendable (String) -> [String]?)? = nil) {
         self.allowsLocalDestinations = allowsLocalDestinations
         self.resolve = resolve
+        self.routesIntoTunnel = routesIntoTunnel
         self.systemProxy = systemProxy
     }
 
@@ -139,6 +155,7 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         current.connected += 1
         current.failedInARow = 0
         current.trouble = nil
+        current.detail = nil
         current.usesSystemProxy = throughProxy
         notes[throughProxy ? "connected through this Mac's proxy" : "connected", default: 0] += 1
         lock.unlock()
@@ -149,6 +166,7 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         current.failed += 1
         current.failedInARow += 1
         current.trouble = trouble
+        current.detail = detail
         notes[detail, default: 0] += 1
         lock.unlock()
     }
@@ -387,7 +405,7 @@ public final class VMNetDirectConnector: @unchecked Sendable {
     }
 
     /// One address of a host, as the system gave it.
-    private struct Address {
+    struct Address {
         var family: Int32
         var storage: sockaddr_storage
         var length: socklen_t
@@ -406,10 +424,17 @@ public final class VMNetDirectConnector: @unchecked Sendable {
             return tunnel(through: proxy.upstream, to: target, port: port, deadline: deadline)
         }
         var hosts = [host]
-        if case .name(let name) = target, let resolve, let given = resolve(name) { hosts = given }
+        // A name's addresses are this Mac's resolver's — a VPN's own among them, which go into
+        // its tunnel. An address the guest wrote itself is taken only if it is a public one.
+        var rule = Rule.publicOnly
+        if case .name(let name) = target {
+            rule = .publicOrIntoATunnel
+            if let resolve, let given = resolve(name) { hosts = given }
+        }
+        if allowsLocalDestinations { rule = .any }
         var failure = Tunnel.failed(.nameNotFound, "no address for the name")
         for host in hosts {
-            switch dial(host, port: port, publicOnly: !allowsLocalDestinations, deadline: deadline) {
+            switch dial(host, port: port, rule: rule, deadline: deadline) {
             case .made(let descriptor, _, _): return .made(descriptor, leftover: [], throughProxy: false)
             case .failed(let trouble, let detail): failure = .failed(trouble, detail)
             }
@@ -417,14 +442,36 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         return failure
     }
 
-    /// A connected socket to one of the host's addresses — the public ones only, when
-    /// `publicOnly` — or why there is none.
-    private func dial(_ host: String, port: UInt16, publicOnly: Bool, deadline: Double) -> Tunnel {
+    /// Which of a host's addresses a connection may be made to.
+    private enum Rule {
+        /// Public ones only.
+        case publicOnly
+        /// Public ones, and private ones this Mac sends into a tunnel (a VPN's own addresses).
+        case publicOrIntoATunnel
+        /// Any: the proxy of this Mac's settings, and the tests' servers.
+        case any
+    }
+
+    private func allows(_ address: Address, by rule: Rule) -> Bool {
+        switch rule {
+        case .any: return true
+        case .publicOnly: return Self.isPublic(address)
+        case .publicOrIntoATunnel:
+            if Self.isPublic(address) { return true }
+            guard Self.isPrivate(address) else { return false }
+            if let routesIntoTunnel { return routesIntoTunnel(Self.text(of: address)) }
+            return Self.goesIntoATunnel(address)
+        }
+    }
+
+    /// A connected socket to one of the host's addresses that `rule` allows, or why there is none.
+    private func dial(_ host: String, port: UInt16, rule: Rule, deadline: Double) -> Tunnel {
         let (found, code) = Self.addresses(of: host, port: port)
         guard !found.isEmpty else { return .failed(.nameNotFound, "no address for the name (resolver's code \(code))") }
-        let allowed = publicOnly ? found.filter(Self.isPublic) : found
+        let allowed = found.filter { allows($0, by: rule) }
         guard !allowed.isEmpty else {
-            return .failed(.notPublic, "the name's addresses here are not public ones (\(Self.kind(of: found[0])))")
+            return .failed(.notPublic, "the name's addresses here are not public ones (\(Self.kind(of: found[0]))"
+                + (rule == .publicOrIntoATunnel && Self.isPrivate(found[0]) ? ", and this Mac does not send them into a tunnel)" : ")"))
         }
         var last = "no time left"
         for address in allowed {
@@ -469,7 +516,7 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         }
         // The proxy is this Mac's own setting, wherever it is — as a rule on this Mac itself.
         let descriptor: Int32
-        switch dial(endpoint.host, port: UInt16(endpoint.port), publicOnly: false, deadline: deadline) {
+        switch dial(endpoint.host, port: UInt16(endpoint.port), rule: .any, deadline: deadline) {
         case .made(let made, _, _): descriptor = made
         case .failed(_, let detail): return .failed(.proxyUnreachable, "this Mac's proxy: " + detail)
         }
@@ -535,7 +582,7 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         answer.lock.lock()
         let found = answer.found ?? []
         answer.lock.unlock()
-        return !found.isEmpty && !found.contains(where: Self.isPublic)
+        return !found.isEmpty && !found.contains { allows($0, by: .publicOrIntoATunnel) }
     }
 
     /// What the system has for a host, IPv4 first (a Mac whose IPv6 goes nowhere then costs no
@@ -569,6 +616,117 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         return withUnsafeMutablePointer(to: &storage) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { isPublic($0, family: address.family) }
         }
+    }
+
+    /// An address of a private range: somebody's local network — or a VPN's own making. Not this
+    /// machine itself, a link's own addresses, a group's or nobody's: those are never taken.
+    static func isPrivate(_ address: Address) -> Bool {
+        var storage = address.storage
+        if address.family == AF_INET {
+            let value = withUnsafeMutablePointer(to: &storage) { pointer in
+                pointer.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { UInt32(bigEndian: $0.pointee.sin_addr.s_addr) }
+            }
+            return isPrivateIPv4(VMNetIPv4(value))
+        }
+        guard address.family == AF_INET6 else { return false }
+        let bytes = withUnsafeMutablePointer(to: &storage) { pointer in
+            pointer.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { inner in
+                withUnsafeBytes(of: inner.pointee.sin6_addr) { Array($0) }
+            }
+        }
+        // fc00::/7, unique local.
+        return bytes.count == 16 && bytes[0] & 0xFE == 0xFC
+    }
+
+    /// 10/8, 100.64/10, 172.16/12, 192.168/16, 192.0.0/24 and 240/4 short of the broadcast
+    /// address. Not 0/8, loopback, link-local or multicast.
+    static func isPrivateIPv4(_ address: VMNetIPv4) -> Bool {
+        let ranges: [(UInt32, Int)] = [(0x0A00_0000, 8), (0x6440_0000, 10), (0xAC10_0000, 12), (0xC0A8_0000, 16),
+                                       (0xC000_0000, 24), (0xF000_0000, 4)]
+        return address != .broadcast && ranges.contains { address.isIn($0.0, $0.1) }
+    }
+
+    /// The address as text, for the tests' answer about its route.
+    private static func text(of address: Address) -> String {
+        var storage = address.storage
+        var buffer = [CChar](repeating: 0, count: 64)
+        let done = withUnsafeMutablePointer(to: &storage) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                getnameinfo($0, address.length, &buffer, socklen_t(buffer.count), nil, 0, NI_NUMERICHOST)
+            }
+        }
+        return done == 0 ? String(cString: buffer) : ""
+    }
+
+    /// The bytes of the address in a socket address (4 or 16), or none.
+    private static func addressBytes(_ pointer: UnsafePointer<sockaddr>, family: Int32) -> [UInt8] {
+        if family == AF_INET {
+            return pointer.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { withUnsafeBytes(of: $0.pointee.sin_addr) { Array($0) } }
+        }
+        if family == AF_INET6 {
+            return pointer.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { withUnsafeBytes(of: $0.pointee.sin6_addr) { Array($0) } }
+        }
+        return []
+    }
+
+    /// Whether this machine sends a packet for the address into a tunnel — a point-to-point
+    /// interface, as a VPN's is — and the address is not the machine's own.
+    ///
+    /// Asked of the system's routes the way a program may: a datagram socket is "connected" to
+    /// the address, which sends nothing and makes the system choose the address it would send
+    /// from; the interface that has that address is the route's.
+    static func goesIntoATunnel(_ address: Address) -> Bool {
+        let probe = socket(address.family, Sys.datagramType, 0)
+        guard probe >= 0 else { return false }
+        defer { Sys.close(probe) }
+        var destination = address.storage
+        let connected: Int32 = withUnsafeMutablePointer(to: &destination) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { target in
+                #if canImport(Darwin)
+                return Darwin.connect(probe, target, address.length)
+                #else
+                return Glibc.connect(probe, target, address.length)
+                #endif
+            }
+        }
+        guard connected == 0 else { return false }
+        var local = sockaddr_storage()
+        var length = socklen_t(MemoryLayout<sockaddr_storage>.size)
+        let named = withUnsafeMutablePointer(to: &local) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(probe, $0, &length) }
+        }
+        guard named == 0 else { return false }
+        let source = withUnsafeMutablePointer(to: &local) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { addressBytes($0, family: address.family) }
+        }
+        let target = withUnsafeMutablePointer(to: &destination) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { addressBytes($0, family: address.family) }
+        }
+        // Sent from the address it is sent to: this machine itself.
+        guard !source.isEmpty, source != target else { return false }
+
+        var list: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&list) == 0 else { return false }
+        defer { freeifaddrs(list) }
+        var found = false
+        var next = list
+        while let entry = next {
+            next = entry.pointee.ifa_next
+            guard let own = entry.pointee.ifa_addr, Int32(own.pointee.sa_family) == address.family,
+                  addressBytes(own, family: address.family) == source else { continue }
+            let flags = Int(entry.pointee.ifa_flags)
+            // Every interface that has the address must be a tunnel's: one that is also a
+            // network's own leaves the question open, and open is refused.
+            guard flags & Int(IFF_UP) != 0, flags & Int(IFF_POINTOPOINT) != 0, flags & Int(IFF_LOOPBACK) == 0 else { return false }
+            found = true
+        }
+        return found
+    }
+
+    /// The same, of an address as it is written ("100.64.0.2"): for the tests.
+    static func goesIntoATunnel(numeric text: String) -> Bool {
+        guard let address = addresses(of: text, port: 9).found.first else { return false }
+        return goesIntoATunnel(address)
     }
 
     /// The kind of address that was refused, for the log: its range, never the address.

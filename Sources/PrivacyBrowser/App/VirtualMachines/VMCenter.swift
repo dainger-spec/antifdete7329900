@@ -59,6 +59,8 @@ final class VMCenter: ObservableObject {
         var connections = 0
         /// A machine without a proxy whose connections are not being made: why.
         var trouble: VMNetworkTrouble?
+        /// The same in the helper's own words (a range, an error's name): a technical detail.
+        var troubleDetail: String?
         /// Its connections go through the proxy this Mac's network settings name.
         var viaSystemProxy = false
     }
@@ -639,11 +641,21 @@ final class VMCenter: ObservableObject {
         switch event.kind {
         case .started:
             if running[id]?.phase == .starting { running[id]?.phase = .running }
+            // What the guest says of itself — its system, its tools, whether Lumen's picture is on
+            // its desktop — is read while it runs too, not only when it has stopped.
+            for delay in [25.0, 60, 120, 240] {
+                Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    guard let self, self.running[id] != nil else { return }
+                    self.readGuestStatus(of: id)
+                }
+            }
         case .traffic:
             running[id]?.bytesUp = event.bytesUp ?? 0
             running[id]?.bytesDown = event.bytesDown ?? 0
             running[id]?.connections = event.connections ?? 0
             running[id]?.trouble = event.trouble.flatMap(VMNetworkTrouble.init(rawValue:))
+            running[id]?.troubleDetail = event.troubleDetail
             running[id]?.viaSystemProxy = event.viaSystemProxy ?? false
         default:
             break

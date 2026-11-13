@@ -139,6 +139,9 @@ public struct VMHelperEvent: Codable, Equatable, Sendable {
     /// `traffic`, a machine without a proxy: why its connections are not being made — a kind
     /// (`VMNetworkTrouble`), set while several in a row have failed and none has been made since.
     public var trouble: String?
+    /// With `trouble`: the same in the helper's log's words — a range of addresses, an error's
+    /// name; never a name or an address the machine asked for. Shown as a technical detail.
+    public var troubleDetail: String?
     /// `traffic`, a machine without a proxy: its connections go through the proxy this Mac's own
     /// network settings name.
     public var viaSystemProxy: Bool?
@@ -146,8 +149,8 @@ public struct VMHelperEvent: Codable, Equatable, Sendable {
     public var message: String?
 
     public init(kind: Kind, image: VMRestoreImage? = nil, fraction: Double? = nil, bytesUp: UInt64? = nil,
-                bytesDown: UInt64? = nil, connections: Int? = nil, trouble: String? = nil, viaSystemProxy: Bool? = nil,
-                message: String? = nil) {
+                bytesDown: UInt64? = nil, connections: Int? = nil, trouble: String? = nil, troubleDetail: String? = nil,
+                viaSystemProxy: Bool? = nil, message: String? = nil) {
         self.kind = kind
         self.image = image
         self.fraction = fraction
@@ -155,6 +158,7 @@ public struct VMHelperEvent: Codable, Equatable, Sendable {
         self.bytesDown = bytesDown
         self.connections = connections
         self.trouble = trouble
+        self.troubleDetail = troubleDetail
         self.viaSystemProxy = viaSystemProxy
         self.message = message
     }
