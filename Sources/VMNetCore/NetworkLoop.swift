@@ -228,6 +228,7 @@ final class NetworkLoop: @unchecked Sendable {
     private var wireOpen = true
     private var wireHoldUntil = 0.0
     private var nextTimerCheck = Double.infinity
+    private var timersRanAt = -Double.infinity
     private var notes: [String: Int] = [:]
     private var notesDue = Double.infinity
     private var notesFlushed = -Double.infinity
@@ -301,15 +302,19 @@ final class NetworkLoop: @unchecked Sendable {
         while !shouldStop {
             var now = Sys.now
             channel.now = now
-            if now >= nextTimerCheck { runTimers(now) }
+            if now >= timerCheckDue { runTimers(now) }
             if now >= notesDue { flushNotes(now) }
+            // Whatever the last round of events and the timers touched is dealt with before the
+            // loop waits again: a connection's next deadline is known only after this.
+            settle(now)
+            publish()
 
             entries.removeAll(keepingCapacity: true)
             polled.removeAll(keepingCapacity: true)
             entries.append(pollfd(fd: wake.descriptor, events: Sys.readable, revents: 0))
             let wireWaits = wireOpen && now >= wireHoldUntil
             entries.append(pollfd(fd: wireWaits ? channel.descriptor : -1, events: Sys.readable, revents: 0))
-            var wakeAt = min(nextTimerCheck, channel.retryAt, notesDue)
+            var wakeAt = min(timerCheckDue, channel.retryAt, notesDue)
             if wireOpen && !wireWaits { wakeAt = min(wakeAt, wireHoldUntil) }
             for flow in flows.values where flow.descriptor >= 0 {
                 if flow.holdUntil > now {
@@ -344,8 +349,6 @@ final class NetworkLoop: @unchecked Sendable {
                     if entry.revents != 0 && flow.descriptor == entry.fd { upstreamEvent(flow, entry.revents, now) }
                 }
             }
-            settle(now)
-            publish()
         }
         tearDown()
     }
@@ -407,6 +410,12 @@ final class NetworkLoop: @unchecked Sendable {
         if deadline < nextTimerCheck { nextTimerCheck = deadline }
     }
 
+    /// When the timers are looked at next: at the earliest deadline, but not within two
+    /// milliseconds of the last look — a deadline that stays in the past must not make the loop spin.
+    private var timerCheckDue: Double {
+        max(nextTimerCheck, timersRanAt + 0.002)
+    }
+
     // MARK: - Frames from the guest
 
     private func readFrames(_ revents: Int16, _ now: Double) {
@@ -461,6 +470,7 @@ final class NetworkLoop: @unchecked Sendable {
         if let flow = flows[key] {
             if flow.tcp.state == .closed && isOpening {
                 // The guest uses the same port again while the old connection lingers: a new one.
+                putAway(flow, now)
                 flows[key] = nil
             } else {
                 flow.tcp.receive(segment, now: now)
@@ -493,7 +503,7 @@ final class NetworkLoop: @unchecked Sendable {
             refuse(segment, in: packet, from: source)
             return
         }
-        if flows.count >= options.maximumConnections, !dropLingeringFlow() {
+        if flows.count >= options.maximumConnections, !dropLingeringFlow(now) {
             note("refused, too many connections at once", now)
             refuse(segment, in: packet, from: source)
             return
@@ -511,8 +521,9 @@ final class NetworkLoop: @unchecked Sendable {
     }
 
     /// Makes room in a full table by forgetting a connection that has ended and only lingers.
-    private func dropLingeringFlow() -> Bool {
-        guard let flow = flows.values.first(where: { $0.phase == .done }) else { return false }
+    private func dropLingeringFlow(_ now: Double) -> Bool {
+        guard let flow = flows.values.first(where: { $0.tcp.state == .closed }) else { return false }
+        putAway(flow, now)
         flows[flow.key] = nil
         return true
     }
@@ -814,6 +825,7 @@ final class NetworkLoop: @unchecked Sendable {
             if deadline <= now { due.append(flow) } else if deadline < next { next = deadline }
         }
         nextTimerCheck = next
+        timersRanAt = now
         for flow in due {
             switch flow.phase {
             case .waiting:
@@ -833,11 +845,10 @@ final class NetworkLoop: @unchecked Sendable {
                 flow.tcp.timerFired(now: now)
                 markDirty(flow)
             case .done:
+                // Its linger is over.
                 if flows[flow.key] === flow { flows[flow.key] = nil }
             }
         }
-        // A deadline that is still in the past after its turn must not make the loop spin.
-        if nextTimerCheck < now + 0.002 { nextTimerCheck = now + 0.002 }
     }
 
     // MARK: - The log
