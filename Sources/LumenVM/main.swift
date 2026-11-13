@@ -29,6 +29,13 @@ guard VZVirtualMachine.isSupported else {
     HelperIO.fail("This Mac cannot run virtual machines.")
 }
 
+// A machine at work is the person's work. Without this, macOS puts a process whose window is
+// covered or behind another to rest (App Nap) and holds its timers back — and the guest, whose
+// processors are this process's, slows down with it. The Mac may still go to sleep when idle.
+let activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
+                                                     reason: "A virtual machine is running")
+_ = activity
+
 let application = NSApplication.shared
 let delegate = HelperDelegate(request: request)
 application.delegate = delegate

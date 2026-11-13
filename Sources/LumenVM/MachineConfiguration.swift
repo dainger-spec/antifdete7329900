@@ -60,7 +60,14 @@ enum MachineConfiguration {
                                                                pixelsPerInch: request.display.pixelsPerInch)]
         configuration.graphicsDevices = [graphics]
 
-        let disk = try VZDiskImageStorageDeviceAttachment(url: files.disk, readOnly: false)
+        // The guest's "write this down now" is answered by the Mac's ordinary one (fsync), not by
+        // making the Mac's drive empty its own cache each time, which is the framework's default:
+        // macOS in a guest asks for it many times a second, each such answer takes this Mac's
+        // drive tens of milliseconds, and the guest stands still for it — a machine that stutters.
+        // What is given up: if this Mac loses power (not: if the app or the machine ends), the
+        // guest's last seconds of writes may not be on the drive, as with any Mac's own files.
+        let disk = try VZDiskImageStorageDeviceAttachment(url: files.disk, readOnly: false, cachingMode: .automatic,
+                                                          synchronizationMode: .fsync)
         configuration.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: disk)]
 
         if let network {

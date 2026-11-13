@@ -129,6 +129,16 @@ final class VMRequirementsTests: XCTestCase {
         XCTAssertEqual(VMRequirements.cores(hostCores: 10), 8)
         XCTAssertEqual(VMRequirements.cores(hostCores: 4), 4)
         XCTAssertTrue(VMRequirements.memoryChoices.contains(VMRequirements.standardMemoryGB))
+        // A new machine gets what the Mac can spare: with 4 GB macOS in it stutters.
+        let gigabyte = VMRequirements.gibibyte
+        XCTAssertEqual(VMRequirements.recommendedMemoryGB(hostMemory: 8 * gigabyte), 4)
+        XCTAssertEqual(VMRequirements.recommendedMemoryGB(hostMemory: 16 * gigabyte), 6)
+        XCTAssertEqual(VMRequirements.recommendedMemoryGB(hostMemory: 18 * gigabyte), 6)
+        XCTAssertEqual(VMRequirements.recommendedMemoryGB(hostMemory: 24 * gigabyte), 8)
+        XCTAssertEqual(VMRequirements.recommendedMemoryGB(hostMemory: 64 * gigabyte), 8)
+        for host in [Int64(0), 8, 12, 16, 24, 32, 128] {
+            XCTAssertTrue(VMRequirements.memoryChoices.contains(VMRequirements.recommendedMemoryGB(hostMemory: host * gigabyte)))
+        }
     }
 }
 

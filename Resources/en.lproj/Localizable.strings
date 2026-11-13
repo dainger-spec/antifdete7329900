@@ -2709,7 +2709,8 @@
 "vm.editor.display" = "Screen";
 "vm.editor.display.note" = "Sites read the screen's size. The window can be made any size: the picture scales, the machine's screen stays the same.";
 "vm.editor.memory" = "Memory";
-"vm.editor.memory.note" = "4 GB is enough for Safari with a dozen tabs. It is taken from this Mac only while the machine runs.";
+"vm.editor.memory.note" = "macOS with Safari is at ease from 6 GB; with less it stutters once a few pages are open. Memory is taken from this Mac only while the machine runs.";
+"vm.editor.memory.low" = "With %1$d GB, macOS in the machine stutters once a few pages are open. This Mac can spare it %2$d GB.";
 "vm.editor.memory.tight" = "This Mac has %@ of memory: with this much given to the machine, the Mac itself will be short.";
 "vm.editor.start" = "Start page";
 "vm.editor.nextStart" = "The machine is running: changes take effect at its next start.";
@@ -2749,7 +2750,7 @@
 "help.vm.what.look" = "The system's look is the machine's own too: light or dark appearance, the accent colour, the computer's name — and the desktop picture, which is Lumen's wallpaper drawn for the machine's screen unless you switch it off in the machine's settings.";
 "help.vm.costs" = "What it takes";
 "help.vm.costs.disk" = "Disk: about 25 GB for the base system; each machine then takes only what changes in it, usually 3–6 GB. The downloaded image is removed after the installation.";
-"help.vm.costs.memory" = "Memory: 4 GB per running machine by default (3–8 GB in its settings), taken only while it runs.";
+"help.vm.costs.memory" = "Memory: 3–8 GB per running machine (in its settings), taken only while it runs. A new machine gets what this Mac can spare — 8 GB on a Mac with 24 GB or more, 6 with 16, otherwise 4. With 4 GB, macOS in the machine stutters once a few pages are open.";
 "help.vm.costs.limit" = "Two machines at once: Apple's limit for macOS in virtual machines on one Mac.";
 "help.vm.costs.start" = "A machine starts in 20–40 seconds, as a Mac does; Shut Down closes its macOS properly.";
 "help.vm.know" = "Good to know";

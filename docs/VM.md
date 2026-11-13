@@ -46,7 +46,7 @@ the section says that macOS runs as a guest only on Apple silicon.
 | Download | about 25 GB, once, from Apple; removed after the installation |
 | Base system on disk | about 20–25 GB |
 | Each machine on disk | what its macOS changes after the clone: usually 3–6 GB, growing with use |
-| Memory | 4 GB per running machine by default (3, 4, 6 or 8 GB per profile), only while it runs |
+| Memory | 3, 4, 6 or 8 GB per profile, only while it runs; a new machine gets 8 on a Mac with 24 GB or more, 6 with 16, 4 below |
 | At once | **two** machines — Apple's limit for macOS guests on one Mac, enforced by the framework |
 | Start | 20–40 seconds, as a Mac starts |
 
@@ -181,7 +181,7 @@ a minute.
 | Proxy | every connection of the machine through it; or none: this Mac's connection |
 | Time zone, language | from where the proxy comes out, at every start; or set by hand |
 | Screen | a real Mac's, at its default size or at "More Space"; external displays |
-| Memory | 3, 4, 6 or 8 GB |
+| Memory | 3, 4, 6 or 8 GB. A new machine gets what the Mac can spare (`VMRequirements.recommendedMemoryGB`: 8 on a Mac with 24 GB or more, 6 with 16, 4 below); with 4, macOS in it stutters once a few pages are open, and the editor says so |
 | Processor | as a Mac (8 cores — what a page of any Mac of today sees), or 4 or 6: lighter on this Mac, and fewer than a Mac has |
 | Sound | heard on this Mac, or not (the machine keeps its speakers either way) |
 | Appearance | light, dark or auto: what a page reads as `prefers-color-scheme` |
@@ -257,6 +257,27 @@ disk.
 
 Machines are this Mac's: not synced, not in a profile's export, and not reachable through the
 automation API yet.
+
+## How smooth a machine is
+
+A guest's macOS is drawn by Apple's paravirtual graphics and is not as smooth as the Mac's own;
+what was in this app's hands, and was found slowing a machine on a person's Mac (13 November):
+
+- **Memory.** With 4 GB, macOS with Safari is short of memory once a few pages are open, and
+  works from its disk. A new machine now gets what the Mac can spare, and the editor says when a
+  machine has less.
+- **The disk's "write this down now".** The framework's default answers each of the guest's
+  flushes by making the Mac's drive empty its own cache (`F_FULLFSYNC`) — tens of milliseconds
+  each, many times a second, with the guest standing still. The disk is attached with
+  `synchronizationMode: .fsync` instead. What is given up: if the Mac loses power — not if the
+  app or the machine ends — the guest's last seconds of writes may not be on the drive.
+- **App Nap.** macOS rests a process whose window is covered; the guest's processors are that
+  process's. The helper holds an activity (`userInitiatedAllowingIdleSystemSleep`,
+  `latencyCritical`) for as long as it runs; the Mac may still sleep when idle.
+- **A machine's first start** is slower than its later ones: to its macOS it is a Mac it has not
+  seen, and it rebuilds what it keeps per Mac. Spotlight's index is off in machines (the tools).
+
+Not measured: how much each of these is worth on a given Mac.
 
 ## What is not measured, and what does not work
 

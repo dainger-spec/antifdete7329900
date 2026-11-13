@@ -307,7 +307,9 @@ private struct VirtualMachinesScreen: View {
         }
         // A new machine gets an accent colour at random, as Macs differ in theirs: the editor
         // shows it, and the person may change it.
-        editing = VMEditorView.Draft(profile: VMProfile(name: name, accent: VMAccent.random().rawValue), isNew: true)
+        // As much memory as this Mac can spare a machine: with too little, macOS in it stutters.
+        let memory = VMRequirements.recommendedMemoryGB(hostMemory: Int64(clamping: ProcessInfo.processInfo.physicalMemory))
+        editing = VMEditorView.Draft(profile: VMProfile(name: name, memoryGB: memory, accent: VMAccent.random().rawValue), isNew: true)
     }
 
     /// The person's Delete, confirmed: the one caller of the machines' one deletion path.
@@ -836,7 +838,7 @@ struct VMEditorView: View {
         EditorField(L("vm.editor.memory")) {
             LumenSegmented(selection: $memoryGB,
                            options: VMRequirements.memoryChoices.map { (value: $0, title: String(format: L("vm.row.memory"), $0)) })
-            note(memoryNote, warns: memoryIsTight)
+            note(memoryNote, warns: memoryIsTight || memoryIsLow)
         }
         EditorField(L("vm.editor.cores")) {
             LumenSegmented(selection: $cores, options: [(value: 0, title: L("vm.editor.cores.mac"))]
@@ -904,10 +906,19 @@ struct VMEditorView: View {
         Int64(clamping: ProcessInfo.processInfo.physicalMemory) - Int64(memoryGB) * VMRequirements.gibibyte < 4 * VMRequirements.gibibyte
     }
 
+    private var recommendedMemoryGB: Int {
+        VMRequirements.recommendedMemoryGB(hostMemory: Int64(clamping: ProcessInfo.processInfo.physicalMemory))
+    }
+
+    /// Less than this Mac can spare a machine, and little for macOS with Safari: it will stutter.
+    private var memoryIsLow: Bool { memoryGB < recommendedMemoryGB }
+
     private var memoryNote: String {
-        memoryIsTight
-            ? String(format: L("vm.editor.memory.tight"), VMText.bytes(Int64(clamping: ProcessInfo.processInfo.physicalMemory)))
-            : L("vm.editor.memory.note")
+        if memoryIsTight {
+            return String(format: L("vm.editor.memory.tight"), VMText.bytes(Int64(clamping: ProcessInfo.processInfo.physicalMemory)))
+        }
+        if memoryIsLow { return String(format: L("vm.editor.memory.low"), memoryGB, recommendedMemoryGB) }
+        return L("vm.editor.memory.note")
     }
 
     private func note(_ text: String, warns: Bool = false) -> some View {

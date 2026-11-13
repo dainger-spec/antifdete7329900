@@ -60,6 +60,17 @@ public enum VMRequirements {
     /// The processors a profile may ask for instead of a Mac's eight: fewer spare this Mac.
     public static let coreChoices = [4, 6, 8]
     public static let standardMemoryGB = 4
+
+    /// The memory a new machine gets on a Mac that has `hostMemory` bytes. macOS with Safari runs
+    /// in 4 GB and stutters there as soon as a few pages are open (it is then short of memory and
+    /// works from its disk); it is at ease with 6 and has room with 8. A Mac is given what it can
+    /// spare: 8 where it has 24 GB or more, 6 where it has 16, and 4 below that.
+    public static func recommendedMemoryGB(hostMemory: Int64) -> Int {
+        let host = hostMemory / gibibyte
+        if host >= 24 { return 8 }
+        if host >= 16 { return 6 }
+        return standardMemoryGB
+    }
     /// Safari reports at most 8 cores, and no Mac with Apple silicon has fewer: a machine with
     /// fewer would be told apart. Virtual cores cost no memory.
     public static let coresWanted = 8
