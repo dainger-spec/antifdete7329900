@@ -7909,7 +7909,9 @@ final class SelfTest {
               "first=\(firstReport?.sites ?? []) (\(firstReport?.cookies ?? -1)) second=\(secondReport?.sites ?? []) (\(secondReport?.cookies ?? -1))")
         let stored = try repository.warmUpSchedule(for: first.id)
         check("warm-up schedule: a run from the queue counts as the profile's last run, stored with its schedule",
-              (stored?.lastRunAt ?? .distantPast) >= queued && (coordinator.nextRun(of: first.id) ?? .distantPast) > Date().addingTimeInterval(23 * 3600),
+              // One interval on, less the schedule's jitter (`WarmUpSchedule.jitter`, up to 15 % earlier).
+              (stored?.lastRunAt ?? .distantPast) >= queued
+                  && (coordinator.nextRun(of: first.id) ?? .distantPast) > Date().addingTimeInterval(24 * 3600 * (1 - WarmUpSchedule.jitter) - 600),
               "lastRunAt=\(String(describing: stored?.lastRunAt)) next=\(String(describing: coordinator.nextRun(of: first.id)))")
         let record = try repository.warmUpRecord(for: first.id)
         check("warm-up record: how the run went is kept for the inspector — when, pages loaded, cookies gained",

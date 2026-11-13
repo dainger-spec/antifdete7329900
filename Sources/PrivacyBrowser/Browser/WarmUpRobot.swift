@@ -346,11 +346,15 @@ final class WarmUpRobot: ObservableObject {
             if !isFailure(outcome) {
                 // A cookie banner, answered as most people answer it: "accept" (the well-known
                 // consent tools' own button only — nothing else on the page is pressed).
+                let consentBegan = Date()
                 if await acceptConsent(in: tab, run: run) { update(index, run: run) { $0.consentsAccepted += 1 } }
                 guard isCurrent(run) else { return }
                 let dwell = dwellTime(plan, using: &generator)
                 update(index, run: run) { $0.dwell = dwell }
-                guard await stay(dwell, scroll: plan.scroll, visit: index, run: run, using: &generator) else { return }
+                // The moment the banner took is time on the page — a person reads while it is up —
+                // so the stay is the plan's, not the plan's and the banner's.
+                let rest = max(dwell - Date().timeIntervalSince(consentBegan), min(dwell, 1))
+                guard await stay(rest, scroll: plan.scroll, visit: index, run: run, using: &generator) else { return }
                 // Links one after the other (`plan.hops`, 1–3 by depth): from a search's results to a
                 // site, then on within that site, as a person reads on.
                 var current = page
