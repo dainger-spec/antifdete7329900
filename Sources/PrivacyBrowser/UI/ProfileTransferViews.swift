@@ -190,9 +190,35 @@ struct ProfileImportView: View {
                  ?? L("transfer.import.direct"))
             Text(String(format: L("transfer.import.exportedAt"),
                         manifest.exportedAt.shown(date: .abbreviated, time: .shortened)))
+            // What the import leaves out of the file's settings (APP-08 of the security audit):
+            // said before the person imports, so that nothing of the file goes around the proxy
+            // unseen.
+            let leftOut = ProfileTransfer.LeftOut(of: manifest.configuration)
+            if !leftOut.isEmpty {
+                Label(String(format: L("transfer.import.leftOut"), leftOutList(leftOut)), systemImage: "exclamationmark.shield")
+                    .foregroundStyle(Theme.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+            }
+            Text(L("transfer.import.trust"))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 4)
         }
         .font(.lumenSecondary)
         .foregroundStyle(Theme.textSecondary)
+    }
+
+    /// The settings left out, in a sentence: the bypassed sites by name (the first few), then the rest.
+    private func leftOutList(_ leftOut: ProfileTransfer.LeftOut) -> String {
+        var items: [String] = []
+        if !leftOut.directDomains.isEmpty {
+            let shown = leftOut.directDomains.prefix(4).joined(separator: ", ")
+            let more = leftOut.directDomains.count > 4 ? String(format: L("transfer.import.leftOut.more"), leftOut.directDomains.count - 4) : ""
+            items.append(String(format: L("transfer.import.leftOut.direct"), shown + more))
+        }
+        if leftOut.safeBrowsing { items.append(L("transfer.import.leftOut.safeBrowsing")) }
+        if leftOut.localRequests { items.append(L("transfer.import.leftOut.localRequests")) }
+        return items.joined(separator: "; ")
     }
 
     private func open() {

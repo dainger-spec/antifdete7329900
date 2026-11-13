@@ -1405,6 +1405,12 @@
 "transfer.import.proxy" = "Proxy: %@";
 "transfer.import.direct" = "No proxy";
 "transfer.import.exportedAt" = "Exported %@";
+"transfer.import.leftOut" = "Not taken from the file: %@. If you want them, turn them on in the profile’s settings after the import.";
+"transfer.import.leftOut.direct" = "sites that bypass the proxy — %@";
+"transfer.import.leftOut.more" = " and %d more";
+"transfer.import.leftOut.safeBrowsing" = "Safe Browsing (its lookups go around the proxy)";
+"transfer.import.leftOut.localRequests" = "pages reaching this Mac and the local network";
+"transfer.import.trust" = "Import profiles only from people you trust: the file brings its own website data, passwords and Safari state.";
 "transfer.import.action" = "Import";
 "transfer.import.done" = "Profile “%@” added.";
 "transfer.error.password" = "Wrong password, or the file is damaged.";

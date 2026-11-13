@@ -328,6 +328,7 @@ def leak_page(run: str) -> bytes:
 <img src="http://img-RUN.leak.example.com/pb-leak/img.png?run=RUN" width="1" height="1">
 <iframe src="http://frame-RUN.leak.example.com/pb-leak/frame?run=RUN" width="200" height="40"></iframe>
 <iframe src="http://127.0.0.1:CANARY/pb-leak/lo4frame?run=RUN" width="20" height="20"></iframe>
+<img src="http://pb:x@127.0.0.1:CANARY/pb-leak/lo4userimg?run=RUN" width="1" height="1">
 <video src="http://media-RUN.leak.example.com/pb-leak/media.mp4?run=RUN" preload="auto" muted width="1" height="1"></video>
 <a id="anchor" href="http://anchor-RUN.leak.example.com/pb-leak/anchor?run=RUN">a link, which a browser may prefetch the name of</a>
 <img src="https://aia-RUN.leak.example.com/pb-leak/aia.png?run=RUN" width="1" height="1">
@@ -365,6 +366,19 @@ def leak_page(run: str) -> bytes:
   await attempt('loopbackName', noCors('http://localhost:CANARY/pb-leak/lohost?run=RUN'));
   await attempt('loopback6', noCors('http://[::1]:CANARY/pb-leak/lo6?run=RUN'));
   await attempt('loopbackAny', noCors('http://0.0.0.0:CANARY/pb-leak/lo0?run=RUN'));
+  // The same with a user name before the host (APP-14 of the security audit): fetch() refuses
+  // such an address itself, an image (above), a WebSocket and an XHR load it — only the rule list
+  // stops them, and the canary takes whatever it lets by.
+  await attempt('loopbackUserWS', () => new Promise((resolve) => {
+    const ws = new WebSocket('ws://pb@127.0.0.1:CANARY/pb-leak/lo4userws?run=RUN');
+    ws.onopen = () => resolve('open'); ws.onerror = () => resolve('rejected');
+  }));
+  await attempt('loopbackUserXHR', () => new Promise((resolve) => {
+    const request = new XMLHttpRequest();
+    request.onload = () => resolve('loaded'); request.onerror = () => resolve('rejected');
+    request.open('GET', 'http://pb:x@localhost:CANARY/pb-leak/lohostuserxhr?run=RUN'); request.send();
+  }));
+  await attempt('loopbackMappedAny', noCors('http://[::ffff:0:0]:CANARY/pb-leak/lo0mapped?run=RUN'));
   await attempt('loopbackWorker', () => new Promise((resolve) => {
     const source = "fetch('http://127.0.0.1:CANARY/pb-leak/lo4w?run=RUN',{mode:'no-cors'}).then(()=>postMessage('resolved'),()=>postMessage('rejected'))";
     const worker = new Worker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));

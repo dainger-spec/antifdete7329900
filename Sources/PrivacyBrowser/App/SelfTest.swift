@@ -1518,10 +1518,14 @@ final class SelfTest {
         // This Mac itself: the system never sends loopback through a proxy (measured in run 382: the
         // page's fetches reached the canary listener directly), so a proxied profile's pages are
         // refused it — a fetch, a frame and a worker's fetch (`ProxiedContentRules`).
-        let refusedHere = ["loopback4", "loopbackName", "loopback6", "loopbackAny", "loopbackWorker"]
-        check("Safari chrome: a page cannot reach this Mac (127.0.0.1, localhost, ::1, 0.0.0.0, from the page and from a worker): each is refused",
+        let refusedHere = ["loopback4", "loopbackName", "loopback6", "loopbackAny", "loopbackWorker", "loopbackMappedAny"]
+        check("Safari chrome: a page cannot reach this Mac (127.0.0.1, localhost, ::1, 0.0.0.0 and its IPv4-mapped form, from the page and from a worker): each is refused",
               refusedHere.allSatisfy { page[$0] as? String == "rejected" },
               refusedHere.map { "\($0)=\(page[$0] ?? "nil")" }.joined(separator: " "))
+        // With a user name before the host (APP-14 of the security audit: no pattern took one), by an
+        // image, a WebSocket and an XHR. Their own answers cannot tell a blocked load from one the
+        // canary's plain HTTP refused; the canary's log, read last below, can: it must hold none.
+        info("Safari chrome: this Mac with a user name before its host — WebSocket \(page["loopbackUserWS"] ?? "nil"), XHR \(page["loopbackUserXHR"] ?? "nil"), an image (in the canary's log if it went)")
         // Measured through the proxy in run 383; kept that way.
         check("Safari chrome: a fetch to a private-network address (10.255.255.1) goes through the profile's proxy",
               reached("10.255.255.1:8080", "/pb-leak/lan10"), "not seen by the proxy (\(page["lan10"] ?? "nil"))")
@@ -1781,7 +1785,7 @@ final class SelfTest {
               log.targets.contains { $0.target == "aia-\(run).\(domain):443" && $0.path.hasPrefix("(tls refused") },
               log.targets.filter { $0.target.hasPrefix("aia-") }.map(\.path).joined(separator: " | "))
         let directs = log.canary.filter { !$0.contains("/pb-canary-control") }
-        let canaryName = "Safari chrome: nothing reached this Mac directly (the canary listener took no connection: no fetch, frame or worker)"
+        let canaryName = "Safari chrome: nothing reached this Mac directly (the canary listener took no connection: no fetch, frame, worker, image, WebSocket or XHR, with a user name before the host or without)"
         // A connection listed fails whatever the control says; none listed is a pass only where
         // the control was listed.
         if !directs.isEmpty || log.canary.contains(where: { $0.contains("/pb-canary-control") }) {
@@ -4499,8 +4503,18 @@ final class SelfTest {
               const late = new Promise((resolve) => setTimeout(() => resolve('pending'), 2500));
               return await Promise.race([outcome, late]);
             };
+            // fetch() refuses an address with a user name itself; an XHR loads it (APP-14). Its own
+            // answer is "rejected" either way (the canary sends no CORS header): the canary's count
+            // is what tells.
+            const xhr = (url) => new Promise((resolve) => {
+              const request = new XMLHttpRequest();
+              request.onload = () => resolve('resolved'); request.onerror = () => resolve('rejected');
+              setTimeout(() => resolve('pending'), 2500);
+              try { request.open('GET', url); request.send(); } catch (e) { resolve('rejected'); }
+            });
             return {
               loopback: await attempt(`http://127.0.0.1:${port}/pb-local?run=${run}`),
+              loopbackUser: await xhr(`http://pb@127.0.0.1:${port}/pb-local-user?run=${run}`),
               lan: await attempt('http://10.255.255.1:8080/pb-local-lan'),
               name: await attempt(`http://printer-${run}.local/pb-local-name`),
             };
@@ -4521,7 +4535,7 @@ final class SelfTest {
         let protected = try await attempt(.protected, run: protectedRun)
         let protectedHits = await canaryHits(protectedRun)
         let refused: Bool = protected["loopback"] == "rejected" && protected["lan"] == "rejected" && protected["name"] == "rejected"
-        check("local requests: protected, a page of the internet reaches neither this Mac (127.0.0.1) nor the local network (10.x, a .local name)",
+        check("local requests: protected, a page of the internet reaches neither this Mac (127.0.0.1, by a fetch and by an XHR with a user name before the host) nor the local network (10.x, a .local name)",
               refused && (protectedHits ?? 0) == 0, "\(protected), canary \(protectedHits.map(String.init) ?? "not asked")")
 
         let allowedRun = runID()

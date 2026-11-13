@@ -22,37 +22,39 @@ public enum LocalRequests: String, Codable, Sendable, CaseIterable {
 /// goes through the proxy, to the proxy's network rather than this one.
 public enum LocalNetworkRules {
     /// Changes with the rules, so that WebKit's compiled copy of an earlier list is not reused.
-    public static let identifier = "pb-local-network-v1"
+    public static let identifier = "pb-local-network-v2"
 
     /// Addresses on a private network as WebKit writes them in a URL (WebKit's `url-filter`
-    /// subset: no alternation, so each range is spelled out), matched case-insensitively.
+    /// subset: no alternation, so each range is spelled out), matched case-insensitively — each
+    /// after `ProxiedContentRules.urlStart`, so that a user name before the host
+    /// (`http://x@192.168.1.1/`) does not take an address past them (APP-14).
     public static let localNetworkURLPatterns: [String] = [
-        #"^[a-z]+://10\.[0-9]+\.[0-9]+\.[0-9]+[:/]"#,
-        #"^[a-z]+://192\.168\.[0-9]+\.[0-9]+[:/]"#,
-        #"^[a-z]+://172\.1[6-9]\.[0-9]+\.[0-9]+[:/]"#,
-        #"^[a-z]+://172\.2[0-9]\.[0-9]+\.[0-9]+[:/]"#,
-        #"^[a-z]+://172\.3[01]\.[0-9]+\.[0-9]+[:/]"#,
-        #"^[a-z]+://169\.254\.[0-9]+\.[0-9]+[:/]"#,
+        #"10\.[0-9]+\.[0-9]+\.[0-9]+[:/]"#,
+        #"192\.168\.[0-9]+\.[0-9]+[:/]"#,
+        #"172\.1[6-9]\.[0-9]+\.[0-9]+[:/]"#,
+        #"172\.2[0-9]\.[0-9]+\.[0-9]+[:/]"#,
+        #"172\.3[01]\.[0-9]+\.[0-9]+[:/]"#,
+        #"169\.254\.[0-9]+\.[0-9]+[:/]"#,
         // 100.64.0.0/10: carrier-grade NAT, and the address space of mesh VPNs.
-        #"^[a-z]+://100\.6[4-9]\.[0-9]+\.[0-9]+[:/]"#,
-        #"^[a-z]+://100\.[7-9][0-9]\.[0-9]+\.[0-9]+[:/]"#,
-        #"^[a-z]+://100\.1[01][0-9]\.[0-9]+\.[0-9]+[:/]"#,
-        #"^[a-z]+://100\.12[0-7]\.[0-9]+\.[0-9]+[:/]"#,
+        #"100\.6[4-9]\.[0-9]+\.[0-9]+[:/]"#,
+        #"100\.[7-9][0-9]\.[0-9]+\.[0-9]+[:/]"#,
+        #"100\.1[01][0-9]\.[0-9]+\.[0-9]+[:/]"#,
+        #"100\.12[0-7]\.[0-9]+\.[0-9]+[:/]"#,
         // IPv6: unique local (fc00::/7) and link-local (fe80::/10).
-        #"^[a-z]+://\[f[cd][0-9a-f]*:"#,
-        #"^[a-z]+://\[fe[89ab][0-9a-f]*:"#,
+        #"\[f[cd][0-9a-f]*:"#,
+        #"\[fe[89ab][0-9a-f]*:"#,
         // The same IPv4 ranges written as IPv4-mapped IPv6, as a URL canonicalizes them.
-        #"^[a-z]+://\[::ffff:a[0-9a-f][0-9a-f]:"#,
-        #"^[a-z]+://\[::ffff:c0a8:"#,
-        #"^[a-z]+://\[::ffff:ac1[0-9a-f]:"#,
-        #"^[a-z]+://\[::ffff:a9fe:"#,
-        #"^[a-z]+://\[::ffff:64[4-7][0-9a-f]:"#,
+        #"\[::ffff:a[0-9a-f][0-9a-f]:"#,
+        #"\[::ffff:c0a8:"#,
+        #"\[::ffff:ac1[0-9a-f]:"#,
+        #"\[::ffff:a9fe:"#,
+        #"\[::ffff:64[4-7][0-9a-f]:"#,
         // Names only the local network answers.
-        #"^[a-z]+://[a-z0-9.-]*\.local\.?[:/]"#,
-        #"^[a-z]+://[a-z0-9.-]*\.home\.arpa\.?[:/]"#,
-        #"^[a-z]+://[a-z0-9.-]*\.lan\.?[:/]"#,
-        #"^[a-z]+://[a-z0-9.-]*\.internal\.?[:/]"#,
-    ]
+        #"[a-z0-9.-]*\.local\.?[:/]"#,
+        #"[a-z0-9.-]*\.home\.arpa\.?[:/]"#,
+        #"[a-z0-9.-]*\.lan\.?[:/]"#,
+        #"[a-z0-9.-]*\.internal\.?[:/]"#,
+    ].map { ProxiedContentRules.urlStart + $0 }
 
     /// This Mac and the local network.
     public static var patterns: [String] { ProxiedContentRules.thisMacURLPatterns + localNetworkURLPatterns }

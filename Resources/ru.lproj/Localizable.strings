@@ -1405,6 +1405,12 @@
 "transfer.import.proxy" = "Прокси: %@";
 "transfer.import.direct" = "Без прокси";
 "transfer.import.exportedAt" = "Экспортирован %@";
+"transfer.import.leftOut" = "Не переносятся из файла: %@. Если они нужны, включите их в настройках профиля после импорта.";
+"transfer.import.leftOut.direct" = "сайты в обход прокси — %@";
+"transfer.import.leftOut.more" = " и ещё %d";
+"transfer.import.leftOut.safeBrowsing" = "Safe Browsing (его проверки идут мимо прокси)";
+"transfer.import.leftOut.localRequests" = "доступ страниц к этому Mac и локальной сети";
+"transfer.import.trust" = "Импортируйте профили только от тех, кому доверяете: файл приносит свои данные сайтов, пароли и состояние Safari.";
 "transfer.import.action" = "Импортировать";
 "transfer.import.done" = "Профиль «%@» добавлен.";
 "transfer.error.password" = "Неверный пароль, или файл повреждён.";

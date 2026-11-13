@@ -173,10 +173,51 @@ public enum ProfileTransfer {
     /// Makes a new profile in `repository` from the file: a new identity (its own id and key — the
     /// file can be imported more than once, or into the vault it came from), named `name` or as in
     /// the file. Returns it; on any failure nothing of it is left behind.
+    ///
+    /// The file's settings that a profile from someone else could turn against its user are not
+    /// taken (`LeftOut`): the person sees which before importing, and sets them again in the
+    /// profile's editor if they want them.
     @discardableResult
     public static func importProfile(from url: URL, password: String, into repository: ProfileRepository,
                                      name: String? = nil) throws -> ProfileSummary {
-        try importProfile(from: url, password: password, into: repository, name: name, createdAt: Date(), adjusting: { _ in })
+        try importProfile(from: url, password: password, into: repository, name: name, createdAt: Date(),
+                          adjusting: { LeftOut.leaveOut(&$0) })
+    }
+
+    /// Of a file's settings, those an import leaves out (the security audit of 12 November 2026,
+    /// APP-08). A `.pbprofile` is often someone else's — a seller's, a colleague's — and until then
+    /// its settings were taken whole while the import window showed only the proxy's host and port.
+    /// A bypass list (`ProxySettings.excludedDomains`) sends those sites around the proxy, from
+    /// this Mac's own address: a file with the promised proxy and `t.attacker.example` in it, and a
+    /// start page, bookmark or warm-up loading from there, gave its maker the buyer's real address.
+    /// Safe Browsing's lookups go around the proxy too (WebKit's own), and allowed local requests
+    /// let the profile's pages reach this Mac and its network. Each goes back to its default —
+    /// nothing bypassed, Safe Browsing off, local requests protected. A deleted profile brought
+    /// back (`bringBack`) is this person's own and keeps them.
+    public struct LeftOut: Equatable, Sendable {
+        /// The proxy's bypass list in the file.
+        public var directDomains: [String]
+        /// Safe Browsing was on in the file.
+        public var safeBrowsing: Bool
+        /// The file let the profile's pages reach this Mac and the local network.
+        public var localRequests: Bool
+
+        public var isEmpty: Bool { directDomains.isEmpty && !safeBrowsing && !localRequests }
+
+        /// What an import of `configuration` leaves out.
+        public init(of configuration: ProfileConfiguration) {
+            directDomains = (configuration.proxy?.excludedDomains ?? [])
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            safeBrowsing = configuration.safeBrowsingEnabled
+            localRequests = configuration.localRequests == .allowed
+        }
+
+        /// `configuration` with those settings at their defaults.
+        static func leaveOut(_ configuration: inout ProfileConfiguration) {
+            configuration.proxy?.excludedDomains = []
+            configuration.safeBrowsingEnabled = false
+            configuration.localRequests = .protected
+        }
     }
 
     /// `importProfile`, the profile made at `createdAt`, its settings adjusted by `adjust` before
