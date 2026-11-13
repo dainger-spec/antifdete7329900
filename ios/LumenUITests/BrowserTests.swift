@@ -46,7 +46,7 @@ final class BrowserTests: LumenUITestCase {
         // The session's search engine: DuckDuckGo, and the address bar searches with it.
         app.buttons["settingsButton"].tap()
         wait(app.buttons["settingsDone"], "the settings open")
-        reveal(app.buttons["DuckDuckGo"], "the settings list the search engines").tap()
+        pickFromMenu("searchEnginePicker", "DuckDuckGo")
         app.buttons["settingsDone"].tap()
         go("lumen browser")
         waitForAddress(containing: "duckduckgo.com")

@@ -128,7 +128,7 @@ final class AccountTests: LumenUITestCase {
         XCTAssertEqual(app.staticTexts["profileCounter"].label, "Профили: 3 из 2")
         shot("71 the paid period over")
         closePlan()
-        XCTAssertTrue(sessionCard("Первый").label.contains("Заперт: без прокси не откроется"),
+        XCTAssertTrue(sessionCard("Первый").label.contains("Заперта: без прокси не откроется"),
                       "the profile that lived behind a proxy is locked: \(sessionCard("Первый").label)")
         XCTAssertTrue(sessionCard("Третий").label.contains("сверх числа профилей"),
                       "a profile beyond the plan's count is locked: \(sessionCard("Третий").label)")
@@ -339,6 +339,7 @@ final class AccountTests: LumenUITestCase {
         XCTAssertFalse(app.secureTextFields["syncPassword"].exists)
         // Forgotten: the password is asked again.
         app.buttons["syncForget"].tap()
+        wait(app.buttons["confirmSyncForget"], "forgetting the vault is asked first").tap()
         wait(app.secureTextFields["syncPassword"], "forgotten: the master password is asked again", timeout: 30)
         app.buttons["syncDone"].tap()
         signOut()
