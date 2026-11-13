@@ -121,7 +121,7 @@ final class DesignShotTests: LumenUITestCase {
         continueAfterFailure = true
         language = "ru"
         theme = "dark"
-        for part in ["always", "nosearch", "searchauto", "searchplain"] {
+        for part in ["always", "scrolltop", "late"] {
             start(env: ["LUMEN_DIAG_TITLE": part])
             snap("diag-title-\(part)")
             app.swipeUp()

@@ -10,6 +10,10 @@ struct SessionsView: View {
     @State private var editor: EditorTarget?
     /// The session whose deletion is being confirmed (from its context menu).
     @State private var deleting: Session?
+    /// The list's place: back at its top once shown (TitleProbe "scrolltop").
+    @State private var listTop = ScrollPosition(edge: .top)
+    /// The screen has appeared: the rows come a moment after it (TitleProbe "late").
+    @State private var appeared = false
     @Namespace private var zoom
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// At the accessibility sizes the search's long hint does not fit its field (the audit, run 108).
@@ -48,7 +52,7 @@ struct SessionsView: View {
                         .accessibilityIdentifier("accountMessage")
                     }
                 }
-                if !shown.isEmpty {
+                if !shown.isEmpty && (TitleProbe.off != "late" || appeared) {
                     Section {
                         ForEach(shown) { session in
                             row(session)
@@ -59,9 +63,13 @@ struct SessionsView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            // The list starts at its top: the large title and the search under it (run 108: with rows
-            // the title came collapsed into the bar).
-            .defaultScrollAnchor(.top)
+            .whenProbe("scrolltop") { $0.scrollPosition($listTop) }
+            .onAppear {
+                DispatchQueue.main.async {
+                    appeared = true
+                    if TitleProbe.off == "scrolltop" { listTop.scrollTo(edge: .top) }
+                }
+            }
             .overlay {
                 if model.sessions.isEmpty {
                     ContentUnavailableView {
