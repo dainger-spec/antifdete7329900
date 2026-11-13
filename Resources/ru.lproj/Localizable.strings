@@ -1322,6 +1322,14 @@
 "warmup.preset.media" = "Новости и медиа";
 "warmup.preset.shopping" = "Покупки";
 "warmup.preset.work" = "Работа";
+"warmup.preset.social" = "Соцсети без входа";
+"warmup.preset.video" = "Видео";
+"warmup.preset.travel" = "Путешествия";
+"warmup.preset.finance" = "Финансы";
+"warmup.preset.games" = "Игры";
+"warmup.preset.tech" = "Технологии";
+"warmup.preset.food" = "Кулинария";
+"warmup.preset.sports" = "Спорт";
 "warmup.problem" = "Строка %1$ld: %2$@";
 "warmup.problems.more" = "Пропущено ещё строк: %ld";
 "warmup.progress.current" = "Сейчас: %@";

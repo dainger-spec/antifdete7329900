@@ -1322,6 +1322,14 @@
 "warmup.preset.media" = "News and media";
 "warmup.preset.shopping" = "Shopping";
 "warmup.preset.work" = "Work";
+"warmup.preset.social" = "Social, no sign-in";
+"warmup.preset.video" = "Video";
+"warmup.preset.travel" = "Travel";
+"warmup.preset.finance" = "Finance";
+"warmup.preset.games" = "Games";
+"warmup.preset.tech" = "Tech";
+"warmup.preset.food" = "Food and recipes";
+"warmup.preset.sports" = "Sports";
 "warmup.problem" = "Line %1$ld: %2$@";
 "warmup.problems.more" = "%ld more lines skipped";
 "warmup.progress.current" = "Now: %@";

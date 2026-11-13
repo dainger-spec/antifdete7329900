@@ -1,38 +1,61 @@
 import Foundation
 
 /// What the session warm-up robot does for a profile: the pages it visits one after the other in
-/// the profile's own tab (a search first, when one is given, then the addresses in their order),
-/// how long it stays on each, and whether it scrolls and follows a link. Kept per profile,
-/// encrypted (`warmup.bin`), on this Mac only.
+/// the profile's own tab (a search first, when one is given, then the addresses in their order,
+/// with any further searches spread between them), how long it stays on each, and whether it
+/// scrolls and follows links. Kept per profile, encrypted (`warmup.bin`), on this Mac only.
 public struct WarmUpPlan: Codable, Equatable, Sendable {
     /// Web addresses as the user typed them, one per line; `#` starts a comment line.
     public var addresses: String
-    /// A search to start with (the address bar's search engine), or empty.
+    /// Searches (the address bar's search engine), one per line, or empty. The first starts the
+    /// run; the others come between the addresses, as a person searches now and then. A plan
+    /// saved before there could be several holds one line, and reads as it did.
     public var searchQuery: String
     /// Seconds on each page, chosen at random between these two (`dwellLimits`).
     public var minimumDwell: TimeInterval
     public var maximumDwell: TimeInterval
     /// Scroll down (now and then up) while on a page, as a trackpad would.
     public var scroll: Bool
-    /// Before leaving a page, follow one plain link on it: on the same site, or, on the search
+    /// Before leaving a page, follow plain links on it: on the same site, or, on the search
     /// results, to a result. Never a sign-out, purchase, deletion or download link.
     public var followLinks: Bool
+    /// How many links, one after the other, `followLinks` follows from a page (`hopLimits`): each
+    /// from the page the one before led to, each with a stay of its own. Nil in plans from before
+    /// there could be more than one: one.
+    public var linkHops: Int?
     /// Where this plan came from, so the screen opens where it was left. Absent in plans saved
     /// before the screen had ready-made lists, and in those written by hand.
     public var choice: WarmUpChoice?
 
     public static let dwellLimits: ClosedRange<TimeInterval> = 2...300
     public static let maximumPages = 50
+    public static let hopLimits: ClosedRange<Int> = 1...3
+    /// Searches beyond these are not run: a run that is mostly searches is a scraper's.
+    public static let maximumSearches = 5
 
     public init(addresses: String = "", searchQuery: String = "", minimumDwell: TimeInterval = 5, maximumDwell: TimeInterval = 15,
-                scroll: Bool = true, followLinks: Bool = false, choice: WarmUpChoice? = nil) {
+                scroll: Bool = true, followLinks: Bool = false, linkHops: Int? = nil, choice: WarmUpChoice? = nil) {
         self.addresses = addresses
         self.searchQuery = searchQuery
         self.minimumDwell = minimumDwell
         self.maximumDwell = maximumDwell
         self.scroll = scroll
         self.followLinks = followLinks
+        self.linkHops = linkHops
         self.choice = choice
+    }
+
+    /// The searches of `searchQuery`, one per line, each once and at most `maximumSearches`.
+    public var searches: [String] {
+        var seen: Set<String> = []
+        let lines = searchQuery.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+        return Array(lines.filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }.prefix(Self.maximumSearches))
+    }
+
+    /// Links followed one after the other from each page: none without `followLinks`, else
+    /// `linkHops` kept to `hopLimits` (one when the plan does not say).
+    public var hops: Int {
+        followLinks ? min(max(linkHops ?? 1, Self.hopLimits.lowerBound), Self.hopLimits.upperBound) : 0
     }
 
     public struct Page: Equatable, Sendable {
@@ -45,10 +68,14 @@ public struct WarmUpPlan: Codable, Equatable, Sendable {
 
         public var url: URL
         public var kind: Kind
+        /// For a search: its words, which the robot types on the engine's own page when it can
+        /// (`url` is the results page it opens otherwise).
+        public var query: String?
 
-        public init(url: URL, kind: Kind) {
+        public init(url: URL, kind: Kind, query: String? = nil) {
             self.url = url
             self.kind = kind
+            self.query = query
         }
     }
 
@@ -70,14 +97,17 @@ public struct WarmUpPlan: Codable, Equatable, Sendable {
         public var reason: Reason
     }
 
-    /// The pages to visit, and the lines that are not; the search with the profile's `engine`.
+    /// The pages to visit, and the lines that are not; the searches with the profile's `engine`:
+    /// the first before the addresses, the others spread evenly between them — always in the same
+    /// places, so that what the screen lists is what runs.
     public func pages(searchEngine engine: SearchEngine = .standard) -> (pages: [Page], problems: [Problem]) {
         var pages: [Page] = []
         var problems: [Problem] = []
         var seen: Set<String> = []
-        if let search = WebAddress.searchURL(for: searchQuery, engine: engine) {
-            pages.append(Page(url: search, kind: .search))
-            seen.insert(search.absoluteString)
+        var searchPages: [Page] = []
+        for query in searches {
+            guard let search = WebAddress.searchURL(for: query, engine: engine), seen.insert(search.absoluteString).inserted else { continue }
+            searchPages.append(Page(url: search, kind: .search, query: query))
         }
         for (index, rawLine) in addresses.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).enumerated() {
             let text = rawLine.trimmingCharacters(in: .whitespaces)
@@ -100,6 +130,11 @@ public struct WarmUpPlan: Codable, Equatable, Sendable {
                 continue
             }
             pages.append(Page(url: url, kind: .address))
+        }
+        // Search j of k (from 0) goes before address j·n/k: the first leads, the rest come between.
+        let count = pages.count
+        for (j, search) in searchPages.enumerated().reversed() {
+            pages.insert(search, at: j == 0 ? 0 : min(count, j * count / searchPages.count))
         }
         return (pages, problems)
     }
@@ -135,11 +170,29 @@ public struct WarmUpTiming: Sendable {
         public var interval: TimeInterval
     }
 
-    /// Seconds on a page: anywhere between the plan's two times.
+    /// How the stays on pages are spread between the plan's two times: most short, a few long —
+    /// the long tail of a person who now and then reads a page through. The share of the way from
+    /// the shortest to the longest is `(e^(λu) − 1) / (e^λ − 1)` for an even `u` in 0…1.
+    static let dwellTail = 2.2
+
+    /// The average share of the way from the shortest stay to the longest — the mean of the
+    /// spread above, `1/λ − 1/(e^λ − 1)` — for what a page costs on average.
+    public static var meanDwellFraction: Double { 1 / dwellTail - 1 / (exp(dwellTail) - 1) }
+
+    /// The average stay between `minimum` and `maximum`.
+    public static func meanDwell(_ minimum: TimeInterval, _ maximum: TimeInterval) -> TimeInterval {
+        minimum + (max(minimum, maximum) - minimum) * meanDwellFraction
+    }
+
+    /// Seconds on a page: between the plan's two times, mostly nearer the shorter (`dwellTail`).
+    /// Stays of one length, or spread evenly, are a pattern a person does not make.
     public static func dwell(_ plan: WarmUpPlan, using generator: inout some RandomNumberGenerator) -> TimeInterval {
         let plan = plan.normalized
-        return plan.minimumDwell == plan.maximumDwell ? plan.minimumDwell
-            : Double.random(in: plan.minimumDwell...plan.maximumDwell, using: &generator)
+        guard plan.minimumDwell < plan.maximumDwell else { return plan.minimumDwell }
+        let u = Double.random(in: 0...1, using: &generator)
+        let fraction = (exp(dwellTail * u) - 1) / (exp(dwellTail) - 1)
+        let span = plan.maximumDwell - plan.minimumDwell
+        return min(plan.maximumDwell, max(plan.minimumDwell, plan.minimumDwell + span * fraction))
     }
 
     /// Seconds between leaving a page and asking for the next.
@@ -164,6 +217,69 @@ public struct WarmUpTiming: Sendable {
             let total = Double(steps * (steps + 1) / 2)
             let deltas = (0..<steps).map { (distance * Double(steps - $0) / total).rounded() }
             return Gesture(at: start, deltas: deltas, interval: Double.random(in: 0.016...0.035, using: &generator))
+        }
+    }
+
+    /// When the pointer drifts while a page is read, as a hand resting on a mouse does: every few
+    /// seconds (3–9), never in the second before a scroll gesture of `gestures` nor while one runs
+    /// (the wheel scrolls where the pointer is), and not in the last two seconds of the stay.
+    public static func pointerMoves(over dwell: TimeInterval, avoiding gestures: [Gesture],
+                                    using generator: inout some RandomNumberGenerator) -> [TimeInterval] {
+        var times: [TimeInterval] = []
+        var at = Double.random(in: 0.8...3, using: &generator)
+        while at < dwell - 2 {
+            let clear = gestures.allSatisfy { gesture in
+                let end = gesture.at + Double(gesture.deltas.count) * gesture.interval
+                return at < gesture.at - 1 || at > end + 0.3
+            }
+            if clear { times.append(at) }
+            at += Double.random(in: 3...9, using: &generator)
+        }
+        return times
+    }
+}
+
+/// A point of a page's viewport, in CSS pixels from its top left.
+public struct WarmUpPoint: Equatable, Sendable {
+    public var x: Double
+    public var y: Double
+
+    public init(x: Double, y: Double) {
+        self.x = x
+        self.y = y
+    }
+}
+
+/// The way a hand takes the pointer from one place to another: a curve, not a ruler's line — a
+/// cubic Bézier whose handles lie off the straight way by up to a fifth of the distance, mostly
+/// to one side (an arc), now and then to both (an S) — eased at both ends, with a hand's tremor
+/// (up to a pixel and a half) on every point but the last, which is exactly where it was going.
+public enum WarmUpPointerPath {
+    public static func path(from start: WarmUpPoint, to end: WarmUpPoint, steps: Int,
+                            using generator: inout some RandomNumberGenerator) -> [WarmUpPoint] {
+        let count = max(1, steps)
+        let dx = end.x - start.x, dy = end.y - start.y
+        let distance = (dx * dx + dy * dy).squareRoot()
+        // The normal of the straight way, along which the handles are pushed.
+        let nx = distance > 0 ? -dy / distance : 0, ny = distance > 0 ? dx / distance : 0
+        let side: Double = Bool.random(using: &generator) ? 1 : -1
+        let bend1 = side * distance * Double.random(in: 0.04...0.2, using: &generator)
+        let bend2 = (Double.random(in: 0...1, using: &generator) < 0.8 ? side : -side)
+            * distance * Double.random(in: 0.02...0.15, using: &generator)
+        let along1 = Double.random(in: 0.2...0.4, using: &generator), along2 = Double.random(in: 0.6...0.8, using: &generator)
+        let c1 = WarmUpPoint(x: start.x + dx * along1 + nx * bend1, y: start.y + dy * along1 + ny * bend1)
+        let c2 = WarmUpPoint(x: start.x + dx * along2 + nx * bend2, y: start.y + dy * along2 + ny * bend2)
+        return (1...count).map { step in
+            let t = Double(step) / Double(count)
+            let s = t * t * (3 - 2 * t)
+            let u = 1 - s
+            var x = u * u * u * start.x + 3 * u * u * s * c1.x + 3 * u * s * s * c2.x + s * s * s * end.x
+            var y = u * u * u * start.y + 3 * u * u * s * c1.y + 3 * u * s * s * c2.y + s * s * s * end.y
+            if step < count {
+                x += Double.random(in: -1.5...1.5, using: &generator)
+                y += Double.random(in: -1.5...1.5, using: &generator)
+            }
+            return WarmUpPoint(x: x, y: y)
         }
     }
 }
@@ -242,7 +358,7 @@ public enum WarmUpLinkPolicy {
 
     /// The site (`WebOrigin.site`: the registrable domain, or the host itself for an IP address
     /// or a single-label host).
-    static func site(of url: URL) -> String {
+    public static func site(of url: URL) -> String {
         WebOrigin(url: url)?.site ?? (url.host ?? "").lowercased()
     }
 
@@ -259,6 +375,9 @@ public struct WarmUpVisit: Equatable, Sendable, Identifiable {
         case failed(String)
         /// Still loading after `WarmUpRobot.loadTimeout`: the robot went on.
         case timedOut
+        /// The page asked something in a dialog: the dialog was answered "Cancel", the page left,
+        /// and the run went on with the next.
+        case dialog
     }
 
     public let id: Int
@@ -270,9 +389,17 @@ public struct WarmUpVisit: Equatable, Sendable, Identifiable {
     public var title: String
     public var dwell: TimeInterval
     public var scrolls: Int
-    /// The link followed from this page, and whether its page loaded.
+    /// The first link followed from this page, and whether its page loaded.
     public var followed: URL?
     public var followedOutcome: Outcome?
+    /// Links followed from this page one after the other, `followed` the first; their pages'
+    /// addresses, for the sites a run went to.
+    public var hops: [URL]
+    /// A cookie banner's "accept" was pressed on this page, or on one its links led to.
+    public var consentsAccepted: Int
+    /// For a search: its words were typed on the engine's own page (otherwise its results page was
+    /// opened by its address).
+    public var typedSearch: Bool
 
     public init(id: Int, url: URL, kind: WarmUpPlan.Page.Kind) {
         self.id = id
@@ -281,5 +408,22 @@ public struct WarmUpVisit: Equatable, Sendable, Identifiable {
         self.title = ""
         self.dwell = 0
         self.scrolls = 0
+        self.hops = []
+        self.consentsAccepted = 0
+        self.typedSearch = false
+    }
+}
+
+extension WarmUpVisit {
+    /// The sites (registrable domains) whose pages a run's visits loaded — its own pages and those
+    /// its links led to — for "sites visited".
+    public static func sitesVisited(_ visits: [WarmUpVisit]) -> Int {
+        var sites: Set<String> = []
+        for visit in visits {
+            if visit.outcome == .loaded, visit.kind == .address { sites.insert(WarmUpLinkPolicy.site(of: visit.url)) }
+            for hop in visit.hops { sites.insert(WarmUpLinkPolicy.site(of: hop)) }
+        }
+        sites.remove("")
+        return sites.count
     }
 }

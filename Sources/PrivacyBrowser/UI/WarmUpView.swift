@@ -321,6 +321,7 @@ private struct WarmUpPanel: View {
             else { Image(systemName: "minus.circle").foregroundStyle(.secondary) }
         case .loaded?: Image(systemName: "checkmark.circle").foregroundStyle(Theme.running)
         case .timedOut?: Image(systemName: "clock").foregroundStyle(Theme.warning)
+        case .dialog?: Image(systemName: "exclamationmark.bubble").foregroundStyle(Theme.warning)
         case .failed?: Image(systemName: "xmark.circle").foregroundStyle(Theme.danger)
         }
     }

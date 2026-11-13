@@ -7663,6 +7663,7 @@ final class SelfTest {
             case .loaded?: return "loaded"
             case .failed?: return "failed"
             case .timedOut?: return "timedOut"
+            case .dialog?: return "dialog"
             case nil: return "-"
             }
         }

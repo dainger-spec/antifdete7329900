@@ -162,6 +162,58 @@ final class WarmUpTimingTests: XCTestCase {
         XCTAssertGreaterThan(up, 0)
         XCTAssertGreaterThan(down, up * 3)
     }
+
+    /// Most stays short, a few long: not one length, and not spread evenly either.
+    func testStaysHaveALongTail() {
+        var generator = SeededGenerator(state: 11)
+        let plan = WarmUpPlan(minimumDwell: 10, maximumDwell: 100)
+        let dwells = (0..<4000).map { _ in WarmUpTiming.dwell(plan, using: &generator) }.sorted()
+        XCTAssertTrue(dwells.allSatisfy { (10...100).contains($0) })
+        let median = dwells[dwells.count / 2]
+        XCTAssertLessThan(median, 40, "most stays are nearer the shorter time (the middle is 55)")
+        let long = Double(dwells.filter { $0 > 80 }.count) / Double(dwells.count)
+        XCTAssertTrue((0.03...0.2).contains(long), "a few stays are long: \(long)")
+        let mean = dwells.reduce(0, +) / Double(dwells.count)
+        XCTAssertEqual(mean, WarmUpTiming.meanDwell(10, 100), accuracy: 2, "the estimates count with the true average")
+    }
+
+    func testThePointerTakesACurvedWayWithAHandsTremorAndEndsWhereItWasGoing() {
+        var generator = SeededGenerator(state: 21)
+        let start = WarmUpPoint(x: 100, y: 120), end = WarmUpPoint(x: 700, y: 420)
+        var bent = 0
+        for _ in 0..<50 {
+            let path = WarmUpPointerPath.path(from: start, to: end, steps: 30, using: &generator)
+            XCTAssertEqual(path.count, 30)
+            XCTAssertEqual(path.last, end, "the last point is the target itself")
+            // How far the way strays from the straight line, at most.
+            let length = ((end.x - start.x) * (end.x - start.x) + (end.y - start.y) * (end.y - start.y)).squareRoot()
+            let strays = path.map { point in
+                abs((end.y - start.y) * point.x - (end.x - start.x) * point.y + end.x * start.y - end.y * start.x) / length
+            }
+            if (strays.max() ?? 0) > 6 { bent += 1 }
+            XCTAssertLessThan(strays.max() ?? 0, length * 0.25, "a curve, not a detour")
+            let first = path[0]
+            XCTAssertLessThan(abs(first.x - start.x) + abs(first.y - start.y), 40, "it sets off from where it was")
+        }
+        XCTAssertGreaterThan(bent, 40, "a hand's way is seldom a ruler's line")
+        XCTAssertEqual(WarmUpPointerPath.path(from: start, to: start, steps: 5, using: &generator).last, start)
+    }
+
+    func testThePointerDriftsWhileAPageIsReadButNotWhileItScrolls() {
+        var generator = SeededGenerator(state: 31)
+        for dwell in [5.0, 20, 60] {
+            let gestures = WarmUpTiming.gestures(over: dwell, using: &generator)
+            let moves = WarmUpTiming.pointerMoves(over: dwell, avoiding: gestures, using: &generator)
+            for move in moves {
+                XCTAssertLessThan(move, dwell - 2)
+                for gesture in gestures {
+                    let end = gesture.at + Double(gesture.deltas.count) * gesture.interval
+                    XCTAssertFalse(move >= gesture.at - 1 && move <= end + 0.3, "dwell \(dwell): a move at \(move) during a scroll")
+                }
+            }
+            if dwell >= 20 { XCTAssertFalse(moves.isEmpty, "dwell \(dwell)") }
+        }
+    }
 }
 
 final class WarmUpLinkPolicyTests: XCTestCase {
@@ -341,20 +393,210 @@ final class WarmUpPresetTests: XCTestCase {
 
     func testTheCountriesAskedForEachHaveTheirOwnList() {
         let asked = ["US", "GB", "DE", "FR", "ES", "IT", "NL", "PL", "UA", "KZ", "EE", "LV", "LT", "FI", "SE", "NO",
-                     "DK", "CZ", "PT", "TR", "BR", "MX", "CA", "AU", "JP", "IN"]
+                     "DK", "CZ", "PT", "TR", "BR", "MX", "CA", "AU", "JP", "IN",
+                     "RU", "AT", "CH", "BE", "IE", "RO", "HU", "GR", "IL", "AE", "SG", "KR", "AR", "CL", "CO", "ZA", "NZ"]
         for code in asked {
             guard let preset = WarmUpPresets.country(code) else {
                 XCTFail("no list for \(code)")
                 continue
             }
-            XCTAssertGreaterThanOrEqual(preset.addresses.count, 7, code)
+            // A run of an hour or more has a dozen sites of the country to go to, and a different
+            // few searches each time.
+            XCTAssertTrue((12...15).contains(preset.addresses.count), "\(code): \(preset.addresses.count) sites")
+            XCTAssertTrue((5...6).contains(preset.searches.count), "\(code): \(preset.searches.count) searches")
             XCTAssertEqual(preset.group, .country, code)
-            XCTAssertFalse(preset.searches.isEmpty, code)
             for search in preset.searches {
                 XCTAssertNotNil(WebAddress.searchURL(for: search), "\(code): \(search)")
             }
         }
         XCTAssertEqual(Set(WarmUpPresets.countries.map(\.id)).count, WarmUpPresets.countries.count, "one list per country")
+        XCTAssertEqual(Set(WarmUpPresets.all.map(\.id)).count, WarmUpPresets.all.count, "one list per id")
+        let russian = WarmUpPresets.country("ru")?.addresses ?? []
+        for site in ["ya.ru", "dzen.ru", "avito.ru", "ozon.ru", "wildberries.ru", "gismeteo.ru", "kinopoisk.ru", "rbc.ru", "lenta.ru", "2gis.ru"] {
+            XCTAssertTrue(russian.contains(site), site)
+        }
+    }
+
+    func testTheKindsOfBrowsingAskedForAreThereWithTheirSites() {
+        let asked: [String: [String]] = [
+            "social": ["reddit.com", "pinterest.com", "quora.com", "medium.com", "tumblr.com"],
+            "video": ["youtube.com", "twitch.tv", "vimeo.com", "dailymotion.com"],
+            "travel": ["booking.com", "airbnb.com", "tripadvisor.com", "skyscanner.net", "expedia.com"],
+            "finance": ["investing.com", "finance.yahoo.com", "coinmarketcap.com", "tradingview.com"],
+            "games": ["store.steampowered.com", "ign.com", "gamespot.com", "epicgames.com"],
+            "tech": ["theverge.com", "techcrunch.com", "wired.com", "arstechnica.com", "producthunt.com"],
+            "food": ["allrecipes.com", "seriouseats.com", "bbcgoodfood.com"],
+            "sports": ["espn.com", "goal.com", "eurosport.com"],
+            "shopping": [], "media": [], "work": [],
+        ]
+        for (id, sites) in asked {
+            guard let preset = WarmUpPresets.preset(id: id) else {
+                XCTFail("no list for \(id)")
+                continue
+            }
+            XCTAssertEqual(preset.group, .interest, id)
+            XCTAssertTrue(Set(sites).isSubset(of: preset.addresses), id)
+            XCTAssertGreaterThanOrEqual(preset.searches.count, 3, id)
+        }
+        XCTAssertEqual(Set(WarmUpPresets.interests.map(\.id)), Set(asked.keys))
+        XCTAssertEqual(WarmUpPresets.all.first?.group, .country, "the countries are listed first")
+    }
+
+    func testEachRunVisitsTheSitesInAnOrderOfItsOwn() throws {
+        let preset = try XCTUnwrap(WarmUpPresets.country("de"))
+        func sites(seed: UInt64, minutes: Int) -> [String] {
+            var generator = SeededGenerator(state: seed)
+            return WarmUpPlan.from(preset: preset, minutes: minutes, quality: .normal, using: &generator)
+                .addresses.split(separator: "\n").map(String.init)
+        }
+        // A whole run: every site once, in another order than the list's and than another run's.
+        let whole = sites(seed: 1, minutes: 120)
+        XCTAssertEqual(Set(whole), Set(preset.addresses))
+        XCTAssertEqual(whole.count, preset.addresses.count)
+        XCTAssertNotEqual(whole, preset.addresses)
+        XCTAssertNotEqual(whole, sites(seed: 2, minutes: 120))
+        XCTAssertEqual(whole, sites(seed: 1, minutes: 120), "the same seed, the same run: tests can count on it")
+        // Short runs: not the same first few sites every time.
+        let firsts = Set((UInt64(1)...8).map { sites(seed: $0, minutes: 5).joined(separator: ",") })
+        XCTAssertGreaterThan(firsts.count, 4)
+        XCTAssertLessThan(sites(seed: 1, minutes: 5).count, preset.addresses.count)
+    }
+
+    func testTwoOrThreeSearchesARunChosenFromTheTemplateAndSpreadBetweenTheSites() throws {
+        let preset = try XCTUnwrap(WarmUpPresets.country("fr"))
+        var counts: Set<Int> = []
+        for seed in UInt64(1)...12 {
+            var generator = SeededGenerator(state: seed)
+            let plan = WarmUpPlan.from(preset: preset, minutes: 60, quality: .normal, using: &generator)
+            let searches = plan.searches
+            counts.insert(searches.count)
+            XCTAssertTrue((2...3).contains(searches.count), "seed \(seed): \(searches)")
+            XCTAssertTrue(Set(searches).isSubset(of: preset.searches))
+            let pages = plan.pages().pages
+            XCTAssertEqual(pages.first?.kind, .search, "a search starts the run")
+            XCTAssertEqual(pages.first?.query, searches.first)
+            XCTAssertNotEqual(pages.last?.kind, .search, "the others come between the sites, not after them")
+            XCTAssertEqual(pages.filter { $0.kind == WarmUpPlan.Page.Kind.search }.map { $0.query ?? "" }, searches)
+        }
+        XCTAssertEqual(counts, [2, 3])
+        // A short run is mostly sites: at most a search for every three of them.
+        var generator = SeededGenerator(state: 3)
+        let short = WarmUpPlan.from(preset: preset, minutes: 5, quality: .deep, using: &generator)
+        XCTAssertLessThanOrEqual(short.searches.count * 3, short.pages().pages.count)
+    }
+
+    func testSearchesAreSpreadEvenlyAndAnOldPlansOneSearchStillLeads() {
+        let plan = WarmUpPlan(addresses: "a.example\nb.example\nc.example\nd.example\ne.example\nf.example",
+                              searchQuery: "one\ntwo\n\n two \nthree")
+        XCTAssertEqual(plan.searches, ["one", "two", "three"], "each once, blank lines left out")
+        XCTAssertEqual(plan.pages().pages.map { $0.query ?? $0.url.host ?? "" },
+                       ["one", "a.example", "b.example", "two", "c.example", "d.example", "three", "e.example", "f.example"])
+        let old = WarmUpPlan(addresses: "a.example", searchQuery: "weather")
+        XCTAssertEqual(old.pages().pages.map(\.kind), [.search, .address])
+        let many = WarmUpPlan(searchQuery: (1...9).map { "q\($0)" }.joined(separator: "\n"))
+        XCTAssertEqual(many.searches.count, WarmUpPlan.maximumSearches)
+    }
+
+    func testMoreTimeMeansMoreSitesThenDeeperVisits() throws {
+        let preset = try XCTUnwrap(WarmUpPresets.country("de"))
+        var lastSites = 0, lastHops = 0
+        var seenHops: Set<Int> = []
+        for minutes in [5, 10, 20, 40, 90, 180] {
+            var generator = SeededGenerator(state: 5)
+            let plan = WarmUpPlan.from(preset: preset, minutes: minutes, quality: .normal, using: &generator)
+            let sites = plan.pages().pages.filter { $0.kind == .address }.count
+            XCTAssertGreaterThanOrEqual(sites, lastSites, "\(minutes) min")
+            XCTAssertGreaterThanOrEqual(plan.hops, lastHops, "\(minutes) min")
+            // Deeper only once every site is in: the time goes to breadth first.
+            if plan.hops > WarmUpQuality.normal.linkHops.lowerBound { XCTAssertEqual(sites, preset.addresses.count, "\(minutes) min") }
+            XCTAssertLessThanOrEqual(plan.estimatedSeconds, TimeInterval(minutes * 60) + plan.secondsPerPage, "\(minutes) min")
+            lastSites = sites
+            lastHops = plan.hops
+            seenHops.insert(plan.hops)
+        }
+        XCTAssertLessThan(WarmUpPlan.from(preset: preset, minutes: 5, quality: .normal).pages().pages.count,
+                          preset.addresses.count, "five minutes is not the whole list")
+        XCTAssertEqual(lastSites, preset.addresses.count)
+        XCTAssertEqual(lastHops, WarmUpQuality.normal.linkHops.upperBound)
+        XCTAssertGreaterThan(seenHops.count, 1, "the time decides how deep, not only how wide")
+        // Deep always follows links, two at least.
+        var generator = SeededGenerator(state: 9)
+        let deep = WarmUpPlan.from(preset: preset, minutes: 5, quality: .deep, using: &generator)
+        XCTAssertTrue(deep.followLinks)
+        XCTAssertGreaterThanOrEqual(deep.hops, 2)
+        XCTAssertEqual(WarmUpPlan(followLinks: true).hops, 1, "a plan from before several links follows one")
+        XCTAssertEqual(WarmUpPlan(followLinks: false, linkHops: 3).hops, 0)
+        XCTAssertEqual(WarmUpPlan(followLinks: true, linkHops: 9).hops, WarmUpPlan.hopLimits.upperBound)
+    }
+
+    func testAListWrittenByHandRunsUnderTheDialsInItsOwnOrder() throws {
+        let choice = WarmUpChoice(source: .manual, minutes: 180, quality: .normal,
+                                  manualAddresses: "z.example\njavascript:alert(1)\na.example\nz.example\nm.example",
+                                  manualSearches: "first\nsecond")
+        var generator = SeededGenerator(state: 4)
+        let plan = try XCTUnwrap(choice.plan(countryCode: nil, using: &generator))
+        XCTAssertEqual(plan.pages().pages.filter { $0.kind == .address }.map { $0.url.host ?? "" },
+                       ["z.example", "a.example", "m.example"], "as written, what is no web address left out")
+        XCTAssertEqual(Set(plan.searches), ["first", "second"])
+        XCTAssertEqual(plan.choice, choice)
+        XCTAssertEqual(plan.minimumDwell, WarmUpQuality.normal.dwell.lowerBound)
+    }
+}
+
+/// The person's own templates: saved from a hand-written list, chosen again like the app's.
+final class WarmUpTemplateTests: XCTestCase {
+    func testATemplateIsMadeFromTheWebAddressesOfAList() throws {
+        let template = try XCTUnwrap(WarmUpTemplate(name: "  News  ", typedAddresses: "# mine\nexample.org\nnot a site\nexample.org\nhttps://b.example/x",
+                                                    typedSearches: "weather\n\nweather"))
+        XCTAssertEqual(template.name, "News")
+        XCTAssertEqual(template.addresses, ["https://example.org", "https://b.example/x"])
+        XCTAssertEqual(template.searches, ["weather"])
+        XCTAssertNil(WarmUpTemplate(name: "Empty", typedAddresses: "two words\n", typedSearches: "a"), "a template is somewhere to go")
+        XCTAssertEqual(template.preset.group, .user)
+        XCTAssertEqual(template.preset.id, template.presetID)
+    }
+
+    func testSavingAgainUnderTheSameNameReplacesIt() throws {
+        var templates = WarmUpTemplates()
+        let first = WarmUpTemplate(name: "Shops", addresses: ["a.example"])
+        XCTAssertTrue(templates.save(first))
+        XCTAssertTrue(templates.save(WarmUpTemplate(name: "shops", addresses: ["b.example"])))
+        XCTAssertEqual(templates.templates.count, 1)
+        XCTAssertEqual(templates.templates[0].id, first.id, "the same template, kept where it was chosen")
+        XCTAssertEqual(templates.templates[0].addresses, ["b.example"])
+        templates.save(WarmUpTemplate(name: "Other", addresses: ["c.example"]))
+        templates.remove(first.id)
+        XCTAssertEqual(templates.templates.map(\.name), ["Other"])
+    }
+
+    func testAChoiceOfATemplateBuildsFromItAndADeletedOneFromNothing() throws {
+        let template = WarmUpTemplate(name: "Mine", addresses: ["a.example", "b.example", "c.example"], searches: ["x", "y"])
+        let choice = WarmUpChoice(source: .preset, presetID: template.presetID, minutes: 60, quality: .quick)
+        let plan = try XCTUnwrap(choice.plan(countryCode: "de", templates: [template]))
+        XCTAssertEqual(Set(plan.pages().pages.filter { $0.kind == .address }.map { $0.url.host ?? "" }),
+                       ["a.example", "b.example", "c.example"])
+        XCTAssertEqual(plan.choice?.presetID, template.presetID)
+        XCTAssertNil(choice.plan(countryCode: "de", templates: []), "deleted since: the plan as it was saved runs")
+    }
+
+    func testTheTemplatesAreStoredEncryptedAtTheVaultsRootAndNotSynced() async throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("pb-warmup-templates-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let vault = try MasterVault.create(in: base.appendingPathComponent("A"), password: "pw", iterations: 1_000)
+        let repository = try ProfileRepository(vault: vault)
+        _ = try repository.create(name: "P", configuration: ProfileConfiguration())
+        XCTAssertEqual(try WarmUpTemplates.load(from: vault), WarmUpTemplates())
+        var templates = WarmUpTemplates()
+        templates.save(WarmUpTemplate(name: "Secret list", addresses: ["https://secret-site.example"], searches: ["private words"],
+                                      createdAt: Date(timeIntervalSince1970: 1_800_000_000)))
+        try templates.save(to: vault)
+        XCTAssertEqual(try WarmUpTemplates.load(from: vault), templates)
+        let onDisk = try Data(contentsOf: vault.root.appendingPathComponent("warmup-templates.bin"))
+        XCTAssertNil(onDisk.range(of: Data("secret-site".utf8)))
+        XCTAssertNil(onDisk.range(of: Data("Secret list".utf8)))
+        let transport = LocalDirectorySyncTransport(directory: base.appendingPathComponent("server"))
+        let report = try await SyncEngine(repository: repository, transport: transport).sync()
+        XCTAssertFalse(report.pushed.contains { $0.contains("warm") }, "the templates stay on this Mac")
     }
 }
 
