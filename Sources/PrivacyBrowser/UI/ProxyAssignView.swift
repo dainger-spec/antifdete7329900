@@ -136,7 +136,7 @@ private struct ProxyAssignPanel: View {
             })
         }
         .sheetFrame(width: 820, height: 640)
-        .background(Theme.raised)
+        .lumenSheetSurface()
         .onAppear {
             if startsWithAliveProxies && chosenProxies.isEmpty { chosenProxies = aliveProxies }
         }

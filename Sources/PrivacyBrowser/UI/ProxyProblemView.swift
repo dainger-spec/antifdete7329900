@@ -105,7 +105,7 @@ struct ProxyProblemPanel: View {
             })
         }
         .sheetFrame(width: 580, height: 600)
-        .background(Theme.raised)
+        .lumenSheetSurface()
     }
 
     private func runCheck() {

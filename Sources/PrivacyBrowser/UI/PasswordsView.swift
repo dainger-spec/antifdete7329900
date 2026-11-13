@@ -98,7 +98,7 @@ struct PasswordListView: View {
             })
         }
         .sheetFrame(width: 780, height: 620)
-        .background(Theme.raised)
+        .lumenSheetSurface()
         .onAppear {
             guard let sample, !unlocked else { return }
             entries = sample

@@ -668,7 +668,7 @@ private struct KeyRecoveryNote: View {
         }
         .padding(28)
         .frame(width: 460)
-        .background(Theme.raised)
+        .lumenSheetSurface()
         .environment(\.colorScheme, .dark)
         .task {
             guard !linked else { return }
@@ -1304,7 +1304,7 @@ struct EmailLinkSheet: View {
             }
         }
         .sheetFrame(width: 500, height: 660)
-        .background(Theme.raised)
+        .lumenSheetSurface()
         .onDisappear {
             typedKey = nil
             password = ""
@@ -1467,7 +1467,7 @@ struct KeyReplaceSheet: View {
             }
         }
         .sheetFrame(width: 500, height: 600)
-        .background(Theme.raised)
+        .lumenSheetSurface()
         .task {
             // Whether an email is linked chooses the warning: asked of the license's view when the
             // key is at hand and it is not known yet.

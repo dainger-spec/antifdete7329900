@@ -21,6 +21,9 @@ struct EclipseLight: View {
         case profiles
         /// Behind the profile editor: still.
         case editor
+        /// Behind a window of pages and lists that is lower than the editor (Scenarios): the
+        /// editor's eclipses, still.
+        case settings
         /// The miniature in Settings → Appearance.
         case thumbnail
     }
@@ -33,7 +36,7 @@ struct EclipseLight: View {
     var place: Place
     var phase: Phase = .idle
     /// The whole effect's brightness: 1 on the lock screen, 0.55 in the profiles window, 0.45
-    /// behind the editor.
+    /// behind the editor, 0.3 behind Scenarios.
     var brightness: Double = 1
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
@@ -225,6 +228,11 @@ private struct EclipseSpec {
                                     shadow: CGSize(width: -39, height: 34),
                                     from: .zero, delay: 0),
                 comesIn: false)
+        case .settings:
+            // The editor's geometry for a lower window: still, so it needs no Reduce Motion path.
+            var spec = of(.editor)
+            spec.referenceHeight = 760
+            return spec
         case .thumbnail:
             return EclipseSpec(
                 referenceHeight: 230,
@@ -241,5 +249,46 @@ private struct EclipseSpec {
                 blur: Blur(halo: 24, glow: 4, rim: 0.6, penumbra: 9, shadow: 18),
                 entryDuration: 1.6, rimDelay: 0.4, rimDuration: 1.5)
         }
+    }
+}
+
+/// The design's eclipse in miniature, behind what it holds (an empty state's symbol, Lumen's glyph,
+/// the mark in About): a dark disc, a hairline, and light breaking at its top-trailing edge, where
+/// the windows' eclipses have theirs. Still, so nothing changes under Reduce Motion; with Increase
+/// Contrast the hairline is `strongBorder`, and the light stays. The ring is decoration only, hidden
+/// from VoiceOver; what it holds is read as it is.
+struct EclipseRing<Content: View>: View {
+    var size: CGFloat
+    let content: Content
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    init(size: CGFloat, @ViewBuilder content: () -> Content) {
+        self.size = size
+        self.content = content()
+    }
+
+    var body: some View {
+        ZStack {
+            Group {
+                // The halo, a little toward the lit edge.
+                Circle().fill(Theme.rim.opacity(0.07))
+                    .blur(radius: size * 0.16)
+                    .offset(x: size * 0.06, y: -size * 0.06)
+                Circle().fill(Theme.backdrop)
+                Circle().strokeBorder(contrast == .increased ? Theme.strongBorder : Theme.hairline, lineWidth: 1)
+                // In SwiftUI 0° is trailing and −90° the top, so location 0.375 (−45°) is top-trailing.
+                Circle().strokeBorder(AngularGradient(stops: [
+                                          .init(color: Theme.rim.opacity(0), location: 0.12),
+                                          .init(color: Theme.rim.opacity(0.75), location: 0.375),
+                                          .init(color: Theme.rim.opacity(0), location: 0.62),
+                                      ],
+                                      center: .center, startAngle: .degrees(-180), endAngle: .degrees(180)),
+                                      lineWidth: 1)
+            }
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+            content
+        }
+        .frame(width: size, height: size)
     }
 }

@@ -29,6 +29,7 @@ struct InspectorInfo {
 /// actions. 320 pt, over the light at 80 % like the sidebar; opaque when it lies over the list.
 struct ProfileInspectorView: View {
     @Environment(\.tagColors) private var tagColors
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let row: ProfileRowItem
     let info: InspectorInfo
     let actions: ProfileActions
@@ -66,6 +67,8 @@ struct ProfileInspectorView: View {
                                 .font(.lumenSecondary)
                                 .foregroundStyle(Theme.textSecondary)
                                 .monospacedDigit()
+                                .contentTransition(rolling)
+                                .animation(rollAnimation, value: warmUp.cookies)
                                 .padding(.top, 8)
                         }
                     }
@@ -110,6 +113,8 @@ struct ProfileInspectorView: View {
                     .font(.lumenBody)
                     .foregroundStyle(row.isRunning ? Theme.textPrimary : Theme.textSecondary)
                     .monospacedDigit()
+                    .contentTransition(rolling)
+                    .animation(rollAnimation, value: statusLine)
             }
             .padding(.top, 6)
             if !row.tags.isEmpty || row.ephemeral {
@@ -136,7 +141,7 @@ struct ProfileInspectorView: View {
                     .disabled(row.exit == .unreadable)
                 case .starting, .sealing:
                     HStack(spacing: 7) {
-                        ProgressView().controlSize(.small)
+                        LiveDot()
                         Text(row.activity == .starting ? L("profiles.row.starting") : L("profiles.row.encrypting"))
                             .font(.lumenBody)
                             .foregroundStyle(Theme.textSecondary)
@@ -365,6 +370,11 @@ struct ProfileInspectorView: View {
 
     // MARK: Parts
 
+    /// A figure that changes (a warm-up's page, its cookies) rolls to the new one rather than
+    /// jumping; under Reduce Motion it is simply replaced.
+    private var rolling: ContentTransition { Motion.isReduced(reduceMotion) ? .identity : .numericText() }
+    private var rollAnimation: Animation? { Motion.isReduced(reduceMotion) ? nil : .easeOut(duration: 0.25) }
+
     private func section<Content: View>(_ title: String, trailing: String? = nil, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -372,6 +382,8 @@ struct ProfileInspectorView: View {
                 Spacer()
                 if let trailing {
                     Text(trailing).font(.lumenSecondary).foregroundStyle(Theme.textSecondary).monospacedDigit()
+                        .contentTransition(rolling)
+                        .animation(rollAnimation, value: trailing)
                 }
             }
             .padding(.bottom, 8)

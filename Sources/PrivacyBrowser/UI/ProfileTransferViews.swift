@@ -94,7 +94,7 @@ struct ProfileExportView: View {
             })
         }
         .sheetFrame(width: 480)
-        .background(Theme.raised)
+        .lumenSheetSurface()
     }
 
     private func export() {
@@ -200,7 +200,7 @@ struct ProfileImportView: View {
             })
         }
         .sheetFrame(width: 480)
-        .background(Theme.raised)
+        .lumenSheetSurface()
         .fileImporter(isPresented: $choosingFile, allowedContentTypes: [.privacyBrowserProfile, .data]) { result in
             switch result {
             case let .success(url):
@@ -353,7 +353,7 @@ struct CookieExportView: View {
             })
         }
         .sheetFrame(width: 480)
-        .background(Theme.raised)
+        .lumenSheetSurface()
     }
 
     private func export() {

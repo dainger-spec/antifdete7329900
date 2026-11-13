@@ -58,7 +58,7 @@ struct CookieImportView: View {
             }
         }
         .sheetFrame(width: 680, height: 560)
-        .background(Theme.raised)
+        .lumenSheetSurface()
         .fileImporter(isPresented: $choosingFile, allowedContentTypes: [.json, .plainText, .text, .data]) { result in
             switch result {
             case let .success(url): read(url)

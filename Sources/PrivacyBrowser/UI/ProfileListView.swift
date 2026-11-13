@@ -925,10 +925,10 @@ struct ProfilesScreen: View {
                 if inspectorShown && inspectorFits {
                     inspector(top: Self.inspectorTop, over: false)
                         .opacity(appeared ? 1 : 0)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                        .transition(.lumenSlide(Motion.isReduced(reduceMotion)))
                 }
             }
-            .animation(Motion.isReduced(reduceMotion) ? nil : Theme.appearAnimation, value: inspectorShown)
+            .animation(Motion.isReduced(reduceMotion) ? nil : Motion.panelIn, value: inspectorShown)
         }
         .background {
             ZStack {
@@ -969,7 +969,7 @@ struct ProfilesScreen: View {
                             if inspectorOver {
                                 inspector(top: 8, over: true)
                                     .shadow(color: .black.opacity(0.55), radius: 30, x: -6)
-                                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                                    .transition(.lumenSlide(Motion.isReduced(reduceMotion)))
                             }
                         }
                         .overlay(alignment: .bottom) {
@@ -982,16 +982,16 @@ struct ProfilesScreen: View {
                                     // Centred in the part of the list the inspector leaves visible, not under it.
                                     .padding(.trailing, inspectorOver ? Self.inspectorWidth : 0)
                                     .padding(.bottom, 18)
-                                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                                    .transition(.lumenRise(Motion.isReduced(reduceMotion)))
                             }
                         }
                     if let guardNotice {
                         GuardNoticeBar(notice: guardNotice, open: openGuardSettings, hide: hideGuardNotice)
                             .padding(.top, 10)
-                            .transition(.opacity)
+                            .transition(.lumenDrop(Motion.isReduced(reduceMotion)))
                     }
                 }
-                .animation(Motion.isReduced(reduceMotion) ? nil : Theme.appearAnimation, value: selectedRows.count >= 2)
+                .animation(Motion.isReduced(reduceMotion) ? nil : Motion.panelIn, value: selectedRows.count >= 2)
                 .animation(Motion.isReduced(reduceMotion) ? nil : Theme.appearAnimation, value: guardNotice)
             }
         }
@@ -1056,7 +1056,7 @@ struct ProfilesScreen: View {
                             withAnimation(Motion.isReduced(reduceMotion) ? nil : Theme.appearAnimation) { bannersExpanded.toggle() }
                         }
                         : nil)
-                    .transition(.opacity)
+                    .transition(.lumenDrop(Motion.isReduced(reduceMotion)))
             }
         }
         // Down to one: the next that comes starts behind "1 more" again.
@@ -1196,6 +1196,8 @@ struct ProfilesScreen: View {
                     .font(.lumenBody)
                     .foregroundStyle(Theme.textSecondary)
                     .monospacedDigit()
+                    .contentTransition(Motion.isReduced(reduceMotion) ? .identity : .numericText())
+                    .animation(Motion.isReduced(reduceMotion) ? nil : .easeOut(duration: 0.25), value: countLine)
             }
             .lineLimit(1)
             .fixedSize()
@@ -1626,7 +1628,8 @@ private struct ProfilesSidebar: View {
 }
 
 /// One of the sidebar's items (the design's `nav`): `t2`, white under the pointer and when chosen
-/// (on 6.5 % white); its count at the end, in red with a dot when it is an alert.
+/// (medium, on 6.5 % white with a faint edge); its count at the end, `t2` when chosen, in red with
+/// a dot when it is an alert.
 private struct SidebarItem: View {
     let symbol: String
     /// A tag's colour: its dot in place of the symbol.
@@ -1638,6 +1641,8 @@ private struct SidebarItem: View {
     let selected: Bool
     let action: () -> Void
     @State private var hovered = false
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button(action: action) {
@@ -1653,7 +1658,7 @@ private struct SidebarItem: View {
                 }
                 .frame(width: 18)
                 Text(title)
-                    .font(.lumenBody)
+                    .font(selected ? .lumenLabel : .lumenBody)
                     .foregroundStyle(selected || hovered ? Theme.textPrimary : Theme.textSecondary)
                     .lineLimit(1)
                 Spacer(minLength: 4)
@@ -1664,8 +1669,11 @@ private struct SidebarItem: View {
                     if let count {
                         Text(verbatim: "\(count)")
                             .font(.lumenSecondary)
-                            .foregroundStyle(alert ? Theme.danger : Theme.textTertiary)
+                            .foregroundStyle(alert ? Theme.danger : (selected ? Theme.textSecondary : Theme.textTertiary))
                             .monospacedDigit()
+                            // A count that changes rolls to the new figure rather than jumping.
+                            .contentTransition(Motion.isReduced(reduceMotion) ? .identity : .numericText())
+                            .animation(Motion.isReduced(reduceMotion) ? nil : .easeOut(duration: 0.25), value: count)
                     }
                 }
             }
@@ -1673,6 +1681,8 @@ private struct SidebarItem: View {
             .frame(height: 30)
             .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(selected ? Theme.rowSelected : (hovered ? Theme.rowHover : Color.clear)))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(selected ? Color.white.opacity(contrast == .increased ? 0.16 : 0.05) : Color.clear, lineWidth: 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1685,6 +1695,8 @@ private struct SidebarItem: View {
 private struct SyncStatusButton: View {
     let sync: SyncLine
     let action: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.lumenStillFrame) private var stillFrame
 
     var body: some View {
         Button(action: action) {
@@ -1692,6 +1704,8 @@ private struct SyncStatusButton: View {
                 Image(systemName: symbol)
                     .font(.system(size: 12))
                     .foregroundStyle(sync == .failed ? Theme.warning : Theme.textTertiary)
+                    // Turning while it syncs; still under Reduce Motion and in the self-test's still frame.
+                    .symbolEffect(.rotate, options: .repeating, isActive: sync == .syncing && !Motion.isReduced(reduceMotion) && !stillFrame)
                     .frame(width: 18)
                 Group {
                     if case .synced(let date) = sync {
@@ -1757,6 +1771,9 @@ private struct ProfileRow: View {
     var onClick: (ProfileSelection.Click) -> Void = { _ in }
     var onDoubleClick: () -> Void = {}
     @State private var hovered = false
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.lumenStillFrame) private var stillFrame
 
     var body: some View {
         HStack(spacing: ProfileColumns.gap) {
@@ -1773,9 +1790,14 @@ private struct ProfileRow: View {
         .frame(height: height)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
             .fill(isSelected ? Theme.rowSelected : (hovered ? Theme.rowHover : Color.clear)))
+        // The chosen row's faint edge, stronger with Increase Contrast.
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .strokeBorder(isSelected ? Color.white.opacity(contrast == .increased ? 0.16 : 0.06) : Color.clear, lineWidth: 1))
         .overlay(alignment: .bottom) {
+            // Not under a lit row: the ruled line cut through its rounded fill.
             Rectangle().fill(Theme.divider).frame(height: 1)
                 .padding(.leading, ProfileColumns.rowPadding + ProfileColumns.nameInset - 18)
+                .opacity(isSelected || hovered ? 0 : 1)
         }
         .contentShape(Rectangle())
         // The row's buttons and ⋯ menu take their own clicks; a click anywhere else selects, and
@@ -1789,6 +1811,8 @@ private struct ProfileRow: View {
         }
         .onHover { hovered = $0 }
         .animation(Motion.hover(hovered), value: hovered)
+        // The selected fill fades in rather than snapping; not in the self-test's still frame.
+        .animation(Motion.isReduced(reduceMotion) || stillFrame ? nil : .easeOut(duration: 0.12), value: isSelected)
         .contextMenu { ProfileMenuItems(row: row, actions: actions) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(row.name))
@@ -1802,7 +1826,7 @@ private struct ProfileRow: View {
             RoundedRectangle(cornerRadius: 5, style: .continuous)
                 .fill(isSelected ? Theme.textPrimary : Color.clear)
                 .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .strokeBorder(isSelected ? Theme.textPrimary : Theme.strongBorder, lineWidth: 1.5))
+                    .strokeBorder(isSelected ? Theme.textPrimary : Theme.edge, lineWidth: 1.5))
                 .overlay {
                     if isSelected {
                         Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.backdrop)
@@ -1823,7 +1847,7 @@ private struct ProfileRow: View {
             ProfileAvatar(name: row.name, id: row.id, size: 30, style: row.avatar, running: row.isRunning)
             HStack(spacing: 8) {
                 Text(row.name)
-                    .font(.lumenLabel)
+                    .font(.lumenRowTitle)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -1957,9 +1981,10 @@ private struct ProfileRow: View {
         Text(text).font(.lumenBody).foregroundStyle(Theme.textSecondary).lineLimit(1)
     }
 
+    /// Launching or encrypting: the words, with a dot that breathes beside them.
     private func busyLine(_ text: String) -> some View {
         HStack(spacing: 7) {
-            ProgressView().controlSize(.mini)
+            LiveDot()
             secondaryLine(text)
         }
     }
@@ -2144,20 +2169,24 @@ struct ExitLabel: View {
     }
 }
 
-/// A warm-up's progress in the profile's row: which page of how many, a bar, and how many cookies
-/// the run has collected so far — the number the whole thing is for.
+/// A warm-up's progress in the profile's row: a dot that breathes while it runs, which page of how
+/// many, a bar, and how many cookies the run has collected so far — the number the whole thing is for.
 private struct WarmUpLine: View {
     let status: WarmUpStatus
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        // As much as the name column has room for, never more: a line wider than the column
-        // pushed the row's other columns out of line and its buttons past the window's edge. The
-        // bar goes first, then the cookie count.
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) { pages; bar; cookies }
-            HStack(spacing: 8) { pages; cookies }
-            HStack(spacing: 8) { pages; bar }
-            pages
+        HStack(spacing: 7) {
+            LiveDot()
+            // As much as the name column has room for, never more: a line wider than the column
+            // pushed the row's other columns out of line and its buttons past the window's edge. The
+            // bar goes first, then the cookie count.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { pages; bar; cookies }
+                HStack(spacing: 8) { pages; cookies }
+                HStack(spacing: 8) { pages; bar }
+                pages
+            }
         }
         .help(String(format: L("profiles.row.warmingUp"), status.currentPage, status.total))
     }
@@ -2169,6 +2198,8 @@ private struct WarmUpLine: View {
             .lineLimit(1)
             .monospacedDigit()
             .fixedSize()
+            .contentTransition(Motion.isReduced(reduceMotion) ? .identity : .numericText())
+            .animation(Motion.isReduced(reduceMotion) ? nil : .easeOut(duration: 0.25), value: status.currentPage)
     }
 
     private var bar: some View {
@@ -2184,6 +2215,8 @@ private struct WarmUpLine: View {
                 .lineLimit(1)
                 .monospacedDigit()
                 .fixedSize()
+                .contentTransition(Motion.isReduced(reduceMotion) ? .identity : .numericText())
+                .animation(Motion.isReduced(reduceMotion) ? nil : .easeOut(duration: 0.25), value: status.cookies)
         }
     }
 }
@@ -2351,7 +2384,9 @@ struct LumenBanner<Content: View>: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
+            // Inherited by every Text of the banner: a body of two lines or more is not a slab.
             content()
+                .lineSpacing(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if let more {
                 Button(action: more.toggle) {
@@ -2667,12 +2702,13 @@ struct GuardNoticeBar: View {
     }
 }
 
+/// No profiles yet: Lumen's glyph in the eclipse's miniature, what a profile is, and New profile.
 private struct EmptyProfilesView: View {
     let onNew: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
-            LumenGlyph(size: 44, color: Theme.textTertiary.opacity(0.55))
+            EclipseRing(size: 72) { LumenGlyph(size: 28, color: Theme.textSecondary) }
                 .padding(.bottom, 20)
             Text(L("profiles.empty.title"))
                 .font(.lumenSheetTitle)
@@ -2707,14 +2743,16 @@ private struct NoMatchesView: View {
     }
 }
 
-/// A search field (the design's `search`): 32 pt, radius 10, 3.5 % white with a 6 % edge; focused,
-/// a little lighter with a 16 % edge. Its magnifier, a clear button, and the shortcut that opens
-/// the command palette (`shortcut`), when given.
+/// A search field (the design's `search`): 32 pt, radius 10, the fields' `field` black with a
+/// hairline edge (`strongBorder` with Increase Contrast); focused, a 50 % edge and the fields' faint
+/// ring around it. Its magnifier, a clear button, and the shortcut that opens the command palette
+/// (`shortcut`), when given.
 struct LumenSearchField: View {
     @Binding var text: String
     let prompt: String
     var shortcut: String?
     @FocusState private var focused: Bool
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         HStack(spacing: 8) {
@@ -2757,10 +2795,13 @@ struct LumenSearchField: View {
         .padding(.leading, 11)
         .padding(.trailing, 8)
         .frame(height: 32)
-        .background(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
-            .fill(Color.white.opacity(focused ? 0.05 : 0.035)))
+        .background(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous).fill(Theme.field))
         .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
-            .strokeBorder(focused ? Theme.strongBorder : Theme.divider, lineWidth: 1))
+            .strokeBorder(focused ? Theme.edgeStrong : (contrast == .increased ? Theme.strongBorder : Theme.hairline), lineWidth: 1))
+        // The focus ring `lumenField` draws, just outside the edge.
+        .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius + 3, style: .continuous)
+            .stroke(focused ? Color.white.opacity(0.06) : Color.clear, lineWidth: 3)
+            .padding(-3))
         .animation(Theme.hoverAnimation, value: focused)
     }
 }

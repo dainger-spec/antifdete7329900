@@ -46,6 +46,35 @@ enum Theme {
     /// `edge2` — the contour under the pointer, and of a focused field.
     static let edgeStrong = Color.white.opacity(0.50)
 
+    // MARK: Light on raised things — computed: a stored gradient may not be Sendable under Swift 6
+
+    /// A contour lit from above, like the eclipse's rim: brighter at its top edge, never under `edge`
+    /// at its foot (3 : 1 kept). Under the pointer: `edgeLitStrong`.
+    static var edgeLit: LinearGradient {
+        LinearGradient(colors: [Color.white.opacity(0.46), Color.white.opacity(0.32)], startPoint: .top, endPoint: .bottom)
+    }
+    static var edgeLitStrong: LinearGradient {
+        LinearGradient(colors: [Color.white.opacity(0.64), Color.white.opacity(0.50)], startPoint: .top, endPoint: .bottom)
+    }
+    /// A raised control's face (a contour button, the chosen segment, a key cap): a shade lighter at the top.
+    static var faceLit: LinearGradient {
+        LinearGradient(colors: [Color(hex: 0x16171C), Color(hex: 0x101115)], startPoint: .top, endPoint: .bottom)
+    }
+    static var faceLitHover: LinearGradient {
+        LinearGradient(colors: [Color(hex: 0x1C1D23), Color(hex: 0x15161B)], startPoint: .top, endPoint: .bottom)
+    }
+    /// The chosen segment's or a key cap's quieter edge.
+    static var pillEdge: LinearGradient {
+        LinearGradient(colors: [Color.white.opacity(0.16), Color.white.opacity(0.07)], startPoint: .top, endPoint: .bottom)
+    }
+    /// The lit top edge of anything raised (a contour button, a sheet, a floating bar): 1 pt, white
+    /// 9 % at the top, clear by the middle.
+    static var lipLight: LinearGradient {
+        LinearGradient(colors: [Color.white.opacity(0.09), Color.white.opacity(0)], startPoint: .top, endPoint: .center)
+    }
+    /// A sheet's footer band: a shade under `raised` (#0E0F12 over it), so the footer reads recessed.
+    static let sheetFooterBand = Color.black.opacity(0.22)
+
     // MARK: Text (contrast against `backdrop`)
 
     /// `t1` — 18.1 : 1
@@ -170,17 +199,24 @@ enum Theme {
 
 // MARK: - Typography
 
-/// The system's SF Pro: large titles dense, with negative tracking (`lumenPageTitle()` and its
-/// siblings set it); section captions small capitals with wide tracking (`lumenCaps()`).
+/// The system's SF Pro: large titles semibold and dense, with negative tracking (`lumenPageTitle()`
+/// and its siblings set it); section captions small capitals with wide tracking (`lumenCaps()`);
+/// paragraphs with room between their lines (`lumenProse()`).
 extension Font {
-    /// The lock screen's title: 32 / bold (tracking −2.5 %: `lumenDisplayTitle()`).
-    static let lumenDisplay = Font.system(size: 32, weight: .bold)
-    /// Window and page titles: 30 / bold (tracking −2.5 %: `lumenPageTitle()`).
-    static let lumenTitle = Font.system(size: 30, weight: .bold)
-    /// A profile's name in its inspector and editor: 22 / bold (−2 %: `lumenHeadingTitle()`).
-    static let lumenHeading = Font.system(size: 22, weight: .bold)
-    /// Sheet titles: 15 / semibold.
-    static let lumenSheetTitle = Font.system(size: 15, weight: .semibold)
+    /// The lock screen's title: 32 / semibold (tracking −3 %: `lumenDisplayTitle()`).
+    static let lumenDisplay = Font.system(size: 32, weight: .semibold)
+    /// Window and page titles: 30 / semibold (tracking −3 %: `lumenPageTitle()`).
+    static let lumenTitle = Font.system(size: 30, weight: .semibold)
+    /// A profile's name in its inspector and editor: 22 / semibold (−2.3 %: `lumenHeadingTitle()`).
+    static let lumenHeading = Font.system(size: 22, weight: .semibold)
+    /// Sheet titles: 17 / semibold (`SheetHeader` tightens it by 0.2).
+    static let lumenSheetTitle = Font.system(size: 17, weight: .semibold)
+    /// A page's sentence under its title (Settings): 14.
+    static let lumenLead = Font.system(size: 14)
+    /// A 28 pt button's or a segment's words: 12.5 / medium.
+    static let lumenControl = Font.system(size: 12.5, weight: .medium)
+    /// Chips, "+N", badges: 10.5 / medium.
+    static let lumenMicro = Font.system(size: 10.5, weight: .medium)
     /// Section titles and group headers: 13 / semibold.
     static let lumenSection = Font.system(size: 13, weight: .semibold)
     /// A setting's title: 14 / medium.
@@ -196,15 +232,23 @@ extension Font {
 }
 
 extension View {
-    /// 32 / bold, tracking −2.5 %.
-    func lumenDisplayTitle() -> some View { font(.lumenDisplay).tracking(-0.8) }
-    /// 30 / bold, tracking −2.5 %.
-    func lumenPageTitle() -> some View { font(.lumenTitle).tracking(-0.75) }
-    /// 22 / bold, tracking −2 %.
-    func lumenHeadingTitle() -> some View { font(.lumenHeading).tracking(-0.44) }
-    /// A section caption: 11 / semibold, capitals, tracking +8 %, `t3` (`red` for attention).
+    /// 32 / semibold, tracking −3 %.
+    func lumenDisplayTitle() -> some View { font(.lumenDisplay).tracking(-1.0) }
+    /// 30 / semibold, tracking −3 %.
+    func lumenPageTitle() -> some View { font(.lumenTitle).tracking(-0.9) }
+    /// 22 / semibold, tracking −2.3 %.
+    func lumenHeadingTitle() -> some View { font(.lumenHeading).tracking(-0.5) }
+    /// A section caption: 11 / semibold, capitals, tracking +8 %, `t3` (`red` for attention); its
+    /// figures of one width, so that counts in captions line up.
     func lumenCaps(_ color: Color = Theme.textTertiary) -> some View {
-        font(.lumenColumn).tracking(0.88).textCase(.uppercase).foregroundStyle(color)
+        font(.lumenColumn).monospacedDigit().tracking(0.88).textCase(.uppercase).foregroundStyle(color)
+    }
+
+    /// A paragraph (an explanation, a page's or a sheet's sentence): `t2` by default, its lines
+    /// `spacing` apart, wrapped rather than cut — a block of grey with no room between its lines
+    /// read as one slab.
+    func lumenProse(_ color: Color = Theme.textSecondary, font: Font = .lumenBody, spacing: CGFloat = 2.5) -> some View {
+        self.font(font).foregroundStyle(color).lineSpacing(spacing).fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -232,8 +276,11 @@ extension NSColor {
 // MARK: - Buttons
 
 /// Lumen's buttons (the design's `btn`): a contour, not a fill. `primary` — the main button: 32 pt,
-/// radius 10, a 1 pt edge of 32 % white on `bg3`; under the pointer the edge goes to 50 %, the fill
-/// a shade lighter, and a faint light gathers under it. `secondary` — the same, 28 pt (radius 9).
+/// radius 10, a 1 pt edge lit from above (`edgeLit`, 46 → 32 % white) on a face lit the same way
+/// (`faceLit`), with a lip of light along its top (`lipLight`) and a faint light resting under it;
+/// under the pointer the edge goes to 64 → 50 %, the face a shade lighter, and the light under it
+/// gathers. `secondary` — the same, 28 pt (radius 9), with light under it only under the pointer.
+/// With Increase Contrast both are flat: the 50 % edge, a flat fill, no lip and no light.
 /// `ghost` — quiet: text only until the pointer is over it. `destructive` — red: quiet at 28 pt
 /// (rows, the selection bar); at 32 pt (a sheet's main action) a red contour, `dangerLine`,
 /// `danger` under the pointer or with Increase Contrast. A press sinks to 98 % for 80 ms (not
@@ -265,7 +312,7 @@ struct LumenButtonStyle: ButtonStyle {
         var body: some View {
             let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
             configuration.label
-                .font(height >= Theme.buttonHeight ? Font.lumenLabel : Font.system(size: 12.5, weight: .medium))
+                .font(height >= Theme.buttonHeight ? Font.lumenLabel : Font.lumenControl)
                 .lineLimit(1)
                 .fixedSize(horizontal: !fullWidth, vertical: false)
                 .padding(.horizontal, height >= Theme.buttonHeight ? 14 : 11)
@@ -274,7 +321,12 @@ struct LumenButtonStyle: ButtonStyle {
                 .foregroundStyle(foreground)
                 .background(shape.fill(fill))
                 .overlay(shape.strokeBorder(border, lineWidth: 1))
-                .shadow(color: Theme.rim.opacity(isContour && hovered ? 0.16 : 0), radius: 15, y: 8)
+                // The lip over the contour: the top edge reads brighter than the sides, while the
+                // contour itself keeps its 3 : 1.
+                .overlay {
+                    if isLit { shape.strokeBorder(Theme.lipLight, lineWidth: 1) }
+                }
+                .shadow(color: Theme.rim.opacity(glow), radius: 15, y: 8)
                 .contentShape(shape)
                 .scaleEffect(configuration.isPressed && !Motion.isReduced(reduceMotion) ? 0.98 : 1)
                 .opacity(isEnabled ? 1 : 0.4)
@@ -285,6 +337,16 @@ struct LumenButtonStyle: ButtonStyle {
 
         private var radius: CGFloat { height >= Theme.buttonHeight ? Theme.cornerRadius : Theme.controlRadius }
         private var isContour: Bool { kind == .primary || kind == .secondary }
+        /// A contour drawn lit from above; Increase Contrast keeps it flat.
+        private var isLit: Bool { isContour && contrast != .increased }
+
+        /// The light under a contour: under the main button always (6 %, 18 % under the pointer),
+        /// under a secondary one only under the pointer; none when disabled or with Increase Contrast.
+        private var glow: Double {
+            guard isEnabled, isLit else { return 0 }
+            if kind == .primary { return hovered ? 0.18 : 0.06 }
+            return hovered ? 0.16 : 0
+        }
 
         private var foreground: Color {
             switch kind {
@@ -294,23 +356,26 @@ struct LumenButtonStyle: ButtonStyle {
             }
         }
 
-        private var fill: Color {
+        private var fill: AnyShapeStyle {
             switch kind {
-            case .primary, .secondary: return hovered ? Theme.raisedInset : Theme.card
-            case .ghost: return hovered ? Theme.rowHover : .clear
-            case .destructive: return hovered ? Theme.dangerTint : .clear
+            case .primary, .secondary:
+                if !isLit { return AnyShapeStyle(hovered ? Theme.raisedInset : Theme.card) }
+                return AnyShapeStyle(hovered ? Theme.faceLitHover : Theme.faceLit)
+            case .ghost: return AnyShapeStyle(hovered ? Theme.rowHover : Color.clear)
+            case .destructive: return AnyShapeStyle(hovered ? Theme.dangerTint : Color.clear)
             }
         }
 
-        private var border: Color {
+        private var border: AnyShapeStyle {
             if kind == .destructive {
                 // A destructive main action (32 pt, a sheet's footer): a red contour; the quiet one in rows has none.
-                guard height >= Theme.buttonHeight else { return .clear }
-                return hovered || contrast == .increased ? Theme.danger : Theme.dangerLine
+                guard height >= Theme.buttonHeight else { return AnyShapeStyle(Color.clear) }
+                return AnyShapeStyle(hovered || contrast == .increased ? Theme.danger : Theme.dangerLine)
             }
-            guard isContour else { return .clear }
-            // Increase Contrast: the contour at the strength it has under the pointer.
-            return hovered || contrast == .increased ? Theme.edgeStrong : Theme.edge
+            guard isContour else { return AnyShapeStyle(Color.clear) }
+            // Increase Contrast: the flat contour at the strength it has under the pointer.
+            if !isLit { return AnyShapeStyle(Theme.edgeStrong) }
+            return AnyShapeStyle(hovered ? Theme.edgeLitStrong : Theme.edgeLit)
         }
     }
 }
@@ -325,7 +390,8 @@ extension ButtonStyle where Self == LumenButtonStyle {
 }
 
 /// An icon-only button (the design's `ib`: ⋯, close, the inspector's toggle): `t2`, a tone of white
-/// under the pointer; `isOn` keeps the selected tone. A press sinks to 94 %.
+/// under the pointer; `isOn` stands raised — a lit face (`faceLit`) with a hairline (`strongBorder`
+/// with Increase Contrast). A press sinks to 94 %.
 struct LumenIconButtonStyle: ButtonStyle {
     var size: CGFloat = 28
     var isOn = false
@@ -340,15 +406,19 @@ struct LumenIconButtonStyle: ButtonStyle {
         let isOn: Bool
         @Environment(\.isEnabled) private var isEnabled
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        @Environment(\.colorSchemeContrast) private var contrast
         @State private var hovered = false
 
         var body: some View {
+            let shape = RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
             configuration.label
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(hovered || isOn ? Theme.textPrimary : Theme.textSecondary)
                 .frame(width: size, height: size)
-                .background(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
-                    .fill(isOn ? Theme.rowSelected : (hovered ? Theme.rowHover : .clear)))
+                .background(shape.fill(isOn ? AnyShapeStyle(Theme.faceLit)
+                                            : AnyShapeStyle(hovered ? Theme.rowHover : Color.clear)))
+                .overlay(shape.strokeBorder(isOn ? (contrast == .increased ? Theme.strongBorder : Theme.hairline) : Color.clear,
+                                            lineWidth: 1))
                 .contentShape(Rectangle())
                 .scaleEffect(configuration.isPressed && !Motion.isReduced(reduceMotion) ? 0.94 : 1)
                 .opacity(isEnabled ? 1 : 0.4)
@@ -362,10 +432,10 @@ struct LumenIconButtonStyle: ButtonStyle {
 // MARK: - Fields
 
 extension View {
-    /// Lumen's text field look for a `TextField` or `SecureField`: `field` black, a 10 % edge,
-    /// radius 9; focused — the edge at 50 % and a 3 pt ring of 6 % white; `error` — a red edge and
-    /// ring. `height` nil: as tall as its lines (a multi-line field). `takesFocus`: the cursor starts
-    /// in it — one field per screen.
+    /// Lumen's text field look for a `TextField` or `SecureField`: `field` black, a 10 % edge, a faint
+    /// shadow inside its top edge (recessed), radius 9; focused — the edge at 50 % and a 3 pt ring of
+    /// 6 % white; `error` — a red edge and ring. `height` nil: as tall as its lines (a multi-line
+    /// field). `takesFocus`: the cursor starts in it — one field per screen.
     func lumenField(height: CGFloat? = 32, error: Bool = false, takesFocus: Bool = false) -> some View {
         modifier(LumenField(height: height, placeholder: nil, error: error, takesFocus: takesFocus))
     }
@@ -438,6 +508,16 @@ private struct LumenField: ViewModifier {
             .frame(minHeight: height == nil ? 32 : nil)
             .background(shape.fill(Theme.field))
             .overlay(shape.strokeBorder(edge, lineWidth: 1))
+            // Recessed: a faint shadow just inside the top edge. Not with Increase Contrast, where
+            // the edge alone draws the field.
+            .overlay {
+                if contrast != .increased {
+                    shape.inset(by: 1)
+                        .stroke(LinearGradient(colors: [Color.black.opacity(0.45), .clear], startPoint: .top, endPoint: .center),
+                                lineWidth: 1)
+                        .allowsHitTesting(false)
+                }
+            }
             .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius + 3, style: .continuous)
                 .stroke(ring, lineWidth: 3)
                 .padding(-3))
@@ -529,10 +609,10 @@ struct LumenEmptyHint: View {
     }
 }
 
-/// A pane's empty, blocked or failed state: a light symbol, a title, a sentence, an optional quiet
-/// note and the action that leads on, centred in the room it is given — one recipe, so that
-/// "nothing yet", "nothing found" and "could not" read alike. `LumenEmptyHint` stays for an
-/// inspector's placeholder.
+/// A pane's empty, blocked or failed state: a light symbol in a small eclipse (`EclipseRing`), a
+/// title, a sentence, an optional quiet note and the action that leads on, centred in the room it
+/// is given — one recipe, so that "nothing yet", "nothing found" and "could not" read alike.
+/// `LumenEmptyHint` stays for an inspector's placeholder.
 struct LumenEmptyState<Actions: View>: View {
     let symbol: String
     var tint: Color
@@ -553,11 +633,13 @@ struct LumenEmptyState<Actions: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Image(systemName: symbol)
-                .font(.system(size: 28, weight: .light))
-                .foregroundStyle(tint)
-                .padding(.bottom, 14)
-                .accessibilityHidden(true)
+            EclipseRing(size: 64) {
+                Image(systemName: symbol)
+                    .font(.system(size: 24, weight: .light))
+                    .foregroundStyle(tint)
+            }
+            .padding(.bottom, 18)
+            .accessibilityHidden(true)
             Text(title)
                 .font(.lumenSheetTitle)
                 .foregroundStyle(Theme.textPrimary)
@@ -567,6 +649,7 @@ struct LumenEmptyState<Actions: View>: View {
             Text(text)
                 .font(.lumenBody)
                 .foregroundStyle(Theme.textSecondary)
+                .lineSpacing(2.5)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
@@ -576,6 +659,7 @@ struct LumenEmptyState<Actions: View>: View {
                 Text(note)
                     .font(.lumenSecondary)
                     .foregroundStyle(Theme.textTertiary)
+                    .lineSpacing(2)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: 400)
@@ -600,11 +684,12 @@ extension LumenEmptyState where Actions == EmptyView {
 }
 
 /// A profile's glyph (the design's `av`): its letters — the first of its name, or the ones the
-/// person chose — on a circle in the profile's colour, dark, with the letters in a light tone of it,
-/// and a hairline. `running`: the green dot at its corner, ringed in the window's black, with its
-/// glow. The colour is the person's choice (`ProfileConfiguration.avatar`) or, without one, one
-/// from its id: the quickest way to tell profiles apart by eye among dozens, which nothing else in
-/// the design does without reading or a click (the owner, 1 November).
+/// person chose — on a circle in the profile's colour, dark, with the letters in a light tone of it;
+/// its face lit a little from above and its rim lit from above, as the eclipse's edge is (a flat
+/// `strongBorder` with Increase Contrast). `running`: the green dot at its corner, ringed in the
+/// window's black, with its glow. The colour is the person's choice (`ProfileConfiguration.avatar`)
+/// or, without one, one from its id: the quickest way to tell profiles apart by eye among dozens,
+/// which nothing else in the design does without reading or a click (the owner, 1 November).
 struct ProfileAvatar: View {
     let name: String
     let id: UUID
@@ -612,6 +697,7 @@ struct ProfileAvatar: View {
     /// The letters the person chose (`ProfileConfiguration.avatar`); nil: the first of the name.
     var style: ProfileAvatarStyle?
     var running = false
+    @Environment(\.colorSchemeContrast) private var contrast
 
     /// The profiles' colours, `ProfileAvatarStyle.colorCount` of them: a dark fill and a light tone
     /// for the letters. The first `ProfileAvatarStyle.idColorCount` are given by an id.
@@ -646,10 +732,16 @@ struct ProfileAvatar: View {
             // An emoji fills more of the circle than a letter does: it has no colour of the
             // palette's to stand out with.
             .font(.system(size: size * (isEmoji ? 0.5 : (glyph.count > 1 ? 0.34 : 0.4)), weight: .semibold))
+            // Two letters ("NW") a little closer, so that they read as one mark.
+            .tracking(glyph.count > 1 && !isEmoji ? -0.3 : 0)
             .foregroundStyle(Color(hex: colors.text))
             .frame(width: size, height: size)
-            .background(Circle().fill(Color(hex: colors.fill)))
-            .overlay(Circle().strokeBorder(large ? Theme.strongBorder : Theme.hairline, lineWidth: 1))
+            // The face: the letters' tone at 12 % from the top to the middle (the lightest spot
+            // keeps the letters at 5.3 : 1).
+            .background(Circle().fill(Color(hex: colors.fill))
+                .overlay(Circle().fill(LinearGradient(colors: [Color(hex: colors.text).opacity(0.12), .clear],
+                                                      startPoint: .top, endPoint: .center))))
+            .overlay(Circle().strokeBorder(rim(large), lineWidth: 1))
             .overlay(alignment: .bottomTrailing) {
                 if running {
                     let dot = large ? 12.0 : max(7, size * 0.3)
@@ -661,6 +753,13 @@ struct ProfileAvatar: View {
                 }
             }
             .accessibilityHidden(true)
+    }
+
+    /// The rim, lit from above; flat `strongBorder` with Increase Contrast.
+    private func rim(_ large: Bool) -> AnyShapeStyle {
+        guard contrast != .increased else { return AnyShapeStyle(Theme.strongBorder) }
+        return AnyShapeStyle(LinearGradient(colors: [Color.white.opacity(large ? 0.24 : 0.18), Color.white.opacity(0.04)],
+                                            startPoint: .top, endPoint: .bottom))
     }
 
     /// The glyph is a picture (an emoji, a flag), not letters or a sign drawn in the text's colour.
@@ -700,7 +799,7 @@ struct TagChips: View {
             }
             if tags.count > shown {
                 Text(verbatim: "+\(tags.count - shown)")
-                    .font(.system(size: 10.5, weight: .medium))
+                    .font(.lumenMicro)
                     .foregroundStyle(Theme.textTertiary)
                     .fixedSize()
             }
@@ -803,7 +902,7 @@ struct TagChip: View {
                     .padding(.trailing, 1)
             }
             Text(text)
-                .font(.system(size: 10.5, weight: .medium))
+                .font(.lumenMicro)
                 .foregroundStyle(Theme.textSecondary)
                 .lineLimit(1)
             if let onRemove {
@@ -928,6 +1027,33 @@ struct RunningDot: View {
                 guard ignites, !lit else { return }
                 withAnimation(Motion.isReduced(reduceMotion) ? nil : Motion.ignite) { lit = true }
             }
+            .accessibilityHidden(true)
+    }
+}
+
+/// Something happening now (warming up, syncing, recording, a check): a 6 pt dot that breathes from
+/// 100 to 40 % and back every 1.6 s while `active`. Still under Reduce Motion, with the animations
+/// off in Settings → Appearance, and in the self-test's still frame. Beside words that say the
+/// state: the dot never tells it alone.
+struct LiveDot: View {
+    var tone: Color = Theme.textSecondary
+    var active = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.lumenStillFrame) private var stillFrame
+    @State private var dim = false
+
+    private var moves: Bool { active && !stillFrame && !Motion.isReduced(reduceMotion) }
+
+    var body: some View {
+        Circle().fill(tone)
+            .frame(width: 6, height: 6)
+            .opacity(moves && dim ? 0.4 : 1)
+            // The repeating animation runs only while it moves; stopping sets `dim` back under a
+            // plain one, which replaces the repeating one.
+            .animation(moves ? Animation.easeInOut(duration: 0.8).repeatForever(autoreverses: true) : Animation.default,
+                       value: dim)
+            .onAppear { dim = moves }
+            .onChange(of: moves) { _, now in dim = now }
             .accessibilityHidden(true)
     }
 }

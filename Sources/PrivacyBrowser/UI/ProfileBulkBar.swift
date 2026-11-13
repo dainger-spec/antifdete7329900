@@ -73,6 +73,7 @@ struct ProfileBulkBar: View {
     let actions: ProfileActions
     let selectAll: () -> Void
     let clear: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -80,9 +81,8 @@ struct ProfileBulkBar: View {
             bar(compact: true)
         }
         .padding(5)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.raised))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
-        .shadow(color: .black.opacity(0.55), radius: 24, y: 12)
+        // Raised over the list: its hairline, a lit top edge, a contact and a drop shadow.
+        .lumenFloatingSurface(cornerRadius: 12)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(String(format: L("profiles.bulk.selected"), rows.count)))
     }
@@ -99,6 +99,8 @@ struct ProfileBulkBar: View {
                 .foregroundStyle(Theme.textPrimary)
                 .monospacedDigit()
                 .fixedSize()
+                .contentTransition(Motion.isReduced(reduceMotion) ? .identity : .numericText())
+                .animation(Motion.isReduced(reduceMotion) ? nil : .easeOut(duration: 0.25), value: rows.count)
                 .padding(.horizontal, 10)
             separator
             Button { actions.launchSeveral(stopped) } label: {

@@ -69,7 +69,7 @@ struct WhatSitesSeeView: View {
             }
         }
         .sheetFrame(width: Self.size.width, height: Self.size.height)
-        .background(Theme.raised)
+        .lumenSheetSurface()
     }
 
     /// The signals one by one: the snapshot's controls, then the list. Under a header that

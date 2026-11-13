@@ -87,6 +87,8 @@ struct ProfileEditorForm: View {
     var onChooseCameraVideo: () -> Void = {}
     /// The system virtual camera's install state, for the delivery choice (`SystemCamera`).
     @ObservedObject private var systemCamera = SystemCamera.shared
+    /// Lumen's light at entry (Settings → Appearance): the still eclipse behind the editor.
+    @ObservedObject private var appearance = AppearancePreferences.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Opens the separate camera preview window (`CameraPreviewWindowController`).
     var onOpenCameraPreview: () -> Void = {}
@@ -155,7 +157,15 @@ struct ProfileEditorForm: View {
             footer
         }
         .sheetFrame(width: Self.size.width, height: Self.size.height)
-        .background(Theme.raised)
+        // The design's eclipse rests behind the editor, still, at 45 % (the profiles window's is
+        // 55 %): between the sheet's surface and the form, whose index has no fill to hide it.
+        .background {
+            if appearance.entryLight {
+                EclipseLight(place: .editor, brightness: 0.45)
+                    .ignoresSafeArea()
+            }
+        }
+        .lumenSheetSurface()
         .tint(Theme.accentFill)
     }
 
@@ -1682,6 +1692,7 @@ private struct EditorToggle: View {
                     Text(detail)
                         .font(.lumenSecondary)
                         .foregroundStyle(Theme.textSecondary)
+                        .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -1726,7 +1737,8 @@ private struct EditorRow<Control: View>: View {
     }
 }
 
-/// A sentence of explanation under a setting.
+/// A sentence of explanation under a setting, its lines 2.5 pt apart (a grey paragraph with none
+/// read as one block).
 private struct EditorNote: View {
     enum Tone { case plain, warning }
     let text: String
@@ -1746,6 +1758,7 @@ private struct EditorNote: View {
             }
         }
         .font(.lumenSecondary)
+        .lineSpacing(2.5)
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
     }

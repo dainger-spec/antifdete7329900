@@ -120,7 +120,11 @@ struct CommandPaletteView: View {
             .accessibilityLabel(L("palette.hint"))
         }
         .sheetFrame(width: Self.size.width, height: Self.size.height)
-        .background(Theme.raised)
+        // Floating, as the selection bar: a hairline and a lit top edge. Square: the sheet's window
+        // rounds its corners itself, and the presentation is pinned to the same tone so that no
+        // system material shows there.
+        .lumenFloatingSurface(cornerRadius: 0)
+        .presentationBackground(Theme.raised)
         .onChange(of: query) { _, _ in selected = 0 }
         .onAppear { searching = true }
         .onExitCommand(perform: onClose)

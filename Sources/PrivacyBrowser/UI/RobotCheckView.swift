@@ -45,7 +45,7 @@ struct RobotCheckSheet: View {
         }
         .padding(28)
         .frame(width: 460)
-        .background(Theme.raised)
+        .lumenSheetSurface()
         .environment(\.colorScheme, .dark)
     }
 }

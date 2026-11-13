@@ -60,6 +60,8 @@ struct ProxyListPanel: View {
     @State private var editing: ProxyListEntry?
     @State private var confirmingDelete = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.lumenStillFrame) private var stillFrame
 
     var body: some View {
         GeometryReader { geometry in
@@ -72,10 +74,10 @@ struct ProxyListPanel: View {
                 main(inspectorOver: inspectorShown && !inspectorFits, compact: mainWidth < 920)
                 if inspectorShown && inspectorFits {
                     inspector(top: ProfilesScreen.inspectorTop, over: false)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                        .transition(.lumenSlide(Motion.isReduced(reduceMotion)))
                 }
             }
-            .animation(Motion.isReduced(reduceMotion) ? nil : Theme.appearAnimation, value: inspectorShown)
+            .animation(Motion.isReduced(reduceMotion) ? nil : Motion.panelIn, value: inspectorShown)
         }
         .onAppear(perform: selectFirstIfNone)
         .onChange(of: proxies.entries.map(\.id)) { _, _ in selectFirstIfNone() }
@@ -125,7 +127,7 @@ struct ProxyListPanel: View {
                     if inspectorOver {
                         inspector(top: 8, over: true)
                             .shadow(color: .black.opacity(0.55), radius: 30, x: -6)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                            .transition(.lumenSlide(Motion.isReduced(reduceMotion)))
                     }
                 }
         }
@@ -191,6 +193,9 @@ struct ProxyListPanel: View {
                     .font(.lumenBody)
                     .foregroundStyle(Theme.textSecondary)
                     .monospacedDigit()
+                    // "Checked 3 of 9" rolls as the check goes rather than jumping.
+                    .contentTransition(Motion.isReduced(reduceMotion) ? .identity : .numericText())
+                    .animation(Motion.isReduced(reduceMotion) ? nil : .easeOut(duration: 0.25), value: compact ? shortSummary : summary)
             }
             .lineLimit(1)
             .fixedSize()
@@ -344,14 +349,17 @@ struct ProxyListPanel: View {
                             .selectionDisabled()
                             .accessibilityAddTraits(.isHeader)
                         ForEach(visible) { entry in
+                            let chosen = selection.contains(entry.id)
                             ProxyRow(entry: entry, checking: proxies.checking.contains(entry.id), profiles: profileCount(entry),
                                      columns: columns)
                                 .tag(entry.id)
                                 .id(entry.id)
                                 .listRowSeparatorTint(Theme.divider)
-                                // The design's selected row, as the profiles' (the system's grey off).
-                                .listRowBackground(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(selection.contains(entry.id) ? Theme.rowSelected : Color.clear))
+                                // Not under the selected row, as the profiles': the line cut through its rounded fill.
+                                .listRowSeparator(chosen ? .hidden : .automatic, edges: .bottom)
+                                // The design's selected row, as the profiles' (the system's grey off): its
+                                // fill and faint edge (stronger with Increase Contrast) fade in.
+                                .listRowBackground(rowBackground(chosen))
                                 .background(SystemListHighlightOff().accessibilityHidden(true))
                         }
                     }
@@ -380,6 +388,14 @@ struct ProxyListPanel: View {
                 }
             }
         }
+    }
+
+    private func rowBackground(_ chosen: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(chosen ? Theme.rowSelected : Color.clear)
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(chosen ? Color.white.opacity(contrast == .increased ? 0.16 : 0.06) : Color.clear, lineWidth: 1))
+            .animation(Motion.isReduced(reduceMotion) || stillFrame ? nil : .easeOut(duration: 0.12), value: chosen)
     }
 
     @ViewBuilder
@@ -579,7 +595,7 @@ private struct ProxyRow: View {
             }
             HStack(spacing: 7) {
                 if checking {
-                    ProgressView().controlSize(.mini)
+                    LiveDot()
                 } else {
                     Circle().fill(state == .unchecked ? Color.clear : state.color).frame(width: 6, height: 6)
                 }
@@ -624,6 +640,7 @@ private struct ProxyRow: View {
 /// the milliseconds, amber when slower than a page should wait; "—" without a measure.
 struct ProxyLatency: View {
     let check: ProxyCheckResult?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         if let check, check.isAlive, let latency = check.latencyMilliseconds {
@@ -643,6 +660,8 @@ struct ProxyLatency: View {
                     .monospacedDigit()
                     .lineLimit(1)
                     .fixedSize()
+                    .contentTransition(Motion.isReduced(reduceMotion) ? .identity : .numericText())
+                    .animation(Motion.isReduced(reduceMotion) ? nil : .easeOut(duration: 0.25), value: latency)
             }
         } else {
             Text(verbatim: "—")
@@ -849,7 +868,7 @@ struct ProxyEditView: View {
             }
         }
         .sheetFrame(width: 560)
-        .background(Theme.raised)
+        .lumenSheetSurface()
     }
 
     /// The line is not one proxy: the field already says why, and there is nothing to save.
@@ -990,7 +1009,7 @@ struct ProxyExportView: View {
             }
         }
         .sheetFrame(width: 500)
-        .background(Theme.raised)
+        .lumenSheetSurface()
     }
 
     private func export() {

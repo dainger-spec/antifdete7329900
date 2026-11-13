@@ -1762,7 +1762,7 @@
 "settings.appearance.subtitle" = "Dark monochrome, the light at entry and the list's density — for the app's own windows. Pages follow macOS, as in Safari.";
 "settings.appearance.entry" = "Entry screen";
 "settings.appearance.light" = "Lumen's light at entry";
-"settings.appearance.light.detail" = "Two eclipses in the corners of the entry screen and the profiles window. They come in once, as the app opens, and stay as a dimmed background.";
+"settings.appearance.light.detail" = "Two eclipses in the corners of the entry screen and the profiles window. They come in once, as the app opens, and stay as a dimmed background. Behind the profile editor and Scenarios they rest still, dimmer.";
 "settings.appearance.listAndMotion" = "List and motion";
 "settings.appearance.density" = "Profile list density";
 "settings.appearance.density.detail" = "Compact: lower rows, more profiles on the screen.";

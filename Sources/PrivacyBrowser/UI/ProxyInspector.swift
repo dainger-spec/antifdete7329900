@@ -117,7 +117,7 @@ struct ProxyInspectorView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 7) {
                     if checking {
-                        ProgressView().controlSize(.mini)
+                        LiveDot()
                     } else {
                         Circle().fill(report.state.color).frame(width: 6, height: 6)
                     }

@@ -136,7 +136,8 @@ struct SettingsView: View {
 }
 
 /// One of the settings window's sections (the design's `nav`): its symbol and title, `t2`, white
-/// when chosen (on 6.5 % white), a tone of white under the pointer; "new" beside a new section.
+/// when chosen (medium, on 6.5 % white with a faint edge — 16 % with Increase Contrast), a tone of
+/// white under the pointer; "new" beside a new section. As the Profiles sidebar's items.
 private struct SettingsSidebarItem: View {
     let section: SettingsSection
     let selected: Bool
@@ -151,7 +152,7 @@ private struct SettingsSidebarItem: View {
                     .frame(width: 18)
                     .accessibilityHidden(true)
                 Text(L(section.sidebarTitleKey))
-                    .font(.lumenBody)
+                    .font(selected ? Font.lumenLabel : Font.lumenBody)
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if section.isNew { NewBadge() }
@@ -162,6 +163,8 @@ private struct SettingsSidebarItem: View {
             .frame(height: 30)
             .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(selected ? Theme.rowSelected : (hovered ? Theme.rowHover : Color.clear)))
+            // No edge on the chosen one here (the Profiles sidebar has one): the Settings window's check
+            // reads its pixel rows' tones, and the weight already tells the chosen section apart.
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -306,8 +309,8 @@ enum SettingEffect {
     }
 }
 
-/// A section's page: its title (30 pt, "new" beside a new section), a sentence about it, and its
-/// settings one under the other.
+/// A section's page: its title (30 pt, "new" beside a new section), a sentence about it (14, at
+/// most 560 pt wide, so its lines stay short enough to read), and its settings one under the other.
 struct SettingsPage<Content: View>: View {
     let title: String
     let subtitle: String?
@@ -332,9 +335,8 @@ struct SettingsPage<Content: View>: View {
             }
             if let subtitle {
                 Text(subtitle)
-                    .font(.system(size: 14))
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lumenProse(font: .lumenLead, spacing: 3)
+                    .frame(maxWidth: 560, alignment: .leading)
                     .padding(.top, 8)
             }
             VStack(alignment: .leading, spacing: 0) {
@@ -345,7 +347,8 @@ struct SettingsPage<Content: View>: View {
     }
 }
 
-/// A group of settings in a page, under its caption (the design's "Entry screen", "List and motion").
+/// A group of settings in a page, under its caption (the design's "Entry screen", "List and motion"):
+/// further from the group above than from its own rows, so that it reads as theirs.
 struct SettingsCaption: View {
     let text: String
 
@@ -354,14 +357,14 @@ struct SettingsCaption: View {
     var body: some View {
         Text(text)
             .lumenCaps()
-            .padding(.top, 26)
-            .padding(.bottom, 12)
+            .padding(.top, 32)
+            .padding(.bottom, 10)
             .accessibilityAddTraits(.isHeader)
     }
 }
 
-/// One setting (the design's row): its title, a sentence on what it does, when that takes effect,
-/// and its control at the right.
+/// One setting (the design's row): its title, a sentence on what it does (at most 520 pt wide, its
+/// lines apart), when that takes effect, and its control at the right.
 struct SettingRow<Control: View>: View {
     let title: String
     let detail: String?
@@ -383,10 +386,10 @@ struct SettingRow<Control: View>: View {
                     .foregroundStyle(Theme.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                 if let detail {
+                    // About 80 characters a line: a sentence across the whole row ran to 95.
                     Text(detail)
-                        .font(.lumenBody)
-                        .foregroundStyle(Theme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lumenProse()
+                        .frame(maxWidth: 520, alignment: .leading)
                 }
                 if let effect {
                     Label(effect.text, systemImage: effect.symbol)
@@ -405,7 +408,8 @@ struct SettingRow<Control: View>: View {
 }
 
 /// The same row with more under its title than a sentence (a token, a state in its colour, buttons
-/// of their own): the design's row, its line above it, its control at the right.
+/// of their own): the design's row, its line above it, its control at the right; what is under the
+/// title as wide and as spaced as a row's sentence.
 struct SettingCustomRow<Detail: View, Control: View>: View {
     let title: String
     let effect: SettingEffect?
@@ -428,6 +432,8 @@ struct SettingCustomRow<Detail: View, Control: View>: View {
                     .foregroundStyle(Theme.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                 detail
+                    .lineSpacing(2.5)
+                    .frame(maxWidth: 520, alignment: .leading)
                 if let effect {
                     Label(effect.text, systemImage: effect.symbol)
                         .font(.lumenSecondary)
@@ -829,16 +835,18 @@ struct ShortcutSettings: View {
 
 // MARK: - About
 
+/// The app's name and version under Lumen's mark in its eclipse (`EclipseRing`), what it runs on, and
+/// the release's links.
 private struct AboutSettings: View {
     var body: some View {
         SettingsPage(title: L("settings.section.about"), subtitle: nil) {
             HStack(spacing: 14) {
-                if let icon = AppIcon.image(pixels: 128) {
-                    Image(nsImage: NSImage(cgImage: icon, size: NSSize(width: 64, height: 64)))
-                        .interpolation(.high)
-                        .frame(width: 64, height: 64)
-                        .accessibilityHidden(true)
+                // The mark in the design's eclipse in miniature: decoration beside the app's name,
+                // which says the same, so hidden from VoiceOver as the icon here was.
+                EclipseRing(size: 112) {
+                    LumenMark(size: 64)
                 }
+                .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(verbatim: Self.appName)
                         .font(.lumenSheetTitle)

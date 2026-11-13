@@ -206,8 +206,11 @@ private final class CapsLockState: ObservableObject {
     }
 }
 
-/// The lock screen's action (the design's `cta`): 50 pt, radius 14, a contour on near-black, 15 /
-/// medium; light gathers under it on hover. `working`: a spinner and its label, not pressable.
+/// The lock screen's action (the design's `cta`): 50 pt, radius 14, 15 / medium, made as the main
+/// button is — a contour lit from above (`edgeLit`) on a face lit the same way (`faceLit`), with a
+/// lip of light along its top (`lipLight`); light gathers under it on hover. Disabled, it dims and
+/// keeps its lip, a control waiting to be enabled. With Increase Contrast: flat — the 50 % contour,
+/// a flat fill, no lip and no light. `working`: a spinner and its label, not pressable.
 struct LockActionButton: View {
     let title: String
     var working = false
@@ -216,6 +219,7 @@ struct LockActionButton: View {
     let action: () -> Void
     @State private var hovered = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         Button(action: action) {
@@ -229,11 +233,12 @@ struct LockActionButton: View {
             .foregroundStyle(Theme.textPrimary)
             .frame(maxWidth: .infinity)
             .frame(height: 50)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(hovered ? Color(hex: 0x15161A) : Color(hex: 0x0F1013)))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(hovered ? Theme.edgeStrong : Theme.edge, lineWidth: 1))
-            .shadow(color: Theme.rim.opacity(hovered ? 0.18 : 0), radius: 20, y: 10)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(fill))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(border, lineWidth: 1))
+            .overlay {
+                if lit { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.lipLight, lineWidth: 1) }
+            }
+            .shadow(color: Theme.rim.opacity(lit && hovered ? 0.18 : 0), radius: 20, y: 10)
             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(LockPressStyle(reduced: Motion.isReduced(reduceMotion)))
@@ -241,6 +246,19 @@ struct LockActionButton: View {
         .opacity(working || enabled ? 1 : 0.5)
         .onHover { hovered = enabled && !working && $0 }
         .animation(Motion.hover(hovered), value: hovered)
+    }
+
+    /// Drawn lit from above; Increase Contrast keeps it flat.
+    private var lit: Bool { contrast != .increased }
+
+    private var fill: AnyShapeStyle {
+        guard lit else { return AnyShapeStyle(hovered ? Color(hex: 0x15161A) : Color(hex: 0x0F1013)) }
+        return AnyShapeStyle(hovered ? Theme.faceLitHover : Theme.faceLit)
+    }
+
+    private var border: AnyShapeStyle {
+        guard lit else { return AnyShapeStyle(Theme.edgeStrong) }
+        return AnyShapeStyle(hovered ? Theme.edgeLitStrong : Theme.edgeLit)
     }
 }
 
@@ -670,7 +688,7 @@ struct ChangePasswordView: View {
         }
         // Fits under the Settings window's title bar (700 pt) as well as the Profiles window's.
         .sheetFrame(width: 480, height: 660)
-        .background(Theme.raised)
+        .lumenSheetSurface()
         .onAppear { model.masterPasswordRefusal = nil }
         .onChange(of: new) { _, _ in model.masterPasswordRefusal = nil }
     }

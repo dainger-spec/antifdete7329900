@@ -92,7 +92,8 @@ struct LumenGlyphShape: Shape {
     func path(in rect: CGRect) -> Path { LumenMarkGeometry.glyph(cut, in: rect) }
 }
 
-/// The app mark: near-black continuous-corner tile, white split disc, faint light ring.
+/// The app mark: near-black continuous-corner tile, white split disc, faint light ring; from 48 pt,
+/// a faint halo of the eclipse's light behind it.
 struct LumenMark: View {
     var size: CGFloat
 
@@ -110,6 +111,15 @@ struct LumenMark: View {
         }
         .frame(width: size, height: size)
         .shadow(color: Color.black.opacity(size >= 48 ? 0.5 : 0), radius: 15, y: 12)
+        // Large (the lock and sign-in tile, About), it catches the light the eclipses give: a faint
+        // halo toward its top-trailing corner, behind the tile and its shadow.
+        .background {
+            if size >= 48 {
+                Circle().fill(Theme.rim.opacity(0.06))
+                    .blur(radius: size * 0.45)
+                    .offset(x: size * 0.12, y: -size * 0.12)
+            }
+        }
         .accessibilityElement()
         .accessibilityLabel(Text(verbatim: "Lumen"))
     }

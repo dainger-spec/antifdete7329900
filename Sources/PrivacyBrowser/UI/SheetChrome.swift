@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// A sheet's title block: the title (15 / semibold) and, when there is one, a sentence under it.
+/// A sheet's title block: the title (17 / semibold, a little tight) and, when there is one, a
+/// sentence under it.
 struct SheetHeader: View {
     let title: String
     var subtitle: String?
@@ -9,13 +10,12 @@ struct SheetHeader: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.lumenSheetTitle)
+                .tracking(-0.2)
                 .foregroundStyle(Theme.textPrimary)
                 .accessibilityAddTraits(.isHeader)
             if let subtitle {
                 Text(subtitle)
-                    .font(.lumenSecondary)
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lumenProse(font: .lumenSecondary, spacing: 2)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -25,7 +25,8 @@ struct SheetHeader: View {
     }
 }
 
-/// A sheet's bottom bar: a hairline, a note or status on the left, its buttons on the right.
+/// A sheet's bottom bar: a hairline, then a band a shade under the sheet (`sheetFooterBand`, so the
+/// footer reads recessed) with a note or status on the left and its buttons on the right.
 struct SheetFooter<Leading: View, Buttons: View>: View {
     let leading: Leading
     let buttons: Buttons
@@ -45,6 +46,7 @@ struct SheetFooter<Leading: View, Buttons: View>: View {
             }
             .padding(.horizontal, 24)
             .frame(height: 60)
+            .background(Theme.sheetFooterBand)
         }
     }
 }
@@ -57,9 +59,11 @@ extension SheetFooter where Leading == EmptyView {
 
 /// A risk said before the person acts (a file written in the clear, a profile that will be stopped):
 /// the design's warning box — the amber tint and line, radius 12, the filled triangle, the sentence
-/// in t1. Not `LumenBanner`, which carries the Profiles list's side margins.
+/// in t1, lines 2.5 pt apart; a faint sheen along its top edge (not with Increase Contrast). Not
+/// `LumenBanner`, which carries the Profiles list's side margins.
 struct SheetWarning: View {
     let text: String
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -71,6 +75,7 @@ struct SheetWarning: View {
             Text(text)
                 .font(.lumenBody)
                 .foregroundStyle(Theme.textPrimary)
+                .lineSpacing(2.5)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 14)
@@ -78,7 +83,71 @@ struct SheetWarning: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.warningTint))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.warningLine, lineWidth: 1))
+        .overlay(alignment: .top) {
+            if contrast != .increased {
+                Rectangle().fill(Color.white.opacity(0.05)).frame(height: 1).padding(.horizontal, 12)
+            }
+        }
         .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - Elevation: one surface for sheets, one for what floats
+
+/// A sheet's root: `raised`, with the eclipse's light reaching its top (the rim at 3.5 %, gone by
+/// 140 pt; not with Increase Contrast), and the presentation itself in the same tone, so that none
+/// of the system's sheet material shows at its rounded corners. No glass: over this black it reads
+/// as a grey haze.
+private struct LumenSheetSurface: ViewModifier {
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    func body(content: Content) -> some View {
+        content
+            .background(alignment: .top) {
+                ZStack(alignment: .top) {
+                    Theme.raised
+                    if contrast != .increased {
+                        LinearGradient(colors: [Theme.rim.opacity(0.035), Theme.rim.opacity(0)], startPoint: .top, endPoint: .bottom)
+                            .frame(height: 140)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .ignoresSafeArea()
+            }
+            // Does nothing outside a presentation: a sheet the UI snapshots draw as a window keeps
+            // the `background` above.
+            .presentationBackground(Theme.raised)
+    }
+}
+
+/// A panel floating over a list: `raised`, a hairline (`strongBorder` with Increase Contrast), a lit
+/// top edge (`lipLight`), a contact shadow and a soft drop shadow.
+private struct LumenFloatingSurface: ViewModifier {
+    let cornerRadius: CGFloat
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        content
+            .background(shape.fill(Theme.raised))
+            .overlay(shape.strokeBorder(contrast == .increased ? Theme.strongBorder : Theme.hairline, lineWidth: 1))
+            .overlay {
+                if contrast != .increased { shape.strokeBorder(Theme.lipLight, lineWidth: 1) }
+            }
+            .shadow(color: Color.black.opacity(0.35), radius: 2, y: 1)
+            .shadow(color: Color.black.opacity(0.5), radius: 24, y: 12)
+    }
+}
+
+extension View {
+    /// A sheet's root surface, in place of `.background(Theme.raised)`: see `LumenSheetSurface`.
+    /// Only on a sheet's root — never on an inline panel, a Settings page or a card.
+    func lumenSheetSurface() -> some View { modifier(LumenSheetSurface()) }
+
+    /// A panel floating over a list (the selection bar, the command palette, toasts): see
+    /// `LumenFloatingSurface`.
+    func lumenFloatingSurface(cornerRadius: CGFloat = 14) -> some View {
+        modifier(LumenFloatingSurface(cornerRadius: cornerRadius))
     }
 }
 

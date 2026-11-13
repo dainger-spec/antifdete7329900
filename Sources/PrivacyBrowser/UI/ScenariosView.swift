@@ -24,6 +24,8 @@ struct ScenariosView: View {
     @State private var proposedSchedule: ScenarioSchedule?
     /// Steps shown as being recorded without a profile (the snapshots).
     var sampleRecording: [RecordedStep]?
+    /// Lumen's light at entry (Settings → Appearance): the still eclipse behind the window.
+    @ObservedObject private var appearance = AppearancePreferences.shared
 
     init(sample: Scenario? = nil, sampleRecording: [RecordedStep]? = nil, showingSchedules: Bool = false) {
         self.sample = sample
@@ -47,9 +49,11 @@ struct ScenariosView: View {
 
     var body: some View {
         HStack(spacing: 0) {
+            // 80 % of the sidebar's tone, as the Profiles window's: the eclipse at the bottom-leading
+            // corner shows through it, all but gone, instead of being hidden.
             list
                 .frame(width: 240)
-                .background(Theme.sidebar)
+                .lumenFrost()
             Rectangle().fill(Theme.divider).frame(width: 1)
             Group {
                 if showingSchedules {
@@ -60,10 +64,20 @@ struct ScenariosView: View {
                     empty
                 }
             }
+            // No fill of its own: the window's (below) is the same black, with the light in it.
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Theme.surface)
         }
         .frame(minWidth: 900, minHeight: 600)
+        // The design's eclipse, still and at 30 %: the editor's geometry for this lower window.
+        .background {
+            ZStack {
+                Theme.backdrop
+                if appearance.entryLight {
+                    EclipseLight(place: .settings, brightness: 0.3)
+                }
+            }
+            .ignoresSafeArea()
+        }
         // With the vault locked there are no scenarios to show and none can be written: said, not
         // an empty editor whose buttons do nothing.
         .overlay {
@@ -384,7 +398,9 @@ struct ScenariosView: View {
             if isRecording {
                 // What the person does in the profile's window becomes the scenario's lines.
                 HStack(spacing: 7) {
-                    Circle().fill(Theme.danger).frame(width: 8, height: 8)
+                    // Breathes while it records; still under Reduce Motion and in the snapshots. The
+                    // words beside it say the state, not the dot alone.
+                    LiveDot(tone: Theme.danger, active: isRecording)
                     Text(String(format: L("scenarios.record.going"), recordedSteps.count))
                         .font(.lumenSecondary)
                         .foregroundStyle(Theme.textPrimary)

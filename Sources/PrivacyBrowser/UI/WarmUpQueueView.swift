@@ -77,7 +77,7 @@ private struct WarmUpQueuePanel: View {
             })
         }
         .sheetFrame(width: 880, height: 640)
-        .background(Theme.raised)
+        .lumenSheetSurface()
         .onAppear {
             guard !loaded else { return }
             loaded = true

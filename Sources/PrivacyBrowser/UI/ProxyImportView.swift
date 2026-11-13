@@ -96,7 +96,7 @@ struct ProxyImportView: View {
             }
         }
         .sheetFrame(width: 680, height: 600)
-        .background(Theme.raised)
+        .lumenSheetSurface()
         // Re-read a moment after the last keystroke: a list of thousands of lines is not taken
         // apart again on every key.
         .task(id: Input(text: text, kind: kind)) {
