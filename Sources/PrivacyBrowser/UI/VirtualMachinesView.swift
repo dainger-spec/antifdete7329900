@@ -130,20 +130,12 @@ private struct VirtualMachinesScreen: View {
     }
 
     private var moreMenu: some View {
-        Menu {
+        MoreMenu {
             Button(L("vm.storage.open")) { showingStorage = true }
             Button(L("vm.base.open")) { center.openBase() }
                 .disabled(center.activity != nil || !allowed || !center.isReady)
             Button(L("vm.reveal")) { SystemOpen.revealInFinder([center.library.root]) }
-        } label: {
-            Image(systemName: "ellipsis")
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .tint(Theme.textSecondary)
-        .fixedSize()
-        .frame(width: 30, height: 30)
-        .hoverHighlight(cornerRadius: Theme.controlRadius)
         .help(L("profiles.menu.more"))
         .accessibilityLabel(L("profiles.menu.more"))
     }
@@ -561,7 +553,7 @@ private struct VMRow: View {
     }
 
     private var menu: some View {
-        Menu {
+        MoreMenu {
             Button(L("vm.row.edit"), action: edit)
             if state != nil {
                 Button(L("vm.row.forceStop"), action: forceStop)
@@ -569,15 +561,7 @@ private struct VMRow: View {
             Divider()
             Button(L("vm.row.delete"), role: .destructive, action: delete)
                 .disabled(state != nil)
-        } label: {
-            Image(systemName: "ellipsis")
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .tint(Theme.textSecondary)
-        .fixedSize()
-        .frame(width: 30, height: 30)
-        .hoverHighlight(cornerRadius: Theme.controlRadius)
         .help(L("profiles.menu.more"))
         .accessibilityLabel(L("profiles.menu.more"))
     }

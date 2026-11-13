@@ -246,7 +246,7 @@ struct ProxyListPanel: View {
     /// Add one, Assign, Edit, Export and Delete: each also in a proxy's own menu (a right click),
     /// and Delete on the Delete key.
     private var moreMenu: some View {
-        Menu {
+        MoreMenu {
             Button(L("proxies.add")) { adding = true }
                 .disabled(proxies.loadError != nil)
             Button(L("proxies.assign")) {
@@ -261,15 +261,7 @@ struct ProxyListPanel: View {
             Divider()
             Button(L("proxies.delete"), role: .destructive) { confirmingDelete = true }
                 .disabled(selectedVisible.isEmpty)
-        } label: {
-            Image(systemName: "ellipsis")
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .tint(Theme.textSecondary)
-        .fixedSize()
-        .frame(width: 30, height: 30)
-        .hoverHighlight(cornerRadius: Theme.controlRadius)
         .help(L("profiles.menu.more"))
         .accessibilityLabel(L("profiles.menu.more"))
     }

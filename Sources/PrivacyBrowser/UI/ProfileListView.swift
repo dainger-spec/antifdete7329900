@@ -1241,7 +1241,7 @@ struct ProfilesScreen: View {
             .accessibilityLabel(showsInspector.wrappedValue ? L("inspector.hide") : L("inspector.show"))
             // Only what is done rarely, in groups: import, sync, the network guard, automation and the
             // master password (they are in Settings and ⌘K too).
-            Menu {
+            MoreMenu {
                 Button(L("profiles.menu.import"), action: actions.importProfile)
                 Divider()
                 Button(L("profiles.menu.sync"), action: actions.openSync)
@@ -1252,15 +1252,7 @@ struct ProfilesScreen: View {
                 Button(L("profiles.menu.automation"), action: actions.openAutomation)
                 Divider()
                 Button(L("profiles.menu.changePassword"), action: actions.changePassword)
-            } label: {
-                Image(systemName: "ellipsis")
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .tint(Theme.textSecondary)
-            .fixedSize()
-            .frame(width: 30, height: 30)
-            .hoverHighlight(cornerRadius: Theme.controlRadius)
             .help(L("profiles.menu.more"))
             .accessibilityLabel(L("profiles.menu.more"))
             Button(action: actions.newProfile) {
@@ -1993,17 +1985,9 @@ private struct ProfileRow: View {
             case .starting, .sealing:
                 EmptyView()
             }
-            Menu {
+            MoreMenu(side: 28) {
                 ProfileMenuItems(row: row, actions: actions)
-            } label: {
-                Image(systemName: "ellipsis")
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .tint(Theme.textSecondary)
-            .fixedSize()
-            .frame(width: 28, height: 28)
-            .hoverHighlight(cornerRadius: Theme.controlRadius)
             .disabled(row.isBusy)
             .accessibilityLabel(String(format: L("profiles.row.moreFor"), row.name))
         }
