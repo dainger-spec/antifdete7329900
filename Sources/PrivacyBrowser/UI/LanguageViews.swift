@@ -12,7 +12,7 @@ struct LanguageSettings: View {
 
     var body: some View {
         SettingsPage(title: L("settings.section.language"), subtitle: L("settings.language.subtitle")) {
-            SettingRow(L("settings.language.title"), detail: L("settings.language.detail"), effect: nil) {
+            SettingRow(L("settings.language.title"), detail: L("settings.language.detail"), effect: .appStart) {
                 InterfaceLanguageChoicePicker(choice: $choice, offersSystem: true)
             }
             if commandLineOverrides {

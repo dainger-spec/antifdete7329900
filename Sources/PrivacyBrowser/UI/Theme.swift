@@ -77,6 +77,9 @@ enum Theme {
     static let dangerLine = Color(hex: 0xF2706A, opacity: 0.24)
     static let warningTint = Color(hex: 0xE3A53C, opacity: 0.06)
     static let warningLine = Color(hex: 0xE3A53C, opacity: 0.24)
+    /// "All in order": the running green's tint and line, for a box that says nothing is wrong.
+    static let runningTint = Color(hex: 0x5FD39B, opacity: 0.07)
+    static let runningLine = Color(hex: 0x5FD39B, opacity: 0.24)
 
     /// A row or item under the pointer: 3.5 % white.
     static let rowHover = Color.white.opacity(0.035)
@@ -231,8 +234,10 @@ extension NSColor {
 /// Lumen's buttons (the design's `btn`): a contour, not a fill. `primary` — the main button: 32 pt,
 /// radius 10, a 1 pt edge of 32 % white on `bg3`; under the pointer the edge goes to 50 %, the fill
 /// a shade lighter, and a faint light gathers under it. `secondary` — the same, 28 pt (radius 9).
-/// `ghost` — quiet: text only until the pointer is over it. `destructive` — quiet, in red. A
-/// press sinks to 98 % for 80 ms (not under Reduce Motion); a disabled button is at 40 %.
+/// `ghost` — quiet: text only until the pointer is over it. `destructive` — red: quiet at 28 pt
+/// (rows, the selection bar); at 32 pt (a sheet's main action) a red contour, `dangerLine`,
+/// `danger` under the pointer or with Increase Contrast. A press sinks to 98 % for 80 ms (not
+/// under Reduce Motion); a disabled button is at 40 %.
 struct LumenButtonStyle: ButtonStyle {
     enum Kind { case primary, secondary, ghost, destructive }
 
@@ -298,6 +303,11 @@ struct LumenButtonStyle: ButtonStyle {
         }
 
         private var border: Color {
+            if kind == .destructive {
+                // A destructive main action (32 pt, a sheet's footer): a red contour; the quiet one in rows has none.
+                guard height >= Theme.buttonHeight else { return .clear }
+                return hovered || contrast == .increased ? Theme.danger : Theme.dangerLine
+            }
             guard isContour else { return .clear }
             // Increase Contrast: the contour at the strength it has under the pointer.
             return hovered || contrast == .increased ? Theme.edgeStrong : Theme.edge
@@ -310,6 +320,8 @@ extension ButtonStyle where Self == LumenButtonStyle {
     static var lumenSecondary: LumenButtonStyle { LumenButtonStyle(kind: .secondary) }
     static var lumenGhost: LumenButtonStyle { LumenButtonStyle(kind: .ghost) }
     static var lumenDestructive: LumenButtonStyle { LumenButtonStyle(kind: .destructive) }
+    /// Beside a 32 pt field (Check, Apply, Add, Icons…): the field's height, so that their edges line up.
+    static var lumenFieldButton: LumenButtonStyle { LumenButtonStyle(kind: .secondary, height: Theme.buttonHeight) }
 }
 
 /// An icon-only button (the design's `ib`: ⋯, close, the inspector's toggle): `t2`, a tone of white
@@ -352,16 +364,18 @@ struct LumenIconButtonStyle: ButtonStyle {
 extension View {
     /// Lumen's text field look for a `TextField` or `SecureField`: `field` black, a 10 % edge,
     /// radius 9; focused — the edge at 50 % and a 3 pt ring of 6 % white; `error` — a red edge and
-    /// ring. `height` nil: as tall as its lines (a multi-line field).
-    func lumenField(height: CGFloat? = 32, error: Bool = false) -> some View {
-        modifier(LumenField(height: height, placeholder: nil, error: error))
+    /// ring. `height` nil: as tall as its lines (a multi-line field). `takesFocus`: the cursor starts
+    /// in it — one field per screen.
+    func lumenField(height: CGFloat? = 32, error: Bool = false, takesFocus: Bool = false) -> some View {
+        modifier(LumenField(height: height, placeholder: nil, error: error, takesFocus: takesFocus))
     }
 
     /// The same, with `placeholder` drawn in the tertiary colour while the field is empty. Give
     /// the field an empty prompt: macOS draws the prompt of an unfocused field almost as bright as
     /// its text, so an example there reads as a value.
-    func lumenField(_ placeholder: String, isEmpty: Bool, height: CGFloat? = 32, error: Bool = false) -> some View {
-        modifier(LumenField(height: height, placeholder: isEmpty ? placeholder : nil, error: error))
+    func lumenField(_ placeholder: String, isEmpty: Bool, height: CGFloat? = 32, error: Bool = false,
+                    takesFocus: Bool = false) -> some View {
+        modifier(LumenField(height: height, placeholder: isEmpty ? placeholder : nil, error: error, takesFocus: takesFocus))
     }
 
     /// The same, for a field whose text holds a secret (a proxy string's password): while the field
@@ -377,6 +391,7 @@ private struct LumenField: ViewModifier {
     let placeholder: String?
     var masked: String?
     var error = false
+    var takesFocus = false
     @FocusState private var focused: Bool
     @Environment(\.colorSchemeContrast) private var contrast
 
@@ -427,6 +442,8 @@ private struct LumenField: ViewModifier {
                 .stroke(ring, lineWidth: 3)
                 .padding(-3))
             .animation(Theme.hoverAnimation, value: focused)
+            // The cursor starts here: one field per screen, as `LockPasswordField.takesFocus`.
+            .onAppear { if takesFocus { focused = true } }
     }
 
     private var edge: Color {
@@ -509,6 +526,76 @@ struct LumenEmptyHint: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// A pane's empty, blocked or failed state: a light symbol, a title, a sentence, an optional quiet
+/// note and the action that leads on, centred in the room it is given — one recipe, so that
+/// "nothing yet", "nothing found" and "could not" read alike. `LumenEmptyHint` stays for an
+/// inspector's placeholder.
+struct LumenEmptyState<Actions: View>: View {
+    let symbol: String
+    var tint: Color
+    let title: String
+    let text: String
+    var note: String?
+    let actions: Actions
+
+    init(symbol: String, tint: Color = Theme.textTertiary, title: String, text: String, note: String? = nil,
+         @ViewBuilder actions: () -> Actions) {
+        self.symbol = symbol
+        self.tint = tint
+        self.title = title
+        self.text = text
+        self.note = note
+        self.actions = actions()
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Image(systemName: symbol)
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(tint)
+                .padding(.bottom, 14)
+                .accessibilityHidden(true)
+            Text(title)
+                .font(.lumenSheetTitle)
+                .foregroundStyle(Theme.textPrimary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+            Text(text)
+                .font(.lumenBody)
+                .foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .frame(maxWidth: 400)
+                .padding(.top, 6)
+            if let note {
+                Text(note)
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textTertiary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 400)
+                    .padding(.top, 8)
+            }
+            // No actions (the init without them): no empty row and no 20 pt gap under the text.
+            if !(actions is EmptyView) {
+                HStack(spacing: 8) { actions }
+                    .padding(.top, 20)
+            }
+        }
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+extension LumenEmptyState where Actions == EmptyView {
+    init(symbol: String, tint: Color = Theme.textTertiary, title: String, text: String, note: String? = nil) {
+        self.init(symbol: symbol, tint: tint, title: title, text: text, note: note) { EmptyView() }
     }
 }
 
@@ -721,15 +808,20 @@ struct TagChip: View {
                 .lineLimit(1)
             if let onRemove {
                 Button(action: onRemove) {
+                    // The whole height of the chip, not the 8 pt glyph alone, takes the click.
                     Image(systemName: "xmark")
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(Theme.textTertiary)
+                        .frame(width: 14, height: 18)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(String(format: L("editor.tags.remove"), text))
             }
         }
-        .padding(.horizontal, 7)
+        // The × carries its own room on the right: a removable chip keeps (almost) its width.
+        .padding(.leading, 7)
+        .padding(.trailing, onRemove == nil ? 7 : 2)
         .frame(height: 18)
         .overlay(Capsule().strokeBorder(Theme.strongBorder, lineWidth: 1))
     }

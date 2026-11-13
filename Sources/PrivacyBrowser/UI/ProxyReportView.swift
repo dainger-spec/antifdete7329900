@@ -77,10 +77,11 @@ enum ProxyState: Equatable {
     }
 
     /// Green: works. Amber: the proxy is there and something about this Mac, the login or the way
-    /// out is wrong. Red: it cannot be reached as a proxy at all. Gray: not checked.
+    /// out is wrong. Red: it cannot be reached as a proxy at all. Gray: not checked (t3, which
+    /// reads as information; the disabled grey does not).
     var color: Color {
         switch self {
-        case .unchecked, .checking: return Theme.textDisabled
+        case .unchecked, .checking: return Theme.textTertiary
         case .works: return Theme.running
         case .noAnswerThrough: return Theme.warning
         case .invalidSettings, .dead: return Theme.danger
@@ -440,18 +441,21 @@ struct ProxyReportView: View {
                         .lineLimit(1)
                 }
             }
+            // Every line of text starts at the headline's edge: an 18 pt column for the symbols, then 8.
             if let explanation = report.explanation {
                 Text(explanation)
                     .font(.lumenBody)
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
+                    .padding(.leading, 26)
             }
             if let advice = report.advice {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "lightbulb")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Theme.accent)
+                        .frame(width: 18)
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(L("proxies.report.advice"))
@@ -465,10 +469,17 @@ struct ProxyReportView: View {
                 }
             }
             if let note = report.kindNote {
-                Label(note, systemImage: "info.circle")
-                    .font(.lumenSecondary)
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(width: 18)
+                        .accessibilityHidden(true)
+                    Text(note)
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             if !report.steps.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
@@ -487,27 +498,43 @@ private struct ProxyStepRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: symbol)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(color)
-                .frame(width: 14)
-                .accessibilityHidden(true)
+            // The inspector's mark, in the headline's 18 pt symbol column, centred on the title's letters.
+            ProxyStepMark(outcome: step.outcome)
+                .frame(width: 18)
+                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 3 }
             Text(step.title)
                 .font(.lumenLabel)
                 .foregroundStyle(step.outcome == .notReached ? Theme.textTertiary : Theme.textPrimary)
                 .frame(width: 130, alignment: .leading)
+            // A step not reached: as dim as its name.
             Text(step.outcome == .notReached ? L("proxies.step.notReached") : step.detail)
                 .font(.lumenSecondary)
-                .foregroundStyle(step.outcome == .failed ? color : Theme.textSecondary)
+                .foregroundStyle(step.outcome == .failed ? Theme.danger
+                                 : (step.outcome == .notReached ? Theme.textTertiary : Theme.textSecondary))
                 .lineLimit(2)
                 .truncationMode(.middle)
                 .textSelection(.enabled)
         }
         .accessibilityElement(children: .combine)
     }
+}
+
+/// A step's mark (the design's `step`): a 16 pt ring with a check, a cross or a dash — never told
+/// apart by the colour alone. The inspector's timeline and the problem sheet draw the same one.
+struct ProxyStepMark: View {
+    let outcome: ProxyReport.Outcome
+
+    var body: some View {
+        ZStack {
+            Circle().strokeBorder(ring, lineWidth: 1)
+            Image(systemName: symbol).font(.system(size: 8, weight: .bold)).foregroundStyle(symbolColor)
+        }
+        .frame(width: 16, height: 16)
+        .accessibilityHidden(true)
+    }
 
     private var symbol: String {
-        switch step.outcome {
+        switch outcome {
         case .passed: return "checkmark"
         case .failed: return "xmark"
         case .skipped: return "arrow.turn.down.right"
@@ -515,9 +542,17 @@ private struct ProxyStepRow: View {
         }
     }
 
-    private var color: Color {
-        switch step.outcome {
-        case .passed: return Theme.running
+    private var ring: Color {
+        switch outcome {
+        case .passed: return Theme.textSecondary
+        case .failed: return Theme.danger
+        case .skipped, .notReached: return Theme.strongBorder
+        }
+    }
+
+    private var symbolColor: Color {
+        switch outcome {
+        case .passed: return Theme.textPrimary
         case .failed: return Theme.danger
         case .skipped, .notReached: return Theme.textTertiary
         }

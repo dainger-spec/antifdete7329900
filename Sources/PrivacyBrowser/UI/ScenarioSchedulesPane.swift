@@ -6,6 +6,7 @@ import SwiftUI
 /// or changes one. Scenarios and a profile's warm-up alike; with the plan's automation only.
 struct ScenarioSchedulesPane: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.openWindow) private var openWindow
     /// The schedule in the form: a new one, or one being changed.
     @State private var draft: ScenarioSchedule?
     /// The schedule whose deletion is being asked about.
@@ -28,25 +29,33 @@ struct ScenarioSchedulesPane: View {
     private var allowed: Bool { sample != nil || model.allowsAutomation }
     /// The schedules' file is a newer version's or does not open: none is shown and none can be saved.
     private var refused: Bool { sample == nil && model.scenarioSchedulesRefused }
+    /// No schedule yet, and one could be added: the empty state, with the action that leads on.
+    private var showsEmpty: Bool { schedules.isEmpty && draft == nil && allowed && !refused }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
+                // A page's title, as Settings' and the Profiles window's.
                 Text(L("schedule.title"))
-                    .font(.lumenHeading)
+                    .lumenPageTitle()
                     .foregroundStyle(Theme.textPrimary)
                 Spacer()
+                // While the empty state shows its own Add (or New Profile), the pane has one main
+                // button: this one keeps its place, so that the header does not move when the first
+                // schedule comes, but is not shown.
                 Button {
                     draft = newSchedule()
                 } label: { Label(L("schedule.add"), systemImage: "plus") }
                     .buttonStyle(.lumenPrimary)
-                    .disabled(!allowed || refused || profiles.isEmpty || draft != nil)
+                    .disabled(!allowed || refused || profiles.isEmpty || draft != nil || showsEmpty)
+                    .opacity(showsEmpty ? 0 : 1)
+                    .accessibilityHidden(showsEmpty)
             }
             .padding(.horizontal, 20)
             .padding(.top, 34)
             .padding(.bottom, 6)
             Text(L("schedule.subtitle"))
-                .font(.lumenSecondary)
+                .font(.system(size: 14))
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 20)
@@ -77,7 +86,7 @@ struct ScenarioSchedulesPane: View {
                     if let draft, !schedules.contains(where: { $0.id == draft.id }) { form(draft) }
                     // Only where one can be added: in a plan without automation, or with a file
                     // that does not open, the note above stands alone.
-                    if schedules.isEmpty, draft == nil, allowed, !refused { empty }
+                    if showsEmpty { empty }
                     ForEach(schedules) { schedule in
                         if draft?.id == schedule.id, let draft { form(draft) } else { row(schedule) }
                     }
@@ -106,30 +115,31 @@ struct ScenarioSchedulesPane: View {
         }
     }
 
-    /// No schedule yet: what one is for, and the button that adds the first.
+    /// No schedule yet: what one is for, and the button that adds the first — the app's one
+    /// empty-state recipe (`LumenEmptyState`).
     private var empty: some View {
-        VStack(spacing: 0) {
-            IconBadge(symbol: "clock", tint: Theme.textTertiary, size: 44)
-                .padding(.bottom, 12)
-            Text(L("schedule.empty.title"))
-                .font(.lumenSheetTitle)
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.bottom, 6)
-            Text(profiles.isEmpty ? L("schedule.empty.noProfiles") : L("schedule.empty"))
-                .font(.lumenBody)
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 360)
-                .padding(.bottom, 20)
-            if !profiles.isEmpty {
-                Button {
-                    draft = newSchedule()
-                } label: { Label(L("schedule.add"), systemImage: "plus") }
-                    .buttonStyle(.lumenPrimary)
+        Group {
+            if profiles.isEmpty {
+                // No profile to run on: the way to one, as the scenario editor's run bar and
+                // File › New Profile (the Profiles window, its new profile).
+                LumenEmptyState(symbol: "clock", title: L("schedule.empty.title"), text: L("schedule.empty.noProfiles")) {
+                    Button {
+                        if model.profilesWindow == nil { openWindow(id: "profiles") }
+                        model.activateProfilesWindow()
+                        model.newProfileRequest = true
+                    } label: { Label(L("profiles.action.new"), systemImage: "plus") }
+                        .buttonStyle(.lumenPrimary)
+                }
+            } else {
+                LumenEmptyState(symbol: "clock", title: L("schedule.empty.title"), text: L("schedule.empty")) {
+                    Button {
+                        draft = newSchedule()
+                    } label: { Label(L("schedule.add"), systemImage: "plus") }
+                        .buttonStyle(.lumenPrimary)
+                }
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 320)
+        .frame(maxWidth: .infinity, minHeight: 360)
     }
 
     // MARK: A schedule

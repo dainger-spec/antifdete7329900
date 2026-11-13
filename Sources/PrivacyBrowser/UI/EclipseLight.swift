@@ -4,7 +4,8 @@ import SwiftUI
 /// out at its edge — in two corners of a window. Five circles of one size, each moved a little
 /// toward the window's centre or away from it, and blurred: a halo, a glow, the rim, the penumbra,
 /// and the shadow that hides all but a crescent. No shaders. Sizes and offsets are the design's,
-/// scaled by the window's height, so the eclipses keep to the corners at any size. Decoration
+/// scaled by the window's height (the lock's, in a window narrower than its board, by the width),
+/// so the eclipses keep to the corners at any size. Decoration
 /// only: hidden from VoiceOver, never in the way of a click.
 ///
 /// At entry the circles come in from beyond the edges in 1.8 s, and the light at their edges
@@ -50,7 +51,11 @@ struct EclipseLight: View {
     var body: some View {
         let spec = EclipseSpec.of(place)
         GeometryReader { geometry in
-            let scale = max(geometry.size.height, 1) / spec.referenceHeight
+            let byHeight = max(geometry.size.height, 1) / spec.referenceHeight
+            // A window narrower than the design board's proportion (the sign-in sheet) is scaled by
+            // its width: by the height alone the rim crossed its form.
+            let byWidth = spec.referenceWidth.map { max(geometry.size.width, 1) / $0 } ?? byHeight
+            let scale = min(byHeight, byWidth)
             ZStack {
                 disc(spec.topTrailing, topTrailing: true, in: geometry.size, scale: scale, spec: spec,
                      shown: inTopTrailing)
@@ -171,6 +176,9 @@ private struct EclipseSpec {
     var entryDuration = 1.8
     var rimDelay = 0.45
     var rimDuration = 1.6
+    /// The design board's width: a window narrower than the board's proportion scales by its width
+    /// instead, so the arcs stay in its corners. Nil: by the height alone.
+    var referenceWidth: CGFloat? = nil
 
     static func of(_ place: EclipseLight.Place) -> EclipseSpec {
         switch place {
@@ -189,7 +197,7 @@ private struct EclipseSpec {
                                     shadow: CGSize(width: -40, height: 33),
                                     from: CGSize(width: -110, height: 90), delay: 0.12,
                                     busy: CGSize(width: 19, height: -16), open: CGSize(width: -130, height: 110)),
-                rimDelay: 0.5, rimDuration: 1.7)
+                rimDelay: 0.5, rimDuration: 1.7, referenceWidth: 1280)
         case .profiles:
             return EclipseSpec(
                 referenceHeight: 1000,

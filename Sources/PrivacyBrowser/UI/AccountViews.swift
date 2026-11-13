@@ -120,22 +120,27 @@ struct SignInFlow: View {
                 .accessibilityLabel(L("license.signIn.method"))
                 .onChange(of: method) { _, _ in problem = nil }
             if method == .email {
-                AccountTextField(label: L("license.signIn.email"), text: $email, onSubmit: signIn)
+                AccountTextField(label: L("license.signIn.email"), text: $email, onSubmit: signIn, takesFocus: true)
                 VStack(alignment: .trailing, spacing: 6) {
                     LockPasswordField(label: L("license.signIn.password"), password: $password,
                                       error: problem != nil, onSubmit: signIn, takesFocus: false)
                     LockLink(title: L("license.signIn.forgot")) { openSite("/reset-password") }
                 }
             } else {
-                VStack(alignment: .trailing, spacing: 6) {
+                // The hint belongs to its field: under it, before the link (it came after the link,
+                // as a block of its own).
+                VStack(alignment: .leading, spacing: 6) {
                     AccountTextField(label: L("license.key.field"), text: $keyText, monospaced: true,
-                                     prompt: "LMK-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX", error: problem != nil, onSubmit: signIn) // l10n: not text
-                    LockLink(title: L("license.key.forgot")) { keyHelp = true }
+                                     prompt: "LMK-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX", error: problem != nil, onSubmit: signIn, takesFocus: true) // l10n: not text
+                    Text(L("license.key.hint"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Spacer(minLength: 0)
+                        LockLink(title: L("license.key.forgot")) { keyHelp = true }
+                    }
                 }
-                Text(L("license.key.hint"))
-                    .font(.lumenSecondary)
-                    .foregroundStyle(Theme.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
                 // §10.1: the key is kept in the vault unless the person says otherwise — what keeping
                 // it means is said beside the choice (`key.remember`).
                 VStack(alignment: .leading, spacing: 6) {
@@ -149,6 +154,8 @@ struct SignInFlow: View {
                         .font(.lumenSecondary)
                         .foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
+                        // Under the checkbox's label, not its box: the box's 16 pt and the 8 between.
+                        .padding(.leading, 24)
                 }
             }
             if let problem { problemLine(problem) }
@@ -256,7 +263,7 @@ struct SignInFlow: View {
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             AccountTextField(label: L("license.code.field"), text: $codeText, monospaced: true,
-                             prompt: "000000", error: problem != nil, onSubmit: confirmCode) // l10n: not text
+                             prompt: "000000", error: problem != nil, onSubmit: confirmCode, takesFocus: true) // l10n: not text
             if let loginCode {
                 // The times move on by themselves: when the letter went, when the code may go again.
                 TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -478,6 +485,8 @@ struct AccountTextField: View {
     var prompt: String = ""
     var error = false
     var onSubmit: () -> Void = {}
+    /// The cursor starts here: one field per screen, as `LockPasswordField.takesFocus`.
+    var takesFocus = false
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -497,8 +506,14 @@ struct AccountTextField: View {
                 .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.field))
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(error ? Theme.danger : (focused ? Theme.edgeStrong : Theme.strongBorder), lineWidth: 1))
+                // The lock field's focus and error ring (`LockPasswordField`): the two fields of one
+                // sign-in screen showed focus differently.
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(error ? Theme.dangerTint : Color.white.opacity(focused ? 0.06 : 0), lineWidth: 4)
+                    .padding(-4))
                 .animation(Theme.hoverAnimation, value: focused)
         }
+        .onAppear { if takesFocus { focused = true } }
     }
 }
 
@@ -827,7 +842,9 @@ struct AccountSettingsPage: View {
     var body: some View {
         SettingsPage(title: L("settings.section.account"), subtitle: L("license.account.subtitle")) {
             if !license.isConfigured {
-                note(L("license.account.notConfigured"))
+                // A section-wide note, as Downloads' and Diagnostics': a grey sentence read as the
+                // subtitle's second line.
+                SettingsNote(text: L("license.account.notConfigured"))
             } else if let state = license.state, state.mode != .notSignedIn {
                 plan(state)
                 offline(state)
@@ -844,7 +861,8 @@ struct AccountSettingsPage: View {
         .sheet(isPresented: $signingIn) {
             SignInFlow(license: license, onFinished: { signingIn = false; Task { await loadDevices() } },
                        onCancel: { signingIn = false })
-                .frame(width: 560, height: 720)
+                // Under the 700 pt Settings window, as Change Password's 660 (720 was taller).
+                .sheetFrame(width: 560, height: 660)
         }
         .alert(L("license.account.signOut.confirm"), isPresented: $confirmingSignOut) {
             Button(L("license.account.cancel"), role: .cancel) {}
@@ -1436,8 +1454,10 @@ struct KeyReplaceSheet: View {
                     Button(L("common.cancel"), action: close)
                         .buttonStyle(.lumenSecondary)
                         .keyboardShortcut(.cancelAction)
+                    // The sheet's main action: a red contour at the main height, not quiet red text
+                    // weaker than Cancel.
                     Button(L("license.keyReplace.button"), action: replace)
-                        .buttonStyle(.lumenDestructive)
+                        .buttonStyle(LumenButtonStyle(kind: .destructive, height: Theme.buttonHeight))
                         .disabled(license.isWorking || license.vaultNeededForKeyReplacement)
                 } else {
                     Button(L("license.done"), action: close)
@@ -1474,6 +1494,11 @@ struct KeyReplaceSheet: View {
             .font(.lumenBody)
             .foregroundStyle(Theme.textPrimary)
             .fixedSize(horizontal: false, vertical: true)
+        // Why the action is off, said before the fields as a state: it was a hint under them,
+        // far above the dimmed button.
+        if license.vaultNeededForKeyReplacement {
+            LockNote(symbol: "lock", tint: Theme.warning, text: L("license.keyReplace.vaultLocked"))
+        }
         if bySession {
             LockPasswordField(label: L("license.keyReplace.password"), password: $password, takesFocus: false)
         } else {
@@ -1486,9 +1511,6 @@ struct KeyReplaceSheet: View {
                                  prompt: "LPC-XXXX-XXXX-XXXX-XXXX-XXXX") // l10n: not text
                 SheetHint(text: L("license.purchaseCode.hint"))
             }
-        }
-        if license.vaultNeededForKeyReplacement {
-            SheetHint(text: L("license.keyReplace.vaultLocked"))
         }
     }
 

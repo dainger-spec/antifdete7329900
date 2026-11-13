@@ -42,25 +42,43 @@ struct ProfileExportView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SheetHeader(title: String(format: L("transfer.export.title"), profile.name), subtitle: L("transfer.export.explanation"))
-            Form {
+            // The design's fields on the sheet's own surface: in the system's grouped Form the
+            // password fields drew no box at all.
+            VStack(alignment: .leading, spacing: 14) {
                 if isRunning && saved == nil {
-                    Label(L("transfer.export.running"), systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(Theme.textSecondary)
+                    SheetWarning(text: L("transfer.export.running"))
                 }
-                SecureField(L("transfer.password"), text: $password)
-                    .disabled(working || saved != nil)
-                SecureField(L("transfer.password.repeat"), text: $confirmation)
-                    .disabled(working || saved != nil)
-                Text(L("transfer.password.note")).font(.caption).foregroundStyle(.secondary)
+                EditorField(L("transfer.password")) {
+                    SecureField(L("transfer.password"), text: $password, prompt: Text(verbatim: ""))
+                        .lumenField(takesFocus: true)
+                        .disabled(working || saved != nil)
+                }
+                EditorField(L("transfer.password.repeat")) {
+                    SecureField(L("transfer.password.repeat"), text: $confirmation, prompt: Text(verbatim: ""))
+                        .lumenField()
+                        .disabled(working || saved != nil)
+                }
+                Text(L("transfer.password.note"))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let saved {
                     Label(String(format: L("transfer.export.done"), saved.lastPathComponent), systemImage: "checkmark.circle")
-                        .foregroundStyle(Theme.textPrimary)
+                        .font(.lumenLabel)
+                        .foregroundStyle(Theme.running)
                 }
                 if let error {
-                    Text(error).foregroundStyle(Theme.danger).font(.lumenSecondary)
+                    Label(error, systemImage: "exclamationmark.circle.fill")
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .lumenForm()
+            .padding(.horizontal, 24)
+            .padding(.top, 4)
+            .padding(.bottom, 18)
+            // Without a height of its own the sheet would hug its content; the Form filled it.
+            Spacer(minLength: 0)
             SheetFooter(leading: {
                 if working { ProgressView().controlSize(.small) }
             }, buttons: {
@@ -117,7 +135,7 @@ struct ProfileImportView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SheetHeader(title: L("transfer.import.title"), subtitle: L("transfer.import.explanation"))
-            Form {
+            VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 10) {
                     Button { choosingFile = true } label: { Label(L("transfer.import.choose"), systemImage: "doc") }
                         .buttonStyle(.lumenSecondary)
@@ -129,24 +147,37 @@ struct ProfileImportView: View {
                     }
                 }
                 if file != nil, manifest == nil {
-                    SecureField(L("transfer.password"), text: $password)
-                        .onSubmit(open)
-                        .disabled(working)
+                    EditorField(L("transfer.password")) {
+                        SecureField(L("transfer.password"), text: $password, prompt: Text(verbatim: ""))
+                            .lumenField(takesFocus: true)
+                            .onSubmit(open)
+                            .disabled(working)
+                    }
                 }
                 if let manifest {
-                    TextField(L("transfer.import.name"), text: $name)
-                        .disabled(working || imported != nil)
+                    EditorField(L("transfer.import.name")) {
+                        TextField(L("transfer.import.name"), text: $name, prompt: Text(verbatim: ""))
+                            .lumenField()
+                            .disabled(working || imported != nil)
+                    }
                     summary(manifest)
                 }
                 if let imported {
                     Label(String(format: L("transfer.import.done"), imported.name), systemImage: "checkmark.circle")
-                        .foregroundStyle(Theme.textPrimary)
+                        .font(.lumenLabel)
+                        .foregroundStyle(Theme.running)
                 }
                 if let error {
-                    Text(error).foregroundStyle(Theme.danger).font(.lumenSecondary)
+                    Label(error, systemImage: "exclamationmark.circle.fill")
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .lumenForm()
+            .padding(.horizontal, 24)
+            .padding(.top, 4)
+            .padding(.bottom, 18)
+            Spacer(minLength: 0)
             SheetFooter(leading: {
                 if working { ProgressView().controlSize(.small) }
             }, buttons: {
@@ -195,9 +226,7 @@ struct ProfileImportView: View {
             // unseen.
             let leftOut = ProfileTransfer.LeftOut(of: manifest.configuration)
             if !leftOut.isEmpty {
-                Label(String(format: L("transfer.import.leftOut"), leftOutList(leftOut)), systemImage: "exclamationmark.shield")
-                    .foregroundStyle(Theme.textPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
+                SheetWarning(text: String(format: L("transfer.import.leftOut"), leftOutList(leftOut)))
                     .padding(.top, 4)
             }
             Text(L("transfer.import.trust"))
@@ -277,26 +306,38 @@ struct CookieExportView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SheetHeader(title: String(format: L("cookieExport.title"), profile.name), subtitle: L("cookieExport.explanation"))
-            Form {
-                Picker(L("cookieExport.format"), selection: $format) {
-                    ForEach(CookieExport.Format.allCases, id: \.self) { Text(label($0)).tag($0) }
+            VStack(alignment: .leading, spacing: 14) {
+                // The formats' names are too long for a segmented control: one radio row each.
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("cookieExport.format")).lumenCaps().padding(.bottom, 4).accessibilityAddTraits(.isHeader)
+                    ForEach(CookieExport.Format.allCases, id: \.self) { choice in
+                        LumenRadio(title: label(choice), isOn: format == choice) { format = choice }
+                    }
                 }
                 .disabled(working || saved != nil)
-                Label(L("cookieExport.warning"), systemImage: "exclamationmark.triangle")
-                    .font(.lumenSecondary)
-                    .foregroundStyle(Theme.textSecondary)
+                SheetWarning(text: L("cookieExport.warning"))
                 if !model.isRunning(profile.id) && saved == nil {
-                    Text(L("cookieExport.stopped")).font(.caption).foregroundStyle(.secondary)
+                    Text(L("cookieExport.stopped"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if let saved {
                     Label(String(format: L("cookieExport.done"), saved.count, saved.url.lastPathComponent), systemImage: "checkmark.circle")
-                        .foregroundStyle(Theme.textPrimary)
+                        .font(.lumenLabel)
+                        .foregroundStyle(Theme.running)
                 }
                 if let error {
-                    Text(error).foregroundStyle(Theme.danger).font(.lumenSecondary)
+                    Label(error, systemImage: "exclamationmark.circle.fill")
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .lumenForm()
+            .padding(.horizontal, 24)
+            .padding(.top, 4)
+            .padding(.bottom, 18)
+            Spacer(minLength: 0)
             SheetFooter(leading: {
                 if working { ProgressView().controlSize(.small) }
             }, buttons: {

@@ -81,7 +81,7 @@ struct AutomationSettingsView: View {
                             .frame(width: 90)
                             .onSubmit { apply(enabled: enabled) }
                         Button(L("automation.port.apply")) { apply(enabled: enabled) }
-                            .buttonStyle(.lumenSecondary)
+                            .buttonStyle(.lumenFieldButton)
                             .disabled(portValue == nil || portValue == settings?.port)
                     }
                 }

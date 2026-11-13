@@ -76,6 +76,9 @@ struct WhatSitesSeeView: View {
     /// speaks of the check, what the snapshot is and where it stays is said here first.
     @ViewBuilder
     private var signalsPane: some View {
+            // Before the first snapshot the pane has one main button, under its message (as the
+            // check's invitation): no row of controls above an empty list.
+            let firstRun = snapshot.step == .ready && snapshot.signals.isEmpty
             if hasCheck {
                 Text(L("whatSites.subtitle"))
                     .font(.lumenSecondary)
@@ -84,40 +87,46 @@ struct WhatSitesSeeView: View {
                     .padding(.horizontal, 24)
                     .padding(.bottom, 12)
             }
-            HStack(spacing: 12) {
-                Button {
-                    Task { await snapshot.take() }
-                } label: {
-                    Label(L(snapshot.takenAt == nil ? "whatSites.take" : "whatSites.retake"), systemImage: "camera.viewfinder")
-                }
-                .buttonStyle(.lumenPrimary)
-                .disabled(snapshot.isTaking)
-                if snapshot.isTaking { ProgressView().controlSize(.small) }
-                Text(status)
-                    .font(.lumenSecondary)
-                    .foregroundStyle(statusColor)
-                    .lineLimit(2)
-                Spacer(minLength: 0)
-                if !snapshot.signals.isEmpty {
-                    Toggle(L("whatSites.onlyDifferences"), isOn: $onlyDifferences)
-                        .toggleStyle(.lumenCheckbox)
+            if !firstRun {
+                HStack(spacing: 12) {
+                    Button {
+                        Task { await snapshot.take() }
+                    } label: {
+                        Label(L(snapshot.takenAt == nil ? "whatSites.take" : "whatSites.retake"), systemImage: "camera.viewfinder")
+                    }
+                    .buttonStyle(.lumenPrimary)
+                    .disabled(snapshot.isTaking)
+                    if snapshot.isTaking { ProgressView().controlSize(.small) }
+                    Text(status)
                         .font(.lumenSecondary)
-                }
-            }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 12)
-            // This Mac's own Safari only on the person's word, with what it means said first.
-            if snapshot.takenAt != nil, !snapshot.isTaking, !mobileView {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Button(L("whatSites.compare")) { Task { await snapshot.compareWithSafari() } }
-                        .buttonStyle(.lumenSecondary)
-                    Text(L("whatSites.compare.note"))
-                        .font(.lumenSecondary)
-                        .foregroundStyle(Theme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .foregroundStyle(statusColor)
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                    // Without Safari's values every signal "differs": the filter would change nothing.
+                    if snapshot.comparedWithSafari && !snapshot.signals.isEmpty {
+                        Toggle(L("whatSites.onlyDifferences"), isOn: $onlyDifferences)
+                            .toggleStyle(.lumenCheckbox)
+                            .font(.lumenSecondary)
+                    }
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 12)
+                // This Mac's own Safari only on the person's word, with what it means said first
+                // (once compared, the status says it: the button alone stays).
+                if snapshot.takenAt != nil, !snapshot.isTaking, !mobileView {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Button(L("whatSites.compare")) { Task { await snapshot.compareWithSafari() } }
+                            .buttonStyle(.lumenSecondary)
+                        if !snapshot.comparedWithSafari {
+                            Text(L("whatSites.compare.note"))
+                                .font(.lumenSecondary)
+                                .foregroundStyle(Theme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 12)
+                }
             }
             if mobileView {
                 Text(L("whatSites.mobileView"))
@@ -127,10 +136,23 @@ struct WhatSitesSeeView: View {
                     .padding(.horizontal, 24)
                     .padding(.bottom, 12)
             }
-            Rectangle().fill(Theme.divider).frame(height: 1)
+            if !firstRun {
+                Rectangle().fill(Theme.divider).frame(height: 1)
+            }
             if snapshot.signals.isEmpty {
-                LumenEmptyHint(symbol: "eye", text: L("whatSites.empty"))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if firstRun {
+                    LumenEmptyState(symbol: "eye", title: L("whatSites.empty.title"), text: L("whatSites.empty")) {
+                        Button {
+                            Task { await snapshot.take() }
+                        } label: {
+                            Label(L("whatSites.take"), systemImage: "camera.viewfinder")
+                        }
+                        .buttonStyle(.lumenPrimary)
+                        .keyboardShortcut(.defaultAction)
+                    }
+                } else {
+                    LumenEmptyState(symbol: "eye", title: L("whatSites.empty.title"), text: L("whatSites.empty"))
+                }
             } else {
                 results
             }
@@ -164,12 +186,12 @@ struct WhatSitesSeeView: View {
             LazyVStack(alignment: .leading, spacing: 14) {
                 ForEach(SiteSignalCategory.allCases, id: \.self) { category in
                     let all = snapshot.signals.filter { $0.category == category }
-                    let shown = onlyDifferences ? all.filter { $0.verdict != .same } : all
+                    let shown = onlyDifferences && snapshot.comparedWithSafari ? all.filter { $0.verdict != .same } : all
                     if !all.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
                             HStack(alignment: .firstTextBaseline) {
                                 Text(L("whatSites.category.\(category.rawValue)")).font(.lumenLabel)
-                                Text(Self.summary(all))
+                                Text(Self.summary(all, comparedWithSafari: snapshot.comparedWithSafari))
                                     .font(.lumenSecondary)
                                     .foregroundStyle(Theme.textSecondary)
                             }
@@ -188,8 +210,10 @@ struct WhatSitesSeeView: View {
         }
     }
 
-    /// "31 same · 2 differ · 3 each window's own".
-    static func summary(_ signals: [SiteSignal]) -> String {
+    /// "31 same · 2 differ · 3 each window's own". Not compared with Safari: how many signals,
+    /// not "7 differ" — without Safari's values none is the same.
+    static func summary(_ signals: [SiteSignal], comparedWithSafari: Bool = true) -> String {
+        guard comparedWithSafari else { return String(format: L("whatSites.summary.profileOnly"), signals.count) }
         let same = signals.filter { $0.verdict == .same }.count
         let perWindow = signals.filter { $0.verdict == .perWindow }.count
         let differ = signals.count - same - perWindow

@@ -15,6 +15,8 @@ final class CameraPreviewWindowController: NSWindowController {
                               styleMask: [.titled, .closable, .resizable, .miniaturizable],
                               backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        // The app's dark chrome, as its other windows: it came up light on a Mac in light mode.
+        Theme.applyAppWindow(to: window)
         window.title = L("editor.camera.preview.window")
         super.init(window: window)
     }
@@ -37,7 +39,7 @@ struct CameraPreviewWindowView: View {
         VStack(spacing: 12) {
             // The source with the crop rectangle, or the live preview when there is no source to crop.
             ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.black)
+                RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous).fill(Theme.field)
                 if let source = CameraPreview.sourceImage(for: mirror.camera) {
                     GeometryReader { geometry in
                         let rect = Self.fittedRect(aspect: source.size.width / max(1, source.size.height), in: geometry.size)
@@ -56,10 +58,12 @@ struct CameraPreviewWindowView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
+                .strokeBorder(Theme.hairline, lineWidth: 1))
 
             // What the page actually gets (crop, fit, mirror and the adjustments applied).
             VStack(alignment: .leading, spacing: 4) {
-                Text(L("editor.camera.preview.result")).font(.caption).foregroundStyle(.secondary)
+                Text(L("editor.camera.preview.result")).lumenCaps()
                 CameraPreviewView(camera: mirror.camera, height: 110)
             }
 
@@ -67,16 +71,22 @@ struct CameraPreviewWindowView: View {
                 Toggle(L("editor.camera.crop.enabled"), isOn: Binding(
                     get: { mirror.camera.crop.enabled },
                     set: { enabled in var crop = mirror.camera.crop; crop.enabled = enabled; setCrop(crop) }))
-                    .toggleStyle(.switch)
+                    .toggleStyle(.lumenSwitch)
+                    .font(.lumenBody)
+                    .foregroundStyle(Theme.textPrimary)
                 Spacer()
                 Button(L("editor.camera.crop.reset")) { setCrop(.none) }
+                    .buttonStyle(.lumenSecondary)
             }
 
-            Divider()
+            Rectangle().fill(Theme.divider).frame(height: 1)
             adjustments
         }
         .padding(14)
         .frame(minWidth: 420, minHeight: 540)
+        .background(Theme.backdrop)
+        // The sliders in white, as the editor's (no Lumen slider: they stay the system's).
+        .tint(Theme.accentFill)
     }
 
     /// The source look (brightness/contrast/… and grayscale), the same adjustments as the editor,
@@ -93,22 +103,28 @@ struct CameraPreviewWindowView: View {
             ("editor.camera.filter.opacity", \.opacity, 0...1),
         ]
         return VStack(alignment: .leading, spacing: 6) {
-            Text(L("editor.camera.preview.adjust")).font(.caption).foregroundStyle(.secondary)
+            Text(L("editor.camera.preview.adjust")).lumenCaps()
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(rows.indices, id: \.self) { index in
                         HStack {
-                            Text(L(rows[index].key)).font(.caption).frame(width: 90, alignment: .leading)
+                            Text(L(rows[index].key))
+                                .font(.lumenSecondary)
+                                .foregroundStyle(Theme.textSecondary)
+                                .frame(width: 90, alignment: .leading)
                             Slider(value: filterBinding(rows[index].path), in: rows[index].range)
                         }
                     }
                     HStack {
                         Toggle(L("editor.camera.filter.grayscale"), isOn: grayscaleBinding)
-                            .toggleStyle(.switch)
+                            .toggleStyle(.lumenSwitch)
+                            .font(.lumenBody)
+                            .foregroundStyle(Theme.textPrimary)
                         Spacer()
                         Button(L("editor.camera.filter.reset")) {
                             var next = mirror.camera; next.filters = .none; update(next)
                         }
+                        .buttonStyle(.lumenSecondary)
                         .disabled(mirror.camera.filters.isIdentity)
                     }
                 }

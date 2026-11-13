@@ -193,7 +193,8 @@ struct ProfileListView: View {
             .sheet(isPresented: $showingSync) { SyncSettingsView() }
             .sheet(isPresented: $signingIn) {
                 SignInFlow(license: model.license, onFinished: { signingIn = false }, onCancel: { signingIn = false })
-                    .frame(width: 560, height: 720)
+                    // The shared size rule: never taller than the window has room for (LockScreen scrolls).
+                    .sheetFrame(width: 560, height: 660)
             }
             .sheet(isPresented: $showingGuard) { NetworkGuardSettingsView() }
             .sheet(isPresented: $showingAutomation) { AutomationSettingsView() }
@@ -922,7 +923,7 @@ struct ProfilesScreen: View {
                     .opacity(appeared ? 1 : 0)
                 main(inspectorOver: inspectorShown && !inspectorFits)
                 if inspectorShown && inspectorFits {
-                    inspector(top: Self.inspectorTop)
+                    inspector(top: Self.inspectorTop, over: false)
                         .opacity(appeared ? 1 : 0)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
@@ -966,7 +967,7 @@ struct ProfilesScreen: View {
                     content
                         .overlay(alignment: .trailing) {
                             if inspectorOver {
-                                inspector(top: 8)
+                                inspector(top: 8, over: true)
                                     .shadow(color: .black.opacity(0.55), radius: 30, x: -6)
                                     .transition(.move(edge: .trailing).combined(with: .opacity))
                             }
@@ -978,6 +979,8 @@ struct ProfilesScreen: View {
                                                selectAll: { selection.select(displayOrder.map(\.id)) },
                                                clear: { selection.clear() })
                                     .padding(.horizontal, 20)
+                                    // Centred in the part of the list the inspector leaves visible, not under it.
+                                    .padding(.trailing, inspectorOver ? Self.inspectorWidth : 0)
                                     .padding(.bottom, 18)
                                     .transition(.move(edge: .bottom).combined(with: .opacity))
                             }
@@ -1108,8 +1111,8 @@ struct ProfilesScreen: View {
     }
 
     /// `top`: where its content starts — under the title bar's band beside the list
-    /// (`inspectorTop`), just under the header over it.
-    private func inspector(top: CGFloat) -> some View {
+    /// (`inspectorTop`), just under the header over it. `over`: it lies over the list.
+    private func inspector(top: CGFloat, over: Bool) -> some View {
         Group {
             if selectedRows.count == 1, let row = selectedRows.first {
                 ProfileInspectorView(row: row, info: inspectorInfo(row.id), actions: actions,
@@ -1124,7 +1127,8 @@ struct ProfilesScreen: View {
         .frame(width: Self.inspectorWidth)
         .frame(maxHeight: .infinity, alignment: .top)
         .padding(.top, top)
-        .background(Theme.sidebar.opacity(0.8))
+        // Over the list: opaque, the rows must not show through; beside it: the frost over the light.
+        .background(over ? Theme.sidebar : Theme.sidebar.opacity(0.8))
         .overlay(alignment: .leading) { Rectangle().fill(Theme.divider).frame(width: 1) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(L("inspector.title"))
@@ -1251,6 +1255,11 @@ struct ProfilesScreen: View {
     }
 
     private var countLine: String {
+        if filter != .all {
+            // The chosen collection or tag, and how many of all it shows: the header said "9" over two rows.
+            let name = filter.title.count > 24 ? String(filter.title.prefix(23)) + "…" : filter.title // l10n: not text
+            return String(format: L("profiles.countFiltered"), name, rows.filter(filter.includes).count, rows.count)
+        }
         let running = rows.filter(\.isActive).count
         return running > 0
             ? String(format: L("profiles.countRunning"), rows.count, running)
@@ -1411,6 +1420,7 @@ struct ProfileColumns {
 
 private struct ProfilesSidebar: View {
     @Environment(\.tagColors) private var tagColors
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let rows: [ProfileRowItem]
     let sync: SyncLine
     @Binding var filter: ProfileFilter
@@ -1441,23 +1451,39 @@ private struct ProfilesSidebar: View {
             // what is above and the foot keep their places. Rows of a fixed number pushed Lock and
             // Settings out at the window's foot (CI run 557, a 1024 × 768 screen; the window may be
             // 560 pt tall).
-            ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    caption(L("profiles.filters"))
-                    item(.running)
-                    item(.proxied)
-                    item(.direct)
-                    item(.ephemeral)
-                    let tags = ProfileFilter.tags(of: rows)
-                    if !tags.isEmpty {
-                        caption(L("profiles.tags"))
-                        ForEach(tags, id: \.self) { tag in tagItem(tag) }
+            ScrollViewReader { scroller in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        caption(L("profiles.filters"))
+                        item(.running)
+                        item(.proxied)
+                        item(.direct)
+                        item(.ephemeral)
+                        let tags = ProfileFilter.tags(of: rows)
+                        if !tags.isEmpty {
+                            caption(L("profiles.tags"))
+                            ForEach(tags, id: \.self) { tag in tagItem(tag) }
+                        }
                     }
                 }
+                // No scroller: a legacy one took ~15 pt and gave the sidebar two count columns (208 vs 190).
+                .scrollIndicators(.never)
+                .contentMargins(.bottom, 16, for: .scrollContent)
+                // A row cut at the foot fades out, so that it reads as "more below".
+                .mask {
+                    VStack(spacing: 0) {
+                        Color.black
+                        LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 16)
+                    }
+                }
+                .frame(maxHeight: .infinity)
+                .padding(.bottom, 12)
+                // A chosen tag below the fold comes into view (the window may be 560 pt tall).
+                .onAppear { DispatchQueue.main.async { scroller.scrollTo(filter, anchor: .center) } }
+                .onChange(of: filter) { _, chosen in
+                    withAnimation(Motion.isReduced(reduceMotion) ? nil : Theme.appearAnimation) { scroller.scrollTo(chosen) }
+                }
             }
-            .scrollIndicators(.automatic)
-            .frame(maxHeight: .infinity)
-            .padding(.bottom, 12)
             SyncStatusButton(sync: sync, action: actions.openSync)
                 .padding(.bottom, rights == nil ? 8 : 2)
             if let rights {
@@ -1496,16 +1522,26 @@ private struct ProfilesSidebar: View {
     /// at the end, and a click opens it.
     private var paletteButton: some View {
         Button(action: actions.openPalette) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textTertiary)
-                Text(L("sidebar.palette"))
-                    .font(.lumenBody)
-                    .foregroundStyle(Theme.textSecondary)
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                KeyCap(keys: "⌘K", small: true) // l10n: not text
+            let icon = Image(systemName: "magnifyingglass")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.textTertiary)
+            let title = Text(L("sidebar.palette"))
+                .font(.lumenBody)
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(1)
+            // The key cap gives way before the words (EN "Commands and S…"); .help names the keys.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    icon
+                    title
+                    Spacer(minLength: 4)
+                    KeyCap(keys: "⌘K", small: true) // l10n: not text
+                }
+                HStack(spacing: 8) {
+                    icon
+                    title
+                    Spacer(minLength: 0)
+                }
             }
             .padding(.horizontal, 10)
             .frame(height: 30)
@@ -1529,6 +1565,7 @@ private struct ProfilesSidebar: View {
             filter = value
             section = .profiles
         }
+        .id(value)
     }
 
     /// A tag: its colour's dot in place of "#", and its menu, where the colour is chosen for every
@@ -1556,6 +1593,7 @@ private struct ProfilesSidebar: View {
                     .disabled(color == nil)
             }
         }
+        .id(value)
     }
 
     /// A colour's dot for a menu item: drawn in its colour, not as a template the menu would tint.
@@ -1655,12 +1693,20 @@ private struct SyncStatusButton: View {
                     .font(.system(size: 12))
                     .foregroundStyle(sync == .failed ? Theme.warning : Theme.textTertiary)
                     .frame(width: 18)
-                Text(text)
-                    .font(.lumenSecondary)
-                    .foregroundStyle(sync == .failed ? Theme.warning : Theme.textSecondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
+                Group {
+                    if case .synced(let date) = sync {
+                        // Two lines by design, as the rights' line under it: "Synced" / "4 minutes ago".
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(L("profiles.sync.syncedTitle")).lineLimit(1)
+                            Text(date.shownRelative).foregroundStyle(Theme.textTertiary).lineLimit(1)
+                        }
+                    } else {
+                        Text(text).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .font(.lumenSecondary)
+                .foregroundStyle(sync == .failed ? Theme.warning : Theme.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
@@ -1715,10 +1761,10 @@ private struct ProfileRow: View {
     var body: some View {
         HStack(spacing: ProfileColumns.gap) {
             checkbox
-            nameCell.frame(maxWidth: .infinity, alignment: .leading)
-            exitCell.frame(width: ProfileColumns.exit, alignment: .leading)
+            nameCell.opacity(identityOpacity).frame(maxWidth: .infinity, alignment: .leading)
+            exitCell.opacity(identityOpacity).frame(width: ProfileColumns.exit, alignment: .leading)
             if columns.showsAppearsAs {
-                seenCell.frame(width: ProfileColumns.appearsAs, alignment: .leading)
+                seenCell.opacity(identityOpacity).frame(width: ProfileColumns.appearsAs, alignment: .leading)
             }
             stateCell.frame(width: columns.state, alignment: .leading)
             actionsCell.frame(width: ProfileColumns.actions, alignment: .trailing)
@@ -1743,7 +1789,6 @@ private struct ProfileRow: View {
         }
         .onHover { hovered = $0 }
         .animation(Motion.hover(hovered), value: hovered)
-        .opacity(row.activity == .sealing ? 0.6 : 1)
         .contextMenu { ProfileMenuItems(row: row, actions: actions) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(row.name))
@@ -1783,6 +1828,8 @@ private struct ProfileRow: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .layoutPriority(1)
+                    // Every tag, whichever of the lines below is drawn (VoiceOver hears only the drawn one).
+                    .accessibilityValue(rowTags.joined(separator: ", "))
                 if !row.notes.isEmpty {
                     Image(systemName: "note.text")
                         .font(.system(size: 10))
@@ -1790,15 +1837,30 @@ private struct ProfileRow: View {
                         .accessibilityLabel(L("profiles.row.hasNotes"))
                 }
                 if !row.tags.isEmpty || row.ephemeral {
-                    TagLine.text(row.tags + (row.ephemeral ? [L("profiles.row.ephemeralTag")] : []), colors: tagColors)
-                        .font(.lumenSecondary)
-                        .foregroundStyle(Theme.textTertiary)
-                        .lineLimit(1)
+                    let tags = rowTags
+                    // All of them, the first and "+N", or none: a cut tag ("●clien…", a 2 pt sliver) read as noise.
+                    ViewThatFits(in: .horizontal) {
+                        tagLine(tags)
+                        if tags.count > 1 { tagLine([tags[0], "+\(tags.count - 1)"]) } // l10n: not text
+                        Color.clear.frame(width: 0, height: 0)
+                    }
+                    .accessibilityHidden(true)
                 }
             }
         }
         .help(row.notes)
     }
+
+    /// The row's tags, an ephemeral profile's mark last.
+    private var rowTags: [String] { row.tags + (row.ephemeral ? [L("profiles.row.ephemeralTag")] : []) }
+
+    private func tagLine(_ tags: [String]) -> some View {
+        TagLine.text(tags, colors: tagColors).font(.lumenSecondary).foregroundStyle(Theme.textTertiary).lineLimit(1).fixedSize()
+    }
+
+    /// While it is encrypted the profile itself is dimmed, not its state: that is what is read then
+    /// (the whole row at 60 % put "Encrypting data…" at 3.4 : 1).
+    private var identityOpacity: Double { row.activity == .sealing ? 0.6 : 1 }
 
     private var exitCell: some View {
         HStack(spacing: 6) {
@@ -2154,10 +2216,12 @@ struct IndexNoticeBox: View {
                         .foregroundStyle(Theme.textTertiary)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
+                    // Under the text, not beside it: the text gets the banner's whole width (9 lines → ~6).
+                    Button(L("index.reveal"), action: reveal)
+                        .buttonStyle(.lumenSecondary)
+                        .padding(.top, 6)
                 }
-                Spacer(minLength: 12)
-                Button(L("index.reveal"), action: reveal)
-                    .buttonStyle(.lumenSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
@@ -2242,8 +2306,9 @@ struct KeptDeletedBox: View {
                                     Button(L("profiles.kept.bringBack")) { bringBack(profile.id) }
                                         .buttonStyle(.lumenSecondary)
                                 }
+                                // What cannot be undone in red, as the selection bar's Delete: not the twin of Bring back.
                                 Button(profile.broughtBack ? L("profiles.kept.removeOld") : L("profiles.kept.remove")) { removeForGood(profile) }
-                                    .buttonStyle(.lumenSecondary)
+                                    .buttonStyle(.lumenDestructive)
                             } else {
                                 Button(L("profiles.kept.reveal")) { reveal(profile.id) }
                                     .buttonStyle(.lumenSecondary)
@@ -2385,12 +2450,18 @@ struct ProxyProblemBanner: View {
     var body: some View {
         LumenBanner(tone: .danger) {
             HStack(alignment: .center, spacing: 12) {
-                Circle().fill(Theme.danger).frame(width: 6, height: 6).accessibilityHidden(true)
-                (Text(item.title + ".").font(.lumenLabel).foregroundStyle(Theme.textPrimary)
-                    + Text(verbatim: " ")
-                    + Text(item.text).font(.lumenBody).foregroundStyle(Theme.textSecondary))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                // The danger's symbol in the banners' 14 pt column: the text starts where theirs does.
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "exclamationmark.octagon.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.danger)
+                        .accessibilityHidden(true)
+                    (Text(item.title + ".").font(.lumenLabel).foregroundStyle(Theme.textPrimary)
+                        + Text(verbatim: " ")
+                        + Text(item.text).font(.lumenBody).foregroundStyle(Theme.textSecondary))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 if item.more > 0 {
                     Text(String(format: L("proxyProblem.more.short"), item.more))
                         .font(.lumenSecondary)
@@ -2438,8 +2509,9 @@ struct EngineWarningBanner: View {
                         .foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 8) {
+                        // The first action a contour, its edge in line with the text (as UpdateOfferBanner).
                         Button(L("engines.banner.details"), action: details)
-                            .buttonStyle(.lumenGhost)
+                            .buttonStyle(.lumenSecondary)
                         Button(L("engines.banner.ok"), action: done)
                             .buttonStyle(.lumenGhost)
                     }
@@ -2472,8 +2544,9 @@ struct UpdatedBanner: View {
                         .foregroundStyle(Theme.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 8) {
+                        // The first action a contour, its edge in line with the text (as UpdateOfferBanner).
                         Button(L("updates.banner.details"), action: details)
-                            .buttonStyle(.lumenGhost)
+                            .buttonStyle(.lumenSecondary)
                         Button(L("updates.banner.ok"), action: done)
                             .buttonStyle(.lumenGhost)
                     }
@@ -2573,7 +2646,7 @@ struct GuardNoticeBar: View {
         LumenBanner(tone: .warning) {
             HStack(alignment: .center, spacing: 12) {
                 Image(systemName: notice == .restartNeeded ? "arrow.clockwise" : "exclamationmark.triangle.fill")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Theme.warning)
                     .accessibilityHidden(true)
                 Text(Self.text(notice))
@@ -2626,23 +2699,11 @@ private struct NoMatchesView: View {
     let onShowAll: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            Text(L("profiles.noMatches"))
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.bottom, 8)
-            Text(query.isEmpty ? L("profiles.noMatches.filter") : String(format: L("profiles.noMatches.query"), query))
-                .font(.lumenBody)
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 340)
-                .padding(.bottom, 18)
+        LumenEmptyState(symbol: "magnifyingglass", title: L("profiles.noMatches"),
+                        text: query.isEmpty ? L("profiles.noMatches.filter") : String(format: L("profiles.noMatches.query"), query)) {
             Button(L("profiles.showAll"), action: onShowAll)
                 .buttonStyle(.lumenSecondary)
         }
-        .padding(40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityElement(children: .contain)
     }
 }
 
@@ -2682,7 +2743,8 @@ struct LumenSearchField: View {
                 Button {
                     text = ""
                 } label: {
-                    Image(systemName: "xmark.circle.fill").font(.system(size: 12))
+                    // A 20 pt target around the 12 pt glyph.
+                    Image(systemName: "xmark.circle.fill").font(.system(size: 12)).frame(width: 20, height: 20).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.textTertiary)

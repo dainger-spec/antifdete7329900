@@ -227,8 +227,10 @@ struct HelpView: View {
 
     var body: some View {
         HStack(spacing: 0) {
+            // Settings' sidebar width: Help is the same sidebar-and-page window, and "Selenium and
+            // WebDriver" was cut at 230.
             topics
-                .frame(width: 230)
+                .frame(width: SettingsView.sidebarWidth)
                 .background(Theme.sidebar)
             Rectangle().fill(Theme.divider).frame(width: 1)
             page
@@ -268,6 +270,8 @@ struct HelpView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                // The whole title, where the sidebar cuts it.
+                .help(item.title)
                 .accessibilityAddTraits(topic == item ? .isSelected : [])
             }
             Spacer(minLength: 0)
@@ -281,7 +285,7 @@ struct HelpView: View {
     private var page: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(topic.title)
-                .font(.lumenHeading)
+                .lumenPageTitle()
                 .foregroundStyle(Theme.textPrimary)
                 .padding(.horizontal, 32)
                 .padding(.top, 40)
@@ -340,12 +344,20 @@ private struct HelpBlockView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// The design's info box (the tokens `LumenBanner(.info)` uses), not a look-alike of the code.
     private func note(_ text: String) -> some View {
         let shape = RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
-        return prose(text, color: Theme.textPrimary)
-            .padding(12)
-            .background(shape.fill(Theme.card))
-            .overlay(shape.strokeBorder(Theme.divider, lineWidth: 1))
+        return HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: "info.circle")
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.textSecondary)
+                .accessibilityHidden(true)
+            prose(text, color: Theme.textPrimary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(shape.fill(Theme.accentTint))
+        .overlay(shape.strokeBorder(Theme.accentTintStrong, lineWidth: 1))
     }
 
     /// Steps by their numbers, or points by a dot.
@@ -398,37 +410,33 @@ private struct HelpBlockView: View {
     }
 }
 
-/// Code to copy: in a fixed-width font, selectable, with Copy at its corner.
+/// Code to copy: in a fixed-width font, selectable, with the app's Copy above it. A line never
+/// wraps (a command broken mid-URL read as two): a long one scrolls sideways.
 private struct HelpCode: View {
     let code: String
-    @State private var copied = false
 
     var body: some View {
-        Text(verbatim: code)
-            .font(.lumenMono)
-            .foregroundStyle(Theme.textPrimary)
-            .lineSpacing(3)
-            .textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 14)
-            .padding(.top, 14)
-            .padding(.bottom, 14)
-            .padding(.trailing, 96)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).fill(Theme.card))
-            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).strokeBorder(Theme.divider, lineWidth: 1))
-            .overlay(alignment: .topTrailing) {
-                Button(copied ? L("help.copied") : L("help.copy")) {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(code, forType: .string)
-                    copied = true
-                    Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 1_500_000_000)
-                        copied = false
-                    }
-                }
-                .buttonStyle(.lumenGhost)
-                .padding(6)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Spacer(minLength: 0)
+                LumenCopyButton(text: code, title: L("help.copy"))
             }
+            .padding(.horizontal, 8)
+            .padding(.top, 8)
+            ScrollView(.horizontal) {
+                Text(verbatim: code)
+                    .font(.lumenMono)
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineSpacing(3)
+                    .textSelection(.enabled)
+                    .fixedSize()
+                    .padding(.horizontal, 14)
+                    .padding(.top, 2)
+                    .padding(.bottom, 14)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).fill(Theme.card))
+        .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).strokeBorder(Theme.divider, lineWidth: 1))
     }
 }

@@ -18,13 +18,15 @@ struct UpdatesPane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 16) {
+                // A setting's title, as the rows under it have.
                 Text(L("updates.version"))
-                    .font(.lumenLabel)
+                    .font(.lumenRowTitle)
                     .foregroundStyle(Theme.textPrimary)
                 Spacer(minLength: 12)
                 Text(verbatim: Self.runningVersion)
                     .font(.lumenBody)
                     .foregroundStyle(Theme.textSecondary)
+                    .monospacedDigit()
                     .textSelection(.enabled)
             }
             .padding(.top, 12)
@@ -55,10 +57,7 @@ struct UpdatesPane: View {
             }
             .padding(.vertical, 12)
             if let item = updater.state.item {
-                Text(String(format: L("updates.notes"), item.version))
-                    .font(.lumenSection)
-                    .foregroundStyle(Theme.textPrimary)
-                    .padding(.top, 4)
+                SettingsCaption(String(format: L("updates.notes"), item.version))
                 // Plain text, never a page: the notes come from the feed, and nothing of it is
                 // rendered by WebKit outside a profile.
                 ScrollView {
@@ -71,8 +70,8 @@ struct UpdatesPane: View {
                 }
                 .frame(maxHeight: 140)
                 .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.raisedInset))
-                .padding(.top, 6)
-                .padding(.bottom, 4)
+                // The rows' own rhythm to the next row's line (4 pt was the page's one break in it).
+                .padding(.bottom, 18)
             }
             SettingRow(L("updates.automatic"), detail: L("updates.privacy"), effect: .now) {
                 SettingSwitch(isOn: $updater.automaticChecks, label: L("updates.automatic"))

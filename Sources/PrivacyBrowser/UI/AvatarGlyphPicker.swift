@@ -136,14 +136,13 @@ struct AvatarGlyphPicker: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 ProfileAvatar(name: draft.name.isEmpty ? "?" : draft.name, id: avatarID, size: 36, style: draft.avatarStyle)
-                Text(L("editor.avatar.pick.title")).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.textPrimary)
+                Text(L("editor.avatar.pick.title")).font(.lumenSheetTitle).foregroundStyle(Theme.textPrimary)
                 Spacer()
                 Button(L("editor.avatar.pick.reset")) { draft.avatarLetters = "" }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 12))
-                    .foregroundStyle(draft.avatarLetters.isEmpty ? Theme.textTertiary : Theme.textSecondary)
+                    .buttonStyle(.lumenGhost)
                     .disabled(draft.avatarLetters.isEmpty)
                 Button(L("common.done"), action: close)
+                    .buttonStyle(.lumenPrimary)
                     .keyboardShortcut(.defaultAction)
             }
             .padding(.horizontal, 16)
@@ -176,14 +175,17 @@ struct AvatarGlyphPicker: View {
                                 .font(.system(size: 12))
                                 .frame(width: 18)
                                 .foregroundStyle(chosen ? Theme.textPrimary : Theme.textTertiary)
+                            // Two lines rather than cut ("Money and shopp…"), as the editor's index.
                             Text(item.title)
                                 .font(.system(size: 13))
                                 .foregroundStyle(chosen ? Theme.textPrimary : Theme.textSecondary)
-                                .lineLimit(1)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
                             Spacer(minLength: 0)
                         }
                         .padding(.horizontal, 10)
-                        .frame(height: 30)
+                        .padding(.vertical, 4)
+                        .frame(minHeight: 30)
                         .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(chosen ? Theme.rowSelected : Color.clear))
                         .contentShape(Rectangle())

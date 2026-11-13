@@ -18,13 +18,14 @@ struct ProfileCheckPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Before the first check the invitation has the button, so the pane has one main button.
-            if check.step != .ready {
+            // Before the first check the invitation has the button, so the pane has one main button;
+            // a first run and a first failure keep it there too (no lone button far above them).
+            if check.checkedAt != nil {
                 HStack(spacing: 12) {
                     Button {
                         Task { await check.run() }
                     } label: {
-                        Label(L(check.checkedAt == nil ? "check.run" : "check.rerun"), systemImage: "checkmark.shield")
+                        Label(L("check.rerun"), systemImage: "checkmark.shield")
                     }
                     .buttonStyle(.lumenPrimary)
                     .disabled(check.isRunning)
@@ -64,23 +65,7 @@ struct ProfileCheckPane: View {
 
     /// Before the first check: what it goes over, and the button that makes it.
     private var intro: some View {
-        VStack(spacing: 0) {
-            Image(systemName: "checkmark.shield")
-                .font(.system(size: 30, weight: .light))
-                .foregroundStyle(Theme.textTertiary)
-                .padding(.bottom, 16)
-                .accessibilityHidden(true)
-            Text(L("check.intro.title"))
-                .font(.lumenSheetTitle)
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.bottom, 6)
-            Text(L("check.empty"))
-                .font(.lumenBody)
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 440)
-                .padding(.bottom, 18)
+        LumenEmptyState(symbol: "checkmark.shield", title: L("check.intro.title"), text: L("check.empty")) {
             Button {
                 Task { await check.run() }
             } label: {
@@ -89,8 +74,6 @@ struct ProfileCheckPane: View {
             .buttonStyle(.lumenPrimary)
             .keyboardShortcut(.defaultAction)
         }
-        .padding(.horizontal, 40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// While the check runs: its three steps in order, and what the person will see meanwhile.
@@ -122,7 +105,7 @@ struct ProfileCheckPane: View {
         HStack(spacing: 10) {
             ZStack {
                 if running {
-                    ProgressView().controlSize(.mini)
+                    ProgressView().controlSize(.small)
                 } else {
                     Image(systemName: made ? "checkmark" : "circle")
                         .font(.system(size: 11, weight: .semibold))
@@ -137,36 +120,25 @@ struct ProfileCheckPane: View {
         }
     }
 
-    /// A check that could not be made: why, and what to see to before checking again with the
-    /// button above.
+    /// A check that could not be made: why, and what to see to before checking again — with the
+    /// button under it on a first check, with the one above after an earlier check.
+    @ViewBuilder
     private func failure(_ reason: String) -> some View {
-        VStack(spacing: 0) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 26, weight: .light))
-                .foregroundStyle(Theme.danger)
-                .padding(.bottom, 12)
-                .accessibilityHidden(true)
-            Text(L("check.failed.title"))
-                .font(.lumenSheetTitle)
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.bottom, 6)
-            Text(reason)
-                .font(.lumenBody)
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-                .frame(maxWidth: 420)
-            Text(L("check.failed.hint"))
-                .font(.lumenSecondary)
-                .foregroundStyle(Theme.textTertiary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 420)
-                .padding(.top, 8)
+        if check.checkedAt == nil {
+            LumenEmptyState(symbol: "exclamationmark.triangle", tint: Theme.danger, title: L("check.failed.title"),
+                            text: reason, note: L("check.failed.hint")) {
+                Button {
+                    Task { await check.run() }
+                } label: {
+                    Label(L("check.rerun"), systemImage: "checkmark.shield")
+                }
+                .buttonStyle(.lumenPrimary)
+                .keyboardShortcut(.defaultAction)
+            }
+        } else {
+            LumenEmptyState(symbol: "exclamationmark.triangle", tint: Theme.danger, title: L("check.failed.title"),
+                            text: reason, note: L("check.failed.hint"))
         }
-        .padding(40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// A finished check: the verdict, the restart where it is asked for, and the findings in
@@ -251,9 +223,9 @@ struct ProfileCheckPane: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(attention == 0 ? Theme.running.opacity(0.07) : Theme.warningTint))
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(attention == 0 ? Theme.runningTint : Theme.warningTint))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .strokeBorder(attention == 0 ? Theme.running.opacity(0.26) : Theme.warningLine, lineWidth: 1))
+            .strokeBorder(attention == 0 ? Theme.runningLine : Theme.warningLine, lineWidth: 1))
         .accessibilityElement(children: .combine)
     }
 

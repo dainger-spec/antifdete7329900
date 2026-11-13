@@ -55,12 +55,30 @@ extension SheetFooter where Leading == EmptyView {
     }
 }
 
-extension View {
-    /// A native grouped `Form` on the sheet's own surface (no second background behind its groups).
-    func lumenForm() -> some View {
-        self
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
+/// A risk said before the person acts (a file written in the clear, a profile that will be stopped):
+/// the design's warning box — the amber tint and line, radius 12, the filled triangle, the sentence
+/// in t1. Not `LumenBanner`, which carries the Profiles list's side margins.
+struct SheetWarning: View {
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Theme.warning)
+                .padding(.top, 1)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(.lumenBody)
+                .foregroundStyle(Theme.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.warningTint))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.warningLine, lineWidth: 1))
+        .accessibilityElement(children: .combine)
     }
 }
 

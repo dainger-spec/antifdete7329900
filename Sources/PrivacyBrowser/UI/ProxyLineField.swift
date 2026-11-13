@@ -174,12 +174,13 @@ struct ProxyLineField: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 TextField(L("proxyLine.field"), text: $line.text, prompt: Text(verbatim: ""))
-                    .lumenField(L("proxyLine.example"), isEmpty: line.text.isEmpty, masked: line.maskedText)
+                    .lumenField(L("proxyLine.example"), isEmpty: line.text.isEmpty, masked: line.maskedText,
+                                error: readingIsProblem)
                     .accessibilityLabel(L("proxyLine.field"))
                 Button(action: onCheck) {
                     Label(L("proxyLine.check"), systemImage: "checkmark.shield")
                 }
-                .buttonStyle(.lumenSecondary)
+                .buttonStyle(.lumenFieldButton)
                 .disabled(checking || line.checkable == nil)
                 .help(L("proxyLine.check.help"))
             }
@@ -190,6 +191,12 @@ struct ProxyLineField: View {
                 ProxyLineCheckView(proxy: check.proxy, result: check.result)
             }
         }
+    }
+
+    /// The line is not one proxy: the field's edge is red, as the words under it.
+    private var readingIsProblem: Bool {
+        if case .problem = line.reading { return true }
+        return false
     }
 }
 

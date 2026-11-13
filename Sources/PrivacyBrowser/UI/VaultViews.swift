@@ -64,11 +64,13 @@ struct LockScreen<Content: View>: View {
             Spacer(minLength: 40)
             VStack(spacing: 0) {
                 LumenMark(size: 64)
+                // A measure of its own, wider than the form's 400: "Хранилище заблокировано" and
+                // "Create a master password" wrapped at 340.
                 Text(title)
                     .lumenDisplayTitle()
                     .foregroundStyle(Theme.textPrimary)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 340)
+                    .frame(maxWidth: 460)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 28)
                 Text(subtitle)
@@ -77,10 +79,11 @@ struct LockScreen<Content: View>: View {
                     .foregroundStyle(Theme.textSecondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 400)
                     .padding(.top, 10)
                 content()
+                    .frame(maxWidth: 400)
             }
-            .frame(maxWidth: 400)
             .padding(.horizontal, 24)
             .opacity(appeared ? 1 : 0)
             .offset(y: appeared || Motion.isReduced(reduceMotion) ? 0 : 10)
@@ -271,6 +274,9 @@ struct LockLink: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
+        // The 6 pt stays as the click's (and the pointer's) slop but not in the layout: the text
+        // lines up with the fields' edge (it sat 6 pt in).
+        .padding(.horizontal, -6)
     }
 }
 

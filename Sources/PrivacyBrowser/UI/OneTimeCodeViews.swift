@@ -248,7 +248,7 @@ struct OneTimeCodeSetup: View {
                     TextField(L("passwords.code.placeholder"), text: $input, prompt: Text(verbatim: ""))
                         .lumenField(L("passwords.code.placeholder"), isEmpty: input.isEmpty, error: shownProblem != nil)
                     Button(L("common.add")) { take(OneTimeCodeInput.read(input)) }
-                        .buttonStyle(.lumenSecondary)
+                        .buttonStyle(.lumenFieldButton)
                         .disabled(input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 // Under the field it is about, and beside the hint rather than in its place: the

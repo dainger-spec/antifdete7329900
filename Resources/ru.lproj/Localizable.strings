@@ -527,7 +527,8 @@
 "whatSites.subtitle" = "Одна страница этого Mac открывается в окне профиля, и её измеряют те же скрипты, что сравнение в CI: навигатор, экран, окно, заголовки запросов, TLS, API. Ничего не покидает этот Mac: страница, её запросы и то, что она находит, остаются на 127.0.0.1, который слушает только пока снимок делается.";
 "whatSites.take" = "Сделать снимок";
 "whatSites.retake" = "Сделать снова";
-"whatSites.empty" = "Снимка ещё нет. Сделайте его: на мгновение откроется окно профиля (профиль запустится, если остановлен). Safari не открывается: сравнить с ней можно после, если захотите.";
+"whatSites.empty" = "Сделайте его: на мгновение откроется окно профиля (профиль запустится, если остановлен). Safari не открывается: сравнить с ней можно после, если захотите.";
+"whatSites.empty.title" = "Снимка ещё нет";
 "whatSites.step.starting" = "Запуск профиля…";
 "whatSites.step.profile" = "Измерение в окне профиля…";
 "whatSites.step.safari" = "Измерение в Safari… Safari выйдет на передний план; это окно вернётся, когда закончится.";
@@ -541,6 +542,7 @@
 "whatSites.allSame.mobile" = "Совпадает с Safari на этом Mac — с настоящим iPhone сравнить не с чем.";
 "whatSites.mobileView" = "Эталона здесь нет: панель сравнивает профиль с Safari на этом Mac, а профиль называет себя iPhone или iPad. От настоящего устройства он отличается и тем, чего здесь не видно: касание, шрифты, видеокарта (WebGL), звук, датчики движения, экран.";
 "whatSites.summary" = "совпадает: %ld · отличается: %ld · у каждого окна своё: %ld";
+"whatSites.summary.profileOnly" = "сигналов: %ld — не сравнивались";
 "whatSites.same" = "совпадает";
 "whatSites.differs" = "отличается";
 "whatSites.perWindow" = "у каждого окна своё — не сравнивается";
@@ -784,6 +786,7 @@
 "profiles.column.name" = "Имя";
 "profiles.count" = "Профилей: %ld";
 "profiles.countRunning" = "Профилей: %1$ld · запущено: %2$ld";
+"profiles.countFiltered" = "%1$@ · %2$ld из %3$ld";
 "profiles.delete.confirm" = "Удалить профиль и все его данные";
 "profiles.delete.message" = "Будут удалены cookie, данные сайтов, кэш, настройки, история, закладки и сохранённые пароли этого профиля.";
 "profiles.delete.title" = "Удалить профиль «%@»?";
@@ -868,6 +871,7 @@
 "profiles.sync.notYet" = "Ещё не синхронизировано";
 "profiles.sync.off" = "Без синхронизации";
 "profiles.sync.synced" = "Синхронизировано %@";
+"profiles.sync.syncedTitle" = "Синхронизировано";
 "profiles.sync.syncing" = "Синхронизация…";
 "profiles.title" = "Профили";
 /* Proxy list (Profiles → ⋯ → Proxies…), import, checks, assignment; several profiles at once */
@@ -1025,6 +1029,7 @@
 "proxies.delete.message" = "Профили, которые используют эти прокси, сохранят их: у каждого профиля своя копия.";
 "proxies.checking.progress" = "Проверено %1$ld из %2$ld";
 "proxies.summary" = "Прокси: %1$ld · отвечают: %2$ld · не отвечают: %3$ld";
+"proxies.summary.short" = "отвечают: %1$ld · не отвечают: %2$ld";
 "proxies.column.proxy" = "Прокси";
 "proxies.column.exit" = "Выход";
 "proxies.column.ip" = "Внешний IP";
@@ -1366,7 +1371,7 @@
 "safari.unavailable.item" = "«%@» опирается на службы настоящей Safari, которых в профиле нет, поэтому не сработал. Профиль продолжает работать; подробности записаны в журнал.";
 "safari.unavailable.action" = "Это действие опирается на службы настоящей Safari, которых в профиле нет, поэтому не сработало. Профиль продолжает работать; подробности записаны в журнал.";
 "simplified.chip" = "Упрощённый режим";
-"simplified.title" = "Профиль работает в упрощённом режиме";
+"simplified.title" = "Профиль работает в упрощённом режиме";
 "simplified.body" = "Его окно — окно приложения, а не Safari. Профиль, как всегда, ходит через свой прокси и хранит свои данные, но с Safari не совпадает: без окна Safari это обычный WebKit, и сайты могут это заметить.";
 "simplified.why" = "Почему: %@";
 "simplified.reason.device" = "профиль представляется iPhone или iPad, а окно Safari — окно Mac: такой профиль всегда открывается в окне приложения.";
@@ -1385,7 +1390,7 @@
 /* Profile export and import; crash recovery */
 "profiles.row.export" = "Экспортировать профиль…";
 "profiles.menu.import" = "Импортировать профиль…";
-"transfer.export.title" = "Экспорт профиля «%@»";
+"transfer.export.title" = "Экспорт профиля — %@";
 "transfer.export.explanation" = "Профиль целиком — настройки и прокси, пароли, история, закладки, cookies и данные сайтов — в один файл, зашифрованный отдельным паролем: для другого Mac, резервной копии или передачи.";
 "transfer.export.running" = "Профиль запущен: перед экспортом он будет остановлен, чтобы его данные сохранились целиком.";
 "transfer.export.action" = "Экспортировать…";
@@ -1481,7 +1486,7 @@
 "profiles.row.exportCookies" = "Экспорт cookies…";
 "profiles.row.check" = "Проверить профиль…";
 "profiles.row.copyWebDriver" = "Скопировать адрес WebDriver";
-"cookieExport.title" = "Экспорт cookies профиля «%@»";
+"cookieExport.title" = "Экспорт cookies — %@";
 "cookieExport.explanation" = "Все cookies профиля, включая сеансовые, в файле, который читают другие браузеры, расширения для cookies и инструменты автоматизации.";
 "cookieExport.format" = "Формат";
 "cookieExport.format.netscape" = "cookies.txt (Netscape: curl, yt-dlp, расширения)";
@@ -1746,6 +1751,7 @@
 "settings.language.sites.title" = "Язык для сайтов";
 "settings.language.sites.detail" = "Сайты видят язык профиля — он задаётся в настройках профиля, в блоке «Часовой пояс и язык». Язык интерфейса его не меняет, и наоборот.";
 "settings.section.webRTC" = "WebRTC через прокси";
+"settings.section.webRTC.short" = "WebRTC через прокси";
 "settings.section.sync" = "Синхронизация";
 "settings.section.security" = "Безопасность";
 "settings.section.automation" = "API автоматизации";
@@ -1905,7 +1911,6 @@
 "automation.webDriver.how" = "Как подключить";
 "help.title" = "Справка";
 "help.copy" = "Скопировать";
-"help.copied" = "Скопировано";
 "help.topic.start" = "Начало работы";
 "help.topic.palette" = "Командная палитра";
 "help.topic.scenarios" = "Сценарии";

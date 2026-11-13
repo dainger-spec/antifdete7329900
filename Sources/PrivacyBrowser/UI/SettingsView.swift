@@ -17,6 +17,7 @@ struct SettingsView: View {
     /// The account page's license, for the UI snapshots; the app's own otherwise.
     var previewLicense: LicenseModel?
     @State private var search = ""
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static let size = CGSize(width: 1000, height: 700)
     static let sidebarWidth: CGFloat = 248
@@ -31,7 +32,9 @@ struct SettingsView: View {
             // inspector had in 555 (ProfilesScreen.inspectorTop).
             ScrollView {
                 pane
-                    .frame(maxWidth: 640, alignment: .leading)
+                    // 620, not 640: the page fits with a legacy scroller's 16 pt or without it
+                    // (751 − 112 − 16 = 623), so rows end at the same x on long and short pages.
+                    .frame(maxWidth: 620, alignment: .leading)
                     .padding(.horizontal, 56)
                     .padding(.bottom, 40)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -61,41 +64,52 @@ struct SettingsView: View {
             Color.clear.frame(height: 40)
             LumenSearchField(text: $search, prompt: L("settings.search"))
                 .padding(.bottom, 8)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(SettingsSection.Group.allCases, id: \.self) { group in
-                        let items = group.sections.filter(matches)
-                        if !items.isEmpty {
-                            Text(group.title)
-                                .lumenCaps()
-                                .padding(.leading, 10)
-                                .padding(.top, 18)
-                                .padding(.bottom, 6)
-                                .accessibilityAddTraits(.isHeader)
-                            ForEach(items) { item in
-                                SettingsSidebarItem(section: item, selected: section == item) { section = item }
+            ScrollViewReader { scroller in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(SettingsSection.Group.allCases, id: \.self) { group in
+                            let items = group.sections.filter(matches)
+                            if !items.isEmpty {
+                                Text(group.title)
+                                    .lumenCaps()
+                                    .padding(.leading, 10)
+                                    .padding(.top, 14)
+                                    .padding(.bottom, 6)
+                                    .accessibilityAddTraits(.isHeader)
+                                ForEach(items) { item in
+                                    SettingsSidebarItem(section: item, selected: section == item) { section = item }
+                                        .id(item)
+                                }
                             }
                         }
-                    }
-                    if SettingsSection.allCases.allSatisfy({ !matches($0) }) {
-                        Text(L("settings.search.none"))
-                            .font(.lumenSecondary)
-                            .foregroundStyle(Theme.textTertiary)
-                            .padding(10)
+                        if SettingsSection.allCases.allSatisfy({ !matches($0) }) {
+                            Text(L("settings.search.none"))
+                                .font(.lumenSecondary)
+                                .foregroundStyle(Theme.textTertiary)
+                                .padding(10)
+                        }
                     }
                 }
+                .scrollIndicators(.never)
+                // The chosen section is in view: About and Updates were below the fold, with
+                // nothing selected on their pages, and one asked for from elsewhere did not come up.
+                .onAppear { DispatchQueue.main.async { scroller.scrollTo(section, anchor: .center) } }
+                .onChange(of: section) { _, chosen in
+                    // With Reduce Motion or the animations off, the list jumps there (the design's Motion).
+                    withAnimation(Motion.isReduced(reduceMotion) ? nil : Theme.appearAnimation) { scroller.scrollTo(chosen) }
+                }
             }
-            .scrollIndicators(.never)
         }
         .padding(.horizontal, 12)
         .frame(width: Self.sidebarWidth)
         .background(Theme.sidebar)
     }
 
-    /// A section the search finds: by its title.
+    /// A section the search finds: by its title, or by the shorter name the sidebar gives it.
     private func matches(_ section: SettingsSection) -> Bool {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         return query.isEmpty || L(section.titleKey).localizedCaseInsensitiveContains(query)
+            || L(section.sidebarTitleKey).localizedCaseInsensitiveContains(query)
     }
 
     @ViewBuilder
@@ -136,7 +150,7 @@ private struct SettingsSidebarItem: View {
                     .font(.system(size: 13))
                     .frame(width: 18)
                     .accessibilityHidden(true)
-                Text(L(section.titleKey))
+                Text(L(section.sidebarTitleKey))
                     .font(.lumenBody)
                     .lineLimit(1)
                 Spacer(minLength: 4)
@@ -144,12 +158,15 @@ private struct SettingsSidebarItem: View {
             }
             .foregroundStyle(selected || hovered ? Theme.textPrimary : Theme.textSecondary)
             .padding(.horizontal, 10)
-            .frame(height: 32)
+            // 30, as the Profiles sidebar's rows: all sixteen fit a 700 pt window.
+            .frame(height: 30)
             .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(selected ? Theme.rowSelected : (hovered ? Theme.rowHover : Color.clear)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // The page's full title, where the sidebar's is shorter or cut.
+        .help(L(section.titleKey))
         .onHover { hovered = $0 }
         .animation(Motion.hover(hovered), value: hovered)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -223,6 +240,9 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         }
     }
 
+    /// The sidebar's name: shorter where the page's title does not fit it (English "WebRTC through the proxy").
+    var sidebarTitleKey: String { self == .webRTC ? "settings.section.webRTC.short" : titleKey }
+
     var symbol: String {
         switch self {
         case .account: return "person.crop.circle"
@@ -236,7 +256,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .webRTC: return "dot.radiowaves.left.and.right"
         case .sync: return "arrow.triangle.2.circlepath"
         case .security: return "lock"
-        case .automation: return "chevron.left.forwardslash.chevron.right"
+        // As the Profiles sidebar, the scenario editor and Help draw the API; `</>` is a scenario's commands.
+        case .automation: return "terminal"
         case .updates: return "arrow.down.to.line"
         case .shortcuts: return "keyboard"
         case .diagnostics: return "stethoscope"
@@ -491,21 +512,17 @@ private struct DiagnosticsSettings: View {
                     .textSelection(.enabled)
                     .padding(.top, 8)
             }
-            Text(L("settings.diagnostics.report"))
-                .font(.lumenSection)
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.top, 16)
-            ScrollView {
-                Text(verbatim: report.isEmpty ? "…" : report) // l10n: the report is for support, in English
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(Theme.textSecondary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-            }
-            .frame(height: 190)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.raisedInset))
-            .padding(.top, 6)
+            SettingsCaption(L("settings.diagnostics.report"))
+            // As tall as the report: the page scrolls, not a box inside it (a fixed 190 pt box
+            // cut its last line through the glyphs).
+            Text(verbatim: report.isEmpty ? "…" : report) // l10n: the report is for support, in English
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Theme.textSecondary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.raisedInset))
             SettingsNote(text: L("settings.diagnostics.contents"))
         }
         .task {
@@ -791,25 +808,17 @@ struct ShortcutSettings: View {
     var body: some View {
         SettingsPage(title: L("settings.section.shortcuts"), subtitle: L("settings.shortcuts.subtitle")) {
             ForEach(Self.groups) { group in
-                Text(L(group.titleKey))
-                    .font(.lumenSection)
-                    .foregroundStyle(Theme.textPrimary)
-                    .padding(.top, 16)
-                    .padding(.bottom, 4)
+                SettingsCaption(L(group.titleKey))
                 ForEach(group.shortcuts) { shortcut in
+                    // The same key as Help, the palette and the search field draw.
                     HStack(spacing: 16) {
                         Text(L(shortcut.titleKey))
                             .font(.lumenBody)
                             .foregroundStyle(Theme.textSecondary)
                         Spacer(minLength: 12)
-                        Text(verbatim: shortcut.keys)
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                            .foregroundStyle(Theme.textPrimary)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Theme.raisedInset))
+                        KeyCap(keys: shortcut.keys)
                     }
-                    .padding(.vertical, 4)
+                    .frame(minHeight: 32)
                     .accessibilityElement(children: .combine)
                 }
             }
@@ -841,13 +850,23 @@ private struct AboutSettings: View {
                 }
             }
             .padding(.vertical, 12)
+            // A table of two columns with row lines: the values start on one edge, and a two-line
+            // value's label sits on its first line.
             ForEach(Self.facts) { fact in
-                HStack(spacing: 16) {
-                    Text(fact.name).font(.lumenBody).foregroundStyle(Theme.textSecondary)
-                    Spacer(minLength: 12)
-                    Text(verbatim: fact.value).font(.lumenBody).foregroundStyle(Theme.textPrimary).textSelection(.enabled)
+                HStack(alignment: .firstTextBaseline, spacing: 16) {
+                    Text(fact.name)
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(width: 160, alignment: .leading)
+                    Text(verbatim: fact.value)
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textPrimary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(.vertical, 5)
+                .padding(.vertical, 9)
+                .overlay(alignment: .top) { Rectangle().fill(Theme.divider).frame(height: 1) }
             }
             if let engines = EngineWarning.current {
                 VStack(alignment: .leading, spacing: 6) {

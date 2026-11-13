@@ -10,7 +10,7 @@ struct ProxyProfileReference: Identifiable {
 
 /// The inspector at the right of the Proxies section (the design's proxy inspector): the selected
 /// proxy's last check, step by step, with what to do about it, what it is, and the profiles that
-/// use it. 320 pt, over the light at 80 %, as the profiles' inspector.
+/// use it. 320 pt, over the light at 80 % (opaque over the list), as the profiles' inspector.
 struct ProxyInspectorView: View {
     let entry: ProxyListEntry
     /// Being checked now.
@@ -27,6 +27,10 @@ struct ProxyInspectorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 head(report)
+                // What happened and what to do first, on the first screen; the steps follow as evidence.
+                if report.explanation != nil || report.advice != nil {
+                    advice(report)
+                }
                 if entry.lastCheck == nil, !checking {
                     section(L("inspector.proxy.steps")) {
                         Text(entry.kindKnown ? L("proxies.report.unchecked") : L("proxies.type.unknown.help"))
@@ -47,9 +51,6 @@ struct ProxyInspectorView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.top, 10)
                     }
-                }
-                if report.explanation != nil || report.advice != nil {
-                    advice(report)
                 }
                 if let note = report.kindNote {
                     Label(note, systemImage: "info.circle")
@@ -111,21 +112,27 @@ struct ProxyInspectorView: View {
                     .textSelection(.enabled)
                     .padding(.top, 6)
             }
-            HStack(spacing: 6) {
-                if checking {
-                    ProgressView().controlSize(.mini)
+            // The state and when it was checked on two lines: on one 272 pt line both were cut. The
+            // dot is never alone: the words are beside it.
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 7) {
+                    if checking {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Circle().fill(report.state.color).frame(width: 6, height: 6)
+                    }
+                    Text(report.state.shortText)
+                        .font(.lumenBody)
+                        .foregroundStyle(report.state.isWorking ? Theme.textPrimary : report.state.color)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Text(report.state.shortText)
-                    .foregroundStyle(report.state.isWorking ? Theme.textPrimary : report.state.color)
                 if let checked = entry.lastCheck?.checkedAt, !checking {
-                    Text(verbatim: "·").foregroundStyle(Theme.textTertiary)
                     Text(String(format: L("proxies.report.checkedAt"), checked.shownRelative))
+                        .font(.lumenSecondary)
                         .foregroundStyle(Theme.textTertiary)
                 }
             }
-            .font(.lumenSecondary)
-            .lineLimit(1)
-            .padding(.top, 10)
+            .padding(.top, 8)
             HStack(spacing: 8) {
                 Button(L("proxies.menu.check"), action: check)
                     .buttonStyle(.lumenSecondary)
@@ -220,13 +227,7 @@ private struct ProxyStepTimelineRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(spacing: 0) {
-                ZStack {
-                    Circle().strokeBorder(ringColor, lineWidth: 1)
-                    Image(systemName: symbol)
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(symbolColor)
-                }
-                .frame(width: 16, height: 16)
+                ProxyStepMark(outcome: step.outcome)
                 if !isLast {
                     Rectangle().fill(Theme.divider).frame(width: 1).frame(maxHeight: .infinity)
                 }
@@ -237,9 +238,11 @@ private struct ProxyStepTimelineRow: View {
                 Text(step.title)
                     .font(.lumenLabel)
                     .foregroundStyle(step.outcome == .notReached ? Theme.textTertiary : Theme.textPrimary)
+                // A step not reached: as dim as its name.
                 Text(step.outcome == .notReached ? L("proxies.step.notReached") : step.detail)
                     .font(.lumenSecondary)
-                    .foregroundStyle(step.outcome == .failed ? Theme.danger : Theme.textSecondary)
+                    .foregroundStyle(step.outcome == .failed ? Theme.danger
+                                     : (step.outcome == .notReached ? Theme.textTertiary : Theme.textSecondary))
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
             }
@@ -249,36 +252,13 @@ private struct ProxyStepTimelineRow: View {
         .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .combine)
     }
-
-    private var symbol: String {
-        switch step.outcome {
-        case .passed: return "checkmark"
-        case .failed: return "xmark"
-        case .skipped: return "arrow.turn.down.right"
-        case .notReached: return "minus"
-        }
-    }
-
-    private var ringColor: Color {
-        switch step.outcome {
-        case .passed: return Theme.textSecondary
-        case .failed: return Theme.danger
-        case .skipped, .notReached: return Theme.divider
-        }
-    }
-
-    private var symbolColor: Color {
-        switch step.outcome {
-        case .passed: return Theme.textPrimary
-        case .failed: return Theme.danger
-        case .skipped, .notReached: return Theme.textTertiary
-        }
-    }
 }
 
-/// Several proxies selected: how many, and what can be done with them all.
+/// Several proxies selected: how many, which, and what can be done with them all.
 struct ProxySelectionInspectorView: View {
     let count: Int
+    /// Their names, in the list's order (as the profiles' selection inspector shows its own).
+    var names: [String] = []
     var checking = false
     let check: () -> Void
     let assign: () -> Void
@@ -290,19 +270,38 @@ struct ProxySelectionInspectorView: View {
                 .lumenHeadingTitle()
                 .foregroundStyle(Theme.textPrimary)
                 .accessibilityAddTraits(.isHeader)
-            VStack(spacing: 8) {
-                Button(L("proxies.check.selected"), action: check)
-                    .buttonStyle(LumenButtonStyle(kind: .secondary, fullWidth: true))
-                    .disabled(checking)
-                Button(L("proxies.menu.assign"), action: assign)
-                    .buttonStyle(LumenButtonStyle(kind: .ghost, fullWidth: true))
-                Button(L("proxies.menu.delete"), role: .destructive, action: delete)
-                    .buttonStyle(LumenButtonStyle(kind: .destructive, fullWidth: true))
+            if !names.isEmpty {
+                Text(ProfileListView.listed(names))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(3)
+                    .padding(.top, 4)
+            }
+            // The single proxy's head: a leading row, Check first (as the profiles' selection
+            // inspector follows its single one); under each other only when they do not fit.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { actionButtons }
+                VStack(alignment: .leading, spacing: 8) { actionButtons }
             }
             .padding(.top, 18)
+            // Quiet, its text on the column's edge (a 28 pt button's 11 pt inset taken back), as
+            // the profiles' warm-up link.
+            Button(L("proxies.menu.delete"), role: .destructive, action: delete)
+                .buttonStyle(.lumenDestructive)
+                .padding(.leading, -11)
+                .padding(.top, 10)
             Spacer(minLength: 0)
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private var actionButtons: some View {
+        Button(L("proxies.check.selected"), action: check)
+            .buttonStyle(.lumenSecondary)
+            .disabled(checking)
+        Button(L("proxies.menu.assign"), action: assign)
+            .buttonStyle(.lumenGhost)
     }
 }

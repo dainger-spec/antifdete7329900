@@ -48,6 +48,14 @@ struct ProfileEditorForm: View {
                 .map { ceil((String($0) as NSString).size(withAttributes: [.font: font]).width) }
                 .max() ?? 0
         }
+
+        /// The widest whole label: an index this wide holds every label on one line.
+        static var widestLabel: CGFloat {
+            let font = NSFont.systemFont(ofSize: 13, weight: .medium)
+            return allCases
+                .map { ceil((L($0.titleKey) as NSString).size(withAttributes: [.font: font]).width) }
+                .max() ?? 0
+        }
     }
 
     @Binding var draft: ProfileDraft
@@ -79,6 +87,7 @@ struct ProfileEditorForm: View {
     var onChooseCameraVideo: () -> Void = {}
     /// The system virtual camera's install state, for the delivery choice (`SystemCamera`).
     @ObservedObject private var systemCamera = SystemCamera.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Opens the separate camera preview window (`CameraPreviewWindowController`).
     var onOpenCameraPreview: () -> Void = {}
     /// Whether the plan opens camera substitution (pro and team). When false the camera section shows
@@ -98,8 +107,10 @@ struct ProfileEditorForm: View {
 
     /// The index is at least as wide as its longest word, so that a label wraps between its words
     /// and never inside one ("Конфиденциаль|ность"); the editor is wider by as much, so that the
-    /// form keeps its width.
-    static let indexWidth: CGFloat = max(172, Topic.widestWord + 2 + indexChrome)
+    /// form keeps its width. A whole label up to 156 pt keeps to one line ("Location and
+    /// Language" took two, a row taller than the others); a longer one still wraps between words.
+    static let indexWidth: CGFloat = max(172, Topic.widestWord + 2 + indexChrome,
+                                         min(Topic.widestLabel, 156) + 2 + indexChrome)
     static let size = CGSize(width: 760 + indexWidth - 172, height: 660)
     /// Around a label in the index: the index's margins and the row's, the symbol, and the row's gaps
     /// on either side of the label.
@@ -114,14 +125,19 @@ struct ProfileEditorForm: View {
                     index(scroller)
                     Rectangle().fill(Theme.divider).frame(width: 1)
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 30) {
+                        // The air between parts is each part's own (`.id` after it): a jump from
+                        // the index leaves 20 pt above the caption, as the first part has at rest,
+                        // and parts stand further apart than the groups inside one.
+                        VStack(alignment: .leading, spacing: 0) {
                             ForEach(Topic.allCases) { part in
-                                section(part).id(part)
+                                section(part)
+                                    .padding(.top, 20)
+                                    .padding(.bottom, 24)
+                                    .id(part)
                             }
                         }
                         .padding(.horizontal, 24)
-                        .padding(.top, 18)
-                        .padding(.bottom, 28)
+                        .padding(.bottom, 4)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .onAppear {
@@ -130,7 +146,9 @@ struct ProfileEditorForm: View {
                     }
                     // Moved to a part from outside the index (Save refused for the system camera).
                     .onChange(of: topic) {
-                        withAnimation(Theme.appearAnimation) { scroller.scrollTo(topic, anchor: .top) }
+                        withAnimation(Motion.isReduced(reduceMotion) ? nil : Theme.appearAnimation) {
+                            scroller.scrollTo(topic, anchor: .top)
+                        }
                     }
                 }
             }
@@ -149,7 +167,7 @@ struct ProfileEditorForm: View {
                 let selected = topic == part
                 Button {
                     topic = part
-                    withAnimation(Theme.appearAnimation) { scroller.scrollTo(part, anchor: .top) }
+                    withAnimation(Motion.isReduced(reduceMotion) ? nil : Theme.appearAnimation) { scroller.scrollTo(part, anchor: .top) }
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: part.symbol)
@@ -649,9 +667,7 @@ struct ProfileEditorForm: View {
     @ViewBuilder
     private var localeChoice: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(L("editor.locale"))
-                .font(.lumenLabel)
-                .foregroundStyle(Theme.textPrimary)
+            EditorGroupTitle(L("editor.locale"))
             LumenSegmented(selection: localeMode,
                            options: [(value: LocaleSource.connection, title: L("editor.locale.connection")),
                                      (value: LocaleSource.manual, title: L("editor.locale.manual")),
@@ -979,7 +995,7 @@ struct ProfileEditorForm: View {
                           prompt: Text(verbatim: "FaceTime HD Camera"))
                     .lumenField("FaceTime HD Camera", isEmpty: draft.camera.deviceLabel.isEmpty)
                 Button(matchDeviceTitle) { matchDeviceCamera() }
-                    .buttonStyle(.lumenSecondary)
+                    .buttonStyle(.lumenFieldButton)
                     .fixedSize()
             }
         }
@@ -1274,30 +1290,24 @@ private struct AvatarChoice: View {
         HStack(spacing: 8) {
             swatch(nil)
             ForEach(0..<ProfileAvatarStyle.colorCount, id: \.self) { index in swatch(index) }
-            Spacer(minLength: 16)
+            Spacer(minLength: 12)
             // Ready ones by section — crypto and currency signs, emoji, flags — beside
-            // the field for one's own letters (the owner, 12 November).
+            // the field for one's own letters (the owner, 12 November). The design's button at
+            // the field's height, which keeps its label whole ("Значк…" was cut).
             Button {
                 picking = true
             } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "face.smiling").font(.system(size: 12))
-                    Text(L("editor.avatar.pick")).font(.system(size: 12))
-                }
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.horizontal, 10)
-                .frame(height: 28)
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.rowSelected))
-                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
-                .contentShape(Rectangle())
+                Label(L("editor.avatar.pick"), systemImage: "face.smiling")
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.lumenFieldButton)
             .popover(isPresented: $picking, arrowEdge: .bottom) {
                 AvatarGlyphPicker(draft: $draft, avatarID: avatarID, close: { picking = false })
             }
+            // Two characters need less than the field's 130 pt: it gives way before the button would.
             TextField(L("editor.avatar.letters"), text: letters, prompt: Text(verbatim: ""))
                 .lumenField(L("editor.avatar.letters"), isEmpty: draft.avatarLetters.isEmpty)
-                .frame(width: 130)
+                .frame(minWidth: 104, maxWidth: 130)
+                .layoutPriority(1)
         }
     }
 
@@ -1429,18 +1439,24 @@ private struct CookiePaste: View {
                     Text(String(format: L("cookies.summary"), report.cookies.count, report.entriesFound))
                         .font(.lumenSecondary)
                         .foregroundStyle(report.cookies.isEmpty ? Theme.warning : Theme.textSecondary)
+                        .lineLimit(1)
+                        .layoutPriority(1)
                     if !report.failures.isEmpty {
                         Text(String(format: L("cookies.problemsTitle"), report.failures.count))
                             .font(.lumenSecondary)
                             .foregroundStyle(Theme.warning)
+                            .lineLimit(1)
                     }
                 }
                 Spacer(minLength: 0)
             }
         }
-        .padding(4)
-        .background(RoundedRectangle(cornerRadius: Theme.controlRadius + 2, style: .continuous)
-            .strokeBorder(targeted ? Theme.accent : .clear, lineWidth: 2))
+        // The drop ring lies outside the box, where a field's focus ring does: the box keeps the
+        // form's edges (an inset of 4 pt stepped it in from every other field).
+        .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius + 3, style: .continuous)
+            .strokeBorder(targeted ? Theme.accent : .clear, lineWidth: 2)
+            .padding(-3)
+            .allowsHitTesting(false))
         .onDrop(of: [UTType.fileURL], isTargeted: $targeted) { providers in
             guard let provider = providers.first else { return false }
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
@@ -1564,9 +1580,11 @@ private struct ProxyLocationCard: View {
     }
 
     private var card: some View {
-        HStack(alignment: .center, spacing: 12) {
+        // The flag on the title's line, as the proxy check's card above puts its symbol.
+        HStack(alignment: .top, spacing: 12) {
             if let location = draft.knownProxyLocation, let code = location.countryCode {
                 CountryFlag(code: code, size: 16)
+                    .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(String(format: L("editor.location.exitsIn"), CountryNames.name(for: code)))
                         .font(.lumenLabel)
@@ -1576,11 +1594,13 @@ private struct ProxyLocationCard: View {
                         .font(.lumenSecondary)
                         .foregroundStyle(Theme.textSecondary)
                 }
+                .layoutPriority(1)
             } else {
                 Image(systemName: "network")
                     .font(.system(size: 14))
                     .foregroundStyle(Theme.textTertiary)
                     .frame(width: 16)
+                    .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(L("editor.location.unknown"))
                         .font(.lumenLabel)
@@ -1590,13 +1610,16 @@ private struct ProxyLocationCard: View {
                         .foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                .layoutPriority(1)
             }
             Spacer(minLength: 12)
             if draft.localeMode == .connection {
-                Text(L("editor.location.followsProxy"))
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.accent)
+                // Quiet, as the fixed zone's line: the card's title is its one strong text.
+                Label(L("editor.location.followsProxy"), systemImage: "link")
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
+                    .fixedSize()
             } else {
                 Text(String(format: L("editor.location.fixedZone"), draft.timeZone))
                     .font(.lumenSecondary)
@@ -1679,13 +1702,26 @@ private struct EditorRow<Control: View>: View {
         self.control = control()
     }
 
+    /// The title on one line beside its menu; above the menu only when the two do not fit side by
+    /// side ("Вид для / сайтов" broke word by word beside a long menu). One of the two is shown.
     var body: some View {
-        HStack(spacing: 16) {
-            Text(title)
-                .font(.lumenLabel)
-                .foregroundStyle(Theme.textPrimary)
-            Spacer(minLength: 12)
-            control
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 0) {
+                Text(title)
+                    .font(.lumenLabel)
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                    .fixedSize()
+                Spacer(minLength: 16)
+                control
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(.lumenLabel)
+                    .foregroundStyle(Theme.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                control
+            }
         }
     }
 }
@@ -1721,9 +1757,11 @@ private struct EditorGroupTitle: View {
     init(_ text: String) { self.text = text }
 
     var body: some View {
+        // 14 / semibold: above the rows' 13 / medium titles under it, so that a group reads as one.
         Text(text)
-            .font(.lumenSection)
+            .font(.system(size: 14, weight: .semibold))
             .foregroundStyle(Theme.textPrimary)
+            .padding(.top, 2)
             .accessibilityAddTraits(.isHeader)
     }
 }

@@ -123,11 +123,12 @@ struct ScenariosView: View {
                 Button(action: create) {
                     Image(systemName: "plus")
                 }
-                .buttonStyle(.lumenGhost)
+                .buttonStyle(LumenIconButtonStyle(size: 28))
                 .help(L("scenarios.new"))
                 .accessibilityLabel(L("scenarios.new"))
             }
-            .padding(.horizontal, 14)
+            // 18: the title starts on the rows' text edge (8 + 10).
+            .padding(.horizontal, 18)
             .padding(.top, 38)
             .padding(.bottom, 10)
             ScrollView {
@@ -205,16 +206,10 @@ struct ScenariosView: View {
         .buttonStyle(.plain)
     }
 
+    /// No scenario yet: the app's one empty-state recipe (`LumenEmptyState`), as the Schedules pane
+    /// of this window; the symbol is the Scenarios' own (the Profiles sidebar's, the help's).
     private var empty: some View {
-        VStack(spacing: 12) {
-            Text(L("scenarios.empty.title"))
-                .font(.lumenHeading)
-                .foregroundStyle(Theme.textPrimary)
-            Text(L("scenarios.empty.detail"))
-                .font(.lumenBody)
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 420)
+        LumenEmptyState(symbol: "play.rectangle", title: L("scenarios.empty.title"), text: L("scenarios.empty.detail")) {
             Button(L("scenarios.new"), action: create)
                 .buttonStyle(.lumenPrimary)
             Button(L("scenarios.help.how")) { openHelp(.scenarios) }
@@ -245,7 +240,7 @@ struct ScenariosView: View {
                 // Not while a recording goes on: with the last scenario deleted there would be no
                 // Stop anywhere.
                 Button { confirmingDelete = true } label: { Image(systemName: "trash") }
-                    .buttonStyle(.lumenGhost)
+                    .buttonStyle(LumenIconButtonStyle(size: 28))
                     .help(L("scenarios.delete"))
                     .accessibilityLabel(L("scenarios.delete"))
                     .disabled(isRecording)
@@ -266,10 +261,12 @@ struct ScenariosView: View {
                     .padding(.bottom, 12)
             }
             HStack(alignment: .top, spacing: 12) {
-                CodeEditor(text: $source)
+                // The code takes the cursor, not the name (which opened selected in the system's highlight).
+                CodeEditor(text: $source, takesFocus: true)
                     .background(Theme.field)
-                    .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.fieldBorder))
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
+                        .strokeBorder(Theme.fieldBorder, lineWidth: 1))
                 if showsCommands { commands }
             }
             .padding(.horizontal, 20)
@@ -355,21 +352,35 @@ struct ScenariosView: View {
 
     private var runBar: some View {
         HStack(spacing: 10) {
-            Picker(L("scenarios.profile"), selection: $profileID) {
-                ForEach(model.profiles) { profile in
-                    Text(profile.name).tag(Optional(profile.id))
-                }
-            }
-            .frame(maxWidth: 320, alignment: .leading)
-            // A recording belongs to the profile it began in, and a start to the one it was asked
-            // for: the picker must not name another meanwhile.
-            .disabled(isRecording || starting)
+            // No profiles: no empty popup, but what to do and the action that does it.
             if model.profiles.isEmpty {
                 Text(L("scenarios.noProfiles"))
                     .font(.lumenSecondary)
-                    .foregroundStyle(Theme.textTertiary)
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
+                // As File › New Profile: the Profiles window, its new profile.
+                Button(L("profiles.action.new")) {
+                    if model.profilesWindow == nil { openWindow(id: "profiles") }
+                    model.activateProfilesWindow()
+                    model.newProfileRequest = true
+                }
+                .buttonStyle(.lumenSecondary)
+            } else {
+                Picker(L("scenarios.profile"), selection: $profileID) {
+                    ForEach(model.profiles) { profile in
+                        Text(profile.name).tag(Optional(profile.id))
+                    }
+                }
+                // At most 260 and free to shrink: a long profile name is cut inside the popup, not
+                // the action buttons' labels, nor the bar pushed past the column.
+                .frame(maxWidth: 260, alignment: .leading)
+                // A recording belongs to the profile it began in, and a start to the one it was asked
+                // for: the picker must not name another meanwhile.
+                .disabled(isRecording || starting)
             }
-            Spacer()
+            Spacer(minLength: 12)
             if isRecording {
                 // What the person does in the profile's window becomes the scenario's lines.
                 HStack(spacing: 7) {
@@ -383,11 +394,20 @@ struct ScenariosView: View {
                 Button(action: stopRecording) { Label(L("scenarios.record.stop"), systemImage: "stop.fill") }
                     .buttonStyle(.lumenPrimary)
             } else if let run, run.isRunning {
-                Text(L("scenarios.running"))
-                    .font(.lumenSecondary)
-                    .foregroundStyle(Theme.running)
-                Button(L("scenarios.stop")) { if let profileID { model.stopScenario(on: profileID) } }
-                    .buttonStyle(.lumenSecondary)
+                // The same shape as a recording: the state by its dot and words, Stop the main action.
+                HStack(spacing: 7) {
+                    Circle().fill(Theme.greenDot).frame(width: 8, height: 8)
+                    Text(L("scenarios.running"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textPrimary)
+                }
+                .accessibilityElement(children: .combine)
+                Button {
+                    if let profileID { model.stopScenario(on: profileID) }
+                } label: {
+                    Label(L("scenarios.stop"), systemImage: "stop.fill")
+                }
+                .buttonStyle(.lumenPrimary)
             } else {
                 // Record and Run start a stopped profile first, which takes a while: said, not
                 // only two dimmed buttons.
@@ -414,7 +434,7 @@ struct ScenariosView: View {
                 .buttonStyle(.lumenSecondary)
                 .disabled(!model.allowsAutomation || profileID == nil || starting)
                 .help(L("scenarios.record.help"))
-                Button(L("scenarios.run"), action: startRun)
+                Button(action: startRun) { Label(L("scenarios.run"), systemImage: "play.fill") }
                     .buttonStyle(.lumenPrimary)
                     .disabled(!model.allowsAutomation || profileID == nil || starting || source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .keyboardShortcut("r")
@@ -530,15 +550,17 @@ private struct RecordingLog: View {
                             .id(index)
                     }
                 }
-                .padding(12)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
             }
             .onChange(of: steps.count) { _, count in
                 if count > 0 { proxy.scrollTo(count - 1, anchor: .bottom) }
             }
         }
         .background(Theme.field)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.danger.opacity(0.35)))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
+            .strokeBorder(Theme.dangerLine, lineWidth: 1))
     }
 }
 
@@ -548,37 +570,50 @@ private struct RunLog: View {
     let run: ProfileManager.ScenarioRunState?
 
     var body: some View {
-        ScrollViewReader { reader in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 3) {
-                    if let run {
-                        ForEach(Array(run.lines.enumerated()), id: \.offset) { index, line in
-                            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                                Text(line.at.formatted(.dateTime.hour().minute().second().locale(Localization.locale)))
-                                    .foregroundStyle(Theme.textTertiary)
-                                Text(line.text)
-                                    .foregroundStyle(color(line.kind))
-                                    .textSelection(.enabled)
-                                    .fixedSize(horizontal: false, vertical: true)
+        Group {
+            // No run yet: said in the middle of the box, not as one small line at its corner.
+            if run == nil {
+                LumenEmptyHint(symbol: "text.alignleft", text: L("scenarios.log.empty"))
+            } else {
+                ScrollViewReader { reader in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 3) {
+                            if let run {
+                                ForEach(Array(run.lines.enumerated()), id: \.offset) { index, line in
+                                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                        Text(line.at.formatted(.dateTime.hour().minute().second().locale(Localization.locale)))
+                                            .foregroundStyle(Theme.textTertiary)
+                                        Text(line.text)
+                                            .foregroundStyle(color(line.kind))
+                                            .textSelection(.enabled)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .id(index)
+                                }
                             }
-                            .font(.system(size: 12, design: .monospaced))
-                            .id(index)
                         }
-                    } else {
-                        Text(L("scenarios.log.empty"))
-                            .font(.lumenSecondary)
-                            .foregroundStyle(Theme.textTertiary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .onChange(of: run?.lines.count ?? 0) { _, count in
+                        if count > 0 { reader.scrollTo(count - 1, anchor: .bottom) }
+                    }
+                    // A log shown at once with its lines (another profile chosen) opens at its end
+                    // too: the reader is new then, and its onChange sees no change.
+                    .onAppear {
+                        let count = run?.lines.count ?? 0
+                        if count > 0 { DispatchQueue.main.async { reader.scrollTo(count - 1, anchor: .bottom) } }
                     }
                 }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .background(Theme.card)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius))
-            .onChange(of: run?.lines.count ?? 0) { _, count in
-                if count > 0 { reader.scrollTo(count - 1, anchor: .bottom) }
             }
         }
+        // The code editor's box: the three code boxes of the window are drawn one way.
+        .background(Theme.field)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
+            .strokeBorder(Theme.fieldBorder, lineWidth: 1))
     }
 
     private func color(_ kind: ScenarioRunner.Line.Kind) -> Color {
@@ -595,6 +630,8 @@ private struct RunLog: View {
 /// would break JavaScript), no spelling.
 struct CodeEditor: NSViewRepresentable {
     @Binding var text: String
+    /// The cursor starts here when it appears: one field per screen, as `LockPasswordField.takesFocus`.
+    var takesFocus = false
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSTextView.scrollableTextView()
@@ -618,9 +655,16 @@ struct CodeEditor: NSViewRepresentable {
         view.textColor = NSColor(Theme.textPrimary)
         view.insertionPointColor = NSColor(Theme.textPrimary)
         view.drawsBackground = false
-        view.textContainerInset = NSSize(width: 8, height: 10)
+        // 7 + the line's own 5 pt padding: the text starts 12 pt in, as in the logs under it.
+        view.textContainerInset = NSSize(width: 7, height: 10)
         view.string = text
         view.setAccessibilityLabel(L("scenarios.code"))
+        if takesFocus {
+            // Once the view is in its window: before, there is no window to make it first responder of.
+            DispatchQueue.main.async { [weak view] in
+                if let view, let window = view.window { window.makeFirstResponder(view) }
+            }
+        }
         return scroll
     }
 

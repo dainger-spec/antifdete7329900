@@ -151,7 +151,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         bookmarkButton = toolbarButton("star", L("toolbar.bookmark"), shortcut: "⌘D", #selector(toggleBookmark))
         let bookmarksMenuButton = toolbarButton("book", L("toolbar.bookmarks"), #selector(showBookmarksMenu(_:)))
         let historyButton = toolbarButton("clock.arrow.circlepath", L("toolbar.history"), shortcut: "⌘Y", #selector(showHistory))
-        let fillButton = toolbarButton("key.fill", L("toolbar.fillPassword"), #selector(fillPassword(_:)))
+        let fillButton = toolbarButton("key", L("toolbar.fillPassword"), #selector(fillPassword(_:)))
         let saveButton = toolbarButton("key.viewfinder", L("toolbar.savePassword"), #selector(savePassword))
 
         addressField.placeholderAttributedString = NSAttributedString(

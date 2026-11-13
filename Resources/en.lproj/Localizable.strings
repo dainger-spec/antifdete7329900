@@ -527,7 +527,8 @@
 "whatSites.subtitle" = "One page of this Mac opens in a window of the profile and is measured there by the scripts CI's comparison runs: navigator, screen, the window, request headers, TLS, APIs. Nothing leaves this Mac: the page, its requests and what it finds stay on 127.0.0.1, which listens only while the snapshot is taken.";
 "whatSites.take" = "Take Snapshot";
 "whatSites.retake" = "Take Again";
-"whatSites.empty" = "No snapshot yet. Take one: a window of the profile opens for a moment (the profile starts if it is stopped). Safari is not opened: compare with it afterwards, if you want to.";
+"whatSites.empty" = "Take one: a window of the profile opens for a moment (the profile starts if it is stopped). Safari is not opened: compare with it afterwards, if you want to.";
+"whatSites.empty.title" = "No snapshot yet";
 "whatSites.step.starting" = "Starting the profile…";
 "whatSites.step.profile" = "Measuring in a window of the profile…";
 "whatSites.step.safari" = "Measuring in Safari… Safari comes to the front; this window comes back when it is done.";
@@ -541,6 +542,7 @@
 "whatSites.allSame.mobile" = "The same as Safari on this Mac — there is nothing to compare with a real iPhone.";
 "whatSites.mobileView" = "There is no reference here: the panel compares the profile with Safari on this Mac, and the profile calls itself an iPhone or an iPad. It also differs from the real device in what this panel cannot see: touch, fonts, graphics (WebGL), audio, motion sensors, the screen.";
 "whatSites.summary" = "%ld same · %ld differ · %ld each window's own";
+"whatSites.summary.profileOnly" = "%ld signals, not compared";
 "whatSites.same" = "same";
 "whatSites.differs" = "differs";
 "whatSites.perWindow" = "each window's own — not compared";
@@ -784,6 +786,7 @@
 "profiles.column.name" = "Name";
 "profiles.count" = "%ld profiles";
 "profiles.countRunning" = "%1$ld profiles · %2$ld running";
+"profiles.countFiltered" = "%1$@ · %2$ld of %3$ld";
 "profiles.delete.confirm" = "Delete Profile and All Its Data";
 "profiles.delete.message" = "Cookies, site data, cache, settings, history, bookmarks and saved passwords of this profile are deleted.";
 "profiles.delete.title" = "Delete profile “%@”?";
@@ -868,6 +871,7 @@
 "profiles.sync.notYet" = "Not synced yet";
 "profiles.sync.off" = "Sync is off";
 "profiles.sync.synced" = "Synced %@";
+"profiles.sync.syncedTitle" = "Synced";
 "profiles.sync.syncing" = "Syncing…";
 "profiles.title" = "Profiles";
 /* Proxy list (Profiles → ⋯ → Proxies…), import, checks, assignment; several profiles at once */
@@ -1025,6 +1029,7 @@
 "proxies.delete.message" = "Profiles that use these proxies keep them: each profile has its own copy.";
 "proxies.checking.progress" = "Checked %1$ld of %2$ld";
 "proxies.summary" = "Proxies: %1$ld · answering: %2$ld · not answering: %3$ld";
+"proxies.summary.short" = "answering: %1$ld · not answering: %2$ld";
 "proxies.column.proxy" = "Proxy";
 "proxies.column.exit" = "Exit";
 "proxies.column.ip" = "Exit IP";
@@ -1385,7 +1390,7 @@
 /* Profile export and import; crash recovery */
 "profiles.row.export" = "Export Profile…";
 "profiles.menu.import" = "Import Profile…";
-"transfer.export.title" = "Export “%@”";
+"transfer.export.title" = "Export Profile — %@";
 "transfer.export.explanation" = "The whole profile — settings and proxy, passwords, history, bookmarks, cookies and website data — in one file encrypted with a password of its own: for another Mac, a backup, or to hand over.";
 "transfer.export.running" = "The profile is running: it will be stopped first, so that its data is saved whole.";
 "transfer.export.action" = "Export…";
@@ -1481,7 +1486,7 @@
 "profiles.row.exportCookies" = "Export Cookies…";
 "profiles.row.check" = "Check the Profile…";
 "profiles.row.copyWebDriver" = "Copy WebDriver Address";
-"cookieExport.title" = "Export the Cookies of “%@”";
+"cookieExport.title" = "Export Cookies — %@";
 "cookieExport.explanation" = "Every cookie of the profile, session cookies included, in a file another browser, a cookie extension or an automation tool reads.";
 "cookieExport.format" = "Format";
 "cookieExport.format.netscape" = "cookies.txt (Netscape: curl, yt-dlp, extensions)";
@@ -1746,6 +1751,7 @@
 "settings.language.sites.title" = "Language for websites";
 "settings.language.sites.detail" = "Websites see the profile’s language, set in the profile’s settings under “Time zone and language”. The interface language doesn’t change it, and the other way round.";
 "settings.section.webRTC" = "WebRTC through the proxy";
+"settings.section.webRTC.short" = "WebRTC";
 "settings.section.sync" = "Sync";
 "settings.section.security" = "Security";
 "settings.section.automation" = "Automation API";
@@ -1905,7 +1911,6 @@
 "automation.webDriver.how" = "How to Connect";
 "help.title" = "Help";
 "help.copy" = "Copy";
-"help.copied" = "Copied";
 "help.topic.start" = "Getting Started";
 "help.topic.palette" = "Command Palette";
 "help.topic.scenarios" = "Scenarios";

@@ -26,7 +26,7 @@ struct InspectorInfo {
 
 /// The inspector at the right of the Profiles window (the design's `insp`): what the selected profile
 /// is and does, at a glance — how it reaches the web, how sites see it, what it keeps — with its
-/// actions. 320 pt, over the light at 80 % like the sidebar.
+/// actions. 320 pt, over the light at 80 % like the sidebar; opaque when it lies over the list.
 struct ProfileInspectorView: View {
     @Environment(\.tagColors) private var tagColors
     let row: ProfileRowItem
@@ -54,8 +54,13 @@ struct ProfileInspectorView: View {
                 }
                 if let warmUp = row.warmUp {
                     section(L("inspector.warmUp"), trailing: String(format: L("inspector.warmUp.page"), warmUp.currentPage, warmUp.total)) {
-                        LumenProgressBar(fraction: warmUp.fraction, width: 272)
-                            .padding(.top, 2)
+                        // The width it is offered: a fixed 272 (+ 2 × 24 = 320) pushed the content 8 pt
+                        // left, under the scroller, whenever the panel scrolled.
+                        GeometryReader { geometry in
+                            LumenProgressBar(fraction: warmUp.fraction, width: geometry.size.width)
+                        }
+                        .frame(height: 2)
+                        .padding(.top, 2)
                         if warmUp.cookies > 0 {
                             Text(String(format: L("inspector.warmUp.cookies"), warmUp.cookies))
                                 .font(.lumenSecondary)
@@ -379,16 +384,46 @@ struct ProfileInspectorView: View {
     }
 
     private func fact(_ key: String, _ value: String, mono: Bool = false, help: String? = nil) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(key)
-                .font(.lumenBody)
-                .foregroundStyle(Theme.textTertiary)
-                .frame(width: 104, alignment: .leading)
-            Text(value)
-                .font(mono ? Font.lumenMono : Font.lumenBody)
-                .foregroundStyle(Theme.textPrimary)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
+        Group {
+            if mono {
+                // An address that does not fit beside its key goes under it, whole, instead of breaking
+                // inside a word ("proxy.northwind.examp / le:1080").
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(key)
+                            .font(.lumenBody)
+                            .foregroundStyle(Theme.textTertiary)
+                            .frame(width: 104, alignment: .leading)
+                        Text(value)
+                            .font(.lumenMono)
+                            .foregroundStyle(Theme.textPrimary)
+                            .fixedSize()
+                            .textSelection(.enabled)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(key)
+                            .font(.lumenBody)
+                            .foregroundStyle(Theme.textTertiary)
+                        Text(value)
+                            .font(.lumenMono)
+                            .foregroundStyle(Theme.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                }
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(key)
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textTertiary)
+                        .frame(width: 104, alignment: .leading)
+                    Text(value)
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
         }
         .padding(.vertical, 4)
         .help(ifAny: help)
@@ -541,19 +576,21 @@ struct SelectionInspectorView: View {
                 .foregroundStyle(Theme.textSecondary)
                 .lineLimit(3)
                 .padding(.top, 4)
-            VStack(spacing: 8) {
-                if !stopped.isEmpty {
-                    Button(String(format: L("inspector.launchSome"), stopped.count)) { actions.launchSeveral(stopped.map(\.id)) }
-                        .buttonStyle(LumenButtonStyle(kind: .secondary, fullWidth: true))
+            // The single inspector's head: a leading row, the main action first; under each other
+            // only when they do not fit side by side.
+            if !stopped.isEmpty || !running.isEmpty {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) { actionButtons(stopped, running) }
+                    VStack(alignment: .leading, spacing: 8) { actionButtons(stopped, running) }
                 }
-                if !running.isEmpty {
-                    Button(String(format: L("inspector.stopSome"), running.count)) { actions.stopSeveral(running.map(\.id)) }
-                        .buttonStyle(LumenButtonStyle(kind: .secondary, fullWidth: true))
-                }
-                Button(L("inspector.warmUpQueue")) { actions.warmUpSeveral(rows.map(\.id)) }
-                    .buttonStyle(LumenButtonStyle(kind: .ghost, fullWidth: true))
+                .padding(.top, 18)
             }
-            .padding(.top, 18)
+            // Quiet, its text on the column's edge (a ghost button's 11 pt inset taken back); first
+            // under the names when none can be launched or stopped (all starting, sealing, unreadable).
+            Button(L("inspector.warmUpQueue")) { actions.warmUpSeveral(rows.map(\.id)) }
+                .buttonStyle(.lumenGhost)
+                .padding(.leading, -11)
+                .padding(.top, stopped.isEmpty && running.isEmpty ? 18 : 10)
             if stopped.count > LaunchQueue.atOnce {
                 Text(String(format: L("inspector.queueNote"), LaunchQueue.atOnce))
                     .font(.lumenSecondary)
@@ -565,6 +602,23 @@ struct SelectionInspectorView: View {
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private func actionButtons(_ stopped: [ProfileRowItem], _ running: [ProfileRowItem]) -> some View {
+        if !stopped.isEmpty {
+            Button { actions.launchSeveral(stopped.map(\.id)) } label: {
+                Label(String(format: L("inspector.launchSome"), stopped.count), systemImage: "play.fill")
+            }
+            .buttonStyle(.lumenPrimary)
+        }
+        if !running.isEmpty {
+            Button { actions.stopSeveral(running.map(\.id)) } label: {
+                Label(String(format: L("inspector.stopSome"), running.count), systemImage: "stop.fill")
+            }
+            // Beside Launch, as tall as it.
+            .buttonStyle(LumenButtonStyle(kind: .secondary, height: stopped.isEmpty ? nil : Theme.buttonHeight))
+        }
     }
 }
 

@@ -74,8 +74,11 @@ struct PasswordListView: View {
                         .frame(width: 220)
                 }
             }
+            // As tall locked as with the search field (32 pt): the title stays on SheetHeader's
+            // line, 22 pt down (it dropped 7 pt when the sheet unlocked).
+            .frame(height: 32)
             .padding(.horizontal, 24)
-            .padding(.top, 22)
+            .padding(.top, 15)
             .padding(.bottom, 14)
             Group {
                 if unlocked { content } else { locked }
@@ -138,7 +141,7 @@ struct PasswordListView: View {
                 .frame(maxWidth: 420)
             HStack(spacing: 8) {
                 SecureField(L("passwords.locked.field"), text: $masterPassword, prompt: Text(verbatim: ""))
-                    .lumenField(L("passwords.locked.field"), isEmpty: masterPassword.isEmpty)
+                    .lumenField(L("passwords.locked.field"), isEmpty: masterPassword.isEmpty, takesFocus: true)
                     .frame(width: 260)
                     .onSubmit(unlock)
                 Button(L("passwords.locked.unlock"), action: unlock)
@@ -185,12 +188,13 @@ struct PasswordListView: View {
                         IconBadge(symbol: "key.fill", size: 26)
                         VStack(alignment: .leading) {
                             Text(entry.host)
+                                .font(.lumenBody).foregroundStyle(Theme.textPrimary)
                             Text(entry.username.isEmpty ? L("passwords.noUsername") : entry.username)
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.lumenSecondary).foregroundStyle(Theme.textSecondary)
                             if entry.isConflictVersion {
                                 Label(String(format: L("passwords.conflict.badgeNumbered"), conflictNumber(of: entry)),
                                       systemImage: "exclamationmark.triangle.fill")
-                                    .font(.caption).foregroundStyle(Theme.warning)
+                                    .font(.lumenSecondary).foregroundStyle(Theme.warning)
                             }
                         }
                         if entry.totp != nil {
@@ -211,7 +215,8 @@ struct PasswordListView: View {
                 }
                 .overlay {
                     if filtered.isEmpty {
-                        Text(entries.isEmpty ? L("passwords.empty") : L("passwords.noMatches")).foregroundStyle(.secondary)
+                        Text(entries.isEmpty ? L("passwords.empty") : L("passwords.noMatches"))
+                            .font(.lumenBody).foregroundStyle(Theme.textSecondary)
                     }
                 }
                 .scrollContentBackground(.hidden)
@@ -247,20 +252,22 @@ struct PasswordListView: View {
 
     private var neverSavedList: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(L("passwords.never.title")).font(.caption.bold()).foregroundStyle(.secondary)
+            Text(L("passwords.never.title")).lumenCaps()
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(neverSaved, id: \.self) { site in
                         HStack {
-                            Text(WebOrigin(site)?.host ?? site).font(.caption)
+                            Text(WebOrigin(site)?.host ?? site)
+                                .font(.lumenSecondary).foregroundStyle(Theme.textSecondary)
                             Spacer()
                             Button(L("passwords.never.remove")) { removeNeverSaved(site) }
-                                .buttonStyle(.borderless).font(.caption)
+                                .buttonStyle(.lumenGhost)
                         }
                     }
                 }
             }
-            .frame(maxHeight: 80)
+            // Three whole rows: the ghost Remove makes each 28 pt, plus the two 2 pt gaps.
+            .frame(maxHeight: 88)
         }
     }
 
@@ -272,8 +279,7 @@ struct PasswordListView: View {
         } else if let id = selection, let entry = entries.first(where: { $0.id == id }) {
             details(entry)
         } else {
-            Text(L("passwords.selectHint")).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            LumenEmptyHint(symbol: "key", text: L("passwords.selectHint"))
         }
     }
 
@@ -285,7 +291,7 @@ struct PasswordListView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     if entry.isConflictVersion {
                         Label(L("passwords.conflict.explanation"), systemImage: "exclamationmark.triangle.fill")
-                            .font(.callout)
+                            .font(.lumenSecondary)
                             .foregroundStyle(Theme.warning)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -295,14 +301,20 @@ struct PasswordListView: View {
                     // A login that is a one-time code alone has no password to show.
                     if !entry.password.isEmpty {
                         HStack(alignment: .firstTextBaseline) {
-                            Text(L("passwords.field.password")).foregroundStyle(.secondary).frame(width: 132, alignment: .leading)
+                            Text(L("passwords.field.password"))
+                                .font(.lumenBody).foregroundStyle(Theme.textSecondary)
+                                .frame(width: 132, alignment: .leading)
                             Text(revealed ? entry.password : String(repeating: "•", count: 10))
-                                .font(.body.monospaced()).textSelection(.enabled)
+                                .font(.lumenMono).textSelection(.enabled)
                             Spacer()
                             Button { revealed.toggle() } label: { Image(systemName: revealed ? "eye.slash" : "eye") }
-                                .buttonStyle(.borderless).help(L(revealed ? "passwords.hide" : "passwords.show"))
+                                .buttonStyle(LumenIconButtonStyle(size: 24))
+                                .help(L(revealed ? "passwords.hide" : "passwords.show"))
+                                .accessibilityLabel(L(revealed ? "passwords.hide" : "passwords.show"))
                             Button { Self.copy(entry.password, concealed: true) } label: { Image(systemName: "doc.on.doc") }
-                                .buttonStyle(.borderless).help(L("passwords.copy"))
+                                .buttonStyle(LumenIconButtonStyle(size: 24))
+                                .help(L("passwords.copy"))
+                                .accessibilityLabel(L("passwords.copy"))
                         }
                     }
                     if let generator = entry.totp {
@@ -314,15 +326,15 @@ struct PasswordListView: View {
                             .buttonStyle(.lumenGhost)
                     }
                     if let note = entry.note, !note.isEmpty { row(L("passwords.field.note"), note, copy: nil) }
-                    Divider()
+                    Rectangle().fill(Theme.divider).frame(height: 1)
                     // Which Mac made this version, and when by that Mac's clock: beside a version kept after a
                     // conflict, what the person tells the two apart by.
                     Text(entry.device.map { String(format: L("passwords.updatedOn"), $0, entry.updatedAt.shown(date: .abbreviated, time: .shortened)) }
                          ?? String(format: L("passwords.updated"), entry.updatedAt.shown(date: .abbreviated, time: .shortened)))
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.lumenCaption).foregroundStyle(Theme.textTertiary)
                     if let used = entry.lastUsedAt {
                         Text(String(format: L("passwords.lastUsed"), used.shown(date: .abbreviated, time: .shortened)))
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.lumenCaption).foregroundStyle(Theme.textTertiary)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -345,14 +357,19 @@ struct PasswordListView: View {
 
     private func row(_ label: String, _ value: String, copy: String?) -> some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(label).foregroundStyle(.secondary).frame(width: 132, alignment: .leading)
+            Text(label)
+                .font(.lumenBody).foregroundStyle(Theme.textSecondary)
+                .frame(width: 132, alignment: .leading)
             // The value takes the room there is: beside a spacer it was given half, and a note
             // went onto a second line with the first half empty.
             Text(value).textSelection(.enabled).lineLimit(3)
+                .font(.lumenBody).foregroundStyle(Theme.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if let copy {
                 Button { Self.copy(copy, concealed: false) } label: { Image(systemName: "doc.on.doc") }
-                    .buttonStyle(.borderless).help(L("passwords.copy"))
+                    .buttonStyle(LumenIconButtonStyle(size: 24))
+                    .help(L("passwords.copy"))
+                    .accessibilityLabel(L("passwords.copy"))
             }
         }
     }
@@ -383,11 +400,16 @@ struct PasswordListView: View {
             // has more to it than the sheet is tall on a small screen.
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-            TextField(L("passwords.placeholder.origin"), text: binding.website, prompt: Text(verbatim: ""))
-                .lumenField(L("passwords.placeholder.origin"), isEmpty: binding.wrappedValue.website.isEmpty)
-            TextField(L("passwords.placeholder.username"), text: binding.username, prompt: Text(verbatim: ""))
-                .lumenField(L("passwords.placeholder.username"), isEmpty: binding.wrappedValue.username.isEmpty)
-            HStack {
+            // Labelled, as the login's details: a placeholder alone went once the field was filled.
+            EditorField(L("passwords.field.website")) {
+                TextField(L("passwords.placeholder.origin"), text: binding.website, prompt: Text(verbatim: ""))
+                    .lumenField(L("passwords.placeholder.origin"), isEmpty: binding.wrappedValue.website.isEmpty)
+            }
+            EditorField(L("passwords.field.username")) {
+                TextField(L("passwords.placeholder.username"), text: binding.username, prompt: Text(verbatim: ""))
+                    .lumenField(L("passwords.placeholder.username"), isEmpty: binding.wrappedValue.username.isEmpty)
+            }
+            EditorField(L("passwords.field.password")) {
                 Group {
                     if revealed {
                         TextField(L("passwords.placeholder.password"), text: binding.password, prompt: Text(verbatim: ""))
@@ -395,13 +417,23 @@ struct PasswordListView: View {
                         SecureField(L("passwords.placeholder.password"), text: binding.password, prompt: Text(verbatim: ""))
                     }
                 }
+                // Room for the eye inside the field, as `LockPasswordField` has it: every field
+                // ends on one right edge.
+                .padding(.trailing, 24)
                 .lumenField(L("passwords.placeholder.password"), isEmpty: binding.wrappedValue.password.isEmpty)
-                Button { revealed.toggle() } label: { Image(systemName: revealed ? "eye.slash" : "eye") }
-                    .buttonStyle(LumenIconButtonStyle())
+                .overlay(alignment: .trailing) {
+                    Button { revealed.toggle() } label: { Image(systemName: revealed ? "eye.slash" : "eye") }
+                        .buttonStyle(LumenIconButtonStyle(size: 26))
+                        .help(L(revealed ? "passwords.hide" : "passwords.show"))
+                        .accessibilityLabel(L(revealed ? "passwords.hide" : "passwords.show"))
+                        .padding(.trailing, 3)
+                }
             }
-            TextField(L("passwords.placeholder.note"), text: binding.note, prompt: Text(verbatim: ""), axis: .vertical)
-                .lineLimit(2...4)
-                .lumenField(L("passwords.placeholder.note"), isEmpty: binding.wrappedValue.note.isEmpty, height: nil)
+            EditorField(L("passwords.field.note")) {
+                TextField(L("passwords.placeholder.note"), text: binding.note, prompt: Text(verbatim: ""), axis: .vertical)
+                    .lineLimit(2...4)
+                    .lumenField(L("passwords.placeholder.note"), isEmpty: binding.wrappedValue.note.isEmpty, height: nil)
+            }
             OneTimeCodeSetup(generator: binding.totp, input: binding.codeInput, saved: saved,
                              saveProblem: binding.wrappedValue.codeProblem,
                              onHelp: {
