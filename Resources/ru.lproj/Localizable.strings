@@ -1349,6 +1349,11 @@
 "warmup.quality.normal.detail" = "10–35 с на странице, с прокруткой: как при обычном чтении.";
 "warmup.quality.quick" = "Быстро";
 "warmup.quality.quick.detail" = "4–12 с на странице, без прокрутки: больше сайтов за то же время.";
+"warmup.traffic" = "Трафик прокси";
+"warmup.traffic.all" = "Загружать всё";
+"warmup.traffic.media" = "Без видео";
+"warmup.traffic.mediaAndImages" = "Без видео и картинок";
+"warmup.traffic.detail" = "Для прокси с оплатой за гигабайт. Пропускает только невидимая вкладка прогрева — страницы, которые открываете вы, загружаются полностью. Действует на все прогревы.";
 "warmup.reason.duplicate" = "уже есть в списке";
 "warmup.reason.notAWebAddress" = "не адрес сайта (поисковый запрос — в поле ниже)";
 "warmup.reason.tooMany" = "за пределами первых %ld страниц";

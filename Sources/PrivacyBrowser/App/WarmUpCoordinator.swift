@@ -51,6 +51,15 @@ final class WarmUpCoordinator: ObservableObject {
         set { UserDefaults.standard.set(min(max(newValue, concurrencyRange.lowerBound), concurrencyRange.upperBound), forKey: concurrencyKey) }
     }
 
+    /// What every warm-up's tab leaves out to spare the proxies' traffic (the person's setting on
+    /// the warm-up screen; nil: nothing). Put into each plan as it starts (`AppModel.startWarmUp`),
+    /// whoever starts it — the screen, a queue, the schedule.
+    static let trafficSavingKey = "warmup.trafficSaving"
+    static var trafficSaving: WarmUpTrafficSaving? {
+        get { (UserDefaults.standard.string(forKey: trafficSavingKey)).flatMap(WarmUpTrafficSaving.init(rawValue:)) }
+        set { UserDefaults.standard.set(newValue?.rawValue, forKey: trafficSavingKey) }
+    }
+
     private let manager: ProfileManager
     private let repository: ProfileRepository
     private let start: Start

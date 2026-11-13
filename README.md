@@ -276,7 +276,7 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    own; starts the profile without a window if it is stopped, and visits the pages one after
    the other in a hidden window of it: a random time on each page, scrolling, and if asked
    plain links followed. Most searches are typed on the engine's own page, key by key, as a
-   person types; a well-known consent tool's cookie banner is accepted. **Stop** in the sheet,
+   person types; a well-known consent tool's cookie banner is accepted. **Stop** in the sheet, **Proxy traffic** (no video, or no video or images) spares a proxy paid by the gigabyte: only the robot's own tab leaves them out.
    closing the robot's tab or stopping the profile ends it, and the sheet says why a run
    stopped. When the run is over the sheet lists the profile's cookies per site and how many
    the run added; the inspector then says when the profile was last warmed and how many pages

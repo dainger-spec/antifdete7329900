@@ -1092,6 +1092,9 @@ final class AppModel: ObservableObject {
     /// stopped. False when it did not start (the launch failed, and said why).
     func startWarmUp(_ plan: WarmUpPlan, for id: UUID) async -> Bool {
         guard let repository, let manager else { return false }
+        // The person's traffic setting, whoever started the run.
+        var plan = plan
+        plan.trafficSaving = WarmUpCoordinator.trafficSaving?.rawValue
         do {
             try repository.saveWarmUpPlan(plan, for: id)
         } catch {

@@ -26,6 +26,13 @@ public struct WarmUpPlan: Codable, Equatable, Sendable {
     /// Where this plan came from, so the screen opens where it was left. Absent in plans saved
     /// before the screen had ready-made lists, and in those written by hand.
     public var choice: WarmUpChoice?
+    /// What the robot's tab does not load, to spare the proxy's traffic (`WarmUpTrafficSaving`'s
+    /// raw value; nil, or one this version does not know: everything loads). Text, so that a
+    /// later version's value does not cost the whole plan.
+    public var trafficSaving: String?
+
+    /// `trafficSaving`, when it is one this version knows.
+    public var savesTraffic: WarmUpTrafficSaving? { trafficSaving.flatMap(WarmUpTrafficSaving.init(rawValue:)) }
 
     public static let dwellLimits: ClosedRange<TimeInterval> = 2...300
     public static let maximumPages = 50
@@ -455,4 +462,31 @@ extension WarmUpVisit {
         sites.remove("")
         return sites.count
     }
+}
+
+/// What a warm-up's tab leaves out to spend less of a proxy that is paid by the gigabyte (a
+/// residential or mobile one): videos and sound — a news site's autoplaying clip is most of its
+/// weight — and, at the stronger setting, images too. Only the robot's own tab, which nobody looks
+/// at: the person's tabs of the profile load everything. A page sees those loads fail as a content
+/// blocker makes them fail; cookies come from the pages and their scripts, which still load.
+public enum WarmUpTrafficSaving: String, Codable, CaseIterable, Sendable {
+    case media
+    case mediaAndImages
+
+    /// WebKit's resource types it blocks.
+    public var blockedResourceTypes: [String] {
+        switch self {
+        case .media: return ["media"]
+        case .mediaAndImages: return ["media", "image"]
+        }
+    }
+
+    /// The content rule list (WebKit's JSON) of the robot's tab.
+    public var ruleListJSON: String {
+        let types = blockedResourceTypes.map { "\"\($0)\"" }.joined(separator: ",")
+        return #"[{"trigger":{"url-filter":".*","resource-type":["# + types + #"]},"action":{"type":"block"}}]"#
+    }
+
+    /// The rule list's identifier in WebKit's store.
+    public var ruleListIdentifier: String { "lumen-warmup-saving-\(rawValue)" }
 }

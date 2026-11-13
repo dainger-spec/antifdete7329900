@@ -169,7 +169,11 @@ final class WarmUpRobot: ObservableObject {
         guard !isRunning, session.dataStore != nil else { return false }
         let pages = plan.pages(searchEngine: session.configuration.searchEngine ?? .standard).pages
         guard !pages.isEmpty else { return false }
-        let controller = session.openOffscreenWindow()
+        // A plan that spares traffic: its tab does not load what the setting leaves out — when the
+        // list compiled (`ContentRules.prepareWarmUp`, at the profile's launch); else everything loads.
+        let saving = plan.savesTraffic.flatMap { ContentRules.warmUpLists[$0] }
+        if plan.savesTraffic != nil, saving == nil { log.notice("The warm-up's traffic-saving list is not ready: everything loads") }
+        let controller = session.openOffscreenWindow(blocking: saving)
         guard let tab = controller.tabs.first else {
             log.error("Warm-up could not open its own window")
             return false

@@ -395,6 +395,8 @@ final class ProfileManager: ObservableObject {
             }
         }
         if ContentRules.needed(by: stored) { await ContentRules.prepare() }
+        // A warm-up that spares traffic needs its tab's list as it starts (`openOffscreenWindow`).
+        if !stored.ephemeral { await ContentRules.prepareWarmUp() }
         var restored = WebDataStoreVault.Restored.nothing
         if !stored.ephemeral {
             // Must happen before WKWebsiteDataStore(forIdentifier:) is created.

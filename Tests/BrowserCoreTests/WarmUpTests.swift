@@ -141,6 +141,35 @@ final class WebAddressTests: XCTestCase {
     }
 }
 
+final class WarmUpTrafficSavingTests: XCTestCase {
+    /// The robot's tab leaves out video and sound, and at the stronger setting images: a rule list
+    /// WebKit takes (one rule, blocking those resource types everywhere) — and a plan from a later
+    /// version with a setting this one does not know still reads, saving nothing.
+    func testTheRuleListsBlockWhatTheSettingSaysAndAnUnknownSettingLoadsEverything() throws {
+        for saving in WarmUpTrafficSaving.allCases {
+            let rules = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(saving.ruleListJSON.utf8)) as? [[String: Any]])
+            XCTAssertEqual(rules.count, 1)
+            let trigger = try XCTUnwrap(rules[0]["trigger"] as? [String: Any])
+            XCTAssertEqual(trigger["url-filter"] as? String, ".*")
+            XCTAssertEqual(trigger["resource-type"] as? [String], saving.blockedResourceTypes)
+            XCTAssertEqual((rules[0]["action"] as? [String: Any])?["type"] as? String, "block")
+        }
+        XCTAssertEqual(WarmUpTrafficSaving.media.blockedResourceTypes, ["media"])
+        XCTAssertEqual(WarmUpTrafficSaving.mediaAndImages.blockedResourceTypes, ["media", "image"])
+        XCTAssertNotEqual(WarmUpTrafficSaving.media.ruleListIdentifier, WarmUpTrafficSaving.mediaAndImages.ruleListIdentifier)
+
+        var plan = WarmUpPlan(addresses: "https://a.example/")
+        XCTAssertNil(plan.savesTraffic)
+        plan.trafficSaving = WarmUpTrafficSaving.media.rawValue
+        let read = try JSONCoding.decoder.decode(WarmUpPlan.self, from: JSONCoding.encoder.encode(plan))
+        XCTAssertEqual(read.savesTraffic, .media)
+        plan.trafficSaving = "everythingButText"
+        let later = try JSONCoding.decoder.decode(WarmUpPlan.self, from: JSONCoding.encoder.encode(plan))
+        XCTAssertNil(later.savesTraffic)
+        XCTAssertEqual(later.addresses, "https://a.example/")
+    }
+}
+
 final class WarmUpTimingTests: XCTestCase {
     /// A pause before every key: none instant, the first the longest kind (from the click to the
     /// first key), a new word slower than a letter within one, never the same rhythm twice.

@@ -1479,6 +1479,16 @@ and Google's own consent page — by that tool's own "accept" button, one to two
 page loads, as most people answer it. Nothing else on a page is pressed. The press is the
 button's `click()` from the robot's world (untrusted); the consent it records is the same.
 
+**Sparing a proxy's traffic.** **Proxy traffic** on the warm-up screen — load everything (the
+default), no video, or no video or images — is one setting for every warm-up, put into each run's
+plan as it starts (screen, queue, schedule). The robot's tab then gets a content controller of its
+own: everything of the profile (its scripts, its rule lists, AutoFill) and a rule list blocking
+WebKit's `media` (and `image`) loads. The person's tabs of the profile keep the shared controller and
+load everything. A page sees those loads fail as a content blocker makes them fail. The lists are
+compiled at the profile's launch; one that did not compile leaves the run loading everything, and
+the log says so. The traffic itself is not counted: WebKit connects to the proxy on its own, and
+counting it would take a relay of the app's in the path of every load.
+
 **User activation.** WebKit runs every script an app sends into a page as if the user had just
 interacted (`callAsyncJavaScript` forces a user gesture), in any content world. The robot's reads
 (scroll position, links) therefore mark the page as activated: `navigator.userActivation` reports

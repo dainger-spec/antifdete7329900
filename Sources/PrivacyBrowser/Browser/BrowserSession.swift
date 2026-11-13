@@ -404,7 +404,10 @@ final class BrowserSession {
     /// timers for a view that is in no window, and a warm-up that does not render is not a warm-up
     /// — the sites it visits are exactly the ones that measure it.
     @discardableResult
-    func openOffscreenWindow() -> BrowserWindowController {
+    /// `blocking`: a rule list for that window's tab alone (a warm-up sparing traffic,
+    /// `WarmUpTrafficSaving`): the tab gets a content controller of its own, with everything of the
+    /// profile in it (`applyContent`) and the list besides, so the person's tabs load as before.
+    func openOffscreenWindow(blocking list: WKContentRuleList? = nil) -> BrowserWindowController {
         let controller = BrowserWindowController(session: self)
         controller.isForWarmUp = true
         windows.append(controller)
@@ -425,7 +428,16 @@ final class BrowserSession {
             window.collectionBehavior.insert([.transient, .ignoresCycle, .fullScreenNone])
             window.orderFront(nil)
         }
-        controller.addTab(url: URL(string: "about:blank"))
+        var configuration: WKWebViewConfiguration?
+        if let list {
+            let own = makeWebViewConfiguration()
+            let content = WKUserContentController()
+            own.userContentController = content
+            applyContent(to: content)
+            content.add(list)
+            configuration = own
+        }
+        controller.addTab(url: URL(string: "about:blank"), configuration: configuration)
         return controller
     }
 

@@ -425,6 +425,8 @@ struct WarmUpPlanChooser: View {
     var onSaveTemplate: ((String) -> Bool)?
     @State private var templateName = ""
     @State private var templateSaved = false
+    /// What every warm-up's tab leaves out (`WarmUpCoordinator.trafficSaving`: one setting for all runs).
+    @State private var trafficSaving = WarmUpCoordinator.trafficSaving
 
     private var reading: (pages: [WarmUpPlan.Page], problems: [WarmUpPlan.Problem]) { plan.pages() }
 
@@ -642,6 +644,20 @@ struct WarmUpPlanChooser: View {
                     .accessibilityElement(children: .contain)
                     .accessibilityLabel(L("warmup.quality"))
                 Text(L("warmup.quality." + choice.quality.rawValue + ".detail"))
+                    .font(.caption).foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L("warmup.traffic")).font(.lumenLabel).foregroundStyle(Theme.textSecondary)
+                LumenSegmented(selection: $trafficSaving, options: [
+                    (value: nil, title: L("warmup.traffic.all")),
+                    (value: .media, title: L("warmup.traffic.media")),
+                    (value: .mediaAndImages, title: L("warmup.traffic.mediaAndImages")),
+                ])
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(L("warmup.traffic"))
+                .onChange(of: trafficSaving) { _, value in WarmUpCoordinator.trafficSaving = value }
+                Text(L("warmup.traffic.detail"))
                     .font(.caption).foregroundStyle(Theme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }

@@ -1349,6 +1349,11 @@
 "warmup.quality.normal.detail" = "10–35 s per page, scrolling: as when you read it.";
 "warmup.quality.quick" = "Quick";
 "warmup.quality.quick.detail" = "4–12 s per page, no scrolling: more sites in the same time.";
+"warmup.traffic" = "Proxy traffic";
+"warmup.traffic.all" = "Load everything";
+"warmup.traffic.media" = "No video";
+"warmup.traffic.mediaAndImages" = "No video or images";
+"warmup.traffic.detail" = "For proxies paid by the gigabyte. Only the warm-up's own tab leaves these out — the profile's pages you open load everything. Applies to every warm-up.";
 "warmup.reason.duplicate" = "already in the list";
 "warmup.reason.notAWebAddress" = "not a web address (a search goes in the field below)";
 "warmup.reason.tooMany" = "beyond the first %ld pages";
