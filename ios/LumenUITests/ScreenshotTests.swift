@@ -77,6 +77,16 @@ final class DesignShotTests: LumenUITestCase {
     private var language = "ru"
     private var theme = "dark"
 
+    /// A touch that does not stop the shots when its element is missing: the miss is recorded, the
+    /// next states are still taken (an interaction's failure ends a test even with continueAfterFailure).
+    private func touch(_ element: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
+        guard element.waitForExistence(timeout: 5) else {
+            XCTFail("not there to touch: \(element)", file: file, line: line)
+            return
+        }
+        element.tap()
+    }
+
     func testEveryState() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["LUMEN_SCREENS"] == "1", "taken by hand (suite ScreenshotTests)")
         continueAfterFailure = true
@@ -95,7 +105,7 @@ final class DesignShotTests: LumenUITestCase {
         go("http://check.example/?l=\(language)")
         _ = app.webViews.staticTexts["Europe/Berlin"].waitForExistence(timeout: 30)
         audit("the browser")
-        app.buttons["settingsButton"].tap()
+        touch(app.buttons["settingsButton"])
         if app.buttons["settingsDone"].waitForExistence(timeout: 10) {
             sleep(1)
             snap("ax3-k-settings")
@@ -111,7 +121,7 @@ final class DesignShotTests: LumenUITestCase {
         go("http://check.example/?l=\(language)")
         _ = app.webViews.staticTexts["Europe/Berlin"].waitForExistence(timeout: 30)
         snap("k-browser")
-        app.buttons["settingsButton"].tap()
+        touch(app.buttons["settingsButton"])
         if app.buttons["settingsDone"].waitForExistence(timeout: 10) { snap("k-settings") }
         app.terminate()
     }
@@ -188,20 +198,25 @@ final class DesignShotTests: LumenUITestCase {
             row.press(forDuration: 1.2)
             if app.buttons[t("Изменить", "Edit")].waitForExistence(timeout: 5) {
                 snap("k-context")
-                app.buttons[t("Удалить", "Delete")].tap()
+                touch(app.buttons[t("Удалить", "Delete")])
                 if app.buttons["confirmDelete"].waitForExistence(timeout: 5) {
                     snap("k-dialog")
-                    app.buttons[t("Отмена", "Cancel")].firstMatch.tap()
+                    // iOS 26 and later show the dialog as a popover with no Cancel: a touch outside closes it.
+                    let cancel = app.buttons[t("Отмена", "Cancel")].firstMatch
+                    if cancel.exists && cancel.isHittable { cancel.tap() } else {
+                        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)).tap()
+                    }
+                    waitGone(app.buttons["confirmDelete"], "the dialog closes")
                 }
             }
         }
-        app.buttons["newSession"].tap()
+        touch(app.buttons["newSession"])
         let name = app.textFields["sessionName"]
         if name.waitForExistence(timeout: 5) {
             typeInto(name, t("Оплата", "Payments"))
             sleep(1)
             snap("k-keyboard")
-            app.buttons[t("Отмена", "Cancel")].firstMatch.tap()
+            touch(app.buttons[t("Отмена", "Cancel")].firstMatch)
         }
 
         // The browser: a page through Berlin, a new tab, the tabs, the history, the settings and their parts.
@@ -211,51 +226,51 @@ final class DesignShotTests: LumenUITestCase {
         sleep(1)
         snap("k-browser")
         openTabs()
-        app.buttons["newTab"].tap()
+        touch(app.buttons["newTab"])
         sleep(1)
         go("http://check.example/?l=\(language)&tab=2")
         _ = app.webViews.staticTexts["Europe/Berlin"].waitForExistence(timeout: 30)
         openTabs()
-        app.buttons["newTab"].tap()
+        touch(app.buttons["newTab"])
         sleep(1)
         snap("k-newtab")
         openTabs()
         sleep(1)
         snap("k-tabs")
-        app.buttons["tabsDone"].tap()
-        app.buttons["historyButton"].tap()
+        touch(app.buttons["tabsDone"])
+        touch(app.buttons["historyButton"])
         if app.buttons["historyDone"].waitForExistence(timeout: 5) {
             sleep(1)
             snap("p5-history")
-            app.buttons["historyDone"].tap()
+            touch(app.buttons["historyDone"])
         }
-        app.buttons["settingsButton"].tap()
+        touch(app.buttons["settingsButton"])
         if app.buttons["settingsDone"].waitForExistence(timeout: 10) {
             sleep(1)
             snap("k-settings")
-            app.buttons["proxyRow"].tap()
+            touch(app.buttons["proxyRow"])
             if app.buttons["proxySheetDone"].waitForExistence(timeout: 5) {
                 sleep(1)
                 snap("k-sheet-mid")
-                app.buttons["proxyNone"].tap()
+                touch(app.buttons["proxyNone"])
                 if app.alerts.firstMatch.waitForExistence(timeout: 5) {
                     snap("k-alert")
-                    app.alerts.firstMatch.buttons[t("Оставить прокси", "Keep the proxy")].tap()
+                    touch(app.alerts.firstMatch.buttons[t("Оставить прокси", "Keep the proxy")])
                 }
-                if app.buttons["proxySheetDone"].exists { app.buttons["proxySheetDone"].tap() }
+                if app.buttons["proxySheetDone"].exists { touch(app.buttons["proxySheetDone"]) }
             }
-            reveal(app.buttons["profile-custom"], "the profile's own choice").tap()
+            touch(reveal(app.buttons["profile-custom"], "the profile's own choice"))
             sleep(1)
             snap("p6-custom")
-            app.buttons["profile-full"].tap()
+            touch(app.buttons["profile-full"])
             let browser = app.buttons["userAgentPicker"]
             if browser.exists {
-                reveal(browser, "the browser's menu").tap()
+                touch(reveal(browser, "the browser's menu"))
                 sleep(1)
                 snap("k-menu")
                 dismissMenu()
             }
-            app.buttons["settingsDone"].tap()
+            touch(app.buttons["settingsDone"])
         }
         backToList()
 
@@ -266,20 +281,20 @@ final class DesignShotTests: LumenUITestCase {
             sleep(1)
             snap("p3-dead")
         }
-        app.buttons["historyButton"].tap()
+        touch(app.buttons["historyButton"])
         if app.buttons["historyDone"].waitForExistence(timeout: 5) {
             sleep(1)
             snap("p5-history-empty")
-            app.buttons["historyDone"].tap()
+            touch(app.buttons["historyDone"])
         }
         backToList()
 
         // The proxies: the list, a new one, a line that is not a proxy.
-        app.buttons["proxiesButton"].tap()
+        touch(app.buttons["proxiesButton"])
         if app.navigationBars[t("Прокси", "Proxies")].waitForExistence(timeout: 10) {
             sleep(1)
             snap("p8-list")
-            app.buttons["newProxy"].tap()
+            touch(app.buttons["newProxy"])
             let line = app.descendants(matching: .any).matching(identifier: "proxyLine").firstMatch
             if line.waitForExistence(timeout: 5) {
                 typeInto(app.textFields["proxyName"], t("Берлин", "Berlin"))
@@ -289,7 +304,7 @@ final class DesignShotTests: LumenUITestCase {
                 replaceText(line, with: "socks5://qa-berlin@")
                 sleep(1)
                 snap("p9-error")
-                app.buttons[t("Отмена", "Cancel")].firstMatch.tap()
+                touch(app.buttons[t("Отмена", "Cancel")].firstMatch)
             }
         }
 
@@ -312,7 +327,7 @@ final class DesignShotTests: LumenUITestCase {
         if free.waitForExistence(timeout: 10) {
             free.tap()
             _ = app.textFields["addressBar"].waitForExistence(timeout: 30)
-            app.buttons["settingsButton"].tap()
+            touch(app.buttons["settingsButton"])
             if app.buttons["settingsDone"].waitForExistence(timeout: 10) {
                 sleep(1)
                 snap("p6-free")
@@ -321,11 +336,11 @@ final class DesignShotTests: LumenUITestCase {
 
         // Not signed in: the account, and the sign-in sheet.
         start(access: "account")
-        app.buttons["plansButton"].tap()
+        touch(app.buttons["plansButton"])
         if app.buttons["signIn"].waitForExistence(timeout: 10) {
             sleep(1)
             snap("p10-signed-out")
-            app.buttons["signIn"].tap()
+            touch(app.buttons["signIn"])
             let email = app.textFields["signInEmail"]
             if email.waitForExistence(timeout: 5) {
                 typeInto(email, "qa@example.com")
@@ -338,7 +353,7 @@ final class DesignShotTests: LumenUITestCase {
         // Nothing yet: no session, no proxy.
         start(empty: true)
         snap("k-empty")
-        app.buttons["proxiesButton"].tap()
+        touch(app.buttons["proxiesButton"])
         if app.navigationBars[t("Прокси", "Proxies")].waitForExistence(timeout: 10) {
             sleep(1)
             snap("p8-empty")
