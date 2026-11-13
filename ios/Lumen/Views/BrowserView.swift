@@ -68,6 +68,7 @@ private struct TabPage: View {
     @ObservedObject var tab: BrowserTab
     @ObservedObject var runtime: SessionRuntime
     @Binding var sheet: BrowserView.Sheet?
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ZStack {
@@ -82,7 +83,7 @@ private struct TabPage: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 AddressCapsule(tab: tab) { runtime.open($0) }
-                    .environment(\.colorScheme, pageIsLight ? .light : .dark)
+                    .environment(\.colorScheme, pageScheme ?? colorScheme)
                 #if DEBUG
                 if TestHooks.enabled { RelayDrills(runtime: runtime) }
                 #endif
@@ -111,12 +112,16 @@ private struct TabPage: View {
         // Over a white site the bars and the status bar go light, as Safari's do: the window's scheme
         // follows the page (a bar's own scheme left 9:41 white on white, runs 108 and 110). The sheets
         // keep the app's own (above).
-        .toolbarColorScheme(pageIsLight ? .light : .dark, for: .navigationBar, .bottomBar)
+        .toolbarColorScheme(pageScheme, for: .navigationBar, .bottomBar)
         .onChange(of: pageIsLight, initial: true) { _, light in model.lightPageShown = light }
     }
 
     /// A site's own light page is on the screen (not the new tab's words, not the proxy that does not answer).
     private var pageIsLight: Bool { tab.lightPage && tab.url != nil && tab.failure == nil }
+
+    /// The bars' scheme: light over a site's light page, else the app's own — not dark: in the light
+    /// theme a dark bar wrote the session's name white on the new tab's white (runs 120, 121).
+    private var pageScheme: ColorScheme? { pageIsLight ? .light : Theme.colorScheme }
 }
 
 /// The address capsule (iOS 26: the system's glass; iOS 18: the bar's material): a lock and the
