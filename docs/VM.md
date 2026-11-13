@@ -127,7 +127,8 @@ A machine whose proxy does not answer is not started. With "time zone and langua
 proxy" the profile takes them from that check.
 
 A proxy reached over TLS (`https://`) is not supported for machines yet; the editor does not offer
-one, and `VMProfile.validate` refuses it.
+one, and `VMProfile.validate` refuses it. A proxy's "domains that go direct" are not applied in a
+machine: nothing of a proxied machine goes direct.
 
 ### The guest's tools
 

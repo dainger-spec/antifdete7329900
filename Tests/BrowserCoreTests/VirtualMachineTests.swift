@@ -301,3 +301,79 @@ final class VMHelperProtocolTests: XCTestCase {
         XCTAssertNil(VMHelperEvent.parse(#"{"kind":"something-new"}"#), "an event of a later helper is not this version's")
     }
 }
+
+/// The tools the base system's macOS gets (Resources/VMGuest) and the app agree on the two files
+/// they pass each other: a key one side writes and the other does not read would be a setting that
+/// silently does nothing in every machine.
+final class VMGuestToolsTests: XCTestCase {
+    private static let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent().appendingPathComponent("Resources/VMGuest", isDirectory: true)
+
+    private func script(_ name: String) throws -> String {
+        try String(contentsOf: Self.folder.appendingPathComponent(name), encoding: .utf8)
+    }
+
+    func testTheBootScriptReadsEveryKeyTheAppWrites() throws {
+        let boot = try script("lumen-guest.sh")
+        let profile = VMProfile(name: "A", timeZoneIdentifier: "Europe/Berlin", language: "de-DE", startURL: "https://example.com/")
+        let keys = VMGuestSettings(profile: profile).text.split(separator: "\n").compactMap { $0.split(separator: "=").first.map(String.init) }
+        XCTAssertEqual(Set(keys), ["LUMEN_REVISION", "LUMEN_TIMEZONE", "LUMEN_LANGUAGE", "LUMEN_LOCALE", "LUMEN_HOSTNAME", "LUMEN_START_URL"])
+        for key in keys {
+            XCTAssertTrue(boot.contains("value \(key) "), "the boot script does not read \(key)")
+        }
+        XCTAssertTrue(boot.contains(VMGuestSettings.fileName))
+    }
+
+    func testTheScriptsWriteTheStatusTheAppReads() throws {
+        for name in ["lumen-guest.sh", "install.sh"] {
+            let text = try script(name)
+            for key in ["LUMEN_TOOLS_VERSION", "LUMEN_MACOS_VERSION", "LUMEN_MACOS_BUILD", "LUMEN_SAFARI_VERSION", "LUMEN_SETUP_DONE"] {
+                XCTAssertTrue(text.contains("'\(key)="), "\(name) does not write \(key)")
+            }
+            XCTAssertTrue(text.contains("TOOLS_VERSION=\(VMGuestTools.version)\n"), "\(name) is not the tools' version the app expects")
+            XCTAssertTrue(text.contains(VMGuestSettings.statusFileName))
+        }
+        XCTAssertTrue(try script("lumen-guest.sh").contains("'LUMEN_APPLIED_REVISION="))
+        // What the scripts write reads back as the app's status.
+        let status = VMGuestStatus(text: "LUMEN_TOOLS_VERSION=1\nLUMEN_MACOS_VERSION=26.1\nLUMEN_MACOS_BUILD=25B78\nLUMEN_SAFARI_VERSION=26.1\nLUMEN_APPLIED_REVISION=9f\nLUMEN_SETUP_DONE=1\n")
+        XCTAssertEqual(status.toolsVersion, 1)
+        XCTAssertEqual(status.systemVersion, "26.1")
+        XCTAssertEqual(status.safariVersion, "26.1")
+        XCTAssertEqual(status.appliedRevision, "9f")
+        XCTAssertTrue(status.setupDone)
+    }
+
+    /// The settings file is the app's word to a root process in the guest: it is read as text,
+    /// value by value, and never run.
+    func testTheBootScriptNeverRunsWhatItReads() throws {
+        let boot = try script("lumen-guest.sh")
+        for line in boot.split(separator: "\n") where !line.trimmingCharacters(in: .whitespaces).hasPrefix("#") {
+            let code = String(line)
+            XCTAssertFalse(code.contains("eval "), code)
+            XCTAssertFalse(code.contains("source "), code)
+            XCTAssertFalse(code.contains(". \"$settings\""), code)
+            XCTAssertFalse(code.contains("sh \"$share"), code)
+        }
+        // And the shutdown request's name is the one the helper writes (Sources/LumenVM/MachineRunner.swift).
+        XCTAssertTrue(boot.contains("lumen-shutdown"))
+        let runner = try String(contentsOf: Self.folder.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/LumenVM/MachineRunner.swift"), encoding: .utf8)
+        XCTAssertTrue(runner.contains("\"lumen-shutdown\""))
+    }
+
+    func testTheScriptsParse() throws {
+        for name in ["lumen-guest.sh", "install.sh", "Install Lumen Tools.command"] {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-n", Self.folder.appendingPathComponent(name).path]
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            process.waitUntilExit()
+            XCTAssertEqual(process.terminationStatus, 0, "\(name) does not parse")
+        }
+        // The daemon's property list names the script where the installer puts it.
+        let plist = try script("io.lumenbrowser.guest.plist")
+        XCTAssertTrue(plist.contains("/usr/local/lumen/lumen-guest.sh"))
+        XCTAssertTrue(try script("install.sh").contains("DEST=/usr/local/lumen\n"))
+    }
+}

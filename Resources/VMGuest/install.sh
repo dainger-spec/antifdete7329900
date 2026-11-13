@@ -74,6 +74,7 @@ fi
 # No sleep, no lock: the machine is a window on the Mac, which has its own.
 /usr/bin/sudo /usr/bin/pmset -a sleep 0 displaysleep 0 disksleep 0 >/dev/null 2>&1
 /usr/bin/defaults -currentHost write com.apple.screensaver idleTime -int 0 >/dev/null 2>&1
+/usr/bin/sudo /usr/bin/defaults write /Library/Preferences/com.apple.screensaver idleTime -int 0 >/dev/null 2>&1
 /usr/sbin/sysadminctl -screenLock off -password "$PASSWORD" >/dev/null 2>&1
 
 # No automatic macOS updates (security data — XProtect and the like — stays on).

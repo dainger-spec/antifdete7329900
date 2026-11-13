@@ -114,6 +114,9 @@ apply_for_user() {
     as_user /usr/bin/defaults write -g AppleLanguages -array "$language"
     [ -z "$locale" ] || as_user /usr/bin/defaults write -g AppleLocale -string "$locale"
   fi
+  # Kept per machine by macOS (by its hardware identifier), so not what the base system had: no
+  # screen saver, which would lock a machine left alone behind a password nobody types here.
+  as_user /usr/bin/defaults -currentHost write com.apple.screensaver idleTime -int 0 2>/dev/null
   # The desktop first: Safari opened before the Dock is there opens behind it.
   /bin/sleep 4
   if [ -n "$share" ] && [ -f "$settings" ]; then
