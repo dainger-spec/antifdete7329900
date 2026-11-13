@@ -339,7 +339,7 @@ final class AccountTests: LumenUITestCase {
         XCTAssertFalse(app.secureTextFields["syncPassword"].exists)
         // Forgotten: the password is asked again.
         app.buttons["syncForget"].tap()
-        wait(app.buttons["confirmSyncForget"], "forgetting the vault is asked first").tap()
+        touchable("confirmSyncForget", "forgetting the vault is asked first").tap()
         wait(app.secureTextFields["syncPassword"], "forgotten: the master password is asked again", timeout: 30)
         app.buttons["syncDone"].tap()
         signOut()
