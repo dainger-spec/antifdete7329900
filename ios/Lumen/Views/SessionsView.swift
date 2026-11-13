@@ -10,9 +10,9 @@ struct SessionsView: View {
     @State private var editor: EditorTarget?
     /// The session whose deletion is being confirmed (from its context menu).
     @State private var deleting: Session?
-    /// The list's place: back at its top once shown (TitleProbe "scrolltop").
-    @State private var listTop = ScrollPosition(edge: .top)
-    /// The screen has appeared: the rows come a moment after it (TitleProbe "late").
+    /// The screen has appeared. The rows come a moment after it: shown with the screen, under the search
+    /// that stays in the bar's drawer, they left the large title collapsed into the bar until the first
+    /// scroll (iOS 26 and 27; runs 114, 116, 118).
     @State private var appeared = false
     @Namespace private var zoom
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -52,7 +52,7 @@ struct SessionsView: View {
                         .accessibilityIdentifier("accountMessage")
                     }
                 }
-                if !shown.isEmpty && (TitleProbe.off != "late" || appeared) {
+                if !shown.isEmpty && appeared {
                     Section {
                         ForEach(shown) { session in
                             row(session)
@@ -63,13 +63,7 @@ struct SessionsView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .whenProbe("scrolltop") { $0.scrollPosition($listTop) }
-            .onAppear {
-                DispatchQueue.main.async {
-                    appeared = true
-                    if TitleProbe.off == "scrolltop" { listTop.scrollTo(edge: .top) }
-                }
-            }
+            .onAppear { DispatchQueue.main.async { appeared = true } }
             .overlay {
                 if model.sessions.isEmpty {
                     ContentUnavailableView {
@@ -89,9 +83,7 @@ struct SessionsView: View {
                     }
                 }
             }
-            .unlessProbe("nosearch") {
-                $0.searchable(text: $query, placement: TitleProbe.searchPlacement, prompt: dynamicTypeSize.isAccessibilitySize ? L("Поиск") : L("Имя, описание, метка, прокси"))
-            }
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: dynamicTypeSize.isAccessibilitySize ? L("Поиск") : L("Имя, описание, метка, прокси"))
             .navigationTitle(L("Сессии"))
             .navigationBarTitleDisplayMode(.large)
             .toolbar {

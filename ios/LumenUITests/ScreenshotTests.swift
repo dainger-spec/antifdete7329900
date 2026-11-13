@@ -111,27 +111,6 @@ final class DesignShotTests: LumenUITestCase {
             snap("ax3-k-settings")
         }
         app.terminate()
-
-    }
-
-    /// Diagnostic, not a mockup's state: the list's large title with its search placed otherwise
-    /// (TitleProbe), alone in a short run (suite "DesignShotTests/testTitleProbe").
-    func testTitleProbe() throws {
-        try XCTSkipUnless(ProcessInfo.processInfo.environment["LUMEN_SCREENS"] == "1", "taken by hand (suite DesignShotTests)")
-        continueAfterFailure = true
-        language = "ru"
-        theme = "dark"
-        for part in ["always", "scrolltop", "late"] {
-            start(env: ["LUMEN_DIAG_TITLE": part])
-            snap("diag-title-\(part)")
-            app.swipeUp()
-            sleep(1)
-            snap("diag-title-\(part)-up")
-            app.swipeDown()
-            sleep(1)
-            snap("diag-title-\(part)-down")
-            app.terminate()
-        }
     }
 
     /// The light theme (behind its flag), every state as in the dark: a run of its own (ci.sh's suite
@@ -164,7 +143,7 @@ final class DesignShotTests: LumenUITestCase {
         }
     }
 
-    private func start(access: String = "full", empty: Bool = false, extra: [String] = [], env: [String: String] = [:]) {
+    private func start(access: String = "full", empty: Bool = false, extra: [String] = []) {
         let app = XCUIApplication()
         app.launchArguments = ["-LumenResetState"] + extra
         app.launchEnvironment["LUMEN_TEST_LANGUAGE"] = language
@@ -172,7 +151,6 @@ final class DesignShotTests: LumenUITestCase {
         app.launchEnvironment["LUMEN_TEST_SEED"] = "appstore"
         app.launchEnvironment["LUMEN_TEST_THEME"] = theme
         if empty { app.launchEnvironment["LUMEN_TEST_SEED_EMPTY"] = "1" }
-        for (key, value) in env { app.launchEnvironment[key] = value }
         app.launch()
         self.app = app
         _ = app.navigationBars[t("Сессии", "Sessions")].waitForExistence(timeout: 30)
