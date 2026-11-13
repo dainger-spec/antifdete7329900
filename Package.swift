@@ -12,6 +12,10 @@
 //                   the relay's route. Tested on Linux and macOS like BrowserCore.
 //   NetworkGuardCore Platform-independent rules of the network guard (what a profile's process
 //                   may reach while its WebRTC goes through its proxy), tested on Linux and macOS.
+//   VMNetCore       Platform-independent network of a virtual machine profile (docs/VM_NETWORK.md): a
+//                   userspace stack on the guest's Ethernet frames — ARP, DHCP, DNS, a TCP terminator —
+//                   whose only way out is the profile's proxy. Tested on Linux and macOS; on Linux also
+//                   against the kernel's own TCP (vmnet-interop, scripts/vmnet_interop.sh).
 //   TunnelTransport macOS only: the relay's network side (SOCKS5 over Network.framework), the
 //                   TURN server's UDP socket on loopback, the proxy's UDP check.
 //   NetworkGuardExtension  macOS only: the content filter's system extension (docs/TUNNEL.md).
@@ -70,6 +74,16 @@ var targets: [Target] = [
         dependencies: ["NetworkGuardCore"],
         path: "Tests/NetworkGuardCoreTests"
     ),
+    // No dependency on the other targets, and none outside the package: Foundation and sockets.
+    .target(
+        name: "VMNetCore",
+        path: "Sources/VMNetCore"
+    ),
+    .testTarget(
+        name: "VMNetCoreTests",
+        dependencies: ["VMNetCore"],
+        path: "Tests/VMNetCoreTests"
+    ),
     .executableTarget(
         name: "pbupdate",
         dependencies: ["BrowserCore"],
@@ -81,8 +95,22 @@ var products: [Product] = [
     .library(name: "BrowserCore", targets: ["BrowserCore"]),
     .library(name: "TunnelCore", targets: ["TunnelCore"]),
     .library(name: "NetworkGuardCore", targets: ["NetworkGuardCore"]),
+    .library(name: "VMNetCore", targets: ["VMNetCore"]),
     .executable(name: "pbupdate", targets: ["pbupdate"]),
 ]
+
+#if os(Linux)
+// The interop test's own program (scripts/vmnet_interop.sh): VMNetCore on a TAP device, so that
+// Linux's TCP/IP stack plays the guest. Linux only; the macOS build never sees it.
+targets.append(
+    .executableTarget(
+        name: "vmnet-interop",
+        dependencies: ["VMNetCore"],
+        path: "Sources/vmnet-interop"
+    )
+)
+products.append(.executable(name: "vmnet-interop", targets: ["vmnet-interop"]))
+#endif
 
 #if os(macOS)
 targets.append(contentsOf: [
