@@ -304,6 +304,8 @@ async def site(reader, writer, scheme="http"):
                     pass
                 break
             if host.split(":")[0] == "check.example":
+                if query.get("wait"):   # the design's k-loading: a page that takes its time to come
+                    await asyncio.sleep(min(float(query["wait"]), 30))
                 out = reply("200 OK", demo_page(query.get("l", "ru"), via), extra=["Cache-Control: no-store"])
             elif path.startswith("/page/"):
                 name = urllib.parse.unquote(path[len("/page/"):]) or "page"
