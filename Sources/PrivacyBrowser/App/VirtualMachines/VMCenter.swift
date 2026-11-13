@@ -581,10 +581,11 @@ final class VMCenter: ObservableObject {
     func measureDisk() {
         let library = self.library
         let ids = list.profiles.map(\.id)
+        let baseID = Self.baseID
         Task.detached(priority: .utility) { [weak self] in
             var usage: [UUID: Int64] = [:]
             for id in ids { usage[id] = VMLibrary.allocatedSize(of: library.machineDirectory(for: id)) }
-            usage[VMCenter.baseID] = VMLibrary.allocatedSize(of: library.baseDirectory)
+            usage[baseID] = VMLibrary.allocatedSize(of: library.baseDirectory)
             let counted = usage
             await MainActor.run { self?.diskUsage = counted }
         }

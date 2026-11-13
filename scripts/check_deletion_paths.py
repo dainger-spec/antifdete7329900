@@ -10,6 +10,9 @@ every profile after signing out, into other accounts and back: profiles are this
 called from that action's handler — and that has to be seen in the code. Not signing out, not
 another account, not a sync, not a server's answer.
 
+A virtual machine's profile (docs/VM.md) is held to the same: its disk — a whole macOS — goes only
+by `VMCenter.deleteMachineBecauseThePersonAsked`, called from the machines' own Delete confirmation.
+
 The one path is `ProfileManager.deleteBecauseThePersonAsked`; its one caller is
 `AppModel.deleteProfile`, which the Profiles window's Delete confirmation calls (one profile, or
 each of several through `deleteProfiles`). A deleted profile's kept folder (R3) goes only by
@@ -67,6 +70,13 @@ RULES = [
     ("the kept folder's removal called",
      re.compile(r"(^|[^\w])removeDeletedProfileForGood\s*\("),
      {("PrivacyBrowser/UI/ProfileListView.swift", "body"): "its confirmation"}),
+    # A virtual machine's profile (docs/VM.md) is a whole macOS on a disk of its own: the same rule.
+    ("the one path that deletes a virtual machine's disk",
+     re.compile(r"\bdeleteMachineBecauseThePersonAsked\s*\("),
+     {("PrivacyBrowser/UI/VirtualMachinesView.swift", "delete"): "the machines' Delete confirmation's handler"}),
+    ("a virtual machine's folder removed",
+     re.compile(r"removeItem\s*\(\s*at:\s*(self\.)?library\.machineDirectory\s*\("),
+     {("PrivacyBrowser/App/VirtualMachines/VMCenter.swift", "deleteMachineBecauseThePersonAsked"): "the one path"}),
 ]
 
 # Files whose own profiles are made and deleted for a check, never the person's.
@@ -167,6 +177,26 @@ struct AccountView: View {
     }
 }
 """,
+        "PrivacyBrowser/App/VirtualMachines/VMCenter.swift": """
+final class VMCenter {
+    func stopAll() async {
+        try? FileManager.default.removeItem(at: library.machineDirectory(for: id))
+    }
+    func deleteMachineBecauseThePersonAsked(_ id: UUID) throws {
+        try? FileManager.default.removeItem(at: library.machineDirectory(for: id))
+    }
+}
+""",
+        "PrivacyBrowser/UI/VirtualMachinesView.swift": """
+struct VirtualMachinesScreen: View {
+    private func signedOut() {
+        try? center.deleteMachineBecauseThePersonAsked(profile.id)
+    }
+    private func delete(_ profile: VMProfile) {
+        try center.deleteMachineBecauseThePersonAsked(profile.id)
+    }
+}
+""",
     }
     expected = {
         ("PrivacyBrowser/App/Account/LicenseModel.swift", "signOut"),
@@ -174,6 +204,8 @@ struct AccountView: View {
         ("PrivacyBrowser/Browser/ProfileManager.swift", "accountChanged"),
         ("BrowserCore/Profiles/ProfileRepository.swift", "wipe"),
         ("PrivacyBrowser/App/Account/AccountViews.swift", "signedInAsAnother"),
+        ("PrivacyBrowser/App/VirtualMachines/VMCenter.swift", "stopAll"),
+        ("PrivacyBrowser/UI/VirtualMachinesView.swift", "signedOut"),
     }
     with tempfile.TemporaryDirectory() as root:
         for relative, text in planted_bad.items():

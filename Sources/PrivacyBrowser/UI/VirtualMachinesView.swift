@@ -1,0 +1,1018 @@
+import BrowserCore
+import SwiftUI
+
+/// The Profiles window's Virtual machines section (docs/VM.md): profiles that are whole Macs.
+///
+/// Signed in, the person adds the machines here: the macOS they run is fetched from Apple by the
+/// app — none of it is in the app's own download — installed, and set up once; from then on each
+/// profile's machine is made from it in a moment. The section says what that takes before it
+/// takes it: the gigabytes, the memory, Apple's limit of two machines at once.
+struct VirtualMachinesView: View {
+    @EnvironmentObject private var model: AppModel
+    var openAccount: () -> Void = {}
+
+    var body: some View {
+        if let center = model.virtualMachines {
+            VirtualMachinesScreen(center: center, license: model.license, proxyList: model.proxyList, openAccount: openAccount)
+        } else {
+            LumenEmptyHint(symbol: "macwindow.on.rectangle", text: L("vm.unavailable.build"))
+        }
+    }
+}
+
+private struct VirtualMachinesScreen: View {
+    @ObservedObject var center: VMCenter
+    @ObservedObject var license: LicenseModel
+    let proxyList: ProxyListModel?
+    let openAccount: () -> Void
+
+    @State private var editing: VMEditorView.Draft?
+    @State private var deleting: VMProfile?
+    @State private var confirmingBaseRemoval = false
+    @State private var error: String?
+
+    private enum Stage: Equatable { case unavailable(String), signedOut, setup, machines }
+
+    private var stage: Stage {
+        switch VMCenter.availability {
+        case .notAppleSilicon: return .unavailable(L("vm.unavailable.intel"))
+        case .sandboxed, .notInThisBuild: return .unavailable(L("vm.unavailable.build"))
+        case .available: break
+        }
+        if license.isConfigured, !license.record.isSignedIn { return .signedOut }
+        return center.isReady ? .machines : .setup
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            ScrollView {
+                content
+                    .padding(.horizontal, 28)
+                    .padding(.bottom, 24)
+                    .frame(maxWidth: 860, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .sheet(item: $editing) { draft in
+            VMEditorView(center: center, proxies: proxyList?.entries ?? [], draft: draft)
+        }
+        .confirmationDialog(deleting.map { String(format: L("vm.delete.title"), $0.name) } ?? "",
+                            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                            titleVisibility: .visible) {
+            Button(L("vm.delete.confirm"), role: .destructive) {
+                if let profile = deleting { delete(profile) }
+            }
+        } message: {
+            Text(L("vm.delete.message"))
+        }
+        .confirmationDialog(L("vm.base.remove.title"), isPresented: $confirmingBaseRemoval, titleVisibility: .visible) {
+            Button(L("vm.base.remove.confirm"), role: .destructive) { center.removeBase() }
+        } message: {
+            Text(L("vm.base.remove.message"))
+        }
+    }
+
+    // MARK: The header
+
+    private var header: some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L("vm.title"))
+                    .lumenPageTitle()
+                    .foregroundStyle(Theme.textPrimary)
+                Text(summary)
+                    .font(.lumenBody)
+                    .foregroundStyle(Theme.textSecondary)
+                    .monospacedDigit()
+            }
+            .lineLimit(1)
+            .fixedSize()
+            Spacer(minLength: 12)
+            if stage == .machines {
+                moreMenu
+                Button { newMachine() } label: { Label(L("vm.new"), systemImage: "plus") }
+                    .buttonStyle(.lumenPrimary)
+                    .disabled(center.loadError != nil)
+            }
+        }
+        .frame(height: ProfilesScreen.headerHeight)
+        .padding(.leading, 28)
+        .padding(.trailing, ProfilesScreen.headerTrailing)
+        .padding(.top, ProfilesScreen.headerTop)
+        .padding(.bottom, 16)
+    }
+
+    private var summary: String {
+        guard stage == .machines else { return L("vm.subtitle") }
+        let total = center.diskUsage.values.reduce(0, +)
+        return String(format: L("vm.summary"), center.profiles.count, center.running.count, VMText.bytes(total))
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            Button(L("vm.base.open")) { center.openBase() }
+                .disabled(center.activity != nil)
+            Button(L("vm.reveal")) { SystemOpen.revealInFinder([center.library.root]) }
+            Divider()
+            Button(L("vm.base.remove"), role: .destructive) { confirmingBaseRemoval = true }
+                .disabled(center.activity != nil)
+        } label: {
+            Image(systemName: "ellipsis")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .tint(Theme.textSecondary)
+        .fixedSize()
+        .frame(width: 30, height: 30)
+        .hoverHighlight(cornerRadius: Theme.controlRadius)
+        .help(L("profiles.menu.more"))
+        .accessibilityLabel(L("profiles.menu.more"))
+    }
+
+    // MARK: What is shown
+
+    @ViewBuilder
+    private var content: some View {
+        switch stage {
+        case .unavailable(let why):
+            LumenEmptyHint(symbol: "macwindow.on.rectangle", text: why)
+                .frame(minHeight: 220)
+        case .signedOut:
+            VMIntroduction(problems: [], error: nil, actionTitle: L("vm.signIn"), actionSymbol: "person.crop.circle",
+                           actionEnabled: true, note: L("vm.signIn.note"), action: openAccount)
+        case .setup:
+            setup
+        case .machines:
+            machines
+        }
+    }
+
+    @ViewBuilder
+    private var setup: some View {
+        if center.activity == nil, center.setup == .none {
+            VMIntroduction(problems: center.requirements, error: center.setupError, actionTitle: L("vm.add"),
+                           actionEnabled: !center.requirements.contains(where: VMRequirements.stops),
+                           note: nil, action: { center.continueSetup() })
+        } else {
+            VMSetupSteps(center: center)
+        }
+    }
+
+    @ViewBuilder
+    private var machines: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let loadError = center.loadError {
+                VMNote(String(format: L("vm.error.load"), loadError), tone: .warning)
+            }
+            if let error {
+                VMNote(error, tone: .danger)
+            }
+            if let setupError = center.setupError {
+                VMNote(setupError, tone: .danger)
+            }
+            if center.activity == .guestSetup {
+                VMNote(L("vm.base.isOpen"), tone: .plain, symbol: "macwindow")
+            }
+            if center.runningCount >= VMRequirements.runningLimit {
+                VMNote(String(format: L("vm.limit.reached"), VMRequirements.runningLimit), tone: .plain, symbol: "info.circle")
+            }
+            if center.profiles.isEmpty {
+                VStack(spacing: 14) {
+                    LumenEmptyHint(symbol: "macwindow.on.rectangle", text: L("vm.empty"))
+                        .frame(height: 130)
+                    Button { newMachine() } label: { Label(L("vm.new"), systemImage: "plus") }
+                        .buttonStyle(.lumenPrimary)
+                        .disabled(center.loadError != nil)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(center.profiles) { profile in
+                        VMRow(profile: profile, state: center.running[profile.id], problem: center.problems[profile.id],
+                              exit: center.exits[profile.id], guest: center.guests[profile.id],
+                              disk: center.diskUsage[profile.id],
+                              canStart: center.runningCount < VMRequirements.runningLimit,
+                              start: { center.start(profile.id) }, stop: { center.stop(profile.id) },
+                              forceStop: { center.forceStop(profile.id) },
+                              edit: { editing = VMEditorView.Draft(profile: profile, isNew: false) },
+                              delete: { deleting = profile })
+                    }
+                }
+            }
+            baseLine
+            VMNote(L("vm.note.disks"), tone: .plain, symbol: "lock.open")
+        }
+    }
+
+    /// Which macOS the machines are made from, and what the base takes.
+    @ViewBuilder
+    private var baseLine: some View {
+        if case .ready(let info) = center.setup {
+            let size = center.diskUsage[VMCenter.baseID].map { VMText.bytes($0) } ?? "…"
+            let version = info.build.isEmpty ? info.version : "\(info.version) (\(info.build))"
+            Text(String(format: L("vm.base.line"), version, size))
+                .font(.lumenSecondary)
+                .foregroundStyle(Theme.textTertiary)
+                .padding(.top, 6)
+        }
+    }
+
+    // MARK: Actions
+
+    private func newMachine() {
+        error = nil
+        let names = Set(center.profiles.map(\.name))
+        var number = center.profiles.count + 1
+        var name = String(format: L("vm.new.name"), number)
+        while names.contains(name) {
+            number += 1
+            name = String(format: L("vm.new.name"), number)
+        }
+        editing = VMEditorView.Draft(profile: VMProfile(name: name), isNew: true)
+    }
+
+    /// The person's Delete, confirmed: the one caller of the machines' one deletion path.
+    private func delete(_ profile: VMProfile) {
+        do {
+            try center.deleteMachineBecauseThePersonAsked(profile.id)
+            error = nil
+        } catch {
+            self.error = errorText(error)
+        }
+        deleting = nil
+    }
+}
+
+// MARK: - Small parts
+
+/// The section's words for sizes and speeds, as the interface says them.
+enum VMText {
+    static func bytes(_ value: Int64) -> String {
+        value.formatted(.byteCount(style: .file).locale(Localization.locale))
+    }
+
+    static func bytes(_ value: UInt64) -> String {
+        bytes(Int64(clamping: value))
+    }
+
+    /// "about 12 min left", from what is still to fetch and how fast it comes.
+    static func remaining(bytes: Int64, speed: Double?) -> String? {
+        guard let speed, speed > 50_000, bytes > 0 else { return nil }
+        let minutes = Int((Double(bytes) / speed / 60).rounded(.up))
+        if minutes >= 60 {
+            return String(format: L("vm.setup.remaining.hours"), minutes / 60, minutes % 60)
+        }
+        return String(format: L("vm.setup.remaining.minutes"), max(1, minutes))
+    }
+
+    static func problem(_ problem: VMRequirements.Problem) -> String {
+        switch problem {
+        case .notAppleSilicon: return L("vm.unavailable.intel")
+        case .unavailableInThisBuild: return L("vm.unavailable.build")
+        case .notEnoughDisk(let needed, let free):
+            return String(format: L("vm.requirement.disk"), bytes(needed), bytes(free))
+        case .littleMemory(let machine, let host):
+            return String(format: L("vm.requirement.memory"), bytes(host), bytes(machine))
+        }
+    }
+}
+
+private struct VMNote: View {
+    enum Tone { case plain, warning, danger }
+    let text: String
+    var tone: Tone = .plain
+    var symbol: String?
+
+    init(_ text: String, tone: Tone = .plain, symbol: String? = nil) {
+        self.text = text
+        self.tone = tone
+        self.symbol = symbol
+    }
+
+    private var color: Color {
+        switch tone {
+        case .plain: return Theme.textSecondary
+        case .warning: return Theme.warning
+        case .danger: return Theme.danger
+        }
+    }
+
+    var body: some View {
+        Label(text, systemImage: symbol ?? (tone == .plain ? "info.circle" : "exclamationmark.triangle.fill"))
+            .font(.lumenSecondary)
+            .foregroundStyle(color)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// What a virtual machine's profile is and what it costs, before anything is fetched: shown until
+/// the person adds the machines (or, signed out, until they sign in).
+private struct VMIntroduction: View {
+    let problems: [VMRequirements.Problem]
+    let error: String?
+    let actionTitle: String
+    var actionSymbol = "plus"
+    let actionEnabled: Bool
+    let note: String?
+    let action: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top, spacing: 16) {
+                Image(systemName: "macwindow.on.rectangle")
+                    .font(.system(size: 30, weight: .light))
+                    .foregroundStyle(Theme.textPrimary)
+                    .frame(width: 44)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L("vm.intro.title"))
+                        .font(.lumenHeading)
+                        .foregroundStyle(Theme.textPrimary)
+                    Text(L("vm.intro.text"))
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                fact("arrow.down.circle", L("vm.intro.download"))
+                fact("internaldrive", L("vm.intro.disk"))
+                fact("memorychip", String(format: L("vm.intro.memory"), VMRequirements.runningLimit, VMRequirements.standardMemoryGB))
+                fact("network", L("vm.intro.proxy"))
+                fact("clock", L("vm.intro.time"))
+            }
+            if !problems.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(problems.enumerated()), id: \.offset) { _, problem in
+                        VMNote(VMText.problem(problem), tone: VMRequirements.stops(problem) ? .danger : .warning)
+                    }
+                }
+            }
+            if let error {
+                VMNote(error, tone: .danger)
+            }
+            HStack(spacing: 12) {
+                Button(action: action) { Label(actionTitle, systemImage: actionSymbol) }
+                    .buttonStyle(.lumenPrimary)
+                    .disabled(!actionEnabled)
+                if let note {
+                    Text(note)
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card(padding: 24)
+    }
+
+    private func fact(_ symbol: String, _ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.textTertiary)
+                .frame(width: 18)
+            Text(text)
+                .font(.lumenBody)
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// The setup under way, or stopped part-way: fetching macOS from Apple, installing it, and its
+/// first-run setup in the base — each step with where it stands and what can be done about it.
+private struct VMSetupSteps: View {
+    @ObservedObject var center: VMCenter
+
+    private enum StepState { case waiting, active, done }
+
+    private var downloadState: StepState {
+        switch center.activity {
+        case .asking?, .downloading?: return .active
+        case .installing?, .guestSetup?: return .done
+        case nil: break
+        }
+        switch center.setup {
+        case .downloaded, .needsGuestSetup, .ready: return .done
+        case .none, .downloading: return .waiting
+        }
+    }
+
+    private var installState: StepState {
+        switch center.activity {
+        case .installing?: return .active
+        case .guestSetup?: return .done
+        default: break
+        }
+        switch center.setup {
+        case .needsGuestSetup, .ready: return .done
+        default: return .waiting
+        }
+    }
+
+    private var guestState: StepState {
+        if center.activity == .guestSetup { return .active }
+        if case .ready = center.setup { return .done }
+        return .waiting
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            step(1, L("vm.setup.download"), downloadState) { download }
+            Rectangle().fill(Theme.divider).frame(height: 1)
+            step(2, L("vm.setup.install"), installState) { install }
+            Rectangle().fill(Theme.divider).frame(height: 1)
+            step(3, L("vm.setup.guest"), guestState) { guest }
+            if let error = center.setupError {
+                VMNote(error, tone: .danger)
+                    .padding(.top, 14)
+            }
+            let stopping = center.requirements.filter(VMRequirements.stops)
+            if center.activity == nil, !stopping.isEmpty {
+                ForEach(Array(stopping.enumerated()), id: \.offset) { _, problem in
+                    VMNote(VMText.problem(problem), tone: .danger)
+                        .padding(.top, 10)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card(padding: 24)
+    }
+
+    private func step<Detail: View>(_ number: Int, _ title: String, _ state: StepState,
+                                    @ViewBuilder detail: () -> Detail) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(state == .done ? Theme.running.opacity(0.16) : Color.white.opacity(state == .active ? 0.10 : 0.05))
+                if state == .done {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Theme.running)
+                } else {
+                    Text(verbatim: "\(number)")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(state == .active ? Theme.textPrimary : Theme.textTertiary)
+                }
+            }
+            .frame(width: 26, height: 26)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title)
+                    .font(.lumenRowTitle)
+                    .foregroundStyle(state == .waiting ? Theme.textSecondary : Theme.textPrimary)
+                    .frame(minHeight: 26)
+                detail()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 14)
+    }
+
+    // MARK: Fetching
+
+    @ViewBuilder
+    private var download: some View {
+        switch center.activity {
+        case .asking?:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                caption(L("vm.setup.asking"))
+            }
+        case .downloading(let progress)?:
+            VStack(alignment: .leading, spacing: 8) {
+                bar(progress.total.map { $0 > 0 ? Double(progress.have) / Double($0) : 0 } ?? 0)
+                HStack(spacing: 10) {
+                    caption(downloadText(progress))
+                    Spacer(minLength: 8)
+                    Button(L("vm.setup.pause")) { center.pauseDownload() }
+                        .buttonStyle(.lumenGhost)
+                }
+                caption(L("vm.setup.download.note"))
+            }
+        default:
+            if downloadState == .waiting {
+                HStack(spacing: 10) {
+                    if case .downloading(let have, let total) = center.setup {
+                        caption(total.map { String(format: L("vm.setup.paused.of"), VMText.bytes(have), VMText.bytes($0)) }
+                            ?? String(format: L("vm.setup.paused"), VMText.bytes(have)))
+                    } else {
+                        caption(L("vm.setup.download.waiting"))
+                    }
+                    Spacer(minLength: 8)
+                    Button(L("vm.setup.continue")) { center.continueSetup() }
+                        .buttonStyle(.lumenPrimary)
+                        .disabled(center.requirements.contains(where: VMRequirements.stops))
+                }
+            } else if let image = center.offeredImage {
+                caption(String(format: L("vm.setup.download.done"), image.version))
+            }
+        }
+    }
+
+    private func downloadText(_ progress: VMImageDownloader.Progress) -> String {
+        var parts: [String] = []
+        if let total = progress.total {
+            parts.append(String(format: L("vm.setup.progress.of"), VMText.bytes(progress.have), VMText.bytes(total)))
+        } else {
+            parts.append(VMText.bytes(progress.have))
+        }
+        if let speed = progress.speed, speed > 0 {
+            parts.append(String(format: L("vm.setup.speed"), VMText.bytes(Int64(speed))))
+        }
+        if let total = progress.total, let left = VMText.remaining(bytes: total - progress.have, speed: progress.speed) {
+            parts.append(left)
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    // MARK: Installing
+
+    @ViewBuilder
+    private var install: some View {
+        switch center.activity {
+        case .installing(let fraction)?:
+            VStack(alignment: .leading, spacing: 8) {
+                bar(fraction)
+                HStack(spacing: 10) {
+                    caption(String(format: L("vm.setup.install.progress"), Int((fraction * 100).rounded())))
+                    Spacer(minLength: 8)
+                    Button(L("common.cancel")) { center.cancelInstallation() }
+                        .buttonStyle(.lumenGhost)
+                }
+                caption(L("vm.setup.install.note"))
+            }
+        default:
+            if installState == .waiting, center.setup == .downloaded, center.activity == nil {
+                HStack(spacing: 10) {
+                    caption(L("vm.setup.install.ready"))
+                    Spacer(minLength: 8)
+                    Button(L("vm.setup.continue")) { center.continueSetup() }
+                        .buttonStyle(.lumenPrimary)
+                }
+            } else if installState == .waiting {
+                caption(L("vm.setup.install.waiting"))
+            }
+        }
+    }
+
+    // MARK: The first-run setup
+
+    @ViewBuilder
+    private var guest: some View {
+        if guestState == .waiting, installState != .done {
+            caption(L("vm.setup.guest.waiting"))
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                instruction(1, L("vm.setup.guest.step1"))
+                instruction(2, L("vm.setup.guest.step2"))
+                instruction(3, L("vm.setup.guest.step3"))
+                caption(L("vm.setup.guest.fallback"))
+                Text(verbatim: #"sh "/Volumes/My Shared Files/install.sh""#)
+                    .font(.lumenMono)
+                    .foregroundStyle(Theme.textSecondary)
+                    .textSelection(.enabled)
+                HStack(spacing: 10) {
+                    if center.activity == .guestSetup {
+                        ProgressView().controlSize(.small)
+                        caption(L("vm.setup.guest.open"))
+                    } else {
+                        Button(L("vm.setup.guest.openMachine")) { center.continueSetup() }
+                            .buttonStyle(.lumenPrimary)
+                        Button(L("vm.setup.guest.startOver")) { center.removeBase() }
+                            .buttonStyle(.lumenGhost)
+                    }
+                }
+                .padding(.top, 4)
+            }
+        }
+    }
+
+    private func instruction(_ number: Int, _ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(verbatim: "\(number).")
+                .font(.lumenBody)
+                .foregroundStyle(Theme.textTertiary)
+                .monospacedDigit()
+            Text(text)
+                .font(.lumenBody)
+                .foregroundStyle(Theme.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func caption(_ text: String) -> some View {
+        Text(text)
+            .font(.lumenSecondary)
+            .foregroundStyle(Theme.textSecondary)
+            .monospacedDigit()
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// A progress bar the step's width (the app's own is a fixed 72 pt).
+    private func bar(_ fraction: Double) -> some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.12))
+                Capsule().fill(Theme.textPrimary)
+                    .frame(width: max(3, geometry.size.width * min(max(fraction, 0), 1)))
+            }
+        }
+        .frame(height: 3)
+        .animation(Theme.hoverAnimation, value: fraction)
+        .accessibilityElement()
+        .accessibilityValue(Text(verbatim: "\(Int((min(max(fraction, 0), 1) * 100).rounded())) %"))
+    }
+}
+
+/// One profile's machine: what it is (where its proxy comes out, its screen, memory, system),
+/// what it is doing, and what can be done with it.
+private struct VMRow: View {
+    let profile: VMProfile
+    let state: VMCenter.Running?
+    let problem: String?
+    let exit: ProxyCheckResult?
+    let guest: VMGuestStatus?
+    let disk: Int64?
+    let canStart: Bool
+    let start: () -> Void
+    let stop: () -> Void
+    let forceStop: () -> Void
+    let edit: () -> Void
+    let delete: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 14) {
+            Image(systemName: profile.display.id.hasPrefix("macbook") ? "laptopcomputer" : "desktopcomputer")
+                .font(.system(size: 20, weight: .light))
+                .foregroundStyle(state == nil ? Theme.textTertiary : Theme.running)
+                .frame(width: 34)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(profile.name)
+                        .font(.lumenRowTitle)
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+                    if let status {
+                        Text(status)
+                            .font(.lumenCaption)
+                            .foregroundStyle(state?.phase == .running ? Theme.running : Theme.textSecondary)
+                            .lineLimit(1)
+                    }
+                }
+                HStack(spacing: 6) {
+                    if let country {
+                        CountryFlag(code: country, size: 12)
+                    }
+                    Text(details)
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                if let problem {
+                    Text(problem)
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 10)
+            if let state, state.phase == .running, profile.proxy != nil {
+                Text(verbatim: "↑ \(VMText.bytes(state.bytesUp))  ↓ \(VMText.bytes(state.bytesDown))")
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textTertiary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .help(L("vm.row.traffic.help"))
+            }
+            action
+            menu
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card(padding: 0)
+    }
+
+    private var country: String? {
+        guard profile.proxy != nil else { return nil }
+        return (exit?.countryCode ?? profile.countryCode)?.uppercased()
+    }
+
+    private var status: String? {
+        switch state?.phase {
+        case .checkingProxy?: return L("vm.row.checkingProxy")
+        case .starting?: return L("vm.row.starting")
+        case .running?: return L("vm.row.running")
+        case .stopping?: return L("vm.row.stopping")
+        case nil: return nil
+        }
+    }
+
+    /// "Germany · 203.0.113.7 · MacBook Air 13″ · 4 GB · macOS 26.1, Safari 26.1 · 6.2 GB on disk".
+    private var details: String {
+        var parts: [String] = []
+        if let proxy = profile.proxy {
+            if let country { parts.append(CountryNames.name(for: country)) }
+            parts.append(exit?.exitIP ?? "\(proxy.host):\(proxy.port)")
+        } else {
+            parts.append(L("vm.row.direct"))
+        }
+        parts.append(profile.display.name)
+        parts.append(String(format: L("vm.row.memory"), profile.memoryGB))
+        if let guest, let system = guest.systemVersion, !system.isEmpty {
+            if let safari = guest.safariVersion, !safari.isEmpty {
+                parts.append(String(format: L("vm.row.system.safari"), system, safari))
+            } else {
+                parts.append(String(format: L("vm.row.system"), system))
+            }
+        }
+        if let disk, disk > 0 { parts.append(String(format: L("vm.row.disk"), VMText.bytes(disk))) }
+        return parts.joined(separator: " · ")
+    }
+
+    @ViewBuilder
+    private var action: some View {
+        switch state?.phase {
+        case nil:
+            Button(action: start) { Label(L("vm.row.start"), systemImage: "play.fill") }
+                .buttonStyle(.lumenSecondary)
+                .disabled(!canStart)
+                .help(canStart ? L("vm.row.start.help") : String(format: L("vm.limit.reached"), VMRequirements.runningLimit))
+        case .checkingProxy?, .starting?:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Button(L("vm.row.stop"), action: stop)
+                    .buttonStyle(.lumenGhost)
+            }
+        case .running?:
+            Button(L("vm.row.stop"), action: stop)
+                .buttonStyle(.lumenGhost)
+                .help(L("vm.row.stop.help"))
+        case .stopping?:
+            ProgressView().controlSize(.small)
+        }
+    }
+
+    private var menu: some View {
+        Menu {
+            Button(L("vm.row.edit"), action: edit)
+            if state != nil {
+                Button(L("vm.row.forceStop"), action: forceStop)
+            }
+            Divider()
+            Button(L("vm.row.delete"), role: .destructive, action: delete)
+                .disabled(state != nil)
+        } label: {
+            Image(systemName: "ellipsis")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .tint(Theme.textSecondary)
+        .fixedSize()
+        .frame(width: 30, height: 30)
+        .hoverHighlight(cornerRadius: Theme.controlRadius)
+        .help(L("profiles.menu.more"))
+        .accessibilityLabel(L("profiles.menu.more"))
+    }
+}
+
+// MARK: - The editor
+
+/// A virtual machine's profile, new or changed: its name, the proxy the whole machine goes out
+/// through, where its time zone and language come from, the Mac its screen is, and its memory.
+/// What is changed here takes effect at the machine's next start.
+struct VMEditorView: View {
+    struct Draft: Identifiable {
+        var profile: VMProfile
+        var isNew: Bool
+        var id: UUID { profile.id }
+    }
+
+    @ObservedObject var center: VMCenter
+    let proxies: [ProxyListEntry]
+    let draft: Draft
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var name: String
+    /// "": this Mac's connection. "current": the proxy the profile has, which the list no longer
+    /// holds. Else a list entry's id.
+    @State private var proxyChoice: String
+    @State private var followsProxy: Bool
+    @State private var timeZone: String
+    @State private var language: String
+    @State private var displayID: String
+    @State private var memoryGB: Int
+    @State private var startURL: String
+    @State private var error: String?
+
+    init(center: VMCenter, proxies: [ProxyListEntry], draft: Draft) {
+        self.center = center
+        // A machine's network speaks to a proxy in the clear (SOCKS5, HTTP): one reached over TLS
+        // is not offered, and a proxy whose type no check has found is given to no profile.
+        let usable = proxies.filter { $0.kindKnown && !$0.proxy.tlsToProxy }
+        self.proxies = usable
+        self.draft = draft
+        let profile = draft.profile
+        _name = State(initialValue: profile.name)
+        var choice = ""
+        if let proxy = profile.proxy {
+            let identity = ProxyList.identity(of: proxy)
+            choice = usable.first { ProxyList.identity(of: $0.proxy) == identity }?.id.uuidString ?? "current"
+        }
+        _proxyChoice = State(initialValue: choice)
+        _followsProxy = State(initialValue: profile.localeFollowsProxy)
+        _timeZone = State(initialValue: profile.timeZoneIdentifier ?? TimeZone.current.identifier)
+        _language = State(initialValue: profile.language ?? "")
+        _displayID = State(initialValue: profile.displayID)
+        _memoryGB = State(initialValue: profile.memoryGB)
+        _startURL = State(initialValue: profile.startURL ?? "")
+    }
+
+    private var chosenEntry: ProxyListEntry? { proxies.first { $0.id.uuidString == proxyChoice } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SheetHeader(title: draft.isNew ? L("vm.editor.title.new") : String(format: L("vm.editor.title"), draft.profile.name),
+                        subtitle: L("vm.editor.subtitle"))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    EditorField(L("vm.editor.name")) {
+                        TextField(L("vm.editor.name"), text: $name, prompt: Text(verbatim: ""))
+                            .lumenField(L("vm.editor.name.placeholder"), isEmpty: name.isEmpty)
+                    }
+                    proxyField
+                    localeFields
+                    EditorField(L("vm.editor.display")) {
+                        Picker(L("vm.editor.display"), selection: $displayID) {
+                            ForEach(VMDisplay.presets) { display in
+                                Text(verbatim: "\(display.name) — \(display.pointsWide) × \(display.pointsHigh)").tag(display.id)
+                            }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                        note(L("vm.editor.display.note"))
+                    }
+                    EditorField(L("vm.editor.memory")) {
+                        LumenSegmented(selection: $memoryGB,
+                                       options: VMRequirements.memoryChoices.map { (value: $0, title: String(format: L("vm.row.memory"), $0)) })
+                        note(memoryNote, warns: memoryIsTight)
+                    }
+                    EditorField(L("vm.editor.start")) {
+                        TextField(L("vm.editor.start"), text: $startURL, prompt: Text(verbatim: ""))
+                            .lumenField("https://", isEmpty: startURL.isEmpty)
+                    }
+                    if center.isRunning(draft.profile.id) {
+                        note(L("vm.editor.nextStart"), warns: true)
+                    }
+                    if let error {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.danger)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 18)
+            }
+            .frame(minHeight: 320, maxHeight: 560)
+            SheetFooter {
+                Button(L("common.cancel")) { dismiss() }
+                    .buttonStyle(.lumenSecondary)
+                    .keyboardShortcut(.cancelAction)
+                Button(draft.isNew ? L("vm.editor.create") : L("common.save"), action: save)
+                    .buttonStyle(.lumenPrimary)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .sheetFrame(width: 540)
+        .background(Theme.raised)
+    }
+
+    private var proxyField: some View {
+        EditorField(L("vm.editor.proxy")) {
+            Picker(L("vm.editor.proxy"), selection: $proxyChoice) {
+                Text(L("vm.editor.proxy.none")).tag("")
+                if proxyChoice == "current", let proxy = draft.profile.proxy {
+                    Text(verbatim: "\(proxy.host):\(proxy.port)").tag("current")
+                }
+                ForEach(proxies) { entry in
+                    Text(verbatim: Self.title(of: entry)).tag(entry.id.uuidString)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+            note(proxyChoice.isEmpty ? L("vm.editor.proxy.direct.note") : L("vm.editor.proxy.note"), warns: proxyChoice.isEmpty)
+            if proxies.isEmpty {
+                note(L("vm.editor.proxy.empty"))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var localeFields: some View {
+        EditorToggle(L("vm.editor.follow"), detail: L(proxyChoice.isEmpty ? "vm.editor.follow.direct" : "vm.editor.follow.detail"),
+                     isOn: $followsProxy)
+        if !followsProxy {
+            EditorField(L("editor.tz")) {
+                Picker(L("editor.tz"), selection: $timeZone) {
+                    ForEach(ProfileEditorForm.timeZones, id: \.self) { Text(verbatim: $0).tag($0) }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+            EditorField(L("editor.language")) {
+                Picker(L("editor.language"), selection: $language) {
+                    Text(L("vm.editor.language.base")).tag("")
+                    ForEach(ProfileEditorForm.languageChoices(including: language), id: \.self) { tag in
+                        Text(verbatim: ProfileEditorForm.languageName(tag)).tag(tag)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+        }
+    }
+
+    /// "Berlin 1 — Germany", as the proxy list names it and where it came out at its last check.
+    private static func title(of entry: ProxyListEntry) -> String {
+        guard let country = entry.lastCheck?.countryCode, entry.lastCheck?.isAlive == true else { return entry.displayName }
+        return "\(entry.displayName) — \(CountryNames.name(for: country.uppercased()))"
+    }
+
+    private var memoryIsTight: Bool {
+        Int64(clamping: ProcessInfo.processInfo.physicalMemory) - Int64(memoryGB) * VMRequirements.gibibyte < 4 * VMRequirements.gibibyte
+    }
+
+    private var memoryNote: String {
+        memoryIsTight
+            ? String(format: L("vm.editor.memory.tight"), VMText.bytes(Int64(clamping: ProcessInfo.processInfo.physicalMemory)))
+            : L("vm.editor.memory.note")
+    }
+
+    private func note(_ text: String, warns: Bool = false) -> some View {
+        Text(text)
+            .font(.lumenSecondary)
+            .foregroundStyle(warns ? Theme.warning : Theme.textTertiary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func save() {
+        var profile = draft.profile
+        profile.name = name
+        profile.displayID = displayID
+        profile.memoryGB = memoryGB
+        profile.localeFollowsProxy = followsProxy
+        let start = startURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if start.isEmpty {
+            profile.startURL = nil
+        } else {
+            // "example.com" is taken as the address it means.
+            let address = start.contains("://") ? start : "https://" + start
+            guard let checked = VMGuestSettings.startURL(address) else {
+                error = L("vm.editor.error.start")
+                return
+            }
+            profile.startURL = checked
+        }
+        var lastCheck: ProxyCheckResult?
+        switch proxyChoice {
+        case "":
+            profile.proxy = nil
+            profile.countryCode = nil
+        case "current":
+            break
+        default:
+            guard let entry = chosenEntry else { break }
+            profile.proxy = entry.proxy
+            lastCheck = entry.lastCheck
+            profile.countryCode = entry.lastCheck?.countryCode?.uppercased()
+        }
+        if followsProxy {
+            if profile.proxy == nil {
+                // This Mac's connection: sites see this Mac's address, and this Mac's time zone.
+                profile.timeZoneIdentifier = TimeZone.current.identifier
+                profile.language = nil
+            } else {
+                // What the list's last check found, until the check at the machine's start.
+                profile = profile.followingProxy(check: lastCheck)
+            }
+        } else {
+            profile.timeZoneIdentifier = timeZone
+            profile.language = language.isEmpty ? nil : language
+        }
+        do {
+            try center.save(profile)
+            center.measureDisk()
+            dismiss()
+        } catch {
+            self.error = errorText(error)
+        }
+    }
+}

@@ -343,6 +343,7 @@ struct ProfileListView: View {
                        filter: $filter, search: $search, actions: actions,
                        section: $section, proxyCount: proxyCount,
                        proxies: AnyView(ProxyListView(selection: $proxySelection)),
+                       virtualMachines: VMCenter.isOffered ? AnyView(VirtualMachinesView(openAccount: actions.openAccount)) : nil,
                        indexNotice: model.indexNotice, revealVault: { model.revealVaultFolder() },
                        keptDeleted: model.keptDeletedProfiles,
                        bringBack: { id in Task { await model.bringBackDeletedProfile(id) } },
@@ -598,10 +599,12 @@ enum ProxySheet: Identifiable, Equatable {
     var id: String { "problems" }
 }
 
-/// What the Profiles window's main area shows: the profiles (through a filter), or the proxy list.
+/// What the Profiles window's main area shows: the profiles (through a filter), the proxy list, or
+/// the virtual machines (docs/VM.md).
 enum ProfilesSection: Equatable {
     case profiles
     case proxies
+    case virtualMachines
 }
 
 // MARK: - What the screen shows
@@ -845,6 +848,9 @@ struct ProfilesScreen: View {
     var section: Binding<ProfilesSection> = .constant(.profiles)
     var proxyCount: Int?
     var proxies: AnyView?
+    /// The virtual machines as a section of the window (`VirtualMachinesView`); nil: this build
+    /// carries no machines (`VMCenter.isOffered`), and the sidebar has no such item.
+    var virtualMachines: AnyView?
     /// The vault's profile index missing or unreadable, or profile folders it does not list
     /// (AppModel.indexNotice): said above the list, with the vault's folder in the Finder.
     var indexNotice: AppModel.IndexNotice?
@@ -934,7 +940,8 @@ struct ProfilesScreen: View {
             let inspectorFits = geometry.size.width - Self.sidebarWidth - Self.inspectorWidth >= ProfileColumns.minimumContentWidth
             HStack(spacing: 0) {
                 ProfilesSidebar(rows: rows, sync: sync, filter: $filter, section: section, proxyCount: proxyCount,
-                                proxyAlerts: proxyAlerts, actions: actions, rights: rights)
+                                proxyAlerts: proxyAlerts, showsVirtualMachines: virtualMachines != nil,
+                                actions: actions, rights: rights)
                     .frame(width: Self.sidebarWidth)
                     .lumenFrost()
                     .overlay(alignment: .trailing) { Rectangle().fill(Theme.divider).frame(width: 1) }
@@ -978,6 +985,8 @@ struct ProfilesScreen: View {
         Group {
             if section.wrappedValue == .proxies, let proxies {
                 proxies
+            } else if section.wrappedValue == .virtualMachines, let virtualMachines {
+                virtualMachines
             } else {
                 VStack(spacing: 0) {
                     header
@@ -1445,6 +1454,8 @@ private struct ProfilesSidebar: View {
     /// Nil: the window has no Proxies section (no list model).
     let proxyCount: Int?
     var proxyAlerts = 0
+    /// The window has the Virtual machines section (the build carries them).
+    var showsVirtualMachines = false
     let actions: ProfileActions
     var rights: RightsLine?
 
@@ -1459,6 +1470,7 @@ private struct ProfilesSidebar: View {
                 .padding(.bottom, 10)
             item(.all, title: L("profiles.title"))
             if let proxyCount { proxiesItem(proxyCount) }
+            if showsVirtualMachines { virtualMachinesItem }
             // What was behind a menu, in the interface (the owner, 10 November): the scenario
             // editor, the automation API's settings, the app's help.
             toolItem(symbol: "play.rectangle", title: L("scenarios.title"), action: actions.openScenarios)
@@ -1603,6 +1615,14 @@ private struct ProfilesSidebar: View {
         sidebarButton(symbol: "globe", title: L("proxies.title"), count: proxyAlerts > 0 ? proxyAlerts : count,
                       alert: proxyAlerts > 0, selected: section == .proxies) {
             section = .proxies
+        }
+    }
+
+    /// The virtual machines: profiles that are whole Macs (docs/VM.md), a section of their own.
+    private var virtualMachinesItem: some View {
+        SidebarItem(symbol: "macwindow.on.rectangle", title: L("vm.title"), count: nil,
+                    selected: section == .virtualMachines) {
+            withAnimation(Theme.appearAnimation) { section = .virtualMachines }
         }
     }
 

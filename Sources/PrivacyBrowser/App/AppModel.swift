@@ -143,6 +143,9 @@ final class AppModel: ObservableObject {
     private(set) var warmUps: WarmUpCoordinator?
     /// The proxy list of the unlocked vault (`ProxyListModel`); nil while locked.
     private(set) var proxyList: ProxyListModel?
+    /// The virtual machines of the unlocked vault (`VMCenter`, docs/VM.md); nil while locked, and
+    /// in a build that carries none.
+    private(set) var virtualMachines: VMCenter?
     private var managerObservation: AnyCancellable?
     private var lockTask: Task<Void, Never>?
     /// The app's updater; nil in a build without an update feed (`AppUpdater.Configuration.main`),
@@ -518,6 +521,11 @@ final class AppModel: ObservableObject {
             }
         }
         self.proxyList = proxyList
+        if VMCenter.isOffered {
+            virtualMachines = VMCenter(vault: vault, library: VMLibrary(vaultDirectory: root)) { [weak self] message in
+                self?.showError(message)
+            }
+        }
         manager.onProxyProblem = { [weak self] id, proxy, diagnosis in
             self?.reportProxyProblem(of: id, proxy: proxy, diagnosis: diagnosis)
         }
@@ -606,7 +614,9 @@ final class AppModel: ObservableObject {
     }
 
     /// Lock or Quit must wait: a lock is under way, or a profile is running, launching or sealing.
-    var hasActivity: Bool { lockTask != nil || (manager?.hasActivity ?? false) }
+    var hasActivity: Bool {
+        lockTask != nil || (manager?.hasActivity ?? false) || (virtualMachines?.hasRunning ?? false)
+    }
 
     private func performLock() async {
         license.vaultLocked()
@@ -623,6 +633,10 @@ final class AppModel: ObservableObject {
         recordingProfile = nil
         recorded = ScenarioRecording()
         await manager?.shutDown()
+        // The machines' macOS is shut down, as a Mac's is, before the vault that holds their
+        // profiles — and their proxies' passwords — is locked.
+        await virtualMachines?.stopAll()
+        virtualMachines = nil
         proxyList?.stopChecking()
         proxyList = nil
         proxyProblems = []
