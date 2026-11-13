@@ -414,6 +414,13 @@ made, sizes = [], set()
 for test in manifest:
     for a in test.get("attachments", []):
         name = a.get("suggestedHumanReadableName", "").split("_")[0]
+        if name.startswith("d-"):   # the design's states: design/<lang>-<theme>/<mockup's name>.png
+            _, language, theme, rest = name.split("-", 3)
+            folder = os.path.join(os.path.dirname(dst), "design", f"{language}-{theme}")
+            os.makedirs(folder, exist_ok=True)
+            shutil.copy(os.path.join(src, a["exportedFileName"]), os.path.join(folder, rest + ".png"))
+            made.append(f"design/{language}-{theme}/{rest}")
+            continue
         if not name[:3] in ("ru-", "en-"):
             continue
         language, rest = name[:2], name[3:]
@@ -423,7 +430,8 @@ for test in manifest:
         info = subprocess.run(["sips", "-g", "pixelWidth", "-g", "pixelHeight", out], capture_output=True, text=True).stdout.split()
         sizes.add(f"{info[-3]}x{info[-1]}" if len(info) >= 4 else "?")
         made.append(f"{language}/{rest}")
-print(f"app store screenshots: {len(made)} ({', '.join(sorted(made))}), sizes {sorted(sizes)}")
+store = [m for m in made if not m.startswith("design/")]
+print(f"app store screenshots: {len(store)} ({', '.join(sorted(store))}), sizes {sorted(sizes)}; design states: {len(made) - len(store)}")
 if sizes - {"1320x2868", "1290x2796"}:
     print("APP STORE SCREENSHOTS: a size App Store Connect does not take for 6.9-inch")
 PY

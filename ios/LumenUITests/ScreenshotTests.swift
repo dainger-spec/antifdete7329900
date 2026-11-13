@@ -68,3 +68,248 @@ final class ScreenshotTests: LumenUITestCase {
         add(attachment)
     }
 }
+
+/// Every state of «Приборная панель» beside its mockup (the handoff's screens/<lang>-<theme>/<name>.png):
+/// taken by hand with the suite "ScreenshotTests", each named d-<lang>-<theme>-<mockup's name>, which
+/// ci.sh sorts into design/<lang>-<theme>/. A state that cannot be reached is said in the log and
+/// skipped; the others go on (continueAfterFailure).
+final class DesignShotTests: LumenUITestCase {
+    private var language = "ru"
+    private var theme = "dark"
+
+    func testEveryState() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["LUMEN_SCREENS"] == "1", "taken by hand (suite ScreenshotTests)")
+        continueAfterFailure = true
+        for language in ["ru", "en"] {
+            self.language = language
+            theme = "dark"
+            takeAll()
+        }
+        // The light theme, behind its flag: the main screens.
+        language = "ru"
+        theme = "light"
+        start()
+        snap("k-list")
+        openSeeded(t("Магазин — Берлин", "Store — Berlin"))
+        go("http://check.example/?l=\(language)")
+        _ = app.webViews.staticTexts["Europe/Berlin"].waitForExistence(timeout: 30)
+        snap("k-browser")
+        app.buttons["settingsButton"].tap()
+        if app.buttons["settingsDone"].waitForExistence(timeout: 10) { snap("k-settings") }
+        app.terminate()
+    }
+
+    private func t(_ ru: String, _ en: String) -> String { language == "en" ? en : ru }
+
+    private func start(access: String = "full", empty: Bool = false) {
+        let app = XCUIApplication()
+        app.launchArguments = ["-LumenResetState"]
+        app.launchEnvironment["LUMEN_TEST_LANGUAGE"] = language
+        app.launchEnvironment["LUMEN_TEST_ACCESS"] = access
+        app.launchEnvironment["LUMEN_TEST_SEED"] = "appstore"
+        app.launchEnvironment["LUMEN_TEST_THEME"] = theme
+        if empty { app.launchEnvironment["LUMEN_TEST_SEED_EMPTY"] = "1" }
+        app.launch()
+        self.app = app
+        _ = app.navigationBars[t("Сессии", "Sessions")].waitForExistence(timeout: 30)
+        sleep(1)
+    }
+
+    private func snap(_ name: String) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "d-\(language)-\(theme)-\(name)"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    private func openSeeded(_ name: String) {
+        let card = app.buttons["session-\(name)"]
+        guard card.waitForExistence(timeout: 15) else { return XCTFail("no session \(name)") }
+        card.tap()
+        _ = app.textFields["addressBar"].waitForExistence(timeout: 30)
+        sleep(1)
+    }
+
+    private func dismissMenu() {
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
+        sleep(1)
+    }
+
+    private func takeAll() {
+        // The list, its search, its menu, its dialog, the new session's sheet.
+        start()
+        snap("k-list")
+        let search = app.searchFields.firstMatch
+        if search.waitForExistence(timeout: 5) {
+            search.tap()
+            search.typeText(t("Берлин", "Berlin"))
+            sleep(1)
+            snap("p1-search")
+            search.typeText(" #android")
+            sleep(1)
+            snap("p1-search-none")
+        }
+        start()
+        let row = app.buttons["session-\(t("Магазин — Берлин", "Store — Berlin"))"]
+        if row.waitForExistence(timeout: 10) {
+            row.press(forDuration: 1.2)
+            if app.buttons[t("Изменить", "Edit")].waitForExistence(timeout: 5) {
+                snap("k-context")
+                app.buttons[t("Удалить", "Delete")].tap()
+                if app.buttons["confirmDelete"].waitForExistence(timeout: 5) {
+                    snap("k-dialog")
+                    app.buttons[t("Отмена", "Cancel")].firstMatch.tap()
+                }
+            }
+        }
+        app.buttons["newSession"].tap()
+        let name = app.textFields["sessionName"]
+        if name.waitForExistence(timeout: 5) {
+            typeInto(name, t("Оплата", "Payments"))
+            sleep(1)
+            snap("k-keyboard")
+            app.buttons[t("Отмена", "Cancel")].firstMatch.tap()
+        }
+
+        // The browser: a page through Berlin, a new tab, the tabs, the history, the settings and their parts.
+        openSeeded(t("Магазин — Берлин", "Store — Berlin"))
+        go("http://check.example/?l=\(language)")
+        _ = app.webViews.staticTexts["Europe/Berlin"].waitForExistence(timeout: 30)
+        sleep(1)
+        snap("k-browser")
+        openTabs()
+        app.buttons["newTab"].tap()
+        sleep(1)
+        go("http://check.example/?l=\(language)&tab=2")
+        _ = app.webViews.staticTexts["Europe/Berlin"].waitForExistence(timeout: 30)
+        openTabs()
+        app.buttons["newTab"].tap()
+        sleep(1)
+        snap("k-newtab")
+        openTabs()
+        sleep(1)
+        snap("k-tabs")
+        app.buttons["tabsDone"].tap()
+        app.buttons["historyButton"].tap()
+        if app.buttons["historyDone"].waitForExistence(timeout: 5) {
+            sleep(1)
+            snap("p5-history")
+            app.buttons["historyDone"].tap()
+        }
+        app.buttons["settingsButton"].tap()
+        if app.buttons["settingsDone"].waitForExistence(timeout: 10) {
+            sleep(1)
+            snap("k-settings")
+            app.buttons["proxyRow"].tap()
+            if app.buttons["proxySheetDone"].waitForExistence(timeout: 5) {
+                sleep(1)
+                snap("k-sheet-mid")
+                app.buttons["proxyNone"].tap()
+                if app.alerts.firstMatch.waitForExistence(timeout: 5) {
+                    snap("k-alert")
+                    app.alerts.firstMatch.buttons[t("Оставить прокси", "Keep the proxy")].tap()
+                }
+                if app.buttons["proxySheetDone"].exists { app.buttons["proxySheetDone"].tap() }
+            }
+            reveal(app.buttons["profile-custom"], "the profile's own choice").tap()
+            sleep(1)
+            snap("p6-custom")
+            app.buttons["profile-full"].tap()
+            let browser = app.buttons["userAgentPicker"]
+            if browser.exists {
+                reveal(browser, "the browser's menu").tap()
+                sleep(1)
+                snap("k-menu")
+                dismissMenu()
+            }
+            app.buttons["settingsDone"].tap()
+        }
+        backToList()
+
+        // A proxy that does not answer, and an empty history.
+        openSeeded(t("Релиз — Амстердам", "Release — Amsterdam"))
+        go("http://check.example/?l=\(language)")
+        if app.descendants(matching: .any)["proxyNotAnswering"].waitForExistence(timeout: 40) {
+            sleep(1)
+            snap("p3-dead")
+        }
+        app.buttons["historyButton"].tap()
+        if app.buttons["historyDone"].waitForExistence(timeout: 5) {
+            sleep(1)
+            snap("p5-history-empty")
+            app.buttons["historyDone"].tap()
+        }
+        backToList()
+
+        // The proxies: the list, a new one, a line that is not a proxy.
+        app.buttons["proxiesButton"].tap()
+        if app.navigationBars[t("Прокси", "Proxies")].waitForExistence(timeout: 10) {
+            sleep(1)
+            snap("p8-list")
+            app.buttons["newProxy"].tap()
+            let line = app.descendants(matching: .any).matching(identifier: "proxyLine").firstMatch
+            if line.waitForExistence(timeout: 5) {
+                typeInto(app.textFields["proxyName"], t("Берлин", "Berlin"))
+                typeInto(line, "socks5://qa-berlin:secret@de1.proxy.example:1080")
+                sleep(1)
+                snap("p9-new")
+                replaceText(line, with: "socks5://qa-berlin@")
+                sleep(1)
+                snap("p9-error")
+                app.buttons[t("Отмена", "Cancel")].firstMatch.tap()
+            }
+        }
+
+        // The paid period over: the sessions with proxies locked, one opened.
+        start(access: "none")
+        sleep(1)
+        snap("p1-ended")
+        let locked = app.buttons["session-\(t("Магазин — Берлин", "Store — Berlin"))"]
+        if locked.waitForExistence(timeout: 10) {
+            locked.tap()
+            if app.descendants(matching: .any)["lockedSession"].waitForExistence(timeout: 10) {
+                sleep(1)
+                snap("k-locked")
+            }
+        }
+
+        // The free level: a session's settings without proxies.
+        start(access: "free")
+        let free = app.buttons["session-\(t("Личное", "Personal"))"]
+        if free.waitForExistence(timeout: 10) {
+            free.tap()
+            _ = app.textFields["addressBar"].waitForExistence(timeout: 30)
+            app.buttons["settingsButton"].tap()
+            if app.buttons["settingsDone"].waitForExistence(timeout: 10) {
+                sleep(1)
+                snap("p6-free")
+            }
+        }
+
+        // Not signed in: the account, and the sign-in sheet.
+        start(access: "account")
+        app.buttons["plansButton"].tap()
+        if app.buttons["signIn"].waitForExistence(timeout: 10) {
+            sleep(1)
+            snap("p10-signed-out")
+            app.buttons["signIn"].tap()
+            let email = app.textFields["signInEmail"]
+            if email.waitForExistence(timeout: 5) {
+                typeInto(email, "qa@example.com")
+                typeInto(app.secureTextFields["signInPassword"], "password12")
+                sleep(1)
+                snap("p11-login")
+            }
+        }
+
+        // Nothing yet: no session, no proxy.
+        start(empty: true)
+        snap("k-empty")
+        app.buttons["proxiesButton"].tap()
+        if app.navigationBars[t("Прокси", "Proxies")].waitForExistence(timeout: 10) {
+            sleep(1)
+            snap("p8-empty")
+        }
+        app.terminate()
+    }
+}

@@ -83,4 +83,5 @@ jobs:
             build/ios-app/testbed
             build/ios-app/screens
             build/ios-app/appstore
+            build/ios-app/design
           if-no-files-found: warn
