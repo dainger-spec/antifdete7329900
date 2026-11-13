@@ -496,6 +496,10 @@ final class WarmUpRobot: ObservableObject {
 
     // MARK: Staying on a page
 
+    /// What happens while a page is read: a scroll gesture, or the pointer drifting. Not nested in
+    /// `stay`: a type in a generic function is refused by the Swift of macOS 26 (accepted by 27's).
+    private enum StayEvent { case gesture(WarmUpTiming.Gesture), drift }
+
     /// Stays `dwell` seconds, scrolling now and then; false when the run ended meanwhile.
     private func stay(_ dwell: TimeInterval, scroll: Bool, visit: Int, run: Int,
                       using generator: inout some RandomNumberGenerator) async -> Bool {
@@ -504,8 +508,7 @@ final class WarmUpRobot: ObservableObject {
         // The pointer drifts while the page is read, as a hand resting on a mouse does — never
         // during a gesture (the wheel scrolls where the pointer is).
         let drifts = WarmUpTiming.pointerMoves(over: dwell, avoiding: gestures, using: &generator)
-        enum Event { case gesture(WarmUpTiming.Gesture), drift }
-        let events = (gestures.map { (at: $0.at, event: Event.gesture($0)) } + drifts.map { (at: $0, event: Event.drift) })
+        let events = (gestures.map { (at: $0.at, event: StayEvent.gesture($0)) } + drifts.map { (at: $0, event: StayEvent.drift) })
             .sorted { $0.at < $1.at }
         for item in events {
             guard await wait(item.at - Date().timeIntervalSince(begun), run: run), let tab = liveTab(run) else { return false }
