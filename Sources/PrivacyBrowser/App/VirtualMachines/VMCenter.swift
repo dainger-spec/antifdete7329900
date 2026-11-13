@@ -98,6 +98,7 @@ final class VMCenter: ObservableObject {
         self.vault = vault
         self.library = library
         self.onError = onError
+        setup = library.setupState()
         do {
             list = try VMProfiles.load(from: vault)
             loadError = nil
@@ -106,7 +107,6 @@ final class VMCenter: ObservableObject {
             loadError = errorText(error)
             log.error("The virtual machines' list could not be read: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
         }
-        setup = library.setupState()
         for profile in list.profiles { readGuestStatus(of: profile.id) }
         measureDisk()
     }
@@ -215,8 +215,8 @@ final class VMCenter: ObservableObject {
                 }
             }
         }, onFinish: { [weak self] result in
-            var failure: String?
-            if case .failure(let error) = result { failure = errorText(error) }
+            let failure: String?
+            if case .failure(let error) = result { failure = errorText(error) } else { failure = nil }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self, self.setupRun == run else { return }
