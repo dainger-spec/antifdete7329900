@@ -168,10 +168,11 @@ final class MachineInstaller {
                                                       hardwareModel: requirements.hardwareModel, options: [])
             try Self.createDisk(at: files.disk, bytes: request.diskBytes)
 
-            var request = request
-            request.cores = max(request.cores, requirements.minimumSupportedCPUCount)
-            request.memoryBytes = max(request.memoryBytes, Int64(clamping: requirements.minimumSupportedMemorySize))
-            let configuration = try MachineConfiguration.make(files: files, request: request, hardwareModel: requirements.hardwareModel,
+            // Never less than what this macOS's installer asks for.
+            var adjusted = self.request
+            adjusted.cores = max(adjusted.cores, requirements.minimumSupportedCPUCount)
+            adjusted.memoryBytes = max(adjusted.memoryBytes, Int64(clamping: requirements.minimumSupportedMemorySize))
+            let configuration = try MachineConfiguration.make(files: files, request: adjusted, hardwareModel: requirements.hardwareModel,
                                                               machineIdentifier: identifier, auxiliaryStorage: auxiliary, network: nil)
             let machine = VZVirtualMachine(configuration: configuration)
             let installer = VZMacOSInstaller(virtualMachine: machine, restoringFromImageAt: imageURL)

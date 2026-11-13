@@ -29,6 +29,9 @@
 //                   list, the swap), tested on real bundles by UpdateInstallerTests.
 //   PrivacyBrowserUpdater  macOS only: the installer helper, Contents/Helpers/PrivacyBrowser
 //                   Updater.app, which the app starts at the end of a quit (docs/UPDATES.md §3).
+//   LumenVM         macOS only: the virtual machines' helper (docs/VM.md) — the one executable that
+//                   loads Apple's Virtualization.framework and is signed with its right. Put into
+//                   the app only by `VM=1 scripts/build-app.sh`; CI builds it with VM=check.
 //
 import PackageDescription
 
@@ -164,11 +167,19 @@ targets.append(contentsOf: [
         dependencies: ["BrowserCore", "UpdateInstaller"],
         path: "Tests/UpdateInstallerTests"
     ),
+    // The virtual machines' helper (docs/VM.md): Virtualization.framework, and the machine's
+    // network through its profile's proxy (VMNetCore). The app itself links neither.
+    .executableTarget(
+        name: "LumenVM",
+        dependencies: ["BrowserCore", "VMNetCore"],
+        path: "Sources/LumenVM"
+    ),
 ])
 products.append(.executable(name: "PrivacyBrowser", targets: ["PrivacyBrowser"]))
 products.append(.executable(name: "PrivacyBrowserUpdater", targets: ["PrivacyBrowserUpdater"]))
 products.append(.executable(name: "NetworkGuardExtension", targets: ["NetworkGuardExtension"]))
 products.append(.executable(name: "CameraExtension", targets: ["CameraExtension"]))
+products.append(.executable(name: "LumenVM", targets: ["LumenVM"]))
 #endif
 
 let package = Package(
