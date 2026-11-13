@@ -527,6 +527,41 @@ final class NetworkLoopTests: XCTestCase {
         XCTAssertEqual(guest.expect(timeout: 2) { Wire.seenTCP($0) }?.flags, [.rst])
     }
 
+    // MARK: - A guest that sends rubbish
+
+    func testANetworkSurvivesDamagedFramesAndStillWorks() throws {
+        let socks = proxy(.socks5, origin: FakeProxy.echo)
+        let guest = start(socks.upstream())
+        // A good connection first, kept open while the rubbish flies.
+        let address = try XCTUnwrap(guest.resolve("steady.example")?.address)
+        let connection = try XCTUnwrap(open(guest, address))
+        XCTAssertTrue(connection.write(Array("before".utf8)))
+        connection.read(atLeast: 6)
+        XCTAssertEqual(connection.takeReceived(), Array("before".utf8))
+
+        var random = TestRandom(seed: 99)
+        let frames = HostileFrames.valid()
+        for round in 0..<30_000 {
+            guest.send(HostileFrames.next(from: frames, &random))
+            // What comes back is read and thrown away, so that the wire does not fill up.
+            if round % 64 == 0 { while guest.receive(timeout: 0) != nil {} }
+        }
+        while guest.receive(timeout: 0.2) != nil {}
+
+        // The network is still there: the thread runs, names resolve, a new connection carries data.
+        XCTAssertEqual(guest.arpForGateway(), Wire.gatewayMAC)
+        let other = try XCTUnwrap(guest.resolve("after.example")?.address)
+        let fresh = try XCTUnwrap(open(guest, other))
+        XCTAssertTrue(fresh.write(Array("after".utf8)))
+        fresh.read(atLeast: 5)
+        XCTAssertEqual(fresh.takeReceived(), Array("after".utf8))
+        // Some of the rubbish was good enough to open connections of its own: they are counted,
+        // and none of them took the good one's place.
+        let counters = network!.counters()
+        XCTAssertGreaterThanOrEqual(counters.connectionsOpened, 2)
+        XCTAssertLessThanOrEqual(counters.connectionsActive, 2048)
+    }
+
     // MARK: - Closing
 
     func testTheGuestClosesItsSideAndStillGetsTheAnswer() throws {
@@ -776,7 +811,7 @@ final class NetworkLoopTests: XCTestCase {
         XCTAssertTrue(lines.contains { $0.contains("network started") && $0.contains("SOCKS5 proxy with a sign-in") })
         XCTAssertTrue(lines.contains { $0.contains("the proxy refused (code 5)") })
         XCTAssertTrue(lines.contains { $0.contains("not a public address") })
-        XCTAssertTrue(lines.contains { $0.contains("network stopped") && $0.contains("2 failed") })
+        XCTAssertTrue(lines.contains { $0.contains("network stopped") && $0.contains("failed 2;") })
         // …and not where the guest was going, nor who signs in to the proxy, nor where the proxy is.
         let forbidden = ["secret-site", "blocked-host", "example", address.string, "198.18.", "10.20.30.40", "93.184.216.34",
                          "the-user-name", "the-pass-word", "127.0.0.1", ":\(socks.port)", "\(socks.port)"]

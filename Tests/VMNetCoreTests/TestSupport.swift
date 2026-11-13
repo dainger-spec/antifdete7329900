@@ -352,10 +352,16 @@ enum TestSocket {
         return (ends[0], ends[1])
     }
 
-    /// How many descriptors this process has open.
+    /// How many sockets and pipes this process has open: the two kinds of descriptor a network
+    /// opens. (Other kinds come and go under a test's feet — the runtime's own — and are not counted.)
     static func openDescriptorCount() -> Int {
         var count = 0
-        for descriptor in Int32(0)..<1024 where fcntl(descriptor, F_GETFD, 0) != -1 { count += 1 }
+        for descriptor in Int32(0)..<1024 {
+            var info = stat()
+            guard fstat(descriptor, &info) == 0 else { continue }
+            let kind = info.st_mode & mode_t(S_IFMT)
+            if kind == mode_t(S_IFSOCK) || kind == mode_t(S_IFIFO) { count += 1 }
+        }
         return count
     }
 }

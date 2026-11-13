@@ -70,6 +70,32 @@ still work, so the guest sees a network on which nothing answers.
 
 The guest never receives a connection: nothing outside can open one towards it.
 
+## What the app does with it
+
+```swift
+// A connected pair of datagram sockets: one end for the virtual machine, one for the stack.
+var ends: [Int32] = [-1, -1]
+socketpair(AF_UNIX, SOCK_DGRAM, 0, &ends)
+// Both ends need room: what one end sends waits in the OTHER end's receive buffer, and macOS's
+// default for a datagram socket holds two frames. VMNetwork enlarges its own end's buffers; the
+// virtual machine's end is the app's to enlarge (SO_RCVBUF of megabytes, SO_SNDBUF of at least
+// a frame), before it is handed over.
+let attachment = VZFileHandleNetworkDeviceAttachment(fileHandle: FileHandle(fileDescriptor: ends[0]))
+
+let network = VMNetwork(configuration: VMNetConfiguration(guestMAC: mac, gatewayMAC: gateway, upstream: upstream,
+                                                          blockedHostSuffixes: suffixes),
+                        frameDescriptor: ends[1])
+network.log = { line in … }     // counts and reasons only
+network.start()                 // its own thread; returns at once
+…
+network.stop()                  // closes every proxy connection; returns when the thread has ended
+close(ends[1])                  // the descriptor stays the app's
+```
+
+`guestMAC` must be the address of the virtual machine's network card (DHCP answers no other), and
+`counters()` may be asked at any time from any thread: bytes each way, connections opened, failed
+and open now, DNS queries and how many were blocked, datagrams dropped.
+
 ## Limits
 
 - **TCP over IPv4 only.** No UDP gets out (so no QUIC/HTTP/3, no WebRTC media, no NTP: the guest's
@@ -81,7 +107,9 @@ The guest never receives a connection: nothing outside can open one towards it.
   ahead of a gap is kept (inside the window) until the gap is filled. Loss on this wire is rare — a
   frame is lost only when the socket's buffer is full and the stack's own queue for it (1 MiB) is
   too — and is repaired by retransmission: three duplicate acknowledgements, or a timer that
-  starts at 250 ms and doubles up to 30 s.
+  starts at 250 ms and doubles up to 30 s. Measured against Linux as the guest, with frames
+  thrown away at random in both directions: an 8 MB download takes about 0.6 s at 1 % loss, 1.6 s
+  at 3 %, 10 s at 5 %. Beyond that transfers crawl; nothing stalls for good.
 - **Buffers**: 256 KiB per connection in each direction. A proxy slower than the guest shuts the
   guest's window; a guest slower than the proxy stops the stack reading from the proxy. Nothing is
   buffered without bound.
@@ -119,7 +147,9 @@ a lost segment sent again, duplicates, data ahead of a gap, windows that shut an
 reset from either side, sequence numbers that wrap, and whole transfers over a wire that loses up
 to 30 % of its frames in both directions. Then the whole network over a real socket pair, with the
 test as a small guest and proxies on loopback that sign in, refuse, stall, talk nonsense or are not
-there.
+there. Last, the guest as an adversary: frames cut short, grown and changed byte by byte, and
+plain noise, through every parser and through a running network — whatever the guest sends
+arrives in Lumen's own process, where a trap would end the app.
 
 **Interop** (`scripts/vmnet_interop.sh`, Linux, in a privileged container). A scripted guest proves
 the code agrees with its author; this proves it agrees with a real TCP/IP stack. The stack is put
@@ -128,8 +158,14 @@ on a TAP device whose interface lives in a network namespace, so Linux's kernel 
 and uploads 32 MB through a SOCKS5 and an HTTP CONNECT test double, compared by SHA-256. Also: 64
 parallel downloads and uploads, a thousand short connections, half-close, a reader and an origin
 that are slow, transfers cut off in the middle, refused names and addresses, UDP answered
-"unreachable", a wire that loses 1 % of its frames each way, and no proxy at all. One PASS or FAIL
-line per check and the throughput of the large download.
+"unreachable", a wire that loses 1 % of its frames each way, no proxy at all, and that the stack
+uses no CPU when nothing happens. One PASS or FAIL line per check and the throughput of the large
+download (some hundreds of MB/s on a build machine, the test doubles included).
+
+```
+docker run --rm --privileged -v "$PWD":/src -w /src swift:6.0-noble bash -c \
+  'apt-get update && apt-get install -y python3 curl iproute2 iputils-ping dnsutils udhcpc && scripts/vmnet_interop.sh'
+```
 
 The interop is what found that data ahead of a gap has to be kept: answered with duplicate
 acknowledgements and then dropped, it made Linux take the wire for one that reorders packets and

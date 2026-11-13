@@ -294,7 +294,7 @@ final class NetworkLoop: @unchecked Sendable {
     // MARK: - The loop
 
     func run() {
-        say("network started: \(describeUpstream()), \(configuration.blockedHostSuffixes.count) blocked host suffixes")
+        say("network started: \(describeUpstream()); blocked host suffixes: \(configuration.blockedHostSuffixes.count)")
         let wakeUp: @Sendable () -> Void = { [wake] in wake.signal() }
         resolver?.resolveIfNeeded(now: Sys.now, done: wakeUp)
         var entries: [pollfd] = []
@@ -363,10 +363,10 @@ final class NetworkLoop: @unchecked Sendable {
         publish()
         flushNotes(.infinity)
         let lost = channel.lost
-        say("network stopped: \(counters.connectionsOpened) connections opened, \(counters.connectionsFailed) failed, "
-            + "\(counters.bytesFromGuest) bytes from the guest, \(counters.bytesToGuest) bytes to the guest, "
-            + "\(counters.dnsQueries) DNS queries (\(counters.dnsBlocked) blocked), \(counters.datagramsDropped) datagrams dropped, "
-            + "\(lost) frames lost on a full wire")
+        say("network stopped: connections opened \(counters.connectionsOpened), failed \(counters.connectionsFailed); "
+            + "bytes from the guest \(counters.bytesFromGuest), to the guest \(counters.bytesToGuest); "
+            + "DNS queries \(counters.dnsQueries), blocked \(counters.dnsBlocked); datagrams dropped \(counters.datagramsDropped); "
+            + "frames lost on a full wire \(lost)")
         wake.close()
         ended.lock()
         hasEnded = true
@@ -450,7 +450,7 @@ final class NetworkLoop: @unchecked Sendable {
     private func wireClosed(_ now: Double) {
         guard wireOpen else { return }
         wireOpen = false
-        say("the guest's wire closed: \(flows.count) connections dropped")
+        say("the guest's wire closed; connections dropped: \(flows.count)")
         for flow in Array(flows.values) {
             if flow.descriptor >= 0 {
                 Sys.close(flow.descriptor)
@@ -558,7 +558,7 @@ final class NetworkLoop: @unchecked Sendable {
         if snapshot.addresses.isEmpty {
             say("the proxy's address was not found (\(snapshot.failure ?? "no address"))")
         } else {
-            say("the proxy's address is known (\(snapshot.addresses.count) addresses)")
+            say("the proxy's address is known (addresses: \(snapshot.addresses.count))")
         }
         for flow in Array(flows.values) where flow.phase == .waiting {
             if snapshot.addresses.isEmpty {
@@ -630,7 +630,11 @@ final class NetworkLoop: @unchecked Sendable {
         }
     }
 
-    private func writeHandshake(_ flow: Flow, _ now: Double) {
+    /// Sends what is left of the handshake's bytes. True when something was sent, or the
+    /// connection failed and was dealt with; false when the socket took nothing.
+    @discardableResult
+    private func writeHandshake(_ flow: Flow, _ now: Double) -> Bool {
+        var progressed = false
         while flow.outgoingSent < flow.outgoing.count {
             let sent = flow.outgoing.withUnsafeBytes { bytes -> (Int, Int32) in
                 let count = Sys.send(flow.descriptor, UnsafeRawBufferPointer(rebasing: bytes[flow.outgoingSent...]))
@@ -638,31 +642,36 @@ final class NetworkLoop: @unchecked Sendable {
             }
             if sent.0 > 0 {
                 flow.outgoingSent += sent.0
+                progressed = true
             } else if sent.1 == EINTR {
                 continue
             } else if Sys.wouldBlock(sent.1) {
-                return
+                return progressed
             } else {
                 fail(flow, "the proxy closed the connection (\(Sys.describe(sent.1)))", proxyUnreachable: false, now)
-                return
+                return true
             }
         }
         flow.outgoing = []
         flow.outgoingSent = 0
+        return progressed
     }
 
-    private func readHandshake(_ flow: Flow, _ now: Double) {
+    /// Reads the proxy's next bytes of the handshake. False when there was nothing to read.
+    private func readHandshake(_ flow: Flow, _ now: Double) -> Bool {
         let count = Sys.receive(flow.descriptor, UnsafeMutableRawBufferPointer(rebasing: streamBuffer[0..<4096]))
         if count > 0 {
             apply(flow.handshake.receive(Array(UnsafeRawBufferPointer(rebasing: streamBuffer[0..<count]))), to: flow, now)
-        } else if count == 0 {
-            fail(flow, "the proxy closed the connection", proxyUnreachable: false, now)
-        } else {
-            let code = errno
-            if code != EINTR && !Sys.wouldBlock(code) {
-                fail(flow, "the proxy closed the connection (\(Sys.describe(code)))", proxyUnreachable: false, now)
-            }
+            return true
         }
+        if count == 0 {
+            fail(flow, "the proxy closed the connection", proxyUnreachable: false, now)
+            return true
+        }
+        let code = errno
+        if code == EINTR || Sys.wouldBlock(code) { return false }
+        fail(flow, "the proxy closed the connection (\(Sys.describe(code)))", proxyUnreachable: false, now)
+        return true
     }
 
     /// The proxy gave no tunnel: the guest's SYN is answered with a reset and the connection forgotten.
@@ -699,61 +708,83 @@ final class NetworkLoop: @unchecked Sendable {
                 connectNext(flow, now)
             }
         case .handshaking:
-            if revents & Sys.writable != 0 { writeHandshake(flow, now) }
-            if flow.phase == .handshaking && revents & (Sys.readable | Sys.hungUp | Sys.failed) != 0 { readHandshake(flow, now) }
+            var progressed = false
+            if revents & Sys.writable != 0 { progressed = writeHandshake(flow, now) }
+            if flow.phase == .handshaking && revents & (Sys.readable | Sys.hungUp | Sys.failed) != 0 {
+                progressed = readHandshake(flow, now) || progressed
+            }
+            if !progressed && flow.phase == .handshaking { holdOff(flow, revents, now) }
         case .open:
-            var useful = false
+            var progressed = false
             if revents & Sys.writable != 0 {
                 flow.wantsWrite = false
-                writeUpstream(flow, now)
-                useful = true
+                progressed = writeUpstream(flow, now)
             }
             if flow.tcp.state != .closed && revents & (Sys.readable | Sys.hungUp | Sys.failed) != 0 {
                 if wantsRead(flow) {
-                    readUpstream(flow, now)
-                    useful = true
+                    progressed = readUpstream(flow, now) || progressed
                 } else if revents & Sys.failed != 0, Sys.pendingError(flow.descriptor) != 0 {
                     flow.tcp.upstreamBroke(now: now)
-                    useful = true
+                    progressed = true
                 }
             }
-            // "Hung up" with nothing to read or write yet would wake the loop at every turn.
-            if !useful { flow.holdUntil = now + 0.02 }
+            if !progressed { holdOff(flow, revents, now) }
             markDirty(flow)
         }
     }
 
-    private func readUpstream(_ flow: Flow, _ now: Double) {
+    /// A socket that reports "hung up" or an error state, and then has nothing to read and takes
+    /// nothing, would wake the loop again at once, turn after turn (the report does not go away
+    /// by being looked at). Such a socket is left out of the wait for a moment.
+    private func holdOff(_ flow: Flow, _ revents: Int16, _ now: Double) {
+        if revents & (Sys.hungUp | Sys.failed) != 0 { flow.holdUntil = now + 0.02 }
+    }
+
+    /// Reads what the proxy sent, as far as the connection has room for it. False when there
+    /// was nothing to read (and no end, and no error).
+    private func readUpstream(_ flow: Flow, _ now: Double) -> Bool {
         let tcp = flow.tcp
+        var progressed = false
         var rounds = 0
         while tcp.state != .closed && !flow.readEnded && rounds < 16 {
             let wanted = min(tcp.upstreamRoom, streamBuffer.count)
             guard wanted > 0 else { break }
             let count = Sys.receive(flow.descriptor, UnsafeMutableRawBufferPointer(rebasing: streamBuffer[0..<wanted]))
             if count > 0 {
+                progressed = true
                 tcp.upstreamData(UnsafeRawBufferPointer(rebasing: streamBuffer[0..<count]), now: now)
                 if count < wanted { break }
                 rounds += 1
             } else if count == 0 {
+                progressed = true
                 flow.readEnded = true
                 tcp.upstreamFinished(now: now)
             } else {
                 let code = errno
                 if code == EINTR { continue }
-                if !Sys.wouldBlock(code) { tcp.upstreamBroke(now: now) }
+                if !Sys.wouldBlock(code) {
+                    progressed = true
+                    tcp.upstreamBroke(now: now)
+                }
                 break
             }
         }
+        return progressed
     }
 
-    private func writeUpstream(_ flow: Flow, _ now: Double) {
+    /// Writes what the guest sent to the proxy, as far as the socket takes it. False when it
+    /// took nothing (and there was no error).
+    @discardableResult
+    private func writeUpstream(_ flow: Flow, _ now: Double) -> Bool {
         let tcp = flow.tcp
+        var progressed = false
         while tcp.state != .closed && tcp.upstreamBacklog > 0 {
             let sent = tcp.withUpstreamBacklog { bytes -> (Int, Int32) in
                 let count = Sys.send(flow.descriptor, bytes)
                 return (count, errno)
             }
             if sent.0 > 0 {
+                progressed = true
                 counters.bytesFromGuest += UInt64(sent.0)
                 tcp.upstreamConsumed(sent.0, now: now)
             } else if sent.1 == EINTR {
@@ -762,10 +793,12 @@ final class NetworkLoop: @unchecked Sendable {
                 flow.wantsWrite = true
                 break
             } else {
+                progressed = true
                 tcp.upstreamBroke(now: now)
                 break
             }
         }
+        return progressed
     }
 
     /// After a round of events: for every connection something happened to, what the guest sent
