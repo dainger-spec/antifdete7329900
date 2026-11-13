@@ -28,9 +28,22 @@ public struct VMGuestSettings: Equatable, Sendable {
     public var opensSafari: Bool
     /// The desktop picture is the one the app left beside this file (`wallpaperFileName`). (Tools 3.)
     public var wallpaper: Bool
+    /// The region of the formats where it is not the language's own. (The locale is made of both.)
+    public var region: String?
+    /// The clock, the week's first day, the Dock, the scroll bars: nil leaves each. (Tools 5.)
+    public var hourCycle: VMHourCycle?
+    public var firstWeekday: Int?
+    public var dockPosition: VMDockPosition?
+    public var dockAutohide: Bool?
+    public var dockSize: VMDockSize?
+    public var scrollBars: VMScrollBars?
+    /// More pages for Safari at start, after `startURL`. (Tools 5.)
+    public var moreStartURLs: [String]
 
     public init(timeZone: String?, language: String?, hostName: String, startURL: String?, computerName: String? = nil,
-                appearance: VMAppearance? = nil, accent: VMAccent? = nil, opensSafari: Bool = true, wallpaper: Bool = false) {
+                appearance: VMAppearance? = nil, accent: VMAccent? = nil, opensSafari: Bool = true, wallpaper: Bool = false,
+                region: String? = nil, hourCycle: VMHourCycle? = nil, firstWeekday: Int? = nil, dockPosition: VMDockPosition? = nil,
+                dockAutohide: Bool? = nil, dockSize: VMDockSize? = nil, scrollBars: VMScrollBars? = nil, moreStartURLs: [String] = []) {
         self.timeZone = timeZone.flatMap { Self.isTimeZone($0) ? $0 : nil }
         self.language = language.flatMap { LocalePlaces.isLanguageTag($0) ? $0 : nil }
         self.computerName = computerName.flatMap(Self.computerName)
@@ -41,6 +54,17 @@ public struct VMGuestSettings: Equatable, Sendable {
         self.accent = accent
         self.opensSafari = opensSafari
         self.wallpaper = wallpaper
+        self.region = region.flatMap { code in
+            code.count == 2 && code.unicodeScalars.allSatisfy { $0.isASCII && CharacterSet.letters.contains($0) } ? code.uppercased() : nil
+        }
+        self.hourCycle = hourCycle
+        self.firstWeekday = firstWeekday.flatMap { (1...7).contains($0) ? $0 : nil }
+        self.dockPosition = dockPosition
+        self.dockAutohide = dockAutohide
+        self.dockSize = dockSize
+        self.scrollBars = scrollBars
+        // After a first page only: pages without one would be Safari's own start, and these.
+        self.moreStartURLs = self.startURL == nil ? [] : Array(moreStartURLs.compactMap(Self.startURL).prefix(VMProfile.moreStartURLsLimit))
         revision = ""
         revision = Self.revision(of: lines(withRevision: false))
     }
@@ -54,7 +78,14 @@ public struct VMGuestSettings: Equatable, Sendable {
                   startURL: profile.startURL, computerName: profile.computerName,
                   appearance: profile.appearance.flatMap(VMAppearance.init(rawValue:)),
                   accent: profile.accent.flatMap(VMAccent.init(rawValue:)), opensSafari: profile.opensSafari,
-                  wallpaper: profile.lumenWallpaper)
+                  wallpaper: profile.lumenWallpaper,
+                  // A region of the person's choosing goes with a language of their choosing: where
+                  // both follow the proxy, the language found there has its own.
+                  region: profile.localeFollowsProxy && profile.proxy != nil ? nil : profile.regionCode,
+                  hourCycle: profile.hourCycle.flatMap(VMHourCycle.init(rawValue:)), firstWeekday: profile.firstWeekday,
+                  dockPosition: profile.dockPosition.flatMap(VMDockPosition.init(rawValue:)), dockAutohide: profile.dockAutohide,
+                  dockSize: profile.dockSize.flatMap(VMDockSize.init(rawValue:)),
+                  scrollBars: profile.scrollBars.flatMap(VMScrollBars.init(rawValue:)), moreStartURLs: profile.moreStartURLs)
     }
 
     public static let fileName = "lumen-settings.env"
@@ -72,7 +103,7 @@ public struct VMGuestSettings: Equatable, Sendable {
         if let timeZone { lines.append("LUMEN_TIMEZONE=\(timeZone)") }
         if let language {
             lines.append("LUMEN_LANGUAGE=\(language)")
-            lines.append("LUMEN_LOCALE=\(Self.locale(for: language))")
+            lines.append("LUMEN_LOCALE=\(Self.locale(for: language, region: region))")
         }
         lines.append("LUMEN_HOSTNAME=\(hostName)")
         if let computerName { lines.append("LUMEN_COMPUTER_NAME=\(computerName)") }
@@ -80,7 +111,14 @@ public struct VMGuestSettings: Equatable, Sendable {
         if let accent { lines.append("LUMEN_ACCENT=\(accent.number.map(String.init) ?? VMAccent.multicolor.rawValue)") }
         lines.append("LUMEN_OPEN_SAFARI=\(opensSafari ? 1 : 0)")
         lines.append("LUMEN_WALLPAPER=\(wallpaper ? 1 : 0)")
+        if let hourCycle { lines.append("LUMEN_HOURS=\(hourCycle.rawValue)") }
+        if let firstWeekday { lines.append("LUMEN_FIRST_WEEKDAY=\(firstWeekday)") }
+        if let dockPosition { lines.append("LUMEN_DOCK_POSITION=\(dockPosition.rawValue)") }
+        if let dockAutohide { lines.append("LUMEN_DOCK_AUTOHIDE=\(dockAutohide ? 1 : 0)") }
+        if let dockSize { lines.append("LUMEN_DOCK_SIZE=\(dockSize.tileSize)") }
+        if let scrollBars { lines.append("LUMEN_SCROLLBARS=\(scrollBars.systemName)") }
         if let startURL { lines.append("LUMEN_START_URL=\(startURL)") }
+        for (index, url) in moreStartURLs.enumerated() { lines.append("LUMEN_START_URL_\(index + 2)=\(url)") }
         return lines
     }
 
@@ -104,10 +142,12 @@ public struct VMGuestSettings: Equatable, Sendable {
         return TimeZone(identifier: text) != nil
     }
 
-    /// "de-DE" → "de_DE"; "en" → "en"; a script tag is left out ("zh-Hant-TW" → "zh_TW").
-    public static func locale(for language: String) -> String {
+    /// "de-DE" → "de_DE"; "en" → "en"; a script tag is left out ("zh-Hant-TW" → "zh_TW"). With a
+    /// region of the person's own it stands in the language's place: "en-US" in "DE" → "en_DE".
+    public static func locale(for language: String, region: String? = nil) -> String {
         let parts = language.split(separator: "-").map(String.init)
         guard let first = parts.first else { return language }
+        if let region, region.count == 2 { return first.lowercased() + "_" + region.uppercased() }
         if let region = parts.dropFirst().last(where: { $0.count == 2 || ($0.count == 3 && $0.allSatisfy(\.isNumber)) }) {
             return first.lowercased() + "_" + region.uppercased()
         }

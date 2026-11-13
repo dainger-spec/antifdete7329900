@@ -309,7 +309,9 @@ private struct VirtualMachinesScreen: View {
         // shows it, and the person may change it.
         // As much memory as this Mac can spare a machine: with too little, macOS in it stutters.
         let memory = VMRequirements.recommendedMemoryGB(hostMemory: Int64(clamping: ProcessInfo.processInfo.physicalMemory))
-        editing = VMEditorView.Draft(profile: VMProfile(name: name, memoryGB: memory, accent: VMAccent.random().rawValue), isNew: true)
+        // And scroll bars as the Mac its screen is has them: a MacBook's show only while scrolling.
+        editing = VMEditorView.Draft(profile: VMProfile(name: name, memoryGB: memory, accent: VMAccent.random().rawValue,
+                                                        scrollBars: VMScrollBars.standard(for: .standard)?.rawValue), isNew: true)
     }
 
     /// The person's Delete, confirmed: the one caller of the machines' one deletion path.
@@ -651,6 +653,18 @@ struct VMEditorView: View {
     @State private var opensSafari: Bool
     @State private var lumenWallpaper: Bool
     @State private var startURL: String
+    @State private var morePages: String
+    @State private var startsFullScreen: Bool
+    @State private var macAddress: String
+    @State private var blockedHosts: String
+    @State private var regionCode: String
+    @State private var hourCycle: String
+    @State private var firstWeekday: Int
+    @State private var scrollBars: String
+    @State private var dockPosition: String
+    /// "", "show" or "hide": as the base has it, always shown, hiding itself.
+    @State private var dockHiding: String
+    @State private var dockSize: String
     @State private var error: String?
 
     init(center: VMCenter, proxies: [ProxyListEntry], draft: Draft) {
@@ -683,6 +697,45 @@ struct VMEditorView: View {
         _opensSafari = State(initialValue: profile.opensSafari)
         _lumenWallpaper = State(initialValue: profile.lumenWallpaper)
         _startURL = State(initialValue: profile.startURL ?? "")
+        _morePages = State(initialValue: profile.moreStartURLs.joined(separator: "\n"))
+        _startsFullScreen = State(initialValue: profile.startsFullScreen)
+        _macAddress = State(initialValue: profile.macAddress)
+        _blockedHosts = State(initialValue: profile.blockedHosts.joined(separator: "\n"))
+        _regionCode = State(initialValue: profile.regionCode ?? "")
+        _hourCycle = State(initialValue: profile.hourCycle ?? "")
+        _firstWeekday = State(initialValue: profile.firstWeekday ?? 0)
+        _scrollBars = State(initialValue: profile.scrollBars ?? "")
+        _dockPosition = State(initialValue: profile.dockPosition ?? "")
+        _dockHiding = State(initialValue: profile.dockAutohide.map { $0 ? "hide" : "show" } ?? "")
+        _dockSize = State(initialValue: profile.dockSize ?? "")
+    }
+
+    /// The regions a system knows, by their names in the interface's language.
+    private static let regions: [(code: String, name: String)] = Locale.Region.isoRegions
+        .map(\.identifier).filter { $0.count == 2 }
+        .map { (code: $0, name: CountryNames.name(for: $0)) }
+        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+
+    /// Several lines of text: one thing a line.
+    private func lines(_ text: Binding<String>, placeholder: String, height: CGFloat) -> some View {
+        TextEditor(text: text)
+            .font(.system(size: 12, design: .monospaced))
+            .scrollContentBackground(.hidden)
+            .padding(6)
+            .frame(height: height)
+            .background(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).fill(Theme.field))
+            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).strokeBorder(Theme.fieldBorder, lineWidth: 1))
+            .overlay(alignment: .topLeading) {
+                if text.wrappedValue.isEmpty {
+                    Text(verbatim: placeholder)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(Theme.textTertiary)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 6)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
     }
 
     private var chosenEntry: ProxyListEntry? { proxies.first { $0.id.uuidString == proxyChoice } }
@@ -700,7 +753,7 @@ struct VMEditorView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
                     section(L("vm.editor.section.machine")) { machineFields }
-                    section(L("vm.editor.section.network")) { proxyField }
+                    section(L("vm.editor.section.network")) { networkFields }
                     section(L("vm.editor.section.region")) { localeFields }
                     section(L("vm.editor.section.device")) { deviceFields }
                     section(L("vm.editor.section.system")) { systemFields }
@@ -774,6 +827,26 @@ struct VMEditorView: View {
 
     // MARK: Where it goes out
 
+    @ViewBuilder
+    private var networkFields: some View {
+        proxyField
+        EditorField(L("vm.editor.blocked")) {
+            lines($blockedHosts, placeholder: "ads.example.com", height: 64) // l10n: not text
+            note(L("vm.editor.blocked.note"))
+        }
+        EditorField(L("vm.editor.mac")) {
+            HStack(spacing: 8) {
+                TextField(L("vm.editor.mac"), text: $macAddress, prompt: Text(verbatim: ""))
+                    .lumenField("02:1a:2b:3c:4d:5e", isEmpty: macAddress.isEmpty)
+                    .font(.system(size: 12, design: .monospaced))
+                    .frame(maxWidth: 190)
+                Button(L("vm.editor.mac.new")) { macAddress = VMProfile.randomMACAddress() }
+                    .buttonStyle(.lumenSecondary)
+            }
+            note(L("vm.editor.mac.note"))
+        }
+    }
+
     private var proxyField: some View {
         EditorField(L("vm.editor.proxy")) {
             Picker(L("vm.editor.proxy"), selection: $proxyChoice) {
@@ -818,6 +891,34 @@ struct VMEditorView: View {
                 .labelsHidden()
                 .fixedSize()
             }
+            EditorField(L("vm.editor.region")) {
+                Picker(L("vm.editor.region"), selection: $regionCode) {
+                    Text(L("vm.editor.region.language")).tag("")
+                    ForEach(Self.regions, id: \.code) { region in
+                        Text(verbatim: region.name).tag(region.code)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+                .disabled(language.isEmpty)
+                note(L("vm.editor.region.note"))
+            }
+        }
+        EditorField(L("vm.editor.hours")) {
+            LumenSegmented(selection: $hourCycle, options: [
+                (value: "", title: L("vm.editor.asBase")),
+                (value: VMHourCycle.twelve.rawValue, title: L("vm.editor.hours.12")),
+                (value: VMHourCycle.twentyFour.rawValue, title: L("vm.editor.hours.24")),
+            ])
+        }
+        EditorField(L("vm.editor.weekday")) {
+            LumenSegmented(selection: $firstWeekday, options: [
+                (value: 0, title: L("vm.editor.asBase")),
+                (value: 2, title: L("vm.editor.weekday.2")),
+                (value: 1, title: L("vm.editor.weekday.1")),
+                (value: 7, title: L("vm.editor.weekday.7")),
+            ])
+            note(L("vm.editor.weekday.note"))
         }
     }
 
@@ -837,7 +938,9 @@ struct VMEditorView: View {
         }
         EditorField(L("vm.editor.memory")) {
             LumenSegmented(selection: $memoryGB,
-                           options: VMRequirements.memoryChoices.map { (value: $0, title: String(format: L("vm.row.memory"), $0)) })
+                           options: VMRequirements.memoryChoices
+                               .filter { memoryChoices.contains($0) || $0 == memoryGB }
+                               .map { (value: $0, title: String(format: L("vm.row.memory"), $0)) })
             note(memoryNote, warns: memoryIsTight || memoryIsLow)
         }
         EditorField(L("vm.editor.cores")) {
@@ -878,6 +981,27 @@ struct VMEditorView: View {
                 .lumenField(L("vm.editor.computerName.placeholder"), isEmpty: computerName.isEmpty)
             note(L("vm.editor.computerName.note"))
         }
+        EditorField(L("vm.editor.scrollBars")) {
+            LumenSegmented(selection: $scrollBars, options: [
+                (value: "", title: L("vm.editor.asBase")),
+                (value: VMScrollBars.whenScrolling.rawValue, title: L("vm.editor.scrollBars.whenScrolling")),
+                (value: VMScrollBars.always.rawValue, title: L("vm.editor.scrollBars.always")),
+                (value: VMScrollBars.automatic.rawValue, title: L("vm.editor.scrollBars.automatic")),
+            ])
+            note(L("vm.editor.scrollBars.note"))
+        }
+        EditorField(L("vm.editor.dock")) {
+            LumenSegmented(selection: $dockPosition, options: [(value: "", title: L("vm.editor.asBase"))]
+                + VMDockPosition.allCases.map { (value: $0.rawValue, title: L("vm.editor.dock.\($0.rawValue)")) })
+            LumenSegmented(selection: $dockHiding, options: [
+                (value: "", title: L("vm.editor.asBase")),
+                (value: "show", title: L("vm.editor.dock.show")),
+                (value: "hide", title: L("vm.editor.dock.hide")),
+            ])
+            LumenSegmented(selection: $dockSize, options: [(value: "", title: L("vm.editor.asBase"))]
+                + VMDockSize.allCases.map { (value: $0.rawValue, title: L("vm.editor.dock.size.\($0.rawValue)")) })
+            note(L("vm.editor.dock.note"))
+        }
         EditorToggle(L("vm.editor.wallpaper"), detail: L("vm.editor.wallpaper.detail"), isOn: $lumenWallpaper)
         if toolsAreOld {
             note(L("vm.editor.tools.old"), warns: true)
@@ -894,6 +1018,12 @@ struct VMEditorView: View {
                 .lumenField("https://", isEmpty: startURL.isEmpty)
         }
         .disabled(!opensSafari)
+        EditorField(L("vm.editor.start.more")) {
+            lines($morePages, placeholder: "https://", height: 64)
+            note(String(format: L("vm.editor.start.more.note"), VMProfile.moreStartURLsLimit))
+        }
+        .disabled(!opensSafari || startURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        EditorToggle(L("vm.editor.fullScreen"), detail: L("vm.editor.fullScreen.detail"), isOn: $startsFullScreen)
     }
 
     /// "Berlin 1 — Germany", as the proxy list names it and where it came out at its last check.
@@ -904,6 +1034,11 @@ struct VMEditorView: View {
 
     private var memoryIsTight: Bool {
         Int64(clamping: ProcessInfo.processInfo.physicalMemory) - Int64(memoryGB) * VMRequirements.gibibyte < 4 * VMRequirements.gibibyte
+    }
+
+    /// What this Mac is offered for a machine's memory.
+    private var memoryChoices: [Int] {
+        VMRequirements.memoryChoices(hostMemory: Int64(clamping: ProcessInfo.processInfo.physicalMemory))
     }
 
     private var recommendedMemoryGB: Int {
@@ -941,6 +1076,36 @@ struct VMEditorView: View {
         profile.accent = accent.isEmpty ? nil : accent
         profile.opensSafari = opensSafari
         profile.lumenWallpaper = lumenWallpaper
+        profile.startsFullScreen = startsFullScreen
+        profile.hourCycle = hourCycle.isEmpty ? nil : hourCycle
+        profile.firstWeekday = firstWeekday == 0 ? nil : firstWeekday
+        profile.scrollBars = scrollBars.isEmpty ? nil : scrollBars
+        profile.dockPosition = dockPosition.isEmpty ? nil : dockPosition
+        profile.dockAutohide = dockHiding.isEmpty ? nil : dockHiding == "hide"
+        profile.dockSize = dockSize.isEmpty ? nil : dockSize
+        // The network card's address, as it is written: lower case, and one a card may have.
+        let card = macAddress.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard VMProfile.isMACAddress(card) else {
+            error = L("vm.editor.error.mac")
+            return
+        }
+        profile.macAddress = card
+        // The names to block: one a line, each a host's name; said by name when one is not.
+        var blocked: [String] = []
+        for line in blockedHosts.split(whereSeparator: \.isNewline) {
+            let written = line.trimmingCharacters(in: .whitespaces)
+            guard !written.isEmpty else { continue }
+            guard let host = VMProfile.blockedHost(written) else {
+                error = String(format: L("vm.editor.error.blocked"), written)
+                return
+            }
+            if !blocked.contains(host) { blocked.append(host) }
+        }
+        guard blocked.count <= VMProfile.blockedHostsLimit else {
+            error = String(format: L("vm.editor.error.blocked.many"), VMProfile.blockedHostsLimit)
+            return
+        }
+        profile.blockedHosts = blocked
         profile.localeFollowsProxy = followsProxy
         let computer = computerName.trimmingCharacters(in: .whitespacesAndNewlines)
         if computer.isEmpty {
@@ -964,6 +1129,24 @@ struct VMEditorView: View {
             }
             profile.startURL = checked
         }
+        // The pages after the first: one a line, each taken as the address it means.
+        var pages: [String] = []
+        if profile.startURL != nil {
+            for line in morePages.split(whereSeparator: \.isNewline) {
+                let written = line.trimmingCharacters(in: .whitespaces)
+                guard !written.isEmpty else { continue }
+                guard let checked = VMGuestSettings.startURL(written.contains("://") ? written : "https://" + written) else {
+                    error = String(format: L("vm.editor.error.start.more"), written)
+                    return
+                }
+                pages.append(checked)
+            }
+            guard pages.count <= VMProfile.moreStartURLsLimit else {
+                error = String(format: L("vm.editor.error.start.more.many"), VMProfile.moreStartURLsLimit)
+                return
+            }
+        }
+        profile.moreStartURLs = pages
         var lastCheck: ProxyCheckResult?
         switch proxyChoice {
         case "":
@@ -990,6 +1173,8 @@ struct VMEditorView: View {
             profile.timeZoneIdentifier = timeZone
             profile.language = language.isEmpty ? nil : language
         }
+        // A region of the person's own goes with a language of their own.
+        profile.regionCode = followsProxy || language.isEmpty || regionCode.isEmpty ? nil : regionCode
         do {
             try center.save(profile)
             center.measureDisk()

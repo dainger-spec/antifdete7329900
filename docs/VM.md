@@ -179,19 +179,26 @@ a minute.
 |---|---|
 | Name, note, colour in the list | the app's own |
 | Proxy | every connection of the machine through it; or none: this Mac's connection |
+| Blocked sites | names the machine's network answers "no such name" for — the whole macOS, not Safari alone — beside the app's own list (Apple's update hosts) |
+| Network card address | the machine's own (MAC), random when it is made; may be written or drawn anew |
 | Time zone, language | from where the proxy comes out, at every start; or set by hand |
+| Region | with a language set by hand: the country whose formats the system uses ("en" in "DE": English as in Germany) |
+| Clock, first day of the week | 12 or 24 hours; Monday, Sunday or Saturday; or as the region has them |
 | Screen | a real Mac's, at its default size or at "More Space"; external displays |
-| Memory | 3, 4, 6 or 8 GB. A new machine gets what the Mac can spare (`VMRequirements.recommendedMemoryGB`: 8 on a Mac with 24 GB or more, 6 with 16, 4 below); with 4, macOS in it stutters once a few pages are open, and the editor says so |
+| Memory | 3, 4, 6 or 8 GB, and 12 or 16 where the Mac keeps 8 for itself. A new machine gets what the Mac can spare (`VMRequirements.recommendedMemoryGB`: 8 on a Mac with 24 GB or more, 6 with 16, 4 below); with 4, macOS in it stutters once a few pages are open, and the editor says so |
 | Processor | as a Mac (8 cores — what a page of any Mac of today sees), or 4 or 6: lighter on this Mac, and fewer than a Mac has |
 | Sound | heard on this Mac, or not (the machine keeps its speakers either way) |
 | Appearance | light, dark or auto: what a page reads as `prefers-color-scheme` |
 | Accent colour | macOS's nine; a new machine gets one at random, as Macs differ in theirs |
 | Computer's name | as Sharing shows it |
+| Scroll bars | while scrolling, always, or by the pointing device. Left to the system a machine's always show — its pointer is a mouse to macOS — and take a strip of every page's width, which a page can measure and no MacBook has; a new machine with a MacBook's screen gets "while scrolling" |
+| Dock | bottom, left or right; always shown or hiding; small, medium or large. What it leaves of the screen is what a page is told is free (`screen.availWidth`, `availHeight`) |
 | Wallpaper | Lumen's eclipse, drawn by the app for the machine's screen pixel for pixel (`VMWallpaper`; no picture is carried in the app); or the picture left as it is in the machine |
-| At start | Safari opened or not; its start page |
+| At start | Safari opened or not; its start page, and up to five more, each in a tab; the window full screen |
 
-The last five are applied in the guest by the boot script and need **tools 2** (the wallpaper:
-tools 3, `VMGuestTools.version`); a base set up with tools 1 says so in the list and in the
+Those of the guest's own system are applied in it by the boot script and need **tools 2** (the
+wallpaper: tools 3; the region's clock and week, the scroll bars, the Dock and the pages after
+the first: tools 5, `VMGuestTools.version`); a base set up with tools 1 says so in the list and in the
 editor, and running Install Lumen Tools in the base again updates it. From tools 2 on, the boot
 script takes a newer copy of itself from the shared folder at a machine's start (the app puts its
 own there), so later versions — tools 3 among them — need no visit to the base
@@ -313,6 +320,17 @@ What is checked where:
 - `Tests/BrowserCoreTests/VirtualMachineTests.swift` (Linux and macOS): the profile list's format
   and its tolerance of a later version's, validation, the download's decisions for every answer a
   server gives, the settings file's text and what it refuses, the helper protocol's round trip.
+- `Tests/BrowserCoreTests/VMGuestScriptTests.swift` (Linux and macOS): **the boot script itself,
+  run from its first line to the shutdown** by `/bin/sh`, with every command it calls by its full
+  path replaced by one of the test's own that writes down how it was called (a command the script
+  learns to call and the test has no word for fails the test), and every place it reads or writes
+  a folder of the test's. What the app writes for a profile goes in; what the script would have
+  done to a machine's macOS comes out command by command: each setting's command and its order
+  before Safari is opened, what an unset setting leaves alone, a Dock that is not started again
+  when nothing of it changed, the picture's later looks and its marker, a failure's words in the
+  status, values that are not settings reaching no command (and running as none), nobody signed
+  in, no settings file, and a newer script taking this one's place. What it cannot show is what
+  macOS then does with those commands.
 - `Tests/VMNetCoreTests` and `scripts/vmnet_interop.sh` (Linux): the network against the real
   Linux TCP stack.
 - CI compiles the helper and the app's side on macOS and starts the helper once. **No test runs a

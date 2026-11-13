@@ -206,7 +206,7 @@ enum HelpContent {
                 .heading("vm.add"),
                 .steps(["vm.step.open", "vm.step.download", "vm.step.setup", "vm.step.tools", "vm.step.create"]),
                 .heading("vm.what"),
-                .points(["vm.what.system", "vm.what.proxy", "vm.what.noProxy", "vm.what.locale", "vm.what.screen", "vm.what.look"]),
+                .points(["vm.what.system", "vm.what.proxy", "vm.what.noProxy", "vm.what.locale", "vm.what.screen", "vm.what.look", "vm.what.network"]),
                 .heading("vm.costs"),
                 .points(["vm.costs.disk", "vm.costs.memory", "vm.costs.limit", "vm.costs.start"]),
                 .heading("vm.know"),

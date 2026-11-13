@@ -56,7 +56,13 @@ public enum VMRequirements {
     /// What a profile's own changes come to with use, roughly.
     public static let profileGrowthBytes: Int64 = 4 * gibibyte
 
-    public static let memoryChoices = [3, 4, 6, 8]
+    public static let memoryChoices = [3, 4, 6, 8, 12, 16]
+
+    /// The choices a Mac with `hostMemory` bytes is offered: those that leave the Mac itself 8 GB
+    /// — and 8 GB and less on any Mac (the editor warns where that is tight).
+    public static func memoryChoices(hostMemory: Int64) -> [Int] {
+        memoryChoices.filter { $0 <= 8 || Int64($0) * gibibyte <= hostMemory - 8 * gibibyte }
+    }
     /// The processors a profile may ask for instead of a Mac's eight: fewer spare this Mac.
     public static let coreChoices = [4, 6, 8]
     public static let standardMemoryGB = 4

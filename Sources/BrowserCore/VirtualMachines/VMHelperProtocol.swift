@@ -70,6 +70,8 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
     public var blockedHosts: [String]
     /// What the guest plays is heard on this Mac. Off: the machine keeps its speakers, silent.
     public var sound: Bool
+    /// The machine's window opens full screen. Nil: as a window.
+    public var fullScreen: Bool?
     /// The window's title, and its few words, in the person's language (the helper has no strings
     /// of its own): `stop`, `stopQuestion`, `stopDetail`, `stopNow`, `cancel`, `stopping` — and
     /// `hint`, a line shown above the machine's screen (what is left to do in the base).
@@ -79,7 +81,7 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
     public init(mode: Mode, restoreImagePath: String? = nil, machineDirectory: String? = nil, baseDirectory: String? = nil,
                 cores: Int = 4, memoryBytes: Int64 = 4 << 30, diskBytes: Int64 = VMRequirements.diskImageBytes,
                 display: Display = Display(VMDisplay.standard), macAddress: String? = nil, network: Network = .closed,
-                proxy: ProxySettings? = nil, blockedHosts: [String] = [], sound: Bool = true,
+                proxy: ProxySettings? = nil, blockedHosts: [String] = [], sound: Bool = true, fullScreen: Bool? = nil,
                 windowTitle: String = "", texts: [String: String] = [:]) {
         self.mode = mode
         self.restoreImagePath = restoreImagePath
@@ -94,6 +96,7 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
         self.proxy = proxy
         self.blockedHosts = blockedHosts
         self.sound = sound
+        self.fullScreen = fullScreen
         self.windowTitle = windowTitle
         self.texts = texts
     }
@@ -107,7 +110,8 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
                         memoryBytes: Int64(profile.memoryGB) * VMRequirements.gibibyte,
                         display: Display(profile.display), macAddress: profile.macAddress,
                         network: profile.proxy == nil ? .direct : .proxy, proxy: profile.proxy,
-                        blockedHosts: VMRequirements.blockedHosts, sound: profile.soundEnabled,
+                        blockedHosts: VMRequirements.blockedHosts + profile.blockedHosts.compactMap(VMProfile.blockedHost),
+                        sound: profile.soundEnabled, fullScreen: profile.startsFullScreen ? true : nil,
                         windowTitle: profile.name, texts: texts)
     }
 

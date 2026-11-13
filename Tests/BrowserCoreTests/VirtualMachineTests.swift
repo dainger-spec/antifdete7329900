@@ -335,6 +335,89 @@ final class VMHelperProtocolTests: XCTestCase {
 /// What a machine may be told about itself beyond where it is: its processors, its sound, its
 /// system's look, its name.
 final class VMMachineSettingsTests: XCTestCase {
+    /// A name to block is kept as the network takes it, and nothing but a host's name is one.
+    func testANameToBlockIsAHostsName() {
+        XCTAssertEqual(VMProfile.blockedHost(" Ads.Example.COM "), "ads.example.com")
+        XCTAssertEqual(VMProfile.blockedHost("*.tracker.example.net"), "tracker.example.net")
+        XCTAssertEqual(VMProfile.blockedHost(".example.org."), "example.org")
+        XCTAssertEqual(VMProfile.blockedHost("xn--80ak6aa92e.com"), "xn--80ak6aa92e.com")
+        for bad in ["", "com", "localhost", "https://example.com", "example.com/path", "a b.example.com", "-a.example.com",
+                    "a-.example.com", "exa$mple.com", "1.2.3.4", "пример.рф", "a..example.com",
+                    String(repeating: "a", count: 64) + ".example.com"] {
+            XCTAssertNil(VMProfile.blockedHost(bad), bad)
+        }
+    }
+
+    /// The machine's own names to block go to its network after the app's, and its window's
+    /// full screen to the helper.
+    func testAMachinesOwnBlockedNamesAndFullScreenReachTheHelper() throws {
+        let library = VMLibrary(root: URL(fileURLWithPath: "/tmp/lib"))
+        let plain = VMHelperRequest.run(profile: VMProfile(name: "A"), library: library, hostCores: 8, texts: [:])
+        XCTAssertEqual(plain.blockedHosts, VMRequirements.blockedHosts)
+        XCTAssertNil(plain.fullScreen)
+        let request = VMHelperRequest.run(profile: VMProfile(name: "A", blockedHosts: ["ads.example.com", "t.example.net"], startsFullScreen: true),
+                                          library: library, hostCores: 8, texts: [:])
+        XCTAssertEqual(request.blockedHosts, VMRequirements.blockedHosts + ["ads.example.com", "t.example.net"])
+        XCTAssertEqual(request.fullScreen, true)
+        XCTAssertEqual(try VMHelperRequest.parse(try request.line()), request)
+    }
+
+    func testTheMemoryAMacIsOfferedAndAMacBooksScrollBars() {
+        let gigabyte = VMRequirements.gibibyte
+        XCTAssertEqual(VMRequirements.memoryChoices(hostMemory: 8 * gigabyte), [3, 4, 6, 8])
+        XCTAssertEqual(VMRequirements.memoryChoices(hostMemory: 16 * gigabyte), [3, 4, 6, 8])
+        XCTAssertEqual(VMRequirements.memoryChoices(hostMemory: 24 * gigabyte), [3, 4, 6, 8, 12, 16])
+        XCTAssertEqual(VMRequirements.memoryChoices(hostMemory: 20 * gigabyte), [3, 4, 6, 8, 12])
+        XCTAssertNoThrow(try VMProfile(name: "A", memoryGB: 16).validate())
+        XCTAssertThrowsError(try VMProfile(name: "A", memoryGB: 32).validate())
+        // A MacBook has a trackpad: its bars show while scrolling. A desktop Mac's are the system's.
+        XCTAssertEqual(VMScrollBars.standard(for: VMDisplay.preset("macbook-air-13")), .whenScrolling)
+        XCTAssertEqual(VMScrollBars.standard(for: VMDisplay.preset("macbook-pro-16-more")), .whenScrolling)
+        XCTAssertNil(VMScrollBars.standard(for: VMDisplay.preset("imac-24")))
+        XCTAssertNil(VMScrollBars.standard(for: VMDisplay.preset("external-4k")))
+        XCTAssertEqual(VMDockSize.allCases.map(\.tileSize), [36, 52, 72])
+        XCTAssertEqual(VMScrollBars.allCases.map(\.systemName), ["Automatic", "WhenScrolling", "Always"])
+    }
+
+    /// The region of the formats, the clock, the week, the Dock, the scroll bars and the pages, as
+    /// the guest is given them.
+    func testTheSystemsHabitsAsTheGuestIsGivenThem() {
+        var profile = VMProfile(name: "A", language: "en-US", localeFollowsProxy: false, startURL: "https://a.example/",
+                                regionCode: "de", hourCycle: "24", firstWeekday: 2, dockPosition: "right", dockAutohide: false,
+                                dockSize: "medium", scrollBars: "always",
+                                moreStartURLs: ["https://b.example/", "nonsense", "https://c.example/"])
+        let lines = Set(VMGuestSettings(profile: profile).text.split(separator: "\n").map(String.init))
+        XCTAssertTrue(lines.contains("LUMEN_LANGUAGE=en-US"))
+        XCTAssertTrue(lines.contains("LUMEN_LOCALE=en_DE"), "\(lines)")
+        XCTAssertTrue(lines.contains("LUMEN_HOURS=24"))
+        XCTAssertTrue(lines.contains("LUMEN_FIRST_WEEKDAY=2"))
+        XCTAssertTrue(lines.contains("LUMEN_DOCK_POSITION=right"))
+        XCTAssertTrue(lines.contains("LUMEN_DOCK_AUTOHIDE=0"))
+        XCTAssertTrue(lines.contains("LUMEN_DOCK_SIZE=52"))
+        XCTAssertTrue(lines.contains("LUMEN_SCROLLBARS=Always"))
+        XCTAssertTrue(lines.contains("LUMEN_START_URL=https://a.example/"))
+        // What is not a page's address is left out, and the rest keep their order.
+        XCTAssertTrue(lines.contains("LUMEN_START_URL_2=https://b.example/"))
+        XCTAssertTrue(lines.contains("LUMEN_START_URL_3=https://c.example/"))
+        XCTAssertFalse(lines.contains { $0.hasPrefix("LUMEN_START_URL_4") })
+
+        // Where the language follows a proxy, the region is the one found with it.
+        profile.localeFollowsProxy = true
+        profile.proxy = ProxySettings(kind: .socks5, host: "proxy.example", port: 1080)
+        XCTAssertTrue(VMGuestSettings(profile: profile).text.contains("LUMEN_LOCALE=en_US\n"))
+        // Without a first page there are no pages after it.
+        XCTAssertFalse(VMGuestSettings(profile: VMProfile(name: "A", moreStartURLs: ["https://b.example/"])).text.contains("LUMEN_START_URL"))
+        // Nothing set: nothing said — the guest leaves each as it is.
+        let plain = VMGuestSettings(profile: VMProfile(name: "A")).text
+        for key in ["LUMEN_HOURS", "LUMEN_FIRST_WEEKDAY", "LUMEN_DOCK", "LUMEN_SCROLLBARS"] {
+            XCTAssertFalse(plain.contains(key), key)
+        }
+        // And each is a new revision.
+        XCTAssertNotEqual(VMGuestSettings(profile: VMProfile(name: "A", hourCycle: "12")).revision, VMGuestSettings(profile: VMProfile(name: "A")).revision)
+        XCTAssertEqual(VMGuestSettings.locale(for: "zh-Hant-TW", region: "HK"), "zh_HK")
+        XCTAssertEqual(VMGuestSettings.locale(for: "en", region: nil), "en")
+    }
+
     func testAListFromBeforeTheseSettingsReadsAsAMachineWasThen() throws {
         let old = #"{"format":1,"profiles":[{"id":"6F1C2E8A-0B0D-4C36-9C2A-7E7C0A1B2C3D","name":"Old","displayID":"macbook-air-13","memoryGB":4,"macAddress":"02:11:22:33:44:55"}]}"#
         let list = try JSONCoding.decoder.decode(VMProfiles.self, from: Data(old.utf8))
@@ -347,6 +430,16 @@ final class VMMachineSettingsTests: XCTestCase {
         XCTAssertTrue(profile.opensSafari)
         XCTAssertNil(profile.colorIndex)
         XCTAssertTrue(profile.lumenWallpaper)
+        XCTAssertNil(profile.regionCode)
+        XCTAssertNil(profile.hourCycle)
+        XCTAssertNil(profile.firstWeekday)
+        XCTAssertNil(profile.dockPosition)
+        XCTAssertNil(profile.dockAutohide)
+        XCTAssertNil(profile.dockSize)
+        XCTAssertNil(profile.scrollBars)
+        XCTAssertEqual(profile.moreStartURLs, [])
+        XCTAssertEqual(profile.blockedHosts, [])
+        XCTAssertFalse(profile.startsFullScreen)
         XCTAssertNoThrow(try profile.validate())
         // And what is set is kept through a save.
         var changed = profile
@@ -358,6 +451,18 @@ final class VMMachineSettingsTests: XCTestCase {
         changed.opensSafari = false
         changed.colorIndex = 3
         changed.lumenWallpaper = false
+        changed.regionCode = "DE"
+        changed.hourCycle = "24"
+        changed.firstWeekday = 2
+        changed.dockPosition = "left"
+        changed.dockAutohide = true
+        changed.dockSize = "large"
+        changed.scrollBars = "whenScrolling"
+        changed.startURL = "https://a.example/"
+        changed.moreStartURLs = ["https://b.example/"]
+        changed.blockedHosts = ["ads.example.com"]
+        changed.startsFullScreen = true
+        XCTAssertNoThrow(try changed.validate())
         changed.notes = "shop"
         let again = try JSONCoding.decoder.decode(VMProfile.self, from: JSONCoding.encoder.encode(changed))
         XCTAssertEqual(again, changed)
@@ -369,6 +474,24 @@ final class VMMachineSettingsTests: XCTestCase {
             change(&profile)
             return profile
         }
+        // The system's habits, the pages, the names to block, the card's address.
+        XCTAssertThrowsError(try profile { $0.regionCode = "DEU" }.validate())
+        XCTAssertThrowsError(try profile { $0.regionCode = "D1" }.validate())
+        XCTAssertThrowsError(try profile { $0.hourCycle = "25" }.validate())
+        XCTAssertThrowsError(try profile { $0.firstWeekday = 0 }.validate())
+        XCTAssertThrowsError(try profile { $0.firstWeekday = 8 }.validate())
+        XCTAssertThrowsError(try profile { $0.dockPosition = "top" }.validate())
+        XCTAssertThrowsError(try profile { $0.dockSize = "huge" }.validate())
+        XCTAssertThrowsError(try profile { $0.scrollBars = "never" }.validate())
+        XCTAssertThrowsError(try profile { $0.moreStartURLs = ["javascript:alert(1)"] }.validate())
+        XCTAssertThrowsError(try profile { $0.moreStartURLs = Array(repeating: "https://a.example/", count: 6) }.validate())
+        XCTAssertThrowsError(try profile { $0.blockedHosts = ["Ads.Example.com"] }.validate(), "kept as the network takes it: lower case")
+        XCTAssertThrowsError(try profile { $0.blockedHosts = ["not a host"] }.validate())
+        XCTAssertThrowsError(try profile { $0.macAddress = "01:00:5e:00:00:01" }.validate(), "a group's address")
+        XCTAssertThrowsError(try profile { $0.macAddress = "00:1a:2b:3c:4d:5e" }.validate(), "a maker's address, not a machine's own")
+        XCTAssertThrowsError(try profile { $0.macAddress = "02:1a:2b:3c:4d" }.validate())
+        XCTAssertNoThrow(try profile { $0.macAddress = "0e:1A:2b:3c:4d:5e" }.validate())
+        for _ in 0..<50 { XCTAssertTrue(VMProfile.isMACAddress(VMProfile.randomMACAddress())) }
         XCTAssertNoThrow(try profile { $0.cores = 6 }.validate())
         XCTAssertThrowsError(try profile { $0.cores = 3 }.validate())
         XCTAssertThrowsError(try profile { $0.cores = 64 }.validate())
@@ -463,10 +586,17 @@ final class VMGuestToolsTests: XCTestCase {
     func testTheBootScriptReadsEveryKeyTheAppWrites() throws {
         let boot = try script("lumen-guest.sh")
         let profile = VMProfile(name: "A", timeZoneIdentifier: "Europe/Berlin", language: "de-DE", startURL: "https://example.com/",
-                                appearance: "dark", accent: "purple", computerName: "Anna's MacBook Air", opensSafari: false)
+                                appearance: "dark", accent: "purple", computerName: "Anna's MacBook Air", opensSafari: false,
+                                hourCycle: "24", firstWeekday: 2, dockPosition: "left", dockAutohide: true, dockSize: "small",
+                                scrollBars: "whenScrolling",
+                                moreStartURLs: (2...6).map { "https://example.com/\($0)" })
         let keys = VMGuestSettings(profile: profile).text.split(separator: "\n").compactMap { $0.split(separator: "=").first.map(String.init) }
         XCTAssertEqual(Set(keys), ["LUMEN_REVISION", "LUMEN_TIMEZONE", "LUMEN_LANGUAGE", "LUMEN_LOCALE", "LUMEN_HOSTNAME", "LUMEN_START_URL",
-                                   "LUMEN_COMPUTER_NAME", "LUMEN_APPEARANCE", "LUMEN_ACCENT", "LUMEN_OPEN_SAFARI", "LUMEN_WALLPAPER"])
+                                   "LUMEN_COMPUTER_NAME", "LUMEN_APPEARANCE", "LUMEN_ACCENT", "LUMEN_OPEN_SAFARI", "LUMEN_WALLPAPER",
+                                   "LUMEN_HOURS", "LUMEN_FIRST_WEEKDAY", "LUMEN_DOCK_POSITION", "LUMEN_DOCK_AUTOHIDE", "LUMEN_DOCK_SIZE",
+                                   "LUMEN_SCROLLBARS", "LUMEN_START_URL_2", "LUMEN_START_URL_3", "LUMEN_START_URL_4", "LUMEN_START_URL_5",
+                                   "LUMEN_START_URL_6"])
+        XCTAssertEqual(VMProfile.moreStartURLsLimit, 5, "the boot script reads the pages by name: LUMEN_START_URL_2 … _6")
         for key in keys {
             XCTAssertTrue(boot.contains("value \(key) "), "the boot script does not read \(key)")
         }

@@ -286,6 +286,12 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(view)
         self.window = window
+        if request.fullScreen == true {
+            // The profile's choice: the machine takes this Mac's whole screen, as the window's
+            // green button would have it.
+            window.collectionBehavior.insert(.fullScreenPrimary)
+            DispatchQueue.main.async { window.toggleFullScreen(nil) }
+        }
         installMenu()
         // In the Dock as the app it is part of, not as a bare executable.
         if Bundle.main.bundleURL.pathExtension == "app" {

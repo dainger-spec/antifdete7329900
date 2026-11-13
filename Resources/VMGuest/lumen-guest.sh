@@ -5,8 +5,8 @@
 #
 # At each start it reads what Lumen left in the folder the machine shares with the Mac
 # (lumen-settings.env: KEY=value lines, read as text and never run), and makes this macOS the
-# profile's: its time zone, its language and region, its name, its appearance and accent colour,
-# its desktop picture; then it opens Safari, says in the same folder what macOS and Safari this is (lumen-status.env),
+# profile's: its time zone, its language and region, its clock and week, its name, its appearance
+# and accent colour, its Dock and scroll bars, its desktop picture; then it opens Safari, says in the same folder what macOS and Safari this is (lumen-status.env),
 # and from then on waits for Lumen's request to shut down (a file named lumen-shutdown), which it
 # answers by quitting Safari and shutting macOS down, as the Apple menu would.
 #
@@ -15,7 +15,7 @@
 # (lumen-guest.sh), which it puts in its own place and starts: Lumen on the Mac is what made this
 # machine, and a later Lumen's script needs no visit to the base system.
 
-TOOLS_VERSION=4
+TOOLS_VERSION=5
 SHARE="/Volumes/My Shared Files"
 OWN_MOUNT=/var/run/lumen-share
 TAG=com.apple.virtio-fs.automount
@@ -70,7 +70,8 @@ if [ -n "$share" ] && [ -f "$newer" ] && [ "${LUMEN_GUEST_UPDATED:-0}" != 1 ]; t
 fi
 
 revision="" timezone="" language="" locale="" hostname="" start_url="" computer="" appearance="" accent="" open_safari=1
-wallpaper=0
+wallpaper=0 hours="" first_weekday="" dock_position="" dock_autohide="" dock_size="" scrollbars=""
+start_url_2="" start_url_3="" start_url_4="" start_url_5="" start_url_6=""
 settings="$share/lumen-settings.env"
 if [ -n "$share" ] && [ -f "$settings" ]; then
   revision="$(value LUMEN_REVISION "$settings")"
@@ -84,22 +85,47 @@ if [ -n "$share" ] && [ -f "$settings" ]; then
   accent="$(value LUMEN_ACCENT "$settings")"
   open_safari="$(value LUMEN_OPEN_SAFARI "$settings")"
   wallpaper="$(value LUMEN_WALLPAPER "$settings")"
+  hours="$(value LUMEN_HOURS "$settings")"
+  first_weekday="$(value LUMEN_FIRST_WEEKDAY "$settings")"
+  dock_position="$(value LUMEN_DOCK_POSITION "$settings")"
+  dock_autohide="$(value LUMEN_DOCK_AUTOHIDE "$settings")"
+  dock_size="$(value LUMEN_DOCK_SIZE "$settings")"
+  scrollbars="$(value LUMEN_SCROLLBARS "$settings")"
+  start_url_2="$(value LUMEN_START_URL_2 "$settings")"
+  start_url_3="$(value LUMEN_START_URL_3 "$settings")"
+  start_url_4="$(value LUMEN_START_URL_4 "$settings")"
+  start_url_5="$(value LUMEN_START_URL_5 "$settings")"
+  start_url_6="$(value LUMEN_START_URL_6 "$settings")"
 fi
 only 'A-Za-z0-9' "$revision" || revision=""
 only 'A-Za-z0-9_+/-' "$timezone" || timezone=""
 only 'A-Za-z0-9-' "$language" || language=""
 only 'A-Za-z0-9_' "$locale" || locale=""
 only 'A-Za-z0-9-' "$hostname" || hostname=""
-case "$start_url" in
-  http://*|https://*) only ']A-Za-z0-9:/?#@&=+,.~%_[-' "$start_url" || start_url="" ;;
-  *) start_url="" ;;
-esac
+# page ADDRESS: the address if it is an http(s) one made of an address's characters; nothing else.
+page() {
+  case "$1" in
+    http://*|https://*) ! only ']A-Za-z0-9:/?#@&=+,.~%_[-' "$1" || printf '%s' "$1" ;;
+  esac
+}
+start_url="$(page "$start_url")"
+start_url_2="$(page "$start_url_2")"
+start_url_3="$(page "$start_url_3")"
+start_url_4="$(page "$start_url_4")"
+start_url_5="$(page "$start_url_5")"
+start_url_6="$(page "$start_url_6")"
 case "$timezone" in *..*|/*) timezone="" ;; esac
 only "A-Za-z0-9 '-" "$computer" || computer=""
 case "$appearance" in light|dark|auto) ;; *) appearance="" ;; esac
 case "$accent" in multi|-1|0|1|2|3|4|5|6) ;; *) accent="" ;; esac
 [ "$open_safari" = 0 ] || open_safari=1
 [ "$wallpaper" = 1 ] || wallpaper=0
+case "$hours" in 12|24) ;; *) hours="" ;; esac
+case "$first_weekday" in 1|2|3|4|5|6|7) ;; *) first_weekday="" ;; esac
+case "$dock_position" in bottom|left|right) ;; *) dock_position="" ;; esac
+case "$dock_autohide" in 0|1) ;; *) dock_autohide="" ;; esac
+case "$dock_size" in 16|[2-9][0-9]|1[01][0-9]|12[0-8]) ;; *) dock_size="" ;; esac
+case "$scrollbars" in Automatic|WhenScrolling|Always) ;; *) scrollbars="" ;; esac
 
 # The colour of selected text that goes with an accent colour, as System Settings sets the two.
 highlight() {
@@ -245,6 +271,34 @@ apply_for_user() {
       as_user /usr/bin/defaults write -g AppleAccentColor -int "$accent"
       as_user /usr/bin/defaults write -g AppleHighlightColor -string "$(highlight "$accent")" ;;
   esac
+  # The clock and the week, as Date & Time and Language & Region set them.
+  case "$hours" in
+    24)
+      as_user /usr/bin/defaults write -g AppleICUForce24HourTime -bool true
+      as_user /usr/bin/defaults delete -g AppleICUForce12HourTime 2>/dev/null ;;
+    12)
+      as_user /usr/bin/defaults write -g AppleICUForce12HourTime -bool true
+      as_user /usr/bin/defaults delete -g AppleICUForce24HourTime 2>/dev/null ;;
+  esac
+  [ -z "$first_weekday" ] || as_user /usr/bin/defaults write -g AppleFirstWeekday -dict gregorian -int "$first_weekday"
+  # When scroll bars show: an app takes it as it starts, so before Safari.
+  [ -z "$scrollbars" ] || as_user /usr/bin/defaults write -g AppleShowScrollBars -string "$scrollbars"
+  # The Dock: what it leaves of the screen is what a page is told is free. It is started again
+  # only when something of it was changed — it takes its settings as it starts.
+  dock_changed=0
+  if [ -n "$dock_position" ] && [ "$(as_user /usr/bin/defaults read com.apple.dock orientation 2>/dev/null)" != "$dock_position" ]; then
+    as_user /usr/bin/defaults write com.apple.dock orientation -string "$dock_position"
+    dock_changed=1
+  fi
+  if [ -n "$dock_autohide" ] && [ "$(as_user /usr/bin/defaults read com.apple.dock autohide 2>/dev/null)" != "$dock_autohide" ]; then
+    as_user /usr/bin/defaults write com.apple.dock autohide -bool "$([ "$dock_autohide" = 1 ] && echo true || echo false)"
+    dock_changed=1
+  fi
+  if [ -n "$dock_size" ] && [ "$(as_user /usr/bin/defaults read com.apple.dock tilesize 2>/dev/null)" != "$dock_size" ]; then
+    as_user /usr/bin/defaults write com.apple.dock tilesize -int "$dock_size"
+    dock_changed=1
+  fi
+  [ "$dock_changed" = 0 ] || /usr/bin/killall Dock 2>/dev/null
   # Kept per machine by macOS (by its hardware identifier), so not what the base system had: no
   # screen saver, which would lock a machine left alone behind a password nobody types here.
   as_user /usr/bin/defaults -currentHost write com.apple.screensaver idleTime -int 0 2>/dev/null
@@ -256,7 +310,12 @@ apply_for_user() {
   set_wallpaper
   if [ -n "$share" ] && [ -f "$settings" ] && [ "$open_safari" = 1 ]; then
     if [ -n "$start_url" ]; then
-      as_user /usr/bin/open -a Safari "$start_url" 2>/dev/null
+      # The first page, and those after it: each in a tab of its own.
+      set -- "$start_url"
+      for more in "$start_url_2" "$start_url_3" "$start_url_4" "$start_url_5" "$start_url_6"; do
+        [ -z "$more" ] || set -- "$@" "$more"
+      done
+      as_user /usr/bin/open -a Safari "$@" 2>/dev/null
     else
       as_user /usr/bin/open -a Safari 2>/dev/null
     fi

@@ -63,6 +63,30 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
     /// The machine's desktop picture is Lumen's, drawn by the app for its screen (tools 3). Off:
     /// the picture is left as it is in the machine.
     public var lumenWallpaper: Bool
+    /// The region of the guest system's formats — dates, numbers, the week — where it is not the
+    /// language's own: English as someone in Germany has it is "en" with "DE". ISO 3166, two
+    /// letters. Nil: the language's own. Used when the language is set by hand.
+    public var regionCode: String?
+    /// The clock: `VMHourCycle`'s raw value, "12" or "24". Nil: left as the system has it.
+    public var hourCycle: String?
+    /// The first day of the week, 1 (Sunday) … 7 (Saturday). Nil: left as the system has it.
+    public var firstWeekday: Int?
+    /// Where the Dock is (`VMDockPosition`), whether it hides itself, and its size (`VMDockSize`).
+    /// Each nil: left as it is. A page reads what the Dock leaves of the screen (`screen.avail…`).
+    public var dockPosition: String?
+    public var dockAutohide: Bool?
+    public var dockSize: String?
+    /// When scroll bars show (`VMScrollBars`). Nil: left to the system, which decides by the
+    /// pointing device — and a machine's is a mouse to it, so its bars always show and take a
+    /// page's width, where a MacBook's, with its trackpad, show only while scrolling.
+    public var scrollBars: String?
+    /// More pages Safari opens at start, after `startURL` (at most `VMProfile.moreStartURLsLimit`).
+    public var moreStartURLs: [String]
+    /// Names the machine's network answers "no such name" for — a name itself and every name
+    /// under it — beside the app's own list (`VMRequirements.blockedHosts`).
+    public var blockedHosts: [String]
+    /// The machine's window opens full screen.
+    public var startsFullScreen: Bool
 
     public init(id: UUID = UUID(), name: String, createdAt: Date = Date(), lastLaunchedAt: Date? = nil,
                 proxy: ProxySettings? = nil, timeZoneIdentifier: String? = nil, language: String? = nil,
@@ -70,7 +94,10 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
                 displayID: String = VMDisplay.standard.id, memoryGB: Int = VMRequirements.standardMemoryGB,
                 macAddress: String = VMProfile.randomMACAddress(), startURL: String? = nil, notes: String = "",
                 cores: Int? = nil, soundEnabled: Bool = true, appearance: String? = nil, accent: String? = nil,
-                computerName: String? = nil, opensSafari: Bool = true, colorIndex: Int? = nil, lumenWallpaper: Bool = true) {
+                computerName: String? = nil, opensSafari: Bool = true, colorIndex: Int? = nil, lumenWallpaper: Bool = true,
+                regionCode: String? = nil, hourCycle: String? = nil, firstWeekday: Int? = nil, dockPosition: String? = nil,
+                dockAutohide: Bool? = nil, dockSize: String? = nil, scrollBars: String? = nil, moreStartURLs: [String] = [],
+                blockedHosts: [String] = [], startsFullScreen: Bool = false) {
         self.id = id
         self.name = name
         self.createdAt = createdAt
@@ -93,12 +120,23 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         self.opensSafari = opensSafari
         self.colorIndex = colorIndex
         self.lumenWallpaper = lumenWallpaper
+        self.regionCode = regionCode
+        self.hourCycle = hourCycle
+        self.firstWeekday = firstWeekday
+        self.dockPosition = dockPosition
+        self.dockAutohide = dockAutohide
+        self.dockSize = dockSize
+        self.scrollBars = scrollBars
+        self.moreStartURLs = moreStartURLs
+        self.blockedHosts = blockedHosts
+        self.startsFullScreen = startsFullScreen
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, createdAt, lastLaunchedAt, proxy, timeZoneIdentifier, language, countryCode, localeFollowsProxy,
              displayID, memoryGB, macAddress, startURL, notes, cores, soundEnabled, appearance, accent, computerName,
-             opensSafari, colorIndex, lumenWallpaper
+             opensSafari, colorIndex, lumenWallpaper, regionCode, hourCycle, firstWeekday, dockPosition, dockAutohide, dockSize,
+             scrollBars, moreStartURLs, blockedHosts, startsFullScreen
     }
 
     /// Tolerant of what a later version adds or an earlier one lacked: defaults for what is absent.
@@ -127,6 +165,51 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         opensSafari = try c.decodeIfPresent(Bool.self, forKey: .opensSafari) ?? true
         colorIndex = try c.decodeIfPresent(Int.self, forKey: .colorIndex)
         lumenWallpaper = try c.decodeIfPresent(Bool.self, forKey: .lumenWallpaper) ?? true
+        regionCode = try c.decodeIfPresent(String.self, forKey: .regionCode)
+        hourCycle = try c.decodeIfPresent(String.self, forKey: .hourCycle)
+        firstWeekday = try c.decodeIfPresent(Int.self, forKey: .firstWeekday)
+        dockPosition = try c.decodeIfPresent(String.self, forKey: .dockPosition)
+        dockAutohide = try c.decodeIfPresent(Bool.self, forKey: .dockAutohide)
+        dockSize = try c.decodeIfPresent(String.self, forKey: .dockSize)
+        scrollBars = try c.decodeIfPresent(String.self, forKey: .scrollBars)
+        moreStartURLs = try c.decodeIfPresent([String].self, forKey: .moreStartURLs) ?? []
+        blockedHosts = try c.decodeIfPresent([String].self, forKey: .blockedHosts) ?? []
+        startsFullScreen = try c.decodeIfPresent(Bool.self, forKey: .startsFullScreen) ?? false
+    }
+
+    /// How many pages Safari may be told to open at start beside the first.
+    public static let moreStartURLsLimit = 5
+    /// How many names of its own a machine may have blocked.
+    public static let blockedHostsLimit = 200
+
+    /// A name to block as the network takes one: lowercase, without a leading "*." or dot, made
+    /// of labels of letters, digits and hyphens with a dot between them ("ads.example.com").
+    /// Nil for anything else — an address, a name without a dot, a URL.
+    public static func blockedHost(_ text: String) -> String? {
+        var name = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if name.hasPrefix("*.") { name.removeFirst(2) }
+        while name.hasPrefix(".") { name.removeFirst() }
+        while name.hasSuffix(".") { name.removeLast() }
+        guard (3...253).contains(name.utf8.count) else { return nil }
+        let labels = name.split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.count >= 2 else { return nil }
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-")
+        for label in labels {
+            guard (1...63).contains(label.utf8.count), label.unicodeScalars.allSatisfy(allowed.contains),
+                  !label.hasPrefix("-"), !label.hasSuffix("-") else { return nil }
+        }
+        // Four numbers are an address, not a name.
+        guard !labels.allSatisfy({ $0.allSatisfy(\.isNumber) }) else { return nil }
+        return name
+    }
+
+    /// A network card's address as a machine may have one: six bytes in hex with colons, the
+    /// first marking it locally administered and not a group's ("02:…", "06:…", "0a:…", "0e:…").
+    public static func isMACAddress(_ text: String) -> Bool {
+        let parts = text.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 6, parts.allSatisfy({ $0.count == 2 && $0.allSatisfy(\.isHexDigit) }),
+              let first = UInt8(parts[0], radix: 16) else { return false }
+        return first & 0x02 != 0 && first & 0x01 == 0
     }
 
     /// The screen, as one of the presets (an id this version does not know: the standard one).
@@ -194,6 +277,33 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         if notes.count > 2000 {
             throw CoreError.invalidConfiguration("the note is too long")
         }
+        if let regionCode, !(regionCode.count == 2 && regionCode.unicodeScalars.allSatisfy { $0.isASCII && CharacterSet.letters.contains($0) }) {
+            throw CoreError.invalidConfiguration("the region must be a country's two letters")
+        }
+        if let hourCycle, VMHourCycle(rawValue: hourCycle) == nil {
+            throw CoreError.invalidConfiguration("the clock is 12 or 24 hours")
+        }
+        if let firstWeekday, !(1...7).contains(firstWeekday) {
+            throw CoreError.invalidConfiguration("the first day of the week is 1 to 7")
+        }
+        if let dockPosition, VMDockPosition(rawValue: dockPosition) == nil {
+            throw CoreError.invalidConfiguration("unknown Dock position")
+        }
+        if let dockSize, VMDockSize(rawValue: dockSize) == nil {
+            throw CoreError.invalidConfiguration("unknown Dock size")
+        }
+        if let scrollBars, VMScrollBars(rawValue: scrollBars) == nil {
+            throw CoreError.invalidConfiguration("unknown scroll bar setting")
+        }
+        guard moreStartURLs.count <= Self.moreStartURLsLimit, moreStartURLs.allSatisfy({ VMGuestSettings.startURL($0) != nil }) else {
+            throw CoreError.invalidConfiguration("every start page must be an http or https address, and there may be \(Self.moreStartURLsLimit + 1) of them")
+        }
+        guard blockedHosts.count <= Self.blockedHostsLimit, blockedHosts.allSatisfy({ Self.blockedHost($0) == $0 }) else {
+            throw CoreError.invalidConfiguration("a blocked name must be a host name such as ads.example.com")
+        }
+        guard Self.isMACAddress(macAddress) else {
+            throw CoreError.invalidConfiguration("the network card's address must be six hex bytes, locally administered (02:…)")
+        }
     }
 
     /// The profile with its time zone, language and country taken from where its proxy came out
@@ -208,6 +318,54 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
             if let language = ProxyLocation.webLanguages[country] { updated.language = language }
         }
         return updated
+    }
+}
+
+/// The guest system's clock.
+public enum VMHourCycle: String, CaseIterable, Sendable {
+    case twelve = "12"
+    case twentyFour = "24"
+}
+
+/// Where the guest's Dock is.
+public enum VMDockPosition: String, CaseIterable, Sendable {
+    case bottom, left, right
+}
+
+/// The guest's Dock's size; `tileSize` is macOS's own number for it (`tilesize`, in points).
+public enum VMDockSize: String, CaseIterable, Sendable {
+    case small, medium, large
+
+    public var tileSize: Int {
+        switch self {
+        case .small: return 36
+        case .medium: return 52
+        case .large: return 72
+        }
+    }
+}
+
+/// When the guest's scroll bars show, as System Settings › Appearance has it; `systemName` is
+/// macOS's own word for it (`AppleShowScrollBars`).
+public enum VMScrollBars: String, CaseIterable, Sendable {
+    /// By the pointing device: with a mouse always, with a trackpad while scrolling.
+    case automatic
+    case whenScrolling
+    case always
+
+    public var systemName: String {
+        switch self {
+        case .automatic: return "Automatic"
+        case .whenScrolling: return "WhenScrolling"
+        case .always: return "Always"
+        }
+    }
+
+    /// What a new machine gets: a MacBook has a trackpad, and its bars show only while scrolling —
+    /// a machine left to the system would show them always, as no MacBook does. A desktop Mac's
+    /// are left to the system (a mouse: always).
+    public static func standard(for display: VMDisplay) -> VMScrollBars? {
+        display.id.hasPrefix("macbook") ? .whenScrolling : nil
     }
 }
 
