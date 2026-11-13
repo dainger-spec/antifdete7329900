@@ -871,8 +871,29 @@ final class AppModel: ObservableObject {
     func launch(_ id: UUID, openingWindow: Bool = true) async {
         // A launch reads the files sync replaces (settings, synced cookies): after the sync.
         while isSyncing { try? await Task.sleep(nanoseconds: 100_000_000) }
+        await changeIPBeforeLaunch(id)
         await perform { try await self.manager?.launch(id, openingWindow: openingWindow) }
         refresh()
+    }
+
+    /// Profiles whose proxy is getting a new IP before they start (the row says so).
+    @Published private(set) var changingIPBeforeLaunch: Set<UUID> = []
+
+    /// A profile on a proxy that changes its IP at each launch (`ProxyListEntry.changesIPOnLaunch`)
+    /// gets a new one first — unless another running profile is on that proxy, whose pages would
+    /// lose their IP mid-session (`ProxyIPChange.mayChange`). A change the provider refused is
+    /// said; the profile starts all the same, with the IP the proxy has.
+    private func changeIPBeforeLaunch(_ id: UUID) async {
+        guard let proxyList, let manager, !manager.isRunning(id), !manager.busyProfileIDs.contains(id),
+              let identity = details[id]?.proxyIdentity,
+              let entry = proxyList.list.entries.first(where: { ProxyList.identity(of: $0.proxy) == identity }) else { return }
+        let running = manager.runningProfileIDs.compactMap { details[$0]?.proxyIdentity }
+        guard ProxyIPChange.mayChange(entry, runningProxies: running) else { return }
+        changingIPBeforeLaunch.insert(id)
+        defer { changingIPBeforeLaunch.remove(id) }
+        guard let report = await proxyList.changeIP(entry.id), !report.accepted else { return }
+        let name = profiles.first { $0.id == id }?.name ?? ""
+        showError(String(format: L("proxies.ipChange.launchFailed"), name, report.reason.isEmpty ? L("proxies.ipChange.noReason") : report.reason))
     }
 
     func stop(_ id: UUID) async {

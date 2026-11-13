@@ -42,6 +42,8 @@ ALLOWED_EXPRESSIONS = {
     "bundled": "a yes/no: whether a bundled file was used",
     "absent": "names of private classes and methods this macOS does not have",
     "onProfile": "a yes/no",
+    "accepted": "a yes/no: whether a proxy provider took an IP change",
+    "newIPSeen": "a yes/no: whether the proxy answered after an IP change",
     "status": "a process exit status",
     "pid": "a process identifier (a profile's own process, held by the network guard)",
     "decoded.pid": "a process identifier the app asked the network guard to hold",

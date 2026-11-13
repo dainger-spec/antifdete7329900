@@ -132,7 +132,7 @@ struct ProfileInspectorView: View {
                 case .starting, .sealing:
                     HStack(spacing: 7) {
                         ProgressView().controlSize(.small)
-                        Text(row.activity == .starting ? L("profiles.row.starting") : L("profiles.row.encrypting"))
+                        Text(row.activity == .starting ? row.startingText : L("profiles.row.encrypting"))
                             .font(.lumenBody)
                             .foregroundStyle(Theme.textSecondary)
                     }
@@ -168,7 +168,7 @@ struct ProfileInspectorView: View {
                 return warmUp.cookies > 0 ? pages + " " + String(format: L("profiles.row.warmUpCookies"), warmUp.cookies) : pages
             }
             return L("profiles.row.running")
-        case .starting: return L("profiles.row.starting")
+        case .starting: return row.startingText
         case .sealing: return L("profiles.row.encrypting")
         case .stopped:
             guard let date = row.lastUsed else { return L("profiles.row.neverLaunched") }

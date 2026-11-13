@@ -1560,6 +1560,24 @@
 "proxies.add.full" = "The list already holds %ld proxies, its limit: delete some first.";
 "proxies.edit.proxy" = "Proxy";
 "proxies.edit.name.placeholder" = "Optional, such as Berlin 1";
+"proxies.ipChange.link" = "Change IP link";
+"proxies.ipChange.link.placeholder" = "https://… — for mobile proxies, from the provider";
+"proxies.ipChange.onLaunch" = "Change the IP when a profile starts";
+"proxies.ipChange.onLaunch.detail" = "Each time a profile on this proxy is started from Lumen, it first gets a new IP. Not while another running profile uses this proxy: its pages would lose their IP.";
+"proxies.ipChange.badLink" = "The change IP link is not an http or https address.";
+"proxies.ipChange.action" = "Change IP";
+"proxies.ipChange.changing" = "Changing the IP…";
+"proxies.ipChange.changed" = "IP changed %3$@: %1$@ → %2$@";
+"proxies.ipChange.changedTo" = "IP changed %2$@: now %1$@";
+"proxies.ipChange.same" = "The provider took the change %2$@, but the IP is still %1$@.";
+"proxies.ipChange.noAnswerYet" = "The provider took the change %@, but the proxy has not answered since. Check it in a moment.";
+"proxies.ipChange.refused" = "The IP was not changed: %@";
+"proxies.ipChange.noReason" = "the provider gave no reason";
+"proxies.ipChange.launchFailed" = "The IP of the proxy of “%1$@” was not changed before it started: %2$@";
+"proxies.ipChange.fact" = "Change IP";
+"proxies.ipChange.fact.onLaunch" = "at each launch";
+"proxies.ipChange.fact.byHand" = "by hand";
+"profiles.row.changingIP" = "Changing IP…";
 
 /* Settings (one window, ⌘,) */
 "settings.title" = "Settings";

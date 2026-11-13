@@ -1560,6 +1560,24 @@
 "proxies.add.full" = "В списке уже %ld прокси — это предел: сначала удалите лишние.";
 "proxies.edit.proxy" = "Прокси";
 "proxies.edit.name.placeholder" = "Необязательно, например «Берлин 1»";
+"proxies.ipChange.link" = "Ссылка смены IP";
+"proxies.ipChange.link.placeholder" = "https://… — для мобильных прокси, от провайдера";
+"proxies.ipChange.onLaunch" = "Менять IP при запуске профиля";
+"proxies.ipChange.onLaunch.detail" = "Каждый раз, когда профиль с этим прокси запускается из Lumen, он сначала получает новый IP. Но не тогда, когда этим прокси пользуется другой запущенный профиль: у его страниц сменился бы IP.";
+"proxies.ipChange.badLink" = "Ссылка смены IP — не адрес http или https.";
+"proxies.ipChange.action" = "Сменить IP";
+"proxies.ipChange.changing" = "Меняю IP…";
+"proxies.ipChange.changed" = "IP сменён %3$@: %1$@ → %2$@";
+"proxies.ipChange.changedTo" = "IP сменён %2$@: теперь %1$@";
+"proxies.ipChange.same" = "Провайдер принял смену %2$@, но IP всё ещё %1$@.";
+"proxies.ipChange.noAnswerYet" = "Провайдер принял смену %@, но прокси с тех пор не отвечает. Проверьте его чуть позже.";
+"proxies.ipChange.refused" = "IP не сменён: %@";
+"proxies.ipChange.noReason" = "провайдер не объяснил причину";
+"proxies.ipChange.launchFailed" = "IP прокси профиля «%1$@» не сменился перед запуском: %2$@";
+"proxies.ipChange.fact" = "Смена IP";
+"proxies.ipChange.fact.onLaunch" = "при каждом запуске";
+"proxies.ipChange.fact.byHand" = "вручную";
+"profiles.row.changingIP" = "Меняю IP…";
 
 /* Settings (one window, ⌘,) */
 "settings.title" = "Настройки";

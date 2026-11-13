@@ -15,6 +15,10 @@ final class ProxyListModel: ObservableObject {
     /// How many proxies the running check covers, and how many it has finished.
     @Published private(set) var checkedCount = 0
     @Published private(set) var checkTotal = 0
+    /// The proxies whose IP is being changed now (`changeIP`).
+    @Published private(set) var changingIP: Set<UUID> = []
+    /// The last IP change of each proxy since unlock, for the inspector to tell.
+    @Published private(set) var ipChanges: [UUID: IPChangeReport] = [:]
     /// Why the stored list could not be read (damaged, or from a later build). It is then shown
     /// empty and never written, so nothing of it is lost by saving over it.
     let loadError: String?
@@ -139,6 +143,100 @@ final class ProxyListModel: ObservableObject {
     /// The text of an export of `ids` (all: nil), passwords in plaintext (`ProxyList.exportText`).
     func exportText(_ ids: Set<UUID>?) -> String {
         ProxyList.exportText(list.entries.filter { ids?.contains($0.id) ?? true })
+    }
+
+    // MARK: Changing the IP
+
+    /// How a change of a proxy's IP went.
+    struct IPChangeReport: Equatable {
+        var at: Date
+        var answer: ProxyIPChange.Answer
+        /// The exit IP before (its last working check) and after (the check once it carried traffic
+        /// again); nil when not known.
+        var before: String?
+        var after: String?
+
+        var accepted: Bool { if case .accepted = answer { return true } else { return false } }
+
+        /// What the provider said, or why there was no answer, as a line for the person.
+        var reason: String {
+            switch answer {
+            case .accepted(let message): return message ?? ""
+            case .refused(let status, let message):
+                let code = (200..<300).contains(status) ? "" : "HTTP \(status)"
+                return [code, message ?? ""].filter { !$0.isEmpty }.joined(separator: ": ")
+            case .unreachable(let message): return message
+            }
+        }
+    }
+
+    /// Sets entry `id`'s IP-change link and whether a launch changes the IP first. Nil when done,
+    /// otherwise what to tell the user.
+    func setIPChange(_ id: UUID, link: URL?, onLaunch: Bool) -> String? {
+        var updated = list
+        do {
+            try updated.setIPChange(id, link: link, onLaunch: onLaunch)
+        } catch {
+            return L("proxies.edit.gone")
+        }
+        guard updated != list else { return nil }
+        return save(updated) ? nil : L("proxies.edit.notSaved")
+    }
+
+    /// Opens entry `id`'s IP-change link (`ProxyIPChange`), then checks the proxy every few
+    /// seconds until it carries traffic again — its modem reconnects — and keeps that check as its
+    /// last: the new exit IP, country and latency. Nil when the entry has no link, or its IP is
+    /// already being changed.
+    @discardableResult
+    func changeIP(_ id: UUID) async -> IPChangeReport? {
+        guard let entry = list.entry(id), let link = entry.changeIPURL, !changingIP.contains(id) else { return nil }
+        changingIP.insert(id)
+        defer { changingIP.remove(id) }
+        let before = entry.lastCheck?.isAlive == true ? entry.lastCheck?.exitIP : nil
+        let answer = await Self.open(link)
+        var after: String?
+        if case .accepted = answer {
+            let begun = Date()
+            while Date().timeIntervalSince(begun) < ProxyIPChange.settleLimit {
+                try? await Task.sleep(nanoseconds: UInt64(ProxyIPChange.settleCheckInterval * 1_000_000_000))
+                guard let current = list.entry(id) else { break }
+                let result = await ProxyChecker.check(current.proxy)
+                guard result.isAlive else { continue }
+                after = result.exitIP
+                // A check of the whole list running over it keeps its own result.
+                if !checking.contains(id) {
+                    var updated = list
+                    let previous = updated.record(result, for: id)
+                    if save(updated), let previous, let changed = list.entry(id) { onEntryChanged?(changed, previous) }
+                }
+                break
+            }
+        }
+        let report = IPChangeReport(at: Date(), answer: answer, before: before, after: after)
+        ipChanges[id] = report
+        // Never the link: it holds the provider's key.
+        let accepted = report.accepted, newIPSeen = after != nil
+        log.notice("IP change of a proxy: accepted \(accepted, privacy: .public), new IP seen \(newIPSeen, privacy: .public)")
+        return report
+    }
+
+    /// Opens `link` from the app — not through the proxy — with nothing of the app on the request
+    /// (`ProxyIPChange.request`), and reads the provider's answer.
+    nonisolated static func open(_ link: URL) async -> ProxyIPChange.Answer {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.urlCache = nil
+        configuration.timeoutIntervalForRequest = ProxyIPChange.timeout
+        configuration.timeoutIntervalForResource = ProxyIPChange.timeout
+        let session = URLSession(configuration: configuration)
+        defer { session.finishTasksAndInvalidate() }
+        do {
+            let (data, response) = try await session.data(for: ProxyIPChange.request(for: link))
+            return ProxyIPChange.answer(status: (response as? HTTPURLResponse)?.statusCode ?? 0, body: data)
+        } catch {
+            return .unreachable(error.localizedDescription)
+        }
     }
 
     // MARK: Checks

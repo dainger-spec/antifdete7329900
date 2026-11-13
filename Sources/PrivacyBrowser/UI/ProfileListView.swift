@@ -456,7 +456,10 @@ struct ProfileListView: View {
             let running = model.isRunning(profile.id)
             let busy = model.isBusy(profile.id)
             let details = model.details[profile.id]
-            let activity: ProfileRowItem.Activity = busy ? (running ? .starting : .sealing) : (running ? .running : .stopped)
+            // Its proxy getting a new IP before it starts is part of starting.
+            let changingIP = !running && model.changingIPBeforeLaunch.contains(profile.id)
+            let activity: ProfileRowItem.Activity = changingIP ? .starting
+                : busy ? (running ? .starting : .sealing) : (running ? .running : .stopped)
             let warmUp = model.manager?.warmUpStatus(of: profile.id)
             let problem = model.proxyProblems.first { $0.profileID == profile.id }
             // No details: its settings could not be read (`AppModel.refresh`) — not "Direct" (R1).
@@ -478,6 +481,7 @@ struct ProfileListView: View {
             }
             return ProfileRowItem(
                 id: profile.id, name: profile.name, activity: activity,
+                changingIP: changingIP,
                 exit: exit,
                 ephemeral: details?.ephemeral ?? false,
                 // Settings that could not be read say nothing of how it appears: no default shown for them.
@@ -602,6 +606,8 @@ struct ProfileRowItem: Identifiable {
     let id: UUID
     var name: String
     var activity: Activity
+    /// Starting, and first its proxy is getting a new IP (`ProxyListEntry.changesIPOnLaunch`).
+    var changingIP = false
     var exit: ProfileExit
     var ephemeral: Bool
     var appearsAs: String
@@ -632,6 +638,8 @@ struct ProfileRowItem: Identifiable {
     var directCountry: String?
 
     var isRunning: Bool { activity == .running }
+    /// "Starting…", or "Changing IP…" while its proxy gets a new IP first.
+    var startingText: String { changingIP ? L("profiles.row.changingIP") : L("profiles.row.starting") }
     /// Grouped under "Need attention": its last launch failed, or its settings cannot be read (R1).
     var needsAttention: Bool { problem != nil || exit == .unreadable }
     var isBusy: Bool { activity == .starting || activity == .sealing }
@@ -1871,7 +1879,7 @@ private struct ProfileRow: View {
         } else {
             switch row.activity {
             case .starting:
-                busyLine(L("profiles.row.starting"))
+                busyLine(row.startingText)
             case .sealing:
                 busyLine(L("profiles.row.encrypting"))
             case .running:

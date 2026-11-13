@@ -1,4 +1,7 @@
 import XCTest
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 @testable import BrowserCore
 
 final class ProxyListImportTests: XCTestCase {
@@ -371,11 +374,11 @@ final class ProxyListTests: XCTestCase {
         XCTAssertEqual(list.entries.first?.label, "kept")
         XCTAssertNil(list.entries.first?.lastCheck)
 
-        try SecureFile.write(AEAD.seal(Data(#"{"format": 3, "entries": []}"#.utf8), key: ProxyList.file(for: vault).key,
+        try SecureFile.write(AEAD.seal(Data(#"{"format": 4, "entries": []}"#.utf8), key: ProxyList.file(for: vault).key,
                                        aad: "proxy-list:v1:\(vault.vaultID.uuidString)"),
                              to: root.appendingPathComponent("proxies.bin"))
         XCTAssertThrowsError(try ProxyList.load(from: vault)) { error in
-            XCTAssertEqual(error as? CoreError, .newerFormat(what: "proxies.bin", found: 3, supported: 2))
+            XCTAssertEqual(error as? CoreError, .newerFormat(what: "proxies.bin", found: 4, supported: 3))
         }
     }
 
@@ -424,6 +427,116 @@ final class ProxyListTests: XCTestCase {
         // Removing the service's proxy makes it the file every version reads again.
         withService.remove([given.id])
         XCTAssertEqual(try written(withService)["format"] as? Int, 1)
+    }
+
+    /// A mobile proxy's IP-change link: read from an import line, kept through the vault, written
+    /// back by the export as it was read — and the list is format 3 while one is set, so that a
+    /// version from before links refuses it rather than write it back without them (R4).
+    func testAnIPChangeLinkIsReadKeptAndExportedAndRaisesTheFormat() throws {
+        let link = "https://changeip.example/api/v1/reboot?key=abc123&port=8001"
+        let report = ProxyListImport.read("""
+            socks5://u:p@m.example:8001[\(link)]  # Mobile 1
+            http://u:p@n.example:3128
+            [2001:db8::1]:1080
+            o.example:9000:user:pass[http://ip.example/change?t=1]
+            """)
+        XCTAssertTrue(report.problems.isEmpty, "\(report.problems)")
+        XCTAssertEqual(report.proxies.map(\.changeIPURL?.absoluteString), [link, nil, nil, "http://ip.example/change?t=1"])
+        XCTAssertEqual(report.proxies.first?.label, "Mobile 1")
+        XCTAssertEqual(report.proxies.first?.proxy.host, "m.example")
+        XCTAssertEqual(report.proxies[2].proxy.host, "2001:db8::1", "an IPv6 host's brackets are not a link")
+        XCTAssertEqual(report.proxies[3].proxy.username, "user")
+
+        // A bracket that is not a link leaves the line unreadable rather than drop it quietly.
+        XCTAssertEqual(ProxyListImport.read("socks5://h.example:1080[ftp://x.example/]").proxies.count, 0)
+        XCTAssertEqual(ProxyListImport.read("socks5://h.example:1080[https://]").proxies.count, 0)
+
+        var list = ProxyList()
+        // Whole seconds: the file keeps times to the second.
+        list.add(report.proxies, at: Date(timeIntervalSince1970: 1_790_000_000))
+        let mobile = try XCTUnwrap(list.entries.first)
+        XCTAssertEqual(mobile.changeIPURL?.absoluteString, link)
+        XCTAssertFalse(mobile.changesIPOnLaunch)
+        XCTAssertEqual(list.format, 3)
+
+        try list.setIPChange(mobile.id, link: mobile.changeIPURL, onLaunch: true)
+        XCTAssertTrue(list.entry(mobile.id)?.changesIPOnLaunch == true)
+        let other = list.entries[1]
+        try list.setIPChange(other.id, link: nil, onLaunch: true)
+        XCTAssertEqual(list.entry(other.id)?.changesIPOnLaunch, false, "no link, nothing to change at launch")
+        XCTAssertThrowsError(try list.setIPChange(UUID(), link: nil, onLaunch: false))
+
+        let vault = try MasterVault.create(in: root, password: "pw", iterations: 1_000)
+        try list.save(to: vault)
+        let reopened = try ProxyList.load(from: vault)
+        XCTAssertEqual(reopened, list)
+        let onDisk = try Data(contentsOf: vault.root.appendingPathComponent("proxies.bin"))
+        XCTAssertNil(onDisk.range(of: Data("abc123".utf8)), "the provider's key is encrypted with the list")
+
+        let exported = ProxyList.exportText(list.entries)
+        XCTAssertTrue(exported.contains("socks5://u:p@m.example:8001[\(link)]  # Mobile 1"), exported)
+        XCTAssertEqual(ProxyListImport.read(exported).proxies.map(\.changeIPURL), report.proxies.map(\.changeIPURL))
+
+        // Without any link the list is written as before.
+        try list.setIPChange(mobile.id, link: nil, onLaunch: false)
+        try list.setIPChange(list.entries[3].id, link: nil, onLaunch: false)
+        XCTAssertEqual(list.format, 1)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(list)) as? [String: Any])
+        XCTAssertTrue((json["entries"] as? [[String: Any]])?.allSatisfy { $0["changeIPURL"] == nil && $0["changesIPOnLaunch"] == nil } == true)
+    }
+}
+
+final class ProxyIPChangeTests: XCTestCase {
+    func testOnlyAnHTTPLinkWithAHostIsALink() {
+        XCTAssertEqual(ProxyIPChange.link(from: "  https://a.example/x?k=1 ")?.absoluteString, "https://a.example/x?k=1")
+        XCTAssertNotNil(ProxyIPChange.link(from: "http://10.0.0.1:8080/change"))
+        for bad in ["", "a.example/x", "ftp://a.example/", "https://", "https://u:p@a.example/", "https://a.example/x y",
+                    "javascript:alert(1)", "https://" + String(repeating: "a", count: 2100) + ".example/"] {
+            XCTAssertNil(ProxyIPChange.link(from: bad), bad)
+        }
+    }
+
+    func testTheRequestCarriesNothingOfTheApp() throws {
+        let request = ProxyIPChange.request(for: try XCTUnwrap(URL(string: "https://a.example/x?k=1")))
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertFalse(request.httpShouldHandleCookies)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), "Lumen")
+        XCTAssertEqual(request.timeoutInterval, ProxyIPChange.timeout)
+    }
+
+    func testTheProvidersAnswerIsReadAsItsAPIsSayIt() {
+        func answer(_ status: Int, _ body: String) -> ProxyIPChange.Answer { ProxyIPChange.answer(status: status, body: Data(body.utf8)) }
+        XCTAssertEqual(answer(200, #"{"status":"OK","new_ip":"1.2.3.4"}"#), .accepted(message: "OK"))
+        XCTAssertEqual(answer(200, "IP changed"), .accepted(message: "IP changed"))
+        XCTAssertEqual(answer(204, ""), .accepted(message: nil))
+        XCTAssertEqual(answer(200, #"{"success":true,"error":null}"#), .accepted(message: nil))
+        XCTAssertEqual(answer(200, #"{"status":"error","message":"Wait 60 seconds"}"#), .refused(status: 200, message: "Wait 60 seconds"))
+        XCTAssertEqual(answer(200, #"{"success":false,"msg":"bad key"}"#), .refused(status: 200, message: "bad key"))
+        XCTAssertEqual(answer(200, #"{"ok":false}"#), .refused(status: 200, message: nil))
+        XCTAssertEqual(answer(200, #"{"error":"too often"}"#), .refused(status: 200, message: "too often"))
+        XCTAssertEqual(answer(200, "Error: modem busy"), .refused(status: 200, message: "Error: modem busy"))
+        XCTAssertEqual(answer(429, "slow down"), .refused(status: 429, message: "slow down"))
+        XCTAssertEqual(answer(502, "<html><body>Bad gateway</body></html>"), .refused(status: 502, message: nil))
+        // Shown as one short line.
+        if case .accepted(let message?) = answer(200, String(repeating: "word ", count: 100) + "\n\u{7}") {
+            XCTAssertLessThanOrEqual(message.count, 160)
+            XCTAssertFalse(message.contains("\n"))
+        } else {
+            XCTFail("a long answer is still an answer")
+        }
+    }
+
+    func testALaunchChangesTheIPOnlyWhenNoOtherRunningProfileIsOnTheProxy() {
+        let proxy = ProxySettings(kind: .socks5, host: "m.example", port: 8001, username: "u", password: "p")
+        var entry = ProxyListEntry(proxy: proxy, changeIPURL: URL(string: "https://a.example/x"), changesIPOnLaunch: true)
+        XCTAssertTrue(ProxyIPChange.mayChange(entry, runningProxies: []))
+        XCTAssertTrue(ProxyIPChange.mayChange(entry, runningProxies: [ProxyList.identity(of: ProxySettings(kind: .socks5, host: "o.example", port: 1))]))
+        XCTAssertFalse(ProxyIPChange.mayChange(entry, runningProxies: [ProxyList.identity(of: proxy)]), "another profile is on it")
+        entry.changesIPOnLaunch = false
+        XCTAssertFalse(ProxyIPChange.mayChange(entry, runningProxies: []))
+        entry.changesIPOnLaunch = true
+        entry.changeIPURL = nil
+        XCTAssertFalse(ProxyIPChange.mayChange(entry, runningProxies: []))
     }
 }
 

@@ -1642,7 +1642,8 @@ struct EditorField<Content: View>: View {
 }
 
 /// A setting with a switch on the right: its title, and what it does below.
-private struct EditorToggle: View {
+/// A switch with its title and, under it, what it does — the editor's, and the proxy sheet's.
+struct EditorToggle: View {
     let title: String
     var detail: String?
     @Binding var isOn: Bool
