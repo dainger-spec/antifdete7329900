@@ -344,17 +344,11 @@ final class WarmUpRobot: ObservableObject {
             }
             // A page that did not load is left at once (its error page is no visit).
             if !isFailure(outcome) {
-                // A cookie banner, answered as most people answer it: "accept" (the well-known
-                // consent tools' own button only — nothing else on the page is pressed).
-                let consentBegan = Date()
-                if await acceptConsent(in: tab, run: run) { update(index, run: run) { $0.consentsAccepted += 1 } }
-                guard isCurrent(run) else { return }
                 let dwell = dwellTime(plan, using: &generator)
                 update(index, run: run) { $0.dwell = dwell }
-                // The moment the banner took is time on the page — a person reads while it is up —
-                // so the stay is the plan's, not the plan's and the banner's.
-                let rest = max(dwell - Date().timeIntervalSince(consentBegan), min(dwell, 1))
-                guard await stay(rest, scroll: plan.scroll, visit: index, run: run, using: &generator) else { return }
+                // The stay answers a cookie banner on the way, as a person reading the page does.
+                guard await stay(dwell, scroll: plan.scroll, answersConsent: true, visit: index, run: run,
+                                 using: &generator) else { return }
                 // Links one after the other (`plan.hops`, 1–3 by depth): from a search's results to a
                 // site, then on within that site, as a person reads on.
                 var current = page
@@ -504,20 +498,27 @@ final class WarmUpRobot: ObservableObject {
 
     // MARK: Staying on a page
 
-    /// What happens while a page is read: a scroll gesture, or the pointer drifting. Not nested in
-    /// `stay`: a type in a generic function is refused by the Swift of macOS 26 (accepted by 27's).
-    private enum StayEvent { case gesture(WarmUpTiming.Gesture), drift }
+    /// What happens while a page is read: a scroll gesture, the pointer drifting, a cookie banner
+    /// answered. Not nested in `stay`: a type in a generic function is refused by the Swift of
+    /// macOS 26 (accepted by 27's).
+    private enum StayEvent { case gesture(WarmUpTiming.Gesture), drift, consent }
 
     /// Stays `dwell` seconds, scrolling now and then; false when the run ended meanwhile.
-    private func stay(_ dwell: TimeInterval, scroll: Bool, visit: Int, run: Int,
+    /// `answersConsent`: a cookie banner is looked for a moment in — it often comes a moment after
+    /// the page — and accepted (`pressConsent`), within the stay, not before it: the time on the
+    /// page is the plan's.
+    private func stay(_ dwell: TimeInterval, scroll: Bool, answersConsent: Bool = false, visit: Int, run: Int,
                       using generator: inout some RandomNumberGenerator) async -> Bool {
         let begun = Date()
         let gestures = scroll ? WarmUpTiming.gestures(over: dwell, using: &generator) : []
         // The pointer drifts while the page is read, as a hand resting on a mouse does — never
         // during a gesture (the wheel scrolls where the pointer is).
         let drifts = WarmUpTiming.pointerMoves(over: dwell, avoiding: gestures, using: &generator)
-        let events = (gestures.map { (at: $0.at, event: StayEvent.gesture($0)) } + drifts.map { (at: $0, event: StayEvent.drift) })
-            .sorted { $0.at < $1.at }
+        var timeline = gestures.map { (at: $0.at, event: StayEvent.gesture($0)) } + drifts.map { (at: $0, event: StayEvent.drift) }
+        if answersConsent {
+            timeline.append((at: min(Double.random(in: 1.2...2.2, using: &generator), dwell / 2), event: StayEvent.consent))
+        }
+        let events = timeline.sorted { $0.at < $1.at }
         for item in events {
             guard await wait(item.at - Date().timeIntervalSince(begun), run: run), let tab = liveTab(run) else { return false }
             // A tab the user put aside (another tab selected) has no window to scroll or point in.
@@ -527,6 +528,8 @@ final class WarmUpRobot: ObservableObject {
                 if await self.scroll(gesture, in: tab, run: run) { update(visit, run: run) { $0.scrolls += 1 } }
             case .drift:
                 await drift(in: tab, using: &generator)
+            case .consent:
+                if await pressConsent(in: tab, run: run) { update(visit, run: run) { $0.consentsAccepted += 1 } }
             }
         }
         return await wait(dwell - Date().timeIntervalSince(begun), run: run)
@@ -607,9 +610,16 @@ final class WarmUpRobot: ObservableObject {
     ]
 
     /// Presses a consent tool's "accept" once the banner is up (it often comes a moment after the
-    /// page); true when one was pressed.
+    /// page); true when one was pressed. For a page before anything else is done on it (the search
+    /// engine's own page, ahead of its box); while a page is read, the stay does it (`stay`).
     private func acceptConsent(in tab: BrowserTab, run: Int) async -> Bool {
         guard await wait(Double.random(in: 1.2...2.2), run: run), liveTab(run) != nil else { return false }
+        return await pressConsent(in: tab, run: run)
+    }
+
+    /// Presses a consent tool's "accept" if its banner is up now; true when one was pressed (and
+    /// the moment it takes to go has passed).
+    private func pressConsent(in tab: BrowserTab, run: Int) async -> Bool {
         let pressed = await script("""
             const roots = [document];
             const uc = document.querySelector('#usercentrics-root');

@@ -1475,8 +1475,8 @@ keyboard gives (docs/PAGE_INPUT.md).
 
 **Cookie banners.** A page's cookie banner is accepted when it is one of the well-known consent
 tools — OneTrust, Didomi, Quantcast, Cookiebot, Usercentrics, TrustArc, Google's Funding Choices
-and Google's own consent page — by that tool's own "accept" button, one to two seconds after the
-page loads, as most people answer it. Nothing else on a page is pressed. The press is the
+and Google's own consent page — by that tool's own "accept" button, one to two seconds into the
+stay on the page (part of the plan's time on it, not added to it), as most people answer it. Nothing else on a page is pressed. The press is the
 button's `click()` from the robot's world (untrusted); the consent it records is the same.
 
 **Sparing a proxy's traffic.** **Proxy traffic** on the warm-up screen — load everything (the
