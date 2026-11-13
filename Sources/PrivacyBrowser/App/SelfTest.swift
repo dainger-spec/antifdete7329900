@@ -7858,6 +7858,11 @@ final class SelfTest {
             return manager.startWarmUp(id, plan: plan)
         }
         defer { coordinator.shutDown() }
+        // One at a time (the person's setting, 2 by default): the check is that the next waits for
+        // the one before to be stopped and sealed.
+        let concurrency = WarmUpCoordinator.concurrency
+        WarmUpCoordinator.concurrency = 1
+        defer { WarmUpCoordinator.concurrency = concurrency }
         let policy = NSApp.activationPolicy()
         NSApp.setActivationPolicy(.accessory)
         defer { NSApp.setActivationPolicy(policy) }
@@ -7906,6 +7911,12 @@ final class SelfTest {
         check("warm-up schedule: a run from the queue counts as the profile's last run, stored with its schedule",
               (stored?.lastRunAt ?? .distantPast) >= queued && (coordinator.nextRun(of: first.id) ?? .distantPast) > Date().addingTimeInterval(23 * 3600),
               "lastRunAt=\(String(describing: stored?.lastRunAt)) next=\(String(describing: coordinator.nextRun(of: first.id)))")
+        let record = try repository.warmUpRecord(for: first.id)
+        check("warm-up record: how the run went is kept for the inspector — when, pages loaded, cookies gained",
+              record?.finished == true && record?.pages == 2 && record?.total == 2 && record?.cookies == 2
+                  && (record?.endedAt ?? .distantPast) >= queued
+                  && repository.counts(for: second.id, cookies: false).lastWarmUp?.pages == 1,
+              "first=\(String(describing: record)) second=\(String(describing: try? repository.warmUpRecord(for: second.id)))")
         try await manager.deleteBecauseThePersonAsked(first.id)
         try await manager.deleteBecauseThePersonAsked(second.id)
     }

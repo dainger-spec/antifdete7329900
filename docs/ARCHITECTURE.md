@@ -102,6 +102,7 @@ profile key (random 256-bit per profile, stored only wrapped)
    ├─ HKDF "cookie-baseline"   → cookies-baseline.bin          (AAD "cookie-baseline:v1:<uuid>")
    ├─ HKDF "warm-up"           → warmup.bin                    (AAD "warm-up:v1:<uuid>")
    ├─ HKDF "warm-up-schedule"  → warmup-schedule.bin           (AAD "warm-up-schedule:v1:<uuid>")
+   ├─ HKDF "warm-up-last"      → warmup-last.bin               (AAD "warm-up-last:v1:<uuid>")
    └─ HKDF "webdata-archive", salt = random per archive → webdata.pbsa chunk key
 ```
 
@@ -173,6 +174,7 @@ Application Support/PrivacyBrowser/      (0700)
     cookies-baseline.bin          AES-GCM(cookie-baseline key, CookieBaseline JSON)   [this Mac only: the store at the last record or apply]
     warmup.bin                    AES-GCM(warm-up key, WarmUpPlan JSON)               [this Mac only: the last warm-up plan]
     warmup-schedule.bin           AES-GCM(warm-up-schedule key, WarmUpSchedule JSON)  [this Mac only, not exported: every N hours, last run]
+    warmup-last.bin               AES-GCM(warm-up-last key, WarmUpRecord JSON)        [this Mac only, not exported: how the last run went]
     tabs.bin                      AES-GCM(open-tabs key, OpenTabs JSON)               [this Mac only, not synced or exported: http(s) tabs
                                                                                        left open, with Settings → Startup → restore tabs]
     <file>.unreadable             a file that could not be read (damaged, cut short, another key's), moved aside instead of being

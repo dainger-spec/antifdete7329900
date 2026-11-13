@@ -200,6 +200,35 @@ public struct WarmUpTiming: Sendable {
         Double.random(in: 1...3, using: &generator)
     }
 
+    /// How often a search is typed on the engine's own page rather than opened by its results'
+    /// address (what Safari's address bar does with words typed into it): people do both.
+    public static let typedSearchShare = 0.7
+
+    /// The pause before each character of `text` is typed, as a person types: 80–240 ms between
+    /// letters, longer after a space (the next word is thought of), and now and then a hesitation
+    /// of half a second to a second. The first is the moment between the click in the box and the
+    /// first key.
+    public static func keyGaps(for text: String, using generator: inout some RandomNumberGenerator) -> [TimeInterval] {
+        var gaps: [TimeInterval] = []
+        var previous: Character?
+        for character in text {
+            var gap: TimeInterval
+            if previous == nil {
+                gap = Double.random(in: 0.35...0.9, using: &generator)
+            } else if previous == " " {
+                gap = Double.random(in: 0.15...0.45, using: &generator)
+            } else {
+                gap = Double.random(in: 0.08...0.24, using: &generator)
+            }
+            if previous != nil, Double.random(in: 0..<1, using: &generator) < 0.06 {
+                gap += Double.random(in: 0.5...1.0, using: &generator)
+            }
+            gaps.append(gap)
+            previous = character
+        }
+        return gaps
+    }
+
     /// Scroll gestures spread over `dwell` (none in the last second): about one every four
     /// seconds, at most six; mostly down, now and then a little back up. Each gesture is a
     /// trackpad-like flick: larger steps first, then slowing.

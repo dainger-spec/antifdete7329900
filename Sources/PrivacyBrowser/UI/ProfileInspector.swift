@@ -325,6 +325,14 @@ struct ProfileInspectorView: View {
         }
     }
 
+    /// "2 days ago, pages: 14"; "not yet" when it was never warmed here; nothing before the counts
+    /// are read.
+    private func lastWarmUpNote(_ counts: ProfileCounts?) -> String? {
+        guard let counts else { return nil }
+        guard let record = counts.lastWarmUp else { return L("inspector.warmUp.never") }
+        return String(format: L("inspector.warmUp.last"), record.endedAt.shownRelative, record.pages)
+    }
+
     // MARK: What it keeps
 
     private var links: some View {
@@ -345,7 +353,9 @@ struct ProfileInspectorView: View {
                 Button(L("profiles.row.importCookies")) { actions.importCookies(row.id) }
                 Button(L("profiles.row.exportCookies")) { actions.exportCookies(row.id) }
             }
-            InspectorLink(title: L("profiles.row.warmUp"), count: nil) { actions.warmUp(row.id) }
+            // When it was last warmed, and how much: a profile never warmed, or not for a month, is
+            // told from one warmed this morning without opening its warm-up.
+            InspectorLink(title: L("profiles.row.warmUp"), count: nil, note: lastWarmUpNote(counts)) { actions.warmUp(row.id) }
             // No WebDriver address to show: one quiet row that says why and leads to where that is
             // settled. R1: a profile that does not start is not driven either.
             if row.exit != .unreadable, let state = webDriverState {

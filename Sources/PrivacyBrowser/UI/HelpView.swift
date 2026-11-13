@@ -7,7 +7,7 @@ import SwiftUI
 /// menu item, and what a scenario may say was written in the repository's docs only.
 enum HelpTopic: String, CaseIterable, Identifiable {
     // The order of the topic list and of the Help menu: the app, what a profile has, automation, the keys.
-    case start, palette, check, codes, camera, scenarios, commands, api, webdriver, keys
+    case start, palette, check, codes, camera, warmUp, scenarios, commands, api, webdriver, keys
 
     var id: String { rawValue }
     var title: String { L("help.topic.\(rawValue)") }
@@ -21,6 +21,7 @@ enum HelpTopic: String, CaseIterable, Identifiable {
         case .api: return "terminal"
         case .webdriver: return "link"
         case .camera: return "camera"
+        case .warmUp: return "flame"
         case .codes: return "lock.rotation"
         case .check: return "checkmark.shield"
         case .keys: return "keyboard"
@@ -177,6 +178,18 @@ enum HelpContent {
                 .note("camera.secure"),
                 .points(["camera.know.system", "camera.know.systemInstall", "camera.know.safari", "camera.know.detect",
                          "camera.know.permission", "camera.know.size"]),
+            ]
+        case .warmUp:
+            return [
+                .paragraph("warmUp.intro"),
+                .heading("warmUp.start"),
+                .steps(["warmUp.step.open", "warmUp.step.choose", "warmUp.step.depth", "warmUp.step.start"]),
+                .heading("warmUp.how"),
+                .points(["warmUp.how.pages", "warmUp.how.search", "warmUp.how.links", "warmUp.how.consent"]),
+                .heading("warmUp.several"),
+                .points(["warmUp.several.queue", "warmUp.several.schedule", "warmUp.several.last"]),
+                .heading("warmUp.know"),
+                .points(["warmUp.know.stop", "warmUp.know.limits", "warmUp.know.local"]),
             ]
         case .check:
             return [

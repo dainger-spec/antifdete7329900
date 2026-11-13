@@ -16,12 +16,17 @@ public struct ProfileCounts: Equatable, Sendable {
     public var historyEntries: Int?
     /// The cookies sync keeps of the profile (`cookies.bin`).
     public var syncedCookies: Int?
+    /// How the profile's last warm-up went; nil when it was never warmed on this Mac, or its
+    /// record does not open.
+    public var lastWarmUp: WarmUpRecord?
 
-    public init(logins: Int? = nil, bookmarks: Int? = nil, historyEntries: Int? = nil, syncedCookies: Int? = nil) {
+    public init(logins: Int? = nil, bookmarks: Int? = nil, historyEntries: Int? = nil, syncedCookies: Int? = nil,
+                lastWarmUp: WarmUpRecord? = nil) {
         self.logins = logins
         self.bookmarks = bookmarks
         self.historyEntries = historyEntries
         self.syncedCookies = syncedCookies
+        self.lastWarmUp = lastWarmUp
     }
 }
 
@@ -57,6 +62,7 @@ extension ProfileRepository {
                 try Self.cookieJarFile(url: url, profileID: id, profileKey: key).load()?.cookies.count ?? 0
             }
         }
+        counts.lastWarmUp = try? warmUpRecord(for: id)
         return counts
     }
 

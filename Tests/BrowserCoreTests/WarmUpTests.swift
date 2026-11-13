@@ -124,9 +124,41 @@ final class WebAddressTests: XCTestCase {
         XCTAssertFalse(same("about:blank", "https://example.com/"))
         XCTAssertFalse(same("about:blank", "https://example.com/#x"))
     }
+
+    /// The robot types a search on the engine's own page: each engine's results are told by their
+    /// address, and its own page is on the same site.
+    func testEachEnginesResultsAreToldAndItsOwnPageIsOnItsSite() throws {
+        for engine in SearchEngine.allCases {
+            let results = try XCTUnwrap(WebAddress.searchURL(for: "weather tomorrow", engine: engine))
+            XCTAssertEqual(SearchEngine(resultsURL: results), engine)
+            XCTAssertEqual(engine.homeURL.scheme, "https")
+            XCTAssertEqual(engine.homeURL.path, "/")
+            let site = { (url: URL) in url.host!.split(separator: ".").suffix(2).dropLast().joined() }
+            XCTAssertEqual(site(engine.homeURL), engine == .yandex ? "ya" : site(results), "\(engine)")
+        }
+        XCTAssertNil(SearchEngine(resultsURL: URL(string: "https://example.com/?q=weather")!))
+        XCTAssertNil(SearchEngine(resultsURL: URL(string: "https://www.google.com/maps")!))
+    }
 }
 
 final class WarmUpTimingTests: XCTestCase {
+    /// A pause before every key: none instant, the first the longest kind (from the click to the
+    /// first key), a new word slower than a letter within one, never the same rhythm twice.
+    func testKeysAreTypedWithAPersonsPauses() {
+        var generator = SeededGenerator(state: 7)
+        let text = "weather in berlin tomorrow"
+        let gaps = WarmUpTiming.keyGaps(for: text, using: &generator)
+        XCTAssertEqual(gaps.count, text.count)
+        XCTAssertTrue(gaps.allSatisfy { (0.08...2.0).contains($0) }, "\(gaps)")
+        XCTAssertGreaterThanOrEqual(gaps[0], 0.35)
+        let characters = Array(text)
+        let afterSpace = gaps.indices.filter { $0 > 0 && characters[$0 - 1] == " " }.map { gaps[$0] }
+        XCTAssertTrue(afterSpace.allSatisfy { $0 >= 0.15 })
+        XCTAssertNotEqual(gaps, WarmUpTiming.keyGaps(for: text, using: &generator))
+        XCTAssertGreaterThan(Set(gaps.map { Int($0 * 100) }).count, 10, "not one fixed rhythm")
+        XCTAssertEqual(WarmUpTiming.keyGaps(for: "", using: &generator), [])
+    }
+
     func testDwellStaysBetweenThePlansTimes() {
         var generator = SeededGenerator(state: 1)
         let plan = WarmUpPlan(minimumDwell: 4, maximumDwell: 9)
@@ -763,6 +795,46 @@ final class WarmUpScheduleTests: XCTestCase {
         XCTAssertNil(scheduler.nextCheck(now: start))
     }
 
+    /// How the last run went, from its last status: only a run that is over and visited a page.
+    func testTheLastRunIsRecordedFromItsLastStatus() throws {
+        let record = try XCTUnwrap(WarmUpRecord(WarmUpStatus(phase: .stopped, visited: 9, total: 14, failed: 2, cookies: 31), at: start))
+        XCTAssertEqual(record, WarmUpRecord(endedAt: start, pages: 7, total: 14, cookies: 31, finished: false))
+        XCTAssertEqual(WarmUpRecord(WarmUpStatus(phase: .finished, visited: 14, total: 14), at: start)?.finished, true)
+        XCTAssertNil(WarmUpRecord(WarmUpStatus(phase: .running, visited: 3, total: 14), at: start), "it is not over")
+        XCTAssertNil(WarmUpRecord(WarmUpStatus(phase: .stopped, visited: 0, total: 14), at: start), "it visited nothing")
+    }
+
+    func testTheLastRunIsStoredEncryptedPerProfileCountedForTheInspectorAndNeitherSyncedNorExported() async throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("pb-warmup-last-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let repository = try ProfileRepository(vault: MasterVault.create(in: base.appendingPathComponent("A"), password: "pw", iterations: 1_000))
+        let id = try repository.create(name: "P", configuration: ProfileConfiguration()).id
+        XCTAssertNil(try repository.warmUpRecord(for: id))
+        XCTAssertNil(repository.counts(for: id, cookies: false).lastWarmUp, "never warmed")
+        let record = WarmUpRecord(endedAt: start, pages: 12, total: 14, cookies: 40, finished: true)
+        try repository.saveWarmUpRecord(record, for: id)
+        XCTAssertEqual(try repository.warmUpRecord(for: id), record)
+        XCTAssertEqual(repository.counts(for: id, cookies: false).lastWarmUp, record)
+        let onDisk = try Data(contentsOf: repository.warmUpRecordURL(for: id))
+        XCTAssertNil(onDisk.range(of: Data("cookies".utf8)))
+
+        // One that does not open is not shown, and is set aside rather than written over.
+        try Data("damaged".utf8).write(to: repository.warmUpRecordURL(for: id))
+        XCTAssertNil(repository.counts(for: id, cookies: false).lastWarmUp)
+        try repository.saveWarmUpRecord(record, for: id)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: repository.warmUpRecordURL(for: id).path + ".unreadable"))
+        XCTAssertEqual(try repository.warmUpRecord(for: id), record)
+
+        let transport = LocalDirectorySyncTransport(directory: base.appendingPathComponent("server"))
+        let report = try await SyncEngine(repository: repository, transport: transport).sync()
+        XCTAssertFalse(report.pushed.contains { $0.contains("warmup") }, "the record stays on this Mac")
+        let file = base.appendingPathComponent("P.pbprofile")
+        try ProfileTransfer.export(id, from: repository, to: file, password: "transfer",
+                                   kdf: KDFParameters.generate(iterations: 1_000))
+        let imported = try ProfileTransfer.importProfile(from: file, password: "transfer", into: repository, name: "Copy")
+        XCTAssertNil(try repository.warmUpRecord(for: imported.id), "the copy was not warmed on this Mac")
+    }
+
     func testTheScheduleIsStoredEncryptedPerProfileAndNeitherSyncedNorExported() async throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("pb-warmup-schedule-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: base) }
@@ -790,6 +862,22 @@ final class WarmUpScheduleTests: XCTestCase {
 
 /// Warm-ups taking turns: who is next, and "profile n of N".
 final class WarmUpQueueTests: XCTestCase {
+    func testSeveralRunAtOnceUpToTheLimitAndTheNextWaitsForOneToEnd() throws {
+        var queue = WarmUpQueue()
+        let ids = (0..<4).map { _ in UUID() }
+        for id in ids { XCTAssertTrue(queue.add(id, plan: WarmUpPlan(addresses: "example.com"), source: .user)) }
+        let first = try XCTUnwrap(queue.startNext(limit: 2))
+        let second = try XCTUnwrap(queue.startNext(limit: 2))
+        XCTAssertEqual([first.profileID, second.profileID], [ids[0], ids[1]], "in the queue's order")
+        XCTAssertNil(queue.startNext(limit: 2), "two at once, no more")
+        XCTAssertEqual(queue.running.map(\.profileID), [ids[0], ids[1]])
+        queue.finish(second.id, as: .done(nil))
+        let third = try XCTUnwrap(queue.startNext(limit: 2))
+        XCTAssertEqual(third.profileID, ids[2])
+        XCTAssertNil(queue.startNext(limit: 2))
+        XCTAssertNotNil(queue.startNext(limit: 3), "a higher limit lets the next one in")
+    }
+
     func testProfilesRunOneAfterTheOtherInTheOrderTheyWereAdded() throws {
         var queue = WarmUpQueue()
         let a = UUID(), b = UUID(), c = UUID()

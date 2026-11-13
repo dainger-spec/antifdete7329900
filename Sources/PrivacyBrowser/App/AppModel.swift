@@ -460,6 +460,11 @@ final class AppModel: ObservableObject {
             await self?.startWarmUp(plan, for: id) ?? false
         }
         warmUps.forwardChanges(to: self)
+        // The inspector of a profile it has shown tells its last warm-up: read again once one ends.
+        warmUps.onRecorded = { [weak self] id in
+            guard let self, self.inspectorCounts[id] != nil else { return }
+            self.loadInspectorCounts(for: id)
+        }
         self.warmUps = warmUps
         warmUps.begin()
         // Scenarios and warm-ups by the clock, while the vault is open.

@@ -160,6 +160,7 @@ final class FormatPolicyTests: XCTestCase {
         try repository.passwordVault(for: id).upsert(PasswordEntry(origin: "https://a.example", username: "u", password: "p"))
         try repository.saveWarmUpPlan(WarmUpPlan(addresses: "https://a.example/"), for: id)
         try repository.saveWarmUpSchedule(WarmUpSchedule(everyHours: 6), for: id)
+        try repository.saveWarmUpRecord(WarmUpRecord(endedAt: Date(), pages: 3, total: 4, cookies: 5, finished: false), for: id)
         try repository.saveCookieBaseline(CookieBaseline(cookies: [cookie]), for: id)
         try repository.queueImportedCookies([cookie], for: id)
         try DeviceSettings().save(to: vault)
@@ -170,6 +171,7 @@ final class FormatPolicyTests: XCTestCase {
             ("config.bin", try json(at: repository.configURL(for: id)) { try AEAD.open($0, key: key, aad: ProfileRepository.configAAD(id)) }),
             ("warmup.bin", try json(at: repository.warmUpPlanURL(for: id)) { try repository.warmUpPlanFile(for: id).open($0) }),
             ("warmup-schedule.bin", try json(at: repository.warmUpScheduleURL(for: id)) { try repository.warmUpScheduleFile(for: id).open($0) }),
+            ("warmup-last.bin", try json(at: repository.warmUpRecordURL(for: id)) { try repository.warmUpRecordFile(for: id).open($0) }),
             ("cookies-baseline.bin", try json(at: repository.cookieBaselineURL(for: id)) { try repository.cookieBaselineFile(for: id).open($0) }),
             ("cookies-import.bin", try json(at: repository.importedCookiesURL(for: id)) { try repository.importedCookiesFile(for: id).open($0) }),
             ("settings.bin", try json(at: vault.root.appendingPathComponent("settings.bin")) { try DeviceSettings.file(for: vault).open($0) }),

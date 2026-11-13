@@ -272,16 +272,19 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    what can be imported and why the rest cannot (with line numbers), then imports into that
    profile: at once when it runs, otherwise when it next starts.
 8. **Warm-up:** **⋯ → Warm Up…** takes a ready-made list (general, by interest, or by
-   country: 26 countries), one put together for the proxy's country, or web addresses of your
+   country: 43 countries), one put together for the proxy's country, or web addresses of your
    own; starts the profile without a window if it is stopped, and visits the pages one after
-   the other in a hidden window of it: a random time on each page, scrolling, and if asked one
-   plain link followed. **Stop** in the sheet, closing the robot's tab or stopping the profile
-   ends it. When the run is over the sheet lists the profile's cookies per site and how many
-   the run added. **Repeat on a schedule** runs the same plan every N hours while the app is
+   the other in a hidden window of it: a random time on each page, scrolling, and if asked
+   plain links followed. Most searches are typed on the engine's own page, key by key, as a
+   person types; a well-known consent tool's cookie banner is accepted. **Stop** in the sheet,
+   closing the robot's tab or stopping the profile ends it, and the sheet says why a run
+   stopped. When the run is over the sheet lists the profile's cookies per site and how many
+   the run added; the inspector then says when the profile was last warmed and how many pages
+   loaded. **Repeat on a schedule** runs the same plan every N hours while the app is
    unlocked (never in a profile that is open; it is tried again 10 minutes later).
-   **More → Warm Up Several Profiles…** warms the ticked profiles one after the other with one
-   plan, each stopped and encrypted again before the next starts; the rest of the queue can be
-   cancelled.
+   **More → Warm Up Several Profiles…** warms the ticked profiles with one plan, up to three at
+   once (**Profiles at once**, 2 by default), each stopped and encrypted again before the next
+   waiting one starts; the rest of the queue can be cancelled.
 9. **Stop**, or closing the last window, saves history and encrypts the profile's website
    data. **Lock** stops every profile and forgets the keys. Quitting (⌘Q) does the same,
    and waits until every profile is sealed.

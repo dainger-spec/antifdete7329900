@@ -36,9 +36,14 @@ public struct WarmUpStatus: Codable, Equatable, Sendable {
     /// Nil while it runs — the list would cross the channel with every page for nothing — and
     /// until the last count has come back (a run stopped mid-page gets it a moment later).
     public var sites: [WarmUpCookieSite]?
+    /// Why a run that did not finish stopped, or why a running one waits: "byUser",
+    /// "profileStopped", "tabClosed", "pageNeedsAttention", "waitingForTab". Nil otherwise (and from
+    /// a profile process of an older build).
+    public var stopReason: String?
 
     public init(phase: Phase, visited: Int, total: Int, failed: Int = 0, cookies: Int = 0,
-                secondsRemaining: TimeInterval? = nil, currentHost: String? = nil, sites: [WarmUpCookieSite]? = nil) {
+                secondsRemaining: TimeInterval? = nil, currentHost: String? = nil, sites: [WarmUpCookieSite]? = nil,
+                stopReason: String? = nil) {
         self.phase = phase
         self.visited = visited
         self.total = total
@@ -47,6 +52,7 @@ public struct WarmUpStatus: Codable, Equatable, Sendable {
         self.secondsRemaining = secondsRemaining
         self.currentHost = currentHost
         self.sites = sites
+        self.stopReason = stopReason
     }
 
     public var isRunning: Bool { phase == .running }

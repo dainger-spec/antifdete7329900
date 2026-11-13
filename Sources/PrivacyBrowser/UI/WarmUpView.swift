@@ -350,6 +350,8 @@ private struct WarmUpPanel: View {
         case .timedOut?: parts.append(L("warmup.visit.timedOut"))
         default: break
         }
+        if visit.typedSearch { parts.append(L("warmup.visit.typed")) }
+        if visit.consentsAccepted > 0 { parts.append(L("warmup.visit.consent")) }
         if visit.dwell > 0 { parts.append(String(format: L("warmup.visit.stayed"), Int(visit.dwell.rounded()), visit.scrolls)) }
         if let followed = visit.followed {
             let outcome: String
@@ -366,6 +368,9 @@ private struct WarmUpPanel: View {
     @ViewBuilder private var footerStatus: some View {
         if starting {
             Text(L("warmup.status.starting")).font(.lumenSecondary)
+        } else if let status, status.isRunning, status.stopReason == "waitingForTab" {
+            Label(L("warmup.status.waitingForTab"), systemImage: "pause.circle")
+                .font(.lumenSecondary).foregroundStyle(Theme.warning)
         } else if let status, status.isRunning {
             Text(String(format: L("warmup.status.running"), status.currentPage, status.total))
                 .font(.lumenSecondary).monospacedDigit()
@@ -375,6 +380,11 @@ private struct WarmUpPanel: View {
         } else if let status, status.phase == .finished {
             Label(String(format: L("warmup.status.finished"), status.visited, status.failed), systemImage: "checkmark.circle")
                 .font(.lumenSecondary).foregroundStyle(Theme.running)
+        } else if let status, status.phase == .stopped, let reason = status.stopReason, reason != "byUser" {
+            // Why it stopped, in words: the tab closed, the profile stopped, a page waits for an answer.
+            Label(L("warmup.status." + reason), systemImage: "exclamationmark.circle")
+                .font(.lumenSecondary).foregroundStyle(Theme.warning)
+                .lineLimit(2)
         } else if let status, status.phase == .stopped, status.visited > 0 {
             Label(L("warmup.status.stopped"), systemImage: "stop.circle")
                 .font(.lumenSecondary).foregroundStyle(Theme.textSecondary)
