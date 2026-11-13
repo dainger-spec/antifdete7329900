@@ -489,6 +489,27 @@ ProfilesScreen ── ProfileSelection (click / ⌘-click / ⇧-click) ── Pr
   acted on. Warm-up of several profiles goes through `ProfileActions.warmUpSeveral`, which today
   opens the warm-up of the first: the hook a warm-up queue takes.
 
+## Virtual machines
+
+A build made with `VM=1` has profiles that are whole Macs (docs/VM.md). They are a separate kind of
+profile, beside the ordinary ones, with their own list (`vms.bin`, encrypted in the vault, like the
+proxy list) and their own section of the Profiles window:
+
+- `BrowserCore/VirtualMachines` — the model: `VMProfile`/`VMProfiles`, the library on disk
+  (`VMLibrary`), the setup's state, the resumable download's decisions (`VMDownload`), what the
+  guest is told (`VMGuestSettings`), and the helper's protocol (`VMHelperRequest`, `VMHelperEvent`).
+  Platform-independent, tested on Linux.
+- `VMNetCore` — the network of a machine with a proxy: a userspace stack at the other end of the
+  machine's network card that carries every connection through the proxy (docs/VM_NETWORK.md).
+- `LumenVM` — the helper executable, the only code that loads Virtualization.framework and holds
+  `com.apple.security.virtualization`. One process per machine; a request on stdin, events on stdout.
+- `VMCenter` (the app) — made at unlock, dropped at lock: the one-time setup (ask Apple, fetch,
+  install, first-run setup in the base), the profiles, the machines running now, their shutdown
+  before Lock and Quit.
+
+The machines' disks are in `<vault folder>/VirtualMachines`, not sealed by the vault (docs/VM.md
+says why, and what protects them).
+
 ## Tabs
 
 `BrowserWindowController` owns the tab model (`[BrowserTab]`, selected index, recently closed

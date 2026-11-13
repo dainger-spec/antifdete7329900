@@ -1594,6 +1594,26 @@ for one profile), then those that answered at their last check, of one country w
 profile whose time zone and language are set by hand keeps them in its copies, whatever country
 their proxies are in; the sheet says so.
 
+## 8c″. Virtual machines
+
+A build with `VM=1` has a second kind of profile: a whole Mac in a virtual machine (docs/VM.md).
+What that changes for isolation, and what it does not:
+
+- **Between a machine and every other profile**: nothing of the operating system is shared — its
+  own disk, keychain, caches, DNS cache, serial number and network card. This is isolation by
+  construction, not by a rule the app keeps.
+- **The network**: a machine with a proxy has no network card on this Mac's network at all. Its
+  card is a socket to `VMNetCore`, which reaches the outside only through the proxy; with the proxy
+  down the machine reaches nothing. UDP does not leave it. Names are resolved by the proxy.
+- **At rest**: a machine's disk is **not** encrypted by the vault — FileVault on this Mac is what
+  encrypts it. The profile's settings (name, proxy and its password) are in the vault.
+- **What sites see**: a real Safari on a real macOS, with nothing injected; the system's time zone
+  and language are the profile's. The guest's graphics are Apple's paravirtual GPU: what a site that
+  studies the device can tell from that is **not measured** yet. A guest has no camera.
+- **Not covered by this document's automatic checks**: no test runs a machine (CI's Macs are
+  virtual machines themselves). The model and the network are unit-tested; the rest is first run on
+  a person's Mac (docs/VM.md, "First run on a Mac").
+
 ## 8d. Paste as Typed
 
 ⌃⌘V types the clipboard's text into the page's focused field instead of pasting it, for a field

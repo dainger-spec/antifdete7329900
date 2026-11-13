@@ -7,9 +7,16 @@ import SwiftUI
 /// menu item, and what a scenario may say was written in the repository's docs only.
 enum HelpTopic: String, CaseIterable, Identifiable {
     // The order of the topic list and of the Help menu: the app, what a profile has, automation, the keys.
-    case start, palette, check, codes, camera, warmUp, scenarios, commands, api, webdriver, keys
+    case start, palette, check, codes, camera, warmUp, virtualMachines, scenarios, commands, api, webdriver, keys
 
     var id: String { rawValue }
+
+    /// The topics this build has something for: the virtual machines' only where the build carries
+    /// them (`VMCenter.isOffered`).
+    @MainActor static var shown: [HelpTopic] {
+        allCases.filter { $0 != .virtualMachines || VMCenter.isOffered }
+    }
+
     var title: String { L("help.topic.\(rawValue)") }
 
     var symbol: String {
@@ -22,6 +29,7 @@ enum HelpTopic: String, CaseIterable, Identifiable {
         case .webdriver: return "link"
         case .camera: return "camera"
         case .warmUp: return "flame"
+        case .virtualMachines: return "macwindow.on.rectangle"
         case .codes: return "lock.rotation"
         case .check: return "checkmark.shield"
         case .keys: return "keyboard"
@@ -191,6 +199,19 @@ enum HelpContent {
                 .heading("warmUp.know"),
                 .points(["warmUp.know.stop", "warmUp.know.limits", "warmUp.know.local"]),
             ]
+        case .virtualMachines:
+            return [
+                .paragraph("vm.intro"),
+                .heading("vm.add"),
+                .steps(["vm.step.open", "vm.step.download", "vm.step.setup", "vm.step.tools", "vm.step.create"]),
+                .heading("vm.what"),
+                .points(["vm.what.system", "vm.what.proxy", "vm.what.locale", "vm.what.screen"]),
+                .heading("vm.costs"),
+                .points(["vm.costs.disk", "vm.costs.memory", "vm.costs.limit", "vm.costs.start"]),
+                .heading("vm.know"),
+                .note("vm.know.disks"),
+                .points(["vm.know.udp", "vm.know.updates", "vm.know.base", "vm.know.license", "vm.know.local"]),
+            ]
         case .check:
             return [
                 .paragraph("check.intro"),
@@ -262,7 +283,7 @@ struct HelpView: View {
                 // Below the title bar's band, where the window's traffic lights are.
                 .padding(.top, 38)
                 .padding(.bottom, 10)
-            ForEach(HelpTopic.allCases) { item in
+            ForEach(HelpTopic.shown) { item in
                 Button { topic = item } label: {
                     HStack(spacing: 10) {
                         Image(systemName: item.symbol)
