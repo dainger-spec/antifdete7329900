@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'push' }}
 on:
   push:
-    branches: [claude/ios-app]
+    branches: [claude/ios-app, claude/ios-design-dashboard]
     paths:
       - "ios/**"
       - "!ios/scripts/install-floor.sh"
