@@ -1309,7 +1309,9 @@ struct ProfilesScreen: View {
     private func listItems(_ columns: ProfileColumns) -> some View {
         columnHeader(columns)
         ForEach(groups) { group in
-            groupView(group.kind, group.rows, columns)
+            // One group alone has no caption: "Ready to launch 50" under the column titles read as
+            // a second header, and the count is the header's own ("Profiles: 50").
+            groupView(group.kind, group.rows, columns, showsCaption: groups.count > 1)
         }
         footnote
     }
@@ -1331,18 +1333,23 @@ struct ProfilesScreen: View {
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.divider).frame(height: 1) }
     }
 
-    private func groupView(_ kind: GroupKind, _ rows: [ProfileRowItem], _ columns: ProfileColumns) -> some View {
+    private func groupView(_ kind: GroupKind, _ rows: [ProfileRowItem], _ columns: ProfileColumns,
+                           showsCaption: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Text(groupTitle(kind)).lumenCaps(kind == .attention ? Theme.danger : Theme.textTertiary)
-                Text(verbatim: "\(rows.count)").lumenCaps(kind == .attention ? Theme.danger : Theme.textTertiary)
-                    .monospacedDigit()
+            if showsCaption {
+                HStack(spacing: 8) {
+                    Text(groupTitle(kind)).lumenCaps(kind == .attention ? Theme.danger : Theme.textTertiary)
+                    Text(verbatim: "\(rows.count)").lumenCaps(kind == .attention ? Theme.danger : Theme.textTertiary)
+                        .monospacedDigit()
+                }
+                .padding(.leading, ProfileColumns.rowPadding + ProfileColumns.nameInset)
+                .frame(height: 42, alignment: .bottomLeading)
+                .padding(.bottom, 6)
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isHeader)
+            } else {
+                Color.clear.frame(height: 6)
             }
-            .padding(.leading, ProfileColumns.rowPadding + ProfileColumns.nameInset)
-            .frame(height: 42, alignment: .bottomLeading)
-            .padding(.bottom, 6)
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.isHeader)
             ForEach(rows) { row in
                 ProfileRow(row: row, columns: columns, actions: actions, isSelected: selection.contains(row.id),
                            showsCheckbox: selectedRows.count >= 2, height: appearance.density.rowHeight,
