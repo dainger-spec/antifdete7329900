@@ -112,12 +112,24 @@ final class DesignShotTests: LumenUITestCase {
         }
         app.terminate()
 
-        // Diagnostic, not a mockup's state: the list with one of its parts left out (TitleProbe), to see
-        // which one collapses the large title.
+    }
+
+    /// Diagnostic, not a mockup's state: the list's large title with its search placed otherwise
+    /// (TitleProbe), alone in a short run (suite "DesignShotTests/testTitleProbe").
+    func testTitleProbe() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["LUMEN_SCREENS"] == "1", "taken by hand (suite DesignShotTests)")
+        continueAfterFailure = true
+        language = "ru"
         theme = "dark"
-        for part in ["nozoom", "nosearch", "noheader", "nomenu"] {
+        for part in ["always", "nosearch", "searchauto", "searchplain"] {
             start(env: ["LUMEN_DIAG_TITLE": part])
             snap("diag-title-\(part)")
+            app.swipeUp()
+            sleep(1)
+            snap("diag-title-\(part)-up")
+            app.swipeDown()
+            sleep(1)
+            snap("diag-title-\(part)-down")
             app.terminate()
         }
     }
