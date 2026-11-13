@@ -49,6 +49,11 @@ public struct VMLibrary: Equatable, Sendable {
     /// The files of a machine (the base's, or a profile's), by what they are.
     public struct MachineFiles: Equatable, Sendable {
         public let directory: URL
+
+        public init(directory: URL) {
+            self.directory = directory
+        }
+
         public var disk: URL { directory.appendingPathComponent("disk.img") }
         public var auxiliaryStorage: URL { directory.appendingPathComponent("aux.img") }
         public var hardwareModel: URL { directory.appendingPathComponent("hardware-model.bin") }

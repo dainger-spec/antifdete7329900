@@ -62,9 +62,6 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
     public var proxy: ProxySettings?
     /// Names the machine's network answers "no such name" for (`VMRequirements.blockedHosts`).
     public var blockedHosts: [String]
-    /// The share shows in the guest's Finder ("My Shared Files") — during the base's setup, where
-    /// the person opens the tools' installer from it. Otherwise only the guest's boot script mounts it.
-    public var shareInFinder: Bool
     /// The window's title, and its few words, in the person's language (the helper has no strings
     /// of its own): `stop`, `stopQuestion`, `stopDetail`, `stopNow`, `cancel`, `starting`.
     public var windowTitle: String
@@ -73,7 +70,7 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
     public init(mode: Mode, restoreImagePath: String? = nil, machineDirectory: String? = nil, baseDirectory: String? = nil,
                 cores: Int = 4, memoryBytes: Int64 = 4 << 30, diskBytes: Int64 = VMRequirements.diskImageBytes,
                 display: Display = Display(VMDisplay.standard), macAddress: String? = nil, network: Network = .closed,
-                proxy: ProxySettings? = nil, blockedHosts: [String] = [], shareInFinder: Bool = false,
+                proxy: ProxySettings? = nil, blockedHosts: [String] = [],
                 windowTitle: String = "", texts: [String: String] = [:]) {
         self.mode = mode
         self.restoreImagePath = restoreImagePath
@@ -87,7 +84,6 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
         self.network = network
         self.proxy = proxy
         self.blockedHosts = blockedHosts
-        self.shareInFinder = shareInFinder
         self.windowTitle = windowTitle
         self.texts = texts
     }
