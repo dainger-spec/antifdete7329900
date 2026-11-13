@@ -109,6 +109,9 @@ class Origin(http.server.BaseHTTPRequestHandler):
             body = b"hello from the origin\n"
             self.send_response(200)
             self.send_header("Content-Length", str(len(body)))
+            if self.headers.get("Connection", "").lower() == "close":
+                self.send_header("Connection", "close")
+                self.close_connection = True
             self.end_headers()
             self.wfile.write(body)
     def do_POST(self):
@@ -320,7 +323,23 @@ def connect(host, port):
     except OSError as error:
         print("failed after %.2f s: %s" % (time.time() - started, error))
 
+# Reads a page to the server's FIN and then keeps its own side open for a while, as a browser
+# keeps a connection it may use again.
+def stay(host, seconds):
+    s = socket.create_connection((host, 80), timeout=20)
+    s.sendall(("GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n" % host).encode())
+    data = b""
+    while True:
+        chunk = s.recv(65536)
+        if not chunk: break
+        data += chunk
+    print("got the page" if b"hello from the origin" in data else "no page")
+    sys.stdout.flush()
+    time.sleep(seconds)
+    s.close()
+
 if sys.argv[1] == "half": half_close(sys.argv[2], int(sys.argv[3]), sys.argv[4])
+elif sys.argv[1] == "stay": stay(sys.argv[2], float(sys.argv[3]))
 elif sys.argv[1] == "connect": connect(sys.argv[2], int(sys.argv[3]))
 elif sys.argv[1] == "slow": slow_reader(sys.argv[2], sys.argv[3])
 elif sys.argv[1] == "udp": udp(sys.argv[2], int(sys.argv[3]))
@@ -393,6 +412,17 @@ stop_stack() {
 counter() { echo "$COUNTERS" | tr ' ' '\n' | grep "^$1=" | cut -d= -f2; }
 
 sha_of() { sha256sum <"$1" | cut -d' ' -f1; }
+# The CPU time the stack has used so far, in clock ticks (user + system).
+stack_ticks() { awk '{ print $14 + $15 }' "/proc/$STACK_PID/stat"; }
+# quiet_for SECONDS: PASS when the stack used next to no CPU meanwhile (at most 3 ticks: 30 ms).
+quiet_for() {
+    local before after
+    before=$(stack_ticks)
+    sleep "$1"
+    after=$(stack_ticks)
+    echo "CPU ticks used in $1 s: $((after - before))"
+    [ $((after - before)) -le 3 ]
+}
 # refused_fast LIMIT HOST: a connection that must be refused, and fast. PASS when connect() fails
 # with ECONNREFUSED (the stack's reset) and curl gives up with "couldn't connect" (exit 7), each
 # within LIMIT seconds — a timeout, or any other failure, is a FAIL.
@@ -472,6 +502,40 @@ check "the refused addresses never reached the proxy" bash -c "! grep -qE '10\.1
 
 UDP="$($G python3 "$WORK/guest.py" udp 93.184.216.34 4433)"
 check "UDP to a public address: ICMP port unreachable ($UDP)" bash -c "echo '$UDP' | grep -q '^refused'"
+
+echo "== load =="
+seq 1000 | xargs -P 32 -I{} $G curl -sS --max-time 60 -o "$WORK/churn.{}" "http://churn{}.test/" 2>"$WORK/churn.err"
+CHURN_OK=$(cat "$WORK"/churn.* 2>/dev/null | grep -c 'hello from the origin')
+check "1000 short connections, 32 at a time: all answered ($CHURN_OK)" test "$CHURN_OK" = 1000
+rm -f "$WORK"/churn.*
+
+head -c $((4 * 1024 * 1024)) /dev/urandom >"$WORK/up4.bin"
+UP4_SHA=$(sha_of "$WORK/up4.bin")
+seq 64 | xargs -P 64 -I{} sh -c "$G curl -sS --max-time 300 -H 'Expect:' --data-binary @'$WORK/up4.bin' 'http://pup{}.test/upload' >'$WORK/pup.{}' 2>>'$WORK/pup.err'"
+PUP_OK=$(cat "$WORK"/pup.[0-9]* 2>/dev/null | grep -c "^$UP4_SHA\$")
+check "64 parallel uploads of 4 MB: all 64 match ($PUP_OK)" test "$PUP_OK" = 64
+rm -f "$WORK"/pup.*
+
+# Downloads and uploads at once, and transfers cut off by the guest in the middle of them.
+(seq 8 | xargs -P 8 -I{} $G curl -sS --max-time 300 -o "$WORK/mix.{}" "http://mix{}.test/mid" 2>>"$WORK/mix.err") &
+MIX_PID=$!
+for i in $(seq 20); do $G curl -sS --max-time 0.05 -o /dev/null "http://cut$i.test/big" 2>/dev/null; done
+MIXUP="$($G curl -sS --max-time 300 -H 'Expect:' --data-binary @"$WORK/up.bin" http://mixup.test/upload)"
+wait $MIX_PID
+MIX_OK=0
+for i in $(seq 8); do [ "$(sha_of "$WORK/mix.$i" 2>/dev/null)" = "$MID_SHA" ] && MIX_OK=$((MIX_OK + 1)); done
+check "8 downloads and a 32 MB upload at once, among 20 transfers the guest cut off: all match ($MIX_OK)" \
+    bash -c "[ '$MIX_OK' = 8 ] && [ '$MIXUP' = '$UP_SHA' ]"
+rm -f "$WORK"/mix.*
+
+# A client that keeps its side open after the server closed: the stack waits without spinning.
+$G python3 "$WORK/guest.py" stay stay.test 3 >"$WORK/stay.out" 2>&1 &
+STAY_PID=$!
+sleep 0.5
+check "a connection the server closed and the guest keeps: the stack sleeps" quiet_for 2
+wait $STAY_PID
+check "…and the guest had its page" grep -qx "got the page" "$WORK/stay.out"
+check "an idle stack uses no CPU" quiet_for 2
 
 check "the stack is still running" kill -0 "$STACK_PID"
 stop_stack

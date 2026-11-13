@@ -363,7 +363,7 @@ final class WireTests: XCTestCase {
             XCTAssertEqual(queue.count, expected.count)
         }
         queue.withBytes { taken += Array($0) }
-        XCTAssertEqual(taken, all)
+        XCTAssertTrue(taken == all, "the bytes differ")
         // A piece from the middle, and one that asks for more than there is.
         var other = ByteQueue()
         other.append([1, 2, 3, 4, 5])

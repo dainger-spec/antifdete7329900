@@ -28,8 +28,14 @@ public final class VMNetwork: @unchecked Sendable {
     /// one Ethernet frame per read and per write. The caller owns it and closes it after `stop()`.
     ///
     /// The descriptor is used without waiting. On a socket nothing of its mode is changed for
-    /// that; its buffers are made larger when they are small, and on macOS it is set not to raise
-    /// SIGPIPE. A descriptor that is not a socket is set non-blocking.
+    /// that; its buffers are made larger when they are small (SO_RCVBUF to 4 MiB, SO_SNDBUF to
+    /// 1 MiB), and on macOS it is set not to raise SIGPIPE. A descriptor that is not a socket is
+    /// set non-blocking.
+    ///
+    /// The other end of the pair — the one the virtual machine gets — is the caller's to prepare:
+    /// what the stack sends waits in THAT end's receive buffer, and macOS's default for a
+    /// datagram socket holds two frames. Give it a SO_RCVBUF of megabytes before handing it over,
+    /// or downloads crawl (the stack then waits a millisecond for every couple of frames).
     public init(configuration: VMNetConfiguration, frameDescriptor: Int32) {
         self.configuration = configuration
         self.frameDescriptor = frameDescriptor

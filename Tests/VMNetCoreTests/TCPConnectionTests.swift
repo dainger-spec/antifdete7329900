@@ -292,43 +292,51 @@ final class TCPConnectionTests: XCTestCase {
         XCTAssertEqual(script.connection.tuning.receiveBufferLimit, 256 * 1024)
     }
 
-    func testALostSegmentIsSentAgainAfterTheTimeout() {
+    func testUnacknowledgedDataIsSentAgainAfterTheTimeout() {
         let script = Script()
         script.openAndEstablish()
-        let data = bytes(4_000)
+        let data = bytes(1460 * 10)
         script.upstream(data)
-        XCTAssertEqual(script.take().count, 3)
-        // Nothing acknowledged. Just before a quarter of a second: nothing; at it: the first
-        // segment again, alone.
+        XCTAssertEqual(script.take().count, 10)
+        // Nothing acknowledged. Just before a quarter of a second: nothing; at it: the data again
+        // from the first unacknowledged byte, four segments of it.
         script.advance(0.24)
         XCTAssertTrue(script.take().isEmpty)
         script.advance(0.02)
         var sent = script.take()
-        XCTAssertEqual(sent.count, 1)
-        XCTAssertEqual(sent[0].sequence, 5_001)
-        XCTAssertEqual(sent[0].payload, Array(data[0..<1460]))
+        XCTAssertEqual(sent.map(\.sequence), [5_001, 6_461, 7_921, 9_381])
+        XCTAssertTrue(sent[0].payload == Array(data[0..<1460]))
         XCTAssertEqual(script.connection.retransmissions, 1)
         // Still nothing: the wait doubles (0.5 s), then again (1 s).
         script.advance(0.49)
         XCTAssertTrue(script.take().isEmpty)
         script.advance(0.02)
-        XCTAssertEqual(script.take().map(\.sequence), [5_001])
+        XCTAssertEqual(script.take().map(\.sequence), [5_001, 6_461, 7_921, 9_381])
         script.advance(0.99)
         XCTAssertTrue(script.take().isEmpty)
         script.advance(0.02)
-        XCTAssertEqual(script.take().map(\.sequence), [5_001])
-        // The guest answers at last: the rest follows from the acknowledged byte on, in order.
-        script.stackNext = 5_001 &+ 1460
+        XCTAssertEqual(script.take().first?.sequence, 5_001)
+        // The guest answers at last: the rest follows from the acknowledged byte on, in order,
+        // and the wait is a quarter of a second again.
+        var received = 1460 * 4
+        script.stackNext = 5_001 &+ UInt32(received)
         script.send()
         sent = script.take()
-        XCTAssertEqual(sent.first?.sequence, 5_001 &+ 1460)
-        script.sink.take().forEach { _ in }
-        var received = Array(data[0..<1460])
-        for segment in sent { received += segment.payload }
-        script.stackNext = 5_001 &+ UInt32(received.count)
-        script.send()
-        for segment in script.take() { received += segment.payload }
-        XCTAssertEqual(received, data)
+        XCTAssertEqual(sent.first?.sequence, 5_001 &+ UInt32(received))
+        var rounds = 0
+        while received < data.count && rounds < 10 {
+            for segment in sent {
+                XCTAssertEqual(segment.sequence, 5_001 &+ UInt32(received))
+                XCTAssertTrue(segment.payload == Array(data[received..<(received + segment.payload.count)]))
+                received += segment.payload.count
+            }
+            script.stackNext = 5_001 &+ UInt32(received)
+            script.send()
+            sent = script.take()
+            rounds += 1
+        }
+        XCTAssertEqual(received, data.count)
+        XCTAssertEqual(script.connection.takeDeliveredBytes(), UInt64(data.count))
     }
 
     func testTheRetransmissionWaitStopsDoublingAtItsMaximum() {
@@ -375,7 +383,7 @@ final class TCPConnectionTests: XCTestCase {
         let sent = script.take()
         XCTAssertEqual(sent.count, 1)
         XCTAssertEqual(sent[0].sequence, 5_001 &+ 1460)
-        XCTAssertEqual(sent[0].payload, Array(data[1460..<2920]))
+        XCTAssertTrue(sent[0].payload == Array(data[1460..<2920]), "the bytes differ")
         // More duplicates do not send it again.
         script.send()
         script.send()
@@ -391,6 +399,60 @@ final class TCPConnectionTests: XCTestCase {
         script.send()
         XCTAssertTrue(script.take().isEmpty)
         XCTAssertEqual(script.connection.takeDeliveredBytes(), UInt64(data.count))
+    }
+
+    func testAfterATimeoutASegmentLostAgainIsSentOnThreeDuplicates() {
+        let script = Script()
+        script.openAndEstablish()
+        let data = bytes(1460 * 30)
+        script.upstream(data)
+        XCTAssertEqual(script.take().count, 10)
+        // Nothing comes back: the timer sends the first four segments again.
+        script.advance(0.26)
+        let burst = script.take()
+        XCTAssertEqual(burst.map(\.sequence), [5_001, 6_461, 7_921, 9_381])
+        // Of these the first is lost again and the others arrive: each is answered with the same
+        // acknowledgement. The third such answer sends the lost one again at once — without
+        // waiting half a second for the timer.
+        let before = script.connection.retransmissions
+        script.send()
+        script.send()
+        XCTAssertTrue(script.take().isEmpty)
+        script.send()
+        let again = script.take()
+        XCTAssertEqual(again.count, 1)
+        XCTAssertEqual(again[0].sequence, 5_001)
+        XCTAssertTrue(again[0].payload == burst[0].payload)
+        XCTAssertEqual(script.connection.retransmissions, before + 1)
+        // More of the same answers do not send it yet again.
+        script.send()
+        script.send()
+        script.send()
+        XCTAssertTrue(script.take().isEmpty)
+        // It arrives; the guest has the rest of the burst already. The transfer goes on from there.
+        script.stackNext = 5_001 &+ 1460 * 4
+        script.send()
+        XCTAssertEqual(script.take().first?.sequence, 5_001 &+ 1460 * 4)
+    }
+
+    func testALossShownByDuplicatesNeverCutsTheWindowBelowTenSegments() {
+        let script = Script()
+        script.openAndEstablish()
+        let data = bytes(1460 * 60)
+        script.upstream(data)
+        XCTAssertEqual(script.take().count, 10)
+        // The second segment is lost; the guest acknowledges the first and then says so nine times.
+        script.stackNext = 5_001 &+ 1460
+        script.send()
+        _ = script.take()
+        for _ in 0..<3 { script.send() }
+        XCTAssertEqual(script.take().map(\.sequence), [5_001 &+ 1460])
+        // The retransmission arrives and everything sent so far is acknowledged: ten segments go
+        // out at once again, not one or two.
+        let sentSoFar = 1460 * 11
+        script.stackNext = 5_001 &+ UInt32(sentSoFar)
+        script.send()
+        XCTAssertEqual(script.take().count, 10)
     }
 
     func testAWindowUpdateIsNotADuplicateAcknowledgement() {
@@ -482,7 +544,7 @@ final class TCPConnectionTests: XCTestCase {
             segments = script.take()
             rounds += 1
         }
-        XCTAssertEqual(received, data)
+        XCTAssertTrue(received == data, "the bytes differ")
         // Doubling each round: 10, 20, 40, 80 segments — 200 000 bytes in five rounds.
         XCTAssertLessThanOrEqual(rounds, 5)
     }
@@ -505,7 +567,7 @@ final class TCPConnectionTests: XCTestCase {
         XCTAssertEqual(sent[0].acknowledgement, 1_001 &+ 4_000)
         XCTAssertEqual(sent[0].sequence, 5_001)
         XCTAssertEqual(script.connection.upstreamBacklog, 4_000)
-        XCTAssertEqual(script.drainToUpstream(), data)
+        XCTAssertTrue(script.drainToUpstream() == data, "the bytes differ")
         XCTAssertEqual(script.connection.upstreamBacklog, 0)
     }
 
@@ -528,7 +590,7 @@ final class TCPConnectionTests: XCTestCase {
         script.guestNext = 2_501
         script.connection.flush(now: script.now)
         XCTAssertEqual(script.take().last?.acknowledgement, 2_501)
-        XCTAssertEqual(script.drainToUpstream(), data + more)
+        XCTAssertTrue(script.drainToUpstream() == data + more, "the bytes differ")
     }
 
     func testDataAheadOfAGapIsKeptAndTheGapNamedAtOnce() {
@@ -556,7 +618,7 @@ final class TCPConnectionTests: XCTestCase {
         XCTAssertEqual(script.connection.earlySegmentCount, 0)
         script.guestNext = 1_001 &+ 4_000
         script.sendData(Array(data[4_000...]))
-        XCTAssertEqual(script.drainToUpstream(), data)
+        XCTAssertTrue(script.drainToUpstream() == data, "the bytes differ")
     }
 
     func testEarlySegmentsThatOverlapOrRepeatAreKeptOnce() {
@@ -580,7 +642,7 @@ final class TCPConnectionTests: XCTestCase {
         script.send([.ack], sequence: 1_001, payload: Array(data[0..<1_500]))
         script.connection.flush(now: script.now)
         XCTAssertEqual(script.take().last?.acknowledgement, 1_001 &+ 5_000)
-        XCTAssertEqual(script.connection.withUpstreamBacklog { Array($0) }, Array(data[0..<5_000]))
+        XCTAssertTrue(script.connection.withUpstreamBacklog { Array($0) } == Array(data[0..<5_000]), "the bytes differ")
         // The next gap, filled by a segment that also repeats old bytes and runs into kept ones.
         script.send([.ack], sequence: 1_001 &+ 4_900, payload: Array(data[4_900..<7_700]))
         script.connection.flush(now: script.now)
@@ -588,7 +650,7 @@ final class TCPConnectionTests: XCTestCase {
         XCTAssertEqual(script.connection.earlySegmentCount, 0)
         script.guestNext = 1_001 &+ 9_500
         script.sendData(Array(data[9_500...]))
-        XCTAssertEqual(script.drainToUpstream(), data)
+        XCTAssertTrue(script.drainToUpstream() == data, "the bytes differ")
     }
 
     func testEarlyDataBeyondTheWindowIsNotKept() {
@@ -613,7 +675,7 @@ final class TCPConnectionTests: XCTestCase {
         script.connection.flush(now: script.now)
         // Up to the edge of the window and not a byte further.
         XCTAssertEqual(script.take().last?.acknowledgement, 1_001 &+ 4_096)
-        XCTAssertEqual(script.connection.withUpstreamBacklog { Array($0) }, Array(data[0..<4_096]))
+        XCTAssertTrue(script.connection.withUpstreamBacklog { Array($0) } == Array(data[0..<4_096]), "the bytes differ")
     }
 
     func testAFINAheadOfAGapIsNotTaken() {
@@ -769,7 +831,7 @@ final class TCPConnectionTests: XCTestCase {
         XCTAssertTrue(script.connection.guestFinished)
         // The tunnel's sending side is closed only when all the guest sent is written.
         XCTAssertFalse(script.connection.shouldShutdownUpstream)
-        XCTAssertEqual(script.drainToUpstream(), request)
+        XCTAssertTrue(script.drainToUpstream() == request, "the bytes differ")
         XCTAssertTrue(script.connection.shouldShutdownUpstream)
         script.connection.noteUpstreamShutdown()
         XCTAssertFalse(script.connection.shouldShutdownUpstream)
@@ -815,7 +877,7 @@ final class TCPConnectionTests: XCTestCase {
         script.sendData(more)
         script.connection.flush(now: script.now)
         XCTAssertEqual(script.take().last?.acknowledgement, 1_001 &+ 500)
-        XCTAssertEqual(script.drainToUpstream(), more)
+        XCTAssertTrue(script.drainToUpstream() == more, "the bytes differ")
         // Its FIN ends the connection, and is acknowledged.
         script.sendData([], fin: true)
         let last = script.take()
@@ -973,7 +1035,7 @@ final class TCPConnectionTests: XCTestCase {
         }
         script.connection.flush(now: script.now)
         XCTAssertEqual(script.take().last?.acknowledgement, 0xFFFF_FF01 &+ 5_000)
-        XCTAssertEqual(script.drainToUpstream(), up)
+        XCTAssertTrue(script.drainToUpstream() == up, "the bytes differ")
         XCTAssertTrue(sequence(0xFFFF_FFF0, isBefore: 0x0000_0010))
         XCTAssertFalse(sequence(0x0000_0010, isBefore: 0xFFFF_FFF0))
         XCTAssertTrue(sequence(5, isAtOrBefore: 5))

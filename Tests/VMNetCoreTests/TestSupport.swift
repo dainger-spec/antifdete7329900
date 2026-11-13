@@ -343,6 +343,12 @@ enum TestSocket {
         let type = Int32(SOCK_DGRAM.rawValue)
         #endif
         precondition(socketpair(AF_UNIX, type, 0, &ends) == 0, "no socket pair")
+        // As an app must for a virtual machine's wire: the default buffers hold a frame or two.
+        // What one end sends waits in the other end's receive buffer, so both ends need room.
+        for end in ends {
+            Sys.raiseBuffer(end, Sys.receiveBufferOption, to: 2 << 20)
+            Sys.raiseBuffer(end, Sys.sendBufferOption, to: 1 << 20)
+        }
         return (ends[0], ends[1])
     }
 

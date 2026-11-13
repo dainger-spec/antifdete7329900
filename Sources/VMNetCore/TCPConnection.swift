@@ -63,8 +63,14 @@ final class TCPConnection {
         var linger = 3.0
         /// A connection on which nothing at all moved for this long is closed.
         var idleTimeout = 7200.0
-        /// The congestion window at the start, in segments (RFC 6928).
+        /// The congestion window at the start, in segments (RFC 6928). Also the least it is cut
+        /// to when a loss is noticed from duplicate acknowledgements: the wire is a socket on
+        /// this Mac, not a shared path to be careful of, and a window of a few segments could
+        /// not show a loss that way at all (three later segments must arrive to give it away).
         var initialWindowSegments = 10
+        /// The congestion window after a timeout, in segments: small, but enough for duplicate
+        /// acknowledgements to show the next loss.
+        var timeoutWindowSegments = 4
         /// The shift of the window the guest is told: 256 KiB does not fit in 16 bits.
         var windowShift: UInt8 = 3
         /// How many segments that arrived ahead of a gap are kept until the gap is filled.
@@ -393,11 +399,18 @@ final class TCPConnection {
             // The same acknowledgement again while data is out: the guest got something later
             // than what it waits for. Three of them mean a segment was lost (RFC 5681, RFC 6582).
             duplicateAcknowledgements += 1
-            if duplicateAcknowledgements == 3, !inRecovery, sequence(recoveryPoint, isAtOrBefore: acknowledgement) {
-                slowStartThreshold = max(Int(sendMaximum &- sendUnacknowledged) / 2, 2 * segmentSize)
-                congestionWindow = slowStartThreshold
-                inRecovery = true
-                recoveryPoint = sendMaximum
+            if duplicateAcknowledgements == 3, !inRecovery {
+                if sequence(recoveryPoint, isAtOrBefore: acknowledgement) {
+                    slowStartThreshold = max(Int(sendMaximum &- sendUnacknowledged) / 2, tuning.initialWindowSegments * segmentSize)
+                    congestionWindow = slowStartThreshold
+                    inRecovery = true
+                    recoveryPoint = sendMaximum
+                }
+                // Otherwise a timeout came before, and what was out then is being sent again in
+                // order: the windows were already cut at the timeout and stay as they are. But
+                // three duplicates still say that the first unacknowledged segment is missing
+                // over there, so it goes again now — once: if it is lost again, the timer is
+                // what is left.
                 retransmitFirst()
                 retransmissionDeadline = now + retransmissionTimeout
             }
@@ -569,8 +582,8 @@ final class TCPConnection {
                     return
                 }
                 // Nothing came back in time: start again from the last acknowledged byte, slowly.
-                slowStartThreshold = max(Int(sendMaximum &- sendUnacknowledged) / 2, 2 * segmentSize)
-                congestionWindow = segmentSize
+                slowStartThreshold = max(Int(sendMaximum &- sendUnacknowledged) / 2, tuning.initialWindowSegments * segmentSize)
+                congestionWindow = tuning.timeoutWindowSegments * segmentSize
                 recoveryPoint = sendMaximum
                 inRecovery = false
                 duplicateAcknowledgements = 0
