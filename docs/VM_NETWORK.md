@@ -113,8 +113,12 @@ and open now, DNS queries and how many were blocked, datagrams dropped.
 - **Buffers**: 256 KiB per connection in each direction. A proxy slower than the guest shuts the
   guest's window; a guest slower than the proxy stops the stack reading from the proxy. Nothing is
   buffered without bound.
-- **2048 connections at once**; one more is reset. A connection on which nothing moved for two
-  hours is closed; a guest that has not answered for 15 minutes while data waits for it is given up on.
+- **2048 connections at once**; one more is reset. Every connection is a socket of Lumen's, so a
+  network never takes more than half of the descriptors the process may open: with macOS's default
+  limit of 256 that is 128 connections, and the full 2048 need a limit of 4096 (the app raises it
+  with `setrlimit`; the log's first line says what the network got). A connection on which nothing
+  moved for two hours is closed; a guest that has not answered for 15 minutes while data waits for
+  it is given up on.
 - **The proxy's own address** is resolved with this Mac's resolver (once, and again after a
   connection to it failed). That is the one name this Mac looks up for a virtual machine profile,
   as it does for a browser profile.

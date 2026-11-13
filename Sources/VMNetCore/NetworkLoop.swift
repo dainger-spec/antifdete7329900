@@ -197,7 +197,8 @@ final class NetworkLoop: @unchecked Sendable {
         var connectTimeout = 15.0
         /// How long one of the proxy's addresses is tried while another is left to try.
         var attemptTimeout = 5.0
-        /// Connections at once; one more is answered with a reset.
+        /// Connections at once; one more is answered with a reset. Fewer when the process may
+        /// not open that many descriptors (`connectionLimit`).
         var maximumConnections = 2048
         var dnsPoolCapacity = 60_000
         var lossToGuest = 0.0
@@ -235,6 +236,17 @@ final class NetworkLoop: @unchecked Sendable {
     private let streamBuffer = UnsafeMutableRawBufferPointer.allocate(byteCount: 65_536, alignment: 8)
     private let frameBuffer = UnsafeMutableRawBufferPointer.allocate(byteCount: 65_536, alignment: 8)
 
+    /// How many connections a network may hold at once: what was asked for, but never more than
+    /// half of the descriptors the process may open, nor so many that fewer than 128 are left —
+    /// every connection is a socket, and the rest of the app must still be able to open its
+    /// files. With macOS's default of 256 descriptors that is 128 connections; the full 2048 need
+    /// a limit of 4096 (the app raises it with `setrlimit`).
+    static func connectionLimit(wanted: Int, descriptorLimit: Int) -> Int {
+        min(wanted, max(min(descriptorLimit / 2, descriptorLimit - 128), 16))
+    }
+
+    private let connectionLimit: Int
+
     /// How often the reasons connections failed for are written to the log, at most.
     static let noteInterval = 10.0
     /// The proxy's bytes are read when at least this much room is free for them.
@@ -249,6 +261,7 @@ final class NetworkLoop: @unchecked Sendable {
         self.log = log
         self.counters = counters
         published = counters
+        connectionLimit = Self.connectionLimit(wanted: options.maximumConnections, descriptorLimit: Sys.descriptorLimit)
         responder = LinkResponder(configuration: configuration, dnsPoolCapacity: options.dnsPoolCapacity)
         channel = FrameChannel(descriptor: frameDescriptor)
         channel.lossToGuest = options.lossToGuest
@@ -294,7 +307,9 @@ final class NetworkLoop: @unchecked Sendable {
     // MARK: - The loop
 
     func run() {
-        say("network started: \(describeUpstream()); blocked host suffixes: \(configuration.blockedHostSuffixes.count)")
+        say("network started: \(describeUpstream()); blocked host suffixes: \(configuration.blockedHostSuffixes.count); "
+            + "connections at once: \(connectionLimit)"
+            + (connectionLimit < options.maximumConnections ? " (the process may open only \(Sys.descriptorLimit) descriptors)" : ""))
         let wakeUp: @Sendable () -> Void = { [wake] in wake.signal() }
         resolver?.resolveIfNeeded(now: Sys.now, done: wakeUp)
         var entries: [pollfd] = []
@@ -366,7 +381,7 @@ final class NetworkLoop: @unchecked Sendable {
         say("network stopped: connections opened \(counters.connectionsOpened), failed \(counters.connectionsFailed); "
             + "bytes from the guest \(counters.bytesFromGuest), to the guest \(counters.bytesToGuest); "
             + "DNS queries \(counters.dnsQueries), blocked \(counters.dnsBlocked); datagrams dropped \(counters.datagramsDropped); "
-            + "frames lost on a full wire \(lost)")
+            + "frames the wire did not take \(lost)")
         wake.close()
         ended.lock()
         hasEnded = true
@@ -503,7 +518,7 @@ final class NetworkLoop: @unchecked Sendable {
             refuse(segment, in: packet, from: source)
             return
         }
-        if flows.count >= options.maximumConnections, !dropLingeringFlow(now) {
+        if flows.count >= connectionLimit, !dropLingeringFlow(now) {
             note("refused, too many connections at once", now)
             refuse(segment, in: packet, from: source)
             return

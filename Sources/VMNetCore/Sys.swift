@@ -149,6 +149,18 @@ enum Sys {
         return status == 0 ? 0 : errno
     }
 
+    /// How many descriptors this process may have open at once (its soft limit) — on macOS 256
+    /// unless the app has raised it.
+    static var descriptorLimit: Int {
+        var limit = rlimit()
+        #if canImport(Darwin)
+        guard getrlimit(RLIMIT_NOFILE, &limit) == 0 else { return 256 }
+        #else
+        guard getrlimit(__rlimit_resource_t(RLIMIT_NOFILE.rawValue), &limit) == 0 else { return 1024 }
+        #endif
+        return Int(min(limit.rlim_cur, 1 << 20))
+    }
+
     static func wouldBlock(_ code: Int32) -> Bool {
         code == EAGAIN || code == EWOULDBLOCK
     }

@@ -609,15 +609,6 @@ final class TCPConnection {
         }
     }
 
-    /// Ends the connection from this side: the guest gets a reset.
-    func abort(now: Double) {
-        switch state {
-        case .closed: return
-        case .connecting: tunnelFailed(now: now)
-        case .synAckSent, .established: reset(.timedOut, now: now)
-        }
-    }
-
     /// Reads and clears the count of payload the guest acknowledged.
     func takeDeliveredBytes() -> UInt64 {
         defer { deliveredBytes = 0 }

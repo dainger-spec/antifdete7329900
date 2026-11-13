@@ -16,6 +16,13 @@ final class NetworkLoopTests: XCTestCase {
     private var proxies: [FakeProxy] = []
     private let logLines = Locked<[String]>([])
 
+    override class func setUp() {
+        super.setUp()
+        // What an app that runs a virtual machine does too: macOS lets a process open 256
+        // descriptors unless it asks for more, and these tests hold hundreds of sockets.
+        TestSocket.raiseDescriptorLimit(to: 4096)
+    }
+
     override func tearDown() {
         network?.stop()
         network = nil
@@ -256,6 +263,18 @@ final class NetworkLoopTests: XCTestCase {
     func testTheDefaultTimeLimitForTheProxyIsFifteenSeconds() {
         XCTAssertEqual(NetworkLoop.Options().connectTimeout, 15)
         XCTAssertEqual(NetworkLoop.Options().maximumConnections, 2048)
+    }
+
+    func testConnectionsNeverTakeMoreThanHalfOfTheProcesssDescriptors() {
+        // Every connection is a socket, and the app must be left able to open its own files.
+        XCTAssertEqual(NetworkLoop.connectionLimit(wanted: 2048, descriptorLimit: 256), 128)      // macOS's default
+        XCTAssertEqual(NetworkLoop.connectionLimit(wanted: 2048, descriptorLimit: 1024), 512)
+        XCTAssertEqual(NetworkLoop.connectionLimit(wanted: 2048, descriptorLimit: 4096), 2048)
+        XCTAssertEqual(NetworkLoop.connectionLimit(wanted: 2048, descriptorLimit: 1 << 20), 2048)
+        XCTAssertEqual(NetworkLoop.connectionLimit(wanted: 2048, descriptorLimit: 200), 72)
+        XCTAssertEqual(NetworkLoop.connectionLimit(wanted: 2048, descriptorLimit: 64), 16)
+        XCTAssertEqual(NetworkLoop.connectionLimit(wanted: 3, descriptorLimit: 256), 3)
+        XCTAssertGreaterThanOrEqual(Sys.descriptorLimit, 64)
     }
 
     func testAProxyThatIsNotThereIsRefusedAtOnce() throws {

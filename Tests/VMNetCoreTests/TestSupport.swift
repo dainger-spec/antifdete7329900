@@ -352,6 +352,21 @@ enum TestSocket {
         return (ends[0], ends[1])
     }
 
+    /// Lets this process open at least `count` descriptors, if the system allows it.
+    static func raiseDescriptorLimit(to count: Int) {
+        var limit = rlimit()
+        #if canImport(Darwin)
+        guard getrlimit(RLIMIT_NOFILE, &limit) == 0, limit.rlim_cur < rlim_t(count) else { return }
+        limit.rlim_cur = min(rlim_t(count), limit.rlim_max)
+        _ = setrlimit(RLIMIT_NOFILE, &limit)
+        #else
+        let resource = __rlimit_resource_t(RLIMIT_NOFILE.rawValue)
+        guard getrlimit(resource, &limit) == 0, limit.rlim_cur < rlim_t(count) else { return }
+        limit.rlim_cur = min(rlim_t(count), limit.rlim_max)
+        _ = setrlimit(resource, &limit)
+        #endif
+    }
+
     /// How many sockets and pipes this process has open: the two kinds of descriptor a network
     /// opens. (Other kinds come and go under a test's feet — the runtime's own — and are not counted.)
     static func openDescriptorCount() -> Int {
