@@ -1774,6 +1774,10 @@
 "settings.appearance.density.compact" = "Compact";
 "settings.appearance.animations" = "Interface animations";
 "settings.appearance.animations.detail" = "Short transitions, up to 250 ms. Off — and under Reduce Motion in macOS — only colour and opacity change.";
+"settings.appearance.countryBackdrop" = "Country behind each profile";
+"settings.appearance.countryBackdrop.detail" = "The flag of where a profile's proxy exits, fading behind its row in the list. Profiles without a proxy keep the plain row.";
+"settings.appearance.countryBackdrop.sample1" = "Shop Berlin";
+"settings.appearance.countryBackdrop.sample2" = "Ads New York";
 "settings.security.subtitle" = "The master password, locking, and where the vault is.";
 "settings.security.password" = "Master password";
 "settings.security.password.detail" = "It encrypts the profiles, their passwords and proxies. It cannot be recovered: forgotten, the profiles' data cannot be opened.";

@@ -1353,6 +1353,7 @@ struct ProfilesScreen: View {
             ForEach(rows) { row in
                 ProfileRow(row: row, columns: columns, actions: actions, isSelected: selection.contains(row.id),
                            showsCheckbox: selectedRows.count >= 2, height: appearance.density.rowHeight,
+                           countryBackdrop: appearance.countryBackdrop,
                            onClick: { click in selection.click(row.id, click, order: displayOrder.map(\.id)) },
                            // A double click is what a person opens a thing with: the profile is
                            // launched, and stays the chosen one.
@@ -1714,6 +1715,8 @@ private struct ProfileRow: View {
     /// Several rows are selected: every row shows its checkbox (one selected — the inspector's — shows its own).
     var showsCheckbox = false
     var height: CGFloat = 52
+    /// Settings › Appearance: the exit country's flag fading behind the row (`CountryBackdrop`).
+    var countryBackdrop = false
     /// A click on the row itself (not on its buttons or menu): selects it (`ProfileSelection`).
     var onClick: (ProfileSelection.Click) -> Void = { _ in }
     var onDoubleClick: () -> Void = {}
@@ -1722,7 +1725,10 @@ private struct ProfileRow: View {
     var body: some View {
         HStack(spacing: ProfileColumns.gap) {
             checkbox
-            nameCell.frame(maxWidth: .infinity, alignment: .leading)
+            // Over a flag: a soft shadow keeps the avatar and the name apart from its colours.
+            nameCell
+                .shadow(color: backdropCountry == nil ? .clear : Color.black.opacity(0.6), radius: 2.5, y: 1)
+                .frame(maxWidth: .infinity, alignment: .leading)
             exitCell.frame(width: ProfileColumns.exit, alignment: .leading)
             if columns.showsAppearsAs {
                 seenCell.frame(width: ProfileColumns.appearsAs, alignment: .leading)
@@ -1734,6 +1740,12 @@ private struct ProfileRow: View {
         .frame(height: height)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
             .fill(isSelected ? Theme.rowSelected : (hovered ? Theme.rowHover : Color.clear)))
+        .background(alignment: .leading) {
+            if let code = backdropCountry {
+                CountryBackdrop(code: code)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+        }
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.divider).frame(height: 1)
                 .padding(.leading, ProfileColumns.rowPadding + ProfileColumns.nameInset - 18)
@@ -1778,6 +1790,13 @@ private struct ProfileRow: View {
         .opacity(isSelected || showsCheckbox || hovered ? 1 : 0)
         .accessibilityLabel(String(format: L("profiles.row.select"), row.name))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    /// The country whose flag is behind the row: where its proxy exits, once known (a profile
+    /// without a proxy keeps the plain row, as "Direct" says).
+    private var backdropCountry: String? {
+        guard countryBackdrop, case let .proxy(_, code) = row.exit, let code, !code.isEmpty else { return nil }
+        return code
     }
 
     private var nameCell: some View {

@@ -54,6 +54,70 @@ struct CountryFlag: View {
     }
 }
 
+/// A country's flag behind a row of the profile list (Settings › Appearance › Country background;
+/// the owner, 13 November): the same width for every country, sharp — never blurred — drawn a little
+/// longer than a flag is, solid for the first third and then fading to nothing, so the row's text
+/// stays on the dark of the list. A flag drawn here (`FlagArt`) fills a rectangle one and a half
+/// times as long as the row is tall, and its last column runs on to the banner's end; any other
+/// country shows its emoji flag across the banner.
+struct CountryBackdrop: View {
+    /// ISO 3166-1 alpha-2, e.g. "DE".
+    let code: String
+    /// How strongly it shows: the owner chose the soft one.
+    var strength: Double = 0.3
+
+    static let width: CGFloat = 300
+
+    var body: some View {
+        let region = code.uppercased()
+        Group {
+            if let art = FlagArt.table[region] {
+                Canvas { context, size in art.drawBanner(in: &context, size: size) }
+            } else if let emoji = CountryFlag.emoji(for: region) {
+                Text(verbatim: emoji)
+                    .font(.system(size: Self.width / 1.2))
+                    .fixedSize()
+                    .frame(width: Self.width, alignment: .center)
+                    .frame(maxHeight: .infinity)
+                    .clipped()
+            }
+        }
+        .frame(width: Self.width)
+        .frame(maxHeight: .infinity)
+        // A faint dark at the start, under the avatar and the name.
+        .overlay(LinearGradient(colors: [Theme.backdrop.opacity(0.25), Theme.backdrop.opacity(0)],
+                                startPoint: .leading, endPoint: .trailing))
+        .mask(LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.3),
+                                     .init(color: .black.opacity(0.45), location: 0.62), .init(color: .clear, location: 1)],
+                             startPoint: .leading, endPoint: .trailing))
+        .opacity(strength)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+extension FlagArt {
+    /// The flag a little longer than it is tall (1.5 : 1, round parts kept round), then its last
+    /// column carried on to the end of `size`: a horizontal band stays a band, a vertical one's
+    /// last colour runs on, the United States' stripes go on past the canton.
+    func drawBanner(in context: inout GraphicsContext, size: CGSize) {
+        let height = size.height
+        let flagWidth = min(size.width, height * 1.5)
+        var flag = context
+        flag.clip(to: Path(CGRect(x: 0, y: 0, width: flagWidth, height: height)))
+        draw(in: &flag, width: flagWidth, height: height)
+        guard size.width > flagWidth else { return }
+        // The flag's last sliver of a point, stretched over the rest: x ∈ [w-ε, w] → [w, width].
+        let sliver: CGFloat = 0.75
+        let stretch = (size.width - flagWidth) / sliver
+        var tail = context
+        tail.clip(to: Path(CGRect(x: flagWidth, y: 0, width: size.width - flagWidth, height: height)))
+        tail.translateBy(x: flagWidth - (flagWidth - sliver) * stretch, y: 0)
+        tail.scaleBy(x: stretch, y: 1)
+        draw(in: &tail, width: flagWidth, height: height)
+    }
+}
+
 /// Country names in the app's UI language ("Germany", "Германия").
 enum CountryNames {
     static func name(for code: String) -> String {
@@ -148,19 +212,26 @@ private enum FlagArt {
     ]
 
     func draw(in context: inout GraphicsContext, side s: CGFloat) {
+        draw(in: &context, width: s, height: s)
+    }
+
+    /// The flag in a rectangle `width` by `height`: bands, bars and fields stretch with it, while
+    /// discs, stars and the wheel keep their shape (their size follows the height) — the banner
+    /// behind a row of the profile list (`CountryBackdrop`) draws it longer than it is tall.
+    func draw(in context: inout GraphicsContext, width sx: CGFloat, height s: CGFloat) {
         func color(_ hex: UInt32) -> GraphicsContext.Shading { .color(Color(hex: hex)) }
         func rect(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, _ hex: UInt32) {
-            context.fill(Path(CGRect(x: x * s, y: y * s, width: w * s, height: h * s)), with: color(hex))
+            context.fill(Path(CGRect(x: x * sx, y: y * s, width: w * sx, height: h * s)), with: color(hex))
         }
         func disc(_ x: CGFloat, _ y: CGFloat, _ r: CGFloat, _ hex: UInt32) {
-            context.fill(Path(ellipseIn: CGRect(x: (x - r) * s, y: (y - r) * s, width: 2 * r * s, height: 2 * r * s)), with: color(hex))
+            context.fill(Path(ellipseIn: CGRect(x: x * sx - r * s, y: (y - r) * s, width: 2 * r * s, height: 2 * r * s)), with: color(hex))
         }
         func star(_ x: CGFloat, _ y: CGFloat, _ r: CGFloat, _ hex: UInt32, rotation: CGFloat = -.pi / 2) {
             var path = Path()
             for index in 0..<10 {
                 let radius = index.isMultiple(of: 2) ? r : r * 0.382
                 let angle = rotation + CGFloat(index) * .pi / 5
-                let point = CGPoint(x: (x + radius * cos(angle)) * s, y: (y + radius * sin(angle)) * s)
+                let point = CGPoint(x: x * sx + radius * cos(angle) * s, y: (y + radius * sin(angle)) * s)
                 if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
             }
             path.closeSubpath()
@@ -205,12 +276,13 @@ private enum FlagArt {
                 rect(0, 0, 0.5, 4.0 / 7.0, 0x2C3E7A)
             case .unitedKingdom:
                 rect(0, 0, 1, 1, 0x24357A)
-                for angle in [CGFloat.pi / 4, -CGFloat.pi / 4] {
+                let slope = atan2(s, sx), reach = sx + s
+                for angle in [slope, -slope] {
                     var diagonal = context
-                    diagonal.translateBy(x: s / 2, y: s / 2)
+                    diagonal.translateBy(x: sx / 2, y: s / 2)
                     diagonal.rotate(by: .radians(Double(angle)))
-                    diagonal.fill(Path(CGRect(x: -s, y: -0.1 * s, width: 2 * s, height: 0.2 * s)), with: color(FlagArt.white))
-                    diagonal.fill(Path(CGRect(x: -s, y: -0.035 * s, width: 2 * s, height: 0.07 * s)), with: color(FlagArt.red))
+                    diagonal.fill(Path(CGRect(x: -reach, y: -0.1 * s, width: 2 * reach, height: 0.2 * s)), with: color(FlagArt.white))
+                    diagonal.fill(Path(CGRect(x: -reach, y: -0.035 * s, width: 2 * reach, height: 0.07 * s)), with: color(FlagArt.red))
                 }
                 rect(0, 0.36, 1, 0.28, FlagArt.white)
                 rect(0.36, 0, 0.28, 1, FlagArt.white)
@@ -226,7 +298,7 @@ private enum FlagArt {
                 rect(0, 0.5, 1, 0.5, FlagArt.red)
                 var triangle = Path()
                 triangle.move(to: CGPoint(x: 0, y: 0))
-                triangle.addLine(to: CGPoint(x: 0.5 * s, y: 0.5 * s))
+                triangle.addLine(to: CGPoint(x: 0.5 * sx, y: 0.5 * s))
                 triangle.addLine(to: CGPoint(x: 0, y: s))
                 triangle.closeSubpath()
                 context.fill(triangle, with: color(0x1F4F9E))
@@ -250,7 +322,7 @@ private enum FlagArt {
                 rect(0, 0, 1, 1 / 3 + 0.002, 0xF29A3A)
                 rect(0, 1 / 3, 1, 1 / 3 + 0.002, FlagArt.white)
                 rect(0, 2 / 3, 1, 1 / 3, 0x2E8B47)
-                let wheel = Path(ellipseIn: CGRect(x: 0.38 * s, y: 0.38 * s, width: 0.24 * s, height: 0.24 * s))
+                let wheel = Path(ellipseIn: CGRect(x: 0.5 * sx - 0.12 * s, y: 0.38 * s, width: 0.24 * s, height: 0.24 * s))
                 context.stroke(wheel, with: color(0x1E3A8A), lineWidth: max(0.6, 0.035 * s))
                 disc(0.5, 0.5, 0.035, 0x1E3A8A)
             case .argentina:
@@ -276,7 +348,7 @@ private enum FlagArt {
                     var triangle = Path()
                     for index in 0..<3 {
                         let angle = rotation + CGFloat(index) * 2 * .pi / 3
-                        let point = CGPoint(x: (0.5 + 0.16 * cos(angle)) * s, y: (0.5 + 0.16 * sin(angle)) * s)
+                        let point = CGPoint(x: 0.5 * sx + 0.16 * cos(angle) * s, y: (0.5 + 0.16 * sin(angle)) * s)
                         if index == 0 { triangle.move(to: point) } else { triangle.addLine(to: point) }
                     }
                     triangle.closeSubpath()

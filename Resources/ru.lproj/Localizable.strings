@@ -1774,6 +1774,10 @@
 "settings.appearance.density.compact" = "Компактно";
 "settings.appearance.animations" = "Анимации интерфейса";
 "settings.appearance.animations.detail" = "Короткие переходы до 250 мс. Выключены — и при «Уменьшить движение» в macOS — меняются только цвет и прозрачность.";
+"settings.appearance.countryBackdrop" = "Страна за профилем";
+"settings.appearance.countryBackdrop.detail" = "Флаг страны, где выходит прокси профиля, плавно уходит в фон его строки в списке. У профилей без прокси строка остаётся обычной.";
+"settings.appearance.countryBackdrop.sample1" = "Магазин Берлин";
+"settings.appearance.countryBackdrop.sample2" = "Реклама Нью-Йорк";
 "settings.security.subtitle" = "Мастер-пароль, блокировка и где лежит хранилище.";
 "settings.security.password" = "Мастер-пароль";
 "settings.security.password.detail" = "Шифрует профили, их пароли и прокси. Восстановить его нельзя: если забыт, данные профилей не открыть.";
