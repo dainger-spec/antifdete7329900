@@ -25,85 +25,136 @@ struct SyncView: View {
         case failed(String)
     }
 
+    /// When the last run ended well (the connected sheet says it).
+    @AppStorage("sync.lastRun") private var lastRun: Double = 0
+    @State private var showPassword = false
+    @State private var confirmForget = false
+
     var body: some View {
         NavigationStack {
             Form {
                 switch stage {
                 case .loading:
-                    Section { ProgressView().accessibilityIdentifier("syncLoading") }.glassRow()
+                    Section {
+                        HStack(spacing: 12) {
+                            ProgressView()
+                            Text(L("Проверяем хранилище…")).foregroundStyle(.secondary)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("syncLoading")
+                    }
                 case .notInPlan:
                     Section {
+                        FactRow(title: L("Синхронизация"), value: L("нет в тарифе"))
+                    } footer: {
                         Text(L("Синхронизация с Mac — в пробном и платном тарифе. Профили на этом iPhone остаются как есть."))
                             .accessibilityIdentifier("syncNotInPlan")
                     }
-                    .glassRow()
                 case .noVault:
                     Section {
+                        FactRow(title: L("Хранилище Mac"), value: L("не включено"))
+                    } footer: {
                         Text(L("Синхронизация ещё не включена. Включите её в Lumen для Mac, затем вернитесь сюда."))
                             .accessibilityIdentifier("syncNoVault")
                     }
-                    .glassRow()
                 case let .askPassword(vaultID):
                     Section {
-                        SecureField(L("Мастер-пароль"), text: $password)
+                        HStack {
+                            Group {
+                                if showPassword {
+                                    TextField(L("Мастер-пароль"), text: $password).accessibilityIdentifier("syncPasswordShown")
+                                } else {
+                                    SecureField(L("Мастер-пароль"), text: $password).accessibilityIdentifier("syncPassword")
+                                }
+                            }
                             .textContentType(.oneTimeCode)
-                            .accessibilityIdentifier("syncPassword")
-                    } footer: {
-                        Text(L("Мастер-пароль хранилища Lumen для Mac. Он нужен один раз: на этом iPhone остаётся только ключ, под Face ID или кодом телефона."))
-                    }
-                    .glassRow()
-                    if let message {
-                        Section {
-                            Label { Text(message).accessibilityIdentifier("syncMessage") } icon: { Image(systemName: "exclamationmark.circle") }
-                                .font(.system(size: 15)).foregroundStyle(Theme.bad)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            Button { showPassword.toggle() } label: {
+                                Image(systemName: showPassword ? "eye" : "eye.slash").foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel(showPassword ? L("Скрыть пароль") : L("Показать пароль"))
                         }
-                        .listRowBackground(Theme.bad.opacity(0.1))
+                    } header: {
+                        Text(L("Хранилище Mac"))
+                    } footer: {
+                        if let message {
+                            Text(message).foregroundStyle(Color(.systemRed)).accessibilityIdentifier("syncMessage")
+                        } else {
+                            Text(L("Мастер-пароль — тот же, что у хранилища Lumen на Mac. Он нужен один раз, дальше — Face ID."))
+                        }
                     }
                     Section {
                         Button(working ? L("Проверяем…") : L("Подключить")) { connect(vaultID) }
-                            .buttonStyle(PrimaryButtonStyle())
+                            .fontWeight(.semibold)
                             .disabled(working || password.isEmpty)
                             .accessibilityIdentifier("syncConnect")
-                            .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
                     }
                 case .connected:
                     Section {
-                        Label(L("Хранилище подключено"), systemImage: "checkmark.circle").foregroundStyle(Theme.ok)
-                            .accessibilityIdentifier("syncConnected")
-                    } footer: {
-                        Text(L("Профили с Mac появляются в списке сессий. Имя, описание и метки, изменённые на iPhone, уходят на Mac."))
-                    }
-                    .glassRow()
-                    if let syncResult {
-                        Section { Text(syncResult).accessibilityIdentifier("syncResult") }.glassRow()
-                    }
-                    Section {
-                        Button(syncing ? L("Синхронизация…") : L("Синхронизировать")) { syncNow() }
-                            .buttonStyle(PrimaryButtonStyle())
-                            .disabled(syncing)
-                            .accessibilityIdentifier("syncNow")
-                            .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
-                    }
-                    Section {
-                        Button(L("Забыть хранилище"), role: .destructive) {
-                            SyncKeychain.erase()
-                            Task { await load() }
+                        HStack(spacing: 8) {
+                            Text(L("Хранилище"))
+                            Spacer(minLength: 8)
+                            StatusLight(light: .working)
+                            Text(L("Подключено")).foregroundStyle(.secondary)
                         }
-                        .accessibilityIdentifier("syncForget")
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(L("Хранилище подключено"))
+                        .accessibilityAddTraits(.isStaticText)
+                        .accessibilityIdentifier("syncConnected")
+                        if lastRun > 0 {
+                            FactRow(title: L("Синхронизировали"),
+                                    value: Date(timeIntervalSince1970: lastRun).formatted(.relative(presentation: .named).locale(Localization.locale)))
+                        }
+                        FactRow(title: L("Сессии с Mac"), value: "\(model.sessions.filter { $0.syncedProfileID != nil }.count)")
+                    } footer: {
+                        if let syncResult {
+                            Text(syncResult).accessibilityIdentifier("syncResult")
+                        } else {
+                            Text(L("Профили с Mac появляются в списке сессий с пометкой «С Mac». Имя, описание и метки, изменённые на iPhone, уходят на Mac."))
+                        }
                     }
-                    .glassRow()
+                    Section {
+                        Button { syncNow() } label: {
+                            HStack(spacing: 10) {
+                                Text(syncing ? L("Синхронизация…") : L("Синхронизировать")).fontWeight(.semibold)
+                                if syncing { ProgressView() }
+                            }
+                        }
+                        .disabled(syncing)
+                        .accessibilityIdentifier("syncNow")
+                    }
+                    Section {
+                        Button(L("Забыть хранилище"), role: .destructive) { confirmForget = true }
+                            .accessibilityIdentifier("syncForget")
+                    } footer: {
+                        Text(L("Забыть — значит отключить этот iPhone от хранилища. Сессии на Mac останутся."))
+                    }
                 case let .failed(text):
-                    Section { Text(text).foregroundStyle(Theme.bad).accessibilityIdentifier("syncFailed") }.glassRow()
+                    Section {
+                        Text(text).foregroundStyle(Color(.systemRed)).accessibilityIdentifier("syncFailed")
+                    }
                 }
             }
-            .eclipseSheet()
             .navigationTitle(L("Синхронизация"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button(L("Готово")) { dismiss() }.accessibilityIdentifier("syncDone") }
             }
+            .confirmationDialog(L("Забыть хранилище на этом iPhone?"), isPresented: $confirmForget, titleVisibility: .visible) {
+                Button(L("Забыть хранилище"), role: .destructive) {
+                    SyncKeychain.erase()
+                    lastRun = 0
+                    Task { await load() }
+                }
+                .accessibilityIdentifier("confirmSyncForget")
+                Button(L("Отмена"), role: .cancel) {}
+            } message: {
+                Text(L("Ключ хранилища удалится с iPhone. Сессии с Mac останутся в списке; чтобы синхронизировать снова, понадобится мастер-пароль."))
+            }
             .task { await load() }
         }
+        .presentationDetents([.large])
     }
 
     /// Where this iPhone stands: a vault kept, or the account's vaults from the server.
@@ -150,6 +201,7 @@ struct SyncView: View {
                 SyncKeychain.generation = outcome.generation
                 SyncKeychain.profileTokens = outcome.profileTokens
                 let made = model.applySynced(outcome.profiles)
+                lastRun = Date().timeIntervalSince1970
                 syncResult = L("Профилей с Mac: %@, новых: %@", "\(outcome.profiles.count)", "\(made)")
                     + (outcome.cookiesSet + outcome.cookiesDeleted > 0 ? "\n" + L("Куки обновлены: %@", "\(outcome.cookiesSet + outcome.cookiesDeleted)") : "")
             case .failure(.notInPlan):
