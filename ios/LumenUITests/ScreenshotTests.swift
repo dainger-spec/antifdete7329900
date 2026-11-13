@@ -112,19 +112,6 @@ final class DesignShotTests: LumenUITestCase {
         }
         app.terminate()
 
-        // The light theme, behind its flag: the main screens.
-        language = "ru"
-        theme = "light"
-        start()
-        snap("k-list")
-        openSeeded(t("Магазин — Берлин", "Store — Berlin"))
-        go("http://check.example/?l=\(language)")
-        _ = app.webViews.staticTexts["Europe/Berlin"].waitForExistence(timeout: 30)
-        snap("k-browser")
-        touch(app.buttons["settingsButton"])
-        if app.buttons["settingsDone"].waitForExistence(timeout: 10) { snap("k-settings") }
-        app.terminate()
-
         // Diagnostic, not a mockup's state: the list with one of its parts left out (TitleProbe), to see
         // which one collapses the large title.
         theme = "dark"
@@ -132,6 +119,18 @@ final class DesignShotTests: LumenUITestCase {
             start(env: ["LUMEN_DIAG_TITLE": part])
             snap("diag-title-\(part)")
             app.terminate()
+        }
+    }
+
+    /// The light theme (behind its flag), every state as in the dark: a run of its own (ci.sh's suite
+    /// "DesignShotTests/testEveryLightState"), both would not fit in one job's two hours.
+    func testEveryLightState() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["LUMEN_SCREENS"] == "1", "taken by hand (suite DesignShotTests)")
+        continueAfterFailure = true
+        for language in ["ru", "en"] {
+            self.language = language
+            theme = "light"
+            takeAll()
         }
     }
 
@@ -192,10 +191,6 @@ final class DesignShotTests: LumenUITestCase {
         // The list, its search, its menu, its dialog, the new session's sheet.
         start()
         snap("k-list")
-        // The title pulled out (diagnostic, not a mockup's state): is the large title only scrolled away?
-        app.cells.firstMatch.swipeDown()
-        sleep(1)
-        snap("diag-k-list-pulled")
         let search = app.searchFields.firstMatch
         if search.waitForExistence(timeout: 5) {
             search.tap()
@@ -287,6 +282,10 @@ final class DesignShotTests: LumenUITestCase {
             }
             touch(app.buttons["settingsDone"])
         }
+        // A page on its way (the testbed holds it back 20 seconds): the bar's progress and its stop.
+        go("http://check.example/?l=\(language)&wait=20")
+        sleep(3)
+        snap("k-loading")
         backToList()
 
         // A proxy that does not answer, and an empty history.
