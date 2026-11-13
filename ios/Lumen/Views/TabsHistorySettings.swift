@@ -84,7 +84,9 @@ struct TabCard: View {
                 .accessibilityAddTraits(selected ? .isSelected : [])
                 .accessibilityIdentifier("tab-\(index)")
                 Button(action: close) {
-                    Image(systemName: "xmark.circle.fill").font(.title3).symbolRenderingMode(.hierarchical).foregroundStyle(.secondary)
+                    // A grey disc with a white cross: seen on a white page and on a dark one.
+                    Image(systemName: "xmark.circle.fill").font(.title3).symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, Color(.systemGray))
                 }
                 .buttonStyle(.plain)
                 .padding(6)
@@ -147,6 +149,8 @@ struct HistoryView: View {
                                         .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
                                 }
                             }
+                            .buttonStyle(.plain)
+                            .contentShape(Rectangle())
                             .accessibilityIdentifier("historyRow")
                         }
                     }
@@ -338,7 +342,7 @@ struct SessionSettingsView: View {
             Section {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(L("Прокси недоступны"))
-                    Text(model.access.reason ?? L("В бесплатном доступе прокси нет")).font(.subheadline).foregroundStyle(.secondary)
+                    Text(proxiesLine).font(.subheadline).foregroundStyle(.secondary)
                         .accessibilityIdentifier("proxiesNotOnPlan")
                 }
                 Button { showPlans = true } label: {
@@ -357,6 +361,14 @@ struct SessionSettingsView: View {
                 Text(L("Сессия открывает сайты с адресом этого iPhone."))
             }
         }
+    }
+
+    /// Why there is no proxy, under "Прокси недоступны": the plan's own reason — or, when that only says
+    /// the same again (the free level's), what the free level is.
+    private var proxiesLine: String {
+        let reason = model.access.reason?.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+        guard let reason, !reason.isEmpty, reason != L("Прокси недоступны") else { return L("В бесплатном доступе прокси нет") }
+        return model.access.reason ?? reason
     }
 
     private var proxyState: String {
@@ -380,6 +392,7 @@ struct SessionSettingsView: View {
                 Text(L("Как у устройства")).tag("device")
             }
             .pickerStyle(.menu)
+            .tint(Color(.secondaryLabel))
             .accessibilityIdentifier("localeMode")
             FactRow(title: L("Часовой пояс"), value: locale.zone, identifier: "localeZone")
                 .contentTransition(.numericText())
@@ -445,6 +458,7 @@ struct SessionSettingsView: View {
             Text(L("Шум")).tag(FingerprintMode.noise)
         }
         .pickerStyle(.menu)
+        .tint(Color(.secondaryLabel))
         .accessibilityIdentifier(id)
     }
 
@@ -461,6 +475,7 @@ struct SessionSettingsView: View {
                 }
             }
             .pickerStyle(.menu)
+            .tint(Color(.secondaryLabel))
             .accessibilityIdentifier("userAgentPicker")
             if case .custom = settings.userAgent {
                 TextField(L("Своя строка браузера"), text: $customUserAgent, axis: .vertical)
@@ -473,6 +488,7 @@ struct SessionSettingsView: View {
                 ForEach(SearchEngine.allCases) { engine in Text(engine.title).tag(engine) }
             }
             .pickerStyle(.menu)
+            .tint(Color(.secondaryLabel))
             .accessibilityIdentifier("searchEnginePicker")
         }
     }
