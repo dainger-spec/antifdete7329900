@@ -68,6 +68,8 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
     public var proxy: ProxySettings?
     /// Names the machine's network answers "no such name" for (`VMRequirements.blockedHosts`).
     public var blockedHosts: [String]
+    /// What the guest plays is heard on this Mac. Off: the machine keeps its speakers, silent.
+    public var sound: Bool
     /// The window's title, and its few words, in the person's language (the helper has no strings
     /// of its own): `stop`, `stopQuestion`, `stopDetail`, `stopNow`, `cancel`, `stopping` — and
     /// `hint`, a line shown above the machine's screen (what is left to do in the base).
@@ -77,7 +79,7 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
     public init(mode: Mode, restoreImagePath: String? = nil, machineDirectory: String? = nil, baseDirectory: String? = nil,
                 cores: Int = 4, memoryBytes: Int64 = 4 << 30, diskBytes: Int64 = VMRequirements.diskImageBytes,
                 display: Display = Display(VMDisplay.standard), macAddress: String? = nil, network: Network = .closed,
-                proxy: ProxySettings? = nil, blockedHosts: [String] = [],
+                proxy: ProxySettings? = nil, blockedHosts: [String] = [], sound: Bool = true,
                 windowTitle: String = "", texts: [String: String] = [:]) {
         self.mode = mode
         self.restoreImagePath = restoreImagePath
@@ -91,6 +93,7 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
         self.network = network
         self.proxy = proxy
         self.blockedHosts = blockedHosts
+        self.sound = sound
         self.windowTitle = windowTitle
         self.texts = texts
     }
@@ -100,11 +103,12 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
     public static func run(profile: VMProfile, library: VMLibrary, hostCores: Int, texts: [String: String]) -> VMHelperRequest {
         VMHelperRequest(mode: .run, machineDirectory: library.machineDirectory(for: profile.id).path,
                         baseDirectory: library.baseDirectory.path,
-                        cores: VMRequirements.cores(hostCores: hostCores),
+                        cores: min(profile.cores ?? VMRequirements.coresWanted, VMRequirements.cores(hostCores: hostCores)),
                         memoryBytes: Int64(profile.memoryGB) * VMRequirements.gibibyte,
                         display: Display(profile.display), macAddress: profile.macAddress,
                         network: profile.proxy == nil ? .direct : .proxy, proxy: profile.proxy,
-                        blockedHosts: VMRequirements.blockedHosts, windowTitle: profile.name, texts: texts)
+                        blockedHosts: VMRequirements.blockedHosts, sound: profile.soundEnabled,
+                        windowTitle: profile.name, texts: texts)
     }
 
     /// One line, as the helper reads it.

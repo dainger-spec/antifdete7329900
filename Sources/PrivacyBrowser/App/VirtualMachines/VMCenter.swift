@@ -603,6 +603,14 @@ final class VMCenter: ObservableObject {
             excludeFromBackups()
             try FileManager.default.createDirectory(at: files.share, withIntermediateDirectories: true)
             try Data(VMGuestSettings(profile: profile).text.utf8).write(to: files.settings, options: .atomic)
+            // The boot script as this Lumen has it: a machine whose own is older takes it (tools 2
+            // on), so that a later Lumen's settings need no visit to the base system.
+            if let script = Bundle.main.resourceURL?.appendingPathComponent("VMGuest/lumen-guest.sh"),
+               FileManager.default.fileExists(atPath: script.path) {
+                let copy = files.share.appendingPathComponent("lumen-guest.sh")
+                try? FileManager.default.removeItem(at: copy)
+                try? FileManager.default.copyItem(at: script, to: copy)
+            }
             let helper = VMHelperProcess(onEvent: { [weak self] event in self?.take(event, of: id) },
                                          onEnd: { [weak self] failure in self?.ended(id, failure: failure) })
             try helper.start(VMHelperRequest.run(profile: profile, library: library,

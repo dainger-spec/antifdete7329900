@@ -18,12 +18,26 @@ public struct VMGuestSettings: Equatable, Sendable {
     public var language: String?
     public var hostName: String
     public var startURL: String?
+    /// The computer's name as the person wrote it ("Anna's MacBook Air"); the host name is made
+    /// from it. Nil: the host name stands for both. (Tools 2.)
+    public var computerName: String?
+    /// The system's appearance and accent colour. Nil: left as they are. (Tools 2.)
+    public var appearance: VMAppearance?
+    public var accent: VMAccent?
+    /// Safari is opened when the machine has started. (Tools 2; before them it always is.)
+    public var opensSafari: Bool
 
-    public init(timeZone: String?, language: String?, hostName: String, startURL: String?) {
+    public init(timeZone: String?, language: String?, hostName: String, startURL: String?, computerName: String? = nil,
+                appearance: VMAppearance? = nil, accent: VMAccent? = nil, opensSafari: Bool = true) {
         self.timeZone = timeZone.flatMap { Self.isTimeZone($0) ? $0 : nil }
         self.language = language.flatMap { LocalePlaces.isLanguageTag($0) ? $0 : nil }
-        self.hostName = Self.hostName(hostName)
+        self.computerName = computerName.flatMap(Self.computerName)
+        // A computer's own name names its host too: "Anna's MacBook Air" is "Annas-MacBook-Air".
+        self.hostName = Self.hostName(self.computerName.map { $0.replacingOccurrences(of: " ", with: "-") } ?? hostName)
         self.startURL = startURL.flatMap(Self.startURL)
+        self.appearance = appearance
+        self.accent = accent
+        self.opensSafari = opensSafari
         revision = ""
         revision = Self.revision(of: lines(withRevision: false))
     }
@@ -34,7 +48,9 @@ public struct VMGuestSettings: Equatable, Sendable {
                   hostName: profile.display.id.hasPrefix("macbook-air") ? "MacBook-Air"
                       : profile.display.id.hasPrefix("macbook-pro") ? "MacBook-Pro"
                       : profile.display.id.hasPrefix("imac") ? "iMac" : "Mac-mini",
-                  startURL: profile.startURL)
+                  startURL: profile.startURL, computerName: profile.computerName,
+                  appearance: profile.appearance.flatMap(VMAppearance.init(rawValue:)),
+                  accent: profile.accent.flatMap(VMAccent.init(rawValue:)), opensSafari: profile.opensSafari)
     }
 
     public static let fileName = "lumen-settings.env"
@@ -52,6 +68,10 @@ public struct VMGuestSettings: Equatable, Sendable {
             lines.append("LUMEN_LOCALE=\(Self.locale(for: language))")
         }
         lines.append("LUMEN_HOSTNAME=\(hostName)")
+        if let computerName { lines.append("LUMEN_COMPUTER_NAME=\(computerName)") }
+        if let appearance { lines.append("LUMEN_APPEARANCE=\(appearance.rawValue)") }
+        if let accent { lines.append("LUMEN_ACCENT=\(accent.number.map(String.init) ?? VMAccent.multicolor.rawValue)") }
+        lines.append("LUMEN_OPEN_SAFARI=\(opensSafari ? 1 : 0)")
         if let startURL { lines.append("LUMEN_START_URL=\(startURL)") }
         return lines
     }
@@ -91,6 +111,17 @@ public struct VMGuestSettings: Equatable, Sendable {
         let kept = String(text.unicodeScalars.filter { $0.isASCII && (CharacterSet.alphanumerics.contains($0) || $0 == "-") }.map(Character.init))
         let trimmed = String(kept.prefix(32)).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
         return trimmed.isEmpty ? "Mac" : trimmed
+    }
+
+    /// A computer's name the script may hand to `scutil`: 1–40 Latin letters, digits, spaces,
+    /// hyphens and apostrophes ("Anna's MacBook Air"), nothing else — a quote, a dollar sign or a
+    /// letter of another script is refused rather than cleaned (the person sees what was kept).
+    public static func computerName(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (1...40).contains(trimmed.count) else { return nil }
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -'")
+        guard trimmed.unicodeScalars.allSatisfy(allowed.contains), !trimmed.contains("  ") else { return nil }
+        return trimmed
     }
 
     /// The start page as the guest is given it: an http(s) address, written by `URLComponents` (so

@@ -137,7 +137,8 @@ final class VMGuestSettingsTests: XCTestCase {
         let settings = VMGuestSettings(timeZone: "Europe/Berlin", language: "de-DE", hostName: "MacBook Air; rm -rf /", startURL: nil)
         XCTAssertEqual(settings.hostName, "MacBookAirrm-rf")
         let lines = settings.text.split(separator: "\n").map(String.init)
-        XCTAssertEqual(Array(lines.dropFirst()), ["LUMEN_TIMEZONE=Europe/Berlin", "LUMEN_LANGUAGE=de-DE", "LUMEN_LOCALE=de_DE", "LUMEN_HOSTNAME=MacBookAirrm-rf"])
+        XCTAssertEqual(Array(lines.dropFirst()), ["LUMEN_TIMEZONE=Europe/Berlin", "LUMEN_LANGUAGE=de-DE", "LUMEN_LOCALE=de_DE", "LUMEN_HOSTNAME=MacBookAirrm-rf",
+                                                  "LUMEN_OPEN_SAFARI=1"])
         XCTAssertTrue(lines[0].hasPrefix("LUMEN_REVISION="))
 
         // Nothing a shell reads as more than text gets through.
@@ -306,6 +307,116 @@ final class VMHelperProtocolTests: XCTestCase {
     }
 }
 
+/// What a machine may be told about itself beyond where it is: its processors, its sound, its
+/// system's look, its name.
+final class VMMachineSettingsTests: XCTestCase {
+    func testAListFromBeforeTheseSettingsReadsAsAMachineWasThen() throws {
+        let old = #"{"format":1,"profiles":[{"id":"6F1C2E8A-0B0D-4C36-9C2A-7E7C0A1B2C3D","name":"Old","displayID":"macbook-air-13","memoryGB":4,"macAddress":"02:11:22:33:44:55"}]}"#
+        let list = try JSONCoding.decoder.decode(VMProfiles.self, from: Data(old.utf8))
+        let profile = try XCTUnwrap(list.profiles.first)
+        XCTAssertNil(profile.cores)
+        XCTAssertTrue(profile.soundEnabled)
+        XCTAssertNil(profile.appearance)
+        XCTAssertNil(profile.accent)
+        XCTAssertNil(profile.computerName)
+        XCTAssertTrue(profile.opensSafari)
+        XCTAssertNil(profile.colorIndex)
+        XCTAssertNoThrow(try profile.validate())
+        // And what is set is kept through a save.
+        var changed = profile
+        changed.cores = 4
+        changed.soundEnabled = false
+        changed.appearance = VMAppearance.dark.rawValue
+        changed.accent = VMAccent.green.rawValue
+        changed.computerName = "Anna's MacBook Air"
+        changed.opensSafari = false
+        changed.colorIndex = 3
+        changed.notes = "shop"
+        let again = try JSONCoding.decoder.decode(VMProfile.self, from: JSONCoding.encoder.encode(changed))
+        XCTAssertEqual(again, changed)
+    }
+
+    func testWhatIsNotASettingIsRefused() {
+        func profile(_ change: (inout VMProfile) -> Void) -> VMProfile {
+            var profile = VMProfile(name: "A")
+            change(&profile)
+            return profile
+        }
+        XCTAssertNoThrow(try profile { $0.cores = 6 }.validate())
+        XCTAssertThrowsError(try profile { $0.cores = 3 }.validate())
+        XCTAssertThrowsError(try profile { $0.cores = 64 }.validate())
+        XCTAssertThrowsError(try profile { $0.appearance = "sepia" }.validate())
+        XCTAssertThrowsError(try profile { $0.accent = "ultraviolet" }.validate())
+        XCTAssertThrowsError(try profile { $0.computerName = "x$(reboot)" }.validate())
+        XCTAssertThrowsError(try profile { $0.computerName = "Имя" }.validate())
+        XCTAssertThrowsError(try profile { $0.notes = String(repeating: "n", count: 2001) }.validate())
+    }
+
+    func testTheGuestIsToldTheSystemsLookAndTheComputersName() {
+        let settings = VMGuestSettings(profile: VMProfile(name: "A", appearance: "dark", accent: "graphite",
+                                                          computerName: "Anna's MacBook Air", opensSafari: false))
+        let lines = Set(settings.text.split(separator: "\n").map(String.init))
+        XCTAssertTrue(lines.contains("LUMEN_APPEARANCE=dark"))
+        // macOS's own number for the colour; multicolour is the absence of one.
+        XCTAssertTrue(lines.contains("LUMEN_ACCENT=-1"))
+        XCTAssertTrue(lines.contains("LUMEN_COMPUTER_NAME=Anna's MacBook Air"))
+        // The host name goes with the computer's name.
+        XCTAssertTrue(lines.contains("LUMEN_HOSTNAME=Annas-MacBook-Air"))
+        XCTAssertTrue(lines.contains("LUMEN_OPEN_SAFARI=0"))
+        let plain = VMGuestSettings(profile: VMProfile(name: "A", accent: "multi")).text
+        XCTAssertTrue(plain.contains("LUMEN_ACCENT=multi\n"))
+        XCTAssertTrue(plain.contains("LUMEN_OPEN_SAFARI=1\n"))
+        XCTAssertFalse(plain.contains("LUMEN_APPEARANCE"))
+        XCTAssertFalse(plain.contains("LUMEN_COMPUTER_NAME"))
+        // A change of any of them is a new revision: the guest applies it.
+        XCTAssertNotEqual(settings.revision, VMGuestSettings(profile: VMProfile(name: "A", appearance: "light", accent: "graphite",
+                                                                              computerName: "Anna's MacBook Air", opensSafari: false)).revision)
+    }
+
+    func testAComputersNameIsLatinLettersDigitsSpacesHyphensAndApostrophes() {
+        XCTAssertEqual(VMGuestSettings.computerName("  Anna's MacBook Air "), "Anna's MacBook Air")
+        XCTAssertEqual(VMGuestSettings.computerName("Mac-mini 2"), "Mac-mini 2")
+        for refused in ["", "   ", "a\"b", "x`id`", "a;b", "Имя компьютера", "two  spaces", String(repeating: "a", count: 41), "a\nb"] {
+            XCTAssertNil(VMGuestSettings.computerName(refused), refused)
+        }
+    }
+
+    func testANewMachinesAccentIsOneOfMacOSsAndOftenItsDefault() {
+        var generator = SeededGenerator(state: 7)
+        var seen: [VMAccent: Int] = [:]
+        for _ in 0..<2000 { seen[VMAccent.random(using: &generator), default: 0] += 1 }
+        XCTAssertEqual(Set(seen.keys), Set(VMAccent.allCases))
+        let share = Double(seen[.multicolor] ?? 0) / 2000
+        XCTAssertTrue((0.3...0.5).contains(share), "multicolour for \(share) of the machines")
+        XCTAssertNil(VMAccent.multicolor.number)
+        XCTAssertEqual(Set(VMAccent.allCases.compactMap(\.number)), Set(-1...6))
+    }
+
+    func testAMachineMayHaveFewerProcessorsAndNoSound() throws {
+        let library = VMLibrary(root: URL(fileURLWithPath: "/tmp/lib"))
+        let quiet = VMProfile(name: "Quiet", cores: 4, soundEnabled: false)
+        let request = VMHelperRequest.run(profile: quiet, library: library, hostCores: 10, texts: [:])
+        XCTAssertEqual(request.cores, 4)
+        XCTAssertFalse(request.sound)
+        XCTAssertEqual(try VMHelperRequest.parse(try request.line()), request)
+        // As a Mac has them — and never more than this Mac has.
+        XCTAssertEqual(VMHelperRequest.run(profile: VMProfile(name: "Mac"), library: library, hostCores: 10, texts: [:]).cores, 8)
+        XCTAssertEqual(VMHelperRequest.run(profile: VMProfile(name: "Mac", cores: 6), library: library, hostCores: 4, texts: [:]).cores, 4)
+        XCTAssertTrue(VMHelperRequest.run(profile: VMProfile(name: "Mac"), library: library, hostCores: 8, texts: [:]).sound)
+    }
+
+    func testEveryScreenIsOneAMacHas() {
+        XCTAssertEqual(Set(VMDisplay.presets.map(\.id)).count, VMDisplay.presets.count)
+        for display in VMDisplay.presets {
+            XCTAssertTrue((1280...2600).contains(display.pointsWide), display.id)
+            XCTAssertTrue([1, 2].contains(display.scale), display.id)
+            // What the helper gives the framework: within what a Mac's screens are.
+            XCTAssertLessThanOrEqual(display.pixelsWide, 4480, display.id)
+        }
+        XCTAssertEqual(VMDisplay.preset("no such screen"), VMDisplay.standard)
+    }
+}
+
 /// The tools the base system's macOS gets (Resources/VMGuest) and the app agree on the two files
 /// they pass each other: a key one side writes and the other does not read would be a setting that
 /// silently does nothing in every machine.
@@ -319,9 +430,11 @@ final class VMGuestToolsTests: XCTestCase {
 
     func testTheBootScriptReadsEveryKeyTheAppWrites() throws {
         let boot = try script("lumen-guest.sh")
-        let profile = VMProfile(name: "A", timeZoneIdentifier: "Europe/Berlin", language: "de-DE", startURL: "https://example.com/")
+        let profile = VMProfile(name: "A", timeZoneIdentifier: "Europe/Berlin", language: "de-DE", startURL: "https://example.com/",
+                                appearance: "dark", accent: "purple", computerName: "Anna's MacBook Air", opensSafari: false)
         let keys = VMGuestSettings(profile: profile).text.split(separator: "\n").compactMap { $0.split(separator: "=").first.map(String.init) }
-        XCTAssertEqual(Set(keys), ["LUMEN_REVISION", "LUMEN_TIMEZONE", "LUMEN_LANGUAGE", "LUMEN_LOCALE", "LUMEN_HOSTNAME", "LUMEN_START_URL"])
+        XCTAssertEqual(Set(keys), ["LUMEN_REVISION", "LUMEN_TIMEZONE", "LUMEN_LANGUAGE", "LUMEN_LOCALE", "LUMEN_HOSTNAME", "LUMEN_START_URL",
+                                   "LUMEN_COMPUTER_NAME", "LUMEN_APPEARANCE", "LUMEN_ACCENT", "LUMEN_OPEN_SAFARI"])
         for key in keys {
             XCTAssertTrue(boot.contains("value \(key) "), "the boot script does not read \(key)")
         }

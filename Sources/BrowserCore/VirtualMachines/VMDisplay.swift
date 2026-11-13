@@ -21,11 +21,17 @@ public struct VMDisplay: Equatable, Identifiable, Sendable {
     /// Each as that Mac has it out of the box (its default "looks like" size).
     public static let presets: [VMDisplay] = [
         VMDisplay(id: "macbook-air-13", name: "MacBook Air 13″", pointsWide: 1470, pointsHigh: 956, scale: 2, pixelsPerInch: 224),
+        // "More Space" in Displays: what many people with a small screen choose.
+        VMDisplay(id: "macbook-air-13-more", name: "MacBook Air 13″ · More Space", pointsWide: 1710, pointsHigh: 1112, scale: 2, pixelsPerInch: 224),
         VMDisplay(id: "macbook-air-15", name: "MacBook Air 15″", pointsWide: 1710, pointsHigh: 1107, scale: 2, pixelsPerInch: 224),
         VMDisplay(id: "macbook-pro-14", name: "MacBook Pro 14″", pointsWide: 1512, pointsHigh: 982, scale: 2, pixelsPerInch: 254),
+        VMDisplay(id: "macbook-pro-14-more", name: "MacBook Pro 14″ · More Space", pointsWide: 1800, pointsHigh: 1169, scale: 2, pixelsPerInch: 254),
         VMDisplay(id: "macbook-pro-16", name: "MacBook Pro 16″", pointsWide: 1728, pointsHigh: 1117, scale: 2, pixelsPerInch: 254),
+        VMDisplay(id: "macbook-pro-16-more", name: "MacBook Pro 16″ · More Space", pointsWide: 2056, pointsHigh: 1329, scale: 2, pixelsPerInch: 254),
         VMDisplay(id: "imac-24", name: "iMac 24″", pointsWide: 2240, pointsHigh: 1260, scale: 2, pixelsPerInch: 218),
         VMDisplay(id: "external-1080p", name: "Mac mini, 1920 × 1080", pointsWide: 1920, pointsHigh: 1080, scale: 1, pixelsPerInch: 92),
+        VMDisplay(id: "external-1440p", name: "Mac mini, 2560 × 1440", pointsWide: 2560, pointsHigh: 1440, scale: 1, pixelsPerInch: 109),
+        VMDisplay(id: "external-4k", name: "Mac mini, 4K", pointsWide: 1920, pointsHigh: 1080, scale: 2, pixelsPerInch: 163),
     ]
 
     /// The most common Mac's.
@@ -51,6 +57,8 @@ public enum VMRequirements {
     public static let profileGrowthBytes: Int64 = 4 * gibibyte
 
     public static let memoryChoices = [3, 4, 6, 8]
+    /// The processors a profile may ask for instead of a Mac's eight: fewer spare this Mac.
+    public static let coreChoices = [4, 6, 8]
     public static let standardMemoryGB = 4
     /// Safari reports at most 8 cores, and no Mac with Apple silicon has fewer: a machine with
     /// fewer would be told apart. Virtual cores cost no memory.

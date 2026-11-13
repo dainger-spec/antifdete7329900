@@ -5,14 +5,16 @@
 #
 # At each start it reads what Lumen left in the folder the machine shares with the Mac
 # (lumen-settings.env: KEY=value lines, read as text and never run), and makes this macOS the
-# profile's: its time zone, its language and region, its name; then it opens Safari, says in the
-# same folder what macOS and Safari this is (lumen-status.env), and from then on waits for Lumen's
-# request to shut down (a file named lumen-shutdown), which it answers by quitting Safari and
-# shutting macOS down, as the Apple menu would.
+# profile's: its time zone, its language and region, its name, its appearance and accent colour;
+# then it opens Safari, says in the same folder what macOS and Safari this is (lumen-status.env),
+# and from then on waits for Lumen's request to shut down (a file named lumen-shutdown), which it
+# answers by quitting Safari and shutting macOS down, as the Apple menu would.
 #
-# Nothing here reaches the network, and nothing is read from the shared folder but those two names.
+# Nothing here reaches the network. From the shared folder it reads those two names — and a newer
+# copy of itself (lumen-guest.sh), which it puts in its own place and starts: Lumen on the Mac is
+# what made this machine, and a later Lumen's script needs no visit to the base system.
 
-TOOLS_VERSION=1
+TOOLS_VERSION=2
 SHARE="/Volumes/My Shared Files"
 OWN_MOUNT=/var/run/lumen-share
 TAG=com.apple.virtio-fs.automount
@@ -51,7 +53,22 @@ while [ "$tries" -lt 120 ]; do
 done
 [ -n "$share" ] || log "the shared folder did not appear: this machine keeps the settings it has"
 
-revision="" timezone="" language="" locale="" hostname="" start_url=""
+# A newer copy of this script, from the Lumen that started the machine: taken once per start.
+newer="$share/lumen-guest.sh"
+if [ -n "$share" ] && [ -f "$newer" ] && [ "${LUMEN_GUEST_UPDATED:-0}" != 1 ]; then
+  theirs="$(/usr/bin/sed -n 's/^TOOLS_VERSION=\([0-9][0-9]*\)$/\1/p' "$newer" 2>/dev/null | /usr/bin/head -n 1)"
+  if [ -n "$theirs" ] && [ "$theirs" -gt "$TOOLS_VERSION" ]; then
+    own=/usr/local/lumen/lumen-guest.sh
+    if /bin/cp "$newer" "$own.new" 2>/dev/null && /usr/sbin/chown root:wheel "$own.new" && /bin/chmod 755 "$own.new" \
+        && /bin/sh -n "$own.new" 2>/dev/null && /bin/mv -f "$own.new" "$own"; then
+      log "updated to tools $theirs"
+      LUMEN_GUEST_UPDATED=1 exec /bin/sh "$own"
+    fi
+    /bin/rm -f "$own.new" 2>/dev/null
+  fi
+fi
+
+revision="" timezone="" language="" locale="" hostname="" start_url="" computer="" appearance="" accent="" open_safari=1
 settings="$share/lumen-settings.env"
 if [ -n "$share" ] && [ -f "$settings" ]; then
   revision="$(value LUMEN_REVISION "$settings")"
@@ -60,6 +77,10 @@ if [ -n "$share" ] && [ -f "$settings" ]; then
   locale="$(value LUMEN_LOCALE "$settings")"
   hostname="$(value LUMEN_HOSTNAME "$settings")"
   start_url="$(value LUMEN_START_URL "$settings")"
+  computer="$(value LUMEN_COMPUTER_NAME "$settings")"
+  appearance="$(value LUMEN_APPEARANCE "$settings")"
+  accent="$(value LUMEN_ACCENT "$settings")"
+  open_safari="$(value LUMEN_OPEN_SAFARI "$settings")"
 fi
 only 'A-Za-z0-9' "$revision" || revision=""
 only 'A-Za-z0-9_+/-' "$timezone" || timezone=""
@@ -71,6 +92,24 @@ case "$start_url" in
   *) start_url="" ;;
 esac
 case "$timezone" in *..*|/*) timezone="" ;; esac
+only "A-Za-z0-9 '-" "$computer" || computer=""
+case "$appearance" in light|dark|auto) ;; *) appearance="" ;; esac
+case "$accent" in multi|-1|0|1|2|3|4|5|6) ;; *) accent="" ;; esac
+[ "$open_safari" = 0 ] || open_safari=1
+
+# The colour of selected text that goes with an accent colour, as System Settings sets the two.
+highlight() {
+  case "$1" in
+    -1) printf '%s' "0.847059 0.847059 0.862745 Graphite" ;;
+    0) printf '%s' "1.000000 0.733333 0.721569 Red" ;;
+    1) printf '%s' "1.000000 0.874510 0.701961 Orange" ;;
+    2) printf '%s' "1.000000 0.937255 0.690196 Yellow" ;;
+    3) printf '%s' "0.752941 0.964706 0.678431 Green" ;;
+    4) printf '%s' "0.698039 0.843137 1.000000 Blue" ;;
+    5) printf '%s' "0.968627 0.831373 1.000000 Purple" ;;
+    6) printf '%s' "1.000000 0.749020 0.823529 Pink" ;;
+  esac
+}
 
 # The system's own settings: the time zone a page reads from Safari, and the machine's name.
 if [ -n "$timezone" ] && [ -e "/var/db/timezone/zoneinfo/$timezone" ]; then
@@ -83,6 +122,8 @@ if [ -n "$hostname" ]; then
     /usr/sbin/scutil --set "$name" "$hostname" 2>/dev/null
   done
 fi
+# The name the person gave the computer, as Sharing shows it; the host name above goes with it.
+[ -z "$computer" ] || /usr/sbin/scutil --set ComputerName "$computer" 2>/dev/null
 
 user=""
 uid=""
@@ -114,12 +155,33 @@ apply_for_user() {
     as_user /usr/bin/defaults write -g AppleLanguages -array "$language"
     [ -z "$locale" ] || as_user /usr/bin/defaults write -g AppleLocale -string "$locale"
   fi
+  # The system's look, which a page can read: set before Safari is opened, which takes it then.
+  case "$appearance" in
+    dark)
+      as_user /usr/bin/defaults write -g AppleInterfaceStyle -string Dark
+      as_user /usr/bin/defaults delete -g AppleInterfaceStyleSwitchesAutomatically 2>/dev/null ;;
+    light)
+      as_user /usr/bin/defaults delete -g AppleInterfaceStyle 2>/dev/null
+      as_user /usr/bin/defaults delete -g AppleInterfaceStyleSwitchesAutomatically 2>/dev/null ;;
+    auto)
+      as_user /usr/bin/defaults delete -g AppleInterfaceStyle 2>/dev/null
+      as_user /usr/bin/defaults write -g AppleInterfaceStyleSwitchesAutomatically -bool true ;;
+  esac
+  case "$accent" in
+    "") ;;
+    multi)
+      as_user /usr/bin/defaults delete -g AppleAccentColor 2>/dev/null
+      as_user /usr/bin/defaults delete -g AppleHighlightColor 2>/dev/null ;;
+    *)
+      as_user /usr/bin/defaults write -g AppleAccentColor -int "$accent"
+      as_user /usr/bin/defaults write -g AppleHighlightColor -string "$(highlight "$accent")" ;;
+  esac
   # Kept per machine by macOS (by its hardware identifier), so not what the base system had: no
   # screen saver, which would lock a machine left alone behind a password nobody types here.
   as_user /usr/bin/defaults -currentHost write com.apple.screensaver idleTime -int 0 2>/dev/null
   # The desktop first: Safari opened before the Dock is there opens behind it.
   /bin/sleep 4
-  if [ -n "$share" ] && [ -f "$settings" ]; then
+  if [ -n "$share" ] && [ -f "$settings" ] && [ "$open_safari" = 1 ]; then
     if [ -n "$start_url" ]; then
       as_user /usr/bin/open -a Safari "$start_url" 2>/dev/null
     else

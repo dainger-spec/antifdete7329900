@@ -11,7 +11,7 @@
 #   - says in the shared folder that the base is ready, and shuts the machine down.
 set -u
 
-TOOLS_VERSION=1
+TOOLS_VERSION=2
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DEST=/usr/local/lumen
 PLIST=/Library/LaunchDaemons/io.lumenbrowser.guest.plist

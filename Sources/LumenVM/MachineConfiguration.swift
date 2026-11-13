@@ -82,7 +82,8 @@ enum MachineConfiguration {
             // a Mac has one too.
             let sound = VZVirtioSoundDeviceConfiguration()
             let output = VZVirtioSoundDeviceOutputStreamConfiguration()
-            output.sink = VZHostAudioOutputStreamSink()
+            // Sound off: the speakers are there, as on any Mac, and connected to nothing.
+            if request.sound { output.sink = VZHostAudioOutputStreamSink() }
             sound.streams = extras.microphone ? [output, VZVirtioSoundDeviceInputStreamConfiguration()] : [output]
             configuration.audioDevices = [sound]
         }

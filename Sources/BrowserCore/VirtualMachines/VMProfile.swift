@@ -41,12 +41,33 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
     /// The page Safari opens when the machine has started. Nil: Safari as it was left.
     public var startURL: String?
     public var notes: String
+    /// The machine's processors. Nil: as a Mac has them (`VMRequirements.coresWanted` — Safari
+    /// tells a page at most eight). Fewer spare this Mac, and are fewer than any Mac of today has.
+    public var cores: Int?
+    /// What the guest plays is heard on this Mac. Off: the machine still has its speakers (a Mac
+    /// without any is not one), and nothing comes out of them.
+    public var soundEnabled: Bool
+    /// The guest system's appearance, which a page reads (`prefers-color-scheme`): `VMAppearance`'s
+    /// raw value. Nil: as the base system has it.
+    public var appearance: String?
+    /// The guest system's accent colour — and with it the colour of selected text —
+    /// (`VMAccent`'s raw value). Nil: as the base system has it. A new machine gets one at
+    /// random, as Macs differ in it.
+    public var accent: String?
+    /// The computer's name in the guest ("Anna's MacBook Air"). Nil: by the Mac its screen is.
+    public var computerName: String?
+    /// Safari opens when the machine has started.
+    public var opensSafari: Bool
+    /// The machine's colour in the list (an index into the profiles' palette). Nil: by its id.
+    public var colorIndex: Int?
 
     public init(id: UUID = UUID(), name: String, createdAt: Date = Date(), lastLaunchedAt: Date? = nil,
                 proxy: ProxySettings? = nil, timeZoneIdentifier: String? = nil, language: String? = nil,
                 countryCode: String? = nil, localeFollowsProxy: Bool = true,
                 displayID: String = VMDisplay.standard.id, memoryGB: Int = VMRequirements.standardMemoryGB,
-                macAddress: String = VMProfile.randomMACAddress(), startURL: String? = nil, notes: String = "") {
+                macAddress: String = VMProfile.randomMACAddress(), startURL: String? = nil, notes: String = "",
+                cores: Int? = nil, soundEnabled: Bool = true, appearance: String? = nil, accent: String? = nil,
+                computerName: String? = nil, opensSafari: Bool = true, colorIndex: Int? = nil) {
         self.id = id
         self.name = name
         self.createdAt = createdAt
@@ -61,11 +82,19 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         self.macAddress = macAddress
         self.startURL = startURL
         self.notes = notes
+        self.cores = cores
+        self.soundEnabled = soundEnabled
+        self.appearance = appearance
+        self.accent = accent
+        self.computerName = computerName
+        self.opensSafari = opensSafari
+        self.colorIndex = colorIndex
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, createdAt, lastLaunchedAt, proxy, timeZoneIdentifier, language, countryCode, localeFollowsProxy,
-             displayID, memoryGB, macAddress, startURL, notes
+             displayID, memoryGB, macAddress, startURL, notes, cores, soundEnabled, appearance, accent, computerName,
+             opensSafari, colorIndex
     }
 
     /// Tolerant of what a later version adds or an earlier one lacked: defaults for what is absent.
@@ -85,6 +114,14 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         macAddress = try c.decodeIfPresent(String.self, forKey: .macAddress) ?? VMProfile.randomMACAddress()
         startURL = try c.decodeIfPresent(String.self, forKey: .startURL)
         notes = try c.decodeIfPresent(String.self, forKey: .notes) ?? ""
+        // What a list of before these settings does not have: as a machine was then.
+        cores = try c.decodeIfPresent(Int.self, forKey: .cores)
+        soundEnabled = try c.decodeIfPresent(Bool.self, forKey: .soundEnabled) ?? true
+        appearance = try c.decodeIfPresent(String.self, forKey: .appearance)
+        accent = try c.decodeIfPresent(String.self, forKey: .accent)
+        computerName = try c.decodeIfPresent(String.self, forKey: .computerName)
+        opensSafari = try c.decodeIfPresent(Bool.self, forKey: .opensSafari) ?? true
+        colorIndex = try c.decodeIfPresent(Int.self, forKey: .colorIndex)
     }
 
     /// The screen, as one of the presets (an id this version does not know: the standard one).
@@ -137,6 +174,21 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         guard VMRequirements.memoryChoices.contains(memoryGB) else {
             throw CoreError.invalidConfiguration("memory out of range")
         }
+        if let cores, !VMRequirements.coreChoices.contains(cores) {
+            throw CoreError.invalidConfiguration("processors out of range")
+        }
+        if let appearance, VMAppearance(rawValue: appearance) == nil {
+            throw CoreError.invalidConfiguration("unknown appearance")
+        }
+        if let accent, VMAccent(rawValue: accent) == nil {
+            throw CoreError.invalidConfiguration("unknown accent colour")
+        }
+        if let computerName, VMGuestSettings.computerName(computerName) == nil {
+            throw CoreError.invalidConfiguration("the computer's name must be 1–40 Latin letters, digits, spaces, hyphens or apostrophes")
+        }
+        if notes.count > 2000 {
+            throw CoreError.invalidConfiguration("the note is too long")
+        }
     }
 
     /// The profile with its time zone, language and country taken from where its proxy came out
@@ -151,6 +203,49 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
             if let language = ProxyLocation.webLanguages[country] { updated.language = language }
         }
         return updated
+    }
+}
+
+/// The guest system's appearance: what a page reads as `prefers-color-scheme`.
+public enum VMAppearance: String, CaseIterable, Sendable {
+    case light, dark
+    /// Light by day, dark by night, as macOS's "Auto".
+    case auto
+}
+
+/// The guest system's accent colour, as System Settings › Appearance offers them. The raw value
+/// is what the boot script is told; `number` is macOS's own (`AppleAccentColor`).
+public enum VMAccent: String, CaseIterable, Sendable {
+    /// macOS's default: each app's own colour (no `AppleAccentColor` at all).
+    case multicolor = "multi"
+    case blue, purple, pink, red, orange, yellow, green, graphite
+
+    /// `AppleAccentColor`; nil for multicolour, which is the key's absence.
+    public var number: Int? {
+        switch self {
+        case .multicolor: return nil
+        case .graphite: return -1
+        case .red: return 0
+        case .orange: return 1
+        case .yellow: return 2
+        case .green: return 3
+        case .blue: return 4
+        case .purple: return 5
+        case .pink: return 6
+        }
+    }
+
+    /// An accent for a new machine: macOS's default for about two machines in five, as most Macs
+    /// keep it, and one of the others for the rest.
+    public static func random<G: RandomNumberGenerator>(using generator: inout G) -> VMAccent {
+        if Int.random(in: 0..<5, using: &generator) < 2 { return .multicolor }
+        let others = allCases.filter { $0 != .multicolor }
+        return others[Int.random(in: 0..<others.count, using: &generator)]
+    }
+
+    public static func random() -> VMAccent {
+        var generator = SystemRandomNumberGenerator()
+        return random(using: &generator)
     }
 }
 

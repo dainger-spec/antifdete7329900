@@ -204,6 +204,10 @@ public enum VMSetupState: Equatable, Sendable {
 
 /// The version of the tools the setup puts into the guest (Resources/VMGuest). Raised when the
 /// boot script changes in a way an installed copy must follow.
+///
+/// 2: the appearance, the accent colour, the computer's own name, Safari not opened; and the boot
+/// script takes a newer copy of itself from the shared folder, so that later versions need no
+/// visit to the base system.
 public enum VMGuestTools {
-    public static let version = 1
+    public static let version = 2
 }

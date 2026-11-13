@@ -211,7 +211,7 @@ enum HelpContent {
                 .points(["vm.costs.disk", "vm.costs.memory", "vm.costs.limit", "vm.costs.start"]),
                 .heading("vm.know"),
                 .note("vm.know.disks"),
-                .points(["vm.know.udp", "vm.know.updates", "vm.know.base", "vm.know.license", "vm.know.local"]),
+                .points(["vm.know.same", "vm.know.udp", "vm.know.updates", "vm.know.base", "vm.know.license", "vm.know.local"]),
             ]
         case .check:
             return [

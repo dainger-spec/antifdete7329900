@@ -173,6 +173,48 @@ Shut Down in the app (or closing the machine's window) asks that way first — n
 guest's screen — then presses the virtual power button after 20 seconds, and ends the machine after
 a minute.
 
+## A machine's settings
+
+| | |
+|---|---|
+| Name, note, colour in the list | the app's own |
+| Proxy | every connection of the machine through it; or none: this Mac's connection |
+| Time zone, language | from where the proxy comes out, at every start; or set by hand |
+| Screen | a real Mac's, at its default size or at "More Space"; external displays |
+| Memory | 3, 4, 6 or 8 GB |
+| Processor | as a Mac (8 cores — what a page of any Mac of today sees), or 4 or 6: lighter on this Mac, and fewer than a Mac has |
+| Sound | heard on this Mac, or not (the machine keeps its speakers either way) |
+| Appearance | light, dark or auto: what a page reads as `prefers-color-scheme` |
+| Accent colour | macOS's nine; a new machine gets one at random, as Macs differ in theirs |
+| Computer's name | as Sharing shows it |
+| At start | Safari opened or not; its start page |
+
+The last four are applied in the guest by the boot script and need **tools 2**
+(`VMGuestTools.version`); a base set up with tools 1 says so in the list and in the editor, and
+running Install Lumen Tools in the base again updates it. From tools 2 on, the boot script takes a
+newer copy of itself from the shared folder at a machine's start (the app puts its own there), so
+later versions need no visit to the base.
+
+## What machines have in common
+
+Nothing of one machine's data, network or identity is another's. But every machine is a copy of
+one base system, and this is what that means:
+
+- **What was in the base when a machine was made is in the machine.** The account, its password,
+  the system's settings — and whatever Safari in the base held. A site opened in the base leaves
+  its cookies in every machine made after. The base is set up without a network for that reason
+  too, and both the base's window and the list say not to browse in it.
+- **The same Mac, as far as a page can tell.** The same macOS and Safari, the same fonts, the same
+  virtual GPU — as two Macs of one model and one macOS are the same to a page. What differs is
+  what the profile sets: the screen, the time zone and language, the appearance and accent, and
+  where the connection comes from. Whether the virtual GPU sets machines apart from real Macs as a
+  class is not measured (below).
+- **Without a proxy, the same address**: this Mac's.
+- **Not shared**: disks (a clone's writes are its own), machine identifiers and serial numbers,
+  network cards, the networks themselves (each machine's is its own, with nobody on it but the
+  gateway — machines cannot reach each other), the folders they share with the app, the helper
+  processes.
+
 ## On disk
 
 ```

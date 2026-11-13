@@ -222,6 +222,10 @@ private struct VirtualMachinesScreen: View {
             if center.isReady, center.activity == .guestSetup {
                 VMNote(L("vm.base.isOpen"), tone: .plain, symbol: "macwindow")
             }
+            if center.isReady, center.activity == nil,
+               (center.library.baseInfo()?.toolsVersion ?? VMGuestTools.version) < VMGuestTools.version {
+                VMNote(L("vm.tools.old"), tone: .warning)
+            }
             if center.runningCount >= VMRequirements.runningLimit {
                 VMNote(String(format: L("vm.limit.reached"), VMRequirements.runningLimit), tone: .plain, symbol: "info.circle")
             }
@@ -301,7 +305,9 @@ private struct VirtualMachinesScreen: View {
             number += 1
             name = String(format: L("vm.new.name"), number)
         }
-        editing = VMEditorView.Draft(profile: VMProfile(name: name), isNew: true)
+        // A new machine gets an accent colour at random, as Macs differ in theirs: the editor
+        // shows it, and the person may change it.
+        editing = VMEditorView.Draft(profile: VMProfile(name: name, accent: VMAccent.random().rawValue), isNew: true)
     }
 
     /// The person's Delete, confirmed: the one caller of the machines' one deletion path.
@@ -399,10 +405,7 @@ private struct VMRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
-            Image(systemName: profile.display.id.hasPrefix("macbook") ? "laptopcomputer" : "desktopcomputer")
-                .font(.system(size: 20, weight: .light))
-                .foregroundStyle(state == nil ? Theme.textTertiary : Theme.running)
-                .frame(width: 34)
+            VMGlyph(profile: profile, running: state != nil)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     Text(profile.name)
@@ -423,6 +426,13 @@ private struct VMRow: View {
                     Text(details)
                         .font(.lumenSecondary)
                         .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                if !profile.notes.isEmpty {
+                    Text(profile.notes)
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textTertiary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
@@ -537,9 +547,41 @@ private struct VMRow: View {
 
 // MARK: - The editor
 
-/// A virtual machine's profile, new or changed: its name, the proxy the whole machine goes out
-/// through, where its time zone and language come from, the Mac its screen is, and its memory.
-/// What is changed here takes effect at the machine's next start.
+/// A machine's sign in the list: the Mac its screen is, on the machine's colour.
+struct VMGlyph: View {
+    let profile: VMProfile
+    var running = false
+    var size: CGFloat = 34
+
+    /// The machine's colour: the one chosen for it, or one by its id.
+    static func colorIndex(of profile: VMProfile) -> Int {
+        let count = ProfileAvatar.palette.count
+        if let chosen = profile.colorIndex, (0..<count).contains(chosen) { return chosen }
+        return ProfileAvatarStyle.color(for: profile.id) % count
+    }
+
+    var body: some View {
+        let colors = ProfileAvatar.palette[Self.colorIndex(of: profile)]
+        Image(systemName: profile.display.id.hasPrefix("macbook") ? "laptopcomputer" : "desktopcomputer")
+            .font(.system(size: size * 0.44, weight: .regular))
+            .foregroundStyle(Color(hex: colors.text))
+            .frame(width: size, height: size)
+            .background(RoundedRectangle(cornerRadius: size * 0.28, style: .continuous).fill(Color(hex: colors.fill)))
+            .overlay(alignment: .bottomTrailing) {
+                if running {
+                    Circle().fill(Theme.greenDot)
+                        .frame(width: 8, height: 8)
+                        .overlay(Circle().strokeBorder(Theme.surface, lineWidth: 1.5))
+                        .offset(x: 2, y: 2)
+                }
+            }
+            .accessibilityHidden(true)
+    }
+}
+
+/// A virtual machine's profile, new or changed, by what the settings are about: the machine
+/// itself, where it goes out, where it says it is, the Mac it is, how its system looks, and what
+/// happens at its start. What is changed here takes effect at the machine's next start.
 struct VMEditorView: View {
     struct Draft: Identifiable {
         var profile: VMProfile
@@ -553,6 +595,8 @@ struct VMEditorView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var name: String
+    @State private var notes: String
+    @State private var colorIndex: Int
     /// "": this Mac's connection. "current": the proxy the profile has, which the list no longer
     /// holds. Else a list entry's id.
     @State private var proxyChoice: String
@@ -561,6 +605,14 @@ struct VMEditorView: View {
     @State private var language: String
     @State private var displayID: String
     @State private var memoryGB: Int
+    /// 0: as a Mac has them.
+    @State private var cores: Int
+    @State private var soundEnabled: Bool
+    /// "": as the base system has it.
+    @State private var appearance: String
+    @State private var accent: String
+    @State private var computerName: String
+    @State private var opensSafari: Bool
     @State private var startURL: String
     @State private var error: String?
 
@@ -573,6 +625,8 @@ struct VMEditorView: View {
         self.draft = draft
         let profile = draft.profile
         _name = State(initialValue: profile.name)
+        _notes = State(initialValue: profile.notes)
+        _colorIndex = State(initialValue: VMGlyph.colorIndex(of: profile))
         var choice = ""
         if let proxy = profile.proxy {
             let identity = ProxyList.identity(of: proxy)
@@ -584,42 +638,35 @@ struct VMEditorView: View {
         _language = State(initialValue: profile.language ?? "")
         _displayID = State(initialValue: profile.displayID)
         _memoryGB = State(initialValue: profile.memoryGB)
+        _cores = State(initialValue: profile.cores ?? 0)
+        _soundEnabled = State(initialValue: profile.soundEnabled)
+        _appearance = State(initialValue: profile.appearance ?? "")
+        _accent = State(initialValue: profile.accent ?? "")
+        _computerName = State(initialValue: profile.computerName ?? "")
+        _opensSafari = State(initialValue: profile.opensSafari)
         _startURL = State(initialValue: profile.startURL ?? "")
     }
 
     private var chosenEntry: ProxyListEntry? { proxies.first { $0.id.uuidString == proxyChoice } }
+
+    /// The base system's tools are older than the settings of the system's look need: said under
+    /// them, with what to do.
+    private var toolsAreOld: Bool {
+        (center.library.baseInfo()?.toolsVersion ?? VMGuestTools.version) < VMGuestTools.version
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SheetHeader(title: draft.isNew ? L("vm.editor.title.new") : String(format: L("vm.editor.title"), draft.profile.name),
                         subtitle: L("vm.editor.subtitle"))
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    EditorField(L("vm.editor.name")) {
-                        TextField(L("vm.editor.name"), text: $name, prompt: Text(verbatim: ""))
-                            .lumenField(L("vm.editor.name.placeholder"), isEmpty: name.isEmpty)
-                    }
-                    proxyField
-                    localeFields
-                    EditorField(L("vm.editor.display")) {
-                        Picker(L("vm.editor.display"), selection: $displayID) {
-                            ForEach(VMDisplay.presets) { display in
-                                Text(verbatim: "\(display.name) — \(display.pointsWide) × \(display.pointsHigh)").tag(display.id)
-                            }
-                        }
-                        .labelsHidden()
-                        .fixedSize()
-                        note(L("vm.editor.display.note"))
-                    }
-                    EditorField(L("vm.editor.memory")) {
-                        LumenSegmented(selection: $memoryGB,
-                                       options: VMRequirements.memoryChoices.map { (value: $0, title: String(format: L("vm.row.memory"), $0)) })
-                        note(memoryNote, warns: memoryIsTight)
-                    }
-                    EditorField(L("vm.editor.start")) {
-                        TextField(L("vm.editor.start"), text: $startURL, prompt: Text(verbatim: ""))
-                            .lumenField("https://", isEmpty: startURL.isEmpty)
-                    }
+                VStack(alignment: .leading, spacing: 26) {
+                    section(L("vm.editor.section.machine")) { machineFields }
+                    section(L("vm.editor.section.network")) { proxyField }
+                    section(L("vm.editor.section.region")) { localeFields }
+                    section(L("vm.editor.section.device")) { deviceFields }
+                    section(L("vm.editor.section.system")) { systemFields }
+                    section(L("vm.editor.section.start")) { startFields }
                     if center.isRunning(draft.profile.id) {
                         note(L("vm.editor.nextStart"), warns: true)
                     }
@@ -633,7 +680,7 @@ struct VMEditorView: View {
                 .padding(.horizontal, 24)
                 .padding(.bottom, 18)
             }
-            .frame(minHeight: 320, maxHeight: 560)
+            .frame(minHeight: 360, maxHeight: 620)
             SheetFooter {
                 Button(L("common.cancel")) { dismiss() }
                     .buttonStyle(.lumenSecondary)
@@ -644,9 +691,50 @@ struct VMEditorView: View {
                     .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
-        .sheetFrame(width: 540)
+        .sheetFrame(width: 580)
         .background(Theme.raised)
     }
+
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(title).lumenCaps()
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: The machine
+
+    @ViewBuilder
+    private var machineFields: some View {
+        EditorField(L("vm.editor.name")) {
+            TextField(L("vm.editor.name"), text: $name, prompt: Text(verbatim: ""))
+                .lumenField(L("vm.editor.name.placeholder"), isEmpty: name.isEmpty)
+        }
+        EditorField(L("vm.editor.color")) {
+            HStack(spacing: 8) {
+                ForEach(Array(ProfileAvatar.palette.enumerated()), id: \.offset) { index, colors in
+                    Button {
+                        colorIndex = index
+                    } label: {
+                        Circle()
+                            .fill(Color(hex: colors.text))
+                            .frame(width: 18, height: 18)
+                            .overlay(Circle().strokeBorder(Color.white, lineWidth: colorIndex == index ? 2 : 0).padding(-3))
+                            .frame(width: 26, height: 26)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(colorIndex == index ? .isSelected : [])
+                }
+            }
+        }
+        EditorField(L("vm.editor.notes")) {
+            TextField(L("vm.editor.notes"), text: $notes, prompt: Text(verbatim: ""))
+                .lumenField(L("vm.editor.notes.placeholder"), isEmpty: notes.isEmpty)
+        }
+    }
+
+    // MARK: Where it goes out
 
     private var proxyField: some View {
         EditorField(L("vm.editor.proxy")) {
@@ -667,6 +755,8 @@ struct VMEditorView: View {
             }
         }
     }
+
+    // MARK: Where it says it is
 
     @ViewBuilder
     private var localeFields: some View {
@@ -691,6 +781,80 @@ struct VMEditorView: View {
                 .fixedSize()
             }
         }
+    }
+
+    // MARK: The Mac it is
+
+    @ViewBuilder
+    private var deviceFields: some View {
+        EditorField(L("vm.editor.display")) {
+            Picker(L("vm.editor.display"), selection: $displayID) {
+                ForEach(VMDisplay.presets) { display in
+                    Text(verbatim: "\(display.name) — \(display.pointsWide) × \(display.pointsHigh)").tag(display.id)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+            note(L("vm.editor.display.note"))
+        }
+        EditorField(L("vm.editor.memory")) {
+            LumenSegmented(selection: $memoryGB,
+                           options: VMRequirements.memoryChoices.map { (value: $0, title: String(format: L("vm.row.memory"), $0)) })
+            note(memoryNote, warns: memoryIsTight)
+        }
+        EditorField(L("vm.editor.cores")) {
+            LumenSegmented(selection: $cores, options: [(value: 0, title: L("vm.editor.cores.mac"))]
+                + VMRequirements.coreChoices.filter { $0 < VMRequirements.coresWanted }
+                    .map { (value: $0, title: String(format: L("vm.editor.cores.count"), $0)) })
+            note(cores == 0 ? L("vm.editor.cores.note") : L("vm.editor.cores.fewer"), warns: cores != 0)
+        }
+        EditorToggle(L("vm.editor.sound"), detail: L("vm.editor.sound.detail"), isOn: $soundEnabled)
+    }
+
+    // MARK: How its system looks
+
+    @ViewBuilder
+    private var systemFields: some View {
+        EditorField(L("vm.editor.appearance")) {
+            LumenSegmented(selection: $appearance, options: [
+                (value: "", title: L("vm.editor.asBase")),
+                (value: VMAppearance.light.rawValue, title: L("vm.editor.appearance.light")),
+                (value: VMAppearance.dark.rawValue, title: L("vm.editor.appearance.dark")),
+                (value: VMAppearance.auto.rawValue, title: L("vm.editor.appearance.auto")),
+            ])
+            note(L("vm.editor.appearance.note"))
+        }
+        EditorField(L("vm.editor.accent")) {
+            Picker(L("vm.editor.accent"), selection: $accent) {
+                Text(L("vm.editor.asBase")).tag("")
+                ForEach(VMAccent.allCases, id: \.rawValue) { value in
+                    Text(L("vm.editor.accent.\(value.rawValue)")).tag(value.rawValue)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+            note(L("vm.editor.accent.note"))
+        }
+        EditorField(L("vm.editor.computerName")) {
+            TextField(L("vm.editor.computerName"), text: $computerName, prompt: Text(verbatim: ""))
+                .lumenField(L("vm.editor.computerName.placeholder"), isEmpty: computerName.isEmpty)
+            note(L("vm.editor.computerName.note"))
+        }
+        if toolsAreOld {
+            note(L("vm.editor.tools.old"), warns: true)
+        }
+    }
+
+    // MARK: Its start
+
+    @ViewBuilder
+    private var startFields: some View {
+        EditorToggle(L("vm.editor.opensSafari"), detail: L("vm.editor.opensSafari.detail"), isOn: $opensSafari)
+        EditorField(L("vm.editor.start")) {
+            TextField(L("vm.editor.start"), text: $startURL, prompt: Text(verbatim: ""))
+                .lumenField("https://", isEmpty: startURL.isEmpty)
+        }
+        .disabled(!opensSafari)
     }
 
     /// "Berlin 1 — Germany", as the proxy list names it and where it came out at its last check.
@@ -719,9 +883,26 @@ struct VMEditorView: View {
     private func save() {
         var profile = draft.profile
         profile.name = name
+        profile.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        profile.colorIndex = colorIndex
         profile.displayID = displayID
         profile.memoryGB = memoryGB
+        profile.cores = cores == 0 ? nil : cores
+        profile.soundEnabled = soundEnabled
+        profile.appearance = appearance.isEmpty ? nil : appearance
+        profile.accent = accent.isEmpty ? nil : accent
+        profile.opensSafari = opensSafari
         profile.localeFollowsProxy = followsProxy
+        let computer = computerName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if computer.isEmpty {
+            profile.computerName = nil
+        } else {
+            guard let checked = VMGuestSettings.computerName(computer) else {
+                error = L("vm.editor.error.computerName")
+                return
+            }
+            profile.computerName = checked
+        }
         let start = startURL.trimmingCharacters(in: .whitespacesAndNewlines)
         if start.isEmpty {
             profile.startURL = nil
