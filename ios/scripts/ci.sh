@@ -129,6 +129,8 @@ if [[ "$SCREENS" == 1 ]]; then   # the status bar Apple's own screenshots show
     xcrun simctl status_bar "$UDID" override --time 9:41 --dataNetwork wifi --wifiMode active --wifiBars 3 \
         --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100 \
         || say "the status bar could not be set"
+    # the keyboard's first-use tip (swipe typing) would cover the keys of the first screenshot with them
+    xcrun simctl spawn "$UDID" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true || true
 fi
 trap 'xcrun simctl shutdown "$UDID" >/dev/null 2>&1; xcrun simctl delete "$UDID" >/dev/null 2>&1; [[ -n "${TESTBED:-}" ]] && kill "$TESTBED" 2>/dev/null; sudo -n rm -f /etc/resolver/lumentest /etc/resolver/example 2>/dev/null; sudo -n pkill -f testbed/dns53.py 2>/dev/null' EXIT
 

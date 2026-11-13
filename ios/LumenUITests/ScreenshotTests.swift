@@ -213,6 +213,9 @@ final class DesignShotTests: LumenUITestCase {
         let name = app.textFields["sessionName"]
         if name.waitForExistence(timeout: 5) {
             typeInto(name, t("Оплата", "Payments"))
+            // The system's own first-keyboard tip (swipe typing) covers the keys on a new simulator.
+            let tip = app.keyboards.buttons["Continue"]
+            if tip.exists { tip.tap() }
             sleep(1)
             snap("k-keyboard")
             touch(app.buttons[t("Отмена", "Cancel")].firstMatch)
