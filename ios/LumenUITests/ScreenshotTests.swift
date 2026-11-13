@@ -85,6 +85,23 @@ final class DesignShotTests: LumenUITestCase {
             theme = "dark"
             takeAll()
         }
+        // Dynamic Type at AX3 on the list and the settings; VoiceOver's own audit on the list and the browser.
+        language = "ru"
+        theme = "dark"
+        start(extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"])
+        snap("ax3-k-list")
+        audit("the session list")
+        openSeeded(t("Магазин — Берлин", "Store — Berlin"))
+        go("http://check.example/?l=\(language)")
+        _ = app.webViews.staticTexts["Europe/Berlin"].waitForExistence(timeout: 30)
+        audit("the browser")
+        app.buttons["settingsButton"].tap()
+        if app.buttons["settingsDone"].waitForExistence(timeout: 10) {
+            sleep(1)
+            snap("ax3-k-settings")
+        }
+        app.terminate()
+
         // The light theme, behind its flag: the main screens.
         language = "ru"
         theme = "light"
@@ -101,9 +118,25 @@ final class DesignShotTests: LumenUITestCase {
 
     private func t(_ ru: String, _ en: String) -> String { language == "en" ? en : ru }
 
-    private func start(access: String = "full", empty: Bool = false) {
+    /// VoiceOver's audit of the screen (iOS 17's XCTest): labels, hit regions, text that grows. The
+    /// page's own content is the site's, not the app's: what is inside the web view is let pass.
+    private func audit(_ what: String) {
+        do {
+            let web = app.webViews.firstMatch
+            let page = web.exists ? web.frame : .null
+            try app.performAccessibilityAudit(for: [.sufficientElementDescription, .hitRegion, .dynamicType, .textClipped]) { issue in
+                let inPage = issue.element.map { $0.elementType == .webView || page.contains($0.frame) } ?? false
+                if !inPage { print("LUMEN A11Y \(what): \(issue.auditType) — \(issue.compactDescription) — \(issue.element?.debugDescription.prefix(120) ?? "")") }
+                return inPage
+            }
+        } catch {
+            XCTFail("the accessibility audit of \(what): \(error)")
+        }
+    }
+
+    private func start(access: String = "full", empty: Bool = false, extra: [String] = []) {
         let app = XCUIApplication()
-        app.launchArguments = ["-LumenResetState"]
+        app.launchArguments = ["-LumenResetState"] + extra
         app.launchEnvironment["LUMEN_TEST_LANGUAGE"] = language
         app.launchEnvironment["LUMEN_TEST_ACCESS"] = access
         app.launchEnvironment["LUMEN_TEST_SEED"] = "appstore"
