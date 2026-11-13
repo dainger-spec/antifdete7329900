@@ -36,7 +36,9 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
     }
 
     public enum Network: String, Codable, Sendable {
-        /// This Mac's own connection (Apple's NAT): sites see this Mac's address.
+        /// This Mac's own connection, as any app on it has it — the helper makes the guest's
+        /// connections as its own (`VMNetDirectConnector`): sites see this Mac's address, or its
+        /// VPN's.
         case direct
         /// Everything through `proxy`, and nothing any other way (`VMNetCore`).
         case proxy

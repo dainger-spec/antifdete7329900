@@ -121,16 +121,25 @@ the person's own.
 
 ### The network
 
-| profile | the machine's network card |
+| profile | where the machine's connections go |
 |---|---|
-| no proxy | Apple's NAT: this Mac's own connection; sites see this Mac's address |
-| a proxy | a socket whose other end is `VMNetCore`: every connection of the guest — the whole macOS, not only Safari — goes through the profile's proxy, and there is no other way out |
+| no proxy | made by the helper as its own, ordinary sockets (`VMNetDirectConnector`): this Mac's connection as any app has it — through its VPN, by its routes. Sites see this Mac's address, or its VPN's |
+| a proxy | every connection of the guest — the whole macOS, not only Safari — goes through the profile's proxy, and there is no other way out |
+
+In both, the machine's network card is a socket whose other end is `VMNetCore` in the helper: it
+answers the guest's DHCP and DNS itself and ends the guest's TCP connections. **Apple's NAT for
+virtual machines is not used.** It carries a guest's packets through a network of the system's
+own, beside the apps' — and where the Mac runs a VPN or a proxy tool that takes the apps' traffic,
+the guest's packets are not taken with it: on the first Mac this ran on (13 November) a machine
+"through my network" had no internet at all, and macOS's first-run setup hung waiting for Apple's
+servers. Connections made by the helper itself go wherever any app's do.
 
 With a proxy the machine is **fail-closed by construction**: its card is not attached to any
-network of this Mac. `VMNetCore` answers the guest's DHCP and DNS itself (names are resolved by
-the proxy, never by this Mac), ends the guest's TCP connections and carries each through the proxy
-(SOCKS5 or HTTP CONNECT). **UDP does not leave the machine**: QUIC falls back to TCP, and WebRTC
-has no path that could show this Mac's address. Apple's software-update hosts are answered "no
+network of this Mac, names are resolved by the proxy and never by this Mac, and each connection is
+carried through the proxy (SOCKS5 or HTTP CONNECT). Without one, names are resolved by this Mac,
+and a name that resolves to this Mac or to a local network is refused: a page in a guest does not
+reach the Mac's own services. **UDP does not leave a machine**, with a proxy or without: QUIC
+falls back to TCP, and WebRTC has no path that could show this Mac's address. Apple's software-update hosts are answered "no
 such name", so a machine does not fetch gigabytes of updates through a paid proxy. docs/VM_NETWORK.md
 has the details and the tests.
 

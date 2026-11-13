@@ -434,7 +434,7 @@ private struct VMRow: View {
                 }
             }
             Spacer(minLength: 10)
-            if let state, state.phase == .running, profile.proxy != nil {
+            if let state, state.phase == .running {
                 Text(verbatim: "↑ \(VMText.bytes(state.bytesUp))  ↓ \(VMText.bytes(state.bytesDown))")
                     .font(.lumenSecondary)
                     .foregroundStyle(Theme.textTertiary)

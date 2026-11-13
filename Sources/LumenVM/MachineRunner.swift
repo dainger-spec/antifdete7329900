@@ -7,14 +7,18 @@ import VMNetCore
 
 /// A machine's network card, and what is at its other end.
 ///
-/// Direct: Apple's NAT — this Mac's own connection. With a proxy: the card is a socket whose other
-/// end is the app's own network (`VMNetCore`), which carries every connection of the guest through
-/// the profile's proxy and has no other way out, so a guest whose proxy is down reaches nothing.
-/// Closed: the same network with no way out at all.
+/// The card is a socket whose other end is the app's own network (`VMNetCore`), which ends every
+/// connection of the guest and carries it on. With a proxy: through the profile's proxy, and no
+/// other way, so a guest whose proxy is down reaches nothing. Direct: as this process's own
+/// connections (`VMNetDirectConnector`) — this Mac's connection as any app has it, through its
+/// VPN and by its routes. Not Apple's NAT: where the Mac runs a VPN or a proxy tool, a guest
+/// behind that NAT had no internet at all (the first run on a person's Mac, 13 November).
+/// Closed: the same network with no way out. Absent: no card.
 final class MachineNetwork {
     /// Nil: the machine has no network card (`VMHelperRequest.Network.absent`).
     let attachment: VZNetworkDeviceAttachment?
     private let network: VMNetwork?
+    private let connector: VMNetDirectConnector?
     private let descriptor: Int32
 
     /// The card's address when the request names none that reads: the same one for the card and
@@ -45,15 +49,32 @@ final class MachineNetwork {
         if request.network == .absent {
             attachment = nil
             network = nil
+            connector = nil
             descriptor = -1
             return
         }
-        if request.network == .direct {
-            attachment = VZNATNetworkDeviceAttachment()
-            network = nil
-            descriptor = -1
-            return
+        Self.raiseDescriptorLimit()
+        // The way out, before anything else is made: a connector that does not start is an
+        // error the person is told, not a machine without a network.
+        var upstream = VMNetUpstream.none
+        var direct: VMNetDirectConnector?
+        switch request.network {
+        case .direct:
+            let made = VMNetDirectConnector()
+            try made.start()
+            direct = made
+            upstream = made.upstream
+        case .proxy:
+            if let proxy = request.proxy, !proxy.tlsToProxy {
+                switch proxy.kind {
+                case .socks5: upstream = .socks5(host: proxy.host, port: proxy.port, username: proxy.username, password: proxy.password)
+                case .httpConnect: upstream = .httpConnect(host: proxy.host, port: proxy.port, username: proxy.username, password: proxy.password)
+                }
+            }
+        case .closed, .absent:
+            break
         }
+        connector = direct
         var pair: [Int32] = [-1, -1]
         guard socketpair(AF_UNIX, SOCK_DGRAM, 0, &pair) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
         for end in pair {
@@ -66,18 +87,10 @@ final class MachineNetwork {
         attachment = VZFileHandleNetworkDeviceAttachment(fileHandle: FileHandle(fileDescriptor: pair[0], closeOnDealloc: true))
         descriptor = pair[1]
 
-        Self.raiseDescriptorLimit()
         let guestMAC = VMNetMAC(string: Self.macAddress(of: request)) ?? VMNetMAC(bytes: [0x02, 0x1A, 0x11, 0x00, 0x00, 0x02])
         // The guest's address on its own little network, as a Mac has one behind a home router:
         // 192.168.1.x, x from its card's address so that it stays the same from start to start.
         let last = 2 + guestMAC.bytes.reduce(0) { ($0 &* 31 &+ Int($1)) % 200 }
-        var upstream = VMNetUpstream.none
-        if request.network == .proxy, let proxy = request.proxy, !proxy.tlsToProxy {
-            switch proxy.kind {
-            case .socks5: upstream = .socks5(host: proxy.host, port: proxy.port, username: proxy.username, password: proxy.password)
-            case .httpConnect: upstream = .httpConnect(host: proxy.host, port: proxy.port, username: proxy.username, password: proxy.password)
-            }
-        }
         let configuration = VMNetConfiguration(guestMAC: guestMAC, gatewayMAC: VMNetMAC(bytes: [0x02, 0x1A, 0x11, 0x00, 0x00, 0x01]),
                                                gatewayAddress: VMNetIPv4(string: "192.168.1.1")!,
                                                guestAddress: VMNetIPv4(string: "192.168.1.\(last)")!,
@@ -87,11 +100,12 @@ final class MachineNetwork {
         network.start()
     }
 
-    /// What went through the proxy so far; nil for a direct machine (Apple's NAT does not say).
+    /// What the machine's network carried so far; nil for a machine without a card.
     func counters() -> VMNetCounters? { network?.counters() }
 
     func stop() {
         network?.stop()
+        connector?.stop()
         if descriptor >= 0 { close(descriptor) }
     }
 }

@@ -2680,7 +2680,7 @@
 "vm.row.system" = "macOS %@";
 "vm.row.system.safari" = "macOS %1$@, Safari %2$@";
 "vm.row.disk" = "%@ on disk";
-"vm.row.traffic.help" = "What went through the proxy since the machine started";
+"vm.row.traffic.help" = "What the machine has sent and received since it started";
 "vm.editor.title.new" = "New virtual machine";
 "vm.editor.title" = "“%@”";
 "vm.editor.subtitle" = "A Mac of its own: its macOS is made from the base system at the first start.";
@@ -2690,7 +2690,7 @@
 "vm.editor.proxy" = "Proxy";
 "vm.editor.proxy.none" = "None — this Mac's connection";
 "vm.editor.proxy.note" = "Everything the machine sends goes through this proxy, and nothing any other way.";
-"vm.editor.proxy.direct.note" = "Without a proxy, sites see this Mac's own address.";
+"vm.editor.proxy.direct.note" = "Without a proxy, sites see this Mac's own address — or its VPN's, if one is on.";
 "vm.editor.proxy.empty" = "Proxies are added in the Proxies section. A machine takes a SOCKS5 or an HTTP proxy; one reached over TLS (https://) is not supported yet.";
 "vm.editor.follow" = "Time zone and language follow the proxy";
 "vm.editor.follow.detail" = "Checked at every start: the machine's macOS gets the time zone and the language of the country the proxy comes out in.";
@@ -2742,7 +2742,7 @@
 "help.vm.costs.start" = "A machine starts in 20–40 seconds, as a Mac does; Shut Down closes its macOS properly.";
 "help.vm.know" = "Good to know";
 "help.vm.know.disks" = "The machines' disks are not encrypted by Lumen's vault: they are files in the vault's folder. Turn on FileVault on your Mac to have them encrypted. Names, proxies and their passwords are in the vault.";
-"help.vm.know.udp" = "Through a proxy a machine has TCP only: QUIC and WebRTC over UDP do not leave it, so WebRTC cannot show your address.";
+"help.vm.know.udp" = "A machine has TCP only: QUIC and WebRTC over UDP do not leave it, so WebRTC cannot show your address.";
 "help.vm.know.updates" = "Automatic macOS updates are off in the machines: each would download gigabytes. To move to a newer macOS, remove the base system (⋯) and add it again; the machines you have keep theirs.";
 "help.vm.know.base" = "⋯ → Open the Base System starts the base itself, to change what every new machine should have. Machines made before keep what they had.";
 "help.vm.know.license" = "Apple's license allows macOS in virtual machines on Apple hardware for development, testing and personal non-commercial use.";

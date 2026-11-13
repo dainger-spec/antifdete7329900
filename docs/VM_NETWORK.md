@@ -177,3 +177,24 @@ stop retransmitting on duplicates.
 
 **Not tested here**: the code on macOS (CI compiles and runs the unit tests there), and a macOS
 guest's own TCP — the interop's guest is Linux.
+
+## Without a proxy: the direct connector
+
+A machine with no proxy does not get Apple's NAT (`VZNATNetworkDeviceAttachment`): it gets the
+same network, with `VMNetDirectConnector` for its "proxy" — a SOCKS5 server on a loopback port of
+the system's choosing, in the same process, that makes each connection as the process's own
+ordinary socket. The guest's traffic then goes wherever any app's on this Mac goes: through its
+VPN, by its routes. Behind Apple's NAT a guest's packets go by a network of the system's own, and
+on a Mac that runs a VPN or a proxy tool they went nowhere.
+
+- CONNECT only, no sign-in; names are resolved here (the system's resolver), IPv4 addresses tried
+  first.
+- Public addresses only, as the network itself has it: a name that resolves to this machine or to
+  a local network is refused, so a page in a guest cannot reach the Mac's own services by naming
+  them.
+- A thread per direction of a connection, blocking; at most `maximumConnections` at once.
+- `DirectConnectorTests`: a connection both ways with megabytes and a half-close, a name resolved
+  on this side, what is refused, a destination that is not there, stop and start — and the whole
+  way with the network: a guest gets its address, resolves a name, and loads a page through the
+  connector byte for byte.
+
