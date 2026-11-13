@@ -170,7 +170,7 @@ private struct VirtualMachinesScreen: View {
                        problems: center.requirements, error: center.setupError, width: width,
                        action: { center.continueSetup() })
             } else {
-                VMSetupPanel(center: center)
+                VMSetupPanel(center: center, width: width)
             }
         case .machines:
             machines

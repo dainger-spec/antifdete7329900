@@ -47,14 +47,21 @@ struct VMShowcaseClock<Content: View>: View {
     }
 }
 
-/// The features as tiles, as many in a row as the width has room for; the one whose turn it is
-/// is lit.
+/// The features as tiles in even rows — three in a row where the width has room, two or one
+/// where it has not (six tiles: no row is left half empty); the one whose turn it is is lit.
 struct VMFeatureGrid: View {
     let features: [VMFeature]
     let active: Int
+    /// The width the grid has.
+    let width: CGFloat
+
+    private var columns: [GridItem] {
+        let count = width >= 820 ? 3 : (width >= 540 ? 2 : 1)
+        return Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: count)
+    }
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 12, alignment: .top)], alignment: .leading, spacing: 12) {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
             ForEach(features) { feature in
                 VMFeatureCard(feature: feature, active: feature.id == active)
             }
@@ -192,7 +199,7 @@ struct VMHero: View {
                 }
                 VStack(alignment: .leading, spacing: 14) {
                     Text(L("vm.hero.features")).lumenCaps()
-                    VMFeatureGrid(features: features, active: active)
+                    VMFeatureGrid(features: features, active: active, width: width)
                 }
             }
         }
@@ -289,6 +296,8 @@ struct VMSetupPanel: View {
     /// Under the panel, what a machine gives, lit in turn: in the section's own setup, not where
     /// the panel stands above a list of machines.
     var showsFeatures = true
+    /// The section's width, for the tiles' rows.
+    var width: CGFloat = 1000
 
     private enum StepState { case waiting, active, done }
 
@@ -350,7 +359,7 @@ struct VMSetupPanel: View {
                 if showsFeatures, !isGuestStep {
                     VStack(alignment: .leading, spacing: 14) {
                         Text(L("vm.setup.meanwhile")).lumenCaps()
-                        VMFeatureGrid(features: features, active: active)
+                        VMFeatureGrid(features: features, active: active, width: width)
                     }
                 }
             }
