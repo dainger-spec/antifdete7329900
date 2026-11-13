@@ -1,0 +1,29 @@
+Lumen is a browser of isolated sessions for testing. Each session lives apart from the others: its own cookies, its own site storage, its own cache, its own history and its own tabs. Sign in to the same service from five sessions, and the service sees five different visitors.
+
+A PROXY FOR EVERY SESSION
+• HTTP and SOCKS5, with a username and password. The password is kept only in this iPhone's keychain.
+• Proxy check: whether it works, which address and country it exits from, whether it carries UDP.
+• A session that has worked through a proxy never opens a page directly: if the proxy is down, the page does not load, and your real address stays yours.
+• Change the proxy of an open session — no relaunch.
+
+A SESSION SPEAKS THE LANGUAGE OF ITS PROXY'S COUNTRY
+• Time zone and page language follow the proxy's exit country — or are set by hand.
+• Each session has its own lasting device profile: a site sees the same session on every visit, and different sessions as different.
+• Browser identity: this iPhone's Safari, one of the iOS versions, or your own.
+
+EVERYTHING FOR THE WORK
+• Tabs, history, search with the engine you choose.
+• Notes and tags on sessions; search by name, tag and proxy.
+• After a relaunch everything is where it was: tabs, cookies, sign-ins.
+• Sessions sync with Lumen for Mac through a Lumen account, end-to-end encrypted.
+
+WHO IT IS FOR
+Anyone who checks sites and services from different countries and as different users: QA engineers, developers, marketers, support teams.
+
+THE LIMITS OF iOS, PLAINLY
+• Sites in Lumen cannot use service workers: they do not work offline, and Telegram Web works only in part.
+• The browser's language is one for the whole app, not one per session; the page language is per session.
+• WebRTC is off in a session with a proxy, or it would go around the proxy. Browser calls do not work in such a session.
+• A site's background scripts loaded from a separate file see the device's real parameters.
+
+Free: two sessions without a proxy. Proxies, more sessions and sync come with a Lumen account.

@@ -25,7 +25,7 @@ in the built app.
 What is scanned: every string literal of the app's Swift sources (ios/Lumen, without Debug/, which a
 release build does not contain) — texts, screen names, accessibility labels and identifiers alike —,
 the Info.plist values in project.yml, any .strings file, the product description's section of
-LIMITATIONS.md, and with --app every string of the built Info.plist. ios/scripts/test_release_rules.py plants each word, and each App-Bound breach (the reds).
+LIMITATIONS.md, the App Store's card (AppStore/metadata), and with --app every string of the built Info.plist. ios/scripts/test_release_rules.py plants each word, and each App-Bound breach (the reds).
 """
 import os
 import plistlib
@@ -68,6 +68,11 @@ SWITCH = re.compile(r'LUMEN_TEST_[A-Z_]+|LUMEN_FAULTS|-LumenFaults|-LumenResetSt
 OFFER = re.compile(r"pricing|выбрать тариф|тариф\w* на сайте|тарифы|купить|оплатит", re.IGNORECASE)
 # The same in the English table (its words are too common to look for among the sources' identifiers).
 OFFER_ENGLISH = re.compile(r"choose a plan|\bbuy\b|purchase|\bplans\b|\bprices?\b|pricing", re.IGNORECASE)
+
+
+# What App Store Connect takes in each field of the card, in characters.
+LISTING_LIMITS = {"name.txt": 30, "subtitle.txt": 30, "promotional_text.txt": 170, "keywords.txt": 100,
+                  "description.txt": 4000, "release_notes.txt": 4000}
 
 
 def outside_debug(path):
@@ -199,6 +204,23 @@ def scan(ios, app=None):
                 section = line.strip() == "## Для описания продукта"
             elif section:
                 judge(f"LIMITATIONS.md:{number}", line.strip())
+    # The App Store's card (ios/AppStore/metadata/<language>/*.txt): what a person reads before the app.
+    # The words, and no offer — Apple's guideline 3.1.1 forbids pointing to a purchase outside the app too.
+    listing = os.path.join(ios, "AppStore", "metadata")
+    for folder, _, files in os.walk(listing):
+        for name in sorted(files):
+            if not name.endswith(".txt") or name.endswith("_url.txt"):
+                continue
+            path = os.path.join(folder, name)
+            text = open(path, encoding="utf-8").read().rstrip("\n")
+            if name in LISTING_LIMITS and len(text) > LISTING_LIMITS[name]:
+                found.append((os.path.relpath(path, ios), "length",
+                              f"{len(text)} characters, App Store Connect takes {LISTING_LIMITS[name]}"))
+            for number, line in enumerate(open(path, encoding="utf-8"), 1):
+                where = f"{os.path.relpath(path, ios)}:{number}"
+                judge(where, line.strip())
+                if OFFER.search(line) or OFFER_ENGLISH.search(line):
+                    found.append((where, "offer", line.strip()))
     if app:
         with open(os.path.join(app, "Info.plist"), "rb") as f:
             info = plistlib.load(f)

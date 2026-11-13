@@ -1,0 +1,1 @@
+Every session is a browser of its own: its own cookies, its own proxy, its own time zone and language. Test sites from different countries on one iPhone.

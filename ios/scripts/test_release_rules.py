@@ -68,6 +68,19 @@ text = open(os.path.join(root, "LIMITATIONS.md"), encoding="utf-8").read()
 open(os.path.join(root, "LIMITATIONS.md"), "w", encoding="utf-8").write(
     text.replace("## Для описания продукта\n", "## Для описания продукта\n\nЛучший антидетект для iPhone.\n", 1))
 check("red — a word in the product description (LIMITATIONS.md): found", any(f[0].startswith("LIMITATIONS.md") for f in scan(root)))
+for language, line, rule, what in [("ru", "Лучший антидетект для iPhone.", "word", "a word"),
+                                   ("en-US", "Choose a plan on our website.", "offer", "an offer")]:
+    root = planted('let row = Text("Сессии")')
+    os.makedirs(os.path.join(root, "AppStore", "metadata", language))
+    with open(os.path.join(root, "AppStore", "metadata", language, "description.txt"), "w", encoding="utf-8") as f:
+        f.write("Сессии для тестирования.\n" + line + "\n")
+    check(f"red — {what} in the App Store's card ({language}): found",
+          any(f[0].startswith("AppStore") and f[1].startswith(rule) for f in scan(root)))
+root = planted('let row = Text("Сессии")')
+os.makedirs(os.path.join(root, "AppStore", "metadata", "ru"))
+with open(os.path.join(root, "AppStore", "metadata", "ru", "name.txt"), "w", encoding="utf-8") as f:
+    f.write("Lumen: изолированные сессии для тестирования\n")
+check("red — a name longer than App Store Connect takes: found", any(f[1] == "length" for f in scan(root)))
 hits = scan(planted("        NSLocalNetworkUsageDescription: Мультиаккаунт видит устройства в сети", "project.yml"))
 check("red — a word in an Info.plist value (project.yml): found", any(f[1].startswith("word") for f in hits))
 app = tempfile.mkdtemp(suffix=".app")
