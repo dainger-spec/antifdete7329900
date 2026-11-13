@@ -522,9 +522,13 @@ final class AppModel: ObservableObject {
         }
         self.proxyList = proxyList
         if VMCenter.isOffered {
-            virtualMachines = VMCenter(vault: vault, library: VMLibrary(vaultDirectory: root)) { [weak self] message in
+            let machines = VMCenter(vault: vault, library: VMLibrary(vaultDirectory: root)) { [weak self] message in
                 self?.showError(message)
             }
+            // The team plan's: without it nothing is set up and no machine starts (the model
+            // refuses, not only the section's buttons).
+            machines.isAllowed = { [weak self] in self?.license.allowsVirtualMachines ?? false }
+            virtualMachines = machines
         }
         manager.onProxyProblem = { [weak self] id, proxy, diagnosis in
             self?.reportProxyProblem(of: id, proxy: proxy, diagnosis: diagnosis)

@@ -2759,3 +2759,8 @@
 "help.vm.know.base" = "⋯ → Open the Base System starts the base itself, to change what every new machine should have. Machines made before keep what they had.";
 "help.vm.know.license" = "Apple's license allows macOS in virtual machines on Apple hardware for development, testing and personal non-commercial use.";
 "help.vm.know.local" = "The machines stay on this Mac: they are not synced and not part of a profile export.";
+"vm.plan.choose" = "Choose a Plan";
+"vm.plan.note" = "Virtual machines are part of the Team plan. Your plan does not include them.";
+"vm.plan.machines" = "Your plan does not include virtual machines. The machines you have stay on disk but do not start; they can be deleted.";
+"vm.error.notInPlan" = "Virtual machines are part of the Team plan.";
+"help.vm.plan" = "Virtual machines are part of the Team plan.";

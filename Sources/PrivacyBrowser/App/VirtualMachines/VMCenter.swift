@@ -83,6 +83,11 @@ final class VMCenter: ObservableObject {
     /// What the setup is assumed to fetch before Apple's server has said the image's length.
     static let assumedDownloadBytes: Int64 = 18 * VMRequirements.gibibyte
 
+    /// The plan has virtual machines (`LicenseModel.allowsVirtualMachines`, set by `AppModel`).
+    /// Without it the setup does not go on and no machine starts; what is on disk stays, and can
+    /// be deleted.
+    var isAllowed: () -> Bool = { true }
+
     let library: VMLibrary
     private let vault: UnlockedVault
     private let onError: (String) -> Void
@@ -161,6 +166,10 @@ final class VMCenter: ObservableObject {
     /// fetched, macOS installed from it, and the base opened for its first-run setup.
     func continueSetup() {
         guard activity == nil, Self.availability == .available else { return }
+        guard isAllowed() else {
+            setupError = L("vm.error.notInPlan")
+            return
+        }
         setupError = nil
         setup = library.setupState()
         switch setup {
@@ -293,6 +302,10 @@ final class VMCenter: ObservableObject {
     /// something every new profile's machine should have. Its network is this Mac's own.
     func openBase() {
         guard activity == nil, Self.availability == .available, library.base.isComplete, let info = library.baseInfo() else { return }
+        guard isAllowed() else {
+            setupError = L("vm.error.notInPlan")
+            return
+        }
         guard runningCount < VMRequirements.runningLimit else {
             setupError = L("vm.error.limit")
             return
@@ -447,6 +460,10 @@ final class VMCenter: ObservableObject {
     /// profile says so, and the guest is told them through its shared folder.
     func start(_ id: UUID) {
         guard isReady, running[id] == nil, helpers[id] == nil, let profile = list.profile(id) else { return }
+        guard isAllowed() else {
+            problems[id] = L("vm.error.notInPlan")
+            return
+        }
         guard runningCount < VMRequirements.runningLimit else {
             problems[id] = L("vm.error.limit")
             return

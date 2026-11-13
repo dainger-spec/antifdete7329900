@@ -31,7 +31,10 @@ private struct VirtualMachinesScreen: View {
     @State private var confirmingBaseRemoval = false
     @State private var error: String?
 
-    private enum Stage: Equatable { case unavailable(String), signedOut, setup, machines }
+    private enum Stage: Equatable { case unavailable(String), signedOut, notInPlan, setup, machines }
+
+    /// The plan has virtual machines: the team plan's (`LicenseModel.allowsVirtualMachines`).
+    private var allowed: Bool { license.allowsVirtualMachines }
 
     private var stage: Stage {
         switch VMCenter.availability {
@@ -40,7 +43,9 @@ private struct VirtualMachinesScreen: View {
         case .available: break
         }
         if license.isConfigured, !license.record.isSignedIn { return .signedOut }
-        return center.isReady ? .machines : .setup
+        // Machines made while the plan had them stay in the list — to be seen, and deleted.
+        if center.isReady { return .machines }
+        return allowed ? .setup : .notInPlan
     }
 
     var body: some View {
@@ -94,7 +99,7 @@ private struct VirtualMachinesScreen: View {
                 moreMenu
                 Button { newMachine() } label: { Label(L("vm.new"), systemImage: "plus") }
                     .buttonStyle(.lumenPrimary)
-                    .disabled(center.loadError != nil)
+                    .disabled(center.loadError != nil || !allowed)
             }
         }
         .frame(height: ProfilesScreen.headerHeight)
@@ -113,7 +118,7 @@ private struct VirtualMachinesScreen: View {
     private var moreMenu: some View {
         Menu {
             Button(L("vm.base.open")) { center.openBase() }
-                .disabled(center.activity != nil)
+                .disabled(center.activity != nil || !allowed)
             Button(L("vm.reveal")) { SystemOpen.revealInFinder([center.library.root]) }
             Divider()
             Button(L("vm.base.remove"), role: .destructive) { confirmingBaseRemoval = true }
@@ -142,10 +147,23 @@ private struct VirtualMachinesScreen: View {
         case .signedOut:
             VMIntroduction(problems: [], error: nil, actionTitle: L("vm.signIn"), actionSymbol: "person.crop.circle",
                            actionEnabled: true, note: L("vm.signIn.note"), action: openAccount)
+        case .notInPlan:
+            VMIntroduction(problems: [], error: nil, actionTitle: L("vm.plan.choose"), actionSymbol: "arrow.up.right",
+                           actionEnabled: true, note: L("vm.plan.note"), action: choosePlan)
         case .setup:
             setup
         case .machines:
             machines
+        }
+    }
+
+    /// The plans' page of the site (a key's license without an email is paid for on the key's page),
+    /// or the account's settings where the build knows no site.
+    private func choosePlan() {
+        if let url = license.configuration?.site(license.hasNoEmail ? "/key" : "/pricing") {
+            SystemOpen.openWebsite(url)
+        } else {
+            openAccount()
         }
     }
 
@@ -163,6 +181,13 @@ private struct VirtualMachinesScreen: View {
     @ViewBuilder
     private var machines: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if !allowed {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    VMNote(L("vm.plan.machines"), tone: .warning)
+                    Button(L("vm.plan.choose"), action: choosePlan)
+                        .buttonStyle(.lumenSecondary)
+                }
+            }
             if let loadError = center.loadError {
                 VMNote(String(format: L("vm.error.load"), loadError), tone: .warning)
             }
@@ -184,7 +209,7 @@ private struct VirtualMachinesScreen: View {
                         .frame(height: 130)
                     Button { newMachine() } label: { Label(L("vm.new"), systemImage: "plus") }
                         .buttonStyle(.lumenPrimary)
-                        .disabled(center.loadError != nil)
+                        .disabled(center.loadError != nil || !allowed)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 24)
@@ -194,7 +219,8 @@ private struct VirtualMachinesScreen: View {
                         VMRow(profile: profile, state: center.running[profile.id], problem: center.problems[profile.id],
                               exit: center.exits[profile.id], guest: center.guests[profile.id],
                               disk: center.diskUsage[profile.id],
-                              canStart: center.runningCount < VMRequirements.runningLimit,
+                              canStart: allowed && center.runningCount < VMRequirements.runningLimit,
+                              startRefusal: allowed ? nil : L("vm.error.notInPlan"),
                               start: { center.start(profile.id) }, stop: { center.stop(profile.id) },
                               forceStop: { center.forceStop(profile.id) },
                               edit: { editing = VMEditorView.Draft(profile: profile, isNew: false) },
@@ -639,6 +665,8 @@ private struct VMRow: View {
     let guest: VMGuestStatus?
     let disk: Int64?
     let canStart: Bool
+    /// Why Start is off, when it is not Apple's limit (the plan has no machines).
+    var startRefusal: String?
     let start: () -> Void
     let stop: () -> Void
     let forceStop: () -> Void
@@ -743,7 +771,8 @@ private struct VMRow: View {
             Button(action: start) { Label(L("vm.row.start"), systemImage: "play.fill") }
                 .buttonStyle(.lumenSecondary)
                 .disabled(!canStart)
-                .help(canStart ? L("vm.row.start.help") : String(format: L("vm.limit.reached"), VMRequirements.runningLimit))
+                .help(canStart ? L("vm.row.start.help")
+                    : startRefusal ?? String(format: L("vm.limit.reached"), VMRequirements.runningLimit))
         case .checkingProxy?, .starting?:
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)

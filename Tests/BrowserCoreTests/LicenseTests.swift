@@ -145,6 +145,31 @@ final class LicenseTests: XCTestCase {
         XCTAssertFalse(exportOnly.allowsAutomation)
     }
 
+    /// Virtual machines are the team plan's (the owner, 13 November): open on an active Team
+    /// license, or where the server names the feature for another plan; closed on every other plan,
+    /// and in export-only whatever the plan.
+    func testVirtualMachinesAreTheTeamPlansOnAnActiveLicense() throws {
+        func made(_ plan: String, _ features: [String]? = nil, status: String = "active") throws -> Entitlement {
+            var changes: [String: Any?] = ["plan": plan, "status": status]
+            if let features { changes.updateValue(features, forKey: "features") }
+            if status != "active" { changes.updateValue("period_ended", forKey: "exportReason") }
+            return try XCTUnwrap(check(try document(payload(changes))).entitlement, "\(plan) \(status)")
+        }
+        XCTAssertTrue(try made("team").allowsVirtualMachines)
+        XCTAssertTrue(try made("team", ["automation"]).allowsVirtualMachines)
+        for plan in ["pro", "personal", "trial", "none", "studio"] {
+            XCTAssertFalse(try made(plan).allowsVirtualMachines, plan)
+            // What the other plans have opens nothing here.
+            XCTAssertFalse(try made(plan, ["automation", "camera"]).allowsVirtualMachines, plan)
+        }
+        // The server may open them to another plan by name.
+        XCTAssertTrue(try made("pro", [Entitlement.virtualMachinesFeature]).allowsVirtualMachines)
+        XCTAssertEqual(Entitlement.virtualMachinesFeature, "virtual_machines")
+        // Export-only: closed, whatever the plan or the features.
+        XCTAssertFalse(try made("team", status: "export_only").allowsVirtualMachines)
+        XCTAssertFalse(try made("pro", [Entitlement.virtualMachinesFeature], status: "export_only").allowsVirtualMachines)
+    }
+
     // MARK: Automation by plan (the owner and the lead, 9 November)
 
     private typealias Judged = (name: String, entitlement: Entitlement)

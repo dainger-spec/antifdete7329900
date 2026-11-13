@@ -202,6 +202,7 @@ enum HelpContent {
         case .virtualMachines:
             return [
                 .paragraph("vm.intro"),
+                .note("vm.plan"),
                 .heading("vm.add"),
                 .steps(["vm.step.open", "vm.step.download", "vm.step.setup", "vm.step.tools", "vm.step.create"]),
                 .heading("vm.what"),

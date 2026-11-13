@@ -11,6 +11,13 @@ not measured yet and what does not work.
 
 ## For the person
 
+Virtual machines are part of the **Team** plan (`Entitlement.allowsVirtualMachines`: the plan
+`team` on an active license, or any plan the server gives the `virtual_machines` feature). On
+another plan the section says so and offers the plans' page; nothing is downloaded and no machine
+starts — the model refuses (`VMCenter.isAllowed`), not only the buttons. Machines made while the
+plan had them stay on disk and in the list, where they can be deleted. A development build has no
+licensing, and has the machines.
+
 1. Signed in, the Profiles window's sidebar has **Virtual Machines**. **Add Virtual Machines** says
    first what it takes (disk, memory, time), then:
 2. asks Apple which macOS this Mac can run as a guest, and **downloads it from Apple's servers**
