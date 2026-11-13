@@ -80,7 +80,7 @@ private struct TabPage: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 AddressCapsule(tab: tab) { runtime.open($0) }
-                    .environment(\.colorScheme, tab.lightPage && tab.url != nil ? .light : .dark)
+                    .environment(\.colorScheme, pageIsLight ? .light : .dark)
                 #if DEBUG
                 if TestHooks.enabled { RelayDrills(runtime: runtime) }
                 #endif
@@ -106,9 +106,14 @@ private struct TabPage: View {
                     .accessibilityIdentifier("settingsButton").accessibilityLabel(L("Настройки сессии"))
             }
         }
-        // Over a white site the bars and the status bar go light, as Safari's do.
-        .toolbarColorScheme(tab.lightPage && tab.url != nil && tab.failure == nil ? .light : .dark, for: .navigationBar, .bottomBar)
+        // Over a white site the bars and the status bar go light, as Safari's do. The scheme of a bar
+        // reaches the status bar only while the bar's background shows (run 108: 9:41 white on white).
+        .toolbarColorScheme(pageIsLight ? .light : .dark, for: .navigationBar, .bottomBar)
+        .toolbarBackground(pageIsLight ? .visible : .automatic, for: .navigationBar)
     }
+
+    /// A site's own light page is on the screen (not the new tab's words, not the proxy that does not answer).
+    private var pageIsLight: Bool { tab.lightPage && tab.url != nil && tab.failure == nil }
 }
 
 /// The address capsule (iOS 26: the system's glass; iOS 18: the bar's material): a lock and the
@@ -227,10 +232,10 @@ struct ProxyNotAnswering: View {
             Text(L("Эта сессия открывает сайты только через прокси «%@», а он не ответил. Напрямую страница не откроется — так сайты не увидят настоящий адрес iPhone.", proxyName))
         } actions: {
             Button(L("Повторить"), action: retry)
-                .buttonStyle(.borderedProminent).tint(Theme.accentFill)
+                .buttonStyle(.borderedProminent).tint(Theme.accentFill).controlSize(.large)
                 .accessibilityIdentifier("retryPage")
             Button(L("Настройки сессии"), action: settings)
-                .buttonStyle(.bordered)
+                .buttonStyle(.bordered).controlSize(.large)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground))
