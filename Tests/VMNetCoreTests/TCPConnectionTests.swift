@@ -531,28 +531,146 @@ final class TCPConnectionTests: XCTestCase {
         XCTAssertEqual(script.drainToUpstream(), data + more)
     }
 
-    func testOutOfOrderDataIsDroppedAndTheGapNamedAtOnce() {
+    func testDataAheadOfAGapIsKeptAndTheGapNamedAtOnce() {
         let script = Script()
         script.openAndEstablish()
-        let data = bytes(3_000)
-        // The second segment arrives without the first: three times, each answered at once with
-        // what is expected — which is what makes the guest send the first again.
-        for _ in 0..<3 {
-            script.send([.ack], sequence: 1_001 &+ 1_000, payload: Array(data[1_000..<2_000]))
+        let data = bytes(5_000)
+        // The first thousand bytes are lost; the next three segments arrive. Each is answered at
+        // once with what is still expected — three such answers are what makes the guest send
+        // the missing segment again — and nothing is handed to the proxy yet.
+        for start in [1_000, 2_000, 3_000] {
+            script.send([.ack], sequence: 1_001 &+ UInt32(start), payload: Array(data[start..<(start + 1_000)]))
             let sent = script.take()
             XCTAssertEqual(sent.count, 1)
+            XCTAssertEqual(sent[0].flags, [.ack])
             XCTAssertEqual(sent[0].acknowledgement, 1_001)
         }
         XCTAssertEqual(script.connection.upstreamBacklog, 0)
-        // The first arrives; the second must be sent again, it was not kept.
-        script.sendData(Array(data[0..<1_000]))
+        XCTAssertEqual(script.connection.earlySegmentCount, 3)
+        // The missing segment arrives: everything kept follows it, and one acknowledgement says so.
+        script.send([.ack], sequence: 1_001, payload: Array(data[0..<1_000]))
         script.connection.flush(now: script.now)
-        XCTAssertEqual(script.take().last?.acknowledgement, 2_001)
-        script.sendData(Array(data[1_000..<2_000]))
-        script.sendData(Array(data[2_000...]))
-        script.connection.flush(now: script.now)
-        XCTAssertEqual(script.take().last?.acknowledgement, 4_001)
+        let sent = script.take()
+        XCTAssertEqual(sent.count, 1)
+        XCTAssertEqual(sent[0].acknowledgement, 1_001 &+ 4_000)
+        XCTAssertEqual(script.connection.earlySegmentCount, 0)
+        script.guestNext = 1_001 &+ 4_000
+        script.sendData(Array(data[4_000...]))
         XCTAssertEqual(script.drainToUpstream(), data)
+    }
+
+    func testEarlySegmentsThatOverlapOrRepeatAreKeptOnce() {
+        let script = Script()
+        script.openAndEstablish()
+        let data = bytes(10_000)
+        func early(_ range: Range<Int>) {
+            script.send([.ack], sequence: 1_001 &+ UInt32(range.lowerBound), payload: Array(data[range]))
+            XCTAssertEqual(script.take().map(\.acknowledgement), [1_001])
+        }
+        early(4_000..<5_000)
+        early(2_000..<3_000)
+        early(4_000..<5_000)          // the same again
+        early(2_500..<4_500)          // across two kept segments and the gap between them
+        early(1_500..<2_200)          // into the front of one
+        early(8_000..<9_000)
+        early(7_500..<9_500)          // around one
+        early(4_100..<4_200)          // inside one
+        XCTAssertEqual(script.connection.upstreamBacklog, 0)
+        // In order now: the first 1500 bytes. All that follows without a gap goes with them.
+        script.send([.ack], sequence: 1_001, payload: Array(data[0..<1_500]))
+        script.connection.flush(now: script.now)
+        XCTAssertEqual(script.take().last?.acknowledgement, 1_001 &+ 5_000)
+        XCTAssertEqual(script.connection.withUpstreamBacklog { Array($0) }, Array(data[0..<5_000]))
+        // The next gap, filled by a segment that also repeats old bytes and runs into kept ones.
+        script.send([.ack], sequence: 1_001 &+ 4_900, payload: Array(data[4_900..<7_700]))
+        script.connection.flush(now: script.now)
+        XCTAssertEqual(script.take().last?.acknowledgement, 1_001 &+ 9_500)
+        XCTAssertEqual(script.connection.earlySegmentCount, 0)
+        script.guestNext = 1_001 &+ 9_500
+        script.sendData(Array(data[9_500...]))
+        XCTAssertEqual(script.drainToUpstream(), data)
+    }
+
+    func testEarlyDataBeyondTheWindowIsNotKept() {
+        var tuning = TCPConnection.Tuning()
+        tuning.receiveBufferLimit = 4_096
+        tuning.earlySegmentLimit = 3
+        let script = Script()
+        script.openAndEstablish(tuning: tuning)
+        let data = bytes(8_000)
+        // Wholly beyond the window: not kept. Partly: only the part inside.
+        script.send([.ack], sequence: 1_001 &+ 5_000, payload: Array(data[5_000..<6_000]))
+        XCTAssertEqual(script.connection.earlySegmentCount, 0)
+        script.send([.ack], sequence: 1_001 &+ 3_500, payload: Array(data[3_500..<4_500]))
+        XCTAssertEqual(script.connection.earlySegmentCount, 1)
+        // No more segments are kept than the limit.
+        for start in [500, 1_000, 1_500, 2_000] {
+            script.send([.ack], sequence: 1_001 &+ UInt32(start), payload: Array(data[start..<(start + 100)]))
+        }
+        XCTAssertEqual(script.connection.earlySegmentCount, 3)
+        _ = script.take()
+        script.send([.ack], sequence: 1_001, payload: Array(data[0..<3_500]))
+        script.connection.flush(now: script.now)
+        // Up to the edge of the window and not a byte further.
+        XCTAssertEqual(script.take().last?.acknowledgement, 1_001 &+ 4_096)
+        XCTAssertEqual(script.connection.withUpstreamBacklog { Array($0) }, Array(data[0..<4_096]))
+    }
+
+    func testAFINAheadOfAGapIsNotTaken() {
+        let script = Script()
+        script.openAndEstablish()
+        script.send([.ack, .fin], sequence: 1_001 &+ 100, payload: [7, 7, 7])
+        XCTAssertEqual(script.take().map(\.acknowledgement), [1_001])
+        XCTAssertFalse(script.connection.guestFinished)
+        script.send([.ack], sequence: 1_001, payload: [UInt8](repeating: 1, count: 100))
+        script.connection.flush(now: script.now)
+        // The data that came with the early FIN counts; the FIN itself must come again.
+        XCTAssertEqual(script.take().last?.acknowledgement, 1_001 &+ 103)
+        XCTAssertFalse(script.connection.guestFinished)
+        script.send([.ack, .fin], sequence: 1_001 &+ 103)
+        XCTAssertTrue(script.connection.guestFinished)
+    }
+
+    /// Segments of one stream in any order, repeated, overlapping, of any size, while the proxy
+    /// takes bytes at its own pace: what reaches the proxy is the stream, byte for byte.
+    func testAnyOrderOfSegmentsGivesTheSameStream() {
+        for seed in 1...20 as ClosedRange<UInt64> {
+            var random = TestRandom(seed: seed)
+            var tuning = TCPConnection.Tuning()
+            tuning.receiveBufferLimit = 16_384
+            let script = Script(guestStart: seed % 2 == 0 ? 0xFFFF_F000 : 1_000)
+            script.openAndEstablish(tuning: tuning)
+            let first = script.guestNext
+            let data = bytes(60_000, seed: seed &+ 100)
+            var delivered: [UInt8] = []
+            var acknowledged = 0
+            var steps = 0
+            while delivered.count < data.count && steps < 200_000 {
+                steps += 1
+                // A segment from somewhere around what was acknowledged: before it, at it, ahead of it.
+                let reach = Int(random.next() % 24_000) - 4_000
+                let start = min(max(acknowledged + reach, 0), data.count - 1)
+                let length = min(Int(random.next() % 1_460) + 1, data.count - start)
+                script.send([.ack], sequence: first &+ UInt32(start), payload: Array(data[start..<(start + length)]))
+                if random.next() % 3 == 0 {
+                    let backlog = script.connection.upstreamBacklog
+                    let amount = backlog == 0 ? 0 : Int(random.next() % UInt64(backlog)) + 1
+                    delivered += script.connection.withUpstreamBacklog { Array($0.prefix(amount)) }
+                    script.connection.upstreamConsumed(amount, now: script.now)
+                }
+                script.connection.flush(now: script.now)
+                for segment in script.take() {
+                    let value = Int(segment.acknowledgement &- first)
+                    XCTAssertGreaterThanOrEqual(value, acknowledged, "an acknowledgement went backwards")
+                    acknowledged = max(acknowledged, value)
+                }
+                // What was acknowledged is what was handed on or waits to be: never more, never less.
+                XCTAssertEqual(acknowledged, delivered.count + script.connection.upstreamBacklog)
+                XCTAssertLessThanOrEqual(script.connection.upstreamBacklog, 16_384)
+            }
+            XCTAssertEqual(delivered.count, data.count, "seed \(seed)")
+            XCTAssertTrue(delivered == data, "the bytes differ with seed \(seed)")
+        }
     }
 
     func testASlowProxyShutsTheGuestsWindowAndDrainingOpensIt() {

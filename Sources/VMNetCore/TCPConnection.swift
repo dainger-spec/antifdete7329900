@@ -39,9 +39,8 @@ struct FlowKey: Hashable {
 /// against a scripted guest. The socket to the proxy belongs to `NetworkLoop`, which tells the
 /// connection when the tunnel is up, hands it what the proxy sent, and takes what the guest sent.
 ///
-/// What it does not do, on purpose: selective acknowledgements, timestamps, reassembly of
-/// segments that arrive out of order (they are dropped and the guest sends them again), and
-/// connections opened towards the guest.
+/// What it does not do, on purpose: selective acknowledgements, timestamps, and connections
+/// opened towards the guest.
 final class TCPConnection {
     struct Tuning {
         /// Bytes from the guest kept for a proxy that is slower than the guest. The window the
@@ -68,6 +67,8 @@ final class TCPConnection {
         var initialWindowSegments = 10
         /// The shift of the window the guest is told: 256 KiB does not fit in 16 bits.
         var windowShift: UInt8 = 3
+        /// How many segments that arrived ahead of a gap are kept until the gap is filled.
+        var earlySegmentLimit = 1024
     }
 
     enum State: Equatable {
@@ -111,6 +112,9 @@ final class TCPConnection {
     /// The end of the window as the guest was last told.
     private var advertisedEdge: UInt32
     private let receiveShift: UInt8
+    /// Segments that arrived ahead of a gap, inside the window: in order of sequence number,
+    /// never overlapping. They join `toUpstream` when what is missing before them arrives.
+    private var early: [(sequence: UInt32, bytes: [UInt8])] = []
     private(set) var guestFinished = false
     private var upstreamShutdownNoted = false
     private var acknowledgementPending = false
@@ -401,7 +405,8 @@ final class TCPConnection {
         return true
     }
 
-    /// The data and the FIN in a segment: taken when they are next in order, answered otherwise.
+    /// The data and the FIN in a segment. What is next in order is taken; what arrives ahead of
+    /// a gap is kept until the gap is filled; what was received before is only answered.
     private func accept(_ segment: TCPSegment) {
         var payload = segment.payload
         let fin = segment.flags.contains(.fin)
@@ -417,8 +422,11 @@ final class TCPConnection {
         }
         let behind = Int(Int32(bitPattern: receiveNext &- segment.sequence))
         if behind < 0 {
-            // A gap before it: dropped, and the guest is told at once what is expected, so that
-            // three such answers make it send the missing segment again without waiting.
+            // A gap before it. The data is kept (a FIN ahead of a gap is not: the guest sends it
+            // again), and the guest is told at once what is still expected. Each such answer
+            // says "a segment arrived"; three of them make the guest send the missing one again
+            // without waiting for its timer.
+            keepEarly(payload, at: -behind)
             emit(flags: [.ack], sequence: sendMaximum)
             return
         }
@@ -444,10 +452,74 @@ final class TCPConnection {
         if fin {
             receiveNext = receiveNext &+ 1
             guestFinished = true
+            early.removeAll()
+        } else if !early.isEmpty {
+            joinEarly()
         }
         // One acknowledgement for all that arrives together: `flush` sends it.
         acknowledgementPending = true
     }
+
+    /// Keeps the part of an early segment that is inside the window and not already kept.
+    /// `offset` is where it starts, counted from the next byte expected.
+    private func keepEarly(_ payload: UnsafeRawBufferPointer, at offset: Int) {
+        let room = max(tuning.receiveBufferLimit - toUpstream.count, 0)
+        let end = min(offset + payload.count, room)
+        guard offset < end else { return }
+        func piece(_ from: Int, _ to: Int) -> (sequence: UInt32, bytes: [UInt8]) {
+            (receiveNext &+ UInt32(from), Array(payload[(from - offset)..<(to - offset)]))
+        }
+        // The usual case: it follows everything kept so far.
+        if let last = early.last {
+            let lastEnd = Int(Int32(bitPattern: last.sequence &- receiveNext)) + last.bytes.count
+            if offset >= lastEnd {
+                if early.count < tuning.earlySegmentLimit { early.append(piece(offset, end)) }
+                return
+            }
+        }
+        // Otherwise: the pieces of it that fall between the segments already kept.
+        var index = 0
+        var cursor = offset
+        while index < early.count && cursor < end {
+            let start = Int(Int32(bitPattern: early[index].sequence &- receiveNext))
+            let stop = start + early[index].bytes.count
+            if stop <= cursor {
+                index += 1
+                continue
+            }
+            if start >= end { break }
+            if start > cursor {
+                guard early.count < tuning.earlySegmentLimit else { return }
+                early.insert(piece(cursor, start), at: index)
+                index += 1
+            }
+            cursor = stop
+            index += 1
+        }
+        if cursor < end, early.count < tuning.earlySegmentLimit { early.insert(piece(cursor, end), at: index) }
+    }
+
+    /// After data arrived in order: the early segments that now follow it without a gap join it.
+    private func joinEarly() {
+        var joined = 0
+        while joined < early.count {
+            let entry = early[joined]
+            let offset = Int(Int32(bitPattern: entry.sequence &- receiveNext))
+            if offset > 0 { break }
+            joined += 1
+            let skip = -offset
+            guard skip < entry.bytes.count else { continue }
+            let room = max(tuning.receiveBufferLimit - toUpstream.count, 0)
+            let taken = min(entry.bytes.count - skip, room)
+            guard taken > 0 else { continue }
+            entry.bytes.withUnsafeBytes { toUpstream.append($0.part(skip, taken)) }
+            receiveNext = receiveNext &+ UInt32(taken)
+        }
+        if joined > 0 { early.removeSubrange(0..<joined) }
+    }
+
+    /// How many early segments are kept. For tests.
+    var earlySegmentCount: Int { early.count }
 
     /// Sends what waits and is allowed: the proxy's bytes, the FIN after them, a pending
     /// acknowledgement. `NetworkLoop` calls it after each round of events and when the wire has room again.
@@ -624,6 +696,7 @@ final class TCPConnection {
         handshakeDeadline = nil
         sendBuffer.removeAll()
         toUpstream.removeAll()
+        early.removeAll()
     }
 
     /// The end of the window on offer now: what is free in the buffer, in the window field's units.
