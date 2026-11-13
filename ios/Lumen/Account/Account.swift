@@ -94,7 +94,7 @@ extension AppModel {
 
     static func dateText(_ date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: Localization.isEnglish ? "en_US" : "ru_RU")
+        formatter.locale = Localization.locale
         formatter.dateStyle = .long
         formatter.timeStyle = .short
         return formatter.string(from: date)

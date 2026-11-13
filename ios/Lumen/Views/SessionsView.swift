@@ -194,7 +194,7 @@ struct SessionCard: View {
 
     private var openedText: String {
         guard let date = session.lastOpenedAt else { return L("Ещё не открывали") }
-        return L("Открывали ") + date.formatted(.relative(presentation: .named))
+        return L("Открывали ") + date.formatted(.relative(presentation: .named).locale(Localization.locale))
     }
 }
 

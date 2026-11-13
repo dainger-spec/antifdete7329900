@@ -18,6 +18,11 @@ public enum Localization {
     /// Whether the texts come out in English: the table says so itself.
     public static var isEnglish: Bool { table.localizedString(forKey: "__language", value: "ru", table: nil) == "en" }
 
+    /// Dates and times in the app's language, not the iPhone's: an iPhone in German reads the app in
+    /// English, and "Opened vor 5 Minuten" mixes the two (the App Store's screenshots, 13 November:
+    /// "Открывали now" — the texts in Russian, the simulator's locale English).
+    public static var locale: Locale { Locale(identifier: isEnglish ? "en_US" : "ru_RU") }
+
     /// Where the texts are looked up: the app's bundle, which follows the iPhone's language. A test
     /// that finds things by their Russian words names the language instead (LUMEN_TEST_LANGUAGE, DEBUG
     /// builds only) — the simulator itself stays in English, with its keyboard and system labels

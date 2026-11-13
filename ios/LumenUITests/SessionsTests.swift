@@ -40,6 +40,9 @@ final class SessionsTests: LumenUITestCase {
         app.navigationBars.buttons.element(boundBy: 0).tap()
         wait(sessionCard("Реклама"), "back to the list")
         XCTAssertTrue(sessionCard("Реклама").label.contains("Открывали"), "the card says it was opened: \(sessionCard("Реклама").label)")
+        // When, in the app's language, not the simulator's (English): "Открывали now" was on the App Store's screenshots.
+        XCTAssertNil(sessionCard("Реклама").label.range(of: #"Открывали [A-Za-z]"#, options: .regularExpression),
+                       "the card says when in Russian: \(sessionCard("Реклама").label)")
         shot("04 renamed and opened")
 
         // Quit and start again: everything as it was left.
