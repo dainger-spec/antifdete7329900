@@ -2,6 +2,7 @@
 """pbctl — the Lumen automation API from the command line (docs/AUTOMATION_API.md).
 
     pbctl list
+    pbctl create [--name N] [--proxy socks5://user:pass@host:port] [--keep] [--start] [--hidden]
     pbctl show <profile>
     pbctl start <profile> [--hidden]
     pbctl stop <profile>
@@ -54,6 +55,12 @@ def main():
     parser = argparse.ArgumentParser(prog="pbctl", description=__doc__.split("\n\n")[0])
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("list", help="every profile")
+    create = commands.add_parser("create", help="make a profile — temporary unless --keep — and start it with --start")
+    create.add_argument("--name")
+    create.add_argument("--proxy", help="scheme://user:password@host:port (socks5, http or https)")
+    create.add_argument("--keep", action="store_true", help="a profile that keeps its data, not a temporary one")
+    create.add_argument("--start", action="store_true", help="start it at once")
+    create.add_argument("--hidden", action="store_true", help="with --start: without a window, as a warm-up does")
     for name, help_text in (("show", "one profile"), ("stop", "stop a profile (its data is sealed)")):
         commands.add_parser(name, help=help_text).add_argument("profile")
     start = commands.add_parser("start", help="start a profile")
@@ -74,6 +81,13 @@ def main():
         for profile in call("GET", "/v1/profiles"):
             state = "running" if profile["running"] else ("busy" if profile["busy"] else "stopped")
             print(f'{profile["id"]}  {state:8}  {profile.get("proxy") or "direct":32}  {profile["name"]}')
+    elif args.command == "create":
+        body = {"temporary": not args.keep, "start": args.start, "window": not args.hidden}
+        if args.name:
+            body["name"] = args.name
+        if args.proxy:
+            body["proxy"] = args.proxy
+        print(json.dumps(call("POST", "/v1/profiles", body), indent=2, ensure_ascii=False))
     elif args.command == "show":
         print(json.dumps(call("GET", profile_path(args.profile)), indent=2, ensure_ascii=False))
     elif args.command == "start":

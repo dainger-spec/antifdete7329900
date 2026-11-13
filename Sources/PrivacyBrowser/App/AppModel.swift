@@ -1513,6 +1513,9 @@ final class AppModel: ObservableObject {
         }
         handler.onChange = { [weak self] in self?.refresh() }
         handler.allowsAutomation = { [weak self] in self?.license.allowsAutomation ?? false }
+        handler.createProfile = { [weak self] name, configuration in
+            try self?.createProfile(name: name, configuration: configuration)
+        }
         handler.savedScenario = { [weak self] name in
             let matching = self?.scenarios.scenarios.filter { $0.name == name } ?? []
             return matching.count == 1 ? matching[0] : nil

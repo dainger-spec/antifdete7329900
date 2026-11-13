@@ -118,6 +118,13 @@ final class AutomationAPITests: XCTestCase {
                        .runScenario("a", ScenarioRunSpec(source: nil, scenario: "Sign in", parametersJSON: "{\"n\":2}")))
         XCTAssertEqual(try route("GET", "/v1/profiles/a/scenario").get(), .scenarioState("a"))
         XCTAssertEqual(try route("POST", "/v1/profiles/a/scenario/stop").get(), .stopScenario("a"))
+        // A fresh profile in one call: temporary by default, started when asked.
+        XCTAssertEqual(try route("POST", "/v1/profiles").get(), .create(AutomationNewProfile()))
+        XCTAssertEqual(try route("POST", "/v1/profiles",
+                                 body: "{\"name\": \" Run 7 \", \"temporary\": false, \"start\": true, \"window\": false, \"proxy\": \"socks5://u:p@h.test:1080\"}").get(),
+                       .create(AutomationNewProfile(name: "Run 7", ephemeral: false,
+                                                    proxy: ProxySettings(kind: .socks5, host: "h.test", port: 1080, username: "u", password: "p"),
+                                                    start: true, window: false)))
 
         func refused(_ method: String, _ target: String, body: String = "") throws -> Int? {
             if case .failure(let refusal) = try route(method, target, body: body) { return refusal.response.status }
@@ -125,7 +132,12 @@ final class AutomationAPITests: XCTestCase {
         }
         XCTAssertEqual(try refused("GET", "/v2/profiles"), 404)
         XCTAssertEqual(try refused("GET", "/v1/profiles/a/delete"), 404)
-        XCTAssertEqual(try refused("POST", "/v1/profiles"), 405)
+        XCTAssertEqual(try refused("PUT", "/v1/profiles"), 405)
+        XCTAssertEqual(try refused("POST", "/v1/profiles", body: "[1]"), 400)
+        XCTAssertEqual(try refused("POST", "/v1/profiles", body: "{\"name\": \"  \"}"), 400, "a blank name")
+        XCTAssertEqual(try refused("POST", "/v1/profiles", body: "{\"start\": \"yes\"}"), 400, "a flag that is not true or false")
+        XCTAssertEqual(try refused("POST", "/v1/profiles", body: "{\"proxy\": \"1.2.3.4:1080\"}"), 400, "no scheme: the type is not guessed")
+        XCTAssertEqual(try refused("POST", "/v1/profiles", body: "{\"proxy\": \"not a proxy\"}"), 400)
         XCTAssertEqual(try refused("GET", "/v1/profiles/a/start"), 405)
         XCTAssertEqual(try refused("POST", "/v1/profiles/a/start", body: "[1]"), 400)
         XCTAssertEqual(try refused("GET", "/v1/profiles/a/cookies?format=har"), 400)

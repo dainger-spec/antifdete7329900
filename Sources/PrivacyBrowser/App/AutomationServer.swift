@@ -249,6 +249,9 @@ final class AutomationHandler {
     var allowsAutomation: () -> Bool = { false }
     /// A saved scenario by its exact name (one), for `{"scenario": "…"}`.
     var savedScenario: (String) -> Scenario? = { _ in nil }
+    /// Makes a profile as the app's New Profile does — the plan's limit and an unreadable index
+    /// refuse it (`AppModel.createProfile`). Nil: no profile can be made here.
+    var createProfile: ((String, ProfileConfiguration) throws -> UUID?)?
 
     init(manager: ProfileManager, repository: ProfileRepository) {
         self.manager = manager
@@ -268,6 +271,31 @@ final class AutomationHandler {
         switch route {
         case .listProfiles:
             return .json(200, repository.list().map(entry))
+        case .create(let request):
+            guard let createProfile else { return .error(503, "not_available", "Profiles cannot be made here.") }
+            let name = request.name ?? ProfileClone.names(for: "Temporary", count: 1, taken: repository.list().map(\.name))[0]
+            let configuration = ProfileConfiguration(proxy: request.proxy, ephemeral: request.ephemeral)
+            let made: UUID?
+            do {
+                made = try createProfile(name, configuration)
+            } catch {
+                return .error(409, "not_created", error.localizedDescription)
+            }
+            guard let id = made, let summary = try? repository.summary(for: id) else {
+                return .error(503, "not_available", "The vault is locked.")
+            }
+            onChange()
+            if request.start {
+                await waitForSync()
+                do {
+                    try await manager.launch(id, openingWindow: request.window)
+                } catch {
+                    // Made, and said so: the profile is there, only its start failed.
+                    return .error(409, "launch_failed", "Profile \(id.uuidString) was made but did not start: \(error.localizedDescription)")
+                }
+                onChange()
+            }
+            return .json(201, entry(summary))
         case .profile(let reference):
             return await profile(reference) { .json(200, self.entry($0)) }
         case .start(let reference, let window):
