@@ -221,7 +221,8 @@ struct SessionRow: View {
                 }
                 secondLine.font(.subheadline).foregroundStyle(.secondary)
                 if session.syncedProfileID != nil {
-                    Label(L("С Mac"), systemImage: "laptopcomputer").font(.subheadline).foregroundStyle(.tertiary)
+                    // The symbol inline in the text: a Label in a list row would take the row's icon place.
+                    Text("\(Image(systemName: "laptopcomputer")) \(L("С Mac"))").font(.subheadline).foregroundStyle(.tertiary)
                 } else if !session.tags.isEmpty {
                     Text(tags).font(.subheadline).foregroundStyle(.tertiary)
                 }
