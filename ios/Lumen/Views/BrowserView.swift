@@ -25,6 +25,8 @@ struct BrowserView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        // Leaving the browser, the window takes the app's own scheme back.
+        .onDisappear { model.lightPageShown = false }
         .toolbar {
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 1) {
@@ -42,9 +44,9 @@ struct BrowserView: View {
         }
         .sheet(item: $sheet) { which in
             switch which {
-            case .tabs: TabsView(runtime: runtime)
-            case .history: HistoryView(runtime: runtime)
-            case .settings: SessionSettingsView(sessionID: runtime.sessionID)
+            case .tabs: TabsView(runtime: runtime).preferredColorScheme(Theme.colorScheme)
+            case .history: HistoryView(runtime: runtime).preferredColorScheme(Theme.colorScheme)
+            case .settings: SessionSettingsView(sessionID: runtime.sessionID).preferredColorScheme(Theme.colorScheme)
             }
         }
     }
@@ -106,10 +108,11 @@ private struct TabPage: View {
                     .accessibilityIdentifier("settingsButton").accessibilityLabel(L("Настройки сессии"))
             }
         }
-        // Over a white site the bars and the status bar go light, as Safari's do. The scheme of a bar
-        // reaches the status bar only while the bar's background shows (run 108: 9:41 white on white).
+        // Over a white site the bars and the status bar go light, as Safari's do: the window's scheme
+        // follows the page (a bar's own scheme left 9:41 white on white, runs 108 and 110). The sheets
+        // keep the app's own (above).
         .toolbarColorScheme(pageIsLight ? .light : .dark, for: .navigationBar, .bottomBar)
-        .toolbarBackground(pageIsLight ? .visible : .automatic, for: .navigationBar)
+        .onChange(of: pageIsLight, initial: true) { _, light in model.lightPageShown = light }
     }
 
     /// A site's own light page is on the screen (not the new tab's words, not the proxy that does not answer).

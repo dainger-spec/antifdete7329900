@@ -28,7 +28,8 @@ struct LumenApp: App {
             }
             .environmentObject(model)
             // Dark, as the app has always been; the light theme behind its flag (Theme.colorScheme).
-            .preferredColorScheme(Theme.colorScheme)
+            // Over a site's light page the window goes light, as Safari's does.
+            .preferredColorScheme(model.lightPageShown ? .light : Theme.colorScheme)
             // Back in front: the account's decision again, and a fresh document if it is due.
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { model.accountTick() }
