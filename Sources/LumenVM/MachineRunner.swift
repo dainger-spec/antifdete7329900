@@ -12,7 +12,8 @@ import VMNetCore
 /// the profile's proxy and has no other way out, so a guest whose proxy is down reaches nothing.
 /// Closed: the same network with no way out at all.
 final class MachineNetwork {
-    let attachment: VZNetworkDeviceAttachment
+    /// Nil: the machine has no network card (`VMHelperRequest.Network.absent`).
+    let attachment: VZNetworkDeviceAttachment?
     private let network: VMNetwork?
     private let descriptor: Int32
 
@@ -41,6 +42,12 @@ final class MachineNetwork {
     }
 
     init(request: VMHelperRequest) throws {
+        if request.network == .absent {
+            attachment = nil
+            network = nil
+            descriptor = -1
+            return
+        }
         if request.network == .direct {
             attachment = VZNATNetworkDeviceAttachment()
             network = nil

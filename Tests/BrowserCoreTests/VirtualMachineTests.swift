@@ -294,6 +294,10 @@ final class VMHelperProtocolTests: XCTestCase {
         XCTAssertFalse(line.contains("\n"))
         XCTAssertEqual(try VMHelperRequest.parse(line), request)
         XCTAssertEqual(VMHelperRequest.run(profile: VMProfile(name: "Direct"), library: library, hostCores: 8, texts: [:]).network, .direct)
+        // The base's first-run setup: no network card at all — and never a profile's machine.
+        let offline = VMHelperRequest(mode: .run, machineDirectory: "/tmp/lib/base", network: .absent)
+        XCTAssertEqual(try VMHelperRequest.parse(try offline.line()).network, .absent)
+        XCTAssertTrue(try offline.line().contains(#""network":"absent""#))
 
         let event = VMHelperEvent(kind: .traffic, bytesUp: 10, bytesDown: 2000, connections: 3)
         XCTAssertEqual(VMHelperEvent.parse(event.line()), event)

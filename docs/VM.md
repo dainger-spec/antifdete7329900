@@ -24,10 +24,15 @@ licensing, and has the machines.
    into the vault's folder — about 25 GB. None of it is in Lumen's own download: the app stays the
    size it was. The download can be paused, and goes on from where it stopped — also after a quit,
    a lost connection or a restart of the Mac;
-3. installs macOS from it (10–20 minutes) into the **base system**, and removes the downloaded image;
+3. installs macOS from it (10–20 minutes) into the **base system**; the downloaded image is
+   removed when the base is set up (until then, starting over is an installation, not a download);
 4. opens the base in a window, for macOS's own first-run setup (the country, an account) and
    **Install Lumen Tools**, which the person opens from the shared folder in the guest's Finder;
-   the machine shuts down by itself when the tools are in;
+   the machine shuts down by itself when the tools are in. During this setup the base has **no
+   network card**: macOS's setup then asks nothing of Apple's servers, is shorter by the screens
+   that need them, and cannot hang waiting for them (the first run on a Mac, 13 November: with
+   this Mac's connection the setup stood on a screen with its buttons off). "Open with Internet"
+   is there for a setup that will not go on without one;
 5. from then on **New Machine** makes a profile. Its machine is a copy-on-write clone of the base,
    made in seconds at its first start, with an identity of its own.
 

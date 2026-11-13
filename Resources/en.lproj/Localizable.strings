@@ -2643,7 +2643,7 @@
 "vm.setup.remaining.hours" = "about %1$d h %2$d min left";
 "vm.setup.install.note" = "10–20 minutes. Keep Lumen open.";
 "vm.setup.install.ready" = "macOS is downloaded and ready to install.";
-"vm.setup.guest.step1" = "Go through macOS's own setup: the country, an account with a password. On the other screens press “Set Up Later” or “Not Now”; leave FileVault off.";
+"vm.setup.guest.step1" = "Go through macOS's own setup: the country, an account with a password. Asked how the Mac connects, choose “My computer does not connect to the internet”; on the other screens press “Set Up Later” or “Not Now”; leave FileVault off.";
 "vm.setup.guest.step2" = "In the machine's Finder, open “My Shared Files” (Go → Computer) and open “Install Lumen Tools”.";
 "vm.setup.guest.step3" = "Type the password of the account you made. The machine shuts down by itself — and everything is ready.";
 "vm.setup.guest.fallback" = "If the file does not open, run this in the machine's Terminal:";
@@ -2811,7 +2811,7 @@
 "vm.plan.upgrade" = "Upgrade to Team";
 "vm.setup.stepOf" = "Step %1$d of %2$d";
 "vm.setup.asking.detail" = "A few seconds.";
-"vm.setup.guest.detail" = "Once, about five minutes. Every machine after it is a ready copy of this system: no setup, signed in, Safari open.";
+"vm.setup.guest.detail" = "Once, about five minutes, without a network. Every machine after it is a ready copy of this system: no setup, signed in, Safari open.";
 "vm.setup.paused.title" = "The download\nis paused";
 "vm.setup.downloaded.title" = "macOS is\ndownloaded";
 "vm.setup.step.download.detail" = "You can keep working: a pause or a quit loses nothing";
@@ -2820,4 +2820,6 @@
 "vm.setup.window" = "macOS %@ · from Apple's servers";
 "vm.setup.window.unknown" = "macOS · from Apple's servers";
 "vm.setup.guest.window" = "What to do in the machine's window";
-"vm.setup.guest.wifi" = "The Wi-Fi icon in the machine is crossed out, as it should be: the machine is on a cable, and has the internet.";
+"vm.setup.guest.wifi" = "During this setup the machine has no network: that is what makes it short. A profile's machine is on a cable — its Wi-Fi icon is crossed out, as it should be, and it has the internet.";
+"vm.setup.guest.openOnline" = "Open with Internet";
+"vm.setup.guest.openOnline.help" = "If macOS's setup will not go on without a connection: the same machine, with this Mac's own connection.";

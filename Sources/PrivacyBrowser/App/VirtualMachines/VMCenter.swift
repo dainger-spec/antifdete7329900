@@ -298,8 +298,8 @@ final class VMCenter: ObservableObject {
             } catch {
                 return self.setupFailed(errorText(error))
             }
-            // The restore image has done its work: its gigabytes go back to the disk.
-            self.removeDownloads()
+            // The restore image stays until the base is set up: starting the setup over is then
+            // an installation, not another download of its gigabytes.
             self.activity = nil
             self.holdAwake(false)
             self.setup = self.library.setupState()
@@ -323,10 +323,23 @@ final class VMCenter: ObservableObject {
         setup = library.setupState()
     }
 
+    /// The memory the base gets while it is set up: macOS's first run is the heaviest thing a
+    /// machine does, and the setup is the one time the person waits on it.
+    static var setupMemoryGB: Int {
+        let host = Int(ProcessInfo.processInfo.physicalMemory / UInt64(VMRequirements.gibibyte))
+        return host >= 16 ? 8 : (host >= 12 ? 6 : VMRequirements.standardMemoryGB)
+    }
+
     /// Opens the base in its window — for macOS's first-run setup and the tools, or later to change
-    /// something every new profile's machine should have. Its network is this Mac's own.
-    func openBase() {
+    /// something every new profile's machine should have.
+    ///
+    /// `online` nil: a base not set up yet has **no network card** — macOS's setup asks nothing of
+    /// Apple's servers then, is shorter by the screens that need them, and cannot hang waiting for
+    /// them (the owner's Mac, 13 November: the setup stood on a screen with its buttons off); a
+    /// base that is ready has this Mac's own connection, for what the person wants to add to it.
+    func openBase(online: Bool? = nil) {
         guard activity == nil, Self.availability == .available, library.base.isComplete, let info = library.baseInfo() else { return }
+        let network: VMHelperRequest.Network = (online ?? (info.stage == .ready)) ? .direct : .absent
         guard isAllowed() else {
             setupError = L("vm.error.notInPlan")
             return
@@ -352,6 +365,9 @@ final class VMCenter: ObservableObject {
             // The tools' installer says in the shared folder that it has done its work.
             let status = (try? String(contentsOf: self.library.base.status, encoding: .utf8)).map(VMGuestStatus.init(text:))
             if let status, status.setupDone {
+                // The base is set up: the restore image has done its work, and its gigabytes go
+                // back to the disk.
+                self.removeDownloads()
                 var ready = info
                 ready.stage = .ready
                 ready.toolsVersion = status.toolsVersion ?? VMGuestTools.version
@@ -368,8 +384,8 @@ final class VMCenter: ObservableObject {
         })
         start(helper, VMHelperRequest(mode: .run, machineDirectory: library.baseDirectory.path,
                                       cores: VMRequirements.cores(hostCores: ProcessInfo.processInfo.activeProcessorCount),
-                                      memoryBytes: Int64(VMRequirements.standardMemoryGB) * VMRequirements.gibibyte,
-                                      macAddress: VMProfile.randomMACAddress(), network: .direct,
+                                      memoryBytes: Int64(Self.setupMemoryGB) * VMRequirements.gibibyte,
+                                      macAddress: VMProfile.randomMACAddress(), network: network,
                                       windowTitle: L("vm.base.window"), texts: Self.helperTexts))
     }
 
@@ -379,11 +395,11 @@ final class VMCenter: ObservableObject {
         setupHelper?.stop()
     }
 
-    /// Removes the base system and what was fetched for it — to set the machines up anew, with the
-    /// macOS Apple offers then. The profiles' machines stay: each has a disk of its own.
+    /// Removes the base system — to set the machines up anew. A restore image still there (the
+    /// base was not set up yet) stays, so the setup starts over from the installation, not from
+    /// the download. The profiles' machines stay: each has a disk of its own.
     func removeBase() {
         guard activity == nil else { return }
-        removeDownloads()
         try? FileManager.default.removeItem(at: library.baseDirectory)
         try? FileManager.default.removeItem(at: library.baseInfoURL)
         setupError = nil

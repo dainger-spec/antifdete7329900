@@ -42,6 +42,10 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
         case proxy
         /// No network card's traffic goes anywhere.
         case closed
+        /// No network card at all: the base during its first-run setup. macOS's own setup then
+        /// asks nothing of Apple's servers and waits for none of them — it is shorter, and does
+        /// not hang where this Mac's connection (a VPN, a proxy tool) keeps the guest from them.
+        case absent
     }
 
     public var mode: Mode

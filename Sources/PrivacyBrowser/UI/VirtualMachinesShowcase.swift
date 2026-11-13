@@ -578,6 +578,11 @@ struct VMSetupPanel: View {
         case .needsGuestSetup:
             Button(L("vm.setup.guest.openMachine")) { center.continueSetup() }
                 .buttonStyle(.lumenPrimary)
+            // For a setup that will not go on without the internet: the same, with this Mac's
+            // connection.
+            Button(L("vm.setup.guest.openOnline")) { center.openBase(online: true) }
+                .buttonStyle(.lumenGhost)
+                .help(L("vm.setup.guest.openOnline.help"))
             Button(L("vm.setup.guest.startOver")) { center.removeBase() }
                 .buttonStyle(.lumenGhost)
         case .none, .ready:
