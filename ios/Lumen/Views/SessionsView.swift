@@ -54,7 +54,7 @@ struct SessionsView: View {
                             row(session)
                         }
                     } header: {
-                        Text(searching ? Count.sessions(shown.count) : L("Недавние"))
+                        if TitleProbe.off != "noheader" { Text(searching ? Count.sessions(shown.count) : L("Недавние")) }
                     }
                 }
             }
@@ -81,7 +81,9 @@ struct SessionsView: View {
                     }
                 }
             }
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: dynamicTypeSize.isAccessibilitySize ? L("Поиск") : L("Имя, описание, метка, прокси"))
+            .unlessProbe("nosearch") {
+                $0.searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: dynamicTypeSize.isAccessibilitySize ? L("Поиск") : L("Имя, описание, метка, прокси"))
+            }
             .navigationTitle(L("Сессии"))
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
@@ -129,9 +131,9 @@ struct SessionsView: View {
                        checking: session.proxyID.map { model.checking.contains($0) } ?? false)
         }
         .buttonStyle(.plain)
-        .matchedTransitionSource(id: session.id, in: zoom)
+        .unlessProbe("nozoom") { $0.matchedTransitionSource(id: session.id, in: zoom) }
         .accessibilityIdentifier("session-\(session.name)")
-        .contextMenu {
+        .unlessProbe("nomenu") { $0.contextMenu {
             Button(L("Изменить"), systemImage: "pencil") { editor = .edit(session.id) }
             Button(L("Скопировать имя"), systemImage: "doc.on.doc") { UIPasteboard.general.string = session.name }
             Divider()
@@ -140,7 +142,7 @@ struct SessionsView: View {
         .swipeActions {
             Button(L("Удалить"), systemImage: "trash", role: .destructive) { deleting = session }
             Button(L("Изменить"), systemImage: "pencil") { editor = .edit(session.id) }.tint(Color(.systemGray))
-        }
+        } }
     }
 
     /// The notice of the period's end may be closed (§8.5); the others stay while they are true.

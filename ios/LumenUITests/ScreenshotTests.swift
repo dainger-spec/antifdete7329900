@@ -124,6 +124,15 @@ final class DesignShotTests: LumenUITestCase {
         touch(app.buttons["settingsButton"])
         if app.buttons["settingsDone"].waitForExistence(timeout: 10) { snap("k-settings") }
         app.terminate()
+
+        // Diagnostic, not a mockup's state: the list with one of its parts left out (TitleProbe), to see
+        // which one collapses the large title.
+        theme = "dark"
+        for part in ["nozoom", "nosearch", "noheader", "nomenu"] {
+            start(env: ["LUMEN_DIAG_TITLE": part])
+            snap("diag-title-\(part)")
+            app.terminate()
+        }
     }
 
     private func t(_ ru: String, _ en: String) -> String { language == "en" ? en : ru }
@@ -144,7 +153,7 @@ final class DesignShotTests: LumenUITestCase {
         }
     }
 
-    private func start(access: String = "full", empty: Bool = false, extra: [String] = []) {
+    private func start(access: String = "full", empty: Bool = false, extra: [String] = [], env: [String: String] = [:]) {
         let app = XCUIApplication()
         app.launchArguments = ["-LumenResetState"] + extra
         app.launchEnvironment["LUMEN_TEST_LANGUAGE"] = language
@@ -152,6 +161,7 @@ final class DesignShotTests: LumenUITestCase {
         app.launchEnvironment["LUMEN_TEST_SEED"] = "appstore"
         app.launchEnvironment["LUMEN_TEST_THEME"] = theme
         if empty { app.launchEnvironment["LUMEN_TEST_SEED_EMPTY"] = "1" }
+        for (key, value) in env { app.launchEnvironment[key] = value }
         app.launch()
         self.app = app
         _ = app.navigationBars[t("Сессии", "Sessions")].waitForExistence(timeout: 30)
