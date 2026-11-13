@@ -6,7 +6,7 @@ same state (DesignShotTests, sorted by ci.sh into design/<lang>-<theme>/<name>.p
 
 <handoff screens dir> holds ru-dark/, en-dark/, ru-light/ … with <name>.png (1170 x 2532); the CI's
 design dir the same names (1320 x 2868, the 6.9-inch iPhone). Each pair is written as
-<out>/<lang>-<theme>/<name>.png, both at one height under a line naming them; a state the app was not
+<out>/<lang>-<theme>/<name>.jpg (JPEG: some sixty pairs go into the repository), both at one height under a line naming them; a state the app was not
 photographed in is listed, not drawn. Prints the list of pairs, and the states missing on either side.
 """
 import os
@@ -43,7 +43,7 @@ def pair(mockup, app, title, out):
     canvas.paste(left, (GAP, TOP))
     canvas.paste(right, (left.width + GAP * 2, TOP))
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    canvas.save(out, optimize=True)
+    canvas.save(out, quality=82, optimize=True)
 
 
 def main(mockups, shots, out):
@@ -55,7 +55,7 @@ def main(mockups, shots, out):
         for name in sorted(n[:-4] for n in os.listdir(folder) if n.endswith(".png")):
             app = os.path.join(shots, variant, name + ".png")
             if os.path.exists(app):
-                pair(os.path.join(folder, name + ".png"), app, f"{variant} · {name}", os.path.join(out, variant, name + ".png"))
+                pair(os.path.join(folder, name + ".png"), app, f"{variant} · {name}", os.path.join(out, variant, name + ".jpg"))
                 made.append(f"{variant}/{name}")
             else:
                 no_app.append(f"{variant}/{name}")
