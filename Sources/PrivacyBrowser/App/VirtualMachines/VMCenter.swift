@@ -451,6 +451,11 @@ final class VMCenter: ObservableObject {
             problems[id] = L("vm.error.limit")
             return
         }
+        // A machine not made yet is a clone of the base's disk: not of one the base is writing now.
+        if activity == .guestSetup, !library.machine(for: id).isComplete {
+            problems[id] = L("vm.error.baseOpen")
+            return
+        }
         problems[id] = nil
         guard let proxy = profile.proxy else {
             running[id] = Running(phase: .starting)

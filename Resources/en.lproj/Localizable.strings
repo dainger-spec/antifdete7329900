@@ -2720,6 +2720,7 @@
 "vm.error.unknown" = "The virtual machine stopped without saying why.";
 "vm.error.helperEnded" = "The virtual machine ended unexpectedly (code %d).";
 "vm.error.limit" = "Two machines are running already — Apple's limit for macOS in virtual machines on one Mac. Shut one down first.";
+"vm.error.baseOpen" = "The base system is open. Shut it down first: a new machine is made from its disk.";
 "vm.error.proxyDown" = "The proxy does not answer, so the machine was not started: it would reach nothing. Check the proxy in the Proxies section.";
 "vm.error.listUnreadable" = "The list of virtual machines could not be read, so nothing is written over it.";
 "vm.error.load" = "The list of virtual machines could not be read (%@). The machines' disks are untouched.";
