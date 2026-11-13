@@ -1397,6 +1397,16 @@
         }
       }
     },
+    "Поиск": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search"
+          }
+        }
+      }
+    },
     "Поиск в истории": {
       "localizations": {
         "en": {

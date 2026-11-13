@@ -12,6 +12,8 @@ struct SessionsView: View {
     @State private var deleting: Session?
     @Namespace private var zoom
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// At the accessibility sizes the search's long hint does not fit its field (the audit, run 108).
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     enum EditorTarget: Identifiable {
         case new
@@ -57,6 +59,9 @@ struct SessionsView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            // The list starts at its top: the large title and the search under it (run 108: with rows
+            // the title came collapsed into the bar).
+            .defaultScrollAnchor(.top)
             .overlay {
                 if model.sessions.isEmpty {
                     ContentUnavailableView {
@@ -65,7 +70,7 @@ struct SessionsView: View {
                         Text(L("У каждой сессии свои куки, хранилище сайтов, вкладки, история и прокси."))
                     } actions: {
                         Button(L("Новая сессия")) { openNew() }
-                            .buttonStyle(.borderedProminent).tint(Theme.accentFill)
+                            .buttonStyle(.borderedProminent).tint(Theme.accentFill).controlSize(.large)
                             .accessibilityIdentifier("newSessionEmpty")
                     }
                 } else if shown.isEmpty {
@@ -76,7 +81,7 @@ struct SessionsView: View {
                     }
                 }
             }
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: L("Имя, описание, метка, прокси"))
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: dynamicTypeSize.isAccessibilitySize ? L("Поиск") : L("Имя, описание, метка, прокси"))
             .navigationTitle(L("Сессии"))
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
