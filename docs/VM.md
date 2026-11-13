@@ -205,7 +205,7 @@ a newer one takes the place of hands the folder it found on (tools 6).
 | Proxy | every connection of the machine through it; or none: this Mac's connection |
 | Blocked sites | names the machine's network answers "no such name" for — the whole macOS, not Safari alone — beside the app's own list (Apple's update hosts) |
 | Network card address | the machine's own (MAC), random when it is made; may be written or drawn anew |
-| Time zone, language | from where the proxy comes out, at every start; or set by hand |
+| Time zone, language | with a proxy: from where the proxy comes out, at every start, or set by hand. Without one, the person's choice of three: this Mac's time zone (the language as it is in the machine); those of the country **this Mac's own connection** comes out in — its VPN's, when one is on — found at every start by a request from this Mac to a service that says where an address is, which is why it is a choice and not the rule (no answer: the machine starts with what it had, and its row says so); or set by hand |
 | Region | with a language set by hand: the country whose formats the system uses ("en" in "DE": English as in Germany) |
 | Clock, first day of the week | 12 or 24 hours; Monday, Sunday or Saturday; or as the region has them |
 | Screen | a real Mac's, at its default size or at "More Space"; external displays |

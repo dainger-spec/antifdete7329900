@@ -80,8 +80,8 @@ public struct VMGuestSettings: Equatable, Sendable {
                   accent: profile.accent.flatMap(VMAccent.init(rawValue:)), opensSafari: profile.opensSafari,
                   wallpaper: profile.lumenWallpaper,
                   // A region of the person's choosing goes with a language of their choosing: where
-                  // both follow the proxy, the language found there has its own.
-                  region: profile.localeFollowsProxy && profile.proxy != nil ? nil : profile.regionCode,
+                  // the language is found — by the proxy, or by this Mac's connection — it has its own.
+                  region: profile.localeFollowsProxy ? nil : profile.regionCode,
                   hourCycle: profile.hourCycle.flatMap(VMHourCycle.init(rawValue:)), firstWeekday: profile.firstWeekday,
                   dockPosition: profile.dockPosition.flatMap(VMDockPosition.init(rawValue:)), dockAutohide: profile.dockAutohide,
                   dockSize: profile.dockSize.flatMap(VMDockSize.init(rawValue:)),

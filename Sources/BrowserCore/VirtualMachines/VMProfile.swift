@@ -87,6 +87,12 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
     public var blockedHosts: [String]
     /// The machine's window opens full screen.
     public var startsFullScreen: Bool
+    /// A machine without a proxy: its time zone and language follow where this Mac's own
+    /// connection comes out (its VPN, when one is on), found at every start. The person's own
+    /// choice, off unless made: finding it is a request from this Mac to a service that says where
+    /// an address is. Off: the Mac's time zone and the base system's language (or set by hand,
+    /// `localeFollowsProxy` off). With a proxy it means nothing: `localeFollowsProxy` does.
+    public var localeFollowsConnection: Bool
 
     public init(id: UUID = UUID(), name: String, createdAt: Date = Date(), lastLaunchedAt: Date? = nil,
                 proxy: ProxySettings? = nil, timeZoneIdentifier: String? = nil, language: String? = nil,
@@ -97,7 +103,7 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
                 computerName: String? = nil, opensSafari: Bool = true, colorIndex: Int? = nil, lumenWallpaper: Bool = true,
                 regionCode: String? = nil, hourCycle: String? = nil, firstWeekday: Int? = nil, dockPosition: String? = nil,
                 dockAutohide: Bool? = nil, dockSize: String? = nil, scrollBars: String? = nil, moreStartURLs: [String] = [],
-                blockedHosts: [String] = [], startsFullScreen: Bool = false) {
+                blockedHosts: [String] = [], startsFullScreen: Bool = false, localeFollowsConnection: Bool = false) {
         self.id = id
         self.name = name
         self.createdAt = createdAt
@@ -130,13 +136,14 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         self.moreStartURLs = moreStartURLs
         self.blockedHosts = blockedHosts
         self.startsFullScreen = startsFullScreen
+        self.localeFollowsConnection = localeFollowsConnection
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, createdAt, lastLaunchedAt, proxy, timeZoneIdentifier, language, countryCode, localeFollowsProxy,
              displayID, memoryGB, macAddress, startURL, notes, cores, soundEnabled, appearance, accent, computerName,
              opensSafari, colorIndex, lumenWallpaper, regionCode, hourCycle, firstWeekday, dockPosition, dockAutohide, dockSize,
-             scrollBars, moreStartURLs, blockedHosts, startsFullScreen
+             scrollBars, moreStartURLs, blockedHosts, startsFullScreen, localeFollowsConnection
     }
 
     /// Tolerant of what a later version adds or an earlier one lacked: defaults for what is absent.
@@ -175,6 +182,7 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         moreStartURLs = try c.decodeIfPresent([String].self, forKey: .moreStartURLs) ?? []
         blockedHosts = try c.decodeIfPresent([String].self, forKey: .blockedHosts) ?? []
         startsFullScreen = try c.decodeIfPresent(Bool.self, forKey: .startsFullScreen) ?? false
+        localeFollowsConnection = try c.decodeIfPresent(Bool.self, forKey: .localeFollowsConnection) ?? false
     }
 
     /// How many pages Safari may be told to open at start beside the first.
@@ -311,6 +319,23 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
     /// otherwise as it is.
     public func followingProxy(check: ProxyCheckResult?) -> VMProfile {
         guard localeFollowsProxy, proxy != nil, let check, check.isAlive else { return self }
+        return taking(check)
+    }
+
+    /// The same for a machine without a proxy whose time zone and language the person has said
+    /// follow this Mac's own connection (`localeFollowsConnection`): `exit` is where that
+    /// connection came out. Otherwise — a proxy, the choice not made, set by hand, or nothing
+    /// found — as it is.
+    public func followingConnection(exit: ProxyCheckResult?) -> VMProfile {
+        guard proxy == nil, localeFollowsProxy, localeFollowsConnection, let exit, exit.isAlive else { return self }
+        return taking(exit)
+    }
+
+    /// Whether this machine's time zone and language are to be found from this Mac's connection
+    /// before it starts.
+    public var asksWhereTheConnectionComesOut: Bool { proxy == nil && localeFollowsProxy && localeFollowsConnection }
+
+    private func taking(_ check: ProxyCheckResult) -> VMProfile {
         var updated = self
         if let zone = check.timeZoneIdentifier, VMGuestSettings.isTimeZone(zone) { updated.timeZoneIdentifier = zone }
         if let country = check.countryCode?.uppercased() {

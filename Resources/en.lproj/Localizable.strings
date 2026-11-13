@@ -2672,6 +2672,7 @@
 "vm.row.edit" = "Edit…";
 "vm.row.delete" = "Delete…";
 "vm.row.checkingProxy" = "checking the proxy…";
+"vm.row.checkingConnection" = "checking the connection…";
 "vm.row.starting" = "starting…";
 "vm.row.running" = "running";
 "vm.row.stopping" = "shutting down…";
@@ -2704,7 +2705,13 @@
 "vm.editor.proxy.empty" = "Proxies are added in the Proxies section. A machine takes a SOCKS5 or an HTTP proxy; one reached over TLS (https://) is not supported yet.";
 "vm.editor.follow" = "Time zone and language follow the proxy";
 "vm.editor.follow.detail" = "Checked at every start: the machine's macOS gets the time zone and the language of the country the proxy comes out in.";
-"vm.editor.follow.direct" = "Without a proxy: this Mac's time zone, the base system's language.";
+"vm.editor.locale" = "Time zone and language";
+"vm.editor.locale.mac" = "This Mac's";
+"vm.editor.locale.connection" = "By the connection";
+"vm.editor.locale.manual" = "By hand";
+"vm.editor.locale.mac.note" = "This Mac's time zone; the language stays as it is in the machine.";
+"vm.editor.locale.connection.note" = "At every start Lumen finds the country this Mac's own connection comes out in — its VPN's, when one is on — and gives the machine that country's time zone and language. To find it, this Mac asks a service that tells where an address is.";
+"vm.editor.locale.manual.note" = "The time zone, language and region chosen below.";
 "vm.editor.language.base" = "As in the base system";
 "vm.editor.display" = "Screen";
 "vm.editor.display.note" = "Sites read the screen's size. The window can be made any size: the picture scales, the machine's screen stays the same.";
@@ -2722,6 +2729,7 @@
 "vm.error.baseOpen" = "The base system is open. Shut it down first: a new machine is made from its disk.";
 "vm.error.proxyDown" = "The proxy does not answer, so the machine was not started: it would reach nothing. Check the proxy in the Proxies section.";
 "vm.error.machineStarting" = "A machine is being made from the base system right now. Open the base when it has started.";
+"vm.note.connectionUnknown" = "Where this Mac's connection comes out could not be found: the machine keeps the time zone and language it had.";
 "vm.error.listUnreadable" = "The list of virtual machines could not be read, so nothing is written over it.";
 "vm.error.load" = "The list of virtual machines could not be read (%@). The machines' disks are untouched.";
 "vm.error.deleteRunning" = "Shut the machine down before deleting it.";
@@ -2746,7 +2754,7 @@
 "help.vm.what.system" = "Its own macOS and Safari: cookies, history, the keychain, caches, the DNS cache — everything a Mac keeps, on a disk of its own.";
 "help.vm.what.proxy" = "With a proxy, everything the machine sends goes through it — the whole macOS, not only Safari — and nothing any other way. The proxy is checked before each start; if it does not answer, the machine is not started.";
 "help.vm.what.noProxy" = "Without a proxy the machine goes out as this Mac's own apps do: through its VPN, and through the proxy in its network settings when a VPN tool has put itself there. If a machine has no internet, its row in the list says why.";
-"help.vm.what.locale" = "The time zone and the language are the machine's own system settings, taken from where the proxy comes out at each start (or set by hand).";
+"help.vm.what.locale" = "The time zone and the language are the machine's own system settings. With a proxy they are taken from where the proxy comes out, at each start. Without one you choose: this Mac's, those of the country this Mac's own connection comes out in (its VPN, when one is on), or your own.";
 "help.vm.what.screen" = "The screen is one of real Macs' — MacBook Air, MacBook Pro, iMac — whatever the size of the window on your Mac.";
 "help.vm.what.look" = "The system's look and habits are the machine's own too: light or dark appearance, the accent colour, the computer's name, the scroll bars, the Dock, the clock and the week's first day — and the desktop picture, which is Lumen's wallpaper drawn for the machine's screen unless you switch it off in the machine's settings.";
 "help.vm.what.network" = "In a machine's settings you can also block sites for its whole macOS, give its network card another address, and open several pages at start.";

@@ -65,6 +65,46 @@ final class VMProfileTests: XCTestCase {
         XCTAssertNil(VMProfile(name: "A").followingProxy(check: check).timeZoneIdentifier)
     }
 
+    /// A machine without a proxy takes the time zone and language of the place this Mac's own
+    /// connection comes out at only when the person chose that for it: finding the place is a
+    /// request from this Mac to a service.
+    func testWithoutAProxyTheConnectionIsFollowedOnlyWhereThePersonChoseIt() throws {
+        let exit = ProxyCheckResult(checkedAt: Date(), exitIP: "203.0.113.9", countryCode: "de", timeZoneIdentifier: "Europe/Berlin")
+        // Not chosen: nothing is asked, and nothing taken.
+        let plain = VMProfile(name: "A")
+        XCTAssertFalse(plain.localeFollowsConnection)
+        XCTAssertFalse(plain.asksWhereTheConnectionComesOut)
+        XCTAssertEqual(plain.followingConnection(exit: exit), plain)
+        // Chosen.
+        let chosen = VMProfile(name: "A", localeFollowsConnection: true)
+        XCTAssertTrue(chosen.asksWhereTheConnectionComesOut)
+        let followed = chosen.followingConnection(exit: exit)
+        XCTAssertEqual(followed.timeZoneIdentifier, "Europe/Berlin")
+        XCTAssertEqual(followed.language, "de-DE")
+        XCTAssertEqual(followed.countryCode, "DE")
+        let settings = VMGuestSettings(profile: followed).text
+        XCTAssertTrue(settings.contains("LUMEN_TIMEZONE=Europe/Berlin\n"))
+        XCTAssertTrue(settings.contains("LUMEN_LOCALE=de_DE\n"))
+        // No answer: the machine keeps what it had.
+        let before = VMProfile(name: "A", timeZoneIdentifier: "Europe/Paris", language: "fr-FR", localeFollowsConnection: true)
+        XCTAssertEqual(before.followingConnection(exit: ProxyCheckResult.dead(.noAnswer)), before)
+        XCTAssertEqual(before.followingConnection(exit: nil), before)
+        // With a proxy the proxy is followed, not the Mac; set by hand, nothing is.
+        let proxied = VMProfile(name: "A", proxy: ProxySettings(kind: .socks5, host: "fr.example", port: 1080), localeFollowsConnection: true)
+        XCTAssertFalse(proxied.asksWhereTheConnectionComesOut)
+        XCTAssertEqual(proxied.followingConnection(exit: exit), proxied)
+        let own = VMProfile(name: "A", timeZoneIdentifier: "Asia/Tokyo", language: "ja-JP", localeFollowsProxy: false, localeFollowsConnection: true)
+        XCTAssertFalse(own.asksWhereTheConnectionComesOut)
+        XCTAssertEqual(own.followingConnection(exit: exit), own)
+        // Kept through a save, and absent in a list from before the choice.
+        XCTAssertTrue(try JSONCoding.decoder.decode(VMProfile.self, from: JSONCoding.encoder.encode(chosen)).localeFollowsConnection)
+        let old = #"{"id":"6F1C2E8A-0B0D-4C36-9C2A-7E7C0A1B2C3D","name":"Old","displayID":"macbook-air-13","memoryGB":4,"macAddress":"02:11:22:33:44:55"}"#
+        XCTAssertFalse(try JSONCoding.decoder.decode(VMProfile.self, from: Data(old.utf8)).localeFollowsConnection)
+        // A region of the person's own goes with a language set by hand only.
+        XCTAssertTrue(VMGuestSettings(profile: VMProfile(name: "A", language: "en-US", regionCode: "DE", localeFollowsConnection: true)).text.contains("LUMEN_LOCALE=en_US\n"))
+        XCTAssertTrue(VMGuestSettings(profile: VMProfile(name: "A", language: "en-US", localeFollowsProxy: false, regionCode: "DE")).text.contains("LUMEN_LOCALE=en_DE\n"))
+    }
+
     func testTheProfilesAreStoredEncryptedAtTheVaultsRootAndNotSynced() async throws {
         let repository = try ProfileRepository(vault: MasterVault.create(in: root.appendingPathComponent("A"), password: "pw", iterations: 1_000))
         let vault = repository.vault

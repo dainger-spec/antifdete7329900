@@ -581,8 +581,44 @@ final class VMCenter: ObservableObject {
         }
         problems[id] = nil
         guard let proxy = profile.proxy else {
-            running[id] = Running(phase: .starting)
-            return launch(profile)
+            guard profile.asksWhereTheConnectionComesOut else {
+                running[id] = Running(phase: .starting)
+                return launch(profile)
+            }
+            // The person's choice for this machine: its time zone and language are those of the
+            // place this Mac's own connection comes out at (its VPN, when one is on) — asked now,
+            // by this Mac, as a profile without a proxy asks. No answer does not keep the machine
+            // from starting: it keeps the time zone and language it had, and the row says so.
+            running[id] = Running(phase: .checkingProxy)
+            Task { [weak self] in
+                let userAgent = ProfileConfiguration().userAgent(hostSafariVersion: HostSafari.version)
+                let exit = ProxyChecker.result(of: await ProxyGeoLookup.lookUp(proxy: nil, userAgent: userAgent,
+                                                                              timeout: ProxyChecker.timeout))
+                guard let self, self.running[id]?.phase == .checkingProxy, var profile = self.list.profile(id) else { return }
+                if exit.isAlive, exit.countryCode != nil {
+                    self.exits[id] = exit
+                    let followed = profile.followingConnection(exit: exit)
+                    if followed != profile {
+                        profile = followed
+                        try? self.save(profile)
+                    }
+                } else {
+                    self.problems[id] = L("vm.note.connectionUnknown")
+                }
+                guard self.runningCount < VMRequirements.runningLimit else {
+                    self.running[id] = nil
+                    self.problems[id] = L("vm.error.limit")
+                    return
+                }
+                if self.activity == .guestSetup, !self.library.machine(for: id).isComplete {
+                    self.running[id] = nil
+                    self.problems[id] = L("vm.error.baseOpen")
+                    return
+                }
+                self.running[id]?.phase = .starting
+                self.launch(profile)
+            }
+            return
         }
         running[id] = Running(phase: .checkingProxy)
         Task { [weak self] in

@@ -492,13 +492,13 @@ private struct VMRow: View {
     }
 
     private var country: String? {
-        guard profile.proxy != nil else { return nil }
+        guard profile.proxy != nil || profile.localeFollowsConnection else { return nil }
         return (exit?.countryCode ?? profile.countryCode)?.uppercased()
     }
 
     private var status: String? {
         switch state?.phase {
-        case .checkingProxy?: return L("vm.row.checkingProxy")
+        case .checkingProxy?: return L(profile.proxy == nil ? "vm.row.checkingConnection" : "vm.row.checkingProxy")
         case .starting?: return L("vm.row.starting")
         case .running?: return L("vm.row.running")
         case .stopping?: return L("vm.row.stopping")
@@ -514,6 +514,8 @@ private struct VMRow: View {
             parts.append(exit?.exitIP ?? "\(proxy.host):\(proxy.port)")
         } else {
             parts.append(L("vm.row.direct"))
+            // Where this Mac's connection came out, for a machine that follows it.
+            if let country { parts.append(CountryNames.name(for: country)) }
         }
         parts.append(profile.display.name)
         parts.append(String(format: L("vm.row.memory"), profile.memoryGB))
@@ -649,6 +651,9 @@ struct VMEditorView: View {
     /// "", "show" or "hide": as the base has it, always shown, hiding itself.
     @State private var dockHiding: String
     @State private var dockSize: String
+    /// A machine without a proxy: whose time zone and language it has — "mac" (this Mac's),
+    /// "connection" (where this Mac's connection comes out) or "manual".
+    @State private var directLocale: String
     @State private var error: String?
 
     init(center: VMCenter, proxies: [ProxyListEntry], draft: Draft) {
@@ -692,7 +697,11 @@ struct VMEditorView: View {
         _dockPosition = State(initialValue: profile.dockPosition ?? "")
         _dockHiding = State(initialValue: profile.dockAutohide.map { $0 ? "hide" : "show" } ?? "")
         _dockSize = State(initialValue: profile.dockSize ?? "")
+        _directLocale = State(initialValue: !profile.localeFollowsProxy ? "manual" : (profile.localeFollowsConnection ? "connection" : "mac"))
     }
+
+    /// The time zone, language and region are the person's own choice below.
+    private var setsLocaleByHand: Bool { proxyChoice.isEmpty ? directLocale == "manual" : !followsProxy }
 
     /// The regions a system knows, by their names in the interface's language.
     private static let regions: [(code: String, name: String)] = Locale.Region.isoRegions
@@ -855,9 +864,23 @@ struct VMEditorView: View {
 
     @ViewBuilder
     private var localeFields: some View {
-        EditorToggle(L("vm.editor.follow"), detail: L(proxyChoice.isEmpty ? "vm.editor.follow.direct" : "vm.editor.follow.detail"),
-                     isOn: $followsProxy)
-        if !followsProxy {
+        if proxyChoice.isEmpty {
+            // Without a proxy there is no exit to follow by itself: the person says whose time
+            // zone and language the machine has — this Mac's, those of the place this Mac's
+            // connection comes out at (which is asked of a service, so it is theirs to choose),
+            // or their own.
+            EditorField(L("vm.editor.locale")) {
+                LumenSegmented(selection: $directLocale, options: [
+                    (value: "mac", title: L("vm.editor.locale.mac")),
+                    (value: "connection", title: L("vm.editor.locale.connection")),
+                    (value: "manual", title: L("vm.editor.locale.manual")),
+                ])
+                note(L("vm.editor.locale.\(directLocale).note"))
+            }
+        } else {
+            EditorToggle(L("vm.editor.follow"), detail: L("vm.editor.follow.detail"), isOn: $followsProxy)
+        }
+        if setsLocaleByHand {
             EditorField(L("editor.tz")) {
                 Picker(L("editor.tz"), selection: $timeZone) {
                     ForEach(ProfileEditorForm.timeZones, id: \.self) { Text(verbatim: $0).tag($0) }
@@ -1090,7 +1113,6 @@ struct VMEditorView: View {
             return
         }
         profile.blockedHosts = blocked
-        profile.localeFollowsProxy = followsProxy
         let computer = computerName.trimmingCharacters(in: .whitespacesAndNewlines)
         if computer.isEmpty {
             profile.computerName = nil
@@ -1144,21 +1166,25 @@ struct VMEditorView: View {
             lastCheck = entry.lastCheck
             profile.countryCode = entry.lastCheck?.countryCode?.uppercased()
         }
-        if followsProxy {
-            if profile.proxy == nil {
-                // This Mac's connection: sites see this Mac's address, and this Mac's time zone.
-                profile.timeZoneIdentifier = TimeZone.current.identifier
-                profile.language = nil
-            } else {
-                // What the list's last check found, until the check at the machine's start.
-                profile = profile.followingProxy(check: lastCheck)
-            }
-        } else {
+        let byHand = setsLocaleByHand
+        profile.localeFollowsProxy = !byHand
+        profile.localeFollowsConnection = profile.proxy == nil && !byHand && directLocale == "connection"
+        if byHand {
             profile.timeZoneIdentifier = timeZone
             profile.language = language.isEmpty ? nil : language
+        } else if profile.proxy != nil {
+            // What the list's last check found, until the check at the machine's start.
+            profile = profile.followingProxy(check: lastCheck)
+        } else if profile.localeFollowsConnection {
+            // Found when the machine starts; until then what it had, or this Mac's time zone.
+            if profile.timeZoneIdentifier == nil { profile.timeZoneIdentifier = TimeZone.current.identifier }
+        } else {
+            // This Mac's connection: sites see this Mac's address, and this Mac's time zone.
+            profile.timeZoneIdentifier = TimeZone.current.identifier
+            profile.language = nil
         }
         // A region of the person's own goes with a language of their own.
-        profile.regionCode = followsProxy || language.isEmpty || regionCode.isEmpty ? nil : regionCode
+        profile.regionCode = !byHand || language.isEmpty || regionCode.isEmpty ? nil : regionCode
         do {
             try center.save(profile)
             center.measureDisk()
