@@ -145,6 +145,7 @@ enum ExitWords {
 }
 
 /// What the browser says of a session and its page.
+@MainActor
 enum PageWords {
     /// "DE · 203.0.113.10 · Europe/Berlin · de-DE" — or "Без прокси · Europe/Moscow · ru-RU": where the
     /// session goes out, and the time zone and language its pages get.
