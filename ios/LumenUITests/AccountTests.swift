@@ -217,6 +217,7 @@ final class AccountTests: LumenUITestCase {
         reveal(app.buttons["submitCode"], "the code's button").tap()
         XCTAssertEqual(signInMessage("a wrong code is refused"), "Код неверный или устарел.")
         replaceText(code, with: "424242")
+        shot("80 the code from the email")
         reveal(app.buttons["submitCode"], "the code's button").tap()
         wait(app.staticTexts["accountEmail"], "signed in with the code", timeout: 30)
         signOut()
@@ -272,6 +273,7 @@ final class AccountTests: LumenUITestCase {
 
         let field = wait(app.secureTextFields["syncPassword"], "the vault is found and its master password asked", timeout: 30)
         typeInto(field, "wrong-pass")
+        shot("81 the vault's master password")
         app.buttons["syncConnect"].tap()
         waitLabel("syncMessage", "Неверный мастер-пароль.", "a wrong master password keeps nothing")
         XCTAssertFalse(app.staticTexts["syncConnected"].exists)
