@@ -21,7 +21,7 @@ licensing, and has the machines.
 1. Signed in, the Profiles window's sidebar has **Virtual Machines**. **Add Virtual Machines** says
    first what it takes (disk, memory, time), then:
 2. asks Apple which macOS this Mac can run as a guest, and **downloads it from Apple's servers**
-   into the vault's folder — about 17 GB. None of it is in Lumen's own download: the app stays the
+   into the vault's folder — about 25 GB. None of it is in Lumen's own download: the app stays the
    size it was. The download can be paused, and goes on from where it stopped — also after a quit,
    a lost connection or a restart of the Mac;
 3. installs macOS from it (10–20 minutes) into the **base system**, and removes the downloaded image;
@@ -38,7 +38,7 @@ the section says that macOS runs as a guest only on Apple silicon.
 
 | | |
 |---|---|
-| Download | about 17 GB, once, from Apple; removed after the installation |
+| Download | about 25 GB, once, from Apple; removed after the installation |
 | Base system on disk | about 20–25 GB |
 | Each machine on disk | what its macOS changes after the clone: usually 3–6 GB, growing with use |
 | Memory | 4 GB per running machine by default (3, 4, 6 or 8 GB per profile), only while it runs |

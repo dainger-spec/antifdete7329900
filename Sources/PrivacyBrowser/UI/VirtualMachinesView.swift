@@ -28,7 +28,7 @@ private struct VirtualMachinesScreen: View {
 
     @State private var editing: VMEditorView.Draft?
     @State private var deleting: VMProfile?
-    @State private var confirmingBaseRemoval = false
+    @State private var showingStorage = false
     @State private var error: String?
 
     private enum Stage: Equatable { case unavailable(String), signedOut, notInPlan, setup, machines }
@@ -43,25 +43,36 @@ private struct VirtualMachinesScreen: View {
         case .available: break
         }
         if license.isConfigured, !license.record.isSignedIn { return .signedOut }
-        // Machines made while the plan had them stay in the list — to be seen, and deleted.
-        if center.isReady { return .machines }
+        // Machines there are stay in the list whatever became of the plan or of the base system —
+        // to be seen, started where they can be, and deleted.
+        if center.isReady || !center.profiles.isEmpty { return .machines }
         return allowed ? .setup : .notInPlan
     }
+
+    /// The opening and the setup stand in the middle of the section when it is taller than they
+    /// are; a list starts at its top.
+    private var centersContent: Bool { stage != .machines }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            ScrollView {
-                content
-                    .padding(.horizontal, 28)
-                    .padding(.bottom, 24)
-                    .frame(maxWidth: 860, alignment: .leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            GeometryReader { geometry in
+                ScrollView {
+                    content(width: geometry.size.width)
+                        .padding(.horizontal, 28)
+                        .padding(.bottom, 28)
+                        .frame(maxWidth: 1180, alignment: .leading)
+                        .frame(maxWidth: .infinity, minHeight: geometry.size.height,
+                               alignment: centersContent ? .leading : .topLeading)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .sheet(item: $editing) { draft in
             VMEditorView(center: center, proxies: proxyList?.entries ?? [], draft: draft)
+        }
+        .sheet(isPresented: $showingStorage) {
+            VMStorageView(center: center)
         }
         .confirmationDialog(deleting.map { String(format: L("vm.delete.title"), $0.name) } ?? "",
                             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
@@ -71,11 +82,6 @@ private struct VirtualMachinesScreen: View {
             }
         } message: {
             Text(L("vm.delete.message"))
-        }
-        .confirmationDialog(L("vm.base.remove.title"), isPresented: $confirmingBaseRemoval, titleVisibility: .visible) {
-            Button(L("vm.base.remove.confirm"), role: .destructive) { center.removeBase() }
-        } message: {
-            Text(L("vm.base.remove.message"))
         }
     }
 
@@ -95,11 +101,20 @@ private struct VirtualMachinesScreen: View {
             .lineLimit(1)
             .fixedSize()
             Spacer(minLength: 12)
+            // What the machines take on disk, and how to have it back: wherever anything is there.
+            if center.totalDiskUsage > 0 {
+                Button { showingStorage = true } label: {
+                    Label(VMText.bytes(center.totalDiskUsage), systemImage: "internaldrive")
+                }
+                .buttonStyle(.lumenGhost)
+                .help(L("vm.storage.open"))
+            }
             if stage == .machines {
                 moreMenu
                 Button { newMachine() } label: { Label(L("vm.new"), systemImage: "plus") }
                     .buttonStyle(.lumenPrimary)
-                    .disabled(center.loadError != nil || !allowed)
+                    .disabled(center.loadError != nil || !allowed || !center.isReady)
+                    .help(center.isReady ? L("vm.new") : L("vm.new.needsBase"))
             }
         }
         .frame(height: ProfilesScreen.headerHeight)
@@ -111,18 +126,15 @@ private struct VirtualMachinesScreen: View {
 
     private var summary: String {
         guard stage == .machines else { return L("vm.subtitle") }
-        let total = center.diskUsage.values.reduce(0, +)
-        return String(format: L("vm.summary"), center.profiles.count, center.running.count, VMText.bytes(total))
+        return String(format: L("vm.summary"), center.profiles.count, center.running.count)
     }
 
     private var moreMenu: some View {
         Menu {
+            Button(L("vm.storage.open")) { showingStorage = true }
             Button(L("vm.base.open")) { center.openBase() }
-                .disabled(center.activity != nil || !allowed)
+                .disabled(center.activity != nil || !allowed || !center.isReady)
             Button(L("vm.reveal")) { SystemOpen.revealInFinder([center.library.root]) }
-            Divider()
-            Button(L("vm.base.remove"), role: .destructive) { confirmingBaseRemoval = true }
-                .disabled(center.activity != nil)
         } label: {
             Image(systemName: "ellipsis")
         }
@@ -139,19 +151,27 @@ private struct VirtualMachinesScreen: View {
     // MARK: What is shown
 
     @ViewBuilder
-    private var content: some View {
+    private func content(width: CGFloat) -> some View {
         switch stage {
         case .unavailable(let why):
             LumenEmptyHint(symbol: "macwindow.on.rectangle", text: why)
                 .frame(minHeight: 220)
         case .signedOut:
-            VMIntroduction(problems: [], error: nil, actionTitle: L("vm.signIn"), actionSymbol: "person.crop.circle",
-                           actionEnabled: true, note: L("vm.signIn.note"), action: openAccount)
+            VMHero(title: L("vm.intro.title"), text: L("vm.intro.text"), actionTitle: L("vm.signIn"),
+                   actionSymbol: "person.crop.circle", footnote: L("vm.signIn.note"), width: width, action: openAccount)
         case .notInPlan:
-            VMIntroduction(problems: [], error: nil, actionTitle: L("vm.plan.choose"), actionSymbol: "arrow.up.right",
-                           actionEnabled: true, note: L("vm.plan.note"), action: choosePlan)
+            VMHero(title: L("vm.intro.title"), text: L("vm.intro.text"), actionTitle: L("vm.plan.choose"),
+                   actionSymbol: "arrow.up.right", footnote: L("vm.plan.note"), width: width, action: choosePlan)
         case .setup:
-            setup
+            if center.activity == nil, center.setup == .none {
+                VMHero(title: L("vm.intro.title"), text: L("vm.intro.text"), actionTitle: L("vm.add"),
+                       actionEnabled: !center.requirements.contains(where: VMRequirements.stops),
+                       footnote: String(format: L("vm.hero.cost"), VMText.bytes(center.setupNeedsBytes), VMRequirements.runningLimit),
+                       problems: center.requirements, error: center.setupError, width: width,
+                       action: { center.continueSetup() })
+            } else {
+                VMSetupPanel(center: center)
+            }
         case .machines:
             machines
         }
@@ -168,17 +188,6 @@ private struct VirtualMachinesScreen: View {
     }
 
     @ViewBuilder
-    private var setup: some View {
-        if center.activity == nil, center.setup == .none {
-            VMIntroduction(problems: center.requirements, error: center.setupError, actionTitle: L("vm.add"),
-                           actionEnabled: !center.requirements.contains(where: VMRequirements.stops),
-                           note: nil, action: { center.continueSetup() })
-        } else {
-            VMSetupSteps(center: center)
-        }
-    }
-
-    @ViewBuilder
     private var machines: some View {
         VStack(alignment: .leading, spacing: 12) {
             if !allowed {
@@ -188,16 +197,17 @@ private struct VirtualMachinesScreen: View {
                         .buttonStyle(.lumenSecondary)
                 }
             }
+            baseState
             if let loadError = center.loadError {
                 VMNote(String(format: L("vm.error.load"), loadError), tone: .warning)
             }
             if let error {
                 VMNote(error, tone: .danger)
             }
-            if let setupError = center.setupError {
+            if center.isReady, let setupError = center.setupError {
                 VMNote(setupError, tone: .danger)
             }
-            if center.activity == .guestSetup {
+            if center.isReady, center.activity == .guestSetup {
                 VMNote(L("vm.base.isOpen"), tone: .plain, symbol: "macwindow")
             }
             if center.runningCount >= VMRequirements.runningLimit {
@@ -209,7 +219,7 @@ private struct VirtualMachinesScreen: View {
                         .frame(height: 130)
                     Button { newMachine() } label: { Label(L("vm.new"), systemImage: "plus") }
                         .buttonStyle(.lumenPrimary)
-                        .disabled(center.loadError != nil || !allowed)
+                        .disabled(center.loadError != nil || !allowed || !center.isReady)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 24)
@@ -230,6 +240,28 @@ private struct VirtualMachinesScreen: View {
             }
             baseLine
             VMNote(L("vm.note.disks"), tone: .plain, symbol: "lock.open")
+        }
+        .frame(maxWidth: 980, alignment: .leading)
+    }
+
+    /// Above the list, while there is no base system to make new machines from: its setup, where
+    /// it stands — or, with nothing of it left, the way to add it again.
+    @ViewBuilder
+    private var baseState: some View {
+        if !center.isReady {
+            if center.activity != nil || center.setup != .none {
+                VMSetupPanel(center: center, showsFeatures: false)
+            } else if allowed {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    VMNote(L("vm.base.missing"), tone: .plain, symbol: "internaldrive")
+                    Button(L("vm.base.add")) { center.continueSetup() }
+                        .buttonStyle(.lumenSecondary)
+                        .disabled(center.requirements.contains(where: VMRequirements.stops))
+                }
+                if let setupError = center.setupError {
+                    VMNote(setupError, tone: .danger)
+                }
+            }
         }
     }
 
@@ -306,7 +338,7 @@ enum VMText {
     }
 }
 
-private struct VMNote: View {
+struct VMNote: View {
     enum Tone { case plain, warning, danger }
     let text: String
     var tone: Tone = .plain
@@ -332,326 +364,6 @@ private struct VMNote: View {
             .foregroundStyle(color)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// What a virtual machine's profile is and what it costs, before anything is fetched: shown until
-/// the person adds the machines (or, signed out, until they sign in).
-private struct VMIntroduction: View {
-    let problems: [VMRequirements.Problem]
-    let error: String?
-    let actionTitle: String
-    var actionSymbol = "plus"
-    let actionEnabled: Bool
-    let note: String?
-    let action: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .top, spacing: 16) {
-                Image(systemName: "macwindow.on.rectangle")
-                    .font(.system(size: 30, weight: .light))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(width: 44)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(L("vm.intro.title"))
-                        .font(.lumenHeading)
-                        .foregroundStyle(Theme.textPrimary)
-                    Text(L("vm.intro.text"))
-                        .font(.lumenBody)
-                        .foregroundStyle(Theme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            VStack(alignment: .leading, spacing: 10) {
-                fact("arrow.down.circle", L("vm.intro.download"))
-                fact("internaldrive", L("vm.intro.disk"))
-                fact("memorychip", String(format: L("vm.intro.memory"), VMRequirements.runningLimit, VMRequirements.standardMemoryGB))
-                fact("network", L("vm.intro.proxy"))
-                fact("clock", L("vm.intro.time"))
-            }
-            if !problems.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(Array(problems.enumerated()), id: \.offset) { _, problem in
-                        VMNote(VMText.problem(problem), tone: VMRequirements.stops(problem) ? .danger : .warning)
-                    }
-                }
-            }
-            if let error {
-                VMNote(error, tone: .danger)
-            }
-            HStack(spacing: 12) {
-                Button(action: action) { Label(actionTitle, systemImage: actionSymbol) }
-                    .buttonStyle(.lumenPrimary)
-                    .disabled(!actionEnabled)
-                if let note {
-                    Text(note)
-                        .font(.lumenSecondary)
-                        .foregroundStyle(Theme.textTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .card(padding: 24)
-    }
-
-    private func fact(_ symbol: String, _ text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Image(systemName: symbol)
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.textTertiary)
-                .frame(width: 18)
-            Text(text)
-                .font(.lumenBody)
-                .foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-}
-
-/// The setup under way, or stopped part-way: fetching macOS from Apple, installing it, and its
-/// first-run setup in the base — each step with where it stands and what can be done about it.
-private struct VMSetupSteps: View {
-    @ObservedObject var center: VMCenter
-
-    private enum StepState { case waiting, active, done }
-
-    private var downloadState: StepState {
-        switch center.activity {
-        case .asking?, .downloading?: return .active
-        case .installing?, .guestSetup?: return .done
-        case nil: break
-        }
-        switch center.setup {
-        case .downloaded, .needsGuestSetup, .ready: return .done
-        case .none, .downloading: return .waiting
-        }
-    }
-
-    private var installState: StepState {
-        switch center.activity {
-        case .installing?: return .active
-        case .guestSetup?: return .done
-        default: break
-        }
-        switch center.setup {
-        case .needsGuestSetup, .ready: return .done
-        default: return .waiting
-        }
-    }
-
-    private var guestState: StepState {
-        if center.activity == .guestSetup { return .active }
-        if case .ready = center.setup { return .done }
-        return .waiting
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            step(1, L("vm.setup.download"), downloadState) { download }
-            Rectangle().fill(Theme.divider).frame(height: 1)
-            step(2, L("vm.setup.install"), installState) { install }
-            Rectangle().fill(Theme.divider).frame(height: 1)
-            step(3, L("vm.setup.guest"), guestState) { guest }
-            if let error = center.setupError {
-                VMNote(error, tone: .danger)
-                    .padding(.top, 14)
-            }
-            let stopping = center.requirements.filter(VMRequirements.stops)
-            if center.activity == nil, !stopping.isEmpty {
-                ForEach(Array(stopping.enumerated()), id: \.offset) { _, problem in
-                    VMNote(VMText.problem(problem), tone: .danger)
-                        .padding(.top, 10)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .card(padding: 24)
-    }
-
-    private func step<Detail: View>(_ number: Int, _ title: String, _ state: StepState,
-                                    @ViewBuilder detail: () -> Detail) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(state == .done ? Theme.running.opacity(0.16) : Color.white.opacity(state == .active ? 0.10 : 0.05))
-                if state == .done {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(Theme.running)
-                } else {
-                    Text(verbatim: "\(number)")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(state == .active ? Theme.textPrimary : Theme.textTertiary)
-                }
-            }
-            .frame(width: 26, height: 26)
-            VStack(alignment: .leading, spacing: 8) {
-                Text(title)
-                    .font(.lumenRowTitle)
-                    .foregroundStyle(state == .waiting ? Theme.textSecondary : Theme.textPrimary)
-                    .frame(minHeight: 26)
-                detail()
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.vertical, 14)
-    }
-
-    // MARK: Fetching
-
-    @ViewBuilder
-    private var download: some View {
-        switch center.activity {
-        case .asking?:
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                caption(L("vm.setup.asking"))
-            }
-        case .downloading(let progress)?:
-            VStack(alignment: .leading, spacing: 8) {
-                bar(progress.total.map { $0 > 0 ? Double(progress.have) / Double($0) : 0 } ?? 0)
-                HStack(spacing: 10) {
-                    caption(downloadText(progress))
-                    Spacer(minLength: 8)
-                    Button(L("vm.setup.pause")) { center.pauseDownload() }
-                        .buttonStyle(.lumenGhost)
-                }
-                caption(L("vm.setup.download.note"))
-            }
-        default:
-            if downloadState == .waiting {
-                HStack(spacing: 10) {
-                    if case .downloading(let have, let total) = center.setup {
-                        caption(total.map { String(format: L("vm.setup.paused.of"), VMText.bytes(have), VMText.bytes($0)) }
-                            ?? String(format: L("vm.setup.paused"), VMText.bytes(have)))
-                    } else {
-                        caption(L("vm.setup.download.waiting"))
-                    }
-                    Spacer(minLength: 8)
-                    Button(L("vm.setup.continue")) { center.continueSetup() }
-                        .buttonStyle(.lumenPrimary)
-                        .disabled(center.requirements.contains(where: VMRequirements.stops))
-                }
-            } else if let image = center.offeredImage {
-                caption(String(format: L("vm.setup.download.done"), image.version))
-            }
-        }
-    }
-
-    private func downloadText(_ progress: VMImageDownloader.Progress) -> String {
-        var parts: [String] = []
-        if let total = progress.total {
-            parts.append(String(format: L("vm.setup.progress.of"), VMText.bytes(progress.have), VMText.bytes(total)))
-        } else {
-            parts.append(VMText.bytes(progress.have))
-        }
-        if let speed = progress.speed, speed > 0 {
-            parts.append(String(format: L("vm.setup.speed"), VMText.bytes(Int64(speed))))
-        }
-        if let total = progress.total, let left = VMText.remaining(bytes: total - progress.have, speed: progress.speed) {
-            parts.append(left)
-        }
-        return parts.joined(separator: " · ")
-    }
-
-    // MARK: Installing
-
-    @ViewBuilder
-    private var install: some View {
-        switch center.activity {
-        case .installing(let fraction)?:
-            VStack(alignment: .leading, spacing: 8) {
-                bar(fraction)
-                HStack(spacing: 10) {
-                    caption(String(format: L("vm.setup.install.progress"), Int((fraction * 100).rounded())))
-                    Spacer(minLength: 8)
-                    Button(L("common.cancel")) { center.cancelInstallation() }
-                        .buttonStyle(.lumenGhost)
-                }
-                caption(L("vm.setup.install.note"))
-            }
-        default:
-            if installState == .waiting, center.setup == .downloaded, center.activity == nil {
-                HStack(spacing: 10) {
-                    caption(L("vm.setup.install.ready"))
-                    Spacer(minLength: 8)
-                    Button(L("vm.setup.continue")) { center.continueSetup() }
-                        .buttonStyle(.lumenPrimary)
-                }
-            } else if installState == .waiting {
-                caption(L("vm.setup.install.waiting"))
-            }
-        }
-    }
-
-    // MARK: The first-run setup
-
-    @ViewBuilder
-    private var guest: some View {
-        if guestState == .waiting, installState != .done {
-            caption(L("vm.setup.guest.waiting"))
-        } else {
-            VStack(alignment: .leading, spacing: 8) {
-                instruction(1, L("vm.setup.guest.step1"))
-                instruction(2, L("vm.setup.guest.step2"))
-                instruction(3, L("vm.setup.guest.step3"))
-                caption(L("vm.setup.guest.fallback"))
-                Text(verbatim: #"sh "/Volumes/My Shared Files/install.sh""#)
-                    .font(.lumenMono)
-                    .foregroundStyle(Theme.textSecondary)
-                    .textSelection(.enabled)
-                HStack(spacing: 10) {
-                    if center.activity == .guestSetup {
-                        ProgressView().controlSize(.small)
-                        caption(L("vm.setup.guest.open"))
-                    } else {
-                        Button(L("vm.setup.guest.openMachine")) { center.continueSetup() }
-                            .buttonStyle(.lumenPrimary)
-                        Button(L("vm.setup.guest.startOver")) { center.removeBase() }
-                            .buttonStyle(.lumenGhost)
-                    }
-                }
-                .padding(.top, 4)
-            }
-        }
-    }
-
-    private func instruction(_ number: Int, _ text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(verbatim: "\(number).")
-                .font(.lumenBody)
-                .foregroundStyle(Theme.textTertiary)
-                .monospacedDigit()
-            Text(text)
-                .font(.lumenBody)
-                .foregroundStyle(Theme.textPrimary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private func caption(_ text: String) -> some View {
-        Text(text)
-            .font(.lumenSecondary)
-            .foregroundStyle(Theme.textSecondary)
-            .monospacedDigit()
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
-    /// A progress bar the step's width (the app's own is a fixed 72 pt).
-    private func bar(_ fraction: Double) -> some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.12))
-                Capsule().fill(Theme.textPrimary)
-                    .frame(width: max(3, geometry.size.width * min(max(fraction, 0), 1)))
-            }
-        }
-        .frame(height: 3)
-        .animation(Theme.hoverAnimation, value: fraction)
-        .accessibilityElement()
-        .accessibilityValue(Text(verbatim: "\(Int((min(max(fraction, 0), 1) * 100).rounded())) %"))
     }
 }
 

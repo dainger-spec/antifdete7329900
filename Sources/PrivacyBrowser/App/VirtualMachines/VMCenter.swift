@@ -78,10 +78,13 @@ final class VMCenter: ObservableObject {
     /// What each machine's files take on disk; the base's under `VMCenter.baseID`.
     @Published private(set) var diskUsage: [UUID: Int64] = [:]
 
-    /// The base's place in `diskUsage`.
+    /// The base's place in `diskUsage`, and the place of what was fetched for it (Apple's restore
+    /// image, whole or in part).
     static let baseID = UUID(uuidString: "00000000-0000-0000-0000-0000000000BA")!
-    /// What the setup is assumed to fetch before Apple's server has said the image's length.
-    static let assumedDownloadBytes: Int64 = 18 * VMRequirements.gibibyte
+    static let downloadsID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D0")!
+    /// What the setup is assumed to fetch before Apple's server has said the image's length
+    /// (macOS 26's restore image is 25.6 GB).
+    static let assumedDownloadBytes: Int64 = 26 * VMRequirements.gibibyte
 
     /// The plan has virtual machines (`LicenseModel.allowsVirtualMachines`, set by `AppModel`).
     /// Without it the setup does not go on and no machine starts; what is on disk stays, and can
@@ -97,6 +100,8 @@ final class VMCenter: ObservableObject {
     /// The current run of the setup: what an earlier one still says is not listened to.
     private var setupRun: UUID?
     private var awake: NSObjectProtocol?
+    /// When the disk was last measured (`measureDisk`).
+    private var lastMeasure = Date.distantPast
     private let log = Logger(subsystem: "PrivacyBrowser", category: "VirtualMachines")
 
     init(vault: UnlockedVault, library: VMLibrary, onError: @escaping (String) -> Void) {
@@ -131,6 +136,22 @@ final class VMCenter: ObservableObject {
 
     var hasRunning: Bool { !helpers.isEmpty || setupHelper != nil }
     var isReady: Bool { if case .ready = setup { return true } else { return false } }
+
+    /// What the machines take on disk in all: the base, what was fetched for it, every machine.
+    var totalDiskUsage: Int64 { diskUsage.values.reduce(0, +) }
+
+    /// What the setup still needs free on disk, as far as is known now — for the section to say
+    /// before anything is fetched.
+    var setupNeedsBytes: Int64 {
+        VMRequirements.setupBytes(downloadBytes: offeredDownloadBytes ?? Self.assumedDownloadBytes)
+    }
+
+    /// The restore image's length, once Apple's server has said it.
+    private var offeredDownloadBytes: Int64? {
+        if case .downloading(let progress)? = activity, let total = progress.total { return total }
+        if case .downloading(_, let total) = setup { return total }
+        return nil
+    }
 
     func isRunning(_ id: UUID) -> Bool { running[id] != nil }
 
@@ -221,6 +242,9 @@ final class VMCenter: ObservableObject {
                 MainActor.assumeIsolated {
                     guard let self, self.setupRun == run else { return }
                     self.activity = .downloading(progress)
+                    // What is fetched so far is on disk, and the section says how much the
+                    // machines take: counted again now and then, not at every step.
+                    if Date().timeIntervalSince(self.lastMeasure) > 8 { self.measureDisk() }
                 }
             }
         }, onFinish: { [weak self] result in
@@ -248,6 +272,7 @@ final class VMCenter: ObservableObject {
         activity = nil
         holdAwake(false)
         setup = library.setupState()
+        measureDisk()
     }
 
     private func install() {
@@ -392,6 +417,43 @@ final class VMCenter: ObservableObject {
         }
     }
 
+    /// Stops the setup where it is and removes what was fetched for it: the gigabytes of a
+    /// download the person called off go back to the disk. The base, if there is one, stays.
+    func removeDownloadedImage() {
+        switch activity {
+        case .downloading?: pauseDownload()
+        case .installing?: cancelInstallation()
+        case .asking?, .guestSetup?: return
+        case nil: break
+        }
+        removeDownloads()
+        setupError = nil
+        setup = library.setupState()
+        measureDisk()
+    }
+
+    /// Removes everything the machines have on this Mac — every profile's machine with its disk,
+    /// the base system, what was fetched — and gives the disk back. Only from the person's own
+    /// "Delete everything", confirmed (scripts/check_deletion_paths.py); never while a machine
+    /// runs or the setup is at work.
+    func deleteEverythingBecauseThePersonAsked() throws {
+        guard !hasRunning, running.isEmpty, activity == nil else { throw Refusal.busy }
+        // A list that did not read names no machine: their folders are then not this call's to remove.
+        guard loadError == nil else { throw Refusal.listUnreadable }
+        for profile in list.profiles {
+            try deleteMachineBecauseThePersonAsked(profile.id)
+        }
+        removeDownloads()
+        try? FileManager.default.removeItem(at: library.baseDirectory)
+        try? FileManager.default.removeItem(at: library.baseInfoURL)
+        // What is left are folders no profile names any more: nothing can start them.
+        try? FileManager.default.removeItem(at: library.root)
+        setupError = nil
+        offeredImage = nil
+        setup = library.setupState()
+        measureDisk()
+    }
+
     /// The tools' installer and the boot script, into the folder the base shares with this Mac
     /// (Resources/VMGuest): the person opens the installer from it in the guest's Finder.
     private func placeGuestTools() throws {
@@ -418,11 +480,14 @@ final class VMCenter: ObservableObject {
         /// The stored list did not read: nothing is written over it.
         case listUnreadable
         case machineRunning
+        /// A machine runs, or the setup is at work: not while everything is removed.
+        case busy
 
         var errorDescription: String? {
             switch self {
             case .listUnreadable: return L("vm.error.listUnreadable")
             case .machineRunning: return L("vm.error.deleteRunning")
+            case .busy: return L("vm.error.busy")
             }
         }
     }
@@ -459,7 +524,13 @@ final class VMCenter: ObservableObject {
     /// would reach nothing), its time zone and language follow where the proxy comes out when the
     /// profile says so, and the guest is told them through its shared folder.
     func start(_ id: UUID) {
-        guard isReady, running[id] == nil, helpers[id] == nil, let profile = list.profile(id) else { return }
+        // A machine that has its disk starts without the base (the base may have been removed to
+        // free the disk); one not made yet needs it, to be cloned from.
+        guard running[id] == nil, helpers[id] == nil, let profile = list.profile(id) else { return }
+        guard isReady || library.machine(for: id).isComplete else {
+            problems[id] = L("vm.error.noBase")
+            return
+        }
         guard isAllowed() else {
             problems[id] = L("vm.error.notInPlan")
             return
@@ -601,14 +672,17 @@ final class VMCenter: ObservableObject {
     /// What each machine, and the base, takes on disk — counted off the main thread (a sparse
     /// disk's written blocks, not its length).
     func measureDisk() {
+        lastMeasure = Date()
         let library = self.library
         let ids = list.profiles.map(\.id)
         let baseID = Self.baseID
+        let downloadsID = Self.downloadsID
         Task.detached(priority: .utility) { [weak self] in
             var usage: [UUID: Int64] = [:]
             // A machine's own blocks: what its macOS changed since it was cloned from the base.
             for id in ids { usage[id] = VMLibrary.allocatedSize(of: library.machineDirectory(for: id), ownOnly: true) }
             usage[baseID] = VMLibrary.allocatedSize(of: library.baseDirectory)
+            usage[downloadsID] = VMLibrary.allocatedSize(of: library.downloadsDirectory)
             let counted = usage
             await MainActor.run { self?.diskUsage = counted }
         }
