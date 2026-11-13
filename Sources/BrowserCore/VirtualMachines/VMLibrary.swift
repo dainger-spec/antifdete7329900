@@ -215,8 +215,11 @@ public enum VMSetupState: Equatable, Sendable {
 /// is said back in the status file.
 ///
 /// 5: the clock and the week's first day, the Dock, the scroll bars, more pages at start.
+///
+/// 6: the shared folder is told from a folder of its name left behind, and handed on to a newer
+/// copy of the script; what the system prints beside the wallpaper's answer is not the answer.
 public enum VMGuestTools {
-    public static let version = 5
+    public static let version = 6
     /// From this version on an installed boot script takes a newer copy of itself at a machine's
     /// start: a base with tools this new needs nothing done to it for a later version's settings.
     public static let updatesItselfFrom = 2

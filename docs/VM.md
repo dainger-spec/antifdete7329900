@@ -98,6 +98,23 @@ After the request the app may write `stop` (shut the guest down) or `kill` (end 
 The end of the helper's input reads as `stop`: a machine does not outlive the app that started it,
 and an installation the app is not there to take ends with it.
 
+What the helper does about the Mac and the app around it:
+
+- **The Mac logging out, restarting or shutting down** while a machine runs: the machine is shut
+  down without a question and the helper ends when it has. (It used to ask "Shut down this
+  virtual machine?" and answer the system "not now", which cancelled the logout.) A quit from
+  the Dock still asks.
+- **The app gone** (crashed, or ended): the machine is shut down as it is at a quit. What the
+  helper says goes to a pipe nobody reads then; those writes fail quietly (`SIGPIPE` is ignored
+  and the writes are the throwing kind) instead of ending the helper in the middle of the
+  shutdown it had just begun.
+- **Force Stop**: the helper is asked to end the machine; if it has not ended in eight seconds
+  the app ends it with `SIGKILL` — the polite signal is one a running helper takes for another
+  request to shut down, and a helper whose main thread is stuck took neither.
+- **The base and a machine being made**: a machine not made yet is a copy of the base's disk,
+  so it is not started while the base is open (checked again after its proxy was asked), and
+  the base is not opened while such a machine is starting.
+
 ### A machine's identity
 
 Each profile's machine has, of its own:
@@ -172,6 +189,13 @@ file named `lumen-shutdown`, which it answers by quitting Safari and shutting ma
 Shut Down in the app (or closing the machine's window) asks that way first — no question on the
 guest's screen — then presses the virtual power button after 20 seconds, and ends the machine after
 a minute.
+
+The shared folder is where macOS mounts it (`/Volumes/My Shared Files`), and the script takes a
+folder for it only if a volume is mounted there or Lumen's settings are in it — not a folder of
+that name a start cut short left behind, which it would otherwise write its status into and so
+keep there, with the real share mounted beside it under another name from then on. Where macOS
+has not mounted the share after 25 seconds the script mounts it itself; a copy of the script that
+a newer one takes the place of hands the folder it found on (tools 6).
 
 ## A machine's settings
 

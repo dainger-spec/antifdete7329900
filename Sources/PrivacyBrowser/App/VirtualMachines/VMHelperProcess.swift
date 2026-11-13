@@ -135,11 +135,17 @@ final class VMHelperProcess {
     func stop() { send("stop") }
 
     /// Ends the machine now, as pulling a Mac's plug would.
+    ///
+    /// The helper is asked first (it ends the machine and then itself). One that has not ended
+    /// eight seconds on is not going to — its main thread is busy or stuck, and a polite signal
+    /// is one it takes for another request to shut down — so it is ended by the system: the
+    /// machine goes with it, and the row does not stay "running" for good.
     func kill() {
         send("kill")
         let process = self.process
         DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
-            if process.isRunning { process.terminate() }
+            guard process.isRunning else { return }
+            _ = Darwin.kill(process.processIdentifier, SIGKILL)
         }
     }
 

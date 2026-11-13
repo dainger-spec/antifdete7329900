@@ -15,6 +15,9 @@ import Virtualization
 // fails takes nothing of the app with it.
 
 setvbuf(stdout, nil, _IOLBF, 0)
+// The app reads what this process says; when the app is gone, saying it must not end this process
+// (it has a machine to shut down): a write to a pipe nobody reads fails, and is not a signal.
+signal(SIGPIPE, SIG_IGN)
 
 // `--check`: started and able to say so — what the build's own checks ask of every executable.
 if CommandLine.arguments.contains("--check") {

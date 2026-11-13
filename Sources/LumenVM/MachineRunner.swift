@@ -144,6 +144,16 @@ final class MachineNetwork {
     /// What that way out did since this was last asked, for the log.
     func takeNotes() -> String? { connector?.takeNotes() }
 
+    /// Whether a connection can be made at all right now (`VMNetDirectConnector.canConnect`), said
+    /// to `done` on the main queue. Asked off the main thread: it can take seconds.
+    func checkWayOut(_ done: @escaping (Bool) -> Void) {
+        guard let connector else { return done(true) }
+        DispatchQueue.global(qos: .utility).async {
+            let works = connector.canConnect()
+            DispatchQueue.main.async { done(works) }
+        }
+    }
+
     func stop() {
         network?.stop()
         connector?.stop()
@@ -163,6 +173,10 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     private var lastTraffic: VMNetCounters?
     private var lastTrouble: String?
     private var lastTroubleDetail: String?
+    /// The last answer to "can a connection be made at all", and when it was asked; and whether
+    /// it is being asked now.
+    private var wayOut: (works: Bool, at: Date)?
+    private var askingWayOut = false
     private var lastViaSystemProxy = false
     private var stopping = false
     private var finished = false
@@ -410,7 +424,8 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         let report = network.directReport()
         var trouble: String?
         var troubleDetail: String?
-        if let report, report.failedInARow >= VMNetworkTrouble.failuresBeforeSaying, let kind = report.trouble {
+        if let report, report.failedInARow >= VMNetworkTrouble.failuresBeforeSaying, let kind = report.trouble,
+           wayOutIsDown(network) {
             // Kind for kind, so that a new one is not forgotten here.
             let named: VMNetworkTrouble
             switch kind {
@@ -437,6 +452,24 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         HelperIO.emit(VMHelperEvent(kind: .traffic, bytesUp: counters.bytesFromGuest, bytesDown: counters.bytesToGuest,
                                     connections: counters.connectionsActive, trouble: trouble, troubleDetail: troubleDetail,
                                     viaSystemProxy: report == nil ? nil : viaSystemProxy))
+    }
+
+    /// Connections are failing one after another — but is it this machine's way out, or the sites
+    /// it asks for (a page's blocked trackers fail so too)? A connection to a name every Mac asks
+    /// for settles it. Asked at most once in half a minute, and off this thread: until there is
+    /// an answer, nothing is said.
+    private func wayOutIsDown(_ network: MachineNetwork) -> Bool {
+        if let wayOut, Date().timeIntervalSince(wayOut.at) < 30 { return !wayOut.works }
+        guard !askingWayOut else { return wayOut.map { !$0.works } ?? false }
+        askingWayOut = true
+        network.checkWayOut { [weak self] works in
+            guard let self else { return }
+            self.askingWayOut = false
+            self.wayOut = (works, Date())
+            if !works { HelperIO.log("way out: a connection to a name every Mac asks for was not made either") }
+            self.reportTraffic()
+        }
+        return wayOut.map { !$0.works } ?? false
     }
 
     private func finish() -> Never {

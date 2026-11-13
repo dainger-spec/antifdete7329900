@@ -15,7 +15,7 @@
 # (lumen-guest.sh), which it puts in its own place and starts: Lumen on the Mac is what made this
 # machine, and a later Lumen's script needs no visit to the base system.
 
-TOOLS_VERSION=5
+TOOLS_VERSION=6
 SHARE="/Volumes/My Shared Files"
 OWN_MOUNT=/var/run/lumen-share
 TAG=com.apple.virtio-fs.automount
@@ -34,14 +34,40 @@ only() {
   return 0
 }
 
-# The shared folder: macOS mounts it by itself; when it has not after a while, here.
+# mounted DIRECTORY: true when a volume is mounted there (it is on another device than the folder
+# it is in).
+mounted() {
+  [ -d "$1" ] || return 1
+  here="$(/usr/bin/stat -f %d "$1" 2>/dev/null)"
+  above="$(/usr/bin/stat -f %d "$1/.." 2>/dev/null)"
+  [ -n "$here" ] && [ -n "$above" ] && [ "$here" != "$above" ]
+}
+
+# shared DIRECTORY: true when the directory is the folder shared with the Mac — a mounted volume,
+# or a folder with Lumen's settings in it (which only Lumen writes). Not a folder of that name
+# that a start cut short left behind: macOS then mounts the share beside it under another name,
+# and what this script wrote into the leftover would keep it there for good.
+shared() {
+  [ -d "$1" ] && /bin/ls "$1" >/dev/null 2>&1 || return 1
+  [ -f "$1/lumen-settings.env" ] || mounted "$1"
+}
+
+# The shared folder: macOS mounts it by itself; when it has not after a while, here. A copy of
+# this script that a newer one took the place of hands the folder it found on, and a folder
+# mounted here at an earlier run of the script is still there.
 share=""
+case "${LUMEN_GUEST_SHARE:-}" in
+  "$SHARE"|"$SHARE 1"|"$OWN_MOUNT") ! shared "$LUMEN_GUEST_SHARE" || share="$LUMEN_GUEST_SHARE" ;;
+esac
 tries=0
-while [ "$tries" -lt 120 ]; do
-  if [ -d "$SHARE" ] && /bin/ls "$SHARE" >/dev/null 2>&1; then
-    share="$SHARE"
-    break
-  fi
+while [ -z "$share" ] && [ "$tries" -lt 120 ]; do
+  for place in "$SHARE" "$SHARE 1" "$OWN_MOUNT"; do
+    if shared "$place"; then
+      share="$place"
+      break
+    fi
+  done
+  [ -z "$share" ] || break
   if [ "$tries" -ge 25 ]; then
     /bin/mkdir -p "$OWN_MOUNT"
     if /sbin/mount_virtiofs "$TAG" "$OWN_MOUNT" 2>/dev/null || /sbin/mount -t virtiofs "$TAG" "$OWN_MOUNT" 2>/dev/null; then
@@ -63,7 +89,7 @@ if [ -n "$share" ] && [ -f "$newer" ] && [ "${LUMEN_GUEST_UPDATED:-0}" != 1 ]; t
     if /bin/cp "$newer" "$own.new" 2>/dev/null && /usr/sbin/chown root:wheel "$own.new" && /bin/chmod 755 "$own.new" \
         && /bin/sh -n "$own.new" 2>/dev/null && /bin/mv -f "$own.new" "$own"; then
       log "updated to tools $theirs"
-      LUMEN_GUEST_UPDATED=1 exec /bin/sh "$own"
+      LUMEN_GUEST_UPDATED=1 LUMEN_GUEST_SHARE="$share" exec /bin/sh "$own"
     fi
     /bin/rm -f "$own.new" 2>/dev/null
   fi
@@ -225,12 +251,15 @@ set_wallpaper() {
       answer = "set";
     }
     return answer;
-  }' "$picture" 2>&1)"
+  }' "$picture" 2>"$WALLPAPERS/said")"
+  # The answer is what the program returned; what the system printed beside it (it prints
+  # warnings of its own) is only looked at when there is no answer to go by.
   case "$answer" in
     set|kept) wallpaper_state=set ;;
     *)
       wallpaper_state=failed
-      wallpaper_note="$(printf '%s' "$answer" | /usr/bin/tr -cd 'A-Za-z0-9 .,:()_/-' | /usr/bin/cut -c 1-110)"
+      [ -n "$answer" ] || answer="$(/usr/bin/head -n 3 "$WALLPAPERS/said" 2>/dev/null)"
+      wallpaper_note="$(printf '%s' "$answer" | /usr/bin/tr '\n' ' ' | /usr/bin/tr -cd 'A-Za-z0-9 .,:()_/-' | /usr/bin/cut -c 1-110)"
       [ -n "$wallpaper_note" ] || wallpaper_note="no answer from the system"
       log "wallpaper: $wallpaper_note" ;;
   esac

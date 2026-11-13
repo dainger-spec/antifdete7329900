@@ -417,14 +417,51 @@ final class DirectConnectorTests: XCTestCase {
         XCTAssertFalse(connector.report().usesSystemProxy)
     }
 
-    /// What a guest must not reach, it must not reach by a proxy on this Mac either.
-    func testANameThatIsThisMachineIsNotAskedOfTheProxy() throws {
+    /// A name that is this machine's or the local network's by the way it is written is not asked
+    /// of a proxy on this Mac. Any other is — and is not looked up here first: the Mac's own
+    /// Safari tells its resolver nothing of what it asks the proxy for, and a resolver that
+    /// answers a blocked name with a local address would have refused what the proxy opens.
+    func testOnlyANameWrittenAsLocalIsKeptFromTheProxy() throws {
         let proxy = FakeProxy(kind: .socks5)
         defer { proxy.stop() }
-        let connector = try connector(through: proxy, local: false)
-        XCTAssertEqual(ask(try dial(connector.port), name: "localhost", port: 80), 5)
-        XCTAssertEqual(connector.report().trouble, .notPublic)
+        let looked = Locked<[String]>([])
+        let settings = VMNetSystemProxy(upstream: proxy.upstream())
+        let connector = VMNetDirectConnector(allowsLocalDestinations: false, systemProxy: { settings }) { name in
+            looked.update { $0.append(name) }
+            return ["192.168.1.10"]
+        }
+        connectors.append(connector)
+        try connector.start()
+        for name in ["localhost", "printer.local", "nas"] {
+            XCTAssertEqual(ask(try dial(connector.port), name: name, port: 80), 5, name)
+            XCTAssertEqual(connector.report().trouble, .notPublic, name)
+        }
         XCTAssertEqual(proxy.accepted.value, 0)
+        // A name the Mac's resolver would have answered with a local network's address.
+        XCTAssertEqual(ask(try dial(connector.port), name: "blocked-here.example", port: 443), 0)
+        XCTAssertEqual(proxy.requests.value.first?.host, "blocked-here.example")
+        XCTAssertEqual(looked.value, [], "the name was looked up on this side")
+        for name in ["example.com", "a.b.example.org", "xn--80ak6aa92e.com"] { XCTAssertFalse(VMNetDirectConnector.isLocalName(name), name) }
+        for name in ["localhost", "x.localhost", "printer.local", "nas", "", "a..b", "a b.example"] {
+            XCTAssertTrue(VMNetDirectConnector.isLocalName(name), name)
+        }
+    }
+
+    /// "No internet in this machine" is said only when a connection cannot be made at all: asked
+    /// by the same way a guest's are, and not counted as one of them.
+    func testWhetherAConnectionCanBeMadeAtAll() throws {
+        let origin = listener()
+        let gone = TestSocket.listen()
+        Sys.close(gone.descriptor)
+        let connector = try connector(names: ["there.example": ["127.0.0.1"], "nowhere.example": []])
+        XCTAssertTrue(connector.canConnect(to: "there.example", port: UInt16(origin.port)))
+        XCTAssertGreaterThanOrEqual(TestSocket.accept(origin.descriptor, timeout: 3), 0)
+        XCTAssertFalse(connector.canConnect(to: "there.example", port: UInt16(gone.port)))
+        XCTAssertFalse(connector.canConnect(to: "nowhere.example", port: 80))
+        XCTAssertEqual(connector.report(), VMNetDirectConnector.Report(), "the question is not one of the guest's connections")
+        XCTAssertNil(connector.takeNotes())
+        connector.stop()
+        XCTAssertFalse(connector.canConnect(to: "there.example", port: UInt16(origin.port)))
     }
 
     func testTheSystemsSettingsAsAProxy() {

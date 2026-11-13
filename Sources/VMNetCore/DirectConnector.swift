@@ -91,9 +91,6 @@ public final class VMNetDirectConnector: @unchecked Sendable {
     private var current = Report()
     /// What happened since the notes were last taken: a line of the log, and how many times.
     private var notes: [String: Int] = [:]
-    /// This Mac's resolver did not answer in time: until then it is not asked before a proxy is
-    /// (`namesOnlyLocalAddresses`), so that its silence costs one connection a wait, not each.
-    private var resolverSilentUntil = 0.0
 
     /// `systemProxy`: what this Mac's network settings name as its proxy at the moment of asking
     /// (the helper reads the system's own dictionary); nil, or a nil answer: plain sockets.
@@ -148,6 +145,27 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         let line = notes.sorted { $0.key < $1.key }.map { "\($0.value) × \($0.key)" }.joined(separator: "; ")
         notes.removeAll()
         return line
+    }
+
+    /// Whether a connection can be made at all right now, by the same way a guest's are: to a
+    /// name of Apple's that every Mac asks for when it joins a network. For telling "this machine
+    /// has no internet" from "the sites it asks for are not there" (a page's blocked trackers
+    /// fail one after another on a Mac with a filtering resolver, and are no outage). Nothing is
+    /// sent but the connection's opening; it is not counted in the report. Blocks: not for the
+    /// main thread.
+    public func canConnect() -> Bool {
+        canConnect(to: "captive.apple.com", port: 80)
+    }
+
+    func canConnect(to name: String, port: UInt16) -> Bool {
+        guard !isStopped else { return false }
+        switch tunnel(to: .name(name), port: port) {
+        case .made(let descriptor, _, _):
+            Sys.close(descriptor)
+            return true
+        case .failed:
+            return false
+        }
     }
 
     private func record(made throughProxy: Bool) {
@@ -502,10 +520,14 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         let asked: ProxyTarget
         switch target {
         case .name(let name):
-            // A name that this Mac knows only as its own or a local network's is not asked of the
-            // proxy either: what a guest must not reach, it must not reach by a proxy on this Mac.
-            if namesOnlyLocalAddresses(name) {
-                return .failed(.notPublic, "the name's addresses here are not public ones (not asked of this Mac's proxy)")
+            // The proxy is asked for the name and resolves it, as it does for this Mac's apps. The
+            // name is NOT looked up here first: that would tell this Mac's resolver — on a network
+            // where a proxy tool is used, often the very party the tool is there for — every name
+            // a guest opens, which the Mac's own Safari does not; and a resolver that answers a
+            // blocked name with a local address (many do) would have the name refused that the
+            // proxy opens. Only what is local by the way it is written is not asked.
+            if !allowsLocalDestinations, Self.isLocalName(name) {
+                return .failed(.notPublic, "a name of this machine or the local network (not asked of this Mac's proxy)")
             }
             asked = .name(name, port: port)
         case .address(let address):
@@ -549,40 +571,13 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         }
     }
 
-    /// Whether this Mac's resolver gives the name addresses, and not one of them public. Asked
-    /// with a limit of a second and a half: a resolver that does not answer (where only the proxy
-    /// gets out, it may not) is no reason to refuse, and no reason to make a connection wait.
-    private func namesOnlyLocalAddresses(_ name: String) -> Bool {
-        guard !allowsLocalDestinations else { return false }
-        lock.lock()
-        let silent = Sys.now < resolverSilentUntil
-        lock.unlock()
-        guard !silent else { return false }
-        final class Answer: @unchecked Sendable {
-            let lock = NSLock()
-            var found: [Address]?
-        }
-        let answer = Answer()
-        let done = DispatchSemaphore(value: 0)
-        let thread = Thread {
-            let found = Self.addresses(of: name, port: 443).found
-            answer.lock.lock()
-            answer.found = found
-            answer.lock.unlock()
-            done.signal()
-        }
-        thread.stackSize = 512 << 10
-        thread.start()
-        guard done.wait(timeout: .now() + 1.5) == .success else {
-            lock.lock()
-            resolverSilentUntil = Sys.now + 30
-            lock.unlock()
-            return false
-        }
-        answer.lock.lock()
-        let found = answer.found ?? []
-        answer.lock.unlock()
-        return !found.isEmpty && !found.contains { allows($0, by: .publicOrIntoATunnel) }
+    /// A name that is this machine's own or the local network's by the way it is written — one
+    /// label, `localhost`, anything under `.local` — or that is not written as a name at all.
+    /// (The machine's own resolver gives such names no address, so its network never asks for
+    /// one: this is the same rule, held here too.)
+    static func isLocalName(_ name: String) -> Bool {
+        let labels = name.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        return !DNSResponder.isResolvable(labels: labels.last == "" ? Array(labels.dropLast()) : labels, name: name)
     }
 
     /// What the system has for a host, IPv4 first (a Mac whose IPv6 goes nowhere then costs no

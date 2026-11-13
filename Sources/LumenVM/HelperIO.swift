@@ -10,7 +10,11 @@ enum HelperIO {
     static func emit(_ event: VMHelperEvent) {
         lock.lock()
         defer { lock.unlock() }
-        FileHandle.standardOutput.write(Data((event.line() + "\n").utf8))
+        // The app may be gone (it crashed, or was ended): its end of the pipe is then closed.
+        // That is no reason for this process to end — it is shutting the machine down, as it
+        // does when the app is gone — so the write is one that fails quietly (SIGPIPE is ignored
+        // in main.swift, and this call throws where the older one raised an exception).
+        try? FileHandle.standardOutput.write(contentsOf: Data((event.line() + "\n").utf8))
     }
 
     /// A line for whoever reads the helper's standard error (the app passes it on to its own and
@@ -19,7 +23,7 @@ enum HelperIO {
     static func log(_ line: String) {
         lock.lock()
         defer { lock.unlock() }
-        FileHandle.standardError.write(Data(("LumenVM: " + line + "\n").utf8))
+        try? FileHandle.standardError.write(contentsOf: Data(("LumenVM: " + line + "\n").utf8))
     }
 
     /// Says why and ends.
@@ -56,12 +60,19 @@ final class HelperDelegate: NSObject, NSApplicationDelegate {
     private var runner: MachineRunner?
     #endif
     private var signals: [DispatchSourceSignal] = []
+    /// This Mac said it is about to power off (before its quit events reach the apps).
+    private var poweringOff = false
+    private var powerOffObserver: NSObjectProtocol?
 
     init(request: VMHelperRequest) {
         self.request = request
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        powerOffObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willPowerOffNotification,
+                                                                            object: nil, queue: .main) { [weak self] _ in
+            self?.poweringOff = true
+        }
         #if arch(arm64)
         switch request.mode {
         case .catalog:
@@ -93,9 +104,25 @@ final class HelperDelegate: NSObject, NSApplicationDelegate {
         #endif
     }
 
+    /// The quit Apple Event of a logout, restart or shutdown carries a quit reason; one from the
+    /// Dock has none (as the app tells them apart, `QuitCoordinator`).
+    private static func isSystemQuit(_ event: NSAppleEventDescriptor?) -> Bool {
+        // 'aevt', 'quit', 'why?' — kCoreEventClass, kAEQuitApplication, kAEQuitReason.
+        guard let event, event.eventClass == 0x6165_7674, event.eventID == 0x7175_6974 else { return false }
+        return event.attributeDescriptor(forKeyword: 0x7768_793F) != nil
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         #if arch(arm64)
         guard let runner, runner.isRunning else { return .terminateNow }
+        if poweringOff || Self.isSystemQuit(NSAppleEventManager.shared().currentAppleEvent) {
+            // This Mac is logging out, restarting or shutting down: a question here, and "not
+            // now" for an answer, would cancel that for the person — who would have to ask again
+            // with Lumen already gone. The machine is shut down without a question; this process
+            // ends when it has (the runner ends it), which is the answer the system waits for.
+            runner.stop(asking: false)
+            return .terminateLater
+        }
         runner.stop(asking: true)
         return .terminateCancel
         #else

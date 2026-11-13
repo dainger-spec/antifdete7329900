@@ -215,9 +215,13 @@ on a Mac that runs a VPN or a proxy tool they went nowhere.
   seconds — a tool switched on or off while a machine runs is followed): a SOCKS proxy first (it
   carries a connection to any port), else the HTTPS one, by CONNECT. The proxy is asked for the
   name itself, as apps ask it. The settings' exceptions go without it. A proxy configuration
-  file (PAC) is not followed. A name this Mac's own resolver knows only as this Mac or a local
-  network is not asked of the proxy either (the resolver is given a second and a half to say
-  so; one that does not answer is no refusal).
+  file (PAC) is not followed. The name is **not looked up on this Mac first**: that told the
+  Mac's resolver every name a guest opened — on a network where a proxy tool is used, often the
+  very party the tool is there for, and something the Mac's own Safari does not do — and a
+  resolver that answers a blocked name with a local address had the name refused that the proxy
+  opens (found in review, 13 November). Only a name that is local by the way it is written — one
+  label, `localhost`, anything under `.local` — is not asked. Where a name asked of the proxy
+  ends up is the proxy's decision, as it is for the Mac's own apps.
 - **Why a connection was not made** is kept as a kind and a count — `Trouble`: no address for the
   name, addresses that are not public, addresses that did not take the connection, the Mac's
   proxy not answering or refusing — never a name or an address. The helper writes the counts to
@@ -225,7 +229,11 @@ on a Mac that runs a VPN or a proxy tool they went nowhere.
   started from and to the system's log), and when `VMNetworkTrouble.failuresBeforeSaying`
   connections have failed one after another with none made since, its `traffic` event carries
   the kind: the machine's row in the app says in words what is wrong, and the machine's window
-  says there is no internet. The first connection made clears it.
+  says there is no internet. The first connection made clears it. Before it is said, the helper
+  asks whether a connection can be made at all (`canConnect`: to captive.apple.com, which every
+  Mac asks for when it joins a network; by the same way as a guest's, at most once in half a
+  minute, not counted in the report): a page's blocked trackers fail one after another on a Mac
+  with a filtering resolver, and that is not a machine without internet.
 - A thread per direction of a connection, blocking; at most `maximumConnections` at once.
 - `DirectConnectorTests`: a connection both ways with megabytes and a half-close, a name resolved
   on this side, what is refused, a destination that is not there, stop and start; a private

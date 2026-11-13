@@ -354,6 +354,14 @@ final class VMCenter: ObservableObject {
             setupError = L("vm.error.limit")
             return
         }
+        // A machine that is being made right now is a copy of the base's disk: the base is not
+        // started — and its disk written — under the copy.
+        guard !running.contains(where: { id, state in
+            (state.phase == .checkingProxy || state.phase == .starting) && !library.machine(for: id).isComplete
+        }) else {
+            setupError = L("vm.error.machineStarting")
+            return
+        }
         setupError = nil
         do {
             try placeGuestTools()
@@ -595,6 +603,13 @@ final class VMCenter: ObservableObject {
             guard self.runningCount < VMRequirements.runningLimit else {
                 self.running[id] = nil
                 self.problems[id] = L("vm.error.limit")
+                return
+            }
+            // And the base again: it may have been opened meanwhile, and a machine not made yet
+            // would be a copy of a disk the base is writing.
+            if self.activity == .guestSetup, !self.library.machine(for: id).isComplete {
+                self.running[id] = nil
+                self.problems[id] = L("vm.error.baseOpen")
                 return
             }
             self.running[id]?.phase = .starting

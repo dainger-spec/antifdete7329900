@@ -71,17 +71,35 @@ final class VMGuestScriptTests: XCTestCase {
               esac
             fi
             """)
-        try stub("osascript", record + "\necho \"${OSASCRIPT_ANSWER:-set}\"")
+        // What the program returned on its output; what the system printed beside it, and an
+        // error's words, on the other one — as osascript has them.
+        try stub("osascript", record + """
+
+            [ -z "$OSASCRIPT_NOISE" ] || echo "$OSASCRIPT_NOISE" >&2
+            if [ -n "$OSASCRIPT_ERROR" ]; then echo "$OSASCRIPT_ERROR" >&2; exit 1; fi
+            echo "${OSASCRIPT_ANSWER-set}"
+            """)
         try stub("sh", "exec /bin/sh \"$@\"")
         // No waiting: and after as many waits as the test says, Lumen's request to shut down.
         let sleeps = root.appendingPathComponent("sleeps").path
         try stub("sleep", """
             echo x >> '\(sleeps)'
-            if [ "$(/usr/bin/env wc -l < '\(sleeps)')" -ge "${SLEEPS_BEFORE_SHUTDOWN:-1}" ]; then : > '\(share.path)/lumen-shutdown'; fi
+            if [ "$(/usr/bin/env wc -l < '\(sleeps)')" -ge "${SLEEPS_BEFORE_SHUTDOWN:-1}" ]; then
+              : > '\(share.path)/lumen-shutdown'
+              : > '\(root.appendingPathComponent("run").path)/lumen-shutdown'
+            fi
             """)
         try stub("launchctl", "[ \"$1\" = asuser ] || exit 1\nshift 2\nexec \"$@\"")
         try stub("sudo", "[ \"$1\" = -u ] || exit 1\nLUMEN_TEST_USER=\"$2\"\nexport LUMEN_TEST_USER\nshift 2\nexec \"$@\"")
-        try stub("stat", "printf '%s\\n' \"${CONSOLE_USER-tester}\"")
+        // Who is at the console; and the device a folder is on — the shared folder's another than
+        // its parent's when a volume is mounted there.
+        try stub("stat", """
+            if [ "$2" = %d ]; then
+              if [ "$3" = '\(share.path)' ] && [ "${SHARE_MOUNTED:-1}" = 1 ]; then echo 2; else echo 1; fi
+            else
+              printf '%s\n' "${CONSOLE_USER-tester}"
+            fi
+            """)
         try stub("id", "[ \"$1\" = -u ] && [ \"$2\" = tester ] && echo 501")
         try stub("pgrep", "exit 1")
         try stub("sw_vers", "case \"$1\" in -productVersion) echo 27.2.1 ;; -buildVersion) echo 26B131 ;; esac")
@@ -290,12 +308,16 @@ final class VMGuestScriptTests: XCTestCase {
     func testAPictureTheSystemDidNotTakeIsSaidWithItsWords() throws {
         try Data("PNG".utf8).write(to: share.appendingPathComponent(VMGuestSettings.wallpaperFileName))
         try boot(settings: VMGuestSettings(profile: VMProfile(name: "A")).text,
-                 environment: ["OSASCRIPT_ANSWER": "execution error: Error: \"oops\" $(id) `id` (-2700)", "SLEEPS_BEFORE_SHUTDOWN": "60"])
+                 environment: ["OSASCRIPT_ERROR": "execution error: Error: \"oops\" $(id) `id` (-2700)", "SLEEPS_BEFORE_SHUTDOWN": "60"])
         let said = status()
         XCTAssertEqual(said.wallpaperState, "failed")
         XCTAssertTrue(said.wallpaperFailed)
         XCTAssertEqual(said.wallpaperNote, "execution error: Error: oops (id) id (-2700)")
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: guest.path).filter { $0.hasSuffix(".set") }.count, 0)
+
+        // What the program itself answered when it did not set the picture.
+        try boot(settings: VMGuestSettings(profile: VMProfile(name: "A")).text, environment: ["OSASCRIPT_ANSWER": "the system refused the picture"])
+        XCTAssertEqual(status().wallpaperNote, "the system refused the picture")
 
         // No picture in the shared folder at all.
         try FileManager.default.removeItem(at: share.appendingPathComponent(VMGuestSettings.wallpaperFileName))
@@ -366,6 +388,42 @@ final class VMGuestScriptTests: XCTestCase {
         XCTAssertEqual(run.calls.last, "root shutdown -h now")
     }
 
+    // MARK: - The shared folder
+
+    /// What the system prints beside the program's answer (it prints warnings of its own) is not
+    /// the answer: a picture that was set is set.
+    func testWhatTheSystemPrintsBesideTheAnswerIsNotTheAnswer() throws {
+        try Data("PNG".utf8).write(to: share.appendingPathComponent(VMGuestSettings.wallpaperFileName))
+        try boot(settings: VMGuestSettings(profile: VMProfile(name: "A")).text,
+                 environment: ["OSASCRIPT_NOISE": "osascript[77:1234] +[NSXPCSharedListener endpointForReply:]: an error occurred"])
+        XCTAssertEqual(status().wallpaperState, "set")
+        XCTAssertNil(status().wallpaperNote)
+    }
+
+    /// A folder of the share's name that a start cut short left behind is not the share: macOS
+    /// mounts the real one beside it, and what was written into the leftover would keep it there.
+    func testAFolderLeftBehindIsNotTakenForTheShare() throws {
+        // No volume mounted there, and none of Lumen's settings in it.
+        let run = try boot(settings: nil, environment: ["SHARE_MOUNTED": "0", "SLEEPS_BEFORE_SHUTDOWN": "30"])
+        XCTAssertEqual(run.status, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: share.appendingPathComponent(VMGuestSettings.statusFileName).path),
+                       "the leftover was written into")
+        // The script mounts the share itself, and goes on with that.
+        let mount = root.appendingPathComponent("run")
+        XCTAssertTrue(run.has("root mount_virtiofs com.apple.virtio-fs.automount \(mount.path)"), "\(run.calls)")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: mount.appendingPathComponent(VMGuestSettings.statusFileName).path))
+        XCTAssertEqual(run.calls.last, "root shutdown -h now")
+    }
+
+    /// Lumen's settings in a folder make it the share whatever the system says of its device:
+    /// only Lumen writes that file.
+    func testAFolderWithLumensSettingsIsTheShare() throws {
+        let run = try boot(settings: VMGuestSettings(profile: VMProfile(name: "A")).text, environment: ["SHARE_MOUNTED": "0"])
+        XCTAssertFalse(run.calls.contains { $0.contains("mount_virtiofs") }, "\(run.calls)")
+        XCTAssertTrue(run.has("tester open -a Safari"))
+        XCTAssertEqual(status().toolsVersion, VMGuestTools.version)
+    }
+
     // MARK: - A newer script
 
     /// A later Lumen's boot script, left in the shared folder, takes this one's place and runs in
@@ -376,9 +434,12 @@ final class VMGuestScriptTests: XCTestCase {
         let ran = root.appendingPathComponent("the-newer-one-ran").path
         let settings = VMGuestSettings(profile: VMProfile(name: "A")).text
 
-        try Data("#!/bin/sh\nTOOLS_VERSION=\(VMGuestTools.version + 1)\n: > '\(ran)'\n".utf8).write(to: offered)
+        try Data("#!/bin/sh\nTOOLS_VERSION=\(VMGuestTools.version + 1)\nprintf '%s' \"$LUMEN_GUEST_SHARE\" > '\(ran)'\n".utf8).write(to: offered)
         var run = try boot(settings: settings)
         XCTAssertTrue(FileManager.default.fileExists(atPath: ran), "the newer script was not run")
+        // And it is handed the shared folder this one found, which it may not find again (one
+        // this script mounted itself is not where the newer one looks first).
+        XCTAssertEqual(try String(contentsOfFile: ran, encoding: .utf8), share.path)
         XCTAssertEqual(try String(contentsOf: installed, encoding: .utf8), try String(contentsOf: offered, encoding: .utf8))
         XCTAssertFalse(run.calls.contains { $0.contains(" open ") }, "the older script went on after handing over: \(run.calls)")
         XCTAssertTrue(run.calls.contains { $0.hasPrefix("root chown root:wheel ") })
