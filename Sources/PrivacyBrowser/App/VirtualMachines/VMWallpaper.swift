@@ -1,4 +1,5 @@
 import AppKit
+import BrowserCore
 import CoreText
 import Foundation
 
