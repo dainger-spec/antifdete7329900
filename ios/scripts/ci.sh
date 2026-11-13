@@ -18,8 +18,9 @@ OUT="${1:?out dir}"; WANT="${2:-newest}"
 # first, then its green. "build" builds the app and its tests and runs none: does it all compile.
 SUITE="${SUITE:-all}"
 in_suite() { [[ "$SUITE" == "all" || ",$SUITE," == *",$1,"* ]]; }   # core | a test class
-# The App Store's screenshots (ScreenshotTests): by hand only, never in "all".
-SCREENS=0; [[ ",$SUITE," == *",ScreenshotTests,"* ]] && SCREENS=1 && export TEST_RUNNER_LUMEN_SCREENS=1
+# The App Store's screenshots (ScreenshotTests) and the design's states (DesignShotTests, or one of its
+# tests, "DesignShotTests/testEveryLightState"): by hand only, never in "all".
+SCREENS=0; [[ ",$SUITE," =~ ,(ScreenshotTests|DesignShotTests)[,/] ]] && SCREENS=1 && export TEST_RUNNER_LUMEN_SCREENS=1
 ONLY=()
 if [[ "$SUITE" != "all" ]]; then
     IFS=',' read -ra PARTS <<<"$SUITE"
