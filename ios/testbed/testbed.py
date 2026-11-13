@@ -99,6 +99,23 @@ def page(title, body, script=""):
 
 
 
+# A long page of numbered rows. mode=url: the page writes its place into the address as it is scrolled,
+# as many long pages do (history.replaceState); mode=ground: its ground turns dark and light by
+# sections as it is scrolled. Either changes what the browser's bars show while a finger moves the page.
+LONG_SCRIPTS = {
+    "plain": "",
+    "url": "addEventListener('scroll',()=>{const n=Math.floor(scrollY/70);"
+           "if(n!==window.lastRow){window.lastRow=n;history.replaceState(null,'','#row-'+n)}},{passive:true})",
+    "ground": "addEventListener('scroll',()=>{const dark=Math.floor(scrollY/700)%2===1;"
+              "document.documentElement.style.background=document.body.style.background=dark?'#111':'#fff';"
+              "document.body.style.color=dark?'#eee':'#111'},{passive:true})",
+}
+
+
+def long_page(mode):
+    rows = "".join(f"<p style='height:70px;margin:0'>ряд {n:03d}</p>" for n in range(1, 101))
+    return page(f"long {mode}", f"<h1>Длинная страница {mode}</h1>{rows}", LONG_SCRIPTS.get(mode, ""))
+
 # The App Store's screenshots (ScreenshotTests, --demo): what a session's own page sees of it — its time
 # zone, language and local time as the page's scripts read them, and whether it came through the proxy
 # (the testbed knows). Served for http://check.example/ (?l=en for English); words of the owner's
@@ -310,6 +327,8 @@ async def site(reader, writer, scheme="http"):
             elif path.startswith("/page/"):
                 name = urllib.parse.unquote(path[len("/page/"):]) or "page"
                 out = reply("200 OK", page(name, f"<h1>Страница {name}</h1><p><a id=next href='/page/{name}-next'>Дальше</a></p>"))
+            elif path == "/long":   # a long page to scroll by hand (BrowserTests/testScrollingFollowsTheFinger)
+                out = reply("200 OK", long_page(query.get("mode", "plain")), extra=["Cache-Control: no-store"])
             elif path == "/state":
                 server_cookie = header(headers, "Cookie") or "none"
                 out = reply("200 OK", page("state", f"<h1>Состояние</h1><p id=cookie>cookie: …</p><p id=local>local: …</p>"

@@ -118,6 +118,64 @@ final class BrowserTests: LumenUITestCase {
         shot("17 reloaded")
     }
 
+    /// A page moved by a slow finger, back up towards its top, follows the finger: no jump. Asked by
+    /// the owner (13 November 2026: scrolled up, a site's page jumps). Three pages: a plain one, one
+    /// that writes its place into its address while scrolled, one whose ground turns dark and light.
+    func testScrollingFollowsTheFinger() throws {
+        launch(reset: true)
+        createSession(name: "Длинная")
+        openSession("Длинная")
+        var jumps: [String] = [], log: [String] = []
+        for mode in ["plain", "url", "ground"] {
+            go("\(site)/long?mode=\(mode)")
+            page("Длинная страница \(mode)")
+            let web = app.webViews.firstMatch
+            for _ in 0..<3 { web.swipeUp(velocity: .default) }
+            sleep(2)
+            let finger = web.frame.height * 0.2
+            for step in 0..<6 {
+                guard let row = try rowNearMiddle(of: web) else { jumps.append("\(mode) \(step): no row on the screen"); break }
+                let start = web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
+                let end = web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
+                start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.4)
+                sleep(1)
+                guard let after = try rowFrame(row.label, in: web) else { jumps.append("\(mode) \(step): \(row.label) gone"); continue }
+                let moved = after.minY - row.frame.minY
+                log.append("\(mode) \(step): \(row.label) \(Int(row.frame.minY)) -> \(Int(after.minY)), moved \(Int(moved)), finger \(Int(finger))")
+                print("LUMEN SCROLL " + log.last!)
+                if abs(moved - finger) > finger * 0.35 { jumps.append("\(mode) \(step): \(row.label) moved \(Int(moved)) for a finger's \(Int(finger))") }
+            }
+            shot("scrolled up: \(mode)")
+        }
+        let attachment = XCTAttachment(string: log.joined(separator: "\n"))
+        attachment.name = "scroll log"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        XCTAssertTrue(jumps.isEmpty, "the page follows the finger scrolled up: \(jumps.joined(separator: "; "))")
+    }
+
+    /// The page's row ("ряд 042") nearest the middle of the web view, with where it is.
+    private func rowNearMiddle(of web: XCUIElement) throws -> (label: String, frame: CGRect)? {
+        let rows = try rows(in: web)
+        let middle = web.frame.midY - web.frame.height * 0.1
+        return rows.min { abs($0.frame.midY - middle) < abs($1.frame.midY - middle) }
+    }
+
+    private func rowFrame(_ label: String, in web: XCUIElement) throws -> CGRect? {
+        try rows(in: web).first { $0.label == label }?.frame
+    }
+
+    /// Every row of the long page that is on the screen, from one snapshot of the web view.
+    private func rows(in web: XCUIElement) throws -> [(label: String, frame: CGRect)] {
+        var found: [(label: String, frame: CGRect)] = []
+        func walk(_ element: XCUIElementSnapshot) {
+            if element.label.hasPrefix("ряд "), element.frame.intersects(web.frame) { found.append((element.label, element.frame)) }
+            element.children.forEach(walk)
+        }
+        walk(try web.snapshot())
+        return found
+    }
+
     /// Two sessions on the same site: cookies, local storage, IndexedDB, the cache and the history of
     /// one are not seen by the other.
     func testSessionsAreIsolated() {
