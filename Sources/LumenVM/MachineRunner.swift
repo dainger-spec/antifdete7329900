@@ -18,10 +18,20 @@ enum MacProxySettings {
         defer { lock.unlock() }
         let now = ProcessInfo.processInfo.systemUptime
         if let last, now - last.at < 3 { return last.proxy }
-        let settings = CFNetworkCopySystemProxySettings()?.takeRetainedValue() as? [String: Any]
-        let proxy = settings.flatMap { VMNetSystemProxy(settings: $0) }
+        let proxy = settings().flatMap { VMNetSystemProxy(settings: $0) }
         last = (now, proxy)
         return proxy
+    }
+
+    /// The settings name a proxy configuration file (PAC) and no proxy a machine can follow: its
+    /// connections are then made without one, which the log says.
+    static var namesOnlyAConfigurationFile: Bool {
+        guard let settings = settings(), VMNetSystemProxy(settings: settings) == nil else { return false }
+        return (settings["ProxyAutoConfigEnable"] as? Int ?? 0) != 0
+    }
+
+    private static func settings() -> [String: Any]? {
+        CFNetworkCopySystemProxySettings()?.takeRetainedValue() as? [String: Any]
     }
 }
 
@@ -84,7 +94,8 @@ final class MachineNetwork {
             let made = VMNetDirectConnector(systemProxy: { MacProxySettings.current() })
             try made.start()
             HelperIO.log("network: no proxy of the machine's own — this Mac's connection"
-                + (MacProxySettings.current() == nil ? "" : ", through the proxy its network settings name"))
+                + (MacProxySettings.current() == nil ? "" : ", through the proxy its network settings name")
+                + (MacProxySettings.namesOnlyAConfigurationFile ? "; the settings name a proxy configuration file (PAC), which is not followed" : ""))
             direct = made
             upstream = made.upstream
         case .proxy:
