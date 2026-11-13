@@ -26,9 +26,11 @@ public struct VMGuestSettings: Equatable, Sendable {
     public var accent: VMAccent?
     /// Safari is opened when the machine has started. (Tools 2; before them it always is.)
     public var opensSafari: Bool
+    /// The desktop picture is the one the app left beside this file (`wallpaperFileName`). (Tools 3.)
+    public var wallpaper: Bool
 
     public init(timeZone: String?, language: String?, hostName: String, startURL: String?, computerName: String? = nil,
-                appearance: VMAppearance? = nil, accent: VMAccent? = nil, opensSafari: Bool = true) {
+                appearance: VMAppearance? = nil, accent: VMAccent? = nil, opensSafari: Bool = true, wallpaper: Bool = false) {
         self.timeZone = timeZone.flatMap { Self.isTimeZone($0) ? $0 : nil }
         self.language = language.flatMap { LocalePlaces.isLanguageTag($0) ? $0 : nil }
         self.computerName = computerName.flatMap(Self.computerName)
@@ -38,6 +40,7 @@ public struct VMGuestSettings: Equatable, Sendable {
         self.appearance = appearance
         self.accent = accent
         self.opensSafari = opensSafari
+        self.wallpaper = wallpaper
         revision = ""
         revision = Self.revision(of: lines(withRevision: false))
     }
@@ -50,11 +53,15 @@ public struct VMGuestSettings: Equatable, Sendable {
                       : profile.display.id.hasPrefix("imac") ? "iMac" : "Mac-mini",
                   startURL: profile.startURL, computerName: profile.computerName,
                   appearance: profile.appearance.flatMap(VMAppearance.init(rawValue:)),
-                  accent: profile.accent.flatMap(VMAccent.init(rawValue:)), opensSafari: profile.opensSafari)
+                  accent: profile.accent.flatMap(VMAccent.init(rawValue:)), opensSafari: profile.opensSafari,
+                  wallpaper: profile.lumenWallpaper)
     }
 
     public static let fileName = "lumen-settings.env"
     public static let statusFileName = "lumen-status.env"
+    /// Lumen's desktop picture for the machine's screen, which the app draws and leaves in the
+    /// shared folder; the boot script sets it when `LUMEN_WALLPAPER` is 1.
+    public static let wallpaperFileName = "lumen-wallpaper.png"
 
     /// The file's text.
     public var text: String { lines(withRevision: true).joined(separator: "\n") + "\n" }
@@ -72,6 +79,7 @@ public struct VMGuestSettings: Equatable, Sendable {
         if let appearance { lines.append("LUMEN_APPEARANCE=\(appearance.rawValue)") }
         if let accent { lines.append("LUMEN_ACCENT=\(accent.number.map(String.init) ?? VMAccent.multicolor.rawValue)") }
         lines.append("LUMEN_OPEN_SAFARI=\(opensSafari ? 1 : 0)")
+        lines.append("LUMEN_WALLPAPER=\(wallpaper ? 1 : 0)")
         if let startURL { lines.append("LUMEN_START_URL=\(startURL)") }
         return lines
     }

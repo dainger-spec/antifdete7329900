@@ -615,6 +615,12 @@ final class VMCenter: ObservableObject {
                 try? FileManager.default.removeItem(at: copy)
                 try? FileManager.default.copyItem(at: script, to: copy)
             }
+            if profile.lumenWallpaper {
+                // Lumen's desktop picture for this machine's screen, drawn once and left where the
+                // boot script looks — beside the start, which takes the guest far longer.
+                let display = profile.display, share = files.share
+                Task.detached(priority: .userInitiated) { VMWallpaper.place(for: display, in: share) }
+            }
             let helper = VMHelperProcess(onEvent: { [weak self] event in self?.take(event, of: id) },
                                          onEnd: { [weak self] failure in self?.ended(id, failure: failure) })
             try helper.start(VMHelperRequest.run(profile: profile, library: library,

@@ -60,6 +60,9 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
     public var opensSafari: Bool
     /// The machine's colour in the list (an index into the profiles' palette). Nil: by its id.
     public var colorIndex: Int?
+    /// The machine's desktop picture is Lumen's, drawn by the app for its screen (tools 3). Off:
+    /// the picture is left as it is in the machine.
+    public var lumenWallpaper: Bool
 
     public init(id: UUID = UUID(), name: String, createdAt: Date = Date(), lastLaunchedAt: Date? = nil,
                 proxy: ProxySettings? = nil, timeZoneIdentifier: String? = nil, language: String? = nil,
@@ -67,7 +70,7 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
                 displayID: String = VMDisplay.standard.id, memoryGB: Int = VMRequirements.standardMemoryGB,
                 macAddress: String = VMProfile.randomMACAddress(), startURL: String? = nil, notes: String = "",
                 cores: Int? = nil, soundEnabled: Bool = true, appearance: String? = nil, accent: String? = nil,
-                computerName: String? = nil, opensSafari: Bool = true, colorIndex: Int? = nil) {
+                computerName: String? = nil, opensSafari: Bool = true, colorIndex: Int? = nil, lumenWallpaper: Bool = true) {
         self.id = id
         self.name = name
         self.createdAt = createdAt
@@ -89,12 +92,13 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         self.computerName = computerName
         self.opensSafari = opensSafari
         self.colorIndex = colorIndex
+        self.lumenWallpaper = lumenWallpaper
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, createdAt, lastLaunchedAt, proxy, timeZoneIdentifier, language, countryCode, localeFollowsProxy,
              displayID, memoryGB, macAddress, startURL, notes, cores, soundEnabled, appearance, accent, computerName,
-             opensSafari, colorIndex
+             opensSafari, colorIndex, lumenWallpaper
     }
 
     /// Tolerant of what a later version adds or an earlier one lacked: defaults for what is absent.
@@ -122,6 +126,7 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         computerName = try c.decodeIfPresent(String.self, forKey: .computerName)
         opensSafari = try c.decodeIfPresent(Bool.self, forKey: .opensSafari) ?? true
         colorIndex = try c.decodeIfPresent(Int.self, forKey: .colorIndex)
+        lumenWallpaper = try c.decodeIfPresent(Bool.self, forKey: .lumenWallpaper) ?? true
     }
 
     /// The screen, as one of the presets (an id this version does not know: the standard one).

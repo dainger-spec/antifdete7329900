@@ -187,13 +187,22 @@ a minute.
 | Appearance | light, dark or auto: what a page reads as `prefers-color-scheme` |
 | Accent colour | macOS's nine; a new machine gets one at random, as Macs differ in theirs |
 | Computer's name | as Sharing shows it |
+| Wallpaper | Lumen's eclipse, drawn by the app for the machine's screen pixel for pixel (`VMWallpaper`; no picture is carried in the app); or the picture left as it is in the machine |
 | At start | Safari opened or not; its start page |
 
-The last four are applied in the guest by the boot script and need **tools 2**
-(`VMGuestTools.version`); a base set up with tools 1 says so in the list and in the editor, and
-running Install Lumen Tools in the base again updates it. From tools 2 on, the boot script takes a
-newer copy of itself from the shared folder at a machine's start (the app puts its own there), so
-later versions need no visit to the base.
+The last five are applied in the guest by the boot script and need **tools 2** (the wallpaper:
+tools 3, `VMGuestTools.version`); a base set up with tools 1 says so in the list and in the
+editor, and running Install Lumen Tools in the base again updates it. From tools 2 on, the boot
+script takes a newer copy of itself from the shared folder at a machine's start (the app puts its
+own there), so later versions — tools 3 among them — need no visit to the base
+(`VMGuestTools.mustBeInstalledAgain`).
+
+The wallpaper is a PNG the app leaves in the shared folder (`lumen-wallpaper.png`) at a machine's
+start, once for a screen size. The boot script copies it into the guest under a name made of its
+checksum (macOS shows a changed file of the same name as the old one) and sets it in the person's
+session by the system's own call (`NSWorkspace`, from `osascript` — no other app is told to do
+it, so nothing asks for a permission). It is set once for each picture: a person who then chooses
+another in the machine keeps theirs.
 
 ## What machines have in common
 

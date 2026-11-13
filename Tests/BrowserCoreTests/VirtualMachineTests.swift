@@ -138,7 +138,7 @@ final class VMGuestSettingsTests: XCTestCase {
         XCTAssertEqual(settings.hostName, "MacBookAirrm-rf")
         let lines = settings.text.split(separator: "\n").map(String.init)
         XCTAssertEqual(Array(lines.dropFirst()), ["LUMEN_TIMEZONE=Europe/Berlin", "LUMEN_LANGUAGE=de-DE", "LUMEN_LOCALE=de_DE", "LUMEN_HOSTNAME=MacBookAirrm-rf",
-                                                  "LUMEN_OPEN_SAFARI=1"])
+                                                  "LUMEN_OPEN_SAFARI=1", "LUMEN_WALLPAPER=0"])
         XCTAssertTrue(lines[0].hasPrefix("LUMEN_REVISION="))
 
         // Nothing a shell reads as more than text gets through.
@@ -329,6 +329,7 @@ final class VMMachineSettingsTests: XCTestCase {
         XCTAssertNil(profile.computerName)
         XCTAssertTrue(profile.opensSafari)
         XCTAssertNil(profile.colorIndex)
+        XCTAssertTrue(profile.lumenWallpaper)
         XCTAssertNoThrow(try profile.validate())
         // And what is set is kept through a save.
         var changed = profile
@@ -339,6 +340,7 @@ final class VMMachineSettingsTests: XCTestCase {
         changed.computerName = "Anna's MacBook Air"
         changed.opensSafari = false
         changed.colorIndex = 3
+        changed.lumenWallpaper = false
         changed.notes = "shop"
         let again = try JSONCoding.decoder.decode(VMProfile.self, from: JSONCoding.encoder.encode(changed))
         XCTAssertEqual(again, changed)
@@ -374,6 +376,11 @@ final class VMMachineSettingsTests: XCTestCase {
         let plain = VMGuestSettings(profile: VMProfile(name: "A", accent: "multi")).text
         XCTAssertTrue(plain.contains("LUMEN_ACCENT=multi\n"))
         XCTAssertTrue(plain.contains("LUMEN_OPEN_SAFARI=1\n"))
+        // Lumen's desktop picture: a machine has it unless the person says otherwise.
+        XCTAssertTrue(plain.contains("LUMEN_WALLPAPER=1\n"))
+        XCTAssertTrue(VMGuestSettings(profile: VMProfile(name: "A", lumenWallpaper: false)).text.contains("LUMEN_WALLPAPER=0\n"))
+        XCTAssertNotEqual(VMGuestSettings(profile: VMProfile(name: "A", lumenWallpaper: false)).revision,
+                          VMGuestSettings(profile: VMProfile(name: "A")).revision)
         XCTAssertFalse(plain.contains("LUMEN_APPEARANCE"))
         XCTAssertFalse(plain.contains("LUMEN_COMPUTER_NAME"))
         // A change of any of them is a new revision: the guest applies it.
@@ -442,11 +449,22 @@ final class VMGuestToolsTests: XCTestCase {
                                 appearance: "dark", accent: "purple", computerName: "Anna's MacBook Air", opensSafari: false)
         let keys = VMGuestSettings(profile: profile).text.split(separator: "\n").compactMap { $0.split(separator: "=").first.map(String.init) }
         XCTAssertEqual(Set(keys), ["LUMEN_REVISION", "LUMEN_TIMEZONE", "LUMEN_LANGUAGE", "LUMEN_LOCALE", "LUMEN_HOSTNAME", "LUMEN_START_URL",
-                                   "LUMEN_COMPUTER_NAME", "LUMEN_APPEARANCE", "LUMEN_ACCENT", "LUMEN_OPEN_SAFARI"])
+                                   "LUMEN_COMPUTER_NAME", "LUMEN_APPEARANCE", "LUMEN_ACCENT", "LUMEN_OPEN_SAFARI", "LUMEN_WALLPAPER"])
         for key in keys {
             XCTAssertTrue(boot.contains("value \(key) "), "the boot script does not read \(key)")
         }
         XCTAssertTrue(boot.contains(VMGuestSettings.fileName))
+    }
+
+    /// A base whose boot script takes a newer copy of itself needs nothing done to it for a later
+    /// version's settings; one from before that (tools 1) has to have its tools installed again.
+    func testOnlyABaseFromBeforeTheScriptUpdatedItselfIsToldToInstallAgain() {
+        XCTAssertTrue(VMGuestTools.mustBeInstalledAgain(1))
+        XCTAssertFalse(VMGuestTools.mustBeInstalledAgain(2))
+        XCTAssertFalse(VMGuestTools.mustBeInstalledAgain(VMGuestTools.version))
+        XCTAssertFalse(VMGuestTools.mustBeInstalledAgain(nil), "a base that does not say is not nagged")
+        XCTAssertGreaterThanOrEqual(VMGuestTools.version, VMGuestTools.updatesItselfFrom)
+        XCTAssertEqual(VMGuestSettings.wallpaperFileName, "lumen-wallpaper.png")
     }
 
     func testTheScriptsWriteTheStatusTheAppReads() throws {

@@ -5,16 +5,17 @@
 #
 # At each start it reads what Lumen left in the folder the machine shares with the Mac
 # (lumen-settings.env: KEY=value lines, read as text and never run), and makes this macOS the
-# profile's: its time zone, its language and region, its name, its appearance and accent colour;
-# then it opens Safari, says in the same folder what macOS and Safari this is (lumen-status.env),
+# profile's: its time zone, its language and region, its name, its appearance and accent colour,
+# its desktop picture; then it opens Safari, says in the same folder what macOS and Safari this is (lumen-status.env),
 # and from then on waits for Lumen's request to shut down (a file named lumen-shutdown), which it
 # answers by quitting Safari and shutting macOS down, as the Apple menu would.
 #
-# Nothing here reaches the network. From the shared folder it reads those two names — and a newer
-# copy of itself (lumen-guest.sh), which it puts in its own place and starts: Lumen on the Mac is
-# what made this machine, and a later Lumen's script needs no visit to the base system.
+# Nothing here reaches the network. From the shared folder it reads those two names, Lumen's
+# desktop picture for this machine's screen (lumen-wallpaper.png) — and a newer copy of itself
+# (lumen-guest.sh), which it puts in its own place and starts: Lumen on the Mac is what made this
+# machine, and a later Lumen's script needs no visit to the base system.
 
-TOOLS_VERSION=2
+TOOLS_VERSION=3
 SHARE="/Volumes/My Shared Files"
 OWN_MOUNT=/var/run/lumen-share
 TAG=com.apple.virtio-fs.automount
@@ -69,6 +70,7 @@ if [ -n "$share" ] && [ -f "$newer" ] && [ "${LUMEN_GUEST_UPDATED:-0}" != 1 ]; t
 fi
 
 revision="" timezone="" language="" locale="" hostname="" start_url="" computer="" appearance="" accent="" open_safari=1
+wallpaper=0
 settings="$share/lumen-settings.env"
 if [ -n "$share" ] && [ -f "$settings" ]; then
   revision="$(value LUMEN_REVISION "$settings")"
@@ -81,6 +83,7 @@ if [ -n "$share" ] && [ -f "$settings" ]; then
   appearance="$(value LUMEN_APPEARANCE "$settings")"
   accent="$(value LUMEN_ACCENT "$settings")"
   open_safari="$(value LUMEN_OPEN_SAFARI "$settings")"
+  wallpaper="$(value LUMEN_WALLPAPER "$settings")"
 fi
 only 'A-Za-z0-9' "$revision" || revision=""
 only 'A-Za-z0-9_+/-' "$timezone" || timezone=""
@@ -96,6 +99,7 @@ only "A-Za-z0-9 '-" "$computer" || computer=""
 case "$appearance" in light|dark|auto) ;; *) appearance="" ;; esac
 case "$accent" in multi|-1|0|1|2|3|4|5|6) ;; *) accent="" ;; esac
 [ "$open_safari" = 0 ] || open_safari=1
+[ "$wallpaper" = 1 ] || wallpaper=0
 
 # The colour of selected text that goes with an accent colour, as System Settings sets the two.
 highlight() {
@@ -141,6 +145,38 @@ write_status() {
   } > "$share/lumen-status.env" 2>/dev/null
 }
 
+# Lumen's desktop picture, as the app drew it for this machine's screen. It is set once for each
+# picture: a person who then chooses another in the machine keeps theirs. A picture is kept under
+# a name of its own (by its checksum) — macOS shows a changed file of the same name as the old one.
+WALLPAPERS=/Users/Shared/Lumen
+set_wallpaper() {
+  [ "$wallpaper" = 1 ] && [ -n "$share" ] && [ -f "$share/lumen-wallpaper.png" ] || return 0
+  sum="$(/usr/bin/cksum < "$share/lumen-wallpaper.png" 2>/dev/null | /usr/bin/cut -d ' ' -f 1)"
+  only '0-9' "$sum" || return 0
+  picture="$WALLPAPERS/wallpaper-$sum.png"
+  [ ! -e "$picture.set" ] || return 0
+  if [ ! -f "$picture" ]; then
+    /bin/mkdir -p "$WALLPAPERS" && /bin/chmod 755 "$WALLPAPERS"
+    /bin/rm -f "$WALLPAPERS"/wallpaper-*.png "$WALLPAPERS"/wallpaper-*.png.set 2>/dev/null
+    /bin/cp "$share/lumen-wallpaper.png" "$picture" 2>/dev/null && /bin/chmod 644 "$picture" || return 0
+  fi
+  # By the system's own call for it, in the person's session: no other app is told to do it, so
+  # nothing asks the person for a permission.
+  done_it="$(as_user /usr/bin/osascript -l JavaScript -e 'function run(argv) {
+    ObjC.import("AppKit");
+    var url = $.NSURL.fileURLWithPath(argv[0]);
+    var screens = $.NSScreen.screens;
+    var ok = screens.count > 0;
+    for (var i = 0; i < screens.count; i++) {
+      ok = $.NSWorkspace.sharedWorkspace.setDesktopImageURLForScreenOptionsError(url, screens.objectAtIndex(i), $.NSDictionary.dictionary, null) && ok;
+    }
+    return ok ? "set" : "not set";
+  }' "$picture" 2>/dev/null)"
+  if [ "$done_it" = "set" ]; then
+    : > "$picture.set"
+  fi
+}
+
 # The person's side — the language Safari tells sites, and Safari itself — once someone is signed
 # in (automatic sign-in: at once; otherwise when the person has typed the password).
 user_done=0
@@ -179,8 +215,12 @@ apply_for_user() {
   # Kept per machine by macOS (by its hardware identifier), so not what the base system had: no
   # screen saver, which would lock a machine left alone behind a password nobody types here.
   as_user /usr/bin/defaults -currentHost write com.apple.screensaver idleTime -int 0 2>/dev/null
-  # The desktop first: Safari opened before the Dock is there opens behind it.
+  # The desktop first: Safari opened before the Dock is there opens behind it. The picture
+  # before the wait, so that the desktop appears with it — and after, for a session that was not
+  # ready to take it.
+  set_wallpaper
   /bin/sleep 4
+  set_wallpaper
   if [ -n "$share" ] && [ -f "$settings" ] && [ "$open_safari" = 1 ]; then
     if [ -n "$start_url" ]; then
       as_user /usr/bin/open -a Safari "$start_url" 2>/dev/null

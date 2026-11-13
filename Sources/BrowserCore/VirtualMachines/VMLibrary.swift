@@ -208,6 +208,17 @@ public enum VMSetupState: Equatable, Sendable {
 /// 2: the appearance, the accent colour, the computer's own name, Safari not opened; and the boot
 /// script takes a newer copy of itself from the shared folder, so that later versions need no
 /// visit to the base system.
+///
+/// 3: Lumen's desktop picture.
 public enum VMGuestTools {
-    public static let version = 2
+    public static let version = 3
+    /// From this version on an installed boot script takes a newer copy of itself at a machine's
+    /// start: a base with tools this new needs nothing done to it for a later version's settings.
+    public static let updatesItselfFrom = 2
+
+    /// Whether a base whose tools are `installed` must have them installed again (Install Lumen
+    /// Tools, in the base) before the settings the boot script applies work in its machines.
+    public static func mustBeInstalledAgain(_ installed: Int?) -> Bool {
+        (installed ?? version) < updatesItselfFrom
+    }
 }

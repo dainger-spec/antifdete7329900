@@ -223,7 +223,7 @@ private struct VirtualMachinesScreen: View {
                 VMNote(L("vm.base.isOpen"), tone: .plain, symbol: "macwindow")
             }
             if center.isReady, center.activity == nil,
-               (center.library.baseInfo()?.toolsVersion ?? VMGuestTools.version) < VMGuestTools.version {
+               VMGuestTools.mustBeInstalledAgain(center.library.baseInfo()?.toolsVersion) {
                 VMNote(L("vm.tools.old"), tone: .warning)
             }
             if center.runningCount >= VMRequirements.runningLimit {
@@ -625,6 +625,7 @@ struct VMEditorView: View {
     @State private var accent: String
     @State private var computerName: String
     @State private var opensSafari: Bool
+    @State private var lumenWallpaper: Bool
     @State private var startURL: String
     @State private var error: String?
 
@@ -656,6 +657,7 @@ struct VMEditorView: View {
         _accent = State(initialValue: profile.accent ?? "")
         _computerName = State(initialValue: profile.computerName ?? "")
         _opensSafari = State(initialValue: profile.opensSafari)
+        _lumenWallpaper = State(initialValue: profile.lumenWallpaper)
         _startURL = State(initialValue: profile.startURL ?? "")
     }
 
@@ -664,7 +666,7 @@ struct VMEditorView: View {
     /// The base system's tools are older than the settings of the system's look need: said under
     /// them, with what to do.
     private var toolsAreOld: Bool {
-        (center.library.baseInfo()?.toolsVersion ?? VMGuestTools.version) < VMGuestTools.version
+        VMGuestTools.mustBeInstalledAgain(center.library.baseInfo()?.toolsVersion)
     }
 
     var body: some View {
@@ -852,6 +854,7 @@ struct VMEditorView: View {
                 .lumenField(L("vm.editor.computerName.placeholder"), isEmpty: computerName.isEmpty)
             note(L("vm.editor.computerName.note"))
         }
+        EditorToggle(L("vm.editor.wallpaper"), detail: L("vm.editor.wallpaper.detail"), isOn: $lumenWallpaper)
         if toolsAreOld {
             note(L("vm.editor.tools.old"), warns: true)
         }
@@ -904,6 +907,7 @@ struct VMEditorView: View {
         profile.appearance = appearance.isEmpty ? nil : appearance
         profile.accent = accent.isEmpty ? nil : accent
         profile.opensSafari = opensSafari
+        profile.lumenWallpaper = lumenWallpaper
         profile.localeFollowsProxy = followsProxy
         let computer = computerName.trimmingCharacters(in: .whitespacesAndNewlines)
         if computer.isEmpty {
