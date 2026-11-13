@@ -77,6 +77,12 @@ for language, line, rule, what in [("ru", "Лучший антидетект д�
     check(f"red — {what} in the App Store's card ({language}): found",
           any(f[0].startswith("AppStore") and f[1].startswith(rule) for f in scan(root)))
 root = planted('let row = Text("Сессии")')
+os.makedirs(os.path.join(root, "AppStore", "cards"))
+with open(os.path.join(root, "AppStore", "cards", "captions.json"), "w", encoding="utf-8") as f:
+    f.write('{"ru": {"01-sessions": ["Мультиаккаунт на iPhone", "Сессии"]}}')
+check("red — a word in a caption of the App Store's pictures: found",
+      any(f[0].startswith("AppStore/cards") and f[1].startswith("word") for f in scan(root)))
+root = planted('let row = Text("Сессии")')
 os.makedirs(os.path.join(root, "AppStore", "metadata", "ru"))
 with open(os.path.join(root, "AppStore", "metadata", "ru", "name.txt"), "w", encoding="utf-8") as f:
     f.write("Lumen: изолированные сессии для тестирования\n")

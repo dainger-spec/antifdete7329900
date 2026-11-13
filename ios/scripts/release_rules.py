@@ -221,6 +221,16 @@ def scan(ios, app=None):
                 judge(where, line.strip())
                 if OFFER.search(line) or OFFER_ENGLISH.search(line):
                     found.append((where, "offer", line.strip()))
+    # The captions over the App Store's pictures (ios/scripts/make_store_cards.mjs).
+    captions = os.path.join(ios, "AppStore", "cards", "captions.json")
+    if os.path.exists(captions):
+        import json
+        for language, items in json.load(open(captions, encoding="utf-8")).items():
+            for name, lines in items.items():
+                for text in lines:
+                    judge(f"AppStore/cards/captions.json {language}/{name}", text)
+                    if OFFER.search(text) or OFFER_ENGLISH.search(text):
+                        found.append((f"AppStore/cards/captions.json {language}/{name}", "offer", text))
     if app:
         with open(os.path.join(app, "Info.plist"), "rb") as f:
             info = plistlib.load(f)
