@@ -120,13 +120,18 @@ public struct VMLibrary: Equatable, Sendable {
 
     /// What the files under `directory` take on disk — for a sparse disk, what was written, not
     /// its length — where the system says (`totalFileAllocatedSize`); their lengths elsewhere.
-    public static func allocatedSize(of directory: URL) -> Int64 {
+    ///
+    /// `ownOnly`: only what removing the folder would give back. A profile's disk is a clone of the
+    /// base's and shares most of its blocks with it; counted whole, every machine would seem to
+    /// take the base's twenty gigabytes again.
+    public static func allocatedSize(of directory: URL, ownOnly: Bool = false) -> Int64 {
         guard let enumerator = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: [.isRegularFileKey]) else { return 0 }
         var total: Int64 = 0
         for case let url as URL in enumerator {
             #if canImport(Darwin)
             if let values = try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey]), values.isRegularFile == true {
-                total += Int64(values.totalFileAllocatedSize ?? 0)
+                let allocated = Int64(values.totalFileAllocatedSize ?? 0)
+                total += ownOnly ? min(allocated, privateSize(of: url) ?? allocated) : allocated
             }
             #else
             total += fileSize(url)
@@ -134,6 +139,28 @@ public struct VMLibrary: Equatable, Sendable {
         }
         return total
     }
+
+    #if canImport(Darwin)
+    /// The file's blocks that no other file shares — what deleting it would free (APFS keeps a
+    /// clone's unchanged blocks once for both files). Nil where the volume does not say.
+    static func privateSize(of url: URL) -> Int64? {
+        // What `getattrlist` writes for this request: its length, which attributes it returned,
+        // then the size — each aligned to four bytes, which is how these three lie anyway.
+        struct Reply {
+            var length: UInt32 = 0
+            var returned = attribute_set_t()
+            var size: off_t = 0
+        }
+        var request = attrlist()
+        request.bitmapcount = u_short(ATTR_BIT_MAP_COUNT)
+        request.commonattr = attrgroup_t(ATTR_CMN_RETURNED_ATTRS)
+        request.forkattr = attrgroup_t(ATTR_CMNEXT_PRIVATESIZE)
+        var reply = Reply()
+        let status = getattrlist(url.path, &request, &reply, MemoryLayout<Reply>.size, UInt32(FSOPT_ATTR_CMN_EXTENDED))
+        guard status == 0, reply.returned.forkattr & attrgroup_t(ATTR_CMNEXT_PRIVATESIZE) != 0, reply.size >= 0 else { return nil }
+        return Int64(reply.size)
+    }
+    #endif
 }
 
 /// The base system: which macOS it is, and whether its one-time setup inside the guest is done.

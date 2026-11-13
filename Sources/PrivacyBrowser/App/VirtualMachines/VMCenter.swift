@@ -584,7 +584,8 @@ final class VMCenter: ObservableObject {
         let baseID = Self.baseID
         Task.detached(priority: .utility) { [weak self] in
             var usage: [UUID: Int64] = [:]
-            for id in ids { usage[id] = VMLibrary.allocatedSize(of: library.machineDirectory(for: id)) }
+            // A machine's own blocks: what its macOS changed since it was cloned from the base.
+            for id in ids { usage[id] = VMLibrary.allocatedSize(of: library.machineDirectory(for: id), ownOnly: true) }
             usage[baseID] = VMLibrary.allocatedSize(of: library.baseDirectory)
             let counted = usage
             await MainActor.run { self?.diskUsage = counted }
