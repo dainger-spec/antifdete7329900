@@ -213,9 +213,15 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = request.windowTitle
-        window.contentAspectRatio = NSSize(width: display.pixelsWide, height: display.pixelsHigh)
         window.contentMinSize = NSSize(width: 480, height: 480 * CGFloat(display.pixelsHigh) / CGFloat(display.pixelsWide))
-        window.contentView = view
+        if let hint = request.texts["hint"], !hint.isEmpty {
+            // What is left to do in this machine, said in its own window: the app's window, which
+            // has the same words, is behind this one.
+            window.contentView = Self.content(of: view, under: hint)
+        } else {
+            window.contentAspectRatio = NSSize(width: display.pixelsWide, height: display.pixelsHigh)
+            window.contentView = view
+        }
         window.delegate = self
         window.isReleasedWhenClosed = false
         window.center()
@@ -228,6 +234,39 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
             NSApp.applicationIconImage = NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath)
         }
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// The machine's screen with a line of words above it.
+    private static func content(of view: NSView, under hint: String) -> NSView {
+        let label = NSTextField(wrappingLabelWithString: hint)
+        label.font = .systemFont(ofSize: 12.5, weight: .medium)
+        label.textColor = NSColor(calibratedWhite: 0.96, alpha: 1)
+        label.maximumNumberOfLines = 3
+        label.isSelectable = false
+        let bar = NSView()
+        bar.wantsLayer = true
+        bar.layer?.backgroundColor = NSColor(calibratedWhite: 0.09, alpha: 1).cgColor
+        let container = NSView()
+        for subview in [bar, view] {
+            subview.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(subview)
+        }
+        label.translatesAutoresizingMaskIntoConstraints = false
+        bar.addSubview(label)
+        NSLayoutConstraint.activate([
+            bar.topAnchor.constraint(equalTo: container.topAnchor),
+            bar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            label.topAnchor.constraint(equalTo: bar.topAnchor, constant: 9),
+            label.bottomAnchor.constraint(equalTo: bar.bottomAnchor, constant: -9),
+            label.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 16),
+            label.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -16),
+            view.topAnchor.constraint(equalTo: bar.bottomAnchor),
+            view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+        return container
     }
 
     /// The app menu's one command: the keys themselves go to the guest (⌘Q quits an app in it).

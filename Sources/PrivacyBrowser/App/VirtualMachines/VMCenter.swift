@@ -355,6 +355,11 @@ final class VMCenter: ObservableObject {
             setupError = errorText(error)
             return
         }
+        // A base not set up yet says in its own window what is left to do in it.
+        var baseTexts = Self.helperTexts
+        if info.stage != .ready {
+            baseTexts["hint"] = L(network == .absent ? "vm.base.hint" : "vm.base.hint.online")
+        }
         let run = beginRun()
         activity = .guestSetup
         let helper = VMHelperProcess(onEvent: { _ in }, onEnd: { [weak self] failure in
@@ -386,7 +391,7 @@ final class VMCenter: ObservableObject {
                                       cores: VMRequirements.cores(hostCores: ProcessInfo.processInfo.activeProcessorCount),
                                       memoryBytes: Int64(Self.setupMemoryGB) * VMRequirements.gibibyte,
                                       macAddress: VMProfile.randomMACAddress(), network: network,
-                                      windowTitle: L("vm.base.window"), texts: Self.helperTexts))
+                                      windowTitle: L("vm.base.window"), texts: baseTexts))
     }
 
     /// Shuts the base down (its window's own close button does the same).

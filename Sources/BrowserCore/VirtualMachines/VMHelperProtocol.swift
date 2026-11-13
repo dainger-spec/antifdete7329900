@@ -67,7 +67,8 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
     /// Names the machine's network answers "no such name" for (`VMRequirements.blockedHosts`).
     public var blockedHosts: [String]
     /// The window's title, and its few words, in the person's language (the helper has no strings
-    /// of its own): `stop`, `stopQuestion`, `stopDetail`, `stopNow`, `cancel`, `starting`.
+    /// of its own): `stop`, `stopQuestion`, `stopDetail`, `stopNow`, `cancel`, `stopping` — and
+    /// `hint`, a line shown above the machine's screen (what is left to do in the base).
     public var windowTitle: String
     public var texts: [String: String]
 

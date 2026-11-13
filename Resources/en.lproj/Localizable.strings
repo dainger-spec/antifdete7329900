@@ -2820,3 +2820,5 @@
 "vm.setup.guest.openOnline" = "Open with Internet";
 "vm.setup.guest.openOnline.help" = "If macOS's setup will not go on without a connection: the same machine, with this Mac's own connection.";
 "vm.setup.download.hint" = "You can keep working: a pause or a quit loses nothing.";
+"vm.base.hint" = "1. Finish macOS's setup (asked how the Mac connects: “My computer does not connect to the internet”).   2. Then, in Finder: Go → Computer → My Shared Files → open “Install Lumen Tools” and type your password.   There is no internet in this system on purpose; the machines made from it have it.";
+"vm.base.hint.online" = "1. Finish macOS's setup.   2. Then, in Finder: Go → Computer → My Shared Files → open “Install Lumen Tools” and type your password. The machine shuts down by itself.";

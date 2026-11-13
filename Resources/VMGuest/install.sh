@@ -4,8 +4,8 @@
 #
 # What it does, all of it in this machine and none of it on the Mac that runs it:
 #   - signs in to this account automatically at start (a profile's machine opens at its desktop);
-#   - turns off sleep, the screen saver's lock and automatic macOS updates (a profile's disk is a
-#     copy of this one: gigabytes of updates would be fetched into every copy);
+#   - turns off sleep, the screen saver's lock, the Spotlight index and automatic macOS updates (a
+#     profile's disk is a copy of this one: gigabytes of updates would be fetched into every copy);
 #   - installs the start-up helper (lumen-guest.sh, a LaunchDaemon) that gives each profile's
 #     machine its time zone, language and name, opens Safari, and shuts macOS down when Lumen asks;
 #   - says in the shared folder that the base is ready, and shuts the machine down.
@@ -76,6 +76,10 @@ fi
 /usr/bin/defaults -currentHost write com.apple.screensaver idleTime -int 0 >/dev/null 2>&1
 /usr/bin/sudo /usr/bin/defaults write /Library/Preferences/com.apple.screensaver idleTime -int 0 >/dev/null 2>&1
 /usr/sbin/sysadminctl -screenLock off -password "$PASSWORD" >/dev/null 2>&1
+
+# No Spotlight index: a machine is for Safari, and indexing its whole system at every first start
+# keeps the Mac's processors busy — and warm — for a quarter of an hour, and grows every copy's disk.
+/usr/bin/sudo /usr/bin/mdutil -a -i off >/dev/null 2>&1
 
 # No automatic macOS updates (security data — XProtect and the like — stays on).
 /usr/bin/sudo /usr/sbin/softwareupdate --schedule off >/dev/null 2>&1
