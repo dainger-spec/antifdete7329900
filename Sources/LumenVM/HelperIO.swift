@@ -13,6 +13,15 @@ enum HelperIO {
         FileHandle.standardOutput.write(Data((event.line() + "\n").utf8))
     }
 
+    /// A line for whoever reads the helper's standard error (the app passes it on to its own and
+    /// to the system's log): what the machine's network did, in kinds and counts — never a name
+    /// or an address.
+    static func log(_ line: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        FileHandle.standardError.write(Data(("LumenVM: " + line + "\n").utf8))
+    }
+
     /// Says why and ends.
     static func fail(_ message: String) -> Never {
         emit(VMHelperEvent(kind: .failed, message: message))

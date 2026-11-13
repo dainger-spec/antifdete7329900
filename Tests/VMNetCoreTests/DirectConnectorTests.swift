@@ -190,6 +190,181 @@ final class DirectConnectorTests: XCTestCase {
         XCTAssertFalse(VMNetDirectConnector.isPublicIPv6([1, 2, 3]))
     }
 
+    // MARK: - Why a connection was not made
+
+    /// What the person is told when a machine has no internet: a kind and a count — never a name
+    /// or an address the guest asked for.
+    func testAFailureSaysItsKindAndNothingOfWhereItWent() throws {
+        let gone = TestSocket.listen()
+        Sys.close(gone.descriptor)
+        let origin = listener()
+        let connector = try connector(names: ["nowhere.example": []])
+        XCTAssertEqual(connector.report(), VMNetDirectConnector.Report())
+        XCTAssertNil(connector.takeNotes())
+
+        XCTAssertEqual(ask(try dial(connector.port), name: "nowhere.example", port: 80), 5)
+        XCTAssertEqual(connector.report().trouble, .nameNotFound)
+        XCTAssertEqual(ask(try dial(connector.port), address: [127, 0, 0, 1], port: gone.port), 5)
+        var report = connector.report()
+        XCTAssertEqual(report.trouble, .unreachable)
+        XCTAssertEqual(report.failed, 2)
+        XCTAssertEqual(report.failedInARow, 2)
+        XCTAssertEqual(report.connected, 0)
+
+        XCTAssertEqual(ask(try dial(connector.port), address: [127, 0, 0, 1], port: origin.port), 0)
+        report = connector.report()
+        XCTAssertNil(report.trouble)
+        XCTAssertEqual(report.failed, 2)
+        XCTAssertEqual(report.failedInARow, 0)
+        XCTAssertEqual(report.connected, 1)
+        XCTAssertFalse(report.usesSystemProxy)
+
+        let notes = try XCTUnwrap(connector.takeNotes())
+        XCTAssertTrue(notes.contains("1 × connected"), notes)
+        XCTAssertTrue(notes.contains("1 × no address for the name"), notes)
+        XCTAssertTrue(notes.contains("connection refused"), notes)
+        XCTAssertFalse(notes.contains("nowhere.example"), notes)
+        XCTAssertFalse(notes.contains("127.0.0.1"), notes)
+        XCTAssertNil(connector.takeNotes(), "the notes are taken once")
+    }
+
+    func testALocalAddressIsToldApartFromOneThatDoesNotAnswer() throws {
+        let connector = try connector(local: false, names: ["lan.example": ["192.168.1.10"]])
+        XCTAssertEqual(ask(try dial(connector.port), name: "lan.example", port: 80), 5)
+        XCTAssertEqual(connector.report().trouble, .notPublic)
+        let notes = try XCTUnwrap(connector.takeNotes())
+        XCTAssertTrue(notes.contains("192.168.0.0/16"), notes)
+        XCTAssertFalse(notes.contains("192.168.1.10"), notes)
+        XCTAssertFalse(notes.contains("lan.example"), notes)
+    }
+
+    // MARK: - The proxy of this Mac's network settings
+
+    /// A connector on a Mac whose network settings name `proxy`.
+    private func connector(through proxy: FakeProxy, exceptions: [String] = [], local: Bool = true,
+                           names: [String: [String]] = [:]) throws -> VMNetDirectConnector {
+        let settings = VMNetSystemProxy(upstream: proxy.upstream(), exceptions: exceptions)
+        let connector = VMNetDirectConnector(allowsLocalDestinations: local, systemProxy: { settings }) { names[$0] }
+        connectors.append(connector)
+        XCTAssertGreaterThan(try connector.start(), 0)
+        return connector
+    }
+
+    /// A VPN or proxy tool in its "system proxy" mode takes no packets: Safari on the Mac asks
+    /// the proxy, and so does a machine — for the name itself, which the proxy resolves.
+    func testWhereTheMacsSettingsNameAProxyItIsAskedForTheNameItself() throws {
+        for kind in [FakeProxy.Kind.socks5, .http] {
+            let proxy = FakeProxy(kind: kind, origin: FakeProxy.httpOrigin(body: Array("through the proxy".utf8)))
+            defer { proxy.stop() }
+            let connector = try connector(through: proxy)
+            let client = try dial(connector.port)
+            XCTAssertEqual(ask(client, name: "site.example", port: 443), 0)
+            TestSocket.write(client, Array("GET / HTTP/1.1\r\nHost: site.example\r\n\r\n".utf8))
+            let answer = String(decoding: TestSocket.readToEnd(client, timeout: 5), as: UTF8.self)
+            XCTAssertTrue(answer.hasSuffix("through the proxy"), answer)
+            let request = try XCTUnwrap(proxy.requests.value.first)
+            XCTAssertEqual(request.host, "site.example")
+            XCTAssertEqual(request.port, 443)
+            XCTAssertTrue(request.byName)
+            let report = connector.report()
+            XCTAssertEqual(report.connected, 1)
+            XCTAssertTrue(report.usesSystemProxy)
+            XCTAssertEqual(connector.takeNotes(), "1 × connected through this Mac's proxy")
+        }
+    }
+
+    /// Bytes a proxy sends in the same breath as its answer are the connection's first.
+    func testWhatAProxySendsRightBehindItsAnswerIsNotLost() throws {
+        let proxy = FakeProxy(kind: .http, afterHeaders: Array("early".utf8))
+        defer { proxy.stop() }
+        let connector = try connector(through: proxy)
+        let client = try dial(connector.port)
+        XCTAssertEqual(ask(client, name: "site.example", port: 443), 0)
+        XCTAssertEqual(TestSocket.read(client, exactly: 5), Array("early".utf8))
+    }
+
+    func testAProxyThatRefusesOrIsNotThereIsSaidSo() throws {
+        let refusing = FakeProxy(kind: .socks5, behaviour: .refuse(2))
+        defer { refusing.stop() }
+        let first = try connector(through: refusing)
+        XCTAssertEqual(ask(try dial(first.port), name: "site.example", port: 443), 5)
+        XCTAssertEqual(first.report().trouble, .proxyRefused)
+        XCTAssertEqual(first.takeNotes(), "1 × this Mac's proxy: the proxy refused (code 2)")
+
+        // The settings name a port nobody listens on (a tool that was quit and left its setting).
+        let gone = TestSocket.listen()
+        Sys.close(gone.descriptor)
+        let settings = VMNetSystemProxy(upstream: .socks5(host: "127.0.0.1", port: gone.port, username: nil, password: nil))
+        let second = VMNetDirectConnector(allowsLocalDestinations: true, systemProxy: { settings })
+        connectors.append(second)
+        try second.start()
+        XCTAssertEqual(ask(try dial(second.port), name: "site.example", port: 443), 5)
+        XCTAssertEqual(second.report().trouble, .proxyUnreachable)
+        XCTAssertFalse(try XCTUnwrap(second.takeNotes()).contains("site.example"))
+    }
+
+    /// The settings' own exceptions go without the proxy, as they do for the Mac's apps.
+    func testHostsTheSettingsExceptGoWithoutTheProxy() throws {
+        let origin = listener()
+        let proxy = FakeProxy(kind: .socks5)
+        defer { proxy.stop() }
+        let connector = try connector(through: proxy, exceptions: ["*.direct.example", "Plain.example"],
+                                      names: ["a.direct.example": ["127.0.0.1"], "plain.example": ["127.0.0.1"]])
+        for name in ["a.direct.example", "plain.example"] {
+            XCTAssertEqual(ask(try dial(connector.port), name: name, port: origin.port), 0)
+            let served = TestSocket.accept(origin.descriptor, timeout: 3)
+            XCTAssertGreaterThanOrEqual(served, 0, name)
+            descriptors.append(served)
+        }
+        XCTAssertEqual(proxy.accepted.value, 0)
+        XCTAssertFalse(connector.report().usesSystemProxy)
+    }
+
+    /// What a guest must not reach, it must not reach by a proxy on this Mac either.
+    func testANameThatIsThisMachineIsNotAskedOfTheProxy() throws {
+        let proxy = FakeProxy(kind: .socks5)
+        defer { proxy.stop() }
+        let connector = try connector(through: proxy, local: false)
+        XCTAssertEqual(ask(try dial(connector.port), name: "localhost", port: 80), 5)
+        XCTAssertEqual(connector.report().trouble, .notPublic)
+        XCTAssertEqual(proxy.accepted.value, 0)
+    }
+
+    func testTheSystemsSettingsAsAProxy() {
+        // A SOCKS proxy first: it carries a connection to any port.
+        let both = VMNetSystemProxy(settings: ["SOCKSEnable": 1, "SOCKSProxy": "127.0.0.1", "SOCKSPort": 7890,
+                                               "HTTPSEnable": 1, "HTTPSProxy": "127.0.0.1", "HTTPSPort": 7891,
+                                               "ExceptionsList": ["*.local", "169.254/16", "Localhost"]])
+        XCTAssertEqual(both?.upstream, .socks5(host: "127.0.0.1", port: 7890, username: nil, password: nil))
+        XCTAssertEqual(both?.exceptions, ["*.local", "169.254/16", "localhost"])
+        XCTAssertEqual(both?.applies(to: "printer.local"), false)
+        XCTAssertEqual(both?.applies(to: "LOCALHOST"), false)
+        XCTAssertEqual(both?.applies(to: "example.com"), true)
+        XCTAssertEqual(both?.applies(to: "notlocal"), true)
+
+        let https = VMNetSystemProxy(settings: ["HTTPEnable": 1, "HTTPProxy": "127.0.0.1", "HTTPPort": 8080,
+                                                "HTTPSEnable": true, "HTTPSProxy": " proxy.example ", "HTTPSPort": "8443"])
+        XCTAssertEqual(https?.upstream, .httpConnect(host: "proxy.example", port: 8443, username: nil, password: nil))
+        XCTAssertEqual(https?.exceptions, [])
+
+        // Nothing switched on, a proxy for plain HTTP alone, a configuration file, and settings
+        // that do not read: no proxy.
+        for settings: [String: Any] in [[:], ["SOCKSEnable": 0, "SOCKSProxy": "127.0.0.1", "SOCKSPort": 7890],
+                                        ["HTTPEnable": 1, "HTTPProxy": "127.0.0.1", "HTTPPort": 8080],
+                                        ["ProxyAutoConfigEnable": 1, "ProxyAutoConfigURLString": "http://example.com/proxy.pac"],
+                                        ["SOCKSEnable": 1, "SOCKSProxy": "127.0.0.1", "SOCKSPort": 0],
+                                        ["SOCKSEnable": 1, "SOCKSProxy": "", "SOCKSPort": 7890],
+                                        ["SOCKSEnable": 1, "SOCKSProxy": "a b", "SOCKSPort": 7890],
+                                        ["HTTPSEnable": 1, "HTTPSProxy": 5, "HTTPSPort": 70000]] {
+            XCTAssertNil(VMNetSystemProxy(settings: settings), "\(settings)")
+        }
+        // A pattern with a leading dot is every name under it, and the name itself.
+        let dotted = VMNetSystemProxy(upstream: .none, exceptions: [".corp.example", ""])
+        XCTAssertFalse(dotted.applies(to: "a.corp.example"))
+        XCTAssertFalse(dotted.applies(to: "corp.example"))
+        XCTAssertTrue(dotted.applies(to: "notcorp.example"))
+    }
+
     // MARK: - Its life
 
     func testStopCutsWhatIsUnderWayAndItStartsAgain() throws {

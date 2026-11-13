@@ -57,6 +57,10 @@ final class VMCenter: ObservableObject {
         var bytesUp: UInt64 = 0
         var bytesDown: UInt64 = 0
         var connections = 0
+        /// A machine without a proxy whose connections are not being made: why.
+        var trouble: VMNetworkTrouble?
+        /// Its connections go through the proxy this Mac's network settings name.
+        var viaSystemProxy = false
     }
 
     @Published private(set) var list: VMProfiles
@@ -633,6 +637,8 @@ final class VMCenter: ObservableObject {
             running[id]?.bytesUp = event.bytesUp ?? 0
             running[id]?.bytesDown = event.bytesDown ?? 0
             running[id]?.connections = event.connections ?? 0
+            running[id]?.trouble = event.trouble.flatMap(VMNetworkTrouble.init(rawValue:))
+            running[id]?.viaSystemProxy = event.viaSystemProxy ?? false
         default:
             break
         }
@@ -741,5 +747,6 @@ final class VMCenter: ObservableObject {
     static var helperTexts: [String: String] {
         ["stop": L("vm.window.stop"), "stopQuestion": L("vm.window.stopQuestion"), "stopDetail": L("vm.window.stopDetail"),
          "stopNow": L("vm.window.stopNow"), "cancel": L("common.cancel"), "stopping": L("vm.window.stopping")]
+            .merging(VMNetworkTrouble.allCases.map { ("trouble." + $0.rawValue, L("vm.window.trouble")) }) { first, _ in first }
     }
 }

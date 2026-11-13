@@ -442,6 +442,18 @@ private struct VMRow: View {
                         .foregroundStyle(Theme.danger)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if let trouble = state?.trouble, state?.phase == .running {
+                    // A machine without a proxy that reaches nothing: why, in the person's words.
+                    Label(L("vm.row.trouble.\(trouble.rawValue)"), systemImage: "wifi.exclamationmark")
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if state?.viaSystemProxy == true, state?.phase == .running {
+                    Text(L("vm.row.viaSystemProxy"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 10)
             if let state, state.phase == .running {

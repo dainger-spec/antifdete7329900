@@ -136,17 +136,26 @@ public struct VMHelperEvent: Codable, Equatable, Sendable {
     public var bytesUp: UInt64?
     public var bytesDown: UInt64?
     public var connections: Int?
+    /// `traffic`, a machine without a proxy: why its connections are not being made — a kind
+    /// (`VMNetworkTrouble`), set while several in a row have failed and none has been made since.
+    public var trouble: String?
+    /// `traffic`, a machine without a proxy: its connections go through the proxy this Mac's own
+    /// network settings name.
+    public var viaSystemProxy: Bool?
     /// `failed`: why, in the system's own words (shown to the person as given).
     public var message: String?
 
     public init(kind: Kind, image: VMRestoreImage? = nil, fraction: Double? = nil, bytesUp: UInt64? = nil,
-                bytesDown: UInt64? = nil, connections: Int? = nil, message: String? = nil) {
+                bytesDown: UInt64? = nil, connections: Int? = nil, trouble: String? = nil, viaSystemProxy: Bool? = nil,
+                message: String? = nil) {
         self.kind = kind
         self.image = image
         self.fraction = fraction
         self.bytesUp = bytesUp
         self.bytesDown = bytesDown
         self.connections = connections
+        self.trouble = trouble
+        self.viaSystemProxy = viaSystemProxy
         self.message = message
     }
 
@@ -159,4 +168,23 @@ public struct VMHelperEvent: Codable, Equatable, Sendable {
         guard line.hasPrefix("{") else { return nil }
         return try? JSONCoding.decoder.decode(VMHelperEvent.self, from: Data(line.utf8))
     }
+}
+
+/// Why a machine without a proxy has no way out, as the helper's `traffic` event names it — the
+/// kinds of `VMNetDirectConnector.Trouble`, which the app does not link.
+public enum VMNetworkTrouble: String, Codable, Sendable, CaseIterable {
+    /// This Mac finds no address for the names the machine asks for.
+    case nameNotFound
+    /// The names resolve, on this Mac, to this Mac itself or a local network.
+    case notPublic
+    /// The addresses do not take the connections.
+    case unreachable
+    /// The proxy this Mac's network settings name does not take the connections.
+    case proxyUnreachable
+    /// That proxy answers, and says no.
+    case proxyRefused
+
+    /// How many connections must fail one after another, none made since, before the machine is
+    /// said to have no way out: a page's one dead address is not that.
+    public static let failuresBeforeSaying: UInt64 = 4
 }

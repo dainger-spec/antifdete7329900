@@ -192,9 +192,32 @@ on a Mac that runs a VPN or a proxy tool they went nowhere.
 - Public addresses only, as the network itself has it: a name that resolves to this machine or to
   a local network is refused, so a page in a guest cannot reach the Mac's own services by naming
   them.
+- **The Mac's own proxy.** A VPN or proxy tool in its "system proxy" mode takes no packets: it
+  writes itself into the Mac's network settings, and the apps that follow them (Safari) ask it.
+  A plain socket passes it by — and on a network where only the tool gets out, reaches nothing
+  (the second run on a person's Mac, 13 November: a machine without a proxy could not connect to
+  any site). So for every connection the connector asks the helper what the settings name now
+  (`VMNetSystemProxy`, from `CFNetworkCopySystemProxySettings`, re-read at most every three
+  seconds — a tool switched on or off while a machine runs is followed): a SOCKS proxy first (it
+  carries a connection to any port), else the HTTPS one, by CONNECT. The proxy is asked for the
+  name itself, as apps ask it. The settings' exceptions go without it. A proxy configuration
+  file (PAC) is not followed. A name this Mac's own resolver knows only as this Mac or a local
+  network is not asked of the proxy either (the resolver is given a second and a half to say
+  so; one that does not answer is no refusal).
+- **Why a connection was not made** is kept as a kind and a count — `Trouble`: no address for the
+  name, addresses that are not public, addresses that did not take the connection, the Mac's
+  proxy not answering or refusing — never a name or an address. The helper writes the counts to
+  its standard error every two seconds (the app passes its own lines on to the terminal it was
+  started from and to the system's log), and when `VMNetworkTrouble.failuresBeforeSaying`
+  connections have failed one after another with none made since, its `traffic` event carries
+  the kind: the machine's row in the app says in words what is wrong, and the machine's window
+  says there is no internet. The first connection made clears it.
 - A thread per direction of a connection, blocking; at most `maximumConnections` at once.
 - `DirectConnectorTests`: a connection both ways with megabytes and a half-close, a name resolved
-  on this side, what is refused, a destination that is not there, stop and start — and the whole
-  way with the network: a guest gets its address, resolves a name, and loads a page through the
-  connector byte for byte.
+  on this side, what is refused, a destination that is not there, stop and start; each kind of
+  failure and that its note names nothing; a SOCKS and an HTTP proxy of the Mac's settings asked
+  for the name, bytes right behind a proxy's answer, a proxy that refuses or is not there, the
+  settings' exceptions, a local name not asked of the proxy, the settings' dictionary read — and
+  the whole way with the network: a guest gets its address, resolves a name, and loads a page
+  through the connector byte for byte.
 

@@ -28,6 +28,7 @@ final class VMHelperProcess {
     private let process = Process()
     private let input = Pipe()
     private let output = Pipe()
+    private let errors = Pipe()
     private let onEvent: (VMHelperEvent) -> Void
     /// The helper has ended; `failure` is what it said went wrong (a `failed` event), or that it
     /// ended without saying how.
@@ -48,12 +49,38 @@ final class VMHelperProcess {
         process.executableURL = url
         process.standardInput = input
         process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
+        process.standardError = errors
         // A helper that has ended is written to at most once more: an error, not a signal that
         // ends the app.
         _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         try process.run()
         try input.fileHandleForWriting.write(contentsOf: Data((try request.line() + "\n").utf8))
+
+        // What the helper says beside its events — what a machine's network did, in kinds and
+        // counts (never a name or an address) — goes where this app's own words go: its standard
+        // error (the terminal it was started from, if any) and the system's log.
+        let said = errors.fileHandleForReading
+        let log = self.log
+        Thread.detachNewThread {
+            var buffer = Data()
+            while true {
+                let chunk = said.availableData
+                if chunk.isEmpty { break }
+                buffer.append(chunk)
+                while let newline = buffer.firstIndex(of: 0x0A) {
+                    let line = String(decoding: buffer[buffer.startIndex..<newline], as: UTF8.self)
+                    buffer.removeSubrange(buffer.startIndex...newline)
+                    guard !line.isEmpty else { continue }
+                    FileHandle.standardError.write(Data((line + "\n").utf8))
+                    // The system's log keeps the helper's own lines only (`HelperIO.log`), not
+                    // what a framework may have printed beside them.
+                    guard line.hasPrefix("LumenVM: ") else { continue }
+                    let helperLine = String(line.prefix(400))
+                    log.notice("\(helperLine, privacy: .public)")
+                }
+                if buffer.count > 1 << 20 { buffer.removeAll() }
+            }
+        }
 
         // One thread reads to the end and hands everything to the main queue in order: the events,
         // then the end.

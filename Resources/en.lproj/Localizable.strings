@@ -2681,6 +2681,13 @@
 "vm.row.system.safari" = "macOS %1$@, Safari %2$@";
 "vm.row.disk" = "%@ on disk";
 "vm.row.traffic.help" = "What the machine has sent and received since it started";
+"vm.row.trouble.nameNotFound" = "No internet in this machine: this Mac finds no addresses for the sites' names. Check the Mac's own connection (its VPN, its DNS).";
+"vm.row.trouble.notPublic" = "No internet in this machine: on this Mac the sites' names lead to local addresses (a VPN or a filter answers with its own), and a machine does not connect to local addresses.";
+"vm.row.trouble.unreachable" = "No internet in this machine: sites do not answer connections made from this Mac. If a VPN is on, check that it carries all apps and not the browser alone.";
+"vm.row.trouble.proxyUnreachable" = "No internet in this machine: the proxy in this Mac's network settings does not answer. A VPN tool that was quit may have left its setting behind — switch the tool on, or the proxy off in System Settings → Network.";
+"vm.row.trouble.proxyRefused" = "No internet in this machine: the proxy in this Mac's network settings refuses its connections.";
+"vm.row.viaSystemProxy" = "Goes through the proxy in this Mac's network settings";
+"vm.window.trouble" = "no internet — Lumen's list of machines says why";
 "vm.editor.title.new" = "New virtual machine";
 "vm.editor.title" = "“%@”";
 "vm.editor.subtitle" = "A Mac of its own. What is changed here takes effect at the machine's next start.";
@@ -2733,6 +2740,7 @@
 "help.vm.what" = "What a machine has of its own";
 "help.vm.what.system" = "Its own macOS and Safari: cookies, history, the keychain, caches, the DNS cache — everything a Mac keeps, on a disk of its own.";
 "help.vm.what.proxy" = "With a proxy, everything the machine sends goes through it — the whole macOS, not only Safari — and nothing any other way. The proxy is checked before each start; if it does not answer, the machine is not started.";
+"help.vm.what.noProxy" = "Without a proxy the machine goes out as this Mac's own apps do: through its VPN, and through the proxy in its network settings when a VPN tool has put itself there. If a machine has no internet, its row in the list says why.";
 "help.vm.what.locale" = "The time zone and the language are the machine's own system settings, taken from where the proxy comes out at each start (or set by hand).";
 "help.vm.what.screen" = "The screen is one of real Macs' — MacBook Air, MacBook Pro, iMac — whatever the size of the window on your Mac.";
 "help.vm.costs" = "What it takes";

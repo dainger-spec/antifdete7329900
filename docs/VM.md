@@ -123,7 +123,7 @@ the person's own.
 
 | profile | where the machine's connections go |
 |---|---|
-| no proxy | made by the helper as its own, ordinary sockets (`VMNetDirectConnector`): this Mac's connection as any app has it — through its VPN, by its routes. Sites see this Mac's address, or its VPN's |
+| no proxy | made by the helper as this Mac's own apps make theirs (`VMNetDirectConnector`): ordinary sockets, which go through its VPN and by its routes — or, where the Mac's network settings name a proxy (a VPN tool in "system proxy" mode), through that proxy, as Safari on the Mac does. Sites see this Mac's address, or its VPN's. When connections fail one after another, the machine's row and its window say so, with the kind of failure |
 | a proxy | every connection of the guest — the whole macOS, not only Safari — goes through the profile's proxy, and there is no other way out |
 
 In both, the machine's network card is a socket whose other end is `VMNetCore` in the helper: it

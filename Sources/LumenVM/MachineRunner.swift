@@ -1,9 +1,29 @@
 #if arch(arm64)
 import AppKit
 import BrowserCore
+import CFNetwork
 import Foundation
 import Virtualization
 import VMNetCore
+
+/// The proxy this Mac's own network settings name at the moment (`VMNetSystemProxy`): where a VPN
+/// or proxy tool in its "system proxy" mode writes itself. Read from the system at most every
+/// three seconds: a tool switched on or off while a machine runs is followed from then on.
+enum MacProxySettings {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var last: (at: Double, proxy: VMNetSystemProxy?)?
+
+    static func current() -> VMNetSystemProxy? {
+        lock.lock()
+        defer { lock.unlock() }
+        let now = ProcessInfo.processInfo.systemUptime
+        if let last, now - last.at < 3 { return last.proxy }
+        let settings = CFNetworkCopySystemProxySettings()?.takeRetainedValue() as? [String: Any]
+        let proxy = settings.flatMap { VMNetSystemProxy(settings: $0) }
+        last = (now, proxy)
+        return proxy
+    }
+}
 
 /// A machine's network card, and what is at its other end.
 ///
@@ -11,9 +31,10 @@ import VMNetCore
 /// connection of the guest and carries it on. With a proxy: through the profile's proxy, and no
 /// other way, so a guest whose proxy is down reaches nothing. Direct: as this process's own
 /// connections (`VMNetDirectConnector`) — this Mac's connection as any app has it, through its
-/// VPN and by its routes. Not Apple's NAT: where the Mac runs a VPN or a proxy tool, a guest
-/// behind that NAT had no internet at all (the first run on a person's Mac, 13 November).
-/// Closed: the same network with no way out. Absent: no card.
+/// VPN and by its routes, and through the proxy its network settings name where they name one
+/// (a VPN tool in "system proxy" mode). Not Apple's NAT: where the Mac runs a VPN or a proxy
+/// tool, a guest behind that NAT had no internet at all (the first run on a person's Mac,
+/// 13 November). Closed: the same network with no way out. Absent: no card.
 final class MachineNetwork {
     /// Nil: the machine has no network card (`VMHelperRequest.Network.absent`).
     let attachment: VZNetworkDeviceAttachment?
@@ -60,8 +81,10 @@ final class MachineNetwork {
         var direct: VMNetDirectConnector?
         switch request.network {
         case .direct:
-            let made = VMNetDirectConnector()
+            let made = VMNetDirectConnector(systemProxy: { MacProxySettings.current() })
             try made.start()
+            HelperIO.log("network: no proxy of the machine's own — this Mac's connection"
+                + (MacProxySettings.current() == nil ? "" : ", through the proxy its network settings name"))
             direct = made
             upstream = made.upstream
         case .proxy:
@@ -97,11 +120,18 @@ final class MachineNetwork {
                                                prefixLength: 24, upstream: upstream, blockedHostSuffixes: request.blockedHosts)
         let network = VMNetwork(configuration: configuration, frameDescriptor: descriptor)
         self.network = network
+        network.log = { HelperIO.log("network: " + $0) }
         network.start()
     }
 
     /// What the machine's network carried so far; nil for a machine without a card.
     func counters() -> VMNetCounters? { network?.counters() }
+
+    /// What the way out of a machine without a proxy has done; nil for any other machine.
+    func directReport() -> VMNetDirectConnector.Report? { connector?.report() }
+
+    /// What that way out did since this was last asked, for the log.
+    func takeNotes() -> String? { connector?.takeNotes() }
 
     func stop() {
         network?.stop()
@@ -120,6 +150,8 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     private var window: NSWindow?
     private var trafficTimer: Timer?
     private var lastTraffic: VMNetCounters?
+    private var lastTrouble: String?
+    private var lastViaSystemProxy = false
     private var stopping = false
     private var finished = false
 
@@ -353,10 +385,36 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     }
 
     private func reportTraffic() {
-        guard let counters = network?.counters(), counters != lastTraffic else { return }
+        guard let network, let counters = network.counters() else { return }
+        if let notes = network.takeNotes() { HelperIO.log("way out: " + notes) }
+        // A machine without a proxy whose connections fail one after another has no way out:
+        // said to the app, and in this window, with the kind of failure — not left to be guessed.
+        let report = network.directReport()
+        var trouble: String?
+        if let report, report.failedInARow >= VMNetworkTrouble.failuresBeforeSaying, let kind = report.trouble {
+            // Kind for kind, so that a new one is not forgotten here.
+            let named: VMNetworkTrouble
+            switch kind {
+            case .nameNotFound: named = .nameNotFound
+            case .notPublic: named = .notPublic
+            case .unreachable: named = .unreachable
+            case .proxyUnreachable: named = .proxyUnreachable
+            case .proxyRefused: named = .proxyRefused
+            }
+            trouble = named.rawValue
+        }
+        let viaSystemProxy = report?.usesSystemProxy ?? false
+        guard counters != lastTraffic || trouble != lastTrouble || viaSystemProxy != lastViaSystemProxy else { return }
+        if trouble != lastTrouble {
+            HelperIO.log(trouble.map { "way out: the machine's connections are not being made (\($0))" } ?? "way out: connections are made again")
+            window?.subtitle = trouble.map { text("trouble." + $0, "No internet in this machine") } ?? ""
+        }
         lastTraffic = counters
+        lastTrouble = trouble
+        lastViaSystemProxy = viaSystemProxy
         HelperIO.emit(VMHelperEvent(kind: .traffic, bytesUp: counters.bytesFromGuest, bytesDown: counters.bytesToGuest,
-                                    connections: counters.connectionsActive))
+                                    connections: counters.connectionsActive, trouble: trouble,
+                                    viaSystemProxy: report == nil ? nil : viaSystemProxy))
     }
 
     private func finish() -> Never {

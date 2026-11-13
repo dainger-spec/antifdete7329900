@@ -22,15 +22,50 @@ import Foundation
 /// only: a name that resolves to this Mac, or to somebody's local network, is refused — a page in
 /// a guest must not reach the Mac's own services by naming them.
 ///
+/// Where this Mac's own network settings name a proxy (a VPN or proxy tool in its "system proxy"
+/// mode), the connection is asked of that proxy instead, as Safari on this Mac asks it
+/// (`VMNetSystemProxy`): such a tool takes no packets, and a plain socket would pass it by.
+///
 /// One thread per direction of a connection, blocking: a few hundred connections of a browser
 /// are a few hundred idle threads, and the code is what can be read.
 public final class VMNetDirectConnector: @unchecked Sendable {
     /// Connections carried at once; one more is refused.
     public static let maximumConnections = 1024
 
+    /// Why a connection was not made: a kind, never where it was going.
+    public enum Trouble: String, Sendable, Codable, CaseIterable {
+        /// This Mac found no address for the name.
+        case nameNotFound
+        /// Every address the name has here is this Mac's own or a local network's.
+        case notPublic
+        /// The addresses did not take the connection: refused, or no answer.
+        case unreachable
+        /// The proxy of this Mac's network settings did not take the connection.
+        case proxyUnreachable
+        /// That proxy answered, and said no.
+        case proxyRefused
+    }
+
+    /// What the connector has done so far. Counts and a kind only.
+    public struct Report: Equatable, Sendable {
+        public var connected: UInt64 = 0
+        public var failed: UInt64 = 0
+        /// Connections that failed one after another since the last one made.
+        public var failedInARow: UInt64 = 0
+        /// Why the last connection failed; nil when it was made.
+        public var trouble: Trouble?
+        /// The last connection made went through the proxy of this Mac's network settings.
+        public var usesSystemProxy = false
+
+        public init() {}
+    }
+
     private let allowsLocalDestinations: Bool
     /// The tests' own answer to "what addresses has this name": nil asks the system.
     private let resolve: (@Sendable (String) -> [String]?)?
+    /// The proxy this Mac's network settings name now, if any: asked for every connection, so a
+    /// tool switched on while a machine runs is followed from the next connection on.
+    private let systemProxy: (@Sendable () -> VMNetSystemProxy?)?
 
     private let lock = NSLock()
     private var listener: Int32 = -1
@@ -39,16 +74,27 @@ public final class VMNetDirectConnector: @unchecked Sendable {
     /// Every socket of the connections under way, to cut them at `stop`.
     private var open: Set<Int32> = []
     private var threads = 0
+    private var current = Report()
+    /// What happened since the notes were last taken: a line of the log, and how many times.
+    private var notes: [String: Int] = [:]
+    /// This Mac's resolver did not answer in time: until then it is not asked before a proxy is
+    /// (`namesOnlyLocalAddresses`), so that its silence costs one connection a wait, not each.
+    private var resolverSilentUntil = 0.0
 
-    public init() {
+    /// `systemProxy`: what this Mac's network settings name as its proxy at the moment of asking
+    /// (the helper reads the system's own dictionary); nil, or a nil answer: plain sockets.
+    public init(systemProxy: (@Sendable () -> VMNetSystemProxy?)? = nil) {
         allowsLocalDestinations = false
         resolve = nil
+        self.systemProxy = systemProxy
     }
 
     /// For the tests: destinations on this machine, and names given their addresses.
-    init(allowsLocalDestinations: Bool, resolve: (@Sendable (String) -> [String]?)? = nil) {
+    init(allowsLocalDestinations: Bool, systemProxy: (@Sendable () -> VMNetSystemProxy?)? = nil,
+         resolve: (@Sendable (String) -> [String]?)? = nil) {
         self.allowsLocalDestinations = allowsLocalDestinations
         self.resolve = resolve
+        self.systemProxy = systemProxy
     }
 
     deinit { stop() }
@@ -68,6 +114,43 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return listeningPort
+    }
+
+    /// What the connector has done so far.
+    public func report() -> Report {
+        lock.lock()
+        defer { lock.unlock() }
+        return current
+    }
+
+    /// What happened since this was last asked, as a line for a log — kinds and counts, never a
+    /// name or an address; nil when nothing did.
+    public func takeNotes() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !notes.isEmpty else { return nil }
+        let line = notes.sorted { $0.key < $1.key }.map { "\($0.value) × \($0.key)" }.joined(separator: "; ")
+        notes.removeAll()
+        return line
+    }
+
+    private func record(made throughProxy: Bool) {
+        lock.lock()
+        current.connected += 1
+        current.failedInARow = 0
+        current.trouble = nil
+        current.usesSystemProxy = throughProxy
+        notes[throughProxy ? "connected through this Mac's proxy" : "connected", default: 0] += 1
+        lock.unlock()
+    }
+
+    private func record(_ trouble: Trouble, _ detail: String) {
+        lock.lock()
+        current.failed += 1
+        current.failedInARow += 1
+        current.trouble = trouble
+        notes[detail, default: 0] += 1
+        lock.unlock()
     }
 
     /// Starts listening on a loopback port of the system's choosing and returns it.
@@ -197,7 +280,8 @@ public final class VMNetDirectConnector: @unchecked Sendable {
                 release(client)
                 finished()
             }
-            thread.stackSize = 256 << 10
+            // The system's resolver runs on it: the size the system gives a thread, not less.
+            thread.stackSize = 512 << 10
             thread.start()
         }
     }
@@ -222,10 +306,18 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         // not coming.
         Self.setTimeout(client, seconds: 15)
         guard let (target, port) = request(from: client) else { return }
-        guard let remote = connect(to: target, port: port) else {
+        let remote: Int32
+        let leftover: [UInt8]
+        switch tunnel(to: target, port: port) {
+        case .failed(let trouble, let detail):
+            if !isStopped { record(trouble, detail) }
             // 5: connection refused — what a guest's TCP is then told.
             _ = Self.sendAll(client, [5, 5, 0, 1, 0, 0, 0, 0, 0, 0])
             return
+        case .made(let descriptor, let early, let throughProxy):
+            record(made: throughProxy)
+            remote = descriptor
+            leftover = early
         }
         guard register(remote, countsAsConnection: false) else {
             Sys.close(remote)
@@ -233,6 +325,8 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         }
         defer { release(remote) }
         guard Self.sendAll(client, [5, 0, 0, 1, 0, 0, 0, 0, 0, 0]) else { return }
+        // What a proxy sent right behind its answer is already the connection's.
+        guard leftover.isEmpty || Self.sendAll(client, leftover) else { return }
         Self.setTimeout(client, seconds: 0)
 
         // The answer's way back on a thread of its own; the request's way here.
@@ -286,55 +380,211 @@ public final class VMNetDirectConnector: @unchecked Sendable {
 
     // MARK: - Connecting
 
-    /// A connected socket to the target, or nil. An address is connected to as given; a name's
-    /// addresses are tried one after another, IPv4 first (a Mac whose IPv6 goes nowhere then
-    /// costs no wait).
-    private func connect(to target: Target, port: UInt16) -> Int32? {
-        let hosts: [String]
-        switch target {
-        case .address(let address):
-            hosts = [address.string]
-        case .name(let name):
-            if let resolve, let given = resolve(name) {
-                hosts = given
-            } else {
-                hosts = [name]
-            }
-        }
+    private enum Tunnel {
+        /// A connected socket; `leftover` is what a proxy sent behind its answer.
+        case made(Int32, leftover: [UInt8], throughProxy: Bool)
+        case failed(Trouble, String)
+    }
+
+    /// One address of a host, as the system gave it.
+    private struct Address {
+        var family: Int32
+        var storage: sockaddr_storage
+        var length: socklen_t
+    }
+
+    /// The connection to the target: through the proxy of this Mac's network settings where they
+    /// name one for it, as this process's own socket otherwise.
+    private func tunnel(to target: Target, port: UInt16) -> Tunnel {
         let deadline = Sys.now + 20
+        let host: String
+        switch target {
+        case .name(let name): host = name
+        case .address(let address): host = address.string
+        }
+        if let proxy = systemProxy?(), proxy.applies(to: host) {
+            return tunnel(through: proxy.upstream, to: target, port: port, deadline: deadline)
+        }
+        var hosts = [host]
+        if case .name(let name) = target, let resolve, let given = resolve(name) { hosts = given }
+        var failure = Tunnel.failed(.nameNotFound, "no address for the name")
         for host in hosts {
-            var hints = addrinfo()
-            hints.ai_family = AF_UNSPEC
-            hints.ai_socktype = Sys.streamType
-            hints.ai_flags = AI_NUMERICSERV
-            var list: UnsafeMutablePointer<addrinfo>?
-            guard getaddrinfo(host, String(port), &hints, &list) == 0 else { continue }
-            defer { freeaddrinfo(list) }
-            var candidates: [UnsafeMutablePointer<addrinfo>] = []
-            var next = list
-            while let entry = next {
-                candidates.append(entry)
-                next = entry.pointee.ai_next
-            }
-            let ordered = candidates.filter { $0.pointee.ai_family == AF_INET } + candidates.filter { $0.pointee.ai_family == AF_INET6 }
-            for entry in ordered {
-                guard !isStopped, Sys.now < deadline else { return nil }
-                guard let address = entry.pointee.ai_addr, allowsLocalDestinations || Self.isPublic(address, family: entry.pointee.ai_family) else { continue }
-                let descriptor = socket(entry.pointee.ai_family, Sys.streamType, 0)
-                guard descriptor >= 0 else { continue }
-                Sys.setNoSigPipe(descriptor)
-                Sys.setNoDelay(descriptor)
-                if Self.connect(descriptor, address, entry.pointee.ai_addrlen, seconds: min(8, deadline - Sys.now)) {
-                    return descriptor
-                }
-                Sys.close(descriptor)
+            switch dial(host, port: port, publicOnly: !allowsLocalDestinations, deadline: deadline) {
+            case .made(let descriptor, _, _): return .made(descriptor, leftover: [], throughProxy: false)
+            case .failed(let trouble, let detail): failure = .failed(trouble, detail)
             }
         }
-        return nil
+        return failure
+    }
+
+    /// A connected socket to one of the host's addresses — the public ones only, when
+    /// `publicOnly` — or why there is none.
+    private func dial(_ host: String, port: UInt16, publicOnly: Bool, deadline: Double) -> Tunnel {
+        let (found, code) = Self.addresses(of: host, port: port)
+        guard !found.isEmpty else { return .failed(.nameNotFound, "no address for the name (resolver's code \(code))") }
+        let allowed = publicOnly ? found.filter(Self.isPublic) : found
+        guard !allowed.isEmpty else {
+            return .failed(.notPublic, "the name's addresses here are not public ones (\(Self.kind(of: found[0])))")
+        }
+        var last = "no time left"
+        for address in allowed {
+            guard !isStopped, Sys.now < deadline else { break }
+            let descriptor = socket(address.family, Sys.streamType, 0)
+            guard descriptor >= 0 else {
+                last = Sys.describe(errno)
+                continue
+            }
+            Sys.setNoSigPipe(descriptor)
+            Sys.setNoDelay(descriptor)
+            var storage = address.storage
+            let code = withUnsafeMutablePointer(to: &storage) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    Self.connect(descriptor, $0, address.length, seconds: min(8, deadline - Sys.now))
+                }
+            }
+            if code == 0 { return .made(descriptor, leftover: [], throughProxy: false) }
+            Sys.close(descriptor)
+            last = Sys.describe(code)
+        }
+        return .failed(.unreachable, "the address did not take the connection (\(last))")
+    }
+
+    /// The connection as the proxy of this Mac's network settings makes it: the proxy is asked
+    /// for the name itself, as it is by the Mac's own apps.
+    private func tunnel(through proxy: VMNetUpstream, to target: Target, port: UInt16, deadline: Double) -> Tunnel {
+        let asked: ProxyTarget
+        switch target {
+        case .name(let name):
+            // A name that this Mac knows only as its own or a local network's is not asked of the
+            // proxy either: what a guest must not reach, it must not reach by a proxy on this Mac.
+            if namesOnlyLocalAddresses(name) {
+                return .failed(.notPublic, "the name's addresses here are not public ones (not asked of this Mac's proxy)")
+            }
+            asked = .name(name, port: port)
+        case .address(let address):
+            asked = .address(address, port: port)
+        }
+        guard let endpoint = proxy.endpoint, (1...65535).contains(endpoint.port), var handshake = proxy.handshake(for: asked) else {
+            return .failed(.proxyUnreachable, "this Mac's proxy is not one a connection can be asked of")
+        }
+        // The proxy is this Mac's own setting, wherever it is — as a rule on this Mac itself.
+        let descriptor: Int32
+        switch dial(endpoint.host, port: UInt16(endpoint.port), publicOnly: false, deadline: deadline) {
+        case .made(let made, _, _): descriptor = made
+        case .failed(_, let detail): return .failed(.proxyUnreachable, "this Mac's proxy: " + detail)
+        }
+        Self.setTimeout(descriptor, seconds: 20)
+        var step = handshake.begin()
+        while true {
+            switch step {
+            case .send(let bytes):
+                guard Self.sendAll(descriptor, bytes) else {
+                    Sys.close(descriptor)
+                    return .failed(.proxyUnreachable, "this Mac's proxy closed the connection")
+                }
+                step = .needMore
+            case .needMore:
+                var chunk = [UInt8](repeating: 0, count: 4096)
+                let got = chunk.withUnsafeMutableBytes { recv(descriptor, $0.baseAddress, $0.count, 0) }
+                if got < 0, errno == EINTR { continue }
+                guard got > 0 else {
+                    Sys.close(descriptor)
+                    return .failed(.proxyUnreachable, got == 0 ? "this Mac's proxy closed the connection" : "this Mac's proxy did not answer")
+                }
+                step = handshake.receive(Array(chunk[0..<got]))
+            case .established(let leftover):
+                Self.setTimeout(descriptor, seconds: 0)
+                return .made(descriptor, leftover: leftover, throughProxy: true)
+            case .failed(let failure):
+                Sys.close(descriptor)
+                return .failed(.proxyRefused, "this Mac's proxy: " + failure.reason)
+            }
+        }
+    }
+
+    /// Whether this Mac's resolver gives the name addresses, and not one of them public. Asked
+    /// with a limit of a second and a half: a resolver that does not answer (where only the proxy
+    /// gets out, it may not) is no reason to refuse, and no reason to make a connection wait.
+    private func namesOnlyLocalAddresses(_ name: String) -> Bool {
+        guard !allowsLocalDestinations else { return false }
+        lock.lock()
+        let silent = Sys.now < resolverSilentUntil
+        lock.unlock()
+        guard !silent else { return false }
+        final class Answer: @unchecked Sendable {
+            let lock = NSLock()
+            var found: [Address]?
+        }
+        let answer = Answer()
+        let done = DispatchSemaphore(value: 0)
+        let thread = Thread {
+            let found = Self.addresses(of: name, port: 443).found
+            answer.lock.lock()
+            answer.found = found
+            answer.lock.unlock()
+            done.signal()
+        }
+        thread.stackSize = 512 << 10
+        thread.start()
+        guard done.wait(timeout: .now() + 1.5) == .success else {
+            lock.lock()
+            resolverSilentUntil = Sys.now + 30
+            lock.unlock()
+            return false
+        }
+        answer.lock.lock()
+        let found = answer.found ?? []
+        answer.lock.unlock()
+        return !found.isEmpty && !found.contains(where: Self.isPublic)
+    }
+
+    /// What the system has for a host, IPv4 first (a Mac whose IPv6 goes nowhere then costs no
+    /// wait); with the resolver's code when it has nothing.
+    private static func addresses(of host: String, port: UInt16) -> (found: [Address], code: Int32) {
+        var hints = addrinfo()
+        hints.ai_family = AF_UNSPEC
+        hints.ai_socktype = Sys.streamType
+        hints.ai_flags = AI_NUMERICSERV
+        var list: UnsafeMutablePointer<addrinfo>?
+        let code = getaddrinfo(host, String(port), &hints, &list)
+        guard code == 0 else { return ([], code) }
+        defer { freeaddrinfo(list) }
+        var found: [Address] = []
+        var next = list
+        while let entry = next {
+            let family = entry.pointee.ai_family
+            let length = Int(entry.pointee.ai_addrlen)
+            if let address = entry.pointee.ai_addr, family == AF_INET || family == AF_INET6, length <= MemoryLayout<sockaddr_storage>.size {
+                var storage = sockaddr_storage()
+                withUnsafeMutableBytes(of: &storage) { $0.copyMemory(from: UnsafeRawBufferPointer(start: address, count: length)) }
+                found.append(Address(family: family, storage: storage, length: entry.pointee.ai_addrlen))
+            }
+            next = entry.pointee.ai_next
+        }
+        return (found.filter { $0.family == AF_INET } + found.filter { $0.family == AF_INET6 }, 0)
+    }
+
+    private static func isPublic(_ address: Address) -> Bool {
+        var storage = address.storage
+        return withUnsafeMutablePointer(to: &storage) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { isPublic($0, family: address.family) }
+        }
+    }
+
+    /// The kind of address that was refused, for the log: its range, never the address.
+    private static func kind(of address: Address) -> String {
+        guard address.family == AF_INET else { return "IPv6, local" }
+        var storage = address.storage
+        let value = withUnsafeMutablePointer(to: &storage) { pointer in
+            pointer.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { UInt32(bigEndian: $0.pointee.sin_addr.s_addr) }
+        }
+        guard let range = DestinationPolicy.refusedRanges.first(where: { VMNetIPv4(value).isIn($0.0, $0.1) }) else { return "IPv4" }
+        return "\(VMNetIPv4(range.0).string)/\(range.1)"
     }
 
     /// Connects within `seconds`, and leaves the socket waiting on its reads and writes again.
-    private static func connect(_ descriptor: Int32, _ address: UnsafeMutablePointer<sockaddr>, _ length: socklen_t, seconds: Double) -> Bool {
+    /// 0, or the error's number.
+    private static func connect(_ descriptor: Int32, _ address: UnsafeMutablePointer<sockaddr>, _ length: socklen_t, seconds: Double) -> Int32 {
         let flags = fcntl(descriptor, F_GETFL, 0)
         _ = fcntl(descriptor, F_SETFL, flags | O_NONBLOCK)
         #if canImport(Darwin)
@@ -343,12 +593,15 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         let status = Glibc.connect(descriptor, address, length)
         #endif
         if status != 0 {
-            guard errno == EINPROGRESS else { return false }
+            let code = errno
+            guard code == EINPROGRESS else { return code }
             var entries = [pollfd(fd: descriptor, events: Sys.writable, revents: 0)]
-            guard Sys.wait(&entries, milliseconds: Int32(max(1, seconds * 1000))) > 0, Sys.pendingError(descriptor) == 0 else { return false }
+            guard Sys.wait(&entries, milliseconds: Int32(max(1, seconds * 1000))) > 0 else { return ETIMEDOUT }
+            let pending = Sys.pendingError(descriptor)
+            guard pending == 0 else { return pending }
         }
         _ = fcntl(descriptor, F_SETFL, flags & ~O_NONBLOCK)
-        return true
+        return 0
     }
 
     /// The address is one of the public internet: not this machine, not a local network.

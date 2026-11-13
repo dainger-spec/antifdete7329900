@@ -302,6 +302,14 @@ final class VMHelperProtocolTests: XCTestCase {
 
         let event = VMHelperEvent(kind: .traffic, bytesUp: 10, bytesDown: 2000, connections: 3)
         XCTAssertEqual(VMHelperEvent.parse(event.line()), event)
+        XCTAssertNil(VMHelperEvent.parse(event.line())?.trouble)
+        // A machine without a proxy whose connections are not being made says why, as a kind.
+        let troubled = VMHelperEvent(kind: .traffic, bytesUp: 0, bytesDown: 0, connections: 0,
+                                     trouble: VMNetworkTrouble.proxyUnreachable.rawValue, viaSystemProxy: false)
+        XCTAssertEqual(VMHelperEvent.parse(troubled.line()), troubled)
+        XCTAssertEqual(VMHelperEvent.parse(troubled.line())?.trouble.flatMap(VMNetworkTrouble.init(rawValue:)), .proxyUnreachable)
+        XCTAssertNil(VMNetworkTrouble(rawValue: "a kind of a later helper"))
+        XCTAssertGreaterThan(VMNetworkTrouble.failuresBeforeSaying, 1, "one dead address of a page is not a machine without internet")
         XCTAssertNil(VMHelperEvent.parse("2026-11-13 12:00:00.000 LumenVM[1:2] a line of the system's own"))
         XCTAssertNil(VMHelperEvent.parse(#"{"kind":"something-new"}"#), "an event of a later helper is not this version's")
     }
