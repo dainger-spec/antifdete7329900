@@ -26,6 +26,9 @@ final class ProxyListModel: ObservableObject {
     /// An entry's proxy changed — edited, or a check found its type — and the profiles that used it
     /// as it was (`previous`) are to follow (`ProfileRepository.follow`, done by `AppModel`).
     var onEntryChanged: ((ProxyListEntry, ProxySettings) -> Void)?
+    /// An entry's IP was changed (`changeIP`) and the provider took it: the profiles on it say so
+    /// in their journals (done by `AppModel`).
+    var onIPChanged: ((ProxyListEntry, IPChangeReport) -> Void)?
 
     private let vault: UnlockedVault
     private let onError: (String) -> Void
@@ -214,6 +217,7 @@ final class ProxyListModel: ObservableObject {
         }
         let report = IPChangeReport(at: Date(), answer: answer, before: before, after: after)
         ipChanges[id] = report
+        if report.accepted, let changed = list.entry(id) { onIPChanged?(changed, report) }
         // Never the link: it holds the provider's key.
         let accepted = report.accepted, newIPSeen = after != nil
         log.notice("IP change of a proxy: accepted \(accepted, privacy: .public), new IP seen \(newIPSeen, privacy: .public)")

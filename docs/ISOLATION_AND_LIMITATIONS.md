@@ -658,6 +658,8 @@ storage and network (§1, §4).
 | Warm-up plan (addresses, search, times) | encrypted (`warmup.bin`, this Mac only, not synced) | decrypted when the sheet opens | — |
 | Warm-up schedule (every N hours, last run) | encrypted (`warmup-schedule.bin`, this Mac only, not synced, not in a profile export) | decrypted at unlock (the timer needs it) | — |
 | Last warm-up (when, pages, cookies) | encrypted (`warmup-last.bin`, this Mac only, not synced, not in a profile export) | decrypted when the inspector shows the profile | — |
+| Restore points (copies of the profile's site data, cookies, history, open tabs) | the copied files as they were, still encrypted (`restore-points/<id>/`, with `point.bin`; this Mac only, not synced, not in a profile export) | listed when the sheet opens | — |
+| The profile's history of events (`journal.bin`) | encrypted (this Mac only, not synced, not in a profile export) | decrypted when the inspector shows the profile | — |
 | Synced cookies (persistent cookies, with cookie sync on) | encrypted (`cookies.bin`; its local baseline `cookies-baseline.bin`) | encrypted | encrypted; written at launch and stop |
 | History | encrypted (`history.bin`); ephemeral profiles: never written | encrypted | in memory, saved encrypted (debounced, ≤ 3 s) |
 | Bookmarks | encrypted (`bookmarks.bin`) | encrypted | in memory, saved encrypted on every change |
@@ -1547,6 +1549,32 @@ time, and the queue runs at most three profiles at once; the plan (`warmup.bin`)
 schedule only runs while the app is open and unlocked: it is a timer in the app, not a system
 job. The ready-made lists (general, by interest, and 43 countries) are part of the app; nothing is
 fetched to build one.
+
+## 8c′. Restore points and a profile's history
+
+**⋯ → Restore Points and History…** (and **Restore Points** in the inspector) keeps a stopped
+profile as it is — its website data (`webdata.pbsa`), Safari's own state (`safarihome.pbsa`), its
+history, its synced cookies and their baseline, its open tabs — to put back later: before a
+sign-up, a warm-up or a cookie import, and back again if it went wrong. Not its settings,
+passwords, codes or bookmarks: a restore never takes away what the person set up. The files are
+copied as they are on disk, still encrypted under the profile's key (on APFS a copy is a clone), into
+`restore-points/<id>/` in the profile's folder, with a description sealed under the profile's key
+(`point.bin`). At most 20 per profile. A restore keeps the state it replaces as a point first
+("Before a restore"), so it can be undone, then puts each file back atomically; a file the point
+did not have (say no open tabs then) is removed — its copy is in the point just made.
+
+Points are made and restored only while the profile is stopped and its data sealed: a profile
+whose last session did not end properly (data still unsealed on disk) is to be launched and
+stopped once first, and the sheet says so. A profile whose cookies sync: the next sync can bring
+back cookies another Mac has — the point is this Mac's, the server's copy is not rolled back.
+
+**History** (`journal.bin`): what happened to the profile, newest first — launched, warmed up (pages),
+cookies imported (how many), its proxy changed (the proxy's name), a new IP (the IP), a point made,
+restored. Nothing of a page — no address, no title. At most 300 events. The inspector shows the
+latest four; the sheet, the rest.
+
+Both stay on this Mac: not synced, not in a profile export; the profile's deletion takes them with
+its folder.
 
 ## 8d. Paste as Typed
 

@@ -116,6 +116,7 @@ struct ProfileListView: View {
     @State private var passwordsFor: ProfileSummary?
     @State private var importingCookiesFor: ProfileSummary?
     @State private var warmingUp: ProfileSummary?
+    @State private var restoringFor: ProfileSummary?
     @State private var whatSitesSeeFor: ProfileSummary?
     @State private var warmingUpSeveral = false
     /// The profiles the warm-up queue opens with ticked (the selection's bar).
@@ -154,6 +155,8 @@ struct ProfileListView: View {
             .sheet(item: $passwordsFor) { profile in PasswordListView(profile: profile) }
             .sheet(item: $importingCookiesFor) { profile in CookieImportView(profile: profile) }
             .sheet(item: $warmingUp) { profile in WarmUpView(profile: profile) }
+            // What it changes reaches the inspector through the journal (`AppModel.recordInJournal`).
+            .sheet(item: $restoringFor) { profile in RestorePointsView(profile: profile) }
             .sheet(item: $whatSitesSeeFor) { profile in
                 WhatSitesSeeView(name: profile.name, snapshot: WhatSitesSee(profileID: profile.id, manager: { model.manager },
                                                                             launch: { await model.launch($0) }),
@@ -545,6 +548,7 @@ struct ProfileListView: View {
             importCookies: { id in importingCookiesFor = summary(id) },
             exportCookies: { id in exportingCookies = summary(id) },
             warmUp: { id in warmingUp = summary(id) },
+            restorePoints: { id in restoringFor = summary(id) },
             whatSitesSee: { id in whatSitesSeeFor = summary(id) },
             exportProfile: { id in exporting = summary(id) },
             importProfile: { importingProfile = true },
@@ -772,6 +776,8 @@ struct ProfileActions {
     var importCookies: (UUID) -> Void = { _ in }
     var exportCookies: (UUID) -> Void = { _ in }
     var warmUp: (UUID) -> Void = { _ in }
+    /// The profile's restore points and journal (`RestorePointsView`).
+    var restorePoints: (UUID) -> Void = { _ in }
     /// What a page measures in the profile next to Safari (`WhatSitesSeeView`).
     var whatSitesSee: (UUID) -> Void = { _ in }
     var exportProfile: (UUID) -> Void = { _ in }
@@ -2022,6 +2028,7 @@ private struct ProfileMenuItems: View {
         Button(L("profiles.row.importCookies")) { actions.importCookies(row.id) }
         Button(L("profiles.row.exportCookies")) { actions.exportCookies(row.id) }
         Button(L("profiles.row.warmUp")) { actions.warmUp(row.id) }
+        Button(L("profiles.row.restorePoints")) { actions.restorePoints(row.id) }
         // Absent while there is no address (the API is off, or not in the plan): the inspector's
         // Selenium row says why.
         if let copyAddress = actions.copyWebDriverAddress, row.exit != .unreadable {

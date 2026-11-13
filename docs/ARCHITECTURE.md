@@ -103,6 +103,8 @@ profile key (random 256-bit per profile, stored only wrapped)
    ├─ HKDF "warm-up"           → warmup.bin                    (AAD "warm-up:v1:<uuid>")
    ├─ HKDF "warm-up-schedule"  → warmup-schedule.bin           (AAD "warm-up-schedule:v1:<uuid>")
    ├─ HKDF "warm-up-last"      → warmup-last.bin               (AAD "warm-up-last:v1:<uuid>")
+   ├─ HKDF "journal"           → journal.bin                   (AAD "journal:v1:<uuid>")
+   ├─ HKDF "restore-point"     → restore-points/<p>/point.bin  (AAD "restore-point:v1:<uuid>:<p>")
    └─ HKDF "webdata-archive", salt = random per archive → webdata.pbsa chunk key
 ```
 
@@ -175,6 +177,10 @@ Application Support/PrivacyBrowser/      (0700)
     warmup.bin                    AES-GCM(warm-up key, WarmUpPlan JSON)               [this Mac only: the last warm-up plan]
     warmup-schedule.bin           AES-GCM(warm-up-schedule key, WarmUpSchedule JSON)  [this Mac only, not exported: every N hours, last run]
     warmup-last.bin               AES-GCM(warm-up-last key, WarmUpRecord JSON)        [this Mac only, not exported: how the last run went]
+    journal.bin                   AES-GCM(journal key, ProfileJournal JSON)           [this Mac only, not exported: what happened to the profile]
+    restore-points/<p>/           copies of webdata.pbsa, safarihome.pbsa, history.bin, cookies.bin, cookies-baseline.bin,
+                                  tabs.bin as they were (still encrypted), and point.bin AES-GCM(restore-point key,
+                                  RestorePoint JSON)                                   [this Mac only, not exported]
     tabs.bin                      AES-GCM(open-tabs key, OpenTabs JSON)               [this Mac only, not synced or exported: http(s) tabs
                                                                                        left open, with Settings → Startup → restore tabs]
     <file>.unreadable             a file that could not be read (damaged, cut short, another key's), moved aside instead of being

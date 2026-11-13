@@ -90,6 +90,14 @@ final class SafariHomeVault {
         return true
     }
 
+    /// Safari's home of the profile is on disk unsealed (a run that did not get to seal): the next
+    /// launch uses it rather than the archive (`prepareForLaunch`). What a seal's deletion left
+    /// (`sealedMarkerURL`) is already in the archive, and does not count.
+    func holdsUnsealedHome(profileID: UUID) -> Bool {
+        guard !FileManager.default.fileExists(atPath: sealedMarkerURL(for: profileID).path) else { return false }
+        return Self.holdsAnyFile(homeDirectory(for: profileID))
+    }
+
     private func archiveURL(for profileID: UUID) -> URL {
         repository.safariHomeArchiveURL(for: profileID)
     }

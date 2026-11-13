@@ -460,10 +460,12 @@ final class AppModel: ObservableObject {
             await self?.startWarmUp(plan, for: id) ?? false
         }
         warmUps.forwardChanges(to: self)
-        // The inspector of a profile it has shown tells its last warm-up: read again once one ends.
+        // The profile's journal says it was warmed, and the inspector of a profile it has shown
+        // reads its last warm-up again.
         warmUps.onRecorded = { [weak self] id in
-            guard let self, self.inspectorCounts[id] != nil else { return }
-            self.loadInspectorCounts(for: id)
+            guard let self else { return }
+            let pages = (try? repository.warmUpRecord(for: id))?.pages
+            self.recordInJournal(.warmedUp, detail: pages.map(String.init) ?? "", for: id)
         }
         self.warmUps = warmUps
         warmUps.begin()
@@ -508,6 +510,13 @@ final class AppModel: ObservableObject {
         // The proxies typed into profiles before there was a list are in it from now on (once).
         proxyList.takeIn(profileProxies: repository.profileProxies())
         proxyList.onEntryChanged = { [weak self] entry, previous in self?.followProxyEntry(entry, previous: previous) }
+        proxyList.onIPChanged = { [weak self] entry, report in
+            guard let self else { return }
+            let identity = ProxyList.identity(of: entry.proxy)
+            for profile in self.profiles where self.details[profile.id]?.proxyIdentity == identity {
+                self.recordInJournal(.ipChanged, detail: report.after ?? "", for: profile.id)
+            }
+        }
         self.proxyList = proxyList
         manager.onProxyProblem = { [weak self] id, proxy, diagnosis in
             self?.reportProxyProblem(of: id, proxy: proxy, diagnosis: diagnosis)
@@ -815,6 +824,10 @@ final class AppModel: ObservableObject {
         let stored = try repository.loadConfiguration(id)
         let saved = configuration.savingEdit(over: stored)
         try repository.saveConfiguration(saved, for: id)
+        if saved.proxy != stored.proxy {
+            let entry = saved.proxy.flatMap { proxyList?.list.entry(for: $0) }
+            recordInJournal(.proxyChanged, detail: entry?.displayName ?? saved.proxy?.displayAddress ?? L("journal.proxy.none"), for: id)
+        }
         // Cookie sync off: the synced cookies go, here and (at the next sync) on the other devices.
         if !saved.syncsCookies { try repository.clearSyncedCookies(for: id) }
         if try repository.summary(for: id).name != name {
@@ -872,8 +885,81 @@ final class AppModel: ObservableObject {
         // A launch reads the files sync replaces (settings, synced cookies): after the sync.
         while isSyncing { try? await Task.sleep(nanoseconds: 100_000_000) }
         await changeIPBeforeLaunch(id)
+        let wasRunning = isRunning(id)
         await perform { try await self.manager?.launch(id, openingWindow: openingWindow) }
+        if !wasRunning, isRunning(id) { recordInJournal(.launched, for: id) }
         refresh()
+    }
+
+    // MARK: The profile's journal and restore points
+
+    /// Adds an event to the profile's journal (`ProfileJournal`); the inspector of a profile it has
+    /// shown reads it again. A journal that cannot be written is only logged: it tells, it holds
+    /// nothing the profile needs.
+    func recordInJournal(_ kind: ProfileJournal.Kind, detail: String = "", for id: UUID) {
+        guard let repository else { return }
+        do {
+            try repository.record(kind, detail: detail, for: id)
+        } catch {
+            Logger(subsystem: "PrivacyBrowser", category: "Journal").error("Could not add to the journal of \(id.uuidString, privacy: .public): \(error.logKind, privacy: .public)")
+        }
+        if inspectorCounts[id] != nil { loadInspectorCounts(for: id) }
+    }
+
+    func journal(for id: UUID) -> ProfileJournal {
+        (try? repository?.journal(for: id)) ?? ProfileJournal()
+    }
+
+    func restorePoints(for id: UUID) -> [RestorePoint] {
+        repository?.restorePoints(for: id) ?? []
+    }
+
+    /// Makes a restore point of a stopped profile. Nil when made, otherwise what to tell the person.
+    func createRestorePoint(_ id: UUID, name: String) async -> String? {
+        guard let manager else { return L("restorePoints.error.locked") }
+        do {
+            let point = try await manager.createRestorePoint(id, name: name)
+            recordInJournal(.restorePointMade, detail: point.name, for: id)
+            return nil
+        } catch {
+            return restorePointProblem(error)
+        }
+    }
+
+    /// Puts a stopped profile back as the point holds it. Nil when done, otherwise what to tell the person.
+    func restore(_ id: UUID, to point: RestorePoint) async -> String? {
+        guard let manager else { return L("restorePoints.error.locked") }
+        do {
+            try await manager.restore(id, to: point.id)
+            recordInJournal(.restored, detail: point.name.isEmpty ? point.createdAt.shown(date: .abbreviated, time: .shortened) : point.name, for: id)
+            refresh()
+            return nil
+        } catch {
+            return restorePointProblem(error)
+        }
+    }
+
+    /// Removes a point, as its confirmation asks. Nil when done.
+    func removeRestorePoint(_ point: RestorePoint, of id: UUID) -> String? {
+        guard let repository else { return L("restorePoints.error.locked") }
+        do {
+            try repository.removeRestorePoint(point.id, for: id)
+            if inspectorCounts[id] != nil { loadInspectorCounts(for: id) }
+            return nil
+        } catch {
+            return restorePointProblem(error)
+        }
+    }
+
+    private func restorePointProblem(_ error: Error) -> String {
+        switch error {
+        case ProfileManager.RestorePointRefusal.inUse: return L("restorePoints.error.inUse")
+        case ProfileManager.RestorePointRefusal.unsealed: return L("restorePoints.error.unsealed")
+        case RestorePointProblem.full(let count): return String(format: L("restorePoints.error.full"), count)
+        case RestorePointProblem.notFound: return L("restorePoints.error.notFound")
+        case RestorePointProblem.damaged: return L("restorePoints.error.damaged")
+        default: return errorText(error)
+        }
     }
 
     /// Profiles whose proxy is getting a new IP before they start (the row says so).
@@ -924,7 +1010,12 @@ final class AppModel: ObservableObject {
     /// Imports cookies into a profile: now if it runs, else at its next launch.
     func importCookies(_ cookies: [ImportedCookie], into id: UUID) async throws -> ProfileManager.CookieImportOutcome {
         guard let manager else { throw CoreError.vaultNotFound }
-        return try await manager.importCookies(cookies, into: id)
+        let outcome = try await manager.importCookies(cookies, into: id)
+        switch outcome {
+        case .applied(let stored, _): recordInJournal(.cookiesImported, detail: String(stored), for: id)
+        case .queued: recordInJournal(.cookiesImported, detail: String(cookies.count), for: id)
+        }
+        return outcome
     }
 
     /// Every cookie of a profile, for an export (`ProfileManager.exportCookies`).

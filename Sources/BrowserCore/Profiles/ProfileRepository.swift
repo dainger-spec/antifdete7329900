@@ -85,6 +85,10 @@ struct ProfileIndex: Codable, Equatable {
 ///                                  N hours" and when it last ran (this device only, not exported)
 /// profiles/<uuid>/warmup-last.bin AEAD(warmUpRecordKey, WarmUpRecord JSON): how the last warm-up
 ///                                  went (this device only, not exported)
+/// profiles/<uuid>/journal.bin      AEAD(journalKey, ProfileJournal JSON): what happened to the
+///                                  profile (this device only, not exported)
+/// profiles/<uuid>/restore-points/<p>/ copies of the profile's browsing state as it was, still
+///                                  encrypted, and point.bin (`RestorePoint`; this device only)
 /// profiles/<uuid>/key.bin          AEAD(indexKey, ProfileKeyCopy JSON): the profile's wrapped key, name
 ///                                  and creation date, as the index has them (`takeInProfilesFromKeyCopies`)
 /// ```
