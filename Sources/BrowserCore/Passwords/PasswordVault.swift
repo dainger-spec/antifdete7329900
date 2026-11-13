@@ -35,10 +35,15 @@ public struct PasswordEntry: Codable, Equatable, Identifiable, Sendable {
     /// password manager can say where a version kept after a conflict came from. Nil in a version
     /// made before it was written, or where no name was known.
     public var device: String?
+    /// What makes the login's one-time codes (two-step sign-in), when the person added it. A file
+    /// that holds one is format 3: a version from before codes would write the login back without
+    /// it (docs/UPDATES.md §4, R4). A login may be a code alone, with an empty password.
+    public var totp: OneTimeCode?
 
     public init(id: UUID = UUID(), origin: String, username: String, password: String,
                 note: String? = nil, updatedAt: Date = Date(), lastUsedAt: Date? = nil,
-                version: UUID? = nil, ancestors: [UUID]? = nil, conflictOf: UUID? = nil, device: String? = nil) {
+                version: UUID? = nil, ancestors: [UUID]? = nil, conflictOf: UUID? = nil, device: String? = nil,
+                totp: OneTimeCode? = nil) {
         self.id = id
         self.origin = origin
         self.username = username
@@ -50,14 +55,18 @@ public struct PasswordEntry: Codable, Equatable, Identifiable, Sendable {
         self.ancestors = ancestors
         self.conflictOf = conflictOf
         self.device = device
+        self.totp = totp
     }
 
     /// The version a merge goes by: `version`, or for a login saved before versions, one derived
     /// from what it holds — two devices holding the same such login agree on it.
     public var currentVersion: UUID {
         if let version { return version }
-        let text = [id.uuidString, origin, username, password, note ?? "",
-                    String(updatedAt.timeIntervalSinceReferenceDate)].joined(separator: "\u{1F}")
+        // A login without a code derives what it always did; versions were written long before
+        // codes, so one with a code and no version is only met in a file put together by hand.
+        let text = ([id.uuidString, origin, username, password, note ?? "",
+                     String(updatedAt.timeIntervalSinceReferenceDate)] + (totp.map { [$0.fingerprint] } ?? []))
+            .joined(separator: "\u{1F}")
         let d = Array(SHA256.hash(data: Data(text.utf8)))
         return UUID(uuid: (d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7], d[8], d[9], d[10], d[11], d[12], d[13], d[14], d[15]))
     }
@@ -86,12 +95,26 @@ public struct PasswordTombstone: Codable, Equatable, Sendable {
 /// The JSON of `passwords.bin`. Format 1 was the logins alone, as an array, with no record of what
 /// was deleted: sync could only push one device's file over another's. Format 2 keeps deletions
 /// (`deleted`) and each login's versions, and two copies are merged login by login (`merge`).
+/// Format 3 is format 2 with a one-time code's generator in a login (`PasswordEntry.totp`): written
+/// only once a login has one, so a profile without codes stays readable to the versions before
+/// them, and one with codes is refused by them whole instead of being written back without.
 struct PasswordDocument: Codable, Equatable {
     var format = 2
     var entries: [PasswordEntry] = []
     var deleted: [PasswordTombstone] = []
 
-    /// Format 1 (an array) or 2; a newer one is refused (docs/UPDATES.md §4).
+    /// The format this document is written as: the lowest that says everything it holds.
+    var writtenFormat: Int { entries.contains { $0.totp != nil } ? 3 : 2 }
+
+    /// Written with `writtenFormat`, whatever `format` it was read with.
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(writtenFormat, forKey: .format)
+        try container.encode(entries, forKey: .entries)
+        try container.encode(deleted, forKey: .deleted)
+    }
+
+    /// Format 1 (an array), 2 or 3; a newer one is refused (docs/UPDATES.md §4).
     static func decode(_ plaintext: Data) throws -> PasswordDocument {
         try DocumentFormat.check(plaintext, supported: PasswordVault.supportedFormat, what: "passwords.bin")
         let first = plaintext.first { !$0.isASCIIWhitespace }
@@ -192,7 +215,7 @@ struct PasswordDocument: Codable, Equatable {
                 if let index = document.entries.firstIndex(where: { $0.id == login.id }), let used = other.lastUsedAt {
                     document.entries[index].lastUsedAt = max(document.entries[index].lastUsedAt ?? used, used)
                 }
-                guard other.password != login.password || (other.note ?? "") != (login.note ?? "") else { continue }
+                guard other.password != login.password || (other.note ?? "") != (login.note ?? "") || other.totp != login.totp else { continue }
                 let beside = kept(other, beside: login.id)
                 if !document.entries.contains(where: { $0.id == beside.id }) { document.entries.append(beside) }
             }
@@ -383,8 +406,9 @@ public final class PasswordVault: @unchecked Sendable {
     private var aad: String { Self.aad(profileID: profileID) }
 
     /// The newest format of `passwords.bin` this version reads and writes (docs/UPDATES.md §4):
-    /// 2 keeps deletions and each login's versions, which sync merges by.
-    static let supportedFormat = 2
+    /// 2 keeps deletions and each login's versions, which sync merges by; 3 is 2 with a one-time
+    /// code's generator in a login, written only once there is one (`PasswordDocument.writtenFormat`).
+    static let supportedFormat = 3
 
     static func aad(profileID: UUID) -> String { "passwords:v1:\(profileID.uuidString)" }
 
@@ -421,13 +445,20 @@ public final class PasswordVault: @unchecked Sendable {
     }
 
     /// Logins a page of `origin` is offered, best first (`PasswordMatching.candidates`).
+    /// A login that is a one-time code alone (no password) is not among them: it has nothing for
+    /// a password's field.
     public func candidates(for origin: WebOrigin) -> [PasswordEntry] {
-        PasswordMatching.candidates(lock.withLock { liveEntries }, for: origin)
+        PasswordMatching.candidates(lock.withLock { liveEntries }, for: origin).filter { !$0.password.isEmpty }
     }
 
     /// What a sign-in on `origin` means for the saved logins (`PasswordMatching.decision`).
     public func saveDecision(username: String, password: String, at origin: WebOrigin) -> PasswordMatching.SaveDecision {
         PasswordMatching.decision(username: username, password: password, at: origin, entries: lock.withLock { liveEntries })
+    }
+
+    /// Logins with a one-time code a page of `origin` is offered for a code's field, best first.
+    public func codeCandidates(for origin: WebOrigin) -> [PasswordEntry] {
+        PasswordMatching.candidates(lock.withLock { liveEntries }, for: origin).filter { $0.totp != nil }
     }
 
     /// The versions kept after a conflict (another device changed the same login at the same time).
@@ -468,16 +499,21 @@ public final class PasswordVault: @unchecked Sendable {
 
     /// Saves `entry`: as a change of the login with its id, else of the login saved for the same
     /// website and user name, else as a new login. (Never of a version kept after a conflict.)
+    /// A save that carries no one-time code keeps the login's: a page that saves a changed
+    /// password knows nothing of it. Taking a code away is an edit (`update`).
     public func upsert(_ entry: PasswordEntry) throws {
         try change { document in
             var updated = document
             if let index = document.entries.firstIndex(where: { $0.id == entry.id }) {
-                updated.entries[index] = Self.edited(document.entries[index], to: entry)
+                var replacing = entry
+                replacing.totp = entry.totp ?? document.entries[index].totp
+                updated.entries[index] = Self.edited(document.entries[index], to: replacing)
             } else if let index = document.entries.firstIndex(where: {
                 !$0.isConflictVersion && $0.origin == entry.origin && $0.username == entry.username
             }) {
                 var replacing = entry
                 replacing.id = document.entries[index].id
+                replacing.totp = entry.totp ?? document.entries[index].totp
                 updated.entries[index] = Self.edited(document.entries[index], to: replacing)
             } else {
                 var added = entry
@@ -523,6 +559,9 @@ public final class PasswordVault: @unchecked Sendable {
                 var replacing = document.entries[original]
                 replacing.password = chosen.password
                 replacing.note = chosen.note
+                // The codes' generator goes with the version chosen; one that has none (made
+                // before the code was added) does not take the login's away.
+                replacing.totp = chosen.totp ?? replacing.totp
                 updated.entries[original] = Self.edited(document.entries[original], to: replacing,
                                                         alsoFrom: [chosen.currentVersion] + (chosen.ancestors ?? []))
                 let gone = updated.entries.remove(at: index)

@@ -227,6 +227,25 @@ public enum AutomationGate {
         return nil
     }
 
+    /// The same for a WebDriver address, whose token is in its path (a WebDriver client sends no
+    /// header of ours): a web page's request and another Host are refused; the token is the
+    /// caller's to compare (`tokenMatches`) once the path is read.
+    public static func webDriverRefusal(of request: AutomationHTTP.Request, port: Int) -> WebDriverError? {
+        if request.headers["origin"] != nil || request.headers.keys.contains(where: { $0.hasPrefix("sec-fetch-") }) {
+            return WebDriverError("unknown error", 403, "Requests from web pages are refused.")
+        }
+        let host = request.headers["host"]?.lowercased() ?? ""
+        guard ["127.0.0.1:\(port)", "localhost:\(port)", "[::1]:\(port)"].contains(host) else {
+            return WebDriverError("unknown error", 403, "The Host header must name this listener (127.0.0.1:\(port)).")
+        }
+        return nil
+    }
+
+    /// Whether `given` is the API's token, compared in a time that does not depend on where they differ.
+    public static func tokenMatches(_ given: String, _ token: String) -> Bool {
+        !token.isEmpty && sameSecret(given, token)
+    }
+
     /// Equal, in a time that does not depend on where they differ.
     static func sameSecret(_ a: String, _ b: String) -> Bool {
         let x = Array(a.utf8), y = Array(b.utf8)

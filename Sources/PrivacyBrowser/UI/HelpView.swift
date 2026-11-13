@@ -6,7 +6,8 @@ import SwiftUI
 /// the app, in the interface's language. The owner, 10 November: the scenario editor was behind a
 /// menu item, and what a scenario may say was written in the repository's docs only.
 enum HelpTopic: String, CaseIterable, Identifiable {
-    case start, palette, scenarios, commands, api, camera, keys
+    // The order of the topic list and of the Help menu: the app, what a profile has, automation, the keys.
+    case start, palette, check, codes, camera, scenarios, commands, api, webdriver, keys
 
     var id: String { rawValue }
     var title: String { L("help.topic.\(rawValue)") }
@@ -18,7 +19,10 @@ enum HelpTopic: String, CaseIterable, Identifiable {
         case .scenarios: return "play.rectangle"
         case .commands: return "chevron.left.forwardslash.chevron.right"
         case .api: return "terminal"
+        case .webdriver: return "link"
         case .camera: return "camera"
+        case .codes: return "lock.rotation"
+        case .check: return "checkmark.shield"
         case .keys: return "keyboard"
         }
     }
@@ -48,7 +52,8 @@ enum HelpContent {
                 .heading("start.first"),
                 .steps(["start.step.new", "start.step.launch", "start.step.proxies", "start.step.lock"]),
                 .heading("start.where"),
-                .points(["start.where.palette", "start.where.scenarios", "start.where.api", "start.where.more", "start.where.settings"]),
+                .points(["start.where.palette", "start.where.check", "start.where.codes", "start.where.scenarios", "start.where.api",
+                         "start.where.more", "start.where.settings"]),
             ]
         case .palette:
             return [
@@ -66,6 +71,12 @@ enum HelpContent {
                 .steps(["scenarios.step.open", "scenarios.step.new", "scenarios.step.write", "scenarios.step.run", "scenarios.step.log"]),
                 .heading("scenarios.example"),
                 .code("scenarios.example.code"),
+                .heading("scenarios.record"),
+                .paragraph("scenarios.record.text"),
+                .points(["scenarios.record.selectors", "scenarios.record.password", "scenarios.record.limits"]),
+                .heading("scenarios.schedule"),
+                .paragraph("scenarios.schedule.text"),
+                .note("scenarios.schedule.running"),
                 .heading("scenarios.know"),
                 .points(["scenarios.know.window", "scenarios.know.await", "scenarios.know.errors", "scenarios.know.typed",
                          "scenarios.know.kept"]),
@@ -133,8 +144,23 @@ enum HelpContent {
                 ]),
                 .heading("api.scenario"),
                 .code("api.scenario.code"),
+                .heading("api.webdriver"),
+                .paragraph("api.webdriver.see"),
                 .heading("api.errors"),
                 .paragraph("api.errors.text"),
+                .note("api.token"),
+            ]
+        case .webdriver:
+            return [
+                .paragraph("api.webdriver.text"),
+                .note("webdriver.plan"),
+                .heading("webdriver.connect"),
+                .steps(["api.webdriver.step.on", "api.webdriver.step.copy", "api.webdriver.step.script"]),
+                .heading("webdriver.example"),
+                .code("api.webdriver.code"),
+                .heading("webdriver.know"),
+                .points(["api.webdriver.session", "api.webdriver.human", "api.webdriver.scripts", "api.webdriver.limits",
+                         "api.webdriver.playwright"]),
                 .note("api.token"),
             ]
         case .camera:
@@ -151,6 +177,29 @@ enum HelpContent {
                 .note("camera.secure"),
                 .points(["camera.know.system", "camera.know.systemInstall", "camera.know.safari", "camera.know.detect",
                          "camera.know.permission", "camera.know.size"]),
+            ]
+        case .check:
+            return [
+                .paragraph("check.intro"),
+                .heading("check.run"),
+                .steps(["check.step.open", "check.step.press", "check.step.read", "check.step.fix"]),
+                .heading("check.what"),
+                .points(["check.what.proxy", "check.what.timeZone", "check.what.language", "check.what.geolocation",
+                         "check.what.webRTC", "check.what.dns", "check.what.engine", "check.what.window"]),
+                .heading("check.know"),
+                .note("check.local"),
+                .points(["check.know.restart", "check.know.unknown", "check.know.dns", "check.know.signals"]),
+            ]
+        case .codes:
+            return [
+                .paragraph("codes.intro"),
+                .heading("codes.add"),
+                .steps(["codes.step.site", "codes.step.open", "codes.step.secret", "codes.step.save"]),
+                .heading("codes.use"),
+                .points(["codes.use.copy", "codes.use.fill", "codes.use.only"]),
+                .heading("codes.know"),
+                .note("codes.backup"),
+                .points(["codes.know.screen", "codes.know.kinds", "codes.know.clock", "codes.know.older"]),
             ]
         case .keys:
             return [

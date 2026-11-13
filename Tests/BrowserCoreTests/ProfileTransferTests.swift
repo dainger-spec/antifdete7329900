@@ -106,6 +106,39 @@ final class ProfileTransferTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: home.appendingPathComponent("Library/Safari/History.db"), encoding: .utf8), "safari history")
     }
 
+    /// APP-08 of the security audit (12 November 2026): a file's settings that send a profile's
+    /// loads around its proxy, or let its pages reach this Mac and its network, are not taken — the
+    /// import window says which (`LeftOut`) — while the proxy itself and everything else are.
+    func testAnImportLeavesOutWhatWouldGoAroundTheProxy() throws {
+        let configuration = ProfileConfiguration(
+            startURL: URL(string: "https://example.org/"),
+            proxy: ProxySettings(kind: .socks5, host: "203.0.113.5", port: 1080, username: "u", password: "p",
+                                 excludedDomains: ["t.attacker.example", " ", "cdn.attacker.example"]),
+            safeBrowsingEnabled: true, localRequests: .allowed)
+        let id = try source.create(name: "Bought", configuration: configuration).id
+        let file = root.appendingPathComponent("bought.\(ProfileTransfer.fileExtension)")
+        try ProfileTransfer.export(id, from: source, to: file, password: "pw", kdf: fastKDF)
+
+        let manifest = try ProfileTransfer.manifest(of: file, password: "pw")
+        let leftOut = ProfileTransfer.LeftOut(of: manifest.configuration)
+        XCTAssertEqual(leftOut.directDomains, ["t.attacker.example", "cdn.attacker.example"])
+        XCTAssertTrue(leftOut.safeBrowsing && leftOut.localRequests && !leftOut.isEmpty)
+
+        let imported = try ProfileTransfer.importProfile(from: file, password: "pw", into: target)
+        let taken = try target.loadConfiguration(imported.id, key: target.profileKey(for: imported.id))
+        XCTAssertEqual(taken.proxy?.excludedDomains, [], "nothing of the file goes around the proxy")
+        XCTAssertFalse(taken.safeBrowsingEnabled, "Safe Browsing's lookups go around the proxy")
+        XCTAssertEqual(taken.localRequests, .protected)
+        XCTAssertTrue(ProfileTransfer.LeftOut(of: taken).isEmpty)
+        // The rest is the file's.
+        XCTAssertEqual(taken.proxy?.host, "203.0.113.5")
+        XCTAssertEqual(taken.proxy?.password, "p")
+        XCTAssertEqual(taken.startURL, URL(string: "https://example.org/"))
+
+        // A file with none of them: nothing to say.
+        XCTAssertTrue(ProfileTransfer.LeftOut(of: ProfileConfiguration()).isEmpty)
+    }
+
     func testTheSameFileImportsTwiceIntoTheVaultItCameFrom() throws {
         let (id, _) = try makeProfile()
         let file = root.appendingPathComponent("again.\(ProfileTransfer.fileExtension)")

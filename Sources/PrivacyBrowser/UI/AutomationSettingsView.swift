@@ -44,8 +44,8 @@ struct AutomationSettingsView: View {
         }
     }
 
-    /// The design's page: the switch with what it allows, then its port, its token, its state and a
-    /// command to try it with. The same actions as ever.
+    /// The design's page: the switch with what it allows, then its port, its token, its state, where
+    /// Selenium's address is, and a command to try it with. The same actions as ever.
     private var rows: some View {
         VStack(alignment: .leading, spacing: 0) {
             if AutomationServer.isAvailable {
@@ -94,8 +94,18 @@ struct AutomationSettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: 320, alignment: .trailing)
                 }
+                // Selenium drives a profile through this API (docs/AUTOMATION.md, "WebDriver"): where a
+                // profile's address for it is found, and Help's page on connecting it.
+                SettingRow(L("automation.webDriver"), detail: L("automation.webDriver.detail"), effect: nil) {
+                    Button(L("automation.webDriver.how")) {
+                        model.helpTopic = .webdriver
+                        openWindow(id: "help")
+                    }
+                    .buttonStyle(.lumenGhost)
+                }
                 SettingsCaption(L("automation.example"))
-                Text(verbatim: exampleCommand) // l10n: not text
+                // The command shows the token as the token's row does: as dots until Show is pressed.
+                Text(verbatim: exampleCommand(token: revealed ? (settings?.token ?? "") : String(repeating: "•", count: 8))) // l10n: not text
                     .font(.system(size: 11.5, design: .monospaced))
                     .foregroundStyle(Theme.textSecondary)
                     .textSelection(.enabled)
@@ -114,8 +124,10 @@ struct AutomationSettingsView: View {
                         openWindow(id: "help")
                     }
                     .buttonStyle(.lumenGhost)
-                    Button(L("automation.example.copy")) { Self.copy(exampleCommand, concealed: true) }
-                        .buttonStyle(.lumenSecondary)
+                    // The whole command, with the token, whatever the line above shows.
+                    LumenCopyButton(text: exampleCommand(token: settings?.token ?? ""), title: L("automation.example.copy"))
+                        // With the vault locked there is no token: nothing to copy, and nothing to say "Copied" of.
+                        .disabled(settings == nil)
                 }
                 .padding(.top, 10)
             } else {
@@ -146,8 +158,8 @@ struct AutomationSettingsView: View {
             HStack(spacing: 6) {
                 Button(L(revealed ? "automation.token.hide" : "automation.token.show")) { revealed.toggle() }
                     .buttonStyle(.lumenGhost)
-                Button(L("automation.token.copy")) { Self.copy(settings?.token ?? "", concealed: true) }
-                    .buttonStyle(.lumenSecondary)
+                LumenCopyButton(text: settings?.token ?? "", title: L("automation.token.copy"))
+                    .disabled(settings == nil)
                 Button(L("automation.token.renew")) { model.renewAutomationToken() }
                     .buttonStyle(.lumenSecondary)
                     .help(L("automation.token.renew.note"))
@@ -165,8 +177,10 @@ struct AutomationSettingsView: View {
         return settings?.port ?? AutomationSettings.defaultPort
     }
 
-    private var exampleCommand: String {
-        "curl -s -H 'Authorization: Bearer \(settings?.token ?? "")' http://127.0.0.1:\(listeningPort)/v1/profiles"
+    /// A command to try the API with, carrying `token`: the real one to copy, dots to show while
+    /// the token is hidden.
+    private func exampleCommand(token: String) -> String {
+        "curl -s -H 'Authorization: Bearer \(token)' http://127.0.0.1:\(listeningPort)/v1/profiles"
     }
 
     private var stateText: String {
@@ -198,13 +212,5 @@ struct AutomationSettingsView: View {
         let chosen = portValue ?? settings?.port ?? AutomationSettings.defaultPort
         guard enabled != settings?.isEnabled || chosen != settings?.port else { return }
         model.setAutomation(enabled: enabled, port: chosen)
-    }
-
-    /// The token, and the command that holds it, are marked concealed: clipboard managers skip them.
-    private static func copy(_ value: String, concealed: Bool) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(value, forType: .string)
-        if concealed { pasteboard.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")) }
     }
 }

@@ -210,12 +210,15 @@ final class TabPasswordAutoFill {
         let token = body["token"] as? String ?? ""
         switch type {
         case "focus":
-            let candidates = settings.autoFill ? vault.candidates(for: origin) : []
+            // A one-time code's field is offered the site's logins that have a code; any other,
+            // the ones that have a password.
+            let codes = body["role"] as? String == "code"
+            let candidates = !settings.autoFill ? [] : codes ? vault.codeCandidates(for: origin) : vault.candidates(for: origin)
             reply(["count": candidates.count])
             if Self.testAnswer != nil { Self.testFocusLog.append("\(origin.host):\(candidates.count)") }
             if let field = body["field"] as? Int, !candidates.isEmpty {
                 showSuggestions(candidates, for: FieldReference(frame: frame, token: token, field: field, origin: origin),
-                                rect: body["rect"] as? [String: Any], pointer: body["pointer"] as? [String: Any])
+                                rect: body["rect"] as? [String: Any], pointer: body["pointer"] as? [String: Any], codes: codes)
             }
         case "blur":
             reply(nil)
@@ -251,7 +254,8 @@ final class TabPasswordAutoFill {
         let origin: WebOrigin
     }
 
-    private func showSuggestions(_ entries: [PasswordEntry], for field: FieldReference, rect: [String: Any]?, pointer: [String: Any]?) {
+    private func showSuggestions(_ entries: [PasswordEntry], for field: FieldReference, rect: [String: Any]?, pointer: [String: Any]?,
+                                 codes: Bool = false) {
         guard let host, host.isSelected, let window = host.webView.window,
               let anchor = Self.anchor(rect: rect, pointer: pointer, in: host.webView) else { return }
         let webView = host.webView
@@ -259,13 +263,31 @@ final class TabPasswordAutoFill {
         let header = field.frame?.isMainFrame == false ? String(format: L("pw.panel.frameHeader"), field.origin.host) : nil
         panel = AutoFillPanel.show(entries: entries, pageHost: field.origin.host, header: header, field: field,
                                    anchor: anchor, of: webView, in: window,
-                                   showsManager: settings.showManager != nil) { [weak self] choice in
+                                   showsManager: settings.showManager != nil, codes: codes) { [weak self] choice in
             guard let self else { return }
             self.panel = nil
             switch choice {
-            case let .entry(entry): self.fill(entry, into: field)
+            case let .entry(entry): if codes { self.fillCode(of: entry, into: field) } else { self.fill(entry, into: field) }
             case .manager: self.settings.showManager?()
             }
+        }
+    }
+
+    /// Fills the code that stands now for `entry` into the code's field, after checking again that
+    /// the login belongs on the frame's site. The code is made here, at the moment it is chosen:
+    /// the list never shows one that could have run out meanwhile.
+    func fillCode(of entry: PasswordEntry, into field: FieldReference) {
+        guard let host, let saved = WebOrigin(entry.origin), PasswordMatching.offers(saved, on: field.origin),
+              let generator = entry.totp else {
+            log.error("A one-time code was not filled: its login is not one for this site")
+            return
+        }
+        let arguments: [String: Any] = ["code": generator.code(), "origin": field.origin.serialized,
+                                        "token": field.token ?? "", "field": field.field ?? 0]
+        let id = entry.id
+        PasswordAutoFill.call("return globalThis.__pbPasswords ? globalThis.__pbPasswords.fillCode(token, field, code, origin) : 'missing';",
+                              arguments, in: field.frame, of: host.webView) { [weak self] result in
+            if result as? String == "filled" { try? self?.vault.markUsed(id: id) }
         }
     }
 

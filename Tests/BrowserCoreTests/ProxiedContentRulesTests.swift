@@ -26,6 +26,23 @@ final class ProxiedContentRulesTests: XCTestCase {
         }
     }
 
+    /// The security audit of 12 November 2026, APP-14: WebKit matches the patterns against the whole
+    /// URL, and an image, a frame, an XHR or a WebSocket loads an address with a user name before
+    /// its host — which no pattern took, so a page could map this Mac's open ports from any profile.
+    func testAUserNameBeforeTheHostDoesNotTakeThisMacPastTheList() {
+        for url in ["http://x@127.0.0.1:8080/", "ws://x@localhost:50777/", "http://x@[::1]/", "http://user:pass@127.0.0.1/",
+                    "wss://a%40b:c@127.1.2.3:9/", "http://x@0.0.0.0:631/", "http://x@app.localhost:3000/", "HTTP://X@LOCALHOST/",
+                    "http://x@[::ffff:7f00:1]/", "http://x@[::]:80/", "http://[::ffff:0:0]:80/", "http://x@[::ffff:0:0]/"] {
+            XCTAssertTrue(ProxiedContentRules.blocks(url, topURL: remotePage), url)
+        }
+        // A user name that only looks like this Mac, before another host, is that host's.
+        for url in ["http://127.0.0.1@example.com/", "http://localhost@example.com/", "http://x@example.com/127.0.0.1/", "http://example.com/?u=http://x@localhost/", "http://x@192.0.2.10:8080/",
+                    "http://[::ffff:0:1]/"] {
+            XCTAssertFalse(ProxiedContentRules.blocks(url, topURL: remotePage), url)
+        }
+        XCTAssertTrue(ProxiedContentRules.thisMacURLPatterns.allSatisfy { $0.hasPrefix(ProxiedContentRules.urlStart) })
+    }
+
     func testAPageTheUserOpenedOnThisMacKeepsItsOwnLoads() {
         let local = "http://127.0.0.1:18080/pb-leak/secure?run=run"
         XCTAssertFalse(ProxiedContentRules.blocks(local, resourceType: "document", topURL: local), "the page itself")

@@ -38,7 +38,7 @@ final class AutoFillPanel: NSPanel {
     /// Shows the list under `anchor` (a rectangle in `view`'s coordinates), above it when there is
     /// no room below.
     static func show(entries: [PasswordEntry], pageHost: String, header: String?, field: TabPasswordAutoFill.FieldReference?,
-                     anchor: NSRect, of view: NSView, in window: NSWindow, showsManager: Bool,
+                     anchor: NSRect, of view: NSView, in window: NSWindow, showsManager: Bool, codes: Bool = false,
                      onChoice: @escaping (Choice) -> Void) -> AutoFillPanel {
         current?.dismiss()
         let panel = AutoFillPanel(field: field)
@@ -46,7 +46,7 @@ final class AutoFillPanel: NSPanel {
         panel.header = header
         panel.onChoice = onChoice
         panel.parentWindowRef = window
-        panel.build(pageHost: pageHost, header: header, showsManager: showsManager, minimumWidth: anchor.width)
+        panel.build(pageHost: pageHost, header: header, showsManager: showsManager, codes: codes, minimumWidth: anchor.width)
         let anchorInWindow = view.convert(anchor, to: nil)
         let anchorOnScreen = window.convertToScreen(anchorInWindow)
         var frame = panel.frame
@@ -84,7 +84,9 @@ final class AutoFillPanel: NSPanel {
     /// Row titles, top to bottom (self-test hook).
     var titles: [String] { rows.map(\.title) }
 
-    private func build(pageHost: String, header: String?, showsManager: Bool, minimumWidth: CGFloat) {
+    /// `codes`: the list is under a one-time code's field — each row is a login whose code would
+    /// be filled, not the code itself (it is made when the row is chosen).
+    private func build(pageHost: String, header: String?, showsManager: Bool, codes: Bool, minimumWidth: CGFloat) {
         let background = NSVisualEffectView()
         background.material = .menu
         background.state = .active
@@ -115,9 +117,14 @@ final class AutoFillPanel: NSPanel {
             stack.addArrangedSubview(holder)
         }
         for (index, entry) in entries.enumerated() {
-            let title = entry.username.isEmpty ? L("pw.panel.savedPassword") : entry.username
             let subtitle = entry.host == pageHost ? nil : entry.host
-            rows.append(AutoFillRow(title: title, subtitle: subtitle, symbol: "key.fill", index: index, panel: self))
+            if codes {
+                let title = String(format: L("pw.panel.code"), entry.username.isEmpty ? entry.host : entry.username)
+                rows.append(AutoFillRow(title: title, subtitle: subtitle, symbol: "lock.rotation", index: index, panel: self))
+            } else {
+                let title = entry.username.isEmpty ? L("pw.panel.savedPassword") : entry.username
+                rows.append(AutoFillRow(title: title, subtitle: subtitle, symbol: "key.fill", index: index, panel: self))
+            }
         }
         if showsManager {
             rows.append(AutoFillRow(title: L("pw.panel.passwords"), subtitle: nil, symbol: "ellipsis.circle", index: entries.count, panel: self))

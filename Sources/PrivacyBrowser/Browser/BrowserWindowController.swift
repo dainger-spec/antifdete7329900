@@ -309,8 +309,8 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         addressField.textColor = .white
         // As on the phone: the site's name in the pill, the whole address once it is tapped.
         addressField.onBeginEditing = { [weak self] in
-            guard let self, let url = self.selectedTab?.url else { return }
-            self.addressField.stringValue = url.absoluteString
+            guard let self, let url = self.selectedTab?.addressURL else { return }
+            self.addressField.stringValue = BrowserWindowController.addressText(url)
             self.addressField.currentEditor()?.selectAll(nil)
         }
         addressField.translatesAutoresizingMaskIntoConstraints = false
@@ -373,6 +373,17 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     }
 
     /// What the phone's pill shows of an address: the site's name, as Safari on an iPhone does.
+    /// An address as the address bar writes it: whole, but without a user name or password — an
+    /// address like https://bank.example@evil.example/ does not show bank.example first (APP-01).
+    static func addressText(_ url: URL) -> String {
+        guard url.user != nil || url.password != nil, var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return url.absoluteString
+        }
+        parts.user = nil
+        parts.password = nil
+        return parts.string ?? url.absoluteString
+    }
+
     static func siteName(_ url: URL?) -> String {
         guard let url, let host = url.host, !host.isEmpty else { return url?.absoluteString ?? "" }
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
@@ -684,13 +695,13 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         stoppedPage.isHidden = !(selectedTab?.pageStopped ?? false)
         tabStrip.update(items: tabs.map { tab in
             TabStripView.Item(title: tab.displayTitle,
-                              toolTip: [tab.webView.title, tab.url?.absoluteString].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n"),
+                              toolTip: [tab.webView.title, tab.addressURL.map(BrowserWindowController.addressText)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n"),
                               isLoading: tab.isLoading)
         }, selectedIndex: selectedIndex)
         guard let tab = selectedTab else { return }
         window?.title = String(format: L("window.browser.title"), profileName, tab.displayTitle)
         if addressField.currentEditor() == nil { // don't overwrite what the user is typing
-            addressField.stringValue = isPhoneLayout ? Self.siteName(tab.url) : tab.url?.absoluteString ?? ""
+            addressField.stringValue = isPhoneLayout ? Self.siteName(tab.addressURL) : tab.addressURL.map(Self.addressText) ?? ""
         }
         backButton.isEnabled = tab.webView.canGoBack
         mobileBack?.isEnabled = tab.webView.canGoBack
@@ -779,7 +790,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
     /// Escape in the address bar restores the current URL.
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         guard control === addressField, commandSelector == #selector(NSResponder.cancelOperation(_:)) else { return false }
-        addressField.stringValue = selectedTab?.url?.absoluteString ?? ""
+        addressField.stringValue = selectedTab?.addressURL.map(Self.addressText) ?? ""
         if let webView = selectedTab?.webView { window?.makeFirstResponder(webView) }
         return true
     }

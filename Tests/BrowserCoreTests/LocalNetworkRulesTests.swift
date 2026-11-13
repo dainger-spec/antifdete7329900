@@ -29,6 +29,21 @@ final class LocalNetworkRulesTests: XCTestCase {
         }
     }
 
+    /// APP-14 of the security audit: a user name before the host (`http://x@192.168.1.1/`) no
+    /// longer takes an address past the list.
+    func testAUserNameBeforeTheHostDoesNotTakeTheLocalNetworkPastTheList() {
+        for url in ["http://x@192.168.1.1/", "http://u:p@10.0.0.1:8080/", "ws://x@service.internal:9000/s", "http://x@printer.local/",
+                    "http://x@[fe80::1]/", "http://x@[::ffff:c0a8:101]/", "http://x@172.16.0.1/", "http://x@100.64.0.1/",
+                    "http://x@127.0.0.1/"] {
+            XCTAssertTrue(LocalNetworkRules.blocks(url, topURL: page), url)
+        }
+        for url in ["http://192.168.1.1@example.com/", "http://x@8.8.8.8/", "https://x@local.example.com/", "http://x@example.com/192.168.1.1/"] {
+            XCTAssertFalse(LocalNetworkRules.blocks(url, topURL: page), url)
+        }
+        XCTAssertFalse(LocalNetworkRules.blocks("http://192.168.1.1/api", topURL: "http://x@192.168.1.1/"), "a page on the network keeps its loads")
+        XCTAssertTrue(LocalNetworkRules.patterns.allSatisfy { $0.hasPrefix(ProxiedContentRules.urlStart) })
+    }
+
     func testAPageOnThisMacOrTheLocalNetworkKeepsItsOwnLoads() {
         XCTAssertFalse(LocalNetworkRules.blocks("http://192.168.1.1/api", topURL: "http://192.168.1.1/"))
         XCTAssertFalse(LocalNetworkRules.blocks("http://127.0.0.1:5173/src/main.js", topURL: "http://localhost:5173/"))

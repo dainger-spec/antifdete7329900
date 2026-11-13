@@ -35,7 +35,8 @@ Pages also report the request's `Accept-Language` header (`accept-language=...`)
 `?tz=`, `?country=` and `?delay=<seconds>` change the answer) for the proxy-location checks, and `/pb-served.json` lists the paths served so far (so the self-test
 can tell which requests reached the proxy, e.g. that a beacon did not).
 
-`/pb-login` is a sign-in form for the password AutoFill checks (`?signup=1`: a new password and
+`/pb-login` is a sign-in form for the password AutoFill checks (`?code=1`: a one-time code's
+field and six boxes of a digit each; `?signup=1`: a new password and
 its confirmation; `?spa=1`: no form, a button whose script removes the fields, as a sign-in by
 fetch does; `?autofocus=1`), and `/pb-frame?src=<url>` a page with that URL in an iframe.
 `/pb-app-banner` is a page with a Smart App Banner (`<meta name="apple-itunes-app">`): the start page of
@@ -327,6 +328,7 @@ def leak_page(run: str) -> bytes:
 <img src="http://img-RUN.leak.example.com/pb-leak/img.png?run=RUN" width="1" height="1">
 <iframe src="http://frame-RUN.leak.example.com/pb-leak/frame?run=RUN" width="200" height="40"></iframe>
 <iframe src="http://127.0.0.1:CANARY/pb-leak/lo4frame?run=RUN" width="20" height="20"></iframe>
+<img src="http://pb:x@127.0.0.1:CANARY/pb-leak/lo4userimg?run=RUN" width="1" height="1">
 <video src="http://media-RUN.leak.example.com/pb-leak/media.mp4?run=RUN" preload="auto" muted width="1" height="1"></video>
 <a id="anchor" href="http://anchor-RUN.leak.example.com/pb-leak/anchor?run=RUN">a link, which a browser may prefetch the name of</a>
 <img src="https://aia-RUN.leak.example.com/pb-leak/aia.png?run=RUN" width="1" height="1">
@@ -364,6 +366,19 @@ def leak_page(run: str) -> bytes:
   await attempt('loopbackName', noCors('http://localhost:CANARY/pb-leak/lohost?run=RUN'));
   await attempt('loopback6', noCors('http://[::1]:CANARY/pb-leak/lo6?run=RUN'));
   await attempt('loopbackAny', noCors('http://0.0.0.0:CANARY/pb-leak/lo0?run=RUN'));
+  // The same with a user name before the host (APP-14 of the security audit): fetch() refuses
+  // such an address itself, an image (above), a WebSocket and an XHR load it — only the rule list
+  // stops them, and the canary takes whatever it lets by.
+  await attempt('loopbackUserWS', () => new Promise((resolve) => {
+    const ws = new WebSocket('ws://pb@127.0.0.1:CANARY/pb-leak/lo4userws?run=RUN');
+    ws.onopen = () => resolve('open'); ws.onerror = () => resolve('rejected');
+  }));
+  await attempt('loopbackUserXHR', () => new Promise((resolve) => {
+    const request = new XMLHttpRequest();
+    request.onload = () => resolve('loaded'); request.onerror = () => resolve('rejected');
+    request.open('GET', 'http://pb:x@localhost:CANARY/pb-leak/lohostuserxhr?run=RUN'); request.send();
+  }));
+  await attempt('loopbackMappedAny', noCors('http://[::ffff:0:0]:CANARY/pb-leak/lo0mapped?run=RUN'));
   await attempt('loopbackWorker', () => new Promise((resolve) => {
     const source = "fetch('http://127.0.0.1:CANARY/pb-leak/lo4w?run=RUN',{mode:'no-cors'}).then(()=>postMessage('resolved'),()=>postMessage('rejected'))";
     const worker = new Worker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
@@ -518,7 +533,14 @@ def login_page(params: dict) -> bytes:
         f'<input id="pass" name="password" type="password" autocomplete="{new}">'
         + ('<input id="confirm" name="confirm" type="password" autocomplete="new-password">' if params.get("signup") else "")
     )
-    if params.get("spa"):
+    if params.get("code"):
+        # The second step of a sign-in: a one-time code's field, and the same as one box a digit.
+        boxes = "".join(f'<input id="d{i}" name="otp{i}" type="text" inputmode="numeric" maxlength="1">' for i in range(6))
+        body = ('<form id="f" action="/pb-welcome" method="post">'
+                '<input id="code" name="otp" type="text" inputmode="numeric" autocomplete="one-time-code">'
+                '<button id="go" type="submit">Verify</button></form>'
+                f'<form id="g" action="/pb-welcome" method="post">{boxes}</form>')
+    elif params.get("spa"):
         body = (f'<div id="box">{fields}<button id="go" type="button">Sign in</button></div>'
                 "<script>document.getElementById('go').addEventListener('click', () =>"
                 " setTimeout(() => document.getElementById('box').remove(), 300));</script>")

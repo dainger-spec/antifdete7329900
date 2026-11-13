@@ -36,7 +36,10 @@ public enum ProfileTransfer {
     static let magic = Data("PBPROFILE1\n".utf8)
     /// 2: its saved passwords carry versions, and the versions kept after a conflict — which a
     /// version that reads only 1 would import as ordinary logins, one over another (R4).
-    static let format = 2
+    /// 3: 2 with a one-time code's generator in a saved login (`PasswordEntry.totp`), which a
+    /// version that reads only 2 would import without. Written only for a profile that has one;
+    /// any other profile's export is format 2, as before.
+    static let format = 3
     /// The formats this version imports (R1).
     static let readableFormats = 1...format
 
@@ -132,7 +135,7 @@ public enum ProfileTransfer {
                                 bookmarkCount: documents.bookmarks?.bookmarks.count ?? 0,
                                 hasWebsiteData: kinds.contains(webDataPrefix), hasSafariState: kinds.contains(safariHomeRoot))
         let keys = try Keys(password: password, kdf: kdf)
-        let header = Header(format: format, kdf: kdf,
+        let header = Header(format: documents.passwords.contains { $0.totp != nil } ? 3 : 2, kdf: kdf,
                             manifest: try AEAD.seal(JSONCoding.encoder.encode(manifest), key: keys.manifest, aad: manifestAAD))
         let sealedDocuments = try AEAD.seal(JSONCoding.encoder.encode(documents), key: keys.documents, aad: documentsAAD)
         var prefix = magic
@@ -170,10 +173,51 @@ public enum ProfileTransfer {
     /// Makes a new profile in `repository` from the file: a new identity (its own id and key — the
     /// file can be imported more than once, or into the vault it came from), named `name` or as in
     /// the file. Returns it; on any failure nothing of it is left behind.
+    ///
+    /// The file's settings that a profile from someone else could turn against its user are not
+    /// taken (`LeftOut`): the person sees which before importing, and sets them again in the
+    /// profile's editor if they want them.
     @discardableResult
     public static func importProfile(from url: URL, password: String, into repository: ProfileRepository,
                                      name: String? = nil) throws -> ProfileSummary {
-        try importProfile(from: url, password: password, into: repository, name: name, createdAt: Date(), adjusting: { _ in })
+        try importProfile(from: url, password: password, into: repository, name: name, createdAt: Date(),
+                          adjusting: { LeftOut.leaveOut(&$0) })
+    }
+
+    /// Of a file's settings, those an import leaves out (the security audit of 12 November 2026,
+    /// APP-08). A `.pbprofile` is often someone else's — a seller's, a colleague's — and until then
+    /// its settings were taken whole while the import window showed only the proxy's host and port.
+    /// A bypass list (`ProxySettings.excludedDomains`) sends those sites around the proxy, from
+    /// this Mac's own address: a file with the promised proxy and `t.attacker.example` in it, and a
+    /// start page, bookmark or warm-up loading from there, gave its maker the buyer's real address.
+    /// Safe Browsing's lookups go around the proxy too (WebKit's own), and allowed local requests
+    /// let the profile's pages reach this Mac and its network. Each goes back to its default —
+    /// nothing bypassed, Safe Browsing off, local requests protected. A deleted profile brought
+    /// back (`bringBack`) is this person's own and keeps them.
+    public struct LeftOut: Equatable, Sendable {
+        /// The proxy's bypass list in the file.
+        public var directDomains: [String]
+        /// Safe Browsing was on in the file.
+        public var safeBrowsing: Bool
+        /// The file let the profile's pages reach this Mac and the local network.
+        public var localRequests: Bool
+
+        public var isEmpty: Bool { directDomains.isEmpty && !safeBrowsing && !localRequests }
+
+        /// What an import of `configuration` leaves out.
+        public init(of configuration: ProfileConfiguration) {
+            directDomains = (configuration.proxy?.excludedDomains ?? [])
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            safeBrowsing = configuration.safeBrowsingEnabled
+            localRequests = configuration.localRequests == .allowed
+        }
+
+        /// `configuration` with those settings at their defaults.
+        static func leaveOut(_ configuration: inout ProfileConfiguration) {
+            configuration.proxy?.excludedDomains = []
+            configuration.safeBrowsingEnabled = false
+            configuration.localRequests = .protected
+        }
     }
 
     /// `importProfile`, the profile made at `createdAt`, its settings adjusted by `adjust` before

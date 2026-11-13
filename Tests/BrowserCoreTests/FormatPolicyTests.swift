@@ -24,6 +24,8 @@ final class FormatPolicyTests: XCTestCase {
     let newer = Data(#"{"format": 2, "somethingNew": true}"#.utf8)
     /// For the files at format 2.
     let newerThan2 = Data(#"{"format": 3, "somethingNew": true}"#.utf8)
+    /// For the files at format 3 (saved passwords, since a login can hold a one-time code).
+    let newerThan3 = Data(#"{"format": 4, "somethingNew": true}"#.utf8)
     let cookie = ImportedCookie(name: "sid", value: "v", domain: "a.example", hostOnly: true)
 
     override func setUpWithError() throws {
@@ -262,12 +264,33 @@ final class FormatPolicyTests: XCTestCase {
     func testPasswordsOfANewerVersion() throws {
         let url = repository.passwordsURL(for: id)
         let openBefore = try repository.passwordVault(for: id)
-        try SecureFile.write(AEAD.seal(newerThan2, key: PasswordVault.fileKey(profileID: id, profileKey: key),
+        try SecureFile.write(AEAD.seal(newerThan3, key: PasswordVault.fileKey(profileID: id, profileKey: key),
                                        aad: PasswordVault.aad(profileID: id)), to: url)
-        try assertRefused("passwords.bin", keeps: url, supported: 2) { _ = try repository.passwordVault(for: id) }
-        try assertRefused("passwords.bin", keeps: url, supported: 2) {
+        try assertRefused("passwords.bin", keeps: url, supported: 3) { _ = try repository.passwordVault(for: id) }
+        try assertRefused("passwords.bin", keeps: url, supported: 3) {
             try openBefore.upsert(PasswordEntry(origin: "https://a.example", username: "u", password: "p"))
         }
+    }
+
+    /// `passwords.bin` is format 3 only once a login holds a one-time code: a version from before
+    /// codes reads every other profile's passwords as it did, and refuses this one whole instead
+    /// of writing the login back without its code (R4).
+    func testPasswordsAreFormat3OnlyWithAOneTimeCode() throws {
+        let url = repository.passwordsURL(for: id)
+        let vault = try repository.passwordVault(for: id)
+        func format() throws -> Int? {
+            DocumentFormat.declared(in: try PasswordVault.open(SecureFile.read(url), profileID: id, profileKey: key))
+        }
+        try vault.upsert(PasswordEntry(origin: "https://a.example", username: "u", password: "p"))
+        XCTAssertEqual(try format(), 2)
+        var login = try XCTUnwrap(vault.allEntries().first)
+        login.totp = try OneTimeCode.parse("JBSWY3DPEHPK3PXP")
+        try vault.update(login)
+        XCTAssertEqual(try format(), 3)
+        XCTAssertEqual(try repository.passwordVault(for: id).allEntries().first?.totp, login.totp)
+        login.totp = nil
+        try vault.update(login)
+        XCTAssertEqual(try format(), 2, "the code taken away: readable to the earlier versions again")
     }
 
     func testHistoryAndBookmarksOfANewerVersion() throws {
@@ -363,7 +386,7 @@ final class FormatPolicyTests: XCTestCase {
         let length = bytes[start..<start + 4].reduce(0) { ($0 << 8) | Int($1) }
         var header = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(bytes[start + 4..<start + 4 + length])) as? [String: Any])
         XCTAssertEqual(header["format"] as? Int, 2)
-        header["format"] = 3
+        header["format"] = 4
         let patched = try JSONSerialization.data(withJSONObject: header)
         var rewritten = Data(bytes.prefix(start))
         withUnsafeBytes(of: UInt32(patched.count).bigEndian) { rewritten.append(contentsOf: $0) }
@@ -372,8 +395,8 @@ final class FormatPolicyTests: XCTestCase {
         try rewritten.write(to: file)
 
         let profiles = repository.list().count
-        try assertRefused("Newer.pbprofile", keeps: file, supported: 2) { _ = try ProfileTransfer.manifest(of: file, password: "pw") }
-        try assertRefused("Newer.pbprofile", keeps: file, supported: 2) { _ = try ProfileTransfer.importProfile(from: file, password: "pw", into: repository) }
+        try assertRefused("Newer.pbprofile", keeps: file, supported: 3) { _ = try ProfileTransfer.manifest(of: file, password: "pw") }
+        try assertRefused("Newer.pbprofile", keeps: file, supported: 3) { _ = try ProfileTransfer.importProfile(from: file, password: "pw", into: repository) }
         XCTAssertEqual(repository.list().count, profiles)
     }
 

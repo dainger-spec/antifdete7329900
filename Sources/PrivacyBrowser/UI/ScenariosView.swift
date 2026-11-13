@@ -18,6 +18,27 @@ struct ScenariosView: View {
     @State private var profileID: UUID?
     @State private var confirmingDelete = false
     @State private var starting = false
+    /// The right side shows the runs by the clock instead of a scenario.
+    @State private var showingSchedules: Bool
+    /// The schedule that side opens its form with: "On a Schedule…" of the scenario on screen.
+    @State private var proposedSchedule: ScenarioSchedule?
+    /// Steps shown as being recorded without a profile (the snapshots).
+    var sampleRecording: [RecordedStep]?
+
+    init(sample: Scenario? = nil, sampleRecording: [RecordedStep]? = nil, showingSchedules: Bool = false) {
+        self.sample = sample
+        self.sampleRecording = sampleRecording
+        _showingSchedules = State(initialValue: showingSchedules)
+    }
+
+    /// A recording is going on, in the profile chosen here or in another.
+    private var isRecording: Bool { sampleRecording != nil || model.recordingProfile != nil }
+    /// A recording is going on, and its profile no longer runs.
+    private var recordingStopped: Bool {
+        guard let id = model.recordingProfile else { return false }
+        return !model.isRunning(id)
+    }
+    private var recordedSteps: [RecordedStep] { sampleRecording ?? model.recorded.steps }
 
     private var selected: Scenario? { sample ?? selection.flatMap { model.scenarios.scenario($0) } }
     private var listed: [Scenario] { sample.map { [$0] } ?? model.scenarios.sorted }
@@ -31,7 +52,13 @@ struct ScenariosView: View {
                 .background(Theme.sidebar)
             Rectangle().fill(Theme.divider).frame(width: 1)
             Group {
-                if selected != nil { editor } else { empty }
+                if showingSchedules {
+                    ScenarioSchedulesPane(proposed: proposedSchedule)
+                } else if selected != nil {
+                    editor
+                } else {
+                    empty
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.surface)
@@ -60,6 +87,11 @@ struct ScenariosView: View {
             if let profileID, !ids.contains(profileID) { self.profileID = ids.first }
             if profileID == nil { profileID = ids.first }
         }
+        // The profile a recording goes on in has stopped — its window was closed, or its process
+        // ended: the recording ends there, with the lines it has.
+        .onChange(of: recordingStopped) { _, stopped in
+            if stopped { stopRecording() }
+        }
         .onAppear {
             if let sample {
                 selection = sample.id
@@ -69,6 +101,10 @@ struct ScenariosView: View {
                 select(model.scenarios.sorted.first?.id)
             }
             if profileID == nil { profileID = model.profiles.first?.id }
+            // A recording going on is of its own profile: the window opened again names that one.
+            if let recording = model.recordingProfile { profileID = recording }
+            // One whose profile stopped while this window was closed ends now.
+            if recordingStopped { stopRecording() }
         }
         .confirmationDialog(String(format: L("scenarios.delete.question"), selected?.name ?? ""), isPresented: $confirmingDelete) {
             Button(L("scenarios.delete"), role: .destructive) { delete() }
@@ -97,7 +133,10 @@ struct ScenariosView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(listed) { scenario in
-                        Button { select(scenario.id) } label: {
+                        Button {
+                            showingSchedules = false
+                            select(scenario.id)
+                        } label: {
                             Text(scenario.name.isEmpty ? L("scenarios.untitled") : scenario.name)
                                 .font(.lumenBody)
                                 .foregroundStyle(Theme.textPrimary)
@@ -106,7 +145,7 @@ struct ScenariosView: View {
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 7)
                                 .background(RoundedRectangle(cornerRadius: 7)
-                                    .fill(selection == scenario.id ? Theme.rowSelected : Color.clear))
+                                    .fill(selection == scenario.id && !showingSchedules ? Theme.rowSelected : Color.clear))
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -118,6 +157,14 @@ struct ScenariosView: View {
             // and the app's help.
             Rectangle().fill(Theme.divider).frame(height: 1)
             VStack(alignment: .leading, spacing: 2) {
+                // Scenarios and warm-ups by the clock: the right side becomes their list. The number
+                // is of those switched on.
+                footLink("clock", L("schedule.title"), chosen: showingSchedules,
+                         count: model.scenarioSchedules.schedules.filter(\.isEnabled).count) {
+                    if edited { save() }
+                    proposedSchedule = nil
+                    showingSchedules = true
+                }
                 footLink("terminal", L("settings.section.automation")) {
                     model.settingsSection = .automation
                     openSettings()
@@ -129,7 +176,10 @@ struct ScenariosView: View {
         }
     }
 
-    private func footLink(_ symbol: String, _ title: String, action: @escaping () -> Void) -> some View {
+    /// A link at the list's foot; `count`, when not zero, at its right edge, as the sidebar's rows
+    /// carry theirs.
+    private func footLink(_ symbol: String, _ title: String, chosen: Bool = false, count: Int = 0,
+                          action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: symbol)
@@ -139,10 +189,17 @@ struct ScenariosView: View {
                     .font(.lumenSecondary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
+                if count > 0 {
+                    Text(verbatim: "\(count)")
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textTertiary)
+                        .monospacedDigit()
+                }
             }
-            .foregroundStyle(Theme.textSecondary)
+            .foregroundStyle(chosen ? Theme.textPrimary : Theme.textSecondary)
             .padding(.horizontal, 10)
             .frame(height: 28)
+            .background(RoundedRectangle(cornerRadius: 7).fill(chosen ? Theme.rowSelected : Color.clear))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -185,10 +242,13 @@ struct ScenariosView: View {
                         .buttonStyle(.lumenSecondary)
                         .keyboardShortcut("s")
                 }
+                // Not while a recording goes on: with the last scenario deleted there would be no
+                // Stop anywhere.
                 Button { confirmingDelete = true } label: { Image(systemName: "trash") }
                     .buttonStyle(.lumenGhost)
                     .help(L("scenarios.delete"))
                     .accessibilityLabel(L("scenarios.delete"))
+                    .disabled(isRecording)
             }
             .padding(.horizontal, 20)
             .padding(.top, 34)
@@ -217,10 +277,13 @@ struct ScenariosView: View {
             runBar
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
-            RunLog(run: run)
-                .frame(minHeight: 140, maxHeight: 260)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 16)
+            Group {
+                // While a recording goes on, its steps as they come; otherwise the last run's log.
+                if isRecording { RecordingLog(steps: recordedSteps) } else { RunLog(run: run) }
+            }
+            .frame(minHeight: 140, maxHeight: 260)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 16)
         }
     }
 
@@ -297,20 +360,60 @@ struct ScenariosView: View {
                     Text(profile.name).tag(Optional(profile.id))
                 }
             }
-            .frame(maxWidth: 320)
+            .frame(maxWidth: 320, alignment: .leading)
+            // A recording belongs to the profile it began in, and a start to the one it was asked
+            // for: the picker must not name another meanwhile.
+            .disabled(isRecording || starting)
             if model.profiles.isEmpty {
                 Text(L("scenarios.noProfiles"))
                     .font(.lumenSecondary)
                     .foregroundStyle(Theme.textTertiary)
             }
             Spacer()
-            if let run, run.isRunning {
+            if isRecording {
+                // What the person does in the profile's window becomes the scenario's lines.
+                HStack(spacing: 7) {
+                    Circle().fill(Theme.danger).frame(width: 8, height: 8)
+                    Text(String(format: L("scenarios.record.going"), recordedSteps.count))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+                }
+                .accessibilityElement(children: .combine)
+                Button(action: stopRecording) { Label(L("scenarios.record.stop"), systemImage: "stop.fill") }
+                    .buttonStyle(.lumenPrimary)
+            } else if let run, run.isRunning {
                 Text(L("scenarios.running"))
                     .font(.lumenSecondary)
                     .foregroundStyle(Theme.running)
                 Button(L("scenarios.stop")) { if let profileID { model.stopScenario(on: profileID) } }
                     .buttonStyle(.lumenSecondary)
             } else {
+                // Record and Run start a stopped profile first, which takes a while: said, not
+                // only two dimmed buttons.
+                if starting {
+                    ProgressView().controlSize(.small)
+                    Text(L("scenarios.starting"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+                }
+                // The scenario on screen by the clock: the schedule's form, filled in with it and
+                // the chosen profile. Open in a plan without automation too: the pane says why
+                // nothing can be added there.
+                Button(action: scheduleThis) { Label(L("scenarios.schedule.this"), systemImage: "clock") }
+                    .buttonStyle(.lumenGhost)
+                    .disabled(profileID == nil || starting)
+                    .help(L("scenarios.schedule.this.help"))
+                Button(action: startRecording) {
+                    HStack(spacing: 6) {
+                        Circle().fill(Theme.danger).frame(width: 8, height: 8)
+                        Text(L("scenarios.record"))
+                    }
+                }
+                .buttonStyle(.lumenSecondary)
+                .disabled(!model.allowsAutomation || profileID == nil || starting)
+                .help(L("scenarios.record.help"))
                 Button(L("scenarios.run"), action: startRun)
                     .buttonStyle(.lumenPrimary)
                     .disabled(!model.allowsAutomation || profileID == nil || starting || source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -354,14 +457,88 @@ struct ScenariosView: View {
         }
     }
 
+    private func startRecording() {
+        guard let profileID else { return }
+        if edited { save() }
+        starting = true
+        Task { @MainActor in
+            let started = await model.startRecording(on: profileID)
+            starting = false
+            // A launch that failed has said why; a refusal nobody said is said here.
+            if !started, model.errorMessage == nil { model.showError(L("scenarios.start.failed")) }
+        }
+    }
+
+    /// The recording's steps go to the scenario's end, as lines to be changed there.
+    private func stopRecording() {
+        let steps = model.stopRecording()
+        guard !steps.isEmpty else { return }
+        let lines = steps.map { ScenarioRecording.line(for: $0, passwordNote: L("scenarios.record.password")) }
+        // A scenario that is still the example, or empty, is replaced: a first recording must not
+        // open example.com first.
+        let untouched = source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || source == L("scenarios.template")
+        let before = untouched ? "" : source + (source.hasSuffix("\n") ? "" : "\n")
+        source = before + lines.joined(separator: "\n") + "\n"
+    }
+
     private func startRun() {
         if edited { save() }
         guard let scenario = selected, let profileID else { return }
         starting = true
         Task { @MainActor in
-            _ = await model.runScenario(scenario, on: profileID)
+            let started = await model.runScenario(scenario, on: profileID)
             starting = false
+            if !started, model.errorMessage == nil { model.showError(L("scenarios.start.failed")) }
         }
+    }
+
+    /// Opens the schedules with a form for this scenario on the chosen profile: every day at
+    /// 10:00, give or take a quarter of an hour, to be changed there.
+    private func scheduleThis() {
+        guard let scenario = selected, let profileID else { return }
+        if edited { save() }
+        // One that is there already is in the list, with its Edit: a second form would add its twin.
+        let action = ScenarioSchedule.Action.scenario(scenario.id)
+        let scheduled = model.scenarioSchedules.schedules.contains { $0.action == action && $0.profileID == profileID }
+        proposedSchedule = scheduled ? nil : ScenarioSchedule(action: action, profileID: profileID,
+                                                              when: .daily(hour: 10, minute: 0), jitterMinutes: 15)
+        showingSchedules = true
+    }
+}
+
+/// A recording as it goes: each step as the line the scenario will get, the newest at the end;
+/// before the first, what to do.
+private struct RecordingLog: View {
+    let steps: [RecordedStep]
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 3) {
+                    if steps.isEmpty {
+                        Text(L("scenarios.record.empty"))
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                        Text(verbatim: ScenarioRecording.line(for: step, passwordNote: L("scenarios.record.password")))
+                            .font(.lumenMono)
+                            .foregroundStyle(step.kind == .note ? Theme.textTertiary : Theme.textPrimary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .id(index)
+                    }
+                }
+                .padding(12)
+            }
+            .onChange(of: steps.count) { _, count in
+                if count > 0 { proxy.scrollTo(count - 1, anchor: .bottom) }
+            }
+        }
+        .background(Theme.field)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.danger.opacity(0.35)))
     }
 }
 
@@ -449,7 +626,11 @@ struct CodeEditor: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let view = scroll.documentView as? NSTextView, view.string != text else { return }
+        // Text added at the end (a recording, a command of the panel) is brought into view: in a
+        // scenario longer than the editor it would land below the fold, and nothing would show.
+        let appended = !view.string.isEmpty && text.hasPrefix(view.string)
         view.string = text
+        if appended { view.scrollRangeToVisible(NSRange(location: (text as NSString).length, length: 0)) }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(text: $text) }

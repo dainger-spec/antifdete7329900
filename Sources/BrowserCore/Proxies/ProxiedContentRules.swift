@@ -13,21 +13,36 @@ import Foundation
 ///     has open, the same set in every profile, and tell the profiles apart from other people's
 ///     or link them to each other. A page the user opened on this Mac (`http://127.0.0.1:…`) is
 ///     already local, and keeps its own loads (`unless-top-url`).
+///
+/// An address may carry a user name and password before its host (`http://x@127.0.0.1:631/`):
+/// WebKit matches `url-filter` against the whole URL, user info and all, and loads such an address
+/// for an image, a frame, a script, an XHR or a WebSocket — only `fetch()` refuses it. Until the
+/// security audit of 12 November 2026 (APP-14) every pattern wanted the host right after the
+/// scheme, so `ws://x@127.0.0.1:<port>` went by them all and a page could map this Mac's open
+/// ports from any profile; every pattern now starts with `urlStart`, which takes the user info.
 public enum ProxiedContentRules {
     /// Changes with the rules, so that WebKit's compiled copy of an earlier list is not reused.
-    public static let identifier = "pb-proxied-profile-v2"
+    public static let identifier = "pb-proxied-profile-v3"
+
+    /// How every pattern of this list and of `LocalNetworkRules` starts: a scheme, then a user name
+    /// and password if the address has them (`x@`, `user:pass@` — a canonical URL writes any `/`,
+    /// `?`, `#` or other `@` in them percent-encoded), then the host. A group with `?` and a negated
+    /// set are in WebKit's `url-filter` subset; alternation and counted repetition are not.
+    public static let urlStart = #"^[a-z]+://([^/?#@]*@)?"#
 
     /// URL patterns (WebKit's `url-filter` subset of regular expressions, matched case-insensitively
     /// against the whole canonical URL) of an address on this Mac.
     public static let thisMacURLPatterns: [String] = [
-        #"^[a-z]+://127\.[0-9]+\.[0-9]+\.[0-9]+[:/]"#,
-        #"^[a-z]+://0\.0\.0\.0[:/]"#,
-        #"^[a-z]+://localhost\.?[:/]"#,
-        #"^[a-z]+://[a-z0-9.-]*\.localhost\.?[:/]"#,
-        #"^[a-z]+://\[::1\]"#,
-        #"^[a-z]+://\[::\]"#,
-        #"^[a-z]+://\[::ffff:7f"#,
-    ]
+        #"127\.[0-9]+\.[0-9]+\.[0-9]+[:/]"#,
+        #"0\.0\.0\.0[:/]"#,
+        #"localhost\.?[:/]"#,
+        #"[a-z0-9.-]*\.localhost\.?[:/]"#,
+        #"\[::1\]"#,
+        #"\[::\]"#,
+        #"\[::ffff:7f"#,
+        // 0.0.0.0 as IPv4-mapped IPv6 (`[::ffff:0.0.0.0]` canonicalizes to it): this Mac too.
+        #"\[::ffff:0:0\]"#,
+    ].map { urlStart + $0 }
 
     /// The list, as WebKit's content-blocker JSON.
     public static var json: String {

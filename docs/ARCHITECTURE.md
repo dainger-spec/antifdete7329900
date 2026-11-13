@@ -610,7 +610,8 @@ SettingsView (Settings scene: ⌘, — and ⋯ → Settings…) ── AppSettin
 ## What sites see
 
 ```
-⋯ → What Sites See… / ⌘K ── WhatSitesSeeView (sheet) ── WhatSitesSee (one per sheet, @MainActor)
+⋯ → Check the Profile… / the inspector's "Check the profile" / ⌘K
+   ── WhatSitesSeeView (sheet; its second tab, All signals) ── WhatSitesSee (one per sheet, @MainActor)
    take():  the profile started if stopped (AppModel.launch)
             SiteSnapshotServer: NWListener × 2 on 127.0.0.1:any — HTTP (AutomationHTTP.parse, header
               lines in order) and TLS (TLSClientHello.parse, then closed); tokens per side, Host checked
@@ -622,6 +623,47 @@ SettingsView (Settings scene: ⌘, — and ⋯ → Settings…) ── AppSettin
             SiteSnapshot(report:clientHello:) × 2 → SiteComparison.compare → [SiteSignal]
    ProfileLibrary.recordVisit skips SiteSnapshotPage.isMeasuringPage
 ```
+
+### The profile's check
+
+The panel opens on a check of the profile in one go (`ProfileCheckPane`, the first tab; the
+signals one by one are the second). The pane follows the run's step: before the first check, an
+invitation with the one button; while it runs, its three steps; when it could not be made, why;
+then the verdict and the findings in groups — things to look at first, what could not be
+compared, what is in order. **Restart and Check Again** is offered after a fix, and whenever a
+finding says the running profile is not what its settings say. `ProfileCheckRun` gathers,
+`ProfileCheck` (BrowserCore) judges:
+
+```
+Check the Profile ── ProfileCheckRun.run()
+   the page:    WhatSitesSee.take() → ProfileCheck.Page(snapshot:) — time zone, language, User-Agent,
+                  screen and window, as the profile's own page says them (a page of this Mac)
+   the exit:    ProxyGeoLookup.lookUp(proxy:) — through the profile's proxy (or, with none, over this
+                  Mac's connection), the lookup a launch makes anyway: address, country, time zone, and
+                  the place when the service gives one (ProxyExitDetails.latitude/longitude)
+   the network: ProfileManager.networkReport(of:) → ProfileNetworkReport of the profile's own process
+                  (web views off the profile's store, WebRTC on where off, DNS prefetch, UDP closed)
+   ProfileCheck.findings(Facts) → one Finding a topic: proxy, timeZone, language, geolocation,
+                  webRTC, dns, engine, window; each ok / attention / unknown, a sentence's key
+                  (check.<topic>.<code>) with its values, and a Fix where the settings can put it right
+   Fix ── AppModel.applyCheckFix → ProfileCheck.applying(fix, to: configuration) → updateProfile
+          (the settings as an edit saves them; a running profile takes them at its next start)
+   Restart and Check Again ── stop, then run() (which starts it)
+```
+
+A fix is kept. Checked again without a restart, a fix already made is still shown as made, with
+the restart it waits for. And where a fix leaves one of the two — time zone, language — following
+the connection beside a chosen other, which the editor's three choices cannot say, the editor
+keeps it as stored while neither is touched (`ProfileDraft.LocaleMix`) and shows, for the one
+that follows, where the connection was last seen to come out: a save of something else never
+writes this Mac's own time zone into the profile.
+
+What it does not do: a DNS leak is judged from how the profile is built and what its process
+reports, not by asking an outside resolver-echo service — that would be a request to a third party
+made for the check alone. "unknown" is never counted as a finding: no exit found means nothing to
+hold the time zone and the language against. Tests: `ProfileCheckTests` (every rule and fix);
+self-test group "profile check" (a time zone set elsewhere than the proxy's exit is found, fixed,
+and gone after the restart).
 
 ## Concurrency
 

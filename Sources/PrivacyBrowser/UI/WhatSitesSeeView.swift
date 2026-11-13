@@ -5,26 +5,85 @@ import SwiftUI
 /// on "Compare with Safari", next to this Mac's own Safari's, signal by signal (`WhatSitesSee`). For an
 /// iPhone or iPad view this Mac's Safari is the wrong reference, and the panel says so, with what
 /// it cannot see of the real device, rather than "the same" (the owner's decision).
+///
+/// With a check (`ProfileCheckRun`) the panel opens on it and is titled as the profile's check:
+/// one button, a verdict — "All in order" or "Things to look at (N)" — and a sentence a topic,
+/// with "Fix" where the settings can put it right. The signals, one by one, are its second tab,
+/// with their own explanation at its top.
 struct WhatSitesSeeView: View {
+    enum Tab: Hashable { case check, signals }
+
     let name: String
     /// The profile is an iPhone or iPad view: Safari on this Mac under another device's name.
     let mobileView: Bool
     @StateObject private var snapshot: WhatSitesSee
+    @StateObject private var check: ProfileCheckRun
+    private let hasCheck: Bool
+    /// The proxy's step-by-step check, for a finding only that can explain (a proxy that does not answer).
+    private let showProxy: (() -> Void)?
+    @State private var tab: Tab
     @State private var onlyDifferences: Bool
     @Environment(\.dismiss) private var dismiss
 
     static let size = CGSize(width: 880, height: 660)
 
-    init(name: String, snapshot: @autoclosure @escaping () -> WhatSitesSee, onlyDifferences: Bool = true, mobileView: Bool = false) {
+    /// `check`: the profile's check, sharing `snapshot` (nil: the signals alone, as the snapshots
+    /// of the list show them).
+    init(name: String, snapshot: @autoclosure @escaping () -> WhatSitesSee, check: ((WhatSitesSee) -> ProfileCheckRun)? = nil,
+         tab: Tab? = nil, onlyDifferences: Bool = true, mobileView: Bool = false, showProxy: (() -> Void)? = nil) {
         self.name = name
         self.mobileView = mobileView
-        _snapshot = StateObject(wrappedValue: snapshot())
+        self.showProxy = showProxy
+        let taken = snapshot()
+        _snapshot = StateObject(wrappedValue: taken)
+        _check = StateObject(wrappedValue: check?(taken) ?? ProfileCheckRun(profileID: taken.profileID, snapshot: taken, environment: { nil }))
+        hasCheck = check != nil
+        _tab = State(initialValue: tab ?? (check != nil ? .check : .signals))
         _onlyDifferences = State(initialValue: onlyDifferences)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SheetHeader(title: String(format: L("whatSites.title"), name), subtitle: L("whatSites.subtitle"))
+            // By `hasCheck`, not by the tab: the header keeps its height when the tab is switched.
+            SheetHeader(title: String(format: hasCheck ? L("check.title") : L("whatSites.title"), name),
+                        subtitle: hasCheck ? L("check.subtitle") : L("whatSites.subtitle"))
+            if hasCheck {
+                LumenSegmented(selection: $tab, options: [(value: Tab.check, title: L("check.tab.check")), (value: Tab.signals, title: L("check.tab.signals"))])
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 14)
+            }
+            if tab == .check {
+                ProfileCheckPane(check: check, showProxy: showProxy.map { show in { dismiss(); show() } })
+            } else {
+                signalsPane
+            }
+            SheetFooter {
+                Text(L(tab == .check ? "check.footer" : "whatSites.notMeasured"))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } buttons: {
+                Button(L("common.done")) { dismiss() }
+                    .buttonStyle(.lumenSecondary)
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
+        .sheetFrame(width: Self.size.width, height: Self.size.height)
+        .background(Theme.raised)
+    }
+
+    /// The signals one by one: the snapshot's controls, then the list. Under a header that
+    /// speaks of the check, what the snapshot is and where it stays is said here first.
+    @ViewBuilder
+    private var signalsPane: some View {
+            if hasCheck {
+                Text(L("whatSites.subtitle"))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 12)
+            }
             HStack(spacing: 12) {
                 Button {
                     Task { await snapshot.take() }
@@ -75,19 +134,6 @@ struct WhatSitesSeeView: View {
             } else {
                 results
             }
-            SheetFooter {
-                Text(L("whatSites.notMeasured"))
-                    .font(.lumenSecondary)
-                    .foregroundStyle(Theme.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } buttons: {
-                Button(L("common.done")) { dismiss() }
-                    .buttonStyle(.lumenSecondary)
-                    .keyboardShortcut(.cancelAction)
-            }
-        }
-        .sheetFrame(width: Self.size.width, height: Self.size.height)
-        .background(Theme.raised)
     }
 
     private var status: String {

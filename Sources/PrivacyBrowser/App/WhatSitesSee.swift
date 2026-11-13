@@ -64,7 +64,12 @@ final class WhatSitesSee: ObservableObject {
         }
         if manager()?.isRunning(profileID) != true {
             step = .starting
-            await launch(profileID)
+            // A start or a stop already under way is waited for: a launch asked for meanwhile does
+            // nothing, and the profile would be found not running a moment before it was.
+            while manager()?.busyProfileIDs.contains(profileID) == true, !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            if manager()?.isRunning(profileID) != true { await launch(profileID) }
         }
         guard let manager = manager(), manager.isRunning(profileID) else {
             step = .failed(L("whatSites.error.notStarted"))

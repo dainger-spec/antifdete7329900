@@ -157,7 +157,16 @@ struct ProfileListView: View {
             .sheet(item: $whatSitesSeeFor) { profile in
                 WhatSitesSeeView(name: profile.name, snapshot: WhatSitesSee(profileID: profile.id, manager: { model.manager },
                                                                             launch: { await model.launch($0) }),
-                                 mobileView: (model.details[profile.id]?.deviceGeneration.platform ?? .macOS) != .macOS)
+                                 // The profile's check, on the same snapshot: the panel opens on it.
+                                 check: { taken in ProfileCheckRun(profileID: profile.id, snapshot: taken, model: { [weak model] in model }) },
+                                 mobileView: (model.details[profile.id]?.deviceGeneration.platform ?? .macOS) != .macOS,
+                                 showProxy: model.details[profile.id]?.proxyIdentity == nil ? nil : {
+                                     let identity = model.details[profile.id]?.proxyIdentity
+                                     let entry = identity.flatMap { identity in
+                                         model.proxyList?.entries.first { ProxyList.identity(of: $0.proxy) == identity }
+                                     }
+                                     showProxies(selecting: entry.map { [$0.id] } ?? [])
+                                 })
             }
             .sheet(isPresented: $warmingUpSeveral) { WarmUpQueueView(preselected: queuePreselection) }
             .sheet(item: $exporting) { profile in ProfileExportView(profile: profile) }
@@ -270,13 +279,16 @@ struct ProfileListView: View {
             commands.append(Command(id: "warm-\(row.id)", title: String(format: L("palette.warmUp"), row.name),
                                     detail: detail, symbol: "flame", group: .profiles, run: { actions.warmUp(row.id) }))
             commands.append(Command(id: "see-\(row.id)", title: String(format: L("palette.whatSitesSee"), row.name),
-                                    detail: detail, symbol: "eye", group: .profiles, run: { actions.whatSitesSee(row.id) }))
+                                    detail: detail, symbol: "checkmark.shield", group: .profiles, run: { actions.whatSitesSee(row.id) }))
+            commands.append(Command(id: "passwords-\(row.id)", title: String(format: L("palette.passwords"), row.name),
+                                    detail: detail, symbol: "key", group: .profiles, run: { actions.passwords(row.id) }))
         }
         commands.append(Command(id: "proxies", title: L("palette.proxies"), symbol: "network", run: actions.openProxies))
         commands.append(Command(id: "warmQueue", title: L("profiles.menu.warmUpSeveral"), symbol: "flame", run: actions.warmUpQueue))
-        commands.append(Command(id: "scenarios", title: L("palette.scenarios"), symbol: "play.rectangle", shortcut: "⇧⌘E",
-                                run: actions.openScenarios))
-        commands.append(Command(id: "automation", title: L("profiles.menu.automation"), symbol: "terminal", run: actions.openAutomation))
+        commands.append(Command(id: "scenarios", title: L("palette.scenarios"), detail: L("palette.scenarios.detail"),
+                                symbol: "play.rectangle", shortcut: "⇧⌘E", run: actions.openScenarios))
+        commands.append(Command(id: "automation", title: L("profiles.menu.automation"), detail: L("palette.automation.detail"),
+                                symbol: "terminal", run: actions.openAutomation))
         commands.append(Command(id: "help", title: L("menu.help"), symbol: "book", shortcut: "⌘?", run: actions.openHelp))
         if let syncNow = actions.syncNow {
             commands.append(Command(id: "sync", title: L("palette.syncNow"), symbol: "arrow.triangle.2.circlepath", run: syncNow))
@@ -339,7 +351,8 @@ struct ProfileListView: View {
                            let check = details?.proxyIdentity.flatMap { identity in
                                proxyEntries.first { ProxyList.identity(of: $0.proxy) == identity }?.lastCheck
                            }
-                           return InspectorInfo(details: details, counts: model.inspectorCounts[id], proxyCheck: check)
+                           return InspectorInfo(details: details, counts: model.inspectorCounts[id], proxyCheck: check,
+                                                webDriver: model.webDriverInfo(for: id))
                        },
                        onInspect: { model.loadInspectorCounts(for: $0) },
                        guardReady: networkGuard.state == .ready,
@@ -496,6 +509,15 @@ struct ProfileListView: View {
 
     private func summary(_ id: UUID) -> ProfileSummary? { model.profiles.first { $0.id == id } }
 
+    /// The address holds the API's token: copied marked concealed, as the inspector's Copy does.
+    private func copyWebDriverAddress(_ id: UUID) {
+        guard case let .address(address)? = model.webDriverInfo(for: id) else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(address, forType: .string)
+        pasteboard.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+    }
+
     private var actions: ProfileActions {
         ProfileActions(
             newProfile: { editing = .new },
@@ -528,6 +550,7 @@ struct ProfileListView: View {
             syncNow: model.syncTarget == nil ? nil : { Task { await model.syncNow() } },
             openGuard: { showingGuard = true },
             openAutomation: { showingAutomation = true },
+            copyWebDriverAddress: model.webDriverReady ? { id in copyWebDriverAddress(id) } : nil,
             openSettings: { openSettings() },
             openAccount: {
                 model.settingsSection = .account
@@ -753,6 +776,9 @@ struct ProfileActions {
     var openGuard: () -> Void = {}
     /// The local automation API's settings (`AutomationSettingsView`).
     var openAutomation: () -> Void = {}
+    /// The profile's WebDriver address to the clipboard. Nil while there is none (the API is off,
+    /// or not in the plan).
+    var copyWebDriverAddress: ((UUID) -> Void)?
     var openSettings: () -> Void = {}
     /// Settings › Account (the sidebar's line about the rights).
     var openAccount: () -> Void = {}
@@ -1707,9 +1733,14 @@ private struct ProfileRow: View {
         }
         .contentShape(Rectangle())
         // The row's buttons and ⋯ menu take their own clicks; a click anywhere else selects, and
-        // a double click launches (each of its clicks is also a click: the first selects).
-        .simultaneousGesture(TapGesture(count: 2).onEnded { onDoubleClick() })
-        .onTapGesture { onClick(.current) }
+        // the second click of a double click, made with no modifier, launches (the first selected).
+        // One gesture, told apart by the event's click count: a second gesture beside it, for two
+        // taps, also heard clicks on the row's checkbox — two quick ones there dropped the whole
+        // selection for that one row and launched it (the owner, 12 November).
+        .onTapGesture {
+            let click = ProfileSelection.Click.current
+            if click == .plain, (NSApp.currentEvent?.clickCount ?? 1) == 2 { onDoubleClick() } else { onClick(click) }
+        }
         .onHover { hovered = $0 }
         .animation(Motion.hover(hovered), value: hovered)
         .opacity(row.activity == .sealing ? 0.6 : 1)
@@ -1952,11 +1983,16 @@ private struct ProfileMenuItems: View {
             Button(L("profiles.row.library")) { actions.library(row.id) }
         }
         Button(L("profiles.row.edit")) { actions.edit(row.id) }
+        Button(L("profiles.row.check")) { actions.whatSitesSee(row.id) }
         Button(L("profiles.row.passwords")) { actions.passwords(row.id) }
         Button(L("profiles.row.importCookies")) { actions.importCookies(row.id) }
         Button(L("profiles.row.exportCookies")) { actions.exportCookies(row.id) }
         Button(L("profiles.row.warmUp")) { actions.warmUp(row.id) }
-        Button(L("profiles.row.whatSitesSee")) { actions.whatSitesSee(row.id) }
+        // Absent while there is no address (the API is off, or not in the plan): the inspector's
+        // Selenium row says why.
+        if let copyAddress = actions.copyWebDriverAddress, row.exit != .unreadable {
+            Button(L("profiles.row.copyWebDriver")) { copyAddress(row.id) }
+        }
         Divider()
         Button(L("profiles.row.export")) { actions.exportProfile(row.id) }
         Divider()

@@ -357,6 +357,7 @@ final class SelfTest {
         await group("diagnostics") { try await diagnosticsBundle(repository) }
         await group("paste as typed") { try await pasteAsTyped(repository) }
         await group("what sites see") { try await whatSitesSee(repository) }
+        await group("profile check") { try await profileCheck(repository) }
         await group("deleting profiles") { try await deleteProfiles(repository) }
         await group("proxies") { try await proxies(repository) }
         await group("certificates") { try await certificatesWithoutFetching(repository) }
@@ -1517,10 +1518,14 @@ final class SelfTest {
         // This Mac itself: the system never sends loopback through a proxy (measured in run 382: the
         // page's fetches reached the canary listener directly), so a proxied profile's pages are
         // refused it — a fetch, a frame and a worker's fetch (`ProxiedContentRules`).
-        let refusedHere = ["loopback4", "loopbackName", "loopback6", "loopbackAny", "loopbackWorker"]
-        check("Safari chrome: a page cannot reach this Mac (127.0.0.1, localhost, ::1, 0.0.0.0, from the page and from a worker): each is refused",
+        let refusedHere = ["loopback4", "loopbackName", "loopback6", "loopbackAny", "loopbackWorker", "loopbackMappedAny"]
+        check("Safari chrome: a page cannot reach this Mac (127.0.0.1, localhost, ::1, 0.0.0.0 and its IPv4-mapped form, from the page and from a worker): each is refused",
               refusedHere.allSatisfy { page[$0] as? String == "rejected" },
               refusedHere.map { "\($0)=\(page[$0] ?? "nil")" }.joined(separator: " "))
+        // With a user name before the host (APP-14 of the security audit: no pattern took one), by an
+        // image, a WebSocket and an XHR. Their own answers cannot tell a blocked load from one the
+        // canary's plain HTTP refused; the canary's log, read last below, can: it must hold none.
+        info("Safari chrome: this Mac with a user name before its host — WebSocket \(page["loopbackUserWS"] ?? "nil"), XHR \(page["loopbackUserXHR"] ?? "nil"), an image (in the canary's log if it went)")
         // Measured through the proxy in run 383; kept that way.
         check("Safari chrome: a fetch to a private-network address (10.255.255.1) goes through the profile's proxy",
               reached("10.255.255.1:8080", "/pb-leak/lan10"), "not seen by the proxy (\(page["lan10"] ?? "nil"))")
@@ -1780,7 +1785,7 @@ final class SelfTest {
               log.targets.contains { $0.target == "aia-\(run).\(domain):443" && $0.path.hasPrefix("(tls refused") },
               log.targets.filter { $0.target.hasPrefix("aia-") }.map(\.path).joined(separator: " | "))
         let directs = log.canary.filter { !$0.contains("/pb-canary-control") }
-        let canaryName = "Safari chrome: nothing reached this Mac directly (the canary listener took no connection: no fetch, frame or worker)"
+        let canaryName = "Safari chrome: nothing reached this Mac directly (the canary listener took no connection: no fetch, frame, worker, image, WebSocket or XHR, with a user name before the host or without)"
         // A connection listed fails whatever the control says; none listed is a pass only where
         // the control was listed.
         if !directs.isEmpty || log.canary.contains(where: { $0.contains("/pb-canary-control") }) {
@@ -4366,6 +4371,29 @@ final class SelfTest {
               manualKept && randomKept && connectionKept,
               "manual \(manualSaved.timeZoneIdentifier ?? "-") \(manualSaved.languageOverride ?? "-"), random \(randomSaved.timeZoneIdentifier ?? "-") \(randomSaved.languageOverride ?? "-")")
 
+        // One of the two follows the connection and the other is chosen: what a fix of the profile's
+        // check leaves. A save that touched neither writes it back as it was; shown, the one that
+        // follows is where the connection was last seen to come out, so that a save which changed
+        // the other writes that zone — never this Mac's own.
+        var chosenBoth = ProfileConfiguration()
+        chosenBoth.timeZoneIdentifier = "America/New_York"
+        chosenBoth.languageOverride = "ru-RU"
+        chosenBoth.matchProxyLocation = false
+        var mixed = ProfileCheck.applying(.timeZoneFromConnection, to: chosenBoth)
+        mixed.lastProxyLocation = ProxyLocation(timeZoneIdentifier: "Europe/Berlin", countryCode: "DE", proxyEndpoint: "")
+        let mixedDraft = ProfileDraft(name: "Locale", configuration: mixed)
+        let mixedSaved = try mixedDraft.makeConfiguration()
+        var touched = mixedDraft
+        touched.language = "de-DE"
+        let touchedSaved = try touched.makeConfiguration()
+        let mixKept: Bool = mixedSaved.timeZoneIdentifier == nil && mixedSaved.matchProxyLocation && mixedSaved.languageOverride == "ru-RU"
+        let mixShown: Bool = mixedDraft.timeZone == "Europe/Berlin"
+        let mixTouched: Bool = touchedSaved.timeZoneIdentifier == "Europe/Berlin" && !touchedSaved.matchProxyLocation
+            && touchedSaved.languageOverride == "de-DE"
+        check("editor: a time zone that follows the connection beside a chosen language is kept by a save that touched neither, and a save that changed the language writes the connection's zone, not this Mac's",
+              mixKept && mixShown && mixTouched,
+              "kept \(mixedSaved.timeZoneIdentifier ?? "nil") follows \(mixedSaved.matchProxyLocation) \(mixedSaved.languageOverride ?? "-"); shown \(mixedDraft.timeZone); touched \(touchedSaved.timeZoneIdentifier ?? "nil") follows \(touchedSaved.matchProxyLocation)")
+
         let row = ProfileRowItem(id: UUID(), name: "Northwind", activity: .stopped, exit: .direct, ephemeral: false,
                                  appearsAs: "", lastUsed: nil, tags: ["ads", "US"], notes: "Renews monthly")
         let other = ProfileRowItem(id: UUID(), name: "Research", activity: .stopped, exit: .direct, ephemeral: false,
@@ -4475,8 +4503,18 @@ final class SelfTest {
               const late = new Promise((resolve) => setTimeout(() => resolve('pending'), 2500));
               return await Promise.race([outcome, late]);
             };
+            // fetch() refuses an address with a user name itself; an XHR loads it (APP-14). Its own
+            // answer is "rejected" either way (the canary sends no CORS header): the canary's count
+            // is what tells.
+            const xhr = (url) => new Promise((resolve) => {
+              const request = new XMLHttpRequest();
+              request.onload = () => resolve('resolved'); request.onerror = () => resolve('rejected');
+              setTimeout(() => resolve('pending'), 2500);
+              try { request.open('GET', url); request.send(); } catch (e) { resolve('rejected'); }
+            });
             return {
               loopback: await attempt(`http://127.0.0.1:${port}/pb-local?run=${run}`),
+              loopbackUser: await xhr(`http://pb@127.0.0.1:${port}/pb-local-user?run=${run}`),
               lan: await attempt('http://10.255.255.1:8080/pb-local-lan'),
               name: await attempt(`http://printer-${run}.local/pb-local-name`),
             };
@@ -4497,7 +4535,7 @@ final class SelfTest {
         let protected = try await attempt(.protected, run: protectedRun)
         let protectedHits = await canaryHits(protectedRun)
         let refused: Bool = protected["loopback"] == "rejected" && protected["lan"] == "rejected" && protected["name"] == "rejected"
-        check("local requests: protected, a page of the internet reaches neither this Mac (127.0.0.1) nor the local network (10.x, a .local name)",
+        check("local requests: protected, a page of the internet reaches neither this Mac (127.0.0.1, by a fetch and by an XHR with a user name before the host) nor the local network (10.x, a .local name)",
               refused && (protectedHits ?? 0) == 0, "\(protected), canary \(protectedHits.map(String.init) ?? "not asked")")
 
         let allowedRun = runID()
@@ -4695,6 +4733,63 @@ final class SelfTest {
         "paste as typed: the clipboard's text arrives in the page's focused field, as typed",
         "paste as typed: the page sees trusted key events — a key down per character, on its own key (H on KeyH, М on KeyV), Shift around a capital",
     ]
+
+    /// The profile's check, as the panel runs it (`ProfileCheckRun`, with the app's own lookup and
+    /// snapshot): a profile whose time zone is set to New York while its proxy exits in Berlin —
+    /// the mismatch is found, with its fix; the fix changes the settings; and after the restart
+    /// the check makes, the pages are in the exit's time zone and the finding is gone. The exit is
+    /// the self-test proxy's (`/pb-geo.json`: Europe/Berlin, DE), asked through the profile's proxy.
+    private func profileCheck(_ repository: ProfileRepository) async throws {
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            skip("profile check: a time zone set elsewhere than the exit is found, fixed, and gone after a restart",
+                 "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
+            return
+        }
+        let services = ProxyGeoLookup.services
+        defer { ProxyGeoLookup.services = services }
+        ProxyGeoLookup.services = [.init(url: URL(string: "http://geo.selftest.invalid/pb-geo.json")!,
+                                         timeZoneKeyPath: ["timezone"], countryKeyPath: ["country"])]
+        let profile = try repository.create(name: "Profile check", configuration: ProfileConfiguration(
+            proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), timeZoneIdentifier: "America/New_York",
+            ephemeral: true))
+        let id = profile.id
+        let manager = ProfileManager(repository: repository)
+        defer { try? repository.delete(id) }
+        let snapshot = WhatSitesSee(profileID: id, manager: { manager }, launch: { _ = try? await manager.launch($0) })
+        let run = ProfileCheckRun(profileID: id, snapshot: snapshot) {
+            ProfileCheckRun.Environment(
+                configuration: { try repository.loadConfiguration(id) },
+                applyFix: { fix, exit in
+                    let stored = try repository.loadConfiguration(id)
+                    try repository.saveConfiguration(ProfileCheck.applying(fix, to: stored, exit: exit).savingEdit(over: stored), for: id)
+                },
+                manager: { manager },
+                stop: { _ = try? await manager.stop(id) })
+        }
+        func finding(_ topic: ProfileCheck.Topic) -> ProfileCheck.Finding? { run.findings.first { $0.topic == topic } }
+        func said(_ topic: ProfileCheck.Topic) -> String {
+            finding(topic).map { "\($0.key) \($0.values) fix \($0.fix?.rawValue ?? "none")" } ?? "no finding (\(run.step))"
+        }
+
+        await run.run()
+        check("profile check: the proxy's exit is found through the proxy, and named",
+              finding(.proxy)?.key == "check.proxy.alive" && finding(.proxy)?.values.first == "country:DE", said(.proxy))
+        check("profile check: a time zone set elsewhere than the exit is found, with the fix that takes it from the connection",
+              finding(.timeZone)?.key == "check.timeZone.differs" && finding(.timeZone)?.values == ["America/New_York", "Europe/Berlin"]
+                  && finding(.timeZone)?.fix == .timeZoneFromConnection && run.attention >= 1,
+              said(.timeZone))
+
+        run.fix(.timeZoneFromConnection)
+        let fixed = try repository.loadConfiguration(id)
+        check("profile check: the fix changes the profile's settings, and is said to wait for the next start",
+              fixed.timeZoneIdentifier == nil && fixed.matchProxyLocation && run.fixesMade == [.timeZoneFromConnection] && run.fixError == nil,
+              "time zone \(fixed.timeZoneIdentifier ?? "nil"), follows \(fixed.matchProxyLocation), \(run.fixError ?? "no error")")
+
+        await run.restartAndRun()
+        check("profile check: after the restart the pages are in the exit's time zone, and the finding is gone",
+              finding(.timeZone)?.key == "check.timeZone.matches" && run.fixesMade.isEmpty, said(.timeZone))
+        if manager.isRunning(id) { try? await manager.stop(id) }
+    }
 
     /// What sites see, in this process: the snapshot's listener answers only its own pages and
     /// only to this Mac's loopback address; a profile's window (no proxy, its local requests
@@ -6598,6 +6693,47 @@ final class SelfTest {
               sameSiteListed && AutoFillPanel.current?.titles == ["ann"] && AutoFillPanel.current?.header?.contains("www.selftest.invalid") == true,
               "\(TabPasswordAutoFill.testFocusLog) \(AutoFillPanel.current?.titles ?? []) \(AutoFillPanel.current?.header ?? "nil")")
         AutoFillPanel.current?.dismiss()
+
+        // A one-time code: the site's login that has one is offered under a code's field, and the
+        // code that stands at that moment is filled — into one field, and into six boxes of a digit.
+        guard var withCode = vault.allEntries().first(where: { $0.username == "ann" && !$0.isConflictVersion }),
+              let generator = try? OneTimeCode.parse("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ") else {
+            check("passwords: a one-time code's field lists the site's logins that have a code", false, "no login to give a code to")
+            return
+        }
+        withCode.totp = generator
+        try vault.update(withCode)
+        _ = await open("http://login.selftest.invalid/pb-login?code=1")
+        _ = await autoFillWorld("return globalThis.__pbPasswords.suggest('#code');")
+        let codeListed = await waitUntil(timeout: 5) { AutoFillPanel.current != nil }
+        check("passwords: a one-time code's field lists the site's logins that have a code",
+              codeListed && AutoFillPanel.current?.titles.first?.contains("ann") == true,
+              "\(AutoFillPanel.current?.titles ?? []) focus: \(TabPasswordAutoFill.testFocusLog)")
+        // The code may turn over between the choice and the reading: either side of it is right.
+        let codeBefore = generator.code()
+        AutoFillPanel.current?.choose(at: 0)
+        let codesStanding = [codeBefore, generator.code()]
+        let codeFilled = await eventually(5) {
+            let values = await self.inputValues(webView, ["#code"])
+            return codesStanding.contains(values.first ?? "")
+        }
+        let codeRead = await inputValues(webView, ["#code"]).first ?? ""
+        check("passwords: choosing it fills the code that stands now", codeFilled,
+              "the field holds \(codeRead.count) characters")
+        _ = await autoFillWorld("return globalThis.__pbPasswords.suggest('#d0');")
+        let boxesListed = await waitUntil(timeout: 5) { AutoFillPanel.current != nil }
+        let boxesBefore = generator.code()
+        AutoFillPanel.current?.choose(at: 0)
+        let boxesStanding = [boxesBefore, generator.code()]
+        let boxes = (0..<6).map { "#d\($0)" }
+        let boxesFilled = await eventually(5) {
+            let values = await self.inputValues(webView, boxes)
+            return boxesStanding.contains(values.joined())
+        }
+        let boxesRead = await inputValues(webView, boxes).filter { !$0.isEmpty }.count
+        check("passwords: a page with one box a digit gets a digit of the code in each", boxesListed && boxesFilled,
+              "listed \(boxesListed), \(boxesRead) boxes hold a digit")
+        AutoFillPanel.current?.dismiss()
     }
 
     // MARK: Cookie import
@@ -7213,6 +7349,37 @@ final class SelfTest {
               navigated == "ok" && atTwo == two && back == "ok" && atForm == form && forward == "ok" && reload == "ok"
                   && driver.url == two && heading == "Page two",
               "link \(navigated) → \(atTwo?.lastPathComponent ?? "nil"); back \(back) → \(atForm?.lastPathComponent ?? "nil"); forward \(forward); reload \(reload) → \(driver.url?.lastPathComponent ?? "nil") \(heading ?? "nil")")
+
+        // Recording: what is done on the page — here by the driver, whose clicks and keys a page
+        // takes for a person's — comes out as a scenario's steps, with selectors that find the
+        // elements again, and the scenario made of them does the same when it is run.
+        var seen = ScenarioRecording()
+        session.startRecording { event in
+            switch event {
+            case let .loaded(address): _ = seen.loaded(address)
+            case let .acted(step): _ = seen.acted(step)
+            }
+        }
+        let recordedRun = await outcome {
+            try await driver.goto(form)
+            try await driver.waitFor("#late")
+            try await driver.click("#button")
+            try await driver.type("#field", "Hi")
+            try await driver.click("#button")
+        }
+        _ = await waitUntil(timeout: 5) { seen.steps.count >= 5 }
+        session.stopRecording()
+        let recordedLines = seen.steps.map { ScenarioRecording.line(for: $0, passwordNote: "") }
+        // The page in front when the recording began (page two) is its first step.
+        check("automation commands: a recording says the pages opened, the click and the typing, each with a selector that finds its element",
+              recordedRun == "ok" && recordedLines == ["await page.goto('\(two.absoluteString)');", "await page.goto('\(form.absoluteString)');",
+                                                      "await page.click('#button');", "await page.type('#field', 'Hi');",
+                                                      "await page.click('#button');"],
+              "\(recordedRun): \(recordedLines)")
+        _ = await outcome { try await driver.click("#button") }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        check("automation commands: after the recording is stopped nothing more is recorded", seen.steps.count == recordedLines.count,
+              "\(seen.steps.count) steps")
     }
 
     // MARK: The page cannot tell (PageInput)

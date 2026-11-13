@@ -118,8 +118,10 @@ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:50777/v1/profiles/Sho
 
 There is no remote-debugging protocol: WebKit's embedded web views hand none out, as Chromium-based
 browsers hand out CDP for Puppeteer or Playwright to attach to — and one would be visible to pages.
-Scripts drive pages through scenarios above, run inside the app; command by command driving from
-outside (for the JavaScript and Python libraries) comes later.
+Scripts drive pages through scenarios above, run inside the app — and, command by command from
+outside, through WebDriver: the same listener answers the W3C WebDriver protocol under
+`/wd/<token>/<profile>`, which Selenium speaks (docs/AUTOMATION.md, "WebDriver"; the profile's
+inspector gives its address to copy).
 
 ## Checked
 

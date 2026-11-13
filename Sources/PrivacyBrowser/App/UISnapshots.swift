@@ -275,6 +275,23 @@ enum UISnapshots {
             ProfileInspectorView(row: rows[1], info: inspected, actions: ProfileActions(), guardReady: true)
                 .background(Theme.sidebar)
         }.capture(into: folder)
+        // The whole inspector, taller than a window shows of it at once: its links and, at its end,
+        // the WebDriver address. And with the automation API off: no address, a row that leads
+        // to its settings.
+        let whole = CGSize(width: ProfilesScreen.inspectorWidth, height: 1500)
+        problems += await Shot(name: "inspector-whole", size: whole, titled: false) {
+            ProfileInspectorView(row: rows[1], info: inspected, actions: ProfileActions(), guardReady: true)
+                .background(Theme.sidebar)
+        }.capture(into: folder)
+        let apiOff: InspectorInfo = {
+            var info = inspected
+            info.webDriver = .apiOff
+            return info
+        }()
+        problems += await Shot(name: "inspector-whole-api-off", size: whole, titled: false) {
+            ProfileInspectorView(row: rows[1], info: apiOff, actions: ProfileActions(), guardReady: true)
+                .background(Theme.sidebar)
+        }.capture(into: folder)
         problems += await Shot(name: "profiles-inspector-unreadable", size: CGSize(width: 1400, height: 860), edges: true) {
             ProfilesPreview(rows: rows, showsInspector: true, selected: [rows[7].id])
         }.capture(into: folder)
@@ -296,7 +313,7 @@ enum UISnapshots {
         }.capture(into: folder)
         // The app's help (HelpView), as the sidebar's Help, the scenario editor's Commands and the
         // automation settings open it: a page of steps and code, the commands' table, the requests'.
-        for topic in [HelpTopic.scenarios, .commands, .api] {
+        for topic in [HelpTopic.scenarios, .commands, .api, .webdriver, .codes, .check] {
             problems += await Shot(name: "help-\(topic.rawValue)", size: CGSize(width: 1040, height: 760)) {
                 HelpView(topic: .constant(topic))
             }.capture(into: folder)
@@ -317,6 +334,62 @@ enum UISnapshots {
                           comparedWithSafari: comparedWithSafari, takenAt: Date(timeIntervalSince1970: 1_793_000_000))
             return snapshot
         }
+        // The profile's check: before it is run; with things to look at — one of them fixed and
+        // waiting for a restart —; and all in order.
+        func checked(_ findings: [ProfileCheck.Finding], fixed: Set<ProfileCheck.Fix> = []) -> (WhatSitesSee) -> ProfileCheckRun {
+            { taken in
+                let run = ProfileCheckRun(profileID: taken.profileID, snapshot: taken, environment: { nil })
+                if !findings.isEmpty { run.show(findings, at: Date(timeIntervalSince1970: 1_793_000_000), fixesMade: fixed) }
+                return run
+            }
+        }
+        var inOrder = ProfileCheck.Facts(configuration: ProfileConfiguration(proxy: ProxySettings(kind: .socks5, host: "203.0.113.7", port: 1080)),
+                                         hostSafariVersion: "26.6.2", webRTC: .throughProxy)
+        inOrder.page = ProfileCheck.Page(timeZone: "Europe/Berlin", language: "de-DE",
+                                         userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Safari/605.1.15",
+                                         screen: .init(width: 1512, height: 982), window: .init(width: 1280, height: 800))
+        inOrder.exit = ProxyLocation(timeZoneIdentifier: "Europe/Berlin", countryCode: "DE", proxyEndpoint: "socks5://203.0.113.7:1080",
+                                     exitIP: "203.0.113.7")
+        inOrder.exitCoordinate = .init(latitude: 52.52, longitude: 13.40)
+        inOrder.lookupAnswered = true
+        inOrder.network = .init()
+        var toLookAt = inOrder
+        toLookAt.configuration.timeZoneIdentifier = "America/New_York"
+        toLookAt.configuration.languageOverride = "ru-RU"
+        toLookAt.configuration.geolocation = .fixed(latitude: 40.71, longitude: -74.0, accuracyMeters: 25)
+        toLookAt.page?.timeZone = "America/New_York"
+        toLookAt.page?.language = "ru-RU"
+        toLookAt.page?.userAgent = inOrder.page?.userAgent?.replacingOccurrences(of: "Version/26.6", with: "Version/18.4")
+        toLookAt.network = nil
+        let checkedAt = Date(timeIntervalSince1970: 1_793_000_000)
+        problems += await Shot(name: "profile-check-empty", size: WhatSitesSeeView.size, titled: false) {
+            WhatSitesSeeView(name: "Northwind", snapshot: seen(), check: checked([]))
+        }.capture(into: folder)
+        // While it runs — its second step — and a check that could not be made.
+        func stopped(at step: ProfileCheckRun.Step) -> (WhatSitesSee) -> ProfileCheckRun {
+            { taken in
+                let run = ProfileCheckRun(profileID: taken.profileID, snapshot: taken, environment: { nil })
+                run.show(step: step)
+                return run
+            }
+        }
+        problems += await Shot(name: "profile-check-running", size: WhatSitesSeeView.size, titled: false) {
+            WhatSitesSeeView(name: "Northwind", snapshot: seen(), check: stopped(at: .exit))
+        }.capture(into: folder)
+        problems += await Shot(name: "profile-check-failed", size: WhatSitesSeeView.size, titled: false) {
+            WhatSitesSeeView(name: "Northwind", snapshot: seen(), check: stopped(at: .failed(L("whatSites.error.profileSilent"))))
+        }.capture(into: folder)
+        problems += await Shot(name: "profile-check", size: WhatSitesSeeView.size, titled: false) {
+            WhatSitesSeeView(name: "Northwind", snapshot: seen(),
+                             check: checked(ProfileCheck.findings(toLookAt, now: checkedAt), fixed: [.timeZoneFromConnection]), showProxy: {})
+        }.capture(into: folder)
+        problems += await Shot(name: "profile-check-ok", size: WhatSitesSeeView.size, titled: false) {
+            WhatSitesSeeView(name: "Northwind", snapshot: seen(), check: checked(ProfileCheck.findings(inOrder, now: checkedAt)))
+        }.capture(into: folder)
+        problems += await Shot(name: "narrow-profile-check", size: narrow(WhatSitesSeeView.size), titled: false) {
+            WhatSitesSeeView(name: "Northwind", snapshot: seen(),
+                             check: checked(ProfileCheck.findings(toLookAt, now: checkedAt))).environment(\.sheetRoom, narrowRoom)
+        }.capture(into: folder)
         problems += await Shot(name: "what-sites-see-empty", size: WhatSitesSeeView.size, titled: false) {
             WhatSitesSeeView(name: "Northwind", snapshot: WhatSitesSee(profileID: UUID(), manager: { nil }, launch: { _ in }))
         }.capture(into: folder)
@@ -510,11 +583,28 @@ enum UISnapshots {
         // The other sheets, as they open.
         let model = AppModel()
         if let northwind = sampleSummary(name: "Northwind", id: rows[1].id) {
-            problems += await Shot(name: "sheet-passwords-locked", size: CGSize(width: 780, height: 560), titled: false) {
+            problems += await Shot(name: "sheet-passwords-locked", size: CGSize(width: 780, height: 620), titled: false) {
                 PasswordListView(profile: northwind).environmentObject(model)
             }.capture(into: folder)
-            problems += await Shot(name: "narrow-sheet-passwords-locked", size: narrow(CGSize(width: 780, height: 560)), titled: false) {
+            problems += await Shot(name: "narrow-sheet-passwords-locked", size: narrow(CGSize(width: 780, height: 620)), titled: false) {
                 PasswordListView(profile: northwind).environmentObject(model).environment(\.sheetRoom, narrowRoom)
+            }.capture(into: folder)
+            // A login with a one-time code, at a moment that does not move (RFC 6238's own secret
+            // at second 44: the code is 287 082, with sixteen seconds left of thirty), and the
+            // part of the editor a code is added in.
+            let logins = [
+                PasswordEntry(origin: "https://bank.example", username: "alice@example.com", password: "correct horse",
+                              note: "Two-step sign-in turned on in November.", updatedAt: Date(timeIntervalSince1970: 1_760_000_000),
+                              device: "MacBook Air",
+                              totp: OneTimeCode(secret: Data("12345678901234567890".utf8), issuer: "Example Bank", account: "alice@example.com")),
+                PasswordEntry(origin: "https://shop.example", username: "alice", password: "battery staple",
+                              updatedAt: Date(timeIntervalSince1970: 1_760_000_000)),
+            ]
+            problems += await Shot(name: "sheet-passwords-code", size: CGSize(width: 780, height: 620), titled: false) {
+                PasswordListView(profile: northwind, codeDate: Date(timeIntervalSince1970: 44), sample: logins).environmentObject(model)
+            }.capture(into: folder)
+            problems += await Shot(name: "sheet-passwords-code-editor", size: CGSize(width: 780, height: 620), titled: false) {
+                PasswordListView(profile: northwind, sample: logins, sampleEditing: true).environmentObject(model)
             }.capture(into: folder)
             problems += await Shot(name: "sheet-cookie-import", size: CGSize(width: 680, height: 560), titled: false) {
                 CookieImportView(profile: northwind).environmentObject(model)
@@ -545,10 +635,59 @@ enum UISnapshots {
             ChangePasswordView().environmentObject(model)
         }.capture(into: folder)
         problems += await settings(into: folder, model: model)
+        // The choice of a profile's glyph: a section of signs, and one of emoji.
+        var glyphDraft = sampleDraft()
+        glyphDraft.avatarLetters = "₿"
+        glyphDraft.avatarColor = 2
+        let glyphOwner = UISnapshots.sampleRows()[1].id
+        problems += await Shot(name: "avatar-glyphs-crypto", size: CGSize(width: 620, height: 440)) {
+            AvatarGlyphPicker(draft: .constant(glyphDraft), avatarID: glyphOwner)
+        }.capture(into: folder)
+        problems += await Shot(name: "avatar-glyphs-faces", size: CGSize(width: 620, height: 440)) {
+            AvatarGlyphPicker(draft: .constant(glyphDraft), avatarID: glyphOwner, sectionKey: "faces")
+        }.capture(into: folder)
         // The scenario editor: a scenario chosen, its code with the commands beside it.
         let scenario = Scenario(name: L("scenarios.untitled"), source: L("scenarios.template"))
         problems += await Shot(name: "scenarios", size: CGSize(width: 1100, height: 760)) {
             ScenariosView(sample: scenario).environmentObject(model)
+        }.capture(into: folder)
+        // A recording going on: its steps as they come, in place of the run's log.
+        let recordedSteps = [
+            RecordedStep(.goto, value: "https://shop.example/login"),
+            RecordedStep(.fill, selector: "#email", value: "alice@example.com"),
+            RecordedStep(.fill, selector: "input[name=\"password\"]", secret: true),
+            RecordedStep(.click, selector: "text=Sign in"),
+            RecordedStep(.load),
+            RecordedStep(.click, selector: "[data-testid=\"orders\"]"),
+        ]
+        problems += await Shot(name: "scenarios-recording", size: CGSize(width: 1100, height: 760)) {
+            ScenariosView(sample: scenario, sampleRecording: recordedSteps).environmentObject(model)
+        }.capture(into: folder)
+        // Runs by the clock: two schedules, none yet, and the form one is added in.
+        let clockProfiles = [(id: rows[0].id, name: "Personal"), (id: rows[1].id, name: "Northwind")]
+        var daily = ScenarioSchedule(action: .scenario(scenario.id), profileID: rows[1].id, when: .daily(hour: 10, minute: 0), jitterMinutes: 15)
+        daily.nextRunAt = Date(timeIntervalSince1970: 1_793_008_000)
+        daily.lastRunAt = Date(timeIntervalSince1970: 1_792_921_000)
+        daily.lastResult = .started
+        var hourly = ScenarioSchedule(action: .warmUp, profileID: rows[0].id, when: .every(hours: 6), jitterMinutes: 30)
+        hourly.nextRunAt = Date(timeIntervalSince1970: 1_793_015_000)
+        hourly.lastResult = .missed
+        problems += await Shot(name: "scenarios-schedule", size: CGSize(width: 860, height: 760)) {
+            ScenarioSchedulesPane(sample: .init(schedules: [daily, hourly], scenarios: [scenario], profiles: clockProfiles, editing: nil))
+                .background(Theme.surface)
+                .environmentObject(model)
+        }.capture(into: folder)
+        problems += await Shot(name: "scenarios-schedule-empty", size: CGSize(width: 860, height: 760)) {
+            ScenarioSchedulesPane(sample: .init(schedules: [], scenarios: [scenario], profiles: clockProfiles, editing: nil))
+                .background(Theme.surface)
+                .environmentObject(model)
+        }.capture(into: folder)
+        problems += await Shot(name: "scenarios-schedule-form", size: CGSize(width: 860, height: 760)) {
+            ScenarioSchedulesPane(sample: .init(schedules: [daily], scenarios: [scenario], profiles: clockProfiles,
+                                                editing: ScenarioSchedule(action: .warmUp, profileID: rows[0].id,
+                                                                          when: .daily(hour: 9, minute: 30), jitterMinutes: 15)))
+                .background(Theme.surface)
+                .environmentObject(model)
         }.capture(into: folder)
         problems += await proxyList(into: folder)
         // A real browser window of a running profile (WebKit, toolbar, tab strip, start page).
@@ -1281,7 +1420,8 @@ enum UISnapshots {
         check.udp = .unsupported
         return InspectorInfo(details: ProfileDetails(configuration),
                              counts: ProfileCounts(logins: 6, bookmarks: 41, historyEntries: 271, syncedCookies: 1_284),
-                             proxyCheck: check)
+                             proxyCheck: check,
+                             webDriver: .address("http://127.0.0.1:50777/wd/kT3vQ9mXw2LrB7sYp0Zc/6B0E3C1F-9A2D-4E7B-8C15-0D4F6A7B8C9D"))
     }
 
     /// The sample vault's tags' colours: some coloured, some not, as a person leaves them.

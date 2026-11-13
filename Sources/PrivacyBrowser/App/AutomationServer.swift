@@ -165,7 +165,44 @@ final class AutomationServer {
         }
     }
 
+    /// The WebDriver's sessions (`/wd/…`), on the same listener and under the same token.
+    var webDriver: WebDriverService?
+
+    /// A WebDriver request (docs/AUTOMATION.md, "WebDriver"): the token is in the address, the
+    /// answer is the protocol's `{"value": …}`.
+    private func answerWebDriver(_ request: AutomationHTTP.Request, on connection: NWConnection) {
+        func reply(_ status: Int, _ body: Data) {
+            send(AutomationHTTP.Response(status: status, contentType: "application/json; charset=utf-8", body: body), on: connection)
+        }
+        if let refusal = AutomationGate.webDriverRefusal(of: request, port: listeningPort) {
+            reply(refusal.status, refusal.body)
+            return
+        }
+        switch WebDriverRoute.parse(method: request.method, path: request.path) {
+        case .failure(let error):
+            reply(error.status, error.body)
+        case .success(let parsed):
+            guard AutomationGate.tokenMatches(parsed.token, settings.token), let webDriver else {
+                let refusal = WebDriverError("unknown error", 401, "The token in the address is missing or wrong (…/wd/<token>/<profile>).")
+                Self.log.notice("WebDriver refused a request: \(refusal.status)")
+                reply(refusal.status, refusal.body)
+                return
+            }
+            let id = ObjectIdentifier(connection)
+            answering.insert(id)
+            Task { @MainActor in
+                let answer = await webDriver.handle(parsed, body: request.body)
+                self.answering.remove(id)
+                reply(answer.status, answer.body)
+            }
+        }
+    }
+
     private func answer(_ request: AutomationHTTP.Request, on connection: NWConnection) {
+        if WebDriverRoute.handles(request.path) {
+            answerWebDriver(request, on: connection)
+            return
+        }
         if let refusal = AutomationGate.refusal(of: request, token: settings.token, port: listeningPort) {
             Self.log.notice("Automation API refused a request: \(refusal.status)")
             send(refusal, on: connection)

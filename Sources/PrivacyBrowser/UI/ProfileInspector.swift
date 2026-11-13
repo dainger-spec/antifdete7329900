@@ -8,6 +8,20 @@ struct InspectorInfo {
     var details: ProfileDetails?
     var counts: ProfileCounts?
     var proxyCheck: ProxyCheckResult?
+    /// The profile's WebDriver address, or why there is none to show; nil: not shown at all (a
+    /// build without the automation API).
+    var webDriver: WebDriver?
+
+    enum WebDriver: Equatable {
+        /// The address a WebDriver client (Selenium) is given for this profile.
+        case address(String)
+        /// The automation API is off: turned on, it listens here.
+        case apiOff
+        /// The automation API is on but does not listen (its port is taken, say).
+        case apiFailed
+        /// The plan has no automation.
+        case notInPlan
+    }
 }
 
 /// The inspector at the right of the Profiles window (the design's `insp`): what the selected profile
@@ -60,6 +74,8 @@ struct ProfileInspectorView: View {
                     }
                 }
                 links
+                // Only an address makes a section: any other state is a row of the links above it.
+                if case let .address(address)? = info.webDriver, row.exit != .unreadable { automation(address) }
             }
         }
         .scrollIndicators(.automatic)
@@ -123,6 +139,20 @@ struct ProfileInspectorView: View {
                 }
             }
             .padding(.top, 16)
+            // The profile's check (`WhatSitesSeeView`), under its own name and on the first screen.
+            // R1: without its settings there is nothing to check.
+            if row.exit != .unreadable {
+                Button { actions.whatSitesSee(row.id) } label: {
+                    HStack(spacing: 4) {
+                        Text(L("inspector.checkProfile"))
+                        Image(systemName: "arrow.right").font(.system(size: 10, weight: .semibold))
+                    }
+                    .font(.lumenBody)
+                    .foregroundStyle(Theme.textPrimary)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 14)
+            }
         }
         .padding(.horizontal, 24)
         .padding(.top, 24)
@@ -237,12 +267,69 @@ struct ProfileInspectorView: View {
         return BuildKind.carriesGuard ? L("inspector.webRTC.guardNotReady") : L("inspector.webRTC.noGuardInBuild")
     }
 
+    // MARK: Automation
+
+    /// The address a WebDriver client drives this profile at, to copy (docs/AUTOMATION.md,
+    /// "WebDriver"). It holds the API's token, so it is shown as the settings show the token, as
+    /// dots, on one line, and is not selectable: a selection would copy the dots, and without the
+    /// concealed mark. Copy gives the whole address.
+    private func automation(_ address: String) -> some View {
+        section(L("inspector.webDriver")) {
+            Text(verbatim: Self.tokenHidden(address)) // l10n: not text
+                .font(.lumenMono)
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .frame(height: 32)
+                .background(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).fill(Theme.field))
+                .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).strokeBorder(Theme.fieldBorder, lineWidth: 1))
+                .accessibilityLabel(L("inspector.webDriver.hidden"))
+            LumenCopyButton(text: address)
+                .padding(.top, 8)
+            Text(L("inspector.webDriver.note"))
+                .font(.lumenSecondary)
+                .foregroundStyle(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 6)
+        }
+    }
+
+    /// The address as it is shown: the API's token as dots. Split at "/", an address
+    /// (`WebDriverRoute.address`) is "http:", "", host and port, "wd", the token, the profile; the
+    /// token is base64url and has no "/" of its own. An address of any other shape is not shown at
+    /// all: where its token is cannot be told.
+    private static func tokenHidden(_ address: String) -> String {
+        var parts = address.components(separatedBy: "/")
+        guard parts.count == 6 else { return String(repeating: "•", count: 12) }
+        parts[4] = String(repeating: "•", count: 6)
+        return parts.joined(separator: "/")
+    }
+
+    /// With no address to show: what stands in the way, in a word, the same at length for the
+    /// tooltip, and what opens the place where it is settled (the API's settings, the account).
+    private var webDriverState: (note: String, warns: Bool, help: String, action: () -> Void)? {
+        switch info.webDriver {
+        case .apiOff?:
+            return (note: L("inspector.webDriver.state.off"), warns: false,
+                    help: L("inspector.webDriver.off"), action: actions.openAutomation)
+        case .apiFailed?:
+            return (note: L("inspector.webDriver.state.failed"), warns: true,
+                    help: L("inspector.webDriver.failed"), action: actions.openAutomation)
+        case .notInPlan?:
+            return (note: L("inspector.webDriver.state.notInPlan"), warns: true,
+                    help: L("inspector.webDriver.notInPlan"), action: actions.openAccount)
+        case .address?, nil:
+            return nil
+        }
+    }
+
     // MARK: What it keeps
 
     private var links: some View {
         let counts = info.counts
         return VStack(spacing: 0) {
-            InspectorLink(title: L("inspector.whatSitesSee"), count: nil) { actions.whatSitesSee(row.id) }
             InspectorLink(title: L("inspector.passwords"), count: counts?.logins) { actions.passwords(row.id) }
             // Bookmarks and history each with its own count: one number for both read, on the owner's
             // Mac (4 November), as bookmarks the person never made — they were the history's entries.
@@ -259,6 +346,12 @@ struct ProfileInspectorView: View {
                 Button(L("profiles.row.exportCookies")) { actions.exportCookies(row.id) }
             }
             InspectorLink(title: L("profiles.row.warmUp"), count: nil) { actions.warmUp(row.id) }
+            // No WebDriver address to show: one quiet row that says why and leads to where that is
+            // settled. R1: a profile that does not start is not driven either.
+            if row.exit != .unreadable, let state = webDriverState {
+                InspectorLink(title: L("inspector.webDriver.link"), count: nil, note: state.note, warns: state.warns, action: state.action)
+                    .help(state.help)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -328,22 +421,31 @@ struct ProfileInspectorView: View {
     }
 }
 
-/// One of the inspector's links (the design's `link`): its title, a count, a chevron; a tone of
-/// white under the pointer.
+/// One of the inspector's links (the design's `link`): its title, a count or a state, a chevron; a
+/// tone of white under the pointer.
 private struct InspectorLink: View {
     let title: String
     let count: Int?
+    /// A state said at the row's end ("API off"); amber when it wants the person.
+    var note: String? = nil
+    var warns = false
     let action: () -> Void
     @State private var hovered = false
 
     var body: some View {
         Button(action: action) {
-            InspectorLinkLabel(title: title, count: count, hovered: hovered)
+            InspectorLinkLabel(title: title, count: count, note: note, warns: warns, hovered: hovered)
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .animation(Motion.hover(hovered), value: hovered)
-        .accessibilityLabel(count.map { "\(title), \($0)" } ?? title)
+        .accessibilityLabel(spoken)
+    }
+
+    /// The row as VoiceOver reads it: the title, then the count and the state it has.
+    private var spoken: String {
+        let parts: [String?] = [title, count.map { "\($0)" }, note]
+        return parts.compactMap { $0 }.joined(separator: ", ")
     }
 }
 
@@ -370,14 +472,20 @@ private struct InspectorMenuLink<Items: View>: View {
 private struct InspectorLinkLabel: View {
     let title: String
     let count: Int?
+    /// A state said at the row's end ("API off"); amber when it wants the person.
+    var note: String? = nil
+    var warns = false
     let hovered: Bool
 
     var body: some View {
         HStack(spacing: 10) {
-            Text(title).font(.lumenBody).foregroundStyle(Theme.textPrimary)
+            Text(title).font(.lumenBody).foregroundStyle(Theme.textPrimary).lineLimit(1)
             Spacer(minLength: 8)
             if let count {
                 Text(verbatim: "\(count)").font(.lumenSecondary).foregroundStyle(Theme.textTertiary).monospacedDigit()
+            }
+            if let note {
+                Text(note).font(.lumenSecondary).foregroundStyle(warns ? Theme.warning : Theme.textTertiary).lineLimit(1)
             }
             Image(systemName: "chevron.right")
                 .font(.system(size: 10, weight: .semibold))
@@ -473,5 +581,35 @@ private extension View {
     @ViewBuilder
     func help(ifAny text: String?) -> some View {
         if let text { help(text) } else { self }
+    }
+}
+
+/// "Copy", which says "Copied" for a moment. What it copies holds the API's token (the token
+/// itself, a WebDriver address, a command with it), so it goes to the clipboard marked as
+/// concealed, as a password does (clipboard managers skip it).
+struct LumenCopyButton: View {
+    let text: String
+    /// What the button says before it is pressed.
+    var title = L("passwords.copy")
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
+            pasteboard.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+            copied = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { copied = false }
+        } label: {
+            // Both titles are laid out and one of them is shown: the button keeps the wider one's
+            // width, so what stands beside it does not move while it says "Copied".
+            ZStack {
+                Label(title, systemImage: "doc.on.doc").opacity(copied ? 0 : 1)
+                Label(L("passwords.code.copied"), systemImage: "checkmark").opacity(copied ? 1 : 0)
+            }
+        }
+        .buttonStyle(.lumenSecondary)
+        .accessibilityLabel(copied ? L("passwords.code.copied") : title)
     }
 }

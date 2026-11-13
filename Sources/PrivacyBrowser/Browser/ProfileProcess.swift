@@ -73,8 +73,9 @@ final class ProfileProcess {
     func send(_ command: ProfileCommand) {
         guard let commands, process.isRunning, let data = ProfileChannel.encode(command) else { return }
         switch command {
-        // A scenario's run opens a window the person sees.
-        case .activate, .openWindow, .openURL, .showLibrary, .showPasswords, .runScenario: isForWarmUpOnly = false
+        // A scenario's run, a recording and a WebDriver session have a window the person sees.
+        case .activate, .openWindow, .openURL, .showLibrary, .showPasswords, .runScenario, .startRecording, .webDriver:
+            isForWarmUpOnly = false
         default: break
         }
         do {

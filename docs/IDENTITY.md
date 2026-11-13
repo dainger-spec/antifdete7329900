@@ -73,7 +73,10 @@ What is tied to the old bundle ID, and stays behind:
 after the bundle ID: `~/Library/Containers/dev.local.PrivacyBrowser`. Lumen, sandboxed or not, does
 not open it: its profiles stay there, for the old build. To carry one, export it there (its row in
 the Profiles window → Export Profile…, a `.pbprofile` with a password of its own) and import it in
-Lumen.
+Lumen. An import does not take three of the file's settings — the proxy's bypass list, Safe
+Browsing, and local requests allowed (`ProfileTransfer.LeftOut`, the security audit's APP-08: a file
+is often someone else's, and each sends something around the proxy); the import window names those
+it leaves out, and they are set again in the profile's editor.
 
 **The keychain.** The app's code keeps nothing in a keychain, and a profile's process must neither
 keep anything in one nor be shown anything of one, whatever the app's signature holds. There are two

@@ -11,11 +11,35 @@ public struct ProxyExitDetails: Equatable, Sendable {
     public var city: String?
     public var asn: String?
     public var organization: String?
+    /// Where the service places the address, when it says: to a city at best. What a fixed
+    /// geolocation is held against (`ProfileCheck`).
+    public var latitude: Double?
+    public var longitude: Double?
 
     public init(city: String? = nil, asn: String? = nil, organization: String? = nil) {
         self.city = city
         self.asn = asn
         self.organization = organization
+    }
+
+    /// The place in a service's answer, as the services here write it: `"loc": "52.52,13.40"`
+    /// (ipinfo.io), or `latitude` and `longitude` as numbers or as text (geojs.io, ipwho.is,
+    /// ipapi.co). Nil when there is none, or one that is not on the globe.
+    public static func coordinates(in data: Data) -> (latitude: Double, longitude: Double)? {
+        guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        func number(_ value: Any?) -> Double? {
+            if let text = value as? String { return Double(text.trimmingCharacters(in: .whitespaces)) }
+            return (value as? NSNumber)?.doubleValue
+        }
+        var found: (Double, Double)?
+        if let pair = (object["loc"] as? String)?.split(separator: ","), pair.count == 2,
+           let latitude = number(String(pair[0])), let longitude = number(String(pair[1])) {
+            found = (latitude, longitude)
+        } else if let latitude = number(object["latitude"] ?? object["lat"]), let longitude = number(object["longitude"] ?? object["lon"]) {
+            found = (latitude, longitude)
+        }
+        guard let found, (-90...90).contains(found.0), (-180...180).contains(found.1), found.0 != 0 || found.1 != 0 else { return nil }
+        return (latitude: found.0, longitude: found.1)
     }
 
     public static func parse(_ data: Data, cityKeyPath: [String]?, asnKeyPath: [String]?,
@@ -32,6 +56,10 @@ public struct ProxyExitDetails: Equatable, Sendable {
             return String(string.prefix(80))
         }
         var details = ProxyExitDetails(city: text(value(at: cityKeyPath)))
+        if let place = coordinates(in: data) {
+            details.latitude = place.latitude
+            details.longitude = place.longitude
+        }
         // The number: as a number, as digits, or as the "AS…" a text starts with.
         let asnValue = value(at: asnKeyPath)
         if let number = asnValue as? Int ?? (asnValue as? NSNumber)?.intValue, number > 0 {

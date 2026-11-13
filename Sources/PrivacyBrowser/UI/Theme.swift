@@ -556,7 +556,9 @@ struct ProfileAvatar: View {
         let large = size >= 44
         let colors = Self.colors(for: id, style: style)
         Text(glyph)
-            .font(.system(size: size * (glyph.count > 1 ? 0.34 : 0.4), weight: .semibold))
+            // An emoji fills more of the circle than a letter does: it has no colour of the
+            // palette's to stand out with.
+            .font(.system(size: size * (isEmoji ? 0.5 : (glyph.count > 1 ? 0.34 : 0.4)), weight: .semibold))
             .foregroundStyle(Color(hex: colors.text))
             .frame(width: size, height: size)
             .background(Circle().fill(Color(hex: colors.fill)))
@@ -572,6 +574,11 @@ struct ProfileAvatar: View {
                 }
             }
             .accessibilityHidden(true)
+    }
+
+    /// The glyph is a picture (an emoji, a flag), not letters or a sign drawn in the text's colour.
+    private var isEmoji: Bool {
+        glyph.unicodeScalars.contains { $0.properties.isEmojiPresentation || $0.value == 0xFE0F }
     }
 
     /// The letters chosen, else the first letter of the name.
