@@ -1576,6 +1576,14 @@ latest four; the sheet, the rest.
 Both stay on this Mac: not synced, not in a profile export; the profile's deletion takes them with
 its folder.
 
+**Duplicate.** **⋯ → Duplicate…** makes up to 50 new profiles set up as one is (`ProfileClone`):
+its settings, and nothing of its own — no data (a new profile has none), not where its proxy came
+out at its launches, not the person's notes, not its glyph's colour. Each copy gets the original's
+proxy, none, or one of the list in turn: those no profile uses yet first (a mobile proxy is meant
+for one profile), then those that answered at their last check, of one country when asked. A
+profile whose time zone and language are set by hand keeps them in its copies, whatever country
+their proxies are in; the sheet says so.
+
 ## 8d. Paste as Typed
 
 ⌃⌘V types the clipboard's text into the page's focused field instead of pasting it, for a field

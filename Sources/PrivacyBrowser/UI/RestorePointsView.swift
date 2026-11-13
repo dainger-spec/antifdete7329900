@@ -236,6 +236,7 @@ struct JournalLine: View {
         case .ipChanged?: return "arrow.triangle.2.circlepath"
         case .restorePointMade?: return "clock.arrow.circlepath"
         case .restored?: return "arrow.uturn.backward"
+        case .copied?: return "plus.square.on.square"
         case nil: return "circle"
         }
     }
@@ -255,6 +256,7 @@ struct JournalLine: View {
         case .ipChanged?: return with("journal.ipChanged", "journal.ipChanged.plain")
         case .restorePointMade?: return with("journal.restorePointMade", "journal.restorePointMade.plain")
         case .restored?: return with("journal.restored", "journal.restored.plain")
+        case .copied?: return with("journal.copied", "journal.copied.plain")
         case nil: return L("journal.other")
         }
     }

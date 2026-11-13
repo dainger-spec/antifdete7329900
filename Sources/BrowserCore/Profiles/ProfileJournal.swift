@@ -37,6 +37,8 @@ public struct ProfileJournal: Codable, Equatable, Sendable {
         case ipChanged
         case restorePointMade
         case restored
+        /// Made as a copy of another profile (`ProfileClone`); the detail is that one's name.
+        case copied
     }
 
     public static let maximumEvents = 300

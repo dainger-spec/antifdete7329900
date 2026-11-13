@@ -117,6 +117,7 @@ struct ProfileListView: View {
     @State private var importingCookiesFor: ProfileSummary?
     @State private var warmingUp: ProfileSummary?
     @State private var restoringFor: ProfileSummary?
+    @State private var duplicating: ProfileSummary?
     @State private var whatSitesSeeFor: ProfileSummary?
     @State private var warmingUpSeveral = false
     /// The profiles the warm-up queue opens with ticked (the selection's bar).
@@ -157,6 +158,7 @@ struct ProfileListView: View {
             .sheet(item: $warmingUp) { profile in WarmUpView(profile: profile) }
             // What it changes reaches the inspector through the journal (`AppModel.recordInJournal`).
             .sheet(item: $restoringFor) { profile in RestorePointsView(profile: profile) }
+            .sheet(item: $duplicating) { profile in DuplicateProfileView(profile: profile) }
             .sheet(item: $whatSitesSeeFor) { profile in
                 WhatSitesSeeView(name: profile.name, snapshot: WhatSitesSee(profileID: profile.id, manager: { model.manager },
                                                                             launch: { await model.launch($0) }),
@@ -549,6 +551,7 @@ struct ProfileListView: View {
             exportCookies: { id in exportingCookies = summary(id) },
             warmUp: { id in warmingUp = summary(id) },
             restorePoints: { id in restoringFor = summary(id) },
+            duplicate: { id in duplicating = summary(id) },
             whatSitesSee: { id in whatSitesSeeFor = summary(id) },
             exportProfile: { id in exporting = summary(id) },
             importProfile: { importingProfile = true },
@@ -778,6 +781,8 @@ struct ProfileActions {
     var warmUp: (UUID) -> Void = { _ in }
     /// The profile's restore points and journal (`RestorePointsView`).
     var restorePoints: (UUID) -> Void = { _ in }
+    /// Copies of the profile (`DuplicateProfileView`).
+    var duplicate: (UUID) -> Void = { _ in }
     /// What a page measures in the profile next to Safari (`WhatSitesSeeView`).
     var whatSitesSee: (UUID) -> Void = { _ in }
     var exportProfile: (UUID) -> Void = { _ in }
@@ -2023,6 +2028,8 @@ private struct ProfileMenuItems: View {
             Button(L("profiles.row.library")) { actions.library(row.id) }
         }
         Button(L("profiles.row.edit")) { actions.edit(row.id) }
+        Button(L("profiles.row.duplicate")) { actions.duplicate(row.id) }
+            .disabled(row.exit == .unreadable)
         Button(L("profiles.row.check")) { actions.whatSitesSee(row.id) }
         Button(L("profiles.row.passwords")) { actions.passwords(row.id) }
         Button(L("profiles.row.importCookies")) { actions.importCookies(row.id) }

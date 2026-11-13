@@ -735,6 +735,55 @@ final class AppModel: ObservableObject {
         return summary.id
     }
 
+    /// Where the copies of a profile get their proxies (`duplicateProfile`).
+    enum CopyProxies: Hashable {
+        /// The original's.
+        case same
+        /// The list's, one each in turn (`ProfileClone.proxies`), of a country when one is given.
+        case fromList(country: String?)
+        /// None: direct.
+        case none
+    }
+
+    /// Makes `count` copies of profile `id` (`ProfileClone`): its settings, nothing of its data,
+    /// each with its proxy as `proxies` says. Returns the profiles made and, when it stopped
+    /// before the last (the plan's limit, a write that failed), why.
+    func duplicateProfile(_ id: UUID, count: Int, proxies: CopyProxies) -> (made: [UUID], problem: String?) {
+        guard let repository else { return ([], nil) }
+        var made: [UUID] = []
+        defer { if !made.isEmpty { refresh() } }
+        do {
+            try refuseWhileTheIndexIsUnreadable(repository)
+            let original = try repository.loadConfiguration(id)
+            let originalName = try repository.summary(for: id).name
+            let count = min(max(count, 1), ProfileClone.maximumCopies)
+            let names = ProfileClone.names(for: originalName, count: count, taken: profiles.map(\.name))
+            let chosen: [ProxySettings?]
+            switch proxies {
+            case .same:
+                chosen = Array(repeating: original.proxy, count: count)
+            case .none:
+                chosen = Array(repeating: nil, count: count)
+            case .fromList(let country):
+                let used = Set(details.values.compactMap(\.proxyIdentity))
+                let picked = ProfileClone.proxies(from: proxyList?.entries ?? [], count: count, country: country, used: used)
+                guard !picked.isEmpty else { return ([], L("duplicate.error.noProxies")) }
+                chosen = picked.map(\.proxy)
+            }
+            for (name, proxy) in zip(names, chosen) {
+                // The plan's limit counts the profiles made so far.
+                if !made.isEmpty { refresh() }
+                if let refusal = license.refusalToCreate() { return (made, refusal.text) }
+                let summary = try repository.create(name: name, configuration: ProfileClone.configuration(from: original, proxy: proxy))
+                made.append(summary.id)
+                recordInJournal(.copied, detail: originalName, for: summary.id)
+            }
+            return (made, nil)
+        } catch {
+            return (made, errorText(error))
+        }
+    }
+
     func configuration(for id: UUID) throws -> ProfileConfiguration {
         guard let repository else { throw CoreError.vaultNotFound }
         return try repository.loadConfiguration(id)
@@ -1652,8 +1701,11 @@ struct ProfileDetails: Equatable {
     var window: String
     var syncsCookies: Bool
     var historyPolicy: HistoryStore.Policy
+    /// Its time zone and language follow where its proxy comes out (`matchProxyLocation`).
+    var followsProxyLocation: Bool
 
     init(_ configuration: ProfileConfiguration) {
+        followsProxyLocation = configuration.matchProxyLocation
         proxyEndpoint = configuration.proxy.map { "\($0.host):\($0.port)" }
         proxyIdentity = configuration.proxy.map(ProxyList.identity(of:))
         exitCountryCode = configuration.rememberedProxyLocation?.countryCode
