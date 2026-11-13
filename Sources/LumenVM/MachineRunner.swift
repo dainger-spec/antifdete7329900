@@ -16,6 +16,30 @@ final class MachineNetwork {
     private let network: VMNetwork?
     private let descriptor: Int32
 
+    /// The card's address when the request names none that reads: the same one for the card and
+    /// for the network at its other end, which answers no other (its DHCP gives the guest its
+    /// address by it).
+    static let fallbackMACAddress = "02:1a:11:00:00:02"
+
+    /// The address the machine's card has: the profile's, or the fallback.
+    static func macAddress(of request: VMHelperRequest) -> String {
+        guard let text = request.macAddress, VZMACAddress(string: text) != nil, VMNetMAC(string: text) != nil else {
+            return fallbackMACAddress
+        }
+        return text
+    }
+
+    /// Each connection of the guest is a socket of this process, and a process starts with room
+    /// for 256 descriptors: a browser with a few tabs open has more connections than that.
+    static func raiseDescriptorLimit() {
+        var limit = rlimit()
+        guard getrlimit(RLIMIT_NOFILE, &limit) == 0 else { return }
+        let wanted = min(rlim_t(8192), limit.rlim_max)
+        guard limit.rlim_cur < wanted else { return }
+        limit.rlim_cur = wanted
+        _ = setrlimit(RLIMIT_NOFILE, &limit)
+    }
+
     init(request: VMHelperRequest) throws {
         if request.network == .direct {
             attachment = VZNATNetworkDeviceAttachment()
@@ -35,7 +59,8 @@ final class MachineNetwork {
         attachment = VZFileHandleNetworkDeviceAttachment(fileHandle: FileHandle(fileDescriptor: pair[0], closeOnDealloc: true))
         descriptor = pair[1]
 
-        let guestMAC = request.macAddress.flatMap(VMNetMAC.init(string:)) ?? VMNetMAC(bytes: [0x02, 0x1A, 0x11, 0x00, 0x00, 0x02])
+        Self.raiseDescriptorLimit()
+        let guestMAC = VMNetMAC(string: Self.macAddress(of: request)) ?? VMNetMAC(bytes: [0x02, 0x1A, 0x11, 0x00, 0x00, 0x02])
         // The guest's address on its own little network, as a Mac has one behind a home router:
         // 192.168.1.x, x from its card's address so that it stays the same from start to start.
         let last = 2 + guestMAC.bytes.reduce(0) { ($0 &* 31 &+ Int($1)) % 200 }

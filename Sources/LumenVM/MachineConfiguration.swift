@@ -66,7 +66,8 @@ enum MachineConfiguration {
         if let network {
             let card = VZVirtioNetworkDeviceConfiguration()
             card.attachment = network
-            if let text = request.macAddress, let address = VZMACAddress(string: text) { card.macAddress = address }
+            // The same address the network at the card's other end knows the guest by.
+            if let address = VZMACAddress(string: MachineNetwork.macAddress(of: request)) { card.macAddress = address }
             configuration.networkDevices = [card]
         }
 
