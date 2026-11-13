@@ -264,6 +264,7 @@ final class DesignShotTests: LumenUITestCase {
             snap("p6-custom")
             touch(app.buttons["profile-full"])
             let browser = app.buttons["userAgentPicker"]
+            app.swipeUp()   // the browser's row up on the screen, its menu under it as on the mockup
             if browser.exists {
                 touch(reveal(browser, "the browser's menu"))
                 sleep(1)
