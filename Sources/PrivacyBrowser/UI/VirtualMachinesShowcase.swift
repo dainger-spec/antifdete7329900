@@ -3,7 +3,7 @@ import SwiftUI
 
 // The Virtual machines section before there are machines: its opening, and its setup while macOS
 // is fetched and installed. Both are one composition the width of the section — the words and
-// what to press on the left; on the right a Mac's window on the eclipse's light. In the opening
+// what to press on the left; on the right a Mac's window. In the opening
 // the window holds a machine's passport — what is its own, line by line, lit in turn; in the
 // setup, the ring that fills as macOS comes, and under it the same lines, one at a time.
 
@@ -63,41 +63,6 @@ struct VMShowcaseClock<Content: View>: View {
 
 // MARK: - The picture
 
-/// The eclipse behind the machine's window: a disc of light of which a dark one hides all but a
-/// crescent, upper right. The light's brightest part sways slowly along the rim.
-private struct VMEclipseArc: View {
-    let diameter: CGFloat
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.lumenStillFrame) private var stillFrame
-
-    private var still: Bool { Motion.isReduced(reduceMotion) || stillFrame }
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: still)) { context in
-            let sway = still ? 0 : sin(context.date.timeIntervalSinceReferenceDate * 2 * Double.pi / 11) * 16
-            let light = AngularGradient(stops: [
-                .init(color: Color.white.opacity(0), location: 0),
-                .init(color: Color.white.opacity(0.55), location: 0.12),
-                .init(color: Color.white.opacity(0.95), location: 0.20),
-                .init(color: Color.white.opacity(0.50), location: 0.30),
-                .init(color: Color.white.opacity(0), location: 0.46),
-                .init(color: Color.white.opacity(0), location: 1),
-            ], center: .center, angle: .degrees(210 + sway))
-            ZStack {
-                Circle().fill(light).blur(radius: 34).opacity(0.5)
-                Circle().strokeBorder(light, lineWidth: 1.5)
-                Circle().fill(Theme.surface)
-                    .padding(3)
-                    .offset(x: -6, y: 8)
-                    .blur(radius: 8)
-            }
-        }
-        .frame(width: diameter, height: diameter)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-}
-
 /// A Mac's window, as the section draws one: its bar with what it is about, and what it holds.
 private struct VMMachineWindow<Content: View>: View {
     let title: String
@@ -140,7 +105,9 @@ private struct VMMachineWindow<Content: View>: View {
     }
 }
 
-/// The machine's window on the eclipse: the light is behind it and takes no room of its own.
+/// The machine's window with a soft light behind it. The light is still — nothing is drawn again
+/// while a download counts — and fades to nothing before its own edge, so that no edge of the
+/// section can cut it; the eclipse in the window's corner is the app's own (`EclipseLight`).
 private struct VMStage<Content: View>: View {
     let title: String
     var symbol = "lock.fill"
@@ -149,7 +116,13 @@ private struct VMStage<Content: View>: View {
 
     var body: some View {
         VMMachineWindow(title: title, symbol: symbol, width: width, content: content)
-            .background(VMEclipseArc(diameter: width * 1.1).offset(x: width * 0.07, y: -width * 0.08))
+            .background(
+                EllipticalGradient(colors: [Color.white.opacity(0.085), Color.white.opacity(0)], center: .center,
+                                   startRadiusFraction: 0, endRadiusFraction: 0.5)
+                    .padding(.horizontal, -130)
+                    .padding(.vertical, -100)
+                    .allowsHitTesting(false)
+            )
     }
 }
 
@@ -488,7 +461,7 @@ struct VMSetupPanel: View {
 
     private var words: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(String(format: L("vm.setup.stepOf"), step, 3)).lumenCaps().padding(.bottom, 14)
+            stepBars.padding(.bottom, compact ? 18 : 26)
             Text(headline)
                 .font(.system(size: compact ? 22 : 34, weight: .bold))
                 .tracking(compact ? -0.44 : -1.1)
@@ -503,11 +476,21 @@ struct VMSetupPanel: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.bottom, 20)
             actions
-            problems.padding(.top, 14)
-            if !compact {
-                timeline.padding(.top, 34)
+            if let hint {
+                Text(hint)
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 14)
             }
+            problems.padding(.top, 14)
         }
+    }
+
+    /// Under the buttons: what the person may do meanwhile.
+    private var hint: String? {
+        if case .downloading? = center.activity { return L("vm.setup.download.hint") }
+        return nil
     }
 
     private var headline: String {
@@ -621,44 +604,56 @@ struct VMSetupPanel: View {
 
     // MARK: The three steps
 
-    private var timeline: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            timelineStep(1, L("vm.setup.step.download"), L("vm.setup.step.download.detail"), isLast: false)
-            timelineStep(2, L("vm.setup.step.install"), L("vm.setup.step.install.detail"), isLast: false)
-            timelineStep(3, L("vm.setup.step.guest"), L("vm.setup.step.guest.detail"), isLast: true)
+    /// The setup's three steps as three bars in a row: those done are filled, the one at work
+    /// fills as it goes, the names under them.
+    private var stepBars: some View {
+        HStack(alignment: .top, spacing: 6) {
+            stepBar(1, L("vm.setup.step.download"))
+            stepBar(2, L("vm.setup.step.install"))
+            stepBar(3, L("vm.setup.step.guest"))
         }
-        .padding(.top, 20)
-        .overlay(alignment: .top) { Rectangle().fill(Theme.divider).frame(height: 1) }
     }
 
-    private func timelineStep(_ number: Int, _ title: String, _ detail: String, isLast: Bool) -> some View {
-        let stepState = state(of: number)
-        return HStack(alignment: .top, spacing: 14) {
-            VStack(spacing: 4) {
-                ZStack {
-                    Circle().strokeBorder(stepState == .waiting ? Theme.textDisabled : Color.clear, lineWidth: 1.5)
-                    Circle().fill(stepState == .done ? Theme.running : (stepState == .active ? Color.white : Color.clear))
-                        .shadow(color: Color.white.opacity(stepState == .active ? 0.7 : 0), radius: 5)
-                }
-                .frame(width: 9, height: 9)
-                .padding(.top, 4)
-                if !isLast {
-                    Rectangle().fill(Theme.hairline).frame(width: 1).frame(maxHeight: .infinity)
-                }
-            }
-            .frame(width: 9)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.lumenLabel)
-                    .foregroundStyle(stepState == .waiting ? Theme.textTertiary : Theme.textPrimary)
-                Text(detail)
-                    .font(.lumenSecondary)
-                    .foregroundStyle(stepState == .active ? Theme.textSecondary : Theme.textDisabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.bottom, isLast ? 0 : 18)
+    /// How far the step at work has got, where it counts: a download, an installation.
+    private var countedShare: Double {
+        switch center.activity {
+        case .downloading(let progress)?:
+            return progress.total.map { $0 > 0 ? Double(progress.have) / Double($0) : 0 } ?? 0
+        case .installing(let fraction)?:
+            return fraction
+        case .asking?, .guestSetup?:
+            return 0
+        case nil:
+            break
         }
-        .fixedSize(horizontal: false, vertical: true)
+        if case .downloading(let have, let total) = center.setup {
+            return total.map { $0 > 0 ? Double(have) / Double($0) : 0 } ?? 0
+        }
+        return 0
+    }
+
+    private func stepBar(_ number: Int, _ title: String) -> some View {
+        let stepState = state(of: number)
+        // A step at work with nothing to count yet still shows that it is the one.
+        let filled: Double = stepState == .done ? 1 : (stepState == .active ? max(0.04, min(countedShare, 1)) : 0)
+        return VStack(alignment: .leading, spacing: 9) {
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.12))
+                    Capsule().fill(Color.white)
+                        .frame(width: geometry.size.width * CGFloat(filled))
+                        .shadow(color: Color.white.opacity(stepState == .active ? 0.7 : 0), radius: 4)
+                }
+            }
+            .frame(height: 3)
+            .animation(.easeOut(duration: 0.4), value: filled)
+            Text(title)
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(stepState == .active ? Theme.textPrimary
+                    : (stepState == .done ? Theme.textSecondary : Theme.textDisabled))
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: The window
