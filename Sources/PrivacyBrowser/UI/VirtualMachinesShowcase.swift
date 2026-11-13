@@ -2,37 +2,51 @@ import BrowserCore
 import SwiftUI
 
 // The Virtual machines section before there are machines: its opening, and its setup while macOS
-// is fetched and installed. Both take the section's whole width and show what a machine gives —
-// one thing after another, lit in turn — so the minutes a download takes are spent on what the
-// person is getting, not on a bar alone.
+// is fetched and installed. Both are one composition the width of the section — the words and
+// what to press on the left; on the right a Mac's window on the eclipse's light. In the opening
+// the window holds a machine's passport — what is its own, line by line, lit in turn; in the
+// setup, the ring that fills as macOS comes, and under it the same lines, one at a time.
 
-/// One thing a virtual machine gives, as the opening and the setup show it.
-struct VMFeature: Identifiable, Equatable {
+/// One line of a machine's passport: what a virtual machine has of its own.
+struct VMPassportLine: Identifiable, Equatable {
     let id: Int
-    let symbol: String
-    let title: String
-    let text: String
+    let label: String
+    /// An example of what the line holds — a serial number, an address: shown as a sample.
+    let value: String
+    /// The value is an identifier, set in the monospaced face.
+    let isCode: Bool
+    let tag: String
+    /// The line as a sentence, for the setup's window.
+    let tip: String
 
-    static var all: [VMFeature] {
-        let items = [("macwindow.on.rectangle", "system"), ("network", "proxy"), ("cpu", "identity"),
-                     ("display", "screen"), ("globe", "locale"), ("checkmark.shield", "real")]
+    static var all: [VMPassportLine] {
+        let items: [(key: String, value: String?, isCode: Bool)] = [
+            ("system", nil, false),
+            ("serial", "F7Q4XK2LXM", true),
+            ("card", "3a:9c:1e:07:b2:4f", true),
+            ("screen", "1470 × 956 · MacBook Air 13″", false),
+            ("locale", "Europe/Berlin · de-DE", false),
+            ("exit", nil, false),
+        ]
         return items.enumerated().map { index, item in
-            VMFeature(id: index, symbol: item.0, title: L("vm.feature.\(item.1).title"), text: L("vm.feature.\(item.1).text"))
+            VMPassportLine(id: index, label: L("vm.passport.\(item.key).label"),
+                           value: item.value ?? L("vm.passport.\(item.key).value"), isCode: item.isCode,
+                           tag: L("vm.passport.\(item.key).tag"), tip: L("vm.passport.\(item.key).tip"))
         }
     }
 }
 
-/// Which feature is lit now: each for a few seconds, one after another, by the clock — so the
-/// turn does not start over whenever the section draws itself again (a download's progress does
-/// that twice a second). Still under Reduce Motion, and in a snapshot: the first one.
+/// Which line is lit now: each for a few seconds, one after another, by the clock — so the turn
+/// does not start over whenever the section draws itself again (a download's progress does that
+/// twice a second). Still under Reduce Motion, and in a snapshot: the first one.
 struct VMShowcaseClock<Content: View>: View {
     let count: Int
     @ViewBuilder let content: (Int) -> Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.lumenStillFrame) private var stillFrame
 
-    /// Seconds a feature stays lit.
-    private var period: Double { 3.4 }
+    /// Seconds a line stays lit.
+    private var period: Double { 3.2 }
 
     var body: some View {
         if Motion.isReduced(reduceMotion) || stillFrame || count < 2 {
@@ -47,69 +61,160 @@ struct VMShowcaseClock<Content: View>: View {
     }
 }
 
-/// The features as tiles in even rows — three in a row where the width has room, two or one
-/// where it has not (six tiles: no row is left half empty); the one whose turn it is is lit.
-struct VMFeatureGrid: View {
-    let features: [VMFeature]
-    let active: Int
-    /// The width the grid has.
-    let width: CGFloat
+// MARK: - The picture
 
-    private var columns: [GridItem] {
-        let count = width >= 820 ? 3 : (width >= 540 ? 2 : 1)
-        return Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: count)
-    }
+/// The eclipse behind the machine's window: a disc of light of which a dark one hides all but a
+/// crescent, upper right. The light's brightest part sways slowly along the rim.
+private struct VMEclipseArc: View {
+    let diameter: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.lumenStillFrame) private var stillFrame
+
+    private var still: Bool { Motion.isReduced(reduceMotion) || stillFrame }
 
     var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
-            ForEach(features) { feature in
-                VMFeatureCard(feature: feature, active: feature.id == active)
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: still)) { context in
+            let sway = still ? 0 : sin(context.date.timeIntervalSinceReferenceDate * 2 * Double.pi / 11) * 16
+            let light = AngularGradient(stops: [
+                .init(color: Color.white.opacity(0), location: 0),
+                .init(color: Color.white.opacity(0.55), location: 0.12),
+                .init(color: Color.white.opacity(0.95), location: 0.20),
+                .init(color: Color.white.opacity(0.50), location: 0.30),
+                .init(color: Color.white.opacity(0), location: 0.46),
+                .init(color: Color.white.opacity(0), location: 1),
+            ], center: .center, angle: .degrees(210 + sway))
+            ZStack {
+                Circle().fill(light).blur(radius: 34).opacity(0.5)
+                Circle().strokeBorder(light, lineWidth: 1.5)
+                Circle().fill(Theme.surface)
+                    .padding(3)
+                    .offset(x: -6, y: 8)
+                    .blur(radius: 8)
             }
         }
+        .frame(width: diameter, height: diameter)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
-private struct VMFeatureCard: View {
-    let feature: VMFeature
-    let active: Bool
+/// A Mac's window, as the section draws one: its bar with what it is about, and what it holds.
+private struct VMMachineWindow<Content: View>: View {
+    let title: String
+    var symbol = "lock.fill"
+    let width: CGFloat
+    @ViewBuilder let content: () -> Content
+
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 16, style: .continuous) }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            Image(systemName: feature.symbol)
-                .font(.system(size: 17))
-                .foregroundStyle(active ? Theme.textPrimary : Theme.textSecondary)
-                .frame(width: 42, height: 42)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(active ? 0.13 : 0.05)))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(Color.white.opacity(active ? 0.32 : 0.10), lineWidth: 1))
-                .shadow(color: Color.white.opacity(active ? 0.22 : 0), radius: 14)
-            VStack(alignment: .leading, spacing: 5) {
-                Text(feature.title)
-                    .font(.lumenRowTitle)
-                    .foregroundStyle(Theme.textPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(feature.text)
-                    .font(.lumenSecondary)
-                    .foregroundStyle(active ? Theme.textSecondary : Theme.textTertiary)
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
+        VStack(spacing: 0) {
+            HStack(spacing: 7) {
+                ForEach(0..<3, id: \.self) { _ in
+                    Circle().fill(Color.white.opacity(0.16)).frame(width: 9, height: 9)
+                }
+                Spacer(minLength: 8)
+                HStack(spacing: 6) {
+                    Image(systemName: symbol).font(.system(size: 8.5))
+                    Text(title).font(.system(size: 11.5)).lineLimit(1)
+                }
+                .foregroundStyle(Theme.textTertiary)
+                .padding(.horizontal, 14)
+                .frame(height: 22)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.white.opacity(0.055)))
+                Spacer(minLength: 8)
+                Color.clear.frame(width: 41, height: 1)
             }
-            Spacer(minLength: 0)
+            .padding(.horizontal, 14)
+            .frame(height: 40)
+            Rectangle().fill(Theme.divider).frame(height: 1)
+            content()
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(active ? Theme.raisedInset : Theme.card))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .strokeBorder(LinearGradient(colors: [Color.white.opacity(active ? 0.45 : 0.10), Color.white.opacity(active ? 0.08 : 0.10)],
-                                         startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
+        .frame(width: width)
+        .background(LinearGradient(colors: [Color(hex: 0x17181D), Color(hex: 0x0D0E11)], startPoint: .top, endPoint: .bottom))
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(LinearGradient(colors: [Color.white.opacity(0.34), Color.white.opacity(0.05), Color.white.opacity(0.03)],
+                                                   startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.7), radius: 40, y: 28)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// The machine's window on the eclipse: the light is behind it and takes no room of its own.
+private struct VMStage<Content: View>: View {
+    let title: String
+    var symbol = "lock.fill"
+    let width: CGFloat
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VMMachineWindow(title: title, symbol: symbol, width: width, content: content)
+            .background(VMEclipseArc(diameter: width * 1.1).offset(x: width * 0.07, y: -width * 0.08))
+    }
+}
+
+/// A machine's passport: its lines, the one whose turn it is lit.
+private struct VMPassportRows: View {
+    let lines: [VMPassportLine]
+    let active: Int
+    /// A narrow window has no room for the tags.
+    let showsTags: Bool
+
+    var body: some View {
+        VStack(spacing: 1) {
+            ForEach(lines) { line in
+                row(line, lit: line.id == active)
+            }
+        }
+        .padding(10)
+    }
+
+    private func row(_ line: VMPassportLine, lit: Bool) -> some View {
+        HStack(spacing: 14) {
+            Text(line.label)
+                .font(.system(size: 12.5))
+                .foregroundStyle(lit ? Theme.textSecondary : Theme.textTertiary)
+                .lineLimit(1)
+                .frame(width: 148, alignment: .leading)
+            Text(line.value)
+                .font(line.isCode ? Font.lumenMono : Font.system(size: 13))
+                .foregroundStyle(lit ? Theme.textPrimary : Theme.textSecondary)
+                .lineLimit(1)
+            Spacer(minLength: 6)
+            if showsTags {
+                Text(line.tag)
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(0.4)
+                    .textCase(.uppercase)
+                    .foregroundStyle(lit ? Theme.textPrimary : Theme.textDisabled)
+                    .lineLimit(1)
+                    .padding(.horizontal, 7)
+                    .frame(height: 20)
+                    .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .strokeBorder(Color.white.opacity(lit ? 0.28 : 0.07), lineWidth: 1))
+                    .fixedSize()
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 44)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.white.opacity(lit ? 0.05 : 0)))
+        .overlay(alignment: .leading) {
+            Capsule()
+                .fill(Color.white)
+                .frame(width: 2, height: 22)
+                .shadow(color: Color.white.opacity(0.8), radius: 5)
+                .opacity(lit ? 1 : 0)
+        }
         .accessibilityElement(children: .combine)
     }
 }
 
-/// The picture beside the opening's words: a Mac's window inside a ring of the eclipse's light,
-/// whose brightest part goes slowly round; in the window, the sign of the feature whose turn it is.
-private struct VMShowcaseStage: View {
-    let feature: VMFeature
+/// The ring that fills as a step goes: its share in figures inside. `fraction` nil: how long is
+/// not known yet, and a short arc goes round.
+private struct VMProgressRing: View {
+    let fraction: Double?
+    /// The step is done: a tick in place of figures.
+    var done = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.lumenStillFrame) private var stillFrame
 
@@ -117,428 +222,366 @@ private struct VMShowcaseStage: View {
 
     var body: some View {
         ZStack {
-            ring
-            window
+            Circle().stroke(Color.white.opacity(0.08), lineWidth: 3)
+            arc
+            inside
         }
-        .frame(width: 300, height: 300)
-        .accessibilityHidden(true)
+        .frame(width: 168, height: 168)
+        .accessibilityElement()
+        .accessibilityValue(Text(verbatim: fraction.map { "\(Int(($0 * 100).rounded(.down))) %" } ?? ""))
     }
 
-    private var ring: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: still)) { context in
-            let turn = still ? 0.12 : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 18) / 18
-            let light = AngularGradient(stops: [
-                .init(color: Color.white.opacity(0.02), location: 0),
-                .init(color: Color.white.opacity(0.80), location: 0.18),
-                .init(color: Color.white.opacity(0.05), location: 0.42),
-                .init(color: Color.white.opacity(0.30), location: 0.68),
-                .init(color: Color.white.opacity(0.02), location: 1),
-            ], center: .center, angle: .degrees(turn * 360))
-            ZStack {
-                Circle().strokeBorder(light, lineWidth: 18).blur(radius: 26).opacity(0.55)
-                Circle().strokeBorder(light, lineWidth: 1.5)
+    @ViewBuilder
+    private var arc: some View {
+        if let fraction {
+            let shown = done ? 1 : min(max(fraction, 0.004), 1)
+            Circle()
+                .trim(from: 0, to: CGFloat(shown))
+                .stroke(Color.white, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .shadow(color: Color.white.opacity(0.8), radius: 6)
+                .animation(.easeOut(duration: 0.5), value: shown)
+        } else {
+            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: still)) { context in
+                let turn = still ? 0 : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.6) / 1.6
+                Circle()
+                    .trim(from: 0, to: 0.18)
+                    .stroke(Color.white, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90 + turn * 360))
+                    .shadow(color: Color.white.opacity(0.8), radius: 6)
             }
         }
     }
 
-    private var window: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 5) {
-                ForEach(0..<3, id: \.self) { _ in
-                    Circle().fill(Color.white.opacity(0.22)).frame(width: 7, height: 7)
-                }
-                Capsule().fill(Color.white.opacity(0.08)).frame(height: 12).padding(.leading, 8)
+    @ViewBuilder
+    private var inside: some View {
+        if done {
+            Image(systemName: "checkmark")
+                .font(.system(size: 40, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+        } else if let fraction {
+            let percent = Int((min(max(fraction, 0), 1) * 100).rounded(.down))
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(verbatim: "\(percent)")
+                    .font(.system(size: 42, weight: .bold))
+                    .tracking(-1.4)
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.textPrimary)
+                    .contentTransition(.numericText())
+                    .animation(.easeOut(duration: 0.3), value: percent)
+                Text(verbatim: "%")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Theme.textTertiary)
             }
-            .padding(.horizontal, 12)
-            .frame(height: 28)
-            Rectangle().fill(Theme.divider).frame(height: 1)
-            ZStack {
-                Image(systemName: feature.symbol)
-                    .font(.system(size: 40, weight: .light))
-                    .foregroundStyle(LinearGradient(colors: [Theme.textPrimary, Theme.textSecondary], startPoint: .top, endPoint: .bottom))
-                    .id(feature.id)
-                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 196, height: 132)
-        .background(LinearGradient(colors: [Color(hex: 0x16171C), Color(hex: 0x0C0D10)], startPoint: .top, endPoint: .bottom))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.strongBorder, lineWidth: 1))
-        .shadow(color: Color.black.opacity(0.6), radius: 24, y: 14)
     }
 }
 
-/// The section's opening: what a virtual machine is, the one button that adds them (or says what
-/// is needed first — an account, the plan), and what a machine gives, lit in turn.
+// MARK: - The opening
+
+/// One figure of what the machines take: the room on disk, the time, how many run at once.
+struct VMFact: Identifiable, Equatable {
+    let id: Int
+    let value: String
+    let label: String
+}
+
+/// The section's opening: what a virtual machine is, the one button that adds them — or says
+/// what is needed first: an account, the plan — what it takes in three figures, and beside them
+/// a machine's passport.
 struct VMHero: View {
+    /// Above the title, when the machines are not to be had yet: which plan has them.
+    var badge: String?
     let title: String
     let text: String
     let actionTitle: String
     var actionSymbol = "plus"
     var actionEnabled = true
-    /// Under the button: what the setup takes, or why it cannot start yet.
+    /// Under the button: why it cannot be pressed yet, or what it leads to.
     var footnote: String?
+    var facts: [VMFact] = []
     var problems: [VMRequirements.Problem] = []
     var error: String?
-    /// The section's width: a narrow one has no room for the picture beside the words.
+    /// The section's width: a narrow one puts the picture under the words.
     let width: CGFloat
     let action: () -> Void
 
+    private var isWide: Bool { width >= 940 }
+
     var body: some View {
-        let features = VMFeature.all
-        VMShowcaseClock(count: features.count) { active in
-            VStack(alignment: .leading, spacing: 34) {
-                HStack(alignment: .center, spacing: 36) {
-                    pitch
-                    if width >= 900 {
-                        Spacer(minLength: 0)
-                        VMShowcaseStage(feature: features[active])
-                            .padding(.trailing, 12)
-                    }
+        let lines = VMPassportLine.all
+        VMShowcaseClock(count: lines.count) { active in
+            if isWide {
+                HStack(alignment: .center, spacing: 48) {
+                    pitch.frame(width: 430, alignment: .leading)
+                    stage(lines, active: active, width: min(620, width - 56 - 430 - 48 - 40))
+                        .frame(maxWidth: .infinity)
                 }
-                VStack(alignment: .leading, spacing: 14) {
-                    Text(L("vm.hero.features")).lumenCaps()
-                    VMFeatureGrid(features: features, active: active, width: width)
+            } else {
+                VStack(alignment: .leading, spacing: 40) {
+                    pitch.frame(maxWidth: 520, alignment: .leading)
+                    stage(lines, active: active, width: max(300, min(560, width - 56)))
                 }
             }
         }
     }
 
+    private func stage(_ lines: [VMPassportLine], active: Int, width: CGFloat) -> some View {
+        VMStage(title: L("vm.passport.title"), width: width) {
+            VMPassportRows(lines: lines, active: active, showsTags: width >= 500)
+        }
+    }
+
     private var pitch: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(L("vm.hero.eyebrow")).lumenCaps()
+        VStack(alignment: .leading, spacing: 0) {
+            if let badge {
+                Label(badge, systemImage: "lock.fill")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .padding(.horizontal, 10)
+                    .frame(height: 24)
+                    .background(Capsule().fill(Color.white.opacity(0.08)))
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
+                    .padding(.bottom, 18)
+            }
             Text(title)
-                .font(.system(size: 38, weight: .bold))
-                .tracking(-1)
+                .font(.system(size: 46, weight: .bold))
+                .tracking(-1.6)
                 .foregroundStyle(Theme.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 18)
             Text(text)
                 .font(.system(size: 15))
                 .foregroundStyle(Theme.textSecondary)
-                .lineSpacing(3)
+                .lineSpacing(4)
                 .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 400, alignment: .leading)
+                .padding(.bottom, 26)
             if !problems.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(Array(problems.enumerated()), id: \.offset) { _, problem in
                         VMNote(VMText.problem(problem), tone: VMRequirements.stops(problem) ? .danger : .warning)
                     }
                 }
+                .padding(.bottom, 16)
             }
             if let error {
-                VMNote(error, tone: .danger)
+                VMNote(error, tone: .danger).padding(.bottom, 16)
             }
             Button(action: action) { Label(actionTitle, systemImage: actionSymbol) }
-                .buttonStyle(LumenButtonStyle(kind: .primary, height: 38))
+                .buttonStyle(LumenButtonStyle(kind: .primary, height: 40))
                 .disabled(!actionEnabled)
-                .padding(.top, 4)
             if let footnote {
                 Text(footnote)
                     .font(.lumenSecondary)
                     .foregroundStyle(Theme.textTertiary)
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 12)
+            }
+            if !facts.isEmpty {
+                VMFacts(facts: facts).padding(.top, 34)
             }
         }
-        .frame(maxWidth: 560, alignment: .leading)
     }
 }
 
-/// A progress bar the width it is given, with light running along what is filled.
-struct VMProgressBar: View {
-    /// 0…1
-    let fraction: Double
-    var height: CGFloat = 6
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.lumenStillFrame) private var stillFrame
-
-    private var still: Bool { Motion.isReduced(reduceMotion) || stillFrame }
-    private var clamped: Double { min(max(fraction, 0), 1) }
+/// What the machines take, as figures in a row under a line.
+private struct VMFacts: View {
+    let facts: [VMFact]
 
     var body: some View {
-        GeometryReader { geometry in
-            let filled = max(height, geometry.size.width * CGFloat(clamped))
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.10))
-                Capsule().fill(Color.white.opacity(0.78))
-                    .frame(width: filled)
-                    .overlay(alignment: .leading) { glint(over: filled) }
-                    .clipShape(Capsule())
-                    .shadow(color: Color.white.opacity(0.30), radius: 6)
+        HStack(alignment: .top, spacing: 0) {
+            ForEach(facts) { fact in
+                if fact.id != facts.first?.id {
+                    Rectangle().fill(Theme.divider).frame(width: 1).padding(.trailing, 16)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(fact.value)
+                        .font(.system(size: 20, weight: .semibold))
+                        .tracking(-0.5)
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    Text(fact.label)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineSpacing(1)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.trailing, 14)
             }
         }
-        .frame(height: height)
-        .animation(.easeOut(duration: 0.4), value: clamped)
-        .accessibilityElement()
-        .accessibilityValue(Text(verbatim: "\(Int((clamped * 100).rounded())) %"))
-    }
-
-    /// The light that runs along the bar every couple of seconds.
-    @ViewBuilder
-    private func glint(over filled: CGFloat) -> some View {
-        if !still {
-            TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
-                let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.2) / 2.2
-                LinearGradient(colors: [Color.white.opacity(0), Color.white, Color.white.opacity(0)], startPoint: .leading, endPoint: .trailing)
-                    .frame(width: 90)
-                    .offset(x: -90 + (filled + 90) * CGFloat(phase))
-            }
-            .frame(width: filled, alignment: .leading)
-        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.top, 18)
+        .overlay(alignment: .top) { Rectangle().fill(Theme.divider).frame(height: 1) }
     }
 }
 
-/// The setup under way, or stopped part-way: where it stands among its three steps, the step at
-/// work with its numbers and what can be done about it, and — while macOS is fetched and
-/// installed — what the machines will give.
+// MARK: - The setup
+
+/// The setup under way, or stopped part-way. On the left the step at work — what it is, its
+/// numbers, what can be done about it — and the three steps down a line; on the right the
+/// machine's window with the ring that fills, and what a machine has of its own, a line at a
+/// time. The first-run setup, which is the person's own work in the machine's window, has what
+/// to do there in the window's place.
 struct VMSetupPanel: View {
     @ObservedObject var center: VMCenter
-    /// Under the panel, what a machine gives, lit in turn: in the section's own setup, not where
-    /// the panel stands above a list of machines.
-    var showsFeatures = true
-    /// The section's width, for the tiles' rows.
+    /// The section's width: a narrow one puts the window under the words.
     var width: CGFloat = 1000
+    /// Above a list of machines: the words alone, in a tile.
+    var compact = false
 
     private enum StepState { case waiting, active, done }
 
-    private var downloadState: StepState {
+    /// 1: fetching, 2: installing, 3: the first-run setup in the machine's window.
+    private var step: Int {
         switch center.activity {
-        case .asking?, .downloading?: return .active
-        case .installing?, .guestSetup?: return .done
+        case .asking?, .downloading?: return 1
+        case .installing?: return 2
+        case .guestSetup?: return 3
         case nil: break
         }
         switch center.setup {
-        case .downloaded, .needsGuestSetup, .ready: return .done
-        case .downloading: return .active
-        case .none: return .waiting
+        case .none, .downloading: return 1
+        case .downloaded: return 2
+        case .needsGuestSetup, .ready: return 3
         }
     }
 
-    private var installState: StepState {
-        switch center.activity {
-        case .installing?: return .active
-        case .guestSetup?: return .done
-        default: break
-        }
-        switch center.setup {
-        case .needsGuestSetup, .ready: return .done
-        case .downloaded: return center.activity == nil ? .active : .waiting
-        default: return .waiting
-        }
+    private func state(of number: Int) -> StepState {
+        if case .ready = center.setup { return .done }
+        return number < step ? .done : (number == step ? .active : .waiting)
     }
 
-    private var guestState: StepState {
-        if center.activity == .guestSetup { return .active }
-        switch center.setup {
-        case .ready: return .done
-        case .needsGuestSetup: return .active
-        default: return .waiting
-        }
-    }
-
-    /// The first-run setup is the person's own work in the machine's window: the tiles below
-    /// would only be in its way.
-    private var isGuestStep: Bool { guestState == .active }
+    private var isWide: Bool { width >= 940 }
 
     var body: some View {
-        let features = VMFeature.all
-        VMShowcaseClock(count: features.count) { active in
-            VStack(alignment: .leading, spacing: 26) {
-                VStack(alignment: .leading, spacing: 22) {
-                    stepper
-                    Rectangle().fill(Theme.divider).frame(height: 1)
-                    current
-                    problems
-                }
-                .padding(28)
+        if compact {
+            words
+                .padding(24)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Theme.card))
-                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(LinearGradient(colors: [Color.white.opacity(0.22), Color.white.opacity(0.06)],
-                                                 startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
-                if showsFeatures, !isGuestStep {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text(L("vm.setup.meanwhile")).lumenCaps()
-                        VMFeatureGrid(features: features, active: active, width: width)
+                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.card))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
+        } else {
+            let lines = VMPassportLine.all
+            VMShowcaseClock(count: lines.count) { active in
+                if isWide {
+                    HStack(alignment: .center, spacing: 48) {
+                        words.frame(width: 430, alignment: .leading)
+                        stage(lines, active: active, width: min(620, width - 56 - 430 - 48 - 40))
+                            .frame(maxWidth: .infinity)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 40) {
+                        words.frame(maxWidth: 520, alignment: .leading)
+                        stage(lines, active: active, width: max(300, min(560, width - 56)))
                     }
                 }
             }
         }
     }
 
-    // MARK: The three steps
+    // MARK: The words
 
-    private var stepper: some View {
-        HStack(spacing: 12) {
-            stepChip(1, L("vm.setup.step.download"), downloadState)
-            connector(done: downloadState == .done)
-            stepChip(2, L("vm.setup.step.install"), installState)
-            connector(done: installState == .done)
-            stepChip(3, L("vm.setup.step.guest"), guestState)
-        }
-    }
-
-    private func stepChip(_ number: Int, _ title: String, _ state: StepState) -> some View {
-        HStack(spacing: 9) {
-            ZStack {
-                Circle().fill(state == .done ? Theme.running.opacity(0.16) : Color.white.opacity(state == .active ? 0.14 : 0.05))
-                if state == .done {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Theme.running)
-                } else {
-                    Text(verbatim: "\(number)")
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(state == .active ? Theme.textPrimary : Theme.textTertiary)
-                }
+    private var words: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(String(format: L("vm.setup.stepOf"), step, 3)).lumenCaps().padding(.bottom, 14)
+            Text(headline)
+                .font(.system(size: compact ? 22 : 34, weight: .bold))
+                .tracking(compact ? -0.44 : -1.1)
+                .foregroundStyle(Theme.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 12)
+            Text(detail)
+                .font(.system(size: 14))
+                .foregroundStyle(Theme.textSecondary)
+                .monospacedDigit()
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 20)
+            actions
+            problems.padding(.top, 14)
+            if !compact {
+                timeline.padding(.top, 34)
             }
-            .frame(width: 24, height: 24)
-            Text(title)
-                .font(.lumenLabel)
-                .foregroundStyle(state == .waiting ? Theme.textTertiary : Theme.textPrimary)
-                .lineLimit(1)
         }
-        .fixedSize()
     }
 
-    private func connector(done: Bool) -> some View {
-        Rectangle()
-            .fill(done ? Theme.running.opacity(0.45) : Theme.hairline)
-            .frame(height: 1)
-            .frame(maxWidth: .infinity)
-    }
-
-    // MARK: The step at work
-
-    @ViewBuilder
-    private var current: some View {
+    private var headline: String {
         switch center.activity {
-        case .asking?:
-            asking
-        case .downloading(let progress)?:
-            downloading(progress)
-        case .installing(let fraction)?:
-            installing(fraction)
-        case .guestSetup?:
-            guest(isOpen: true)
-        case nil:
-            stopped
+        case .asking?: return L("vm.setup.asking")
+        case .downloading?: return L("vm.setup.download")
+        case .installing?: return L("vm.setup.install")
+        case .guestSetup?: return L("vm.setup.guest")
+        case nil: break
+        }
+        switch center.setup {
+        case .downloading: return L("vm.setup.paused.title")
+        case .downloaded: return L("vm.setup.downloaded.title")
+        case .needsGuestSetup: return L("vm.setup.guest")
+        case .none, .ready: return L("vm.setup.download")
         }
     }
 
-    @ViewBuilder
-    private var stopped: some View {
+    private var detail: String {
+        switch center.activity {
+        case .asking?: return L("vm.setup.asking.detail")
+        case .downloading(let progress)?: return downloadText(progress)
+        case .installing?: return L("vm.setup.install.note")
+        case .guestSetup?: return L("vm.setup.guest.detail")
+        case nil: break
+        }
         switch center.setup {
         case .downloading(let have, let total):
-            paused(have: have, total: total)
-        case .downloaded:
-            readyToInstall
-        case .needsGuestSetup:
-            guest(isOpen: false)
-        case .none, .ready:
-            EmptyView()
+            return total.map { String(format: L("vm.setup.paused.of"), VMText.bytes(have), VMText.bytes($0)) }
+                ?? String(format: L("vm.setup.paused"), VMText.bytes(have))
+        case .downloaded: return L("vm.setup.install.ready")
+        case .needsGuestSetup: return L("vm.setup.guest.detail")
+        case .none, .ready: return ""
         }
     }
 
-    private var asking: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(L("vm.setup.asking"))
-                .font(.lumenHeading)
-                .foregroundStyle(Theme.textPrimary)
-            LumenActivityLine(width: 260)
-        }
-    }
-
-    private func downloading(_ progress: VMImageDownloader.Progress) -> some View {
-        let fraction = progress.total.map { $0 > 0 ? Double(progress.have) / Double($0) : 0 } ?? 0
-        return meter(percent: progress.total == nil ? nil : fraction, title: L("vm.setup.download"),
-                     detail: downloadText(progress), note: L("vm.setup.download.note")) {
-            Button(L("vm.setup.pause")) { center.pauseDownload() }
-                .buttonStyle(.lumenSecondary)
-        }
-    }
-
-    private func installing(_ fraction: Double) -> some View {
-        meter(percent: fraction, title: L("vm.setup.install"), detail: L("vm.setup.install.note"), note: nil) {
-            Button(L("common.cancel")) { center.cancelInstallation() }
-                .buttonStyle(.lumenGhost)
-        }
-    }
-
-    private func paused(have: Int64, total: Int64?) -> some View {
-        let fraction = total.map { $0 > 0 ? Double(have) / Double($0) : 0 }
-        let detail = total.map { String(format: L("vm.setup.paused.of"), VMText.bytes(have), VMText.bytes($0)) }
-            ?? String(format: L("vm.setup.paused"), VMText.bytes(have))
-        return meter(percent: fraction, title: L("vm.setup.download"), detail: detail, note: nil, glints: false) {
-            HStack(spacing: 8) {
-                Button(L("vm.setup.removeDownload")) { center.removeDownloadedImage() }
-                    .buttonStyle(.lumenGhost)
-                Button(L("vm.setup.continue")) { center.continueSetup() }
-                    .buttonStyle(.lumenPrimary)
-                    .disabled(center.requirements.contains(where: VMRequirements.stops))
+    private var actions: some View {
+        HStack(spacing: 8) {
+            switch center.activity {
+            case .asking?:
+                EmptyView()
+            case .downloading?:
+                Button(L("vm.setup.pause")) { center.pauseDownload() }
+                    .buttonStyle(.lumenSecondary)
+            case .installing?:
+                Button(L("common.cancel")) { center.cancelInstallation() }
+                    .buttonStyle(.lumenSecondary)
+            case .guestSetup?:
+                ProgressView().controlSize(.small)
+                Text(L("vm.setup.guest.open"))
+                    .font(.lumenBody)
+                    .foregroundStyle(Theme.textSecondary)
+            case nil:
+                stoppedActions
             }
         }
     }
 
-    private var readyToInstall: some View {
-        HStack(alignment: .center, spacing: 14) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(L("vm.setup.install"))
-                    .font(.lumenHeading)
-                    .foregroundStyle(Theme.textPrimary)
-                caption(L("vm.setup.install.ready"))
-            }
-            Spacer(minLength: 12)
-            Button(L("vm.setup.removeDownload")) { center.removeDownloadedImage() }
-                .buttonStyle(.lumenGhost)
+    @ViewBuilder
+    private var stoppedActions: some View {
+        switch center.setup {
+        case .downloading, .downloaded:
             Button(L("vm.setup.continue")) { center.continueSetup() }
                 .buttonStyle(.lumenPrimary)
-        }
-    }
-
-    /// A step that counts: its share done in large figures, what it is, its numbers, the bar.
-    /// `percent` nil: the length is not known yet, and no figure is shown.
-    private func meter<Trailing: View>(percent: Double?, title: String, detail: String, note: String?, glints: Bool = true,
-                                       @ViewBuilder trailing: () -> Trailing) -> some View {
-        let shown = percent.map { Int((min(max($0, 0), 1) * 100).rounded(.down)) }
-        return VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .center, spacing: 18) {
-                if let shown {
-                    HStack(alignment: .firstTextBaseline, spacing: 3) {
-                        Text(verbatim: "\(shown)")
-                            .font(.system(size: 52, weight: .bold))
-                            .tracking(-1.5)
-                            .monospacedDigit()
-                            .foregroundStyle(Theme.textPrimary)
-                            .contentTransition(.numericText())
-                            .animation(.easeOut(duration: 0.3), value: shown)
-                        Text(verbatim: "%")
-                            .font(.system(size: 22, weight: .semibold))
-                            .foregroundStyle(Theme.textTertiary)
-                    }
-                    .fixedSize()
-                }
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(title)
-                        .font(.lumenHeading)
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(1)
-                    caption(detail)
-                }
-                Spacer(minLength: 12)
-                trailing()
-            }
-            if glints {
-                VMProgressBar(fraction: percent ?? 0)
-            } else {
-                VMProgressBar(fraction: percent ?? 0).environment(\.lumenStillFrame, true)
-            }
-            if let note {
-                Text(note)
-                    .font(.lumenSecondary)
-                    .foregroundStyle(Theme.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+                .disabled(center.requirements.contains(where: VMRequirements.stops))
+            Button(L("vm.setup.removeDownload")) { center.removeDownloadedImage() }
+                .buttonStyle(.lumenGhost)
+        case .needsGuestSetup:
+            Button(L("vm.setup.guest.openMachine")) { center.continueSetup() }
+                .buttonStyle(.lumenPrimary)
+            Button(L("vm.setup.guest.startOver")) { center.removeBase() }
+                .buttonStyle(.lumenGhost)
+        case .none, .ready:
+            EmptyView()
         }
     }
 
@@ -558,56 +601,6 @@ struct VMSetupPanel: View {
         return parts.joined(separator: " · ")
     }
 
-    // MARK: The first-run setup
-
-    private func guest(isOpen: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(L("vm.setup.guest"))
-                .font(.lumenHeading)
-                .foregroundStyle(Theme.textPrimary)
-            instruction(1, L("vm.setup.guest.step1"))
-            instruction(2, L("vm.setup.guest.step2"))
-            instruction(3, L("vm.setup.guest.step3"))
-            caption(L("vm.setup.guest.fallback"))
-            Text(verbatim: #"sh "/Volumes/My Shared Files/install.sh""#)
-                .font(.lumenMono)
-                .foregroundStyle(Theme.textSecondary)
-                .textSelection(.enabled)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.05)))
-            HStack(spacing: 10) {
-                if isOpen {
-                    ProgressView().controlSize(.small)
-                    caption(L("vm.setup.guest.open"))
-                } else {
-                    Button(L("vm.setup.guest.openMachine")) { center.continueSetup() }
-                        .buttonStyle(.lumenPrimary)
-                    Button(L("vm.setup.guest.startOver")) { center.removeBase() }
-                        .buttonStyle(.lumenGhost)
-                }
-            }
-            .padding(.top, 4)
-        }
-    }
-
-    private func instruction(_ number: Int, _ text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text(verbatim: "\(number)")
-                .font(.system(size: 11.5, weight: .semibold))
-                .foregroundStyle(Theme.textSecondary)
-                .frame(width: 22, height: 22)
-                .background(Circle().fill(Color.white.opacity(0.07)))
-            Text(text)
-                .font(.system(size: 14))
-                .foregroundStyle(Theme.textPrimary)
-                .lineSpacing(2)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    // MARK: What stands in the way
-
     @ViewBuilder
     private var problems: some View {
         if let error = center.setupError {
@@ -621,11 +614,151 @@ struct VMSetupPanel: View {
         }
     }
 
-    private func caption(_ text: String) -> some View {
-        Text(text)
-            .font(.lumenBody)
-            .foregroundStyle(Theme.textSecondary)
-            .monospacedDigit()
-            .fixedSize(horizontal: false, vertical: true)
+    // MARK: The three steps
+
+    private var timeline: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            timelineStep(1, L("vm.setup.step.download"), L("vm.setup.step.download.detail"), isLast: false)
+            timelineStep(2, L("vm.setup.step.install"), L("vm.setup.step.install.detail"), isLast: false)
+            timelineStep(3, L("vm.setup.step.guest"), L("vm.setup.step.guest.detail"), isLast: true)
+        }
+        .padding(.top, 20)
+        .overlay(alignment: .top) { Rectangle().fill(Theme.divider).frame(height: 1) }
+    }
+
+    private func timelineStep(_ number: Int, _ title: String, _ detail: String, isLast: Bool) -> some View {
+        let stepState = state(of: number)
+        return HStack(alignment: .top, spacing: 14) {
+            VStack(spacing: 4) {
+                ZStack {
+                    Circle().strokeBorder(stepState == .waiting ? Theme.textDisabled : Color.clear, lineWidth: 1.5)
+                    Circle().fill(stepState == .done ? Theme.running : (stepState == .active ? Color.white : Color.clear))
+                        .shadow(color: Color.white.opacity(stepState == .active ? 0.7 : 0), radius: 5)
+                }
+                .frame(width: 9, height: 9)
+                .padding(.top, 4)
+                if !isLast {
+                    Rectangle().fill(Theme.hairline).frame(width: 1).frame(maxHeight: .infinity)
+                }
+            }
+            .frame(width: 9)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.lumenLabel)
+                    .foregroundStyle(stepState == .waiting ? Theme.textTertiary : Theme.textPrimary)
+                Text(detail)
+                    .font(.lumenSecondary)
+                    .foregroundStyle(stepState == .active ? Theme.textSecondary : Theme.textDisabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.bottom, isLast ? 0 : 18)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    // MARK: The window
+
+    @ViewBuilder
+    private func stage(_ lines: [VMPassportLine], active: Int, width: CGFloat) -> some View {
+        if step == 3 {
+            VMStage(title: L("vm.setup.guest.window"), symbol: "macwindow", width: width) {
+                guestSteps
+            }
+        } else {
+            VMStage(title: windowTitle, symbol: "arrow.down", width: width) {
+                VStack(spacing: 22) {
+                    VMProgressRing(fraction: ringFraction, done: step == 2 && center.activity == nil)
+                    VStack(spacing: 5) {
+                        Text(lines[active].label + " — " + lines[active].tag)
+                            .font(.lumenRowTitle)
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(1)
+                        Text(lines[active].tip)
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(Theme.textTertiary)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .frame(height: 34, alignment: .top)
+                    }
+                    .id(active)
+                    .transition(.opacity)
+                    .padding(.horizontal, 24)
+                    HStack(spacing: 6) {
+                        ForEach(lines) { line in
+                            Capsule()
+                                .fill(Color.white.opacity(line.id == active ? 1 : 0.14))
+                                .frame(width: line.id == active ? 16 : 5, height: 5)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 352)
+            }
+        }
+    }
+
+    private var windowTitle: String {
+        if let image = center.offeredImage, !image.version.isEmpty {
+            return String(format: L("vm.setup.window"), image.version)
+        }
+        return L("vm.setup.window.unknown")
+    }
+
+    /// The ring's share: nil while it is not known how much there is.
+    private var ringFraction: Double? {
+        switch center.activity {
+        case .asking?: return nil
+        case .downloading(let progress)?: return progress.total.map { $0 > 0 ? Double(progress.have) / Double($0) : 0 }
+        case .installing(let fraction)?: return fraction
+        case .guestSetup?: return 1
+        case nil: break
+        }
+        switch center.setup {
+        case .downloading(let have, let total): return total.map { $0 > 0 ? Double(have) / Double($0) : 0 } ?? 0
+        case .downloaded: return 1
+        case .none, .needsGuestSetup, .ready: return 0
+        }
+    }
+
+    /// What to do in the machine's own window, in the order it is done.
+    private var guestSteps: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            instruction(1, L("vm.setup.guest.step1"))
+            instruction(2, L("vm.setup.guest.step2"))
+            instruction(3, L("vm.setup.guest.step3"))
+            Rectangle().fill(Theme.divider).frame(height: 1)
+            Text(L("vm.setup.guest.fallback"))
+                .font(.lumenSecondary)
+                .foregroundStyle(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(verbatim: #"sh "/Volumes/My Shared Files/install.sh""#)
+                .font(.lumenMono)
+                .foregroundStyle(Theme.textSecondary)
+                .textSelection(.enabled)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.05)))
+            Text(L("vm.setup.guest.wifi"))
+                .font(.lumenSecondary)
+                .foregroundStyle(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(22)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func instruction(_ number: Int, _ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(verbatim: "\(number)")
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(Color.white.opacity(0.09)))
+            Text(text)
+                .font(.system(size: 13.5))
+                .foregroundStyle(Theme.textPrimary)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }

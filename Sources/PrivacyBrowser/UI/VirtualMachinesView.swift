@@ -158,15 +158,19 @@ private struct VirtualMachinesScreen: View {
                 .frame(minHeight: 220)
         case .signedOut:
             VMHero(title: L("vm.intro.title"), text: L("vm.intro.text"), actionTitle: L("vm.signIn"),
-                   actionSymbol: "person.crop.circle", footnote: L("vm.signIn.note"), width: width, action: openAccount)
+                   actionSymbol: "person.crop.circle", footnote: L("vm.signIn.note"), facts: facts, width: width,
+                   action: openAccount)
         case .notInPlan:
-            VMHero(title: L("vm.intro.title"), text: L("vm.intro.text"), actionTitle: L("vm.plan.choose"),
-                   actionSymbol: "arrow.up.right", footnote: L("vm.plan.note"), width: width, action: choosePlan)
+            // The plan has no machines: the same opening — what a machine is and gives — with the
+            // plan that has them named above it, and the way to it in the button's place.
+            VMHero(badge: L("vm.plan.badge"), title: L("vm.intro.title"), text: L("vm.plan.text"),
+                   actionTitle: L("vm.plan.upgrade"), actionSymbol: "arrow.up.right", footnote: L("vm.plan.note"),
+                   facts: facts, width: width, action: choosePlan)
         case .setup:
             if center.activity == nil, center.setup == .none {
                 VMHero(title: L("vm.intro.title"), text: L("vm.intro.text"), actionTitle: L("vm.add"),
                        actionEnabled: !center.requirements.contains(where: VMRequirements.stops),
-                       footnote: String(format: L("vm.hero.cost"), VMText.bytes(center.setupNeedsBytes), VMRequirements.runningLimit),
+                       footnote: L("vm.hero.note"), facts: facts,
                        problems: center.requirements, error: center.setupError, width: width,
                        action: { center.continueSetup() })
             } else {
@@ -175,6 +179,14 @@ private struct VirtualMachinesScreen: View {
         case .machines:
             machines
         }
+    }
+
+    /// What the machines take, in three figures: the room on disk while they are set up, the
+    /// time, how many run at once.
+    private var facts: [VMFact] {
+        [VMFact(id: 0, value: VMText.bytes(center.setupNeedsBytes), label: L("vm.fact.disk")),
+         VMFact(id: 1, value: L("vm.fact.time.value"), label: L("vm.fact.time")),
+         VMFact(id: 2, value: String(VMRequirements.runningLimit), label: L("vm.fact.limit"))]
     }
 
     /// The plans' page of the site (a key's license without an email is paid for on the key's page),
@@ -250,7 +262,7 @@ private struct VirtualMachinesScreen: View {
     private var baseState: some View {
         if !center.isReady {
             if center.activity != nil || center.setup != .none {
-                VMSetupPanel(center: center, showsFeatures: false)
+                VMSetupPanel(center: center, compact: true)
             } else if allowed {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     VMNote(L("vm.base.missing"), tone: .plain, symbol: "internaldrive")
