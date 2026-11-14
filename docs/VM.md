@@ -22,8 +22,11 @@ licensing, and has the machines.
    first what it takes (disk, memory, time), then:
 2. asks Apple which macOS this Mac can run as a guest, and **downloads it from Apple's servers**
    into the vault's folder — about 25 GB. None of it is in Lumen's own download: the app stays the
-   size it was. The download can be paused, and goes on from where it stopped — also after a quit,
-   a lost connection or a restart of the Mac;
+   size it was. It comes over **six connections at once**, in chunks of 32 MB (`VMImageFetch`): a
+   network that gives each connection only so much — far from Apple's servers, through a VPN,
+   under a provider's shaping — gives six several times that (people's reports, 14 November: one
+   connection was slow). The download can be paused, and goes on with the chunks that are not here
+   yet — also after a quit, a lost connection or a restart of the Mac;
 3. installs macOS from it (10–20 minutes) into the **base system**; the downloaded image is
    removed when the base is set up (until then, starting over is an installation, not a download);
 4. opens the base in a window, for macOS's own first-run setup (the country, an account) and
@@ -61,7 +64,8 @@ Sources/BrowserCore/VirtualMachines/   the model, platform-independent, unit-tes
   VMProfile.swift        a profile and the list (vms.bin, encrypted in the vault)
   VMDisplay.swift        screens of real Macs; what the setup needs (VMRequirements)
   VMLibrary.swift        where machines are on disk; how far the setup got
-  VMDownload.swift       the resumable download's decisions (Range, If-Range)
+  VMDownload.swift       the resumable download's decisions (Range, If-Range), the chunk map
+  VMImageFetch.swift     the download: several connections, chunk by chunk (tested on Linux)
   VMGuestSettings.swift  what the guest is told, what it says back
   VMHelperProtocol.swift the app's conversation with the helper
 Sources/VMNetCore/                     the machine's network through a proxy (docs/VM_NETWORK.md)
@@ -69,7 +73,7 @@ Sources/LumenVM/                       the helper: Apple's Virtualization.framew
 Sources/PrivacyBrowser/App/VirtualMachines/
   VMCenter.swift         the setup, the profiles, the machines running now
   VMHelperProcess.swift  one run of the helper
-  VMImageDownloader.swift the download itself
+  VMImageDownloader.swift the download as the app has it: its failures in the person's language
 Sources/PrivacyBrowser/UI/VirtualMachinesView.swift   the section, the setup's steps, the editor
 Resources/VMGuest/                     what the base system's macOS gets
 Resources/LumenVM.entitlements         the helper's one right
@@ -348,6 +352,28 @@ what was in this app's hands, and was found slowing a machine on a person's Mac 
 
 Not measured: how much each of these is worth on a given Mac.
 
+## The download
+
+`VMImageFetch` (BrowserCore) fetches the restore image in chunks of 32 MB, six at a time, each a
+`Range` request on a URLSession of its own: one session would carry them all on one HTTP/2
+connection, which is no faster than one request. The partial file has the whole length from the
+start; a chunk counts only when every byte of it was written, and the chunks that are here are
+kept in `restore.json` (`VMChunkMap`, runs of indexes), written at most once a second and at once
+at a pause. The setup shows what the chunks that are here come to, not the partial file's length.
+
+- The first request asks for the first chunk; its answer says the file's length and its validator
+  (a strong `ETag`, else `Last-Modified`). Every other chunk is asked for under `If-Range`: a file
+  Apple replaced meanwhile comes back whole (200), and the download starts over (twice at most,
+  then it says so) rather than glue two files together.
+- A download of one stream from before (no chunk map) counts the chunks its partial file holds
+  whole.
+- A server that answers the first request with 200 has no ranges: the whole file comes in one
+  stream, which starts over if it breaks.
+- A chunk that does not come whole is asked for again after a moment; a network that brings
+  nothing again and again is given up on, with what is here kept. A server's own trouble (5xx,
+  408, 429) is tried again; any other refusal is said.
+- The connections go the way any app's do on this Mac — its VPN, its system proxy.
+
 ## What is not measured, and what does not work
 
 - **How a machine looks to a site that studies the device.** Safari in the guest is real and
@@ -382,6 +408,13 @@ What is checked where:
 - `Tests/BrowserCoreTests/VirtualMachineTests.swift` (Linux and macOS): the profile list's format
   and its tolerance of a later version's, validation, the download's decisions for every answer a
   server gives, the settings file's text and what it refuses, the helper protocol's round trip.
+- `Tests/BrowserCoreTests/VMImageFetchTests.swift` (Linux and macOS): **the download itself**,
+  against a file server on loopback that speaks ranges as Apple's does and can be told to be
+  worse: the file whole over several connections (and no more than it was given), a file smaller
+  than a chunk, a paused download going on with only the chunks it did not have, a download of
+  one stream from before taken up at its whole chunks, a file replaced between two runs started
+  over, a server without ranges given one stream, connections cut short taken up again, a refusal
+  said, only https fetched. Each time the file byte for byte.
 - `Tests/BrowserCoreTests/VMGuestScriptTests.swift` (Linux and macOS): **the boot script itself,
   run from its first line to the shutdown** by `/bin/sh`, with every command it calls by its full
   path replaced by one of the test's own that writes down how it was called (a command the script

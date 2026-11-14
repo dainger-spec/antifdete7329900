@@ -583,6 +583,9 @@ struct VMSetupPanel: View {
         if let speed = progress.speed, speed > 0 {
             parts.append(String(format: L("vm.setup.speed"), VMText.bytes(Int64(speed))))
         }
+        if progress.connections > 1 {
+            parts.append(String(format: L("vm.setup.connections"), progress.connections))
+        }
         if let total = progress.total, let left = VMText.remaining(bytes: total - progress.have, speed: progress.speed) {
             parts.append(left)
         }

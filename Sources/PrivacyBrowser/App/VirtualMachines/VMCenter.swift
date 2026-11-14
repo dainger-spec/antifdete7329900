@@ -240,9 +240,9 @@ final class VMCenter: ObservableObject {
         let run = beginRun()
         holdAwake(true)
         excludeFromBackups()
-        activity = .downloading(VMImageDownloader.Progress(have: VMLibrary.fileSize(library.partialRestoreImageURL),
-                                                           total: library.downloadState().flatMap { $0.image == image ? $0.expectedLength : nil },
-                                                           speed: nil))
+        let saved = library.downloadState().flatMap { $0.image == image ? $0 : nil }
+        activity = .downloading(VMImageDownloader.Progress(have: saved.map { library.downloadedBytes($0) } ?? 0,
+                                                           total: saved?.expectedLength, speed: nil))
         let downloader = VMImageDownloader(library: library, image: image, onProgress: { [weak self] progress in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {

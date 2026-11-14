@@ -2643,6 +2643,7 @@
 "vm.setup.paused.of" = "На паузе: скачано %1$@ из %2$@.";
 "vm.setup.progress.of" = "%1$@ из %2$@";
 "vm.setup.speed" = "%@/с";
+"vm.setup.connections" = "соединений: %d";
 "vm.setup.remaining.minutes" = "осталось около %d мин";
 "vm.setup.remaining.hours" = "осталось около %1$d ч %2$d мин";
 "vm.setup.install.note" = "10–20 минут. Не закрывайте Lumen.";
@@ -2741,6 +2742,7 @@
 "vm.download.error.refused" = "Сервер Apple отказал в скачивании (HTTP %d). Попробуйте позже.";
 "vm.download.error.incomplete" = "Скачивание оборвалось. Нажмите «Продолжить» — оно пойдёт с того же места.";
 "vm.download.error.notFetchable" = "Apple дала адрес, с которого нельзя скачать.";
+"vm.download.error.keepsChanging" = "Файл у Apple несколько раз поменялся, пока скачивался. Попробуйте позже.";
 "vm.window.stop" = "Выключить виртуальную машину…";
 "vm.window.stopQuestion" = "Выключить эту виртуальную машину?";
 "vm.window.stopDetail" = "Её macOS выключится, как обычный Mac; всё открытое в ней закроется.";

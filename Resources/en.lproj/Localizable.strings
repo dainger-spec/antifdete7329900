@@ -2643,6 +2643,7 @@
 "vm.setup.paused.of" = "Paused: %1$@ of %2$@ downloaded.";
 "vm.setup.progress.of" = "%1$@ of %2$@";
 "vm.setup.speed" = "%@/s";
+"vm.setup.connections" = "connections: %d";
 "vm.setup.remaining.minutes" = "about %d min left";
 "vm.setup.remaining.hours" = "about %1$d h %2$d min left";
 "vm.setup.install.note" = "10–20 minutes. Keep Lumen open.";
@@ -2741,6 +2742,7 @@
 "vm.download.error.refused" = "Apple's server refused the download (HTTP %d). Try again later.";
 "vm.download.error.incomplete" = "The download broke off. Press Continue: it goes on from where it stopped.";
 "vm.download.error.notFetchable" = "Apple gave an address that cannot be downloaded from.";
+"vm.download.error.keepsChanging" = "Apple's file changed several times while it was being downloaded. Try again later.";
 "vm.window.stop" = "Shut Down the Virtual Machine…";
 "vm.window.stopQuestion" = "Shut down this virtual machine?";
 "vm.window.stopDetail" = "Its macOS shuts down as a Mac does; what is open in it is closed.";

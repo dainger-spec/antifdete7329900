@@ -98,13 +98,20 @@ public struct VMLibrary: Equatable, Sendable {
         }
         if FileManager.default.fileExists(atPath: restoreImageURL.path) { return .downloaded }
         if let state = downloadState() {
-            let have = Self.fileSize(partialRestoreImageURL)
-            return .downloading(have: have, of: state.expectedLength)
+            return .downloading(have: downloadedBytes(state), of: state.expectedLength)
         }
         return .none
     }
 
     // MARK: The download's state
+
+    /// What of the restore image is here: the chunks that are whole, for a download of several
+    /// connections (its partial file has the whole length from the start); the partial file's
+    /// length, for one of one stream.
+    public func downloadedBytes(_ state: VMDownloadState? = nil) -> Int64 {
+        if let chunks = (state ?? downloadState())?.chunks { return chunks.doneBytes }
+        return Self.fileSize(partialRestoreImageURL)
+    }
 
     public func downloadState() -> VMDownloadState? {
         guard let data = try? Data(contentsOf: downloadStateURL) else { return nil }
