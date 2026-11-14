@@ -26,7 +26,8 @@ import WebKit
 ///
 /// It stops by itself when its tab is closed, when the profile stops (`ProfileManager.stop`
 /// cancels it first, before the store is released: the robot holds its tab and session only
-/// weakly) and when a page waits for an answer to a dialog.
+/// weakly), when a page waits for an answer to a dialog, and when its tab is not the one its
+/// window shows for `Limits.tabWait` (its window refuses the windows pages open, so it should not be).
 @MainActor
 final class WarmUpRobot: ObservableObject {
     enum State: Equatable {
