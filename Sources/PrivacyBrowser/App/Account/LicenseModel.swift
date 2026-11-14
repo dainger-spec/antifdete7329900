@@ -452,6 +452,9 @@ final class LicenseModel: ObservableObject {
             nextRetry = nil
             save()
             forgetKey()
+            // The key kept in the vault goes with the sign-in: now while the vault is open, else at
+            // its next unlock (`vaultOpened`).
+            if let openVault { removeKeptKey(from: openVault) }
             log.notice("License renewal: signed out by the server (\(why.rawValue, privacy: .public))")
         case .appOutdated:
             failures = 0
@@ -615,11 +618,17 @@ final class LicenseModel: ObservableObject {
 
     /// The vault was created or unlocked: a key signed in with is kept in it now; a key kept there
     /// before is read for the account screen. "Don't remember the key" (§10.1): no copy is kept, and
-    /// one kept before goes now.
+    /// one kept before goes now. Not signed in with a key (any more): a key kept there goes now too —
+    /// this Mac signed out while the vault was locked (Settings opens without it), or the server
+    /// signed it out; the key stayed in the vault for good (audit 3, #29). Not while `account.json`
+    /// could not be read: nothing is known then of how this Mac is signed in.
     func vaultOpened(_ vault: UnlockedVault) {
         openVault = vault
         restoreSession(from: vault)
-        guard record.isSignedIn, record.signedInWith == .key else { return }
+        guard record.isSignedIn, record.signedInWith == .key else {
+            if fileProblem == nil { removeKeptKey(from: vault) }
+            return
+        }
         do {
             if !record.keepsKey {
                 try AccountKeyVault.remove(from: vault)
@@ -672,6 +681,15 @@ final class LicenseModel: ObservableObject {
     }
 
     private func forgetKey() { key = nil }
+
+    /// The key kept in `vault` goes: this Mac is no longer signed in with it.
+    private func removeKeptKey(from vault: UnlockedVault) {
+        do {
+            try AccountKeyVault.remove(from: vault)
+        } catch {
+            log.error("The account's key could not be removed from the vault: \(error.logKind, privacy: .public)")
+        }
+    }
 
     /// `404 key_not_found` for the key the vault kept: it was replaced — by support, or on another
     /// Mac — so it goes from the vault, and the key is asked for anew (§10.1, §11.1). A key typed for
@@ -739,8 +757,9 @@ final class LicenseModel: ObservableObject {
     // MARK: Signing out, devices
 
     /// `DELETE /v1/device` (§6.3): this Mac leaves the license whatever the server says — the key
-    /// goes from the vault, the profiles stay — except under the unlink cooldown: then nothing
-    /// changes, and the account screen says until when (`signout.cooldown`).
+    /// goes from the vault (now, or at its next unlock while it is locked: `vaultOpened`), the
+    /// profiles stay — except under the unlink cooldown: then nothing changes, and the account
+    /// screen says until when (`signout.cooldown`).
     func signOut(vault: UnlockedVault?) async -> LicenseClient.SignOut? {
         guard let client else { return nil }
         isWorking = true
@@ -752,7 +771,7 @@ final class LicenseModel: ObservableObject {
         }
         record = updated
         save()
-        if let vault { try? AccountKeyVault.remove(from: vault) }
+        if let vault = vault ?? openVault { removeKeptKey(from: vault) }
         key = nil
         pendingSession = nil
         // What this account's server was told and refused is not the next one's.

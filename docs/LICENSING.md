@@ -140,6 +140,10 @@ A key is the whole account for whoever holds it — no email, no password. So (t
   taken: unlink one, then connect) the key is held until the action ends.
 - **A key the server no longer knows** (`key_not_found`: replaced by support or on another Mac) is
   removed from the vault and asked for anew (§10.1).
+- **Signing out** — by the person, or by the server (`device_revoked`, `machine_mismatch`) — removes
+  the key from the vault: at once while the vault is open, else at its next unlock, which removes
+  any key kept there while this Mac is not signed in with one (Settings → Account works while the
+  vault is locked; the key used to stay there for good). Not while `account.json` cannot be read.
 - **On disk only inside the vault**: `account-key.bin`, AES-GCM under `HKDF(VMK, "account-key")`,
   this Mac's, never synced (`AccountKeyVault`). A profile's own process, opened with a grant,
   cannot derive the key. Never in `account.json`, the defaults, a log or a report.

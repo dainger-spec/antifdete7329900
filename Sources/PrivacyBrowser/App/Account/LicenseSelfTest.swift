@@ -509,6 +509,47 @@ enum LicenseSelfTest {
               "under the cooldown: \(String(describing: held)), still in: \(stillIn); after: \(String(describing: out)),"
               + " mode \(String(describing: coded.mode)); consequences: \(consequences)")
 
+        // Signed out while the vault is locked (Settings → Account works without it), and by the
+        // server with the vault open: the key the vault kept goes — at the next unlock, or at once. It
+        // stayed there for good (audit 3, #29). Kept while signed in, and while locked: the controls.
+        if let currentKey = AccountKey(typed: newKeyText) {
+            let (lockedOut, lockedOutFolder) = person("signed-out-while-locked")
+            lockedOut.useKey(currentKey)
+            let connected = await lockedOut.activate(label: "", vault: nil)
+            let lockedOutVault = try? MasterVault.create(in: lockedOutFolder.appendingPathComponent("vault"),
+                                                         password: "license-check-locked-out", iterations: 1_000)
+            if let lockedOutVault { lockedOut.vaultOpened(lockedOutVault) }
+            let keptWhileIn = lockedOutVault.map { (try? AccountKeyVault.load(from: $0)) == currentKey } == true
+            lockedOut.vaultLocked()
+            let out = await lockedOut.signOut(vault: nil)
+            let keptWhileLocked = lockedOutVault.map { (try? AccountKeyVault.load(from: $0)) == currentKey } == true
+            if let lockedOutVault { lockedOut.vaultOpened(lockedOutVault) }
+            let keptAfterUnlock = lockedOutVault.flatMap { try? AccountKeyVault.load(from: $0) } != nil
+            check("signed out with the vault locked: the key the vault kept goes at its next unlock — kept while signed in and while"
+                  + " locked (the controls)",
+                  (try? connected.get()) != nil && keptWhileIn && out == .signedOut(confirmed: true) && keptWhileLocked && !keptAfterUnlock,
+                  "connected \(connected), kept while in: \(keptWhileIn), sign-out \(String(describing: out)), kept while locked:"
+                  + " \(keptWhileLocked), after the unlock: \(keptAfterUnlock)")
+
+            let (revokedOpen, revokedFolder) = person("signed-out-by-the-server")
+            revokedOpen.useKey(currentKey)
+            let revokedConnected = await revokedOpen.activate(label: "", vault: nil)
+            let revokedVault = try? MasterVault.create(in: revokedFolder.appendingPathComponent("vault"),
+                                                       password: "license-check-revoked", iterations: 1_000)
+            if let revokedVault { revokedOpen.vaultOpened(revokedVault) }
+            let keptBeforeRevoked = revokedVault.map { (try? AccountKeyVault.load(from: $0)) == currentKey } == true
+            server.revoked = true
+            await revokedOpen.refresh()
+            server.revoked = false
+            let keptAfterRevoked = revokedVault.flatMap { try? AccountKeyVault.load(from: $0) } != nil
+            check("signed out by the server (device_revoked) with the vault open: the key the vault kept goes at once — it was kept (the control)",
+                  (try? revokedConnected.get()) != nil && keptBeforeRevoked && revokedOpen.mode == .notSignedIn && !keptAfterRevoked,
+                  "connected \(revokedConnected), kept before: \(keptBeforeRevoked), mode \(String(describing: revokedOpen.mode)),"
+                  + " kept after: \(keptAfterRevoked)")
+        } else {
+            check("signed out with the vault locked, or by the server: the key the vault kept goes", false, "the self-test's new key does not read")
+        }
+
         // The key replaced with the purchase code while this Mac cannot connect again at once: the
         // email is unlinked all the same (F3) — its session goes, and it is asked again whether one is
         // linked — not only when the reconnection works (step 8 is that one).
