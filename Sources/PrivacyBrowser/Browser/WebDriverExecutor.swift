@@ -201,9 +201,13 @@ final class WebDriverExecutor {
         case "getTimeouts":
             return Self.json(["script": Int(scriptTimeout * 1000), "pageLoad": Int(driver.timeout * 1000), "implicit": Int(implicitWait * 1000)])
         case "setTimeouts":
-            if let value = (body["implicit"] as? NSNumber)?.doubleValue { implicitWait = max(0, value / 1000) }
-            if let value = (body["pageLoad"] as? NSNumber)?.doubleValue { driver.timeout = max(1, value / 1000) }
-            if let value = (body["script"] as? NSNumber)?.doubleValue { scriptTimeout = max(1, value / 1000) }
+            // All three read before any is set: one out of the protocol's range sets none.
+            let implicit = try WebDriverRoute.timeoutSeconds(body, "implicit")
+            let pageLoad = try WebDriverRoute.timeoutSeconds(body, "pageLoad")
+            let script = try WebDriverRoute.timeoutSeconds(body, "script")
+            if let implicit { implicitWait = implicit }
+            if let pageLoad { driver.timeout = max(1, pageLoad) }
+            if let script { scriptTimeout = max(1, script) }
             return "null"
 
         case "windowHandle": return Self.json(Self.windowHandle)
