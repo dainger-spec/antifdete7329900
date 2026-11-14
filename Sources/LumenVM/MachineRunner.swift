@@ -775,7 +775,7 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
                 machine.saveMachineStateTo(url: self.files.state) { error in
                     DispatchQueue.main.async {
                         if let error { return giveUp(Self.kind(of: error)) }
-                        guard machine.canStop else { return self.finishAsleep() }
+                        guard machine.canStop else { self.finishAsleep() }
                         machine.stop { _ in DispatchQueue.main.async { self.finishAsleep() } }
                     }
                 }
