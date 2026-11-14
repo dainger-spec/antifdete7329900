@@ -186,7 +186,9 @@ public struct ProxyListEntry: Codable, Equatable, Identifiable, Sendable {
         addedAt = try c.decodeIfPresent(Date.self, forKey: .addedAt) ?? Date(timeIntervalSince1970: 0)
         lastCheck = (try? c.decodeIfPresent(ProxyCheckResult.self, forKey: .lastCheck)) ?? nil
         origin = try c.decodeIfPresent(ProxyOrigin.self, forKey: .origin) ?? .user
-        changeIPURL = (try? c.decodeIfPresent(String.self, forKey: .changeIPURL)).flatMap { ProxyIPChange.link(from: $0) }
+        // As it was saved, even to a host the rule on entered links refuses: never dropped here
+        // (`ProxyIPChange.storedLink`); opening it is what is refused (`ProxyIPChange.mayOpen`).
+        changeIPURL = (try? c.decodeIfPresent(String.self, forKey: .changeIPURL)).flatMap { ProxyIPChange.storedLink(from: $0) }
         changesIPOnLaunch = (try? c.decodeIfPresent(Bool.self, forKey: .changesIPOnLaunch)) ?? false
     }
 

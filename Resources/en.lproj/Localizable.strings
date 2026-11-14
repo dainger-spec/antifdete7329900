@@ -1581,6 +1581,7 @@
 "proxies.ipChange.noAnswerYet" = "The provider took the change %@, but the proxy has not answered since. Check it in a moment.";
 "proxies.ipChange.refused" = "The IP was not changed: %@";
 "proxies.ipChange.noReason" = "the provider gave no reason";
+"proxies.ipChange.localLink" = "the change IP link points at this Mac or its local network, so Lumen does not open it — edit the proxy and give the provider's address on the internet";
 "proxies.ipChange.launchFailed" = "The IP of the proxy of “%1$@” was not changed before it started: %2$@";
 "proxies.ipChange.fact" = "Change IP";
 "proxies.ipChange.fact.onLaunch" = "at each launch";

@@ -1581,6 +1581,7 @@
 "proxies.ipChange.noAnswerYet" = "Провайдер принял смену %@, но прокси с тех пор не отвечает. Проверьте его чуть позже.";
 "proxies.ipChange.refused" = "IP не сменён: %@";
 "proxies.ipChange.noReason" = "провайдер не объяснил причину";
+"proxies.ipChange.localLink" = "ссылка смены IP ведёт на этот Mac или в его локальную сеть, поэтому Lumen её не открывает — измените прокси и укажите адрес провайдера в интернете";
 "proxies.ipChange.launchFailed" = "IP прокси профиля «%1$@» не сменился перед запуском: %2$@";
 "proxies.ipChange.fact" = "Смена IP";
 "proxies.ipChange.fact.onLaunch" = "при каждом запуске";

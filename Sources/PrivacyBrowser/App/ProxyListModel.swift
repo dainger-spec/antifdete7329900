@@ -166,7 +166,8 @@ final class ProxyListModel: ObservableObject {
             switch answer {
             case .accepted(let message): return message ?? ""
             case .refused(let status, let message):
-                let code = (200..<300).contains(status) ? "" : "HTTP \(status)"
+                // 0: refused here, before anything was sent (`open`): no HTTP status to say.
+                let code = status == 0 || (200..<300).contains(status) ? "" : "HTTP \(status)"
                 return [code, message ?? ""].filter { !$0.isEmpty }.joined(separator: ": ")
             case .unreachable(let message): return message
             }
@@ -228,9 +229,12 @@ final class ProxyListModel: ObservableObject {
     /// (`ProxyIPChange.request`), and reads the provider's answer. A redirect is followed only on
     /// the link's own host (`ProxyIPChange.mayFollowRedirect`); any other is the answer itself.
     nonisolated static func open(_ link: URL) async -> ProxyIPChange.Answer {
-        // A link kept from before the rule on hosts, or made some other way, is checked again here.
-        guard ProxyIPChange.link(from: link.absoluteString) != nil else {
-            return .refused(status: 0, message: L("proxies.ipChange.badLink"))
+        // A link kept from before the rule on hosts (this Mac, its local network) is kept in the
+        // list but not opened. Logged by its kind alone: never the link, which holds the key.
+        guard ProxyIPChange.mayOpen(link) else {
+            Logger(subsystem: "PrivacyBrowser", category: "ProxyList")
+                .notice("IP change of a proxy not made: its link is not to a host on the internet")
+            return .refused(status: 0, message: L("proxies.ipChange.localLink"))
         }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpCookieStorage = nil

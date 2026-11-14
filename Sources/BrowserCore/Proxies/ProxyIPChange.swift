@@ -12,10 +12,11 @@ import FoundationNetworking
 ///
 /// It is opened from the app itself, not through the proxy (the provider's API is reachable
 /// directly, and a proxy whose modem is reconnecting does not carry anything) — from this Mac's
-/// own connection, which the editor says. So a link is taken only to a host on the internet: not
-/// this Mac, its local network or a link-local address, by name (localhost, .local, a name of one
-/// label…) or by address; a redirect is followed only on the same host (`mayFollowRedirect`). The
-/// provider's
+/// own connection, which the editor says. So a link entered (the editor, an import line) is taken
+/// only to a host on the internet: not this Mac, its local network or a link-local address, by
+/// name (localhost, .local, a name of one label…) or by address; one already in the list is kept
+/// as it is (`storedLink`) but not opened (`mayOpen`); a redirect is followed only on the same
+/// host (`mayFollowRedirect`). The provider's
 /// answer is the only word on whether it worked: a 2xx answer whose text does not say it failed.
 /// The new exit IP is found afterwards by checking the proxy again (`ProxyChecker`), once it
 /// carries traffic again.
@@ -40,14 +41,31 @@ public enum ProxyIPChange {
     /// unencrypted, key and all; the editor says the link is opened from this Mac's connection,
     /// and https is what to give when the provider has it.
     public static func link(from text: String) -> URL? {
+        guard let url = storedLink(from: text), let host = URLComponents(url: url, resolvingAgainstBaseURL: false)?.host,
+              isInternetHost(host) else { return nil }
+        return url
+    }
+
+    /// `text` as a link kept in the proxy list: the rule before hosts were looked at — an http or
+    /// https URL with a host, no user name or password, at most `maximumLength` characters. A link
+    /// saved before that rule (to a host of the local network, say) is read and written back as it
+    /// is, never dropped: it is the person's. It is not opened (`mayOpen`), and the editor asks for
+    /// another when it is edited (`link(from:)`).
+    public static func storedLink(from text: String) -> URL? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.count <= maximumLength, !trimmed.contains(where: \.isWhitespace),
               let components = URLComponents(string: trimmed),
               let scheme = components.scheme?.lowercased(), scheme == "https" || scheme == "http",
-              let host = components.host, !host.isEmpty, isInternetHost(host),
+              let host = components.host, !host.isEmpty,
               components.user == nil, components.password == nil,
               let url = components.url else { return nil }
         return url
+    }
+
+    /// Whether `link` may be opened: one `link(from:)` takes — to a host on the internet. A link
+    /// kept from before the rule on hosts that names this Mac or its network is not.
+    public static func mayOpen(_ link: URL) -> Bool {
+        self.link(from: link.absoluteString) != nil
     }
 
     /// Whether `host` (a URL's) names a host on the internet, as far as its text tells: not

@@ -518,6 +518,25 @@ final class ProxyIPChangeTests: XCTestCase {
         XCTAssertEqual(ProxyListImport.read("socks5://u:p@m.example:8001[http://192.168.0.1/reboot]").proxies.count, 0)
     }
 
+    /// A link saved before the rule on hosts — to the local network — is the person's: the list
+    /// reads it and writes it back as it is, and it is not opened.
+    func testAStoredLocalLinkIsKeptButNotOpened() throws {
+        let local = "http://192.168.1.1/reboot?key=abc"
+        let proxy = ProxySettings(kind: .socks5, host: "m.example", port: 8001)
+        let entry = ProxyListEntry(proxy: proxy, changeIPURL: URL(string: local), changesIPOnLaunch: true)
+        let decoded = try JSONCoding.decoder.decode(ProxyListEntry.self, from: JSONCoding.encoder.encode(entry))
+        XCTAssertEqual(decoded.changeIPURL?.absoluteString, local, "kept, not dropped on load")
+        XCTAssertTrue(decoded.changesIPOnLaunch)
+        XCTAssertEqual(try JSONCoding.decoder.decode(ProxyListEntry.self, from: JSONCoding.encoder.encode(decoded)), decoded)
+        XCTAssertNotNil(ProxyIPChange.storedLink(from: local))
+        XCTAssertNil(ProxyIPChange.link(from: local), "not taken when entered or edited")
+        XCTAssertFalse(ProxyIPChange.mayOpen(try XCTUnwrap(decoded.changeIPURL)), "not opened")
+        XCTAssertTrue(ProxyIPChange.mayOpen(try XCTUnwrap(URL(string: "https://changeip.example/x?key=1"))))
+        // What the stored rule never took is still not taken.
+        XCTAssertNil(ProxyIPChange.storedLink(from: "ftp://a.example/"))
+        XCTAssertNil(ProxyIPChange.storedLink(from: "https://u:p@a.example/"))
+    }
+
     /// A redirect is followed on the link's own host only, and never from https to http.
     func testARedirectIsFollowedOnTheSameHostOnly() throws {
         let link = try XCTUnwrap(URL(string: "https://changeip.example/api?key=1"))
