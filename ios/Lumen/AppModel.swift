@@ -47,6 +47,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var sessions: [Session] = []
     @Published private(set) var proxies: [ProxyEntry] = []
     @Published var path: [UUID] = []
+    /// A site's light page fills the browser: the window goes light, its status bar dark on white (run 110).
+    @Published var lightPageShown = false
     /// Set once a reset launch has removed every WebKit store (the UI waits for it).
     @Published private(set) var ready = false
     /// Proxies being checked right now (their rows show it).

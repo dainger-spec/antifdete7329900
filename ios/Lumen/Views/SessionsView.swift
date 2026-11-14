@@ -1,11 +1,23 @@
 import LumenCore
 import SwiftUI
+import UIKit
 
-/// The list of sessions: a card each, search over names, descriptions, tags and proxies.
+/// The list of sessions («Приборная панель», k-list): a large title, search under it, the account's
+/// notice above the list, the sessions as rows — the one opened last on top.
 struct SessionsView: View {
     @EnvironmentObject var model: AppModel
     @State private var query = ""
     @State private var editor: EditorTarget?
+    /// The session whose deletion is being confirmed (from its context menu).
+    @State private var deleting: Session?
+    /// The screen has appeared. The rows come a moment after it: shown with the screen, under the search
+    /// that stays in the bar's drawer, they left the large title collapsed into the bar until the first
+    /// scroll (iOS 26 and 27; runs 114, 116, 118).
+    @State private var appeared = false
+    @Namespace private var zoom
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// At the accessibility sizes the search's long hint does not fit its field (the audit, run 108).
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     enum EditorTarget: Identifiable {
         case new
@@ -21,85 +33,78 @@ struct SessionsView: View {
         }
     }
 
+    /// The sessions shown: the search's, the one used last first (a new one counts from its making).
+    private var shown: [Session] {
+        model.filteredSessions(query).sorted { ($0.lastOpenedAt ?? $0.createdAt) > ($1.lastOpenedAt ?? $1.createdAt) }
+    }
+
+    private var searching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
+
     var body: some View {
         NavigationStack(path: $model.path) {
             List {
-                let shown = model.filteredSessions(query)
-                // What the account says that the person must read (the iPhone unlinked, no answer of
-                // the server, the paid period over): one line, the plan behind it.
-                if let message = model.accountMessage {
-                    Button { editor = .plans(because: nil) } label: {
-                        Label(message, systemImage: "exclamationmark.triangle").font(.subheadline).foregroundStyle(Theme.warn)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .accessibilityIdentifier("accountMessage")
-                    .overlay(alignment: .topTrailing) {
-                        // The notice of the period's end may be closed (§8.5); the others stay while true.
-                        if model.endingNotice != nil, model.accountMessage == model.endingNotice?.text {
-                            Button { model.dismissEndingNotice() } label: { Image(systemName: "xmark").font(.system(size: 12, weight: .bold)) }
-                                .buttonStyle(.plain).foregroundStyle(Theme.warn).padding(8)
-                                .accessibilityIdentifier("dismissNotice").accessibilityLabel(L("Скрыть"))
+                if let message = model.accountMessage, !searching {
+                    Section {
+                        Button { editor = .plans(because: nil) } label: {
+                            NoticeRow(text: message, dismiss: dismissible(message) ? { model.dismissEndingNotice() } : nil)
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("accountMessage")
                     }
-                    .padding(.horizontal, 14).padding(.vertical, 12)
-                    .background(Theme.warn.opacity(0.1), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .listRowBackground(Color.clear).listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
                 }
-                if model.sessions.isEmpty {
-                    EmptySessions { openNew() }
-                        .listRowBackground(Color.clear).listRowSeparator(.hidden)
-                } else if shown.isEmpty {
-                    ContentUnavailableView.search(text: query)
-                        .listRowBackground(Color.clear).listRowSeparator(.hidden)
-                }
-                ForEach(shown) { session in
-                    // A card is a button, not a row with a chevron (the design): it opens the session.
-                    Button { model.path.append(session.id) } label: {
-                        SessionCard(session: session, proxy: model.proxy(session.proxyID), lock: model.lock(session),
-                                    lockedForProxy: model.lockedForProxy(session))
-                            .padding(.horizontal, 14).padding(.vertical, 13)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                            .glassPane(radius: 24)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("session-\(session.name)")
-                    .listRowBackground(Color.clear).listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
-                    .contextMenu {
-                        Button(L("Изменить"), systemImage: "pencil") { editor = .edit(session.id) }
-                        Button(L("Удалить"), systemImage: "trash", role: .destructive) { model.deleteSession(session.id) }
-                    }
-                    .swipeActions {
-                        Button(L("Удалить"), systemImage: "trash", role: .destructive) { model.deleteSession(session.id) }
-                        Button(L("Изменить"), systemImage: "pencil") { editor = .edit(session.id) }.tint(.gray)
+                if !shown.isEmpty && appeared {
+                    Section {
+                        ForEach(shown) { session in
+                            row(session)
+                        }
+                    } header: {
+                        Text(searching ? Count.sessions(shown.count) : L("Недавние"))
                     }
                 }
             }
-            .listStyle(.plain)
-            .eclipseScreen()
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: L("Имя, описание, метка, прокси"))
+            .listStyle(.insetGrouped)
+            .onAppear { DispatchQueue.main.async { appeared = true } }
+            .overlay {
+                if model.sessions.isEmpty {
+                    ContentUnavailableView {
+                        Label(L("Сессий пока нет"), systemImage: "square.on.square")
+                    } description: {
+                        Text(L("У каждой сессии свои куки, хранилище сайтов, вкладки, история и прокси."))
+                    } actions: {
+                        Button(L("Новая сессия")) { openNew() }
+                            .buttonStyle(.borderedProminent).tint(Theme.accentFill).controlSize(.large)
+                            .accessibilityIdentifier("newSessionEmpty")
+                    }
+                } else if shown.isEmpty {
+                    ContentUnavailableView {
+                        Label(L("Ничего не найдено"), systemImage: "magnifyingglass")
+                    } description: {
+                        Text(L("Нет сессий с «%@». Проверьте написание или ищите по прокси.", query))
+                    }
+                }
+            }
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: dynamicTypeSize.isAccessibilitySize ? L("Поиск") : L("Имя, описание, метка, прокси"))
             .navigationTitle(L("Сессии"))
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
+                ToolbarItemGroup(placement: .topBarLeading) {
+                    NavigationLink { ProxiesView() } label: { Image(systemName: "network") }
+                        .accessibilityIdentifier("proxiesButton")
+                        .accessibilityLabel(L("Прокси"))
+                    Button { editor = .plans(because: nil) } label: { Image(systemName: "person.crop.circle") }
+                        .accessibilityIdentifier("plansButton")
+                        .accessibilityLabel(L("Аккаунт"))
+                }
+                ToolbarItem(placement: .topBarTrailing) { DebugProbeLink() }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { openNew() } label: { Image(systemName: "plus") }
                         .accessibilityIdentifier("newSession")
                         .accessibilityLabel(L("Новая сессия"))
                 }
-                ToolbarItem(placement: .topBarLeading) {
-                    NavigationLink { ProxiesView() } label: { Label(L("Прокси"), systemImage: "network").labelStyle(.titleAndIcon) }
-                        .accessibilityIdentifier("proxiesButton")
-                }
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { editor = .plans(because: nil) } label: { Label(L("Аккаунт"), systemImage: "person.crop.circle") }
-                        .accessibilityIdentifier("plansButton")
-                }
-                ToolbarItem(placement: .topBarTrailing) { DebugProbeLink() }
             }
             .navigationDestination(for: UUID.self) { id in
                 SessionScreen(sessionID: id)
+                    .modifier(ZoomFrom(id: id, namespace: zoom, enabled: !reduceMotion))
             }
             .sheet(item: $editor) { target in
                 switch target {
@@ -108,7 +113,53 @@ struct SessionsView: View {
                 case let .plans(because): PlansView(because: because)
                 }
             }
+            .confirmationDialog(L("Удалить сессию со всеми её данными?"), isPresented: Binding(
+                get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible, presenting: deleting) { session in
+                Button(L("Удалить сессию"), role: .destructive) { model.deleteSession(session.id) }
+                    .accessibilityIdentifier("confirmDelete")
+                Button(L("Отмена"), role: .cancel) {}
+            } message: { session in
+                Text(L("Куки, хранилище сайтов, вкладки и история «%@» будут удалены. Это нельзя отменить.", session.name))
+            }
         }
+    }
+
+    private func row(_ session: Session) -> some View {
+        Button { model.path.append(session.id) } label: {
+            SessionRow(session: session, proxy: model.proxy(session.proxyID), lock: model.lock(session),
+                       lockedForProxy: model.lockedForProxy(session),
+                       checking: session.proxyID.map { model.checking.contains($0) } ?? false)
+        }
+        .buttonStyle(.plain)
+        .matchedTransitionSource(id: session.id, in: zoom)
+        .accessibilityIdentifier("session-\(session.name)")
+        .contextMenu {
+            Button(L("Изменить"), systemImage: "pencil") { editor = .edit(session.id) }
+            Button(L("Скопировать имя"), systemImage: "doc.on.doc") { UIPasteboard.general.string = session.name }
+            Divider()
+            Button(L("Удалить"), systemImage: "trash", role: .destructive) { deleting = session }
+        }
+        .swipeActions {
+            Button(L("Удалить"), systemImage: "trash", role: .destructive) { deleting = session }
+            Button(L("Изменить"), systemImage: "pencil") { editor = .edit(session.id) }.tint(Color(.systemGray))
+        }
+    }
+
+    /// The notice of the period's end may be closed (§8.5); the others stay while they are true.
+    private func dismissible(_ message: String) -> Bool {
+        model.endingNotice != nil && message == model.endingNotice?.text
+    }
+}
+
+/// Opening a session: its row grows into the browser (iOS 18's zoom), and shrinks back on the way out.
+/// With "Reduce Motion" the system's plain transition.
+struct ZoomFrom: ViewModifier {
+    let id: UUID
+    let namespace: Namespace.ID
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled { content.navigationTransition(.zoom(sourceID: id, in: namespace)) } else { content }
     }
 }
 
@@ -120,85 +171,7 @@ extension SessionsView {
     }
 }
 
-/// No session yet: what a session is, and the way to the first one.
-struct EmptySessions: View {
-    var create: () -> Void
-
-    var body: some View {
-        VStack(spacing: 14) {
-            ZStack {
-                Color.clear.frame(width: 88, height: 66).glassPane(radius: 18).offset(y: -23)
-                Color.clear.frame(width: 110, height: 76).glassPane(radius: 20).offset(y: -4)
-                Image(systemName: "plus").font(.system(size: 26, weight: .medium)).foregroundStyle(Theme.text)
-                    .frame(width: 132, height: 82).glassPane(radius: 22).offset(y: 15)
-            }
-            .frame(width: 132, height: 112)
-            .accessibilityHidden(true)
-            Text(L("Сессий пока нет")).font(.system(size: 22, weight: .bold)).foregroundStyle(Theme.text).padding(.top, 10)
-            Text(L("У каждой сессии свои куки, хранилище, вкладки, история и прокси."))
-                .font(.system(size: 16)).foregroundStyle(Theme.secondary).multilineTextAlignment(.center)
-            Button(action: create) {
-                Label(L("Новая сессия"), systemImage: "plus").font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Theme.text).padding(.horizontal, 22).frame(height: 48)
-            }
-            .buttonStyle(.plain)
-            .glassPane(radius: 24)
-            .padding(.top, 14)
-            .accessibilityIdentifier("newSessionEmpty")
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 24).padding(.top, 70)
-    }
-}
-
-/// A session at a glance: name, proxy, where it exits, when it was last opened, tags, description.
-struct SessionCard: View {
-    let session: Session
-    let proxy: ProxyEntry?
-    var lock = SessionLock.open
-    var lockedForProxy = true
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 14) {
-            InitialBadge(name: session.name)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 8) {
-                    Text(session.name).font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.text)
-                    Spacer(minLength: 0)
-                    if !exitText.isEmpty { Chip(text: exitText) }
-                }
-                Text(proxy.map { L("Прокси: %@", "\($0.displayName)") } ?? (session.boundToProxy ? L("Прокси удалён") : L("Без прокси")))
-                    .font(.system(size: 14)).foregroundStyle(Theme.secondary)
-                if case let .locked(reason) = lock {
-                    // A profile that lived behind a proxy says the short thing; any other lock, its reason.
-                    Label(lockedForProxy ? L("Заперт: без прокси не откроется") : L("Заперт: %@", "\(reason)"), systemImage: "lock.fill")
-                        .font(.system(size: 14)).foregroundStyle(Theme.warn)
-                }
-                Text(openedText).font(.system(size: 14)).foregroundStyle(Theme.tertiary)
-                if !session.notes.isEmpty {
-                    Text(session.notes).font(.system(size: 13)).foregroundStyle(Theme.secondary).lineLimit(1)
-                }
-                if !session.tags.isEmpty {
-                    Text(session.tags.map { "#\($0)" }.joined(separator: " ")).font(.system(size: 13)).foregroundStyle(Theme.tertiary)
-                }
-            }
-        }
-    }
-
-    private var exitText: String {
-        guard let proxy else { return "" }
-        guard let check = proxy.check else { return L("не проверен") }
-        guard check.alive, let country = check.country else { return L("недоступен") }
-        return "\(CountryLocale.flag(country)) \(country)"
-    }
-
-    private var openedText: String {
-        guard let date = session.lastOpenedAt else { return L("Ещё не открывали") }
-        return L("Открывали ") + date.formatted(.relative(presentation: .named).locale(Localization.locale))
-    }
-}
-
-/// Create or change a session's name, description and tags; delete it.
+/// Create or change a session's name, description and tags; delete it (k-keyboard).
 struct SessionEditor: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -207,17 +180,22 @@ struct SessionEditor: View {
     @State private var notes = ""
     @State private var tags = ""
     @State private var confirmDelete = false
+    @FocusState private var nameFocused: Bool
 
     var body: some View {
         NavigationStack {
             Form {
-                Section(L("Сессия")) {
+                Section {
                     TextField(L("Имя"), text: $name).accessibilityIdentifier("sessionName")
+                        .focused($nameFocused)
                     TextField(L("Описание"), text: $notes).accessibilityIdentifier("sessionNotes")
                     TextField(L("Метки через запятую"), text: $tags).accessibilityIdentifier("sessionTags")
                         .textInputAutocapitalization(.never)
+                } header: {
+                    Text(L("Сессия"))
+                } footer: {
+                    Text(L("У сессии свои куки, хранилище сайтов, вкладки и история."))
                 }
-                .glassRow()
                 if sessionID != nil {
                     Section {
                         Button(L("Удалить сессию"), role: .destructive) { confirmDelete = true }
@@ -225,10 +203,8 @@ struct SessionEditor: View {
                     } footer: {
                         Text(L("Удаляются куки, хранилище, кэш, вкладки и история этой сессии."))
                     }
-                    .glassRow()
                 }
             }
-            .eclipseSheet()
             .navigationTitle(sessionID == nil ? L("Новая сессия") : L("Сессия"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -242,22 +218,30 @@ struct SessionEditor: View {
                         }
                         dismiss()
                     }
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
                     .accessibilityIdentifier("saveSession")
                 }
             }
             .confirmationDialog(L("Удалить сессию со всеми её данными?"), isPresented: $confirmDelete, titleVisibility: .visible) {
-                Button(L("Удалить"), role: .destructive) {
+                Button(L("Удалить сессию"), role: .destructive) {
                     if let sessionID { model.deleteSession(sessionID) }
                     dismiss()
                 }
                 .accessibilityIdentifier("confirmDelete")
+                Button(L("Отмена"), role: .cancel) {}
+            } message: {
+                Text(L("Куки, хранилище сайтов, вкладки и история «%@» будут удалены. Это нельзя отменить.", name))
             }
             .onAppear {
-                guard let id = sessionID, let session = model.session(id) else { return }
+                guard let id = sessionID, let session = model.session(id) else {
+                    nameFocused = true
+                    return
+                }
                 name = session.name
                 notes = session.notes
                 tags = session.tags.joined(separator: ", ")
             }
         }
+        .presentationDetents([.large])
     }
 }

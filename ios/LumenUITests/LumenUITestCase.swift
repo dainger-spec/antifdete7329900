@@ -380,7 +380,8 @@ class LumenUITestCase: XCTestCase {
     func chooseProfile(_ level: String, in session: String, file: StaticString = #filePath, line: UInt = #line) {
         app.buttons["settingsButton"].tap()
         wait(app.buttons["settingsDone"], "the settings open", file: file, line: line)
-        reveal(app.segmentedControls["profileLevel"], "the device profile's choice is there").buttons[level].tap()
+        let id = ["Полный": "profile-full", "Упрощённый": "profile-simplified", "Свой": "profile-custom"][level] ?? level
+        reveal(app.buttons[id], "the device profile's choice \(level) is there").tap()
         app.buttons["settingsDone"].tap()
         waitForBrowser(session: session, file: file, line: line)
     }
@@ -388,9 +389,18 @@ class LumenUITestCase: XCTestCase {
     func chooseProxy(_ name: String, in session: String, file: StaticString = #filePath, line: UInt = #line) {
         app.buttons["settingsButton"].tap()
         wait(app.buttons["settingsDone"], "the settings open")
-        reveal(app.buttons[name], "the settings list the proxy \(name)").tap()
+        // The proxy's row opens the chooser (a half-height sheet); a choice closes it.
+        reveal(app.buttons["proxyRow"], "the settings show the session's proxy").tap()
+        wait(app.buttons["choose-\(name)"], "the chooser lists the proxy \(name)").tap()
+        waitGone(app.buttons["proxySheetDone"], "the chooser closes")
         app.buttons["settingsDone"].tap()
         waitForBrowser(session: session, file: file, line: line)
+    }
+
+    /// A menu's choice (Picker(.menu)): the menu opened by its button, then the option touched.
+    func pickFromMenu(_ id: String, _ option: String, file: StaticString = #filePath, line: UInt = #line) {
+        reveal(app.buttons[id], "the menu \(id) is there", file: file, line: line).tap()
+        wait(app.buttons[option], "the menu \(id) offers \(option)", file: file, line: line).tap()
     }
 
     // MARK: Sessions

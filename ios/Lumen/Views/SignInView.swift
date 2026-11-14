@@ -12,85 +12,26 @@ struct SignInView: View {
     @Environment(\.openURL) private var openURL
     @State private var email = ""
     @State private var password = ""
+    @State private var showPassword = false
     @State private var code = ""
     /// The code step: the server's handle of this sign-in attempt.
     @State private var challenge: String?
     @State private var message: String?
     @State private var busy = false
     @State private var robotCheck = false
+    /// When the code may be sent again (a minute after the last one).
+    @State private var resendAt = Date.distantPast
 
     var body: some View {
         NavigationStack {
             Form {
-                if challenge == nil {
-                    Section {
-                        TextField(L("Почта"), text: $email)
-                            .keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .accessibilityIdentifier("signInEmail")
-                        SecureField(L("Пароль"), text: $password).accessibilityIdentifier("signInPassword")
-                    } footer: {
-                        Text(L("Аккаунт Lumen — тот же, что в Lumen для Mac."))
-                    }
-                    .glassRow()
-                    if let message {
-                        Section {
-                            Label { Text(message).accessibilityIdentifier("signInMessage") } icon: { Image(systemName: "exclamationmark.circle") }
-                                .font(.system(size: 15)).foregroundStyle(Theme.bad)
-                        }
-                        .listRowBackground(Theme.bad.opacity(0.1))
-                    }
-                    Section {
-                        Button(L("Войти")) { submit(robotToken: nil) }
-                            .buttonStyle(PrimaryButtonStyle())
-                            .disabled(busy || email.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty)
-                            .accessibilityIdentifier("submitSignIn")
-                            .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
-                    }
-                    Section {
-                        Button(L("Забыли пароль?")) { openURL(AccountClient.site.appendingPathComponent("reset-password")) }
-                            .foregroundStyle(Theme.secondary)
-                            .accessibilityIdentifier("forgotPassword")
-                    }
-                    .glassRow()
-                } else {
-                    Section {
-                        Text(AccountText.checkEmail)
-                        TextField(L("Код из письма"), text: $code).keyboardType(.numberPad).accessibilityIdentifier("signInCode")
-                    }
-                    .glassRow()
-                    if let message {
-                        Section {
-                            Label { Text(message).accessibilityIdentifier("signInMessage") } icon: { Image(systemName: "exclamationmark.circle") }
-                                .font(.system(size: 15)).foregroundStyle(Theme.bad)
-                        }
-                        .listRowBackground(Theme.bad.opacity(0.1))
-                    }
-                    Section {
-                        Button(L("Подтвердить")) { confirm() }
-                            .buttonStyle(PrimaryButtonStyle())
-                            .disabled(busy || code.trimmingCharacters(in: .whitespaces).isEmpty)
-                            .accessibilityIdentifier("submitCode")
-                            .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
-                    }
-                    Section {
-                        Button(L("Отправить код ещё раз")) { resend() }.disabled(busy).accessibilityIdentifier("resendCode")
-                        Button(L("Ввести пароль заново")) {
-                            challenge = nil
-                            code = ""
-                            message = nil
-                        }
-                    }
-                    .glassRow()
-                }
-                if busy {
-                    Section { ProgressView().accessibilityIdentifier("signInBusy") }.glassRow()
-                }
+                if challenge == nil { passwordStep } else { codeStep }
             }
-            .eclipseSheet()
-            .navigationTitle(L("Вход"))
+            .navigationTitle(challenge == nil ? L("Вход") : L("Код из письма"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(L("Отмена")) { close() }.accessibilityIdentifier("cancelSignIn") }
+                if busy { ToolbarItem(placement: .confirmationAction) { ProgressView().accessibilityIdentifier("signInBusy") } }
             }
             .sheet(isPresented: $robotCheck) {
                 RobotCheckSheet(url: Self.robotCheckURL) { token in
@@ -102,6 +43,88 @@ struct SignInView: View {
                 }
             }
         }
+        .presentationDetents([.large])
+    }
+
+    /// The account's address and password (p11-login); a failure in one red line under the fields.
+    @ViewBuilder private var passwordStep: some View {
+        Section {
+            TextField(L("Почта"), text: $email)
+                .keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
+                .textContentType(.username)
+                .accessibilityIdentifier("signInEmail")
+            HStack {
+                Group {
+                    if showPassword {
+                        TextField(L("Пароль"), text: $password).accessibilityIdentifier("signInPasswordShown")
+                    } else {
+                        SecureField(L("Пароль"), text: $password).accessibilityIdentifier("signInPassword")
+                    }
+                }
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                Button { showPassword.toggle() } label: {
+                    Image(systemName: showPassword ? "eye" : "eye.slash").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(showPassword ? L("Скрыть пароль") : L("Показать пароль"))
+            }
+        } header: {
+            Text(L("Аккаунт Lumen"))
+        } footer: {
+            if let message { failure(message) }
+        }
+        Section {
+            Button(L("Войти")) { submit(robotToken: nil) }
+                .fontWeight(.semibold)
+                .disabled(busy || email.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty)
+                .accessibilityIdentifier("submitSignIn")
+            Button(L("Забыли пароль?")) { openURL(AccountClient.site.appendingPathComponent("reset-password")) }
+                .accessibilityIdentifier("forgotPassword")
+        } footer: {
+            Text(L("Пароль восстанавливается на сайте %@.", AccountClient.site.host() ?? "lumenbrowser.io"))
+        }
+    }
+
+    /// The code from the letter (p11-code): sent again after a minute, the password step one touch away.
+    @ViewBuilder private var codeStep: some View {
+        Section {
+            TextField(L("Код из письма"), text: $code)
+                .keyboardType(.numberPad).textContentType(.oneTimeCode).monospacedDigit()
+                .accessibilityIdentifier("signInCode")
+        } header: {
+            Text(AccountText.checkEmail).textCase(nil)
+        } footer: {
+            if let message { failure(message) }
+        }
+        Section {
+            Button(L("Подтвердить")) { confirm() }
+                .fontWeight(.semibold)
+                .disabled(busy || code.trimmingCharacters(in: .whitespaces).isEmpty)
+                .accessibilityIdentifier("submitCode")
+        }
+        Section {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let left = max(0, Int(resendAt.timeIntervalSince(context.date).rounded(.up)))
+                Button { resend() } label: {
+                    HStack(spacing: 4) {
+                        Text(L("Отправить код ещё раз"))
+                        if left > 0 { Text(String(format: "%d:%02d", left / 60, left % 60)).foregroundStyle(.secondary).monospacedDigit() }
+                    }
+                }
+                .disabled(busy || left > 0)
+                .accessibilityIdentifier("resendCode")
+            }
+            Button(L("Ввести пароль заново")) {
+                challenge = nil
+                code = ""
+                message = nil
+            }
+        }
+    }
+
+    /// One red line, the reason — under the field it is about.
+    private func failure(_ text: String) -> some View {
+        Text(text).foregroundStyle(Color(.systemRed)).accessibilityIdentifier("signInMessage")
     }
 
     /// `<site>/robot-check?action=login` (CONTRACT.md §5.5).
@@ -134,6 +157,7 @@ struct SignInView: View {
     private func resend() {
         guard let challenge else { return }
         busy = true
+        resendAt = Date().addingTimeInterval(60)
         Task {
             message = await model.resendCode(challenge: challenge)
             busy = false
@@ -146,6 +170,7 @@ struct SignInView: View {
             close()
         case let .needsCode(challenge):
             self.challenge = challenge
+            resendAt = Date().addingTimeInterval(60)
         case .needsRobotCheck:
             message = AccountText.robotCheck
             robotCheck = true

@@ -1,0 +1,2722 @@
+{
+  "sourceLanguage": "ru",
+  "strings": {
+    " Повторите через %@.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " Try again in %@."
+          }
+        }
+      }
+    },
+    " до %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " until %@"
+          }
+        }
+      }
+    },
+    "%@ Сессия работала через прокси — без него она не откроется, чтобы сайты не увидели настоящий адрес iPhone. Данные сессии сохранены.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ This session worked through a proxy, so it won't open without one — sites must not see the iPhone's real address. The session's data is kept."
+          }
+        }
+      }
+    },
+    "%@ дн.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ d"
+          }
+        }
+      }
+    },
+    "%@ из %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ of %@"
+          }
+        }
+      }
+    },
+    "%@ мин": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ min"
+          }
+        }
+      }
+    },
+    "%@ ч": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ h"
+          }
+        }
+      }
+    },
+    "7 дней бесплатно": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "7 days free"
+          }
+        }
+      }
+    },
+    "Lumen давно не получал ответа сервера. Прокси недоступны, пока сервер Lumen не ответит.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lumen has not heard from its server for a long time. Proxies are unavailable until the Lumen server answers."
+          }
+        }
+      }
+    },
+    "UDP: не проверен": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "UDP: not checked"
+          }
+        }
+      }
+    },
+    "UDP: не умеет": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "UDP: no"
+          }
+        }
+      }
+    },
+    "UDP: проверяется": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "UDP: checking"
+          }
+        }
+      }
+    },
+    "UDP: умеет": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "UDP: yes"
+          }
+        }
+      }
+    },
+    "__language": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "en"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ru"
+          }
+        }
+      }
+    },
+    "Адрес или запрос": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Address or search"
+          }
+        }
+      }
+    },
+    "Аккаунт": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Account"
+          }
+        }
+      }
+    },
+    "Аккаунт Lumen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lumen Account"
+          }
+        }
+      }
+    },
+    "Аккаунт Lumen — тот же, что в Lumen для Mac.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your Lumen account is the same one as in Lumen for Mac."
+          }
+        }
+      }
+    },
+    "Аккаунт заблокирован": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Account blocked"
+          }
+        }
+      }
+    },
+    "Аккаунт заблокирован, напишите в поддержку.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This account is blocked. Contact support."
+          }
+        }
+      }
+    },
+    "Аккаунт удаляется. Отменить удаление можно на сайте.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This account is being deleted. You can cancel the deletion on the website."
+          }
+        }
+      }
+    },
+    "Без прокси": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No proxy"
+          }
+        }
+      }
+    },
+    "Бесплатный": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Free"
+          }
+        }
+      }
+    },
+    "Браузер": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Browser"
+          }
+        }
+      }
+    },
+    "Браузер и поиск": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Browser and Search"
+          }
+        }
+      }
+    },
+    "В адресе прокси не бывает пробелов.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A proxy’s address has no spaces."
+          }
+        }
+      }
+    },
+    "В бесплатном доступе прокси нет": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The free level has no proxies"
+          }
+        }
+      }
+    },
+    "В вашем тарифе нет прокси.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your plan has no proxies."
+          }
+        }
+      }
+    },
+    "В вашем тарифе сайты на iPhone не открываются.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your plan does not open sites on iPhone."
+          }
+        }
+      }
+    },
+    "Введите адрес или запрос.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter an address or a search."
+          }
+        }
+      }
+    },
+    "Введите адрес прокси.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter the proxy’s address."
+          }
+        }
+      }
+    },
+    "Ввести пароль заново": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter the password again"
+          }
+        }
+      }
+    },
+    "Вид прокси «%@» не поддерживается: подойдут socks5 и http.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The proxy type “%@” is not supported: use socks5 or http."
+          }
+        }
+      }
+    },
+    "Вкладки: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tabs: %@"
+          }
+        }
+      }
+    },
+    "Войдите в аккаунт Lumen.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in to your Lumen account."
+          }
+        }
+      }
+    },
+    "Войдите, чтобы включить свой тариф.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in to turn on your plan."
+          }
+        }
+      }
+    },
+    "Войти": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign In"
+          }
+        }
+      }
+    },
+    "Вперёд": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forward"
+          }
+        }
+      }
+    },
+    "Все возможности (проверочная сборка)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Everything (test build)"
+          }
+        }
+      }
+    },
+    "Вход": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign In"
+          }
+        }
+      }
+    },
+    "Вход не выполнен": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not signed in"
+          }
+        }
+      }
+    },
+    "Вчера": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yesterday"
+          }
+        }
+      }
+    },
+    "Выбрать прокси": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a Proxy"
+          }
+        }
+      }
+    },
+    "Выйти": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign Out"
+          }
+        }
+      }
+    },
+    "Выйти из аккаунта на этом iPhone?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign out of the account on this iPhone?"
+          }
+        }
+      }
+    },
+    "Выкл": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off"
+          }
+        }
+      }
+    },
+    "Выкл — сайт не получит значение. Настоящий — как у этого iPhone. Шум — своё значение у этой сессии, одно и то же при каждом запуске.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off — the site gets no value. Real — as on this iPhone. Noise — a value of this session's own, the same on every launch."
+          }
+        }
+      }
+    },
+    "Готово": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Done"
+          }
+        }
+      }
+    },
+    "Данные сессии сохранены.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The session's data is kept."
+          }
+        }
+      }
+    },
+    "Данные синхронизации на сервере изменились. Синхронизируйте ещё раз.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The sync data on the server changed. Sync again."
+          }
+        }
+      }
+    },
+    "Добавить прокси": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add Proxy"
+          }
+        }
+      }
+    },
+    "Добавьте HTTP или SOCKS5 — строкой, как его выдал провайдер.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add an HTTP or SOCKS5 proxy — as one line, the way your provider gave it."
+          }
+        }
+      }
+    },
+    "Ещё не открывали": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Never opened"
+          }
+        }
+      }
+    },
+    "Забыли пароль?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forgot password?"
+          }
+        }
+      }
+    },
+    "Забыть хранилище": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forget the Vault"
+          }
+        }
+      }
+    },
+    "Забыть хранилище на этом iPhone?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forget the vault on this iPhone?"
+          }
+        }
+      }
+    },
+    "Забыть — значит отключить этот iPhone от хранилища. Сессии на Mac останутся.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forgetting disconnects this iPhone from the vault. The sessions on the Mac stay."
+          }
+        }
+      }
+    },
+    "Задавать": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set By"
+          }
+        }
+      }
+    },
+    "Задайте код-пароль iPhone в Настройках: без него ключ хранилища не сохранить.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set an iPhone passcode in Settings: without one the vault's key cannot be kept."
+          }
+        }
+      }
+    },
+    "Закрыть вкладку": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close Tab"
+          }
+        }
+      }
+    },
+    "Заперта": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Locked"
+          }
+        }
+      }
+    },
+    "Заперта: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Locked: %@"
+          }
+        }
+      }
+    },
+    "Заперта: без прокси не откроется": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Locked: won't open without a proxy"
+          }
+        }
+      }
+    },
+    "Звук": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audio"
+          }
+        }
+      }
+    },
+    "Здесь один прокси: одна строка.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "One proxy goes here: a single line."
+          }
+        }
+      }
+    },
+    "Здесь появятся страницы, открытые в этой сессии.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pages opened in this session will appear here."
+          }
+        }
+      }
+    },
+    "Изменить": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit"
+          }
+        }
+      }
+    },
+    "Имя": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Name"
+          }
+        }
+      }
+    },
+    "Имя, описание, метка, прокси": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Name, description, tag, proxy"
+          }
+        }
+      }
+    },
+    "История": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "History"
+          }
+        }
+      }
+    },
+    "История пуста": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No history"
+          }
+        }
+      }
+    },
+    "К этой лицензии уже подключено наибольшее число iPhone%@. Отключите один из них в кабинете на сайте и войдите снова.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This license already has the largest number of iPhones connected%@. Disconnect one of them in your account on the website and sign in again."
+          }
+        }
+      }
+    },
+    "Как Safari этого iPhone": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Same as this iPhone’s Safari"
+          }
+        }
+      }
+    },
+    "Как у устройства": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Same as the device"
+          }
+        }
+      }
+    },
+    "Канвас": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Canvas"
+          }
+        }
+      }
+    },
+    "Канвас, WebGL и звук свои и постоянные": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Its own canvas, WebGL and audio, the same every time"
+          }
+        }
+      }
+    },
+    "Канвас, WebGL и звук — по отдельности": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Canvas, WebGL and audio, each set apart"
+          }
+        }
+      }
+    },
+    "Ключ хранилища удалится с iPhone. Сессии с Mac останутся в списке; чтобы синхронизировать снова, понадобится мастер-пароль.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The vault key will be removed from the iPhone. Sessions from the Mac stay in the list; to sync again you'll need the master password."
+          }
+        }
+      }
+    },
+    "Код в этой попытке больше не отправить. Письма нет — проверьте «Спам».": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The code can’t be sent again in this attempt. No email? Check your spam folder."
+          }
+        }
+      }
+    },
+    "Код из письма": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Code from the email"
+          }
+        }
+      }
+    },
+    "Код неверный или устарел.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The code is wrong or has expired."
+          }
+        }
+      }
+    },
+    "Код этого iPhone в кабинете: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This iPhone’s code in your account: %@"
+          }
+        }
+      }
+    },
+    "Команда": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Team"
+          }
+        }
+      }
+    },
+    "Куки обновлены: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cookies updated: %@"
+          }
+        }
+      }
+    },
+    "Куки, хранилище сайтов, вкладки и история «%@» будут удалены. Это нельзя отменить.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The cookies, site storage, tabs and history of “%@” will be deleted. This can't be undone."
+          }
+        }
+      }
+    },
+    "Личный": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Personal"
+          }
+        }
+      }
+    },
+    "Мастер-пароль": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Master password"
+          }
+        }
+      }
+    },
+    "Мастер-пароль изменился на Mac. Введите новый.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The master password changed on your Mac. Enter the new one."
+          }
+        }
+      }
+    },
+    "Мастер-пароль — тот же, что у хранилища Lumen на Mac. Он нужен один раз, дальше — Face ID.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The master password is the one of the Lumen vault on your Mac. It's needed once; after that, Face ID."
+          }
+        }
+      }
+    },
+    "Метки через запятую": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tags, comma-separated"
+          }
+        }
+      }
+    },
+    "На этом iPhone": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On this iPhone"
+          }
+        }
+      }
+    },
+    "На этом iPhone можно держать не больше %@ профилей.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This iPhone can keep no more than %@ profiles."
+          }
+        }
+      }
+    },
+    "Назад": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back"
+          }
+        }
+      }
+    },
+    "Название": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Name"
+          }
+        }
+      }
+    },
+    "Настоящий": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Real"
+          }
+        }
+      }
+    },
+    "Настройки сессии": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Session Settings"
+          }
+        }
+      }
+    },
+    "Не отвечает": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not Responding"
+          }
+        }
+      }
+    },
+    "Не проверен": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not checked"
+          }
+        }
+      }
+    },
+    "Не удаётся связаться с сервером Lumen. Lumen работает как обычно%@. Проверьте соединение.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lumen can’t reach its server. It works as usual%@. Check your connection."
+          }
+        }
+      }
+    },
+    "Неверная почта или пароль.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wrong email or password."
+          }
+        }
+      }
+    },
+    "Неверный мастер-пароль.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wrong master password."
+          }
+        }
+      }
+    },
+    "Недавние": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recent"
+          }
+        }
+      }
+    },
+    "Недоступен": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unavailable"
+          }
+        }
+      }
+    },
+    "Недоступен: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unavailable: %@"
+          }
+        }
+      }
+    },
+    "Нет ответа сервера Lumen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No answer from the Lumen server"
+          }
+        }
+      }
+    },
+    "Нет сессий с «%@». Проверьте написание или ищите по прокси.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No sessions match “%@”. Check the spelling or search by proxy."
+          }
+        }
+      }
+    },
+    "Ничего не найдено": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Results"
+          }
+        }
+      }
+    },
+    "Новая вкладка": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Tab"
+          }
+        }
+      }
+    },
+    "Новая сессия": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Session"
+          }
+        }
+      }
+    },
+    "Новый прокси": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Proxy"
+          }
+        }
+      }
+    },
+    "Обновите Lumen.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Update Lumen."
+          }
+        }
+      }
+    },
+    "Обновить": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reload"
+          }
+        }
+      }
+    },
+    "Обновить статус": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh Status"
+          }
+        }
+      }
+    },
+    "Обновляем…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refreshing…"
+          }
+        }
+      }
+    },
+    "Описание": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Description"
+          }
+        }
+      }
+    },
+    "Оплачен до": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paid Until"
+          }
+        }
+      }
+    },
+    "Оплаченный период заканчивается %@.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The paid period ends on %@."
+          }
+        }
+      }
+    },
+    "Оплаченный период закончился": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The paid period has ended"
+          }
+        }
+      }
+    },
+    "Оплаченный период закончился.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The paid period has ended."
+          }
+        }
+      }
+    },
+    "Оплаченный период закончился. Прокси недоступны.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The paid period has ended. Proxies are unavailable."
+          }
+        }
+      }
+    },
+    "Оставить прокси": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep the proxy"
+          }
+        }
+      }
+    },
+    "Открывали %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opened %@"
+          }
+        }
+      }
+    },
+    "Открывать без прокси": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open without a proxy"
+          }
+        }
+      }
+    },
+    "Открывать без прокси?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Without a Proxy?"
+          }
+        }
+      }
+    },
+    "Отмена": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        }
+      }
+    },
+    "Отправили код ещё раз — тот же, что в прошлом письме.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "We sent the code again — the same one as in the last email."
+          }
+        }
+      }
+    },
+    "Отправить код ещё раз": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Send the code again"
+          }
+        }
+      }
+    },
+    "Очистить историю": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear History"
+          }
+        }
+      }
+    },
+    "Пароль": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Password"
+          }
+        }
+      }
+    },
+    "Пароль восстанавливается на сайте %@.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passwords are reset on %@."
+          }
+        }
+      }
+    },
+    "Пароль не показан. Строка без пароля оставит прежний.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The password is not shown. A line without one keeps the password as it is."
+          }
+        }
+      }
+    },
+    "Перед паролем нужен логин.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A password needs a login before it."
+          }
+        }
+      }
+    },
+    "По стране прокси": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "By the proxy’s country"
+          }
+        }
+      }
+    },
+    "Повторить": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try Again"
+          }
+        }
+      }
+    },
+    "Подключено": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connected"
+          }
+        }
+      }
+    },
+    "Подключить": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connect"
+          }
+        }
+      }
+    },
+    "Подойдёт любой привычный вид: адрес:порт, логин:пароль@адрес:порт или ссылка со схемой.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Any usual form works: host:port, user:password@host:port, or a link with a scheme."
+          }
+        }
+      }
+    },
+    "Подтвердите, что вы не робот, и отправьте ещё раз.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm you're not a robot, then send again."
+          }
+        }
+      }
+    },
+    "Подтвердить": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm"
+          }
+        }
+      }
+    },
+    "Поиск": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search"
+          }
+        }
+      }
+    },
+    "Поиск в истории": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search History"
+          }
+        }
+      }
+    },
+    "Поисковик": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search engine"
+          }
+        }
+      }
+    },
+    "Поисковик: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search engine: %@"
+          }
+        }
+      }
+    },
+    "Показать пароль": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show Password"
+          }
+        }
+      }
+    },
+    "Полный": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Full"
+          }
+        }
+      }
+    },
+    "Порт — число от 1 до 65535.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The port is a number from 1 to 65535."
+          }
+        }
+      }
+    },
+    "Похоже, данные Lumen перенесены с другого iPhone. Войдите, чтобы подключить этот.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "It looks like Lumen’s data was moved here from another iPhone. Sign in to connect this one."
+          }
+        }
+      }
+    },
+    "Почта": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Email"
+          }
+        }
+      }
+    },
+    "Права на этом iPhone не удаётся проверить. Прокси недоступны, пока сервер Lumen не ответит.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The rights on this iPhone can’t be checked. Proxies are unavailable until the Lumen server answers."
+          }
+        }
+      }
+    },
+    "Права не проверены": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rights not checked"
+          }
+        }
+      }
+    },
+    "Проверить": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check"
+          }
+        }
+      }
+    },
+    "Проверка «не робот»": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Robot check"
+          }
+        }
+      }
+    },
+    "Проверка «не робот» сейчас недоступна.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The robot check is unavailable right now."
+          }
+        }
+      }
+    },
+    "Проверка…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking…"
+          }
+        }
+      }
+    },
+    "Проверяем хранилище…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking the vault…"
+          }
+        }
+      }
+    },
+    "Проверяем…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking…"
+          }
+        }
+      }
+    },
+    "Прокси": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proxies"
+          }
+        }
+      }
+    },
+    "Прокси не отвечает": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proxy Not Responding"
+          }
+        }
+      }
+    },
+    "Прокси недоступны": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proxies Unavailable"
+          }
+        }
+      }
+    },
+    "Прокси недоступны.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proxies are unavailable."
+          }
+        }
+      }
+    },
+    "Прокси одной строкой": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The proxy as one line"
+          }
+        }
+      }
+    },
+    "Прокси пока нет": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No proxies yet"
+          }
+        }
+      }
+    },
+    "Прокси проверим при сохранении.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The proxy is checked when you save it."
+          }
+        }
+      }
+    },
+    "Прокси проверяется при сохранении и по нажатию.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A proxy is checked when saved and when you tap it."
+          }
+        }
+      }
+    },
+    "Прокси сейчас недоступны.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proxies are unavailable right now."
+          }
+        }
+      }
+    },
+    "Прокси сессии": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Session Proxy"
+          }
+        }
+      }
+    },
+    "Прокси удалён": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proxy deleted"
+          }
+        }
+      }
+    },
+    "Прокси этого профиля больше нет в списке.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This profile’s proxy is no longer in the list."
+          }
+        }
+      }
+    },
+    "Профессиональный": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Professional"
+          }
+        }
+      }
+    },
+    "Профилей с Mac: %@, новых: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profiles from your Mac: %@, new: %@"
+          }
+        }
+      }
+    },
+    "Профили": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profiles"
+          }
+        }
+      }
+    },
+    "Профили на этом iPhone сейчас не открываются.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profiles can’t be opened on this iPhone right now."
+          }
+        }
+      }
+    },
+    "Профили с Mac появляются в списке сессий с пометкой «С Mac». Имя, описание и метки, изменённые на iPhone, уходят на Mac.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profiles from the Mac appear in the session list marked “From Mac”. Names, descriptions and tags changed on the iPhone go to the Mac."
+          }
+        }
+      }
+    },
+    "Профили: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profiles: %@"
+          }
+        }
+      }
+    },
+    "Профили: %@ из %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profiles: %@ of %@"
+          }
+        }
+      }
+    },
+    "Профиль сверх числа профилей тарифа%@. Он и его данные сохранены.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This profile is over the plan’s number of profiles%@. It and its data are kept."
+          }
+        }
+      }
+    },
+    "Профиль устройства": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Device profile"
+          }
+        }
+      }
+    },
+    "Работает": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Working"
+          }
+        }
+      }
+    },
+    "С Mac": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "From Mac"
+          }
+        }
+      }
+    },
+    "Сайты видят этот адрес, а не адрес iPhone.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sites see this address, not the iPhone's."
+          }
+        }
+      }
+    },
+    "Сайты получают их из JavaScript. Заголовок Accept-Language у iPhone один на всё приложение.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sites get them from JavaScript. The iPhone sends one Accept-Language header for the whole app."
+          }
+        }
+      }
+    },
+    "Сайты сейчас не открываются.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sites can’t be opened right now."
+          }
+        }
+      }
+    },
+    "Свой": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Custom"
+          }
+        }
+      }
+    },
+    "Своя": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Custom"
+          }
+        }
+      }
+    },
+    "Своя строка браузера": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Custom browser string"
+          }
+        }
+      }
+    },
+    "Сегодня": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today"
+          }
+        }
+      }
+    },
+    "Сервер Lumen не отвечает. Проверьте соединение и попробуйте ещё раз.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Lumen server isn’t responding. Check your connection and try again."
+          }
+        }
+      }
+    },
+    "Сервер Lumen сейчас очень занят.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Lumen server is very busy right now."
+          }
+        }
+      }
+    },
+    "Сессии": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sessions"
+          }
+        }
+      }
+    },
+    "Сессии с Mac": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sessions from Mac"
+          }
+        }
+      }
+    },
+    "Сессии с этим прокси останутся запертыми, пока не выберете им другой.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sessions using this proxy stay locked until you choose another one for them."
+          }
+        }
+      }
+    },
+    "Сессий пока нет": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No sessions yet"
+          }
+        }
+      }
+    },
+    "Сессия": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Session"
+          }
+        }
+      }
+    },
+    "Сессия %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Session %@"
+          }
+        }
+      }
+    },
+    "Сессия закончилась. Войдите снова.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your session has ended. Sign in again."
+          }
+        }
+      }
+    },
+    "Сессия заперта": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Session locked"
+          }
+        }
+      }
+    },
+    "Сессия открывает сайты с адресом этого iPhone.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The session opens sites with this iPhone's address."
+          }
+        }
+      }
+    },
+    "Сессия удалена": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Session deleted"
+          }
+        }
+      }
+    },
+    "Синхронизация": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync"
+          }
+        }
+      }
+    },
+    "Синхронизация ещё не включена. Включите её в Lumen для Mac, затем вернитесь сюда.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync is not turned on yet. Turn it on in Lumen for Mac, then come back here."
+          }
+        }
+      }
+    },
+    "Синхронизация с Mac": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync with your Mac"
+          }
+        }
+      }
+    },
+    "Синхронизация с Mac — в пробном и платном тарифе. Профили на этом iPhone остаются как есть.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync with your Mac comes with a trial or a paid plan. The profiles on this iPhone stay as they are."
+          }
+        }
+      }
+    },
+    "Синхронизация…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Syncing…"
+          }
+        }
+      }
+    },
+    "Синхронизировали": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last Synced"
+          }
+        }
+      }
+    },
+    "Синхронизировать": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync Now"
+          }
+        }
+      }
+    },
+    "Скопировать имя": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy Name"
+          }
+        }
+      }
+    },
+    "Скрыть": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide"
+          }
+        }
+      }
+    },
+    "Скрыть пароль": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide Password"
+          }
+        }
+      }
+    },
+    "Слишком много попыток.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Too many attempts."
+          }
+        }
+      }
+    },
+    "Сохранить": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save"
+          }
+        }
+      }
+    },
+    "Стоп": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop"
+          }
+        }
+      }
+    },
+    "Тариф": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plan"
+          }
+        }
+      }
+    },
+    "Тип": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Type"
+          }
+        }
+      }
+    },
+    "Только строка браузера, часовой пояс и язык": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only the browser string, time zone and language"
+          }
+        }
+      }
+    },
+    "У адреса прокси нет пути после порта.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A proxy’s address has no path after the port."
+          }
+        }
+      }
+    },
+    "У каждой сессии свои куки, хранилище сайтов, вкладки, история и прокси.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Each session has its own cookies, site storage, tabs, history and proxy."
+          }
+        }
+      }
+    },
+    "У сессии свои куки, хранилище сайтов, вкладки и история.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A session has its own cookies, site storage, tabs and history."
+          }
+        }
+      }
+    },
+    "У этого аккаунта было много неудачных попыток входа, поэтому мы отправили код на его почту. Введите код из письма.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This account had many failed sign-in attempts, so we sent a code to its email. Enter the code from the email."
+          }
+        }
+      }
+    },
+    "Удалить": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete"
+          }
+        }
+      }
+    },
+    "Удалить прокси": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete Proxy"
+          }
+        }
+      }
+    },
+    "Удалить прокси «%@»?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete the proxy “%@”?"
+          }
+        }
+      }
+    },
+    "Удалить сессию": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete Session"
+          }
+        }
+      }
+    },
+    "Удалить сессию со всеми её данными?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete the session with all its data?"
+          }
+        }
+      }
+    },
+    "Удаляются куки, хранилище, кэш, вкладки и история этой сессии.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This deletes the session’s cookies, storage, cache, tabs and history."
+          }
+        }
+      }
+    },
+    "Укажите порт: адрес:порт.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add the port: host:port."
+          }
+        }
+      }
+    },
+    "Упрощённый": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Simplified"
+          }
+        }
+      }
+    },
+    "Хранилище": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vault"
+          }
+        }
+      }
+    },
+    "Хранилище Mac": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac Vault"
+          }
+        }
+      }
+    },
+    "Хранилище подключено": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vault connected"
+          }
+        }
+      }
+    },
+    "Часовой пояс": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Time Zone"
+          }
+        }
+      }
+    },
+    "Часовой пояс и язык": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Time zone and language"
+          }
+        }
+      }
+    },
+    "Часы iPhone расходятся со временем сервера на %@. Исправьте дату и время в Настройках.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This iPhone’s clock is off from the server’s time by %@. Correct the date and time in Settings."
+          }
+        }
+      }
+    },
+    "Что-то пошло не так.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Something went wrong."
+          }
+        }
+      }
+    },
+    "Шум": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noise"
+          }
+        }
+      }
+    },
+    "Эта попытка входа закончилась. Введите пароль ещё раз.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This sign-in attempt is over. Enter your password again."
+          }
+        }
+      }
+    },
+    "Эта сессия открывает сайты только через прокси «%@», а он не ответил. Напрямую страница не откроется — так сайты не увидят настоящий адрес iPhone.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This session opens sites only through the proxy “%@”, and it didn't respond. The page won't open directly — that way sites never see the iPhone's real address."
+          }
+        }
+      }
+    },
+    "Эта сессия работала через прокси «%@». Без него сайты увидят настоящий адрес iPhone.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This session worked through the proxy “%@”. Without it, sites will see the iPhone's real address."
+          }
+        }
+      }
+    },
+    "Это не адрес прокси: нужен адрес и порт.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This is not a proxy’s address: it needs a host and a port."
+          }
+        }
+      }
+    },
+    "Этот iPhone отключится от аккаунта. Профили останутся здесь; прокси будут недоступны, пока вы не войдёте снова.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This iPhone will be disconnected from the account. Profiles stay here; proxies are unavailable until you sign in again."
+          }
+        }
+      }
+    },
+    "Этот iPhone отключён от аккаунта. Войдите снова.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This iPhone has been disconnected from the account. Sign in again."
+          }
+        }
+      }
+    },
+    "Язык страниц": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Page Language"
+          }
+        }
+      }
+    },
+    "Яндекс": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yandex"
+          }
+        }
+      }
+    },
+    "вкладка": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "tab"
+          }
+        }
+      }
+    },
+    "вкладки": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "tabs"
+          }
+        }
+      }
+    },
+    "вкладок": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "tabs"
+          }
+        }
+      }
+    },
+    "есть": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "yes"
+          }
+        }
+      }
+    },
+    "минут": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "minutes"
+          }
+        }
+      }
+    },
+    "минуту": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "minute"
+          }
+        }
+      }
+    },
+    "минуты": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "minutes"
+          }
+        }
+      }
+    },
+    "не включено": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "not turned on"
+          }
+        }
+      }
+    },
+    "не отвечает": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "not responding"
+          }
+        }
+      }
+    },
+    "не проверен": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "not checked"
+          }
+        }
+      }
+    },
+    "нет": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "no"
+          }
+        }
+      }
+    },
+    "нет в тарифе": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "not in your plan"
+          }
+        }
+      }
+    },
+    "нет ответа": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "no answer"
+          }
+        }
+      }
+    },
+    "ответ %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "answer %@"
+          }
+        }
+      }
+    },
+    "ответа прокси": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "the proxy’s answer"
+          }
+        }
+      }
+    },
+    "перезапуск": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "restart"
+          }
+        }
+      }
+    },
+    "проверка…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "checking…"
+          }
+        }
+      }
+    },
+    "прокси не ответил за %@ с (ждали %@)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "the proxy did not answer in %@ s (waiting for %@)"
+          }
+        }
+      }
+    },
+    "секунд": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "seconds"
+          }
+        }
+      }
+    },
+    "секунду": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "second"
+          }
+        }
+      }
+    },
+    "секунды": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "seconds"
+          }
+        }
+      }
+    },
+    "сессии": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "sessions"
+          }
+        }
+      }
+    },
+    "сессий": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "sessions"
+          }
+        }
+      }
+    },
+    "сессия": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "session"
+          }
+        }
+      }
+    },
+    "сеть": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "network"
+          }
+        }
+      }
+    },
+    "смерть": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "death"
+          }
+        }
+      }
+    },
+    "час": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hour"
+          }
+        }
+      }
+    },
+    "часа": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hours"
+          }
+        }
+      }
+    },
+    "часов": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hours"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

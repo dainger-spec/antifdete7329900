@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'push' }}
 on:
   push:
-    branches: [claude/ios-app]
+    branches: [claude/ios-app, claude/ios-design-dashboard]
     paths:
       - "ios/**"
       - "!ios/scripts/install-floor.sh"
@@ -83,4 +83,5 @@ jobs:
             build/ios-app/testbed
             build/ios-app/screens
             build/ios-app/appstore
+            build/ios-app/design
           if-no-files-found: warn

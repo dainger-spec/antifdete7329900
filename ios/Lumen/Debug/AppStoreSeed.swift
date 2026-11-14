@@ -13,6 +13,12 @@ enum AppStoreSeed {
     static var active: Bool { ProcessInfo.processInfo.environment["LUMEN_TEST_SEED"] == "appstore" }
 
     static func write(to store: LumenStore) {
+        // The empty app (k-empty, p8-empty): nothing at all.
+        if ProcessInfo.processInfo.environment["LUMEN_TEST_SEED_EMPTY"] == "1" {
+            store.saveProxies([])
+            store.saveSessions([])
+            return
+        }
         let english = ProcessInfo.processInfo.environment["LUMEN_TEST_LANGUAGE"] == "en"
         func t(_ ru: String, _ en: String) -> String { english ? en : ru }
         let now = Date()
@@ -30,9 +36,11 @@ enum AppStoreSeed {
         let newYork = ProxyEntry(name: t("Нью-Йорк", "New York"), kind: .socks5, host: "us.proxy.example", port: 1080,
                                  username: "nyc", hasPassword: true,
                                  check: checked("192.0.2.41", "US", "America/New_York", udp: .supported))
+        // Amsterdam does not answer (nothing listens on its port on the CI Mac): its session shows p3-dead.
         let amsterdam = ProxyEntry(name: t("Амстердам", "Amsterdam"), kind: .http, host: "nl.proxy.example", port: 3128,
                                    username: "ams", hasPassword: true,
-                                   check: checked("203.0.113.88", "NL", "Europe/Amsterdam", udp: .unsupported))
+                                   check: ProxyCheck(checkedAt: ago(6), alive: false, error: t("сервер не ответил за 10 секунд",
+                                                                                                 "the server did not answer in 10 seconds")))
         let tokyo = ProxyEntry(name: t("Токио", "Tokyo"), kind: .socks5, host: "jp.proxy.example", port: 1080,
                                username: "tokyo", hasPassword: true,
                                check: checked("198.51.100.230", "JP", "Asia/Tokyo", udp: .supported))
@@ -40,7 +48,10 @@ enum AppStoreSeed {
         store.saveProxies(proxies)
         for proxy in proxies { ProxyPasswords.set(proxy.id == berlin.id ? "demo" : "screenshot", for: proxy.id) }
 
-        let sessions = [
+        var fromMac = Session(name: t("Поддержка — тикет 4821", "Support — ticket 4821"), notes: t("Пришла с Mac", "Came from the Mac"),
+                              proxyID: newYork.id, createdAt: ago(60 * 24 * 4), lastOpenedAt: ago(60 * 22))
+        fromMac.syncedProfileID = UUID()
+        let sessions = [fromMac, 
             Session(name: t("Магазин — Берлин", "Store — Berlin"), notes: t("Корзина и оплата", "Cart and checkout"),
                     tags: [t("магазин", "store"), "de"], proxyID: berlin.id, createdAt: ago(60 * 24 * 20), lastOpenedAt: ago(12)),
             Session(name: t("Клиент — Париж", "Client — Paris"), notes: t("Лендинг для Франции", "Landing page for France"),
