@@ -549,6 +549,23 @@ public enum GeolocationSetting: Codable, Equatable, Sendable {
     /// egress IP; set a matching proxy.
     case fixed(latitude: Double, longitude: Double, accuracyMeters: Double)
 
+    /// The accuracy the profile editor offers, in metres (its picker's slider and circle).
+    public static let accuracyRange: ClosedRange<Double> = 5...500
+
+    /// A number as the editor's fields read it — "55,75" with a decimal comma too — when it is a
+    /// finite one: `Double` reads "nan" and "inf" as well, which no field means.
+    public static func number(fromField text: String) -> Double? {
+        guard let value = Double(text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")),
+              value.isFinite else { return nil }
+        return value
+    }
+
+    /// The editor's Accuracy field as a page is told it: held to `accuracyRange`, as the picker
+    /// shows it, so the map and the profile say the same; nil when it is not a finite number.
+    public static func accuracy(fromField text: String) -> Double? {
+        number(fromField: text).map { min(max($0, accuracyRange.lowerBound), accuracyRange.upperBound) }
+    }
+
     public func validate() throws {
         if case let .fixed(latitude, longitude, accuracy) = self {
             guard (-90...90).contains(latitude), (-180...180).contains(longitude),
