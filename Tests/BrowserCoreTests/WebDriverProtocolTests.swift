@@ -64,6 +64,17 @@ final class WebDriverProtocolTests: XCTestCase {
         XCTAssertEqual(AutomationGate.refusal(of: request, token: master, port: 50777)?.status, 401)
     }
 
+    /// "navigate" goes where a scenario's goto goes: http, https, and about:blank.
+    func testNavigateTakesWebAddressesOnly() {
+        for text in ["https://example.com/", "http://example.com/login?x=1", "HTTPS://Example.com", "about:blank"] {
+            XCTAssertNotNil(WebDriverRoute.navigableURL(text), text)
+        }
+        for text in ["file:///etc/passwd", "javascript:alert(1)", "data:text/html,<b>x</b>", "about:config", "about:blank#x",
+                     "ftp://example.com/", "x-apple-helpbook://open", "https:///nohost", "example.com", ""] {
+            XCTAssertNil(WebDriverRoute.navigableURL(text), text)
+        }
+    }
+
     func testTheCommandsSeleniumSends() {
         let expected: [(String, String, String)] = [
             ("POST", "/session/s/url", "navigate"), ("GET", "/session/s/url", "currentURL"), ("GET", "/session/s/title", "title"),

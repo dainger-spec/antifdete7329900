@@ -197,7 +197,8 @@ a client (Selenium) ── http://127.0.0.1:<port>/wd/<profile's token>/<profile
        quit:        "close"; a profile the session started is stopped
    WebDriverExecutor (where the window is) ── PageDriver for a window of Safari's
        (SafariChromeHost.openScenarioPage) or, where Safari's chrome is not hosted, of the app's own
-       navigate, back, forward, refresh, title, url, source ── PageDriver
+       navigate (http, https or about:blank only; else "invalid argument"), back, forward,
+       refresh, title, url, source ── PageDriver
        find (css selector, xpath, link text, partial link text, tag name), with the implicit wait
        click ── the element brought into view, the point checked for what covers it, then the
                 pointer moved there and pressed (PageInput); an <option> is chosen in its list

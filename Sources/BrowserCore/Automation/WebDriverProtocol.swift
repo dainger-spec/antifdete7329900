@@ -110,6 +110,16 @@ public enum WebDriverRoute {
         !masterToken.isEmpty && AutomationGate.sameSecret(given, token(masterToken: masterToken, profile: profile))
     }
 
+    /// The address "navigate" may go to: http or https with a host, or about:blank — the same
+    /// rule as a scenario's `goto`. Nil for any other (file:, javascript:, data:, a custom
+    /// scheme…), which the command refuses as an invalid argument.
+    public static func navigableURL(_ text: String) -> URL? {
+        guard let url = URL(string: text), let scheme = url.scheme?.lowercased() else { return nil }
+        if scheme == "about" { return text.lowercased() == "about:blank" ? url : nil }
+        guard ["http", "https"].contains(scheme), let host = url.host, !host.isEmpty else { return nil }
+        return url
+    }
+
     public static func parse(method: String, path: String) -> Result<WebDriverRequest, WebDriverError> {
         guard handles(path) else { return .failure(.unknownCommand("not a WebDriver address")) }
         let parts = path.dropFirst(prefix.count).split(separator: "/", omittingEmptySubsequences: true)
