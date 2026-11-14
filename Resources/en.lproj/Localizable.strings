@@ -2146,7 +2146,7 @@
 "help.api.webdriver.scripts" = "execute_script runs in a world of its own in the page: the DOM, elements as arguments and elements returned work; the page's own variables (window.app and the like) are not seen from it.";
 "help.api.webdriver.limits" = "There is: navigation, finding by CSS and XPath, click, send_keys, clear, text and attributes, execute_script, cookies, a screenshot, the window's size, waits. There is not: frames, alert dialogs, several tabs, ActionChains, file uploads.";
 "help.api.webdriver.playwright" = "Playwright cannot be connected: it drives only its own builds of browsers and does not speak WebDriver. Its script moves into a Lumen scenario almost word for word — page.goto, page.click, page.type have the same names.";
-"help.api.webdriver.see" = "Your Selenium scripts connect to a profile over WebDriver, on the same port and with the same token. How: the Selenium and WebDriver topic on the left.";
+"help.api.webdriver.see" = "Your Selenium scripts connect to a profile over WebDriver, on the same port, with a token of the profile's own made from the API's. How: the Selenium and WebDriver topic on the left.";
 "help.keys.app" = "In the Profiles window";
 "help.keys.palette" = "The command palette";
 "help.keys.newProfile" = "A new profile";
@@ -2550,7 +2550,7 @@
 "inspector.webRTC.guardNotReady" = "Off: the network guard is not ready";
 "inspector.webRTC.noGuardInBuild" = "Off: no network guard in this version";
 "inspector.webDriver" = "WebDriver Address";
-"inspector.webDriver.note" = "For Selenium: give it as command_executor. It is copied with the API's token: keep it like a password.";
+"inspector.webDriver.note" = "For Selenium: give it as command_executor. It is copied with this profile's own token, which drives this profile only: keep it like a password.";
 "inspector.webDriver.off" = "Turn the automation API on, and the profile gets a WebDriver address for Selenium.";
 "inspector.webDriver.notInPlan" = "Driving a profile from Selenium (WebDriver) is part of the Professional and Team plans. Your plan does not include it.";
 "inspector.webDriver.link" = "Selenium";

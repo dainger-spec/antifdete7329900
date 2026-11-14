@@ -184,11 +184,11 @@ So the protocol is served here, over what scenarios already use: the same page d
 pointer and the keys a page takes for a person's.
 
 ```
-a client (Selenium) ── http://127.0.0.1:<port>/wd/<token>/<profile>/session…
+a client (Selenium) ── http://127.0.0.1:<port>/wd/<profile's token>/<profile>/session…
    AutomationServer (the API's own listener, 127.0.0.1 only) ── a path under /wd/:
        AutomationGate.webDriverRefusal (no web page's request, the Host this listener's),
        WebDriverRoute.parse (BrowserCore: the protocol's commands by method and path),
-       the token of the address against the API's (constant time)
+       the token of the address against the profile's own (WebDriverRoute.token, constant time)
    WebDriverService ── the plan (allowsAutomation); the profile the address names; its sessions
        new session: the profile started if it is stopped, without a window of its own
                     ("open": the window the commands act in), capabilities back
@@ -210,13 +210,24 @@ a client (Selenium) ── http://127.0.0.1:<port>/wd/<token>/<profile>/session�
        screenshot (the viewport, an element), the window's rectangle, timeouts
 ```
 
-- **The address** is the API's listener and token plus the profile: one for each profile, shown
-  in its inspector (**WebDriver Address**: the token as dots, and Copy, which gives the whole
-  address) and copied from the profile's ⋯ menu (**Copy WebDriver Address**) while the API
-  listens. With the API off, on but not started, or not in the plan, the inspector has a row
-  **Selenium** that says which and opens where that is settled. The token is in the
-  path because a WebDriver client sends no header of ours; whoever has the address drives the
-  profile, as whoever has the token uses the API. 127.0.0.1 only.
+- **The address** is the API's listener, the profile's own token and the profile: one for each
+  profile, shown in its inspector (**WebDriver Address**: the token as dots, and Copy, which gives
+  the whole address) and copied from the profile's ⋯ menu (**Copy WebDriver Address**) while the
+  API listens. With the API off, on but not started, or not in the plan, the inspector has a row
+  **Selenium** that says which and opens where that is settled. The token is in the path because
+  a WebDriver client sends no header of ours, and so it is not the API's token: it is the
+  profile's own, made from it —
+
+  ```
+  base64url without padding of HMAC-SHA256(key = the API's token (UTF-8),
+                                           message = "webdriver:" + the profile's UUID, upper case)
+  ```
+
+  (`WebDriverRoute.token`; `scripts/pbctl webdriver <profile>` prints the address). Under `/wd/`
+  only that profile's token is taken, for that profile alone — not the API's token, not another
+  profile's; under `/v1/` only the API's. So an address given to a script, or left in its logs,
+  drives that one profile and nothing else of the API. Renewing the API's token changes every
+  profile's address. 127.0.0.1 only.
 - **A session is a launch.** One session a profile at a time; ending it closes its window, and
   stops the profile when the session started it (a profile that was running stays).
 - **What a page can tell.** Nothing new: `navigator.webdriver` stays false, and clicks and keys
@@ -238,7 +249,7 @@ from selenium.webdriver.common.by import By
 
 # The profile's inspector: WebDriver Address → Copy
 driver = webdriver.Remote(
-    command_executor="http://127.0.0.1:50777/wd/<token>/<profile>",
+    command_executor="http://127.0.0.1:50777/wd/<profile's token>/<profile>",
     options=webdriver.SafariOptions())
 
 driver.implicitly_wait(10)

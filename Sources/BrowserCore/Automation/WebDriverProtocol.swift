@@ -1,3 +1,8 @@
+#if canImport(CryptoKit)
+import CryptoKit
+#else
+import Crypto
+#endif
 import Foundation
 
 /// An error as the W3C WebDriver protocol says it: its code ("no such element"), the HTTP status
@@ -40,8 +45,9 @@ public struct WebDriverError: Error, Equatable, Sendable, Codable {
 }
 
 /// A WebDriver request, read from its method and path (docs/AUTOMATION.md, "WebDriver"):
-/// `/wd/<token>/<profile>/session/<id>/element/<element>/attribute/<name>`. The token and the
-/// profile are part of the address a client is given; the rest is the protocol's own.
+/// `/wd/<token>/<profile>/session/<id>/element/<element>/attribute/<name>`. The token (the
+/// profile's own, `WebDriverRoute.token`) and the profile are part of the address a client is
+/// given; the rest is the protocol's own.
 public struct WebDriverRequest: Equatable, Sendable {
     public var token: String
     /// The profile the address names: its id, or its exact name.
@@ -71,9 +77,37 @@ public enum WebDriverRoute {
     /// Whether `path` is the WebDriver's (the automation API's other routes are under `/v1/`).
     public static func handles(_ path: String) -> Bool { path.hasPrefix(prefix) }
 
-    /// The address a client is given for a profile: `http://127.0.0.1:<port>/wd/<token>/<profile id>`.
-    public static func address(port: Int, token: String, profile: UUID) -> String {
-        "http://127.0.0.1:\(port)\(prefix)\(token)/\(profile.uuidString)"
+    /// The address a client is given for a profile: `http://127.0.0.1:<port>/wd/<profile's token>/<profile id>`.
+    /// The token in it is the profile's own (`token(masterToken:profile:)`), never the API's: an
+    /// address given to a script drives that one profile and opens nothing of `/v1/`.
+    public static func address(port: Int, masterToken: String, profile: UUID) -> String {
+        "http://127.0.0.1:\(port)\(prefix)\(token(masterToken: masterToken, profile: profile))/\(profile.uuidString)"
+    }
+
+    /// A profile's WebDriver token, made from the API's token:
+    ///
+    /// ```
+    /// base64url, without padding, of HMAC-SHA256(key = the API's token as UTF-8,
+    ///                                             message = "webdriver:" + the profile's UUID)
+    /// ```
+    ///
+    /// The UUID as `UUID.uuidString` writes it (upper-case, with hyphens). 43 characters, as the
+    /// API's own token. It cannot be turned back into the API's token, nor into another profile's;
+    /// a new API token (Renew) gives every profile a new one.
+    public static func token(masterToken: String, profile: UUID) -> String {
+        let key = SymmetricKey(data: Data(masterToken.utf8))
+        let mac = HMAC<SHA256>.authenticationCode(for: Data("webdriver:\(profile.uuidString)".utf8), using: key)
+        return Data(Array(mac)).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    /// Whether `given` (the token of a `/wd/` address) is `profile`'s own WebDriver token, compared
+    /// in a time that does not depend on where they differ. The API's token itself is not: under
+    /// `/wd/` only a profile's token is taken, and under `/v1/` only the API's (`AutomationGate`).
+    public static func tokenMatches(_ given: String, masterToken: String, profile: UUID) -> Bool {
+        !masterToken.isEmpty && AutomationGate.sameSecret(given, token(masterToken: masterToken, profile: profile))
     }
 
     public static func parse(method: String, path: String) -> Result<WebDriverRequest, WebDriverError> {

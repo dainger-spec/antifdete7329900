@@ -307,7 +307,7 @@ struct ProfileInspectorView: View {
         }
     }
 
-    /// The address as it is shown: the API's token as dots. Split at "/", an address
+    /// The address as it is shown: the profile's token as dots. Split at "/", an address
     /// (`WebDriverRoute.address`) is "http:", "", host and port, "wd", the token, the profile; the
     /// token is base64url and has no "/" of its own. An address of any other shape is not shown at
     /// all: where its token is cannot be told.

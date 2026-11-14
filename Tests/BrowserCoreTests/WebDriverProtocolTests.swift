@@ -14,13 +14,54 @@ final class WebDriverProtocolTests: XCTestCase {
 
     func testTheAddressNamesTheTokenAndTheProfile() {
         let id = UUID()
-        XCTAssertEqual(WebDriverRoute.address(port: 50777, token: "abc", profile: id), "http://127.0.0.1:50777/wd/abc/\(id.uuidString)")
+        XCTAssertEqual(WebDriverRoute.address(port: 50777, masterToken: "abc", profile: id),
+                       "http://127.0.0.1:50777/wd/\(WebDriverRoute.token(masterToken: "abc", profile: id))/\(id.uuidString)")
+        XCTAssertFalse(WebDriverRoute.address(port: 50777, masterToken: "abc", profile: id).contains("/wd/abc/"),
+                       "the API's own token is never in a WebDriver address")
         XCTAssertEqual(parse("GET", "/status"), WebDriverRequest(token: "tok", profile: "Shop one", command: "status"))
         XCTAssertEqual(parse("POST", "/session")?.command, "newSession")
         XCTAssertEqual(parse("DELETE", "/session/s1"), WebDriverRequest(token: "tok", profile: "Shop one", command: "deleteSession", session: "s1"))
         XCTAssertTrue(WebDriverRoute.handles("/wd/x"))
         XCTAssertFalse(WebDriverRoute.handles("/v1/profiles"))
         XCTAssertEqual(failure("GET", "/wd/tok")?.code, "unknown command", "no profile in the address")
+    }
+
+    /// A profile's token: HMAC-SHA256 of "webdriver:" + its UUID under the API's token, base64url
+    /// without padding — a script that has the API's token can make it (docs/AUTOMATION.md).
+    func testAProfilesTokenIsMadeFromTheAPIsToken() {
+        let master = "kT3vQ9mXw2LrB7sYp0Zc"
+        let profile = UUID(uuidString: "6B0E3C1F-9A2D-4E7B-8C15-0D4F6A7B8C9D")!
+        let other = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        // Python: base64.urlsafe_b64encode(hmac.new(master, b"webdriver:" + uuid, sha256).digest()).rstrip(b"=")
+        XCTAssertEqual(WebDriverRoute.token(masterToken: master, profile: profile), "uRA-uC_eCD4sTFbzTshYP3AsrCNk5mQXbPX04RQdd5E")
+        XCTAssertEqual(WebDriverRoute.token(masterToken: master, profile: other), "soxoOJ-5u5qfzgK7-dPFjCHsykBpVTOly9aK1FOzOag")
+        XCTAssertEqual(WebDriverRoute.token(masterToken: master, profile: profile).count, 43)
+        XCTAssertNotEqual(WebDriverRoute.token(masterToken: "another", profile: profile), WebDriverRoute.token(masterToken: master, profile: profile),
+                          "a renewed API token gives the profile another one")
+    }
+
+    /// Under /wd/ only the profile's own token opens the profile: not the API's, not another
+    /// profile's; and under /v1/ the profile's token is not the API's.
+    func testOnlyTheProfilesOwnTokenOpensItsAddress() {
+        let master = AutomationSettings.newToken()
+        let profile = UUID(), other = UUID()
+        let own = WebDriverRoute.token(masterToken: master, profile: profile)
+        XCTAssertTrue(WebDriverRoute.tokenMatches(own, masterToken: master, profile: profile))
+        XCTAssertFalse(WebDriverRoute.tokenMatches(master, masterToken: master, profile: profile), "the API's token is not taken under /wd/")
+        XCTAssertFalse(WebDriverRoute.tokenMatches(own, masterToken: master, profile: other), "nor one profile's token for another")
+        XCTAssertFalse(WebDriverRoute.tokenMatches("", masterToken: master, profile: profile))
+        XCTAssertFalse(WebDriverRoute.tokenMatches(own, masterToken: AutomationSettings.newToken(), profile: profile), "nor after a new API token")
+        XCTAssertFalse(WebDriverRoute.tokenMatches(WebDriverRoute.token(masterToken: "", profile: profile), masterToken: "", profile: profile),
+                       "no API token, no WebDriver")
+        // The parsed address carries the token as it was sent.
+        let path = "/wd/\(own)/\(profile.uuidString)/status"
+        let parsed = try? WebDriverRoute.parse(method: "GET", path: path).get()
+        XCTAssertEqual(parsed?.token, own)
+        XCTAssertEqual(parsed?.profile, profile.uuidString)
+        // The /v1/ gate takes the API's token alone.
+        let headers = ["host": "127.0.0.1:50777", "authorization": "Bearer \(own)"]
+        let request = AutomationHTTP.Request(method: "GET", path: "/v1/profiles", query: [:], headers: headers, body: Data(), headerLines: [])
+        XCTAssertEqual(AutomationGate.refusal(of: request, token: master, port: 50777)?.status, 401)
     }
 
     func testTheCommandsSeleniumSends() {

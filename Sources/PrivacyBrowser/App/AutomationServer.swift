@@ -165,11 +165,12 @@ final class AutomationServer {
         }
     }
 
-    /// The WebDriver's sessions (`/wd/…`), on the same listener and under the same token.
+    /// The WebDriver's sessions (`/wd/…`), on the same listener, each profile under a token of its
+    /// own made from the API's (`WebDriverRoute.token`).
     var webDriver: WebDriverService?
 
-    /// A WebDriver request (docs/AUTOMATION.md, "WebDriver"): the token is in the address, the
-    /// answer is the protocol's `{"value": …}`.
+    /// A WebDriver request (docs/AUTOMATION.md, "WebDriver"): the profile's token is in the
+    /// address, the answer is the protocol's `{"value": …}`.
     private func answerWebDriver(_ request: AutomationHTTP.Request, on connection: NWConnection) {
         func reply(_ status: Int, _ body: Data) {
             send(AutomationHTTP.Response(status: status, contentType: "application/json; charset=utf-8", body: body), on: connection)
@@ -182,8 +183,12 @@ final class AutomationServer {
         case .failure(let error):
             reply(error.status, error.body)
         case .success(let parsed):
-            guard AutomationGate.tokenMatches(parsed.token, settings.token), let webDriver else {
-                let refusal = WebDriverError("unknown error", 401, "The token in the address is missing or wrong (…/wd/<token>/<profile>).")
+            // The profile's own token (`WebDriverRoute.token`), for the profile the address names
+            // and no other; the API's token itself is not taken here.
+            guard let webDriver, let profileID = webDriver.profileID(parsed.profile),
+                  WebDriverRoute.tokenMatches(parsed.token, masterToken: settings.token, profile: profileID) else {
+                let refusal = WebDriverError("unknown error", 401,
+                                             "The token in the address is missing or not this profile's (…/wd/<profile's token>/<profile>): copy the profile's WebDriver address again.")
                 Self.log.notice("WebDriver refused a request: \(refusal.status)")
                 reply(refusal.status, refusal.body)
                 return

@@ -1481,7 +1481,7 @@ final class AppModel: ObservableObject {
         switch automationState {
         case let .listening(port):
             guard let token = automationSettings?.token else { return .apiOff }
-            return .address(WebDriverRoute.address(port: port, token: token, profile: id))
+            return .address(WebDriverRoute.address(port: port, masterToken: token, profile: id))
         // On, but it does not listen (its port is taken, say): not "turn the API on".
         case .failed: return .apiFailed
         case .stopped: return .apiOff

@@ -30,7 +30,7 @@ profiles share is refused (`409 ambiguous`) — use the id.
 | Request | What it does | Answer |
 |---|---|---|
 | `GET /v1/profiles` | Every profile | `[Profile]` |
-| `POST /v1/profiles` | Makes a profile, as the app's New Profile does (the plan's profile limit counts it): body `{"name": "…", "temporary": true, "proxy": "socks5://user:pass@host:port", "start": false, "window": true}` — all optional. By default a **temporary** profile ("Temporary 2", "Temporary 3"…), which keeps nothing between launches; `"start": true` starts it in the same call, so one request gives a fresh browser whose WebDriver address is `/wd/<token>/<id>`. The proxy needs its scheme (its type is not guessed). The API never deletes it: deleting a profile is the person's alone, from the app (scripts/check_deletion_paths.py); a temporary one has nothing in it to delete but its line in the list. | `201`, `Profile`; `409 launch_failed` (the message names the profile made) |
+| `POST /v1/profiles` | Makes a profile, as the app's New Profile does (the plan's profile limit counts it): body `{"name": "…", "temporary": true, "proxy": "socks5://user:pass@host:port", "start": false, "window": true}` — all optional. By default a **temporary** profile ("Temporary 2", "Temporary 3"…), which keeps nothing between launches; `"start": true` starts it in the same call, so one request gives a fresh browser whose WebDriver address is `/wd/<profile's token>/<id>` (the profile's token is made from the API's: docs/AUTOMATION.md, "WebDriver"; `pbctl webdriver <profile>` prints the address). The proxy needs its scheme (its type is not guessed). The API never deletes it: deleting a profile is the person's alone, from the app (scripts/check_deletion_paths.py); a temporary one has nothing in it to delete but its line in the list. | `201`, `Profile`; `409 launch_failed` (the message names the profile made) |
 | `GET /v1/profiles/{profile}` | One profile | `Profile` |
 | `POST /v1/profiles/{profile}/start` | Starts it; body `{"window": false}` starts it out of sight (as a warm-up does), default `true`. A running profile is left as it is. | `Profile` |
 | `POST /v1/profiles/{profile}/stop` | Stops it; its data is sealed before the answer comes. | `Profile` |
@@ -123,8 +123,9 @@ There is no remote-debugging protocol: WebKit's embedded web views hand none out
 browsers hand out CDP for Puppeteer or Playwright to attach to — and one would be visible to pages.
 Scripts drive pages through scenarios above, run inside the app — and, command by command from
 outside, through WebDriver: the same listener answers the W3C WebDriver protocol under
-`/wd/<token>/<profile>`, which Selenium speaks (docs/AUTOMATION.md, "WebDriver"; the profile's
-inspector gives its address to copy).
+`/wd/<profile's token>/<profile>`, which Selenium speaks (docs/AUTOMATION.md, "WebDriver"; the
+profile's inspector gives its address to copy). The token there is the profile's own, made from the
+API's; the API's token itself is not taken under `/wd/`, nor a profile's under `/v1/`.
 
 ## Checked
 

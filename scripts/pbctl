@@ -9,11 +9,15 @@
     pbctl open <profile> <url>
     pbctl cookies <profile> [--format playwright|netscape|extension]
     pbctl import-cookies <profile> <file>
+    pbctl webdriver <profile>
 
 <profile> is a profile's id or its exact name. The token comes from PB_API_TOKEN (Automation API…
 → Copy in the app), the port from PB_API_PORT (default 50777). Nothing is installed: Python 3 only.
 """
 import argparse
+import base64
+import hashlib
+import hmac
 import json
 import os
 import sys
@@ -22,11 +26,27 @@ import urllib.parse
 import urllib.request
 
 
-def call(method, path, body=None, raw=False):
+def api_token():
     token = os.environ.get("PB_API_TOKEN", "")
     if not token:
         sys.exit("pbctl: set PB_API_TOKEN to the token shown in the app (Automation API… → Copy)")
-    port = int(os.environ.get("PB_API_PORT", "50777"))
+    return token
+
+
+def api_port():
+    return int(os.environ.get("PB_API_PORT", "50777"))
+
+
+def webdriver_token(token, profile_id):
+    """A profile's own WebDriver token (WebDriverRoute.token, docs/AUTOMATION.md "WebDriver"):
+    base64url without padding of HMAC-SHA256(key = the API's token, "webdriver:" + its UUID)."""
+    mac = hmac.new(token.encode(), ("webdriver:" + profile_id.upper()).encode(), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(mac).decode().rstrip("=")
+
+
+def call(method, path, body=None, raw=False):
+    token = api_token()
+    port = api_port()
     data = body if isinstance(body, (bytes, type(None))) else json.dumps(body).encode()
     request = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data, method=method,
                                      headers={"Authorization": f"Bearer {token}"})
@@ -75,6 +95,7 @@ def main():
     imports = commands.add_parser("import-cookies", help="import a cookie file into a profile")
     imports.add_argument("profile")
     imports.add_argument("file")
+    commands.add_parser("webdriver", help="a profile's WebDriver address (for Selenium's command_executor)").add_argument("profile")
     args = parser.parse_args()
 
     if args.command == "list":
@@ -101,6 +122,9 @@ def main():
     elif args.command == "import-cookies":
         with open(args.file, "rb") as handle:
             print(json.dumps(call("POST", profile_path(args.profile, "/cookies"), handle.read()), indent=2))
+    elif args.command == "webdriver":
+        profile_id = call("GET", profile_path(args.profile))["id"]
+        print(f"http://127.0.0.1:{api_port()}/wd/{webdriver_token(api_token(), profile_id)}/{profile_id.upper()}")
 
 
 if __name__ == "__main__":
