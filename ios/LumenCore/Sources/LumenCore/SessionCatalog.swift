@@ -18,10 +18,11 @@ public final class SessionCatalog {
         notSyncedHere = catalogue.notSyncedHere
     }
 
+    /// Name, description and tags are held to the Mac's limits (`SessionLimits`), for every session.
     @discardableResult
     public func create(name: String, notes: String = "", tags: [String] = []) -> Session {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let session = Session(name: trimmed.isEmpty ? nextDefaultName() : trimmed, notes: notes,
+        let trimmed = SessionLimits.name(name)
+        let session = Session(name: trimmed.isEmpty ? nextDefaultName() : trimmed, notes: SessionLimits.notes(notes),
                               tags: Self.normalizedTags(tags))
         sessions.append(session)
         save()
@@ -29,14 +30,14 @@ public final class SessionCatalog {
     }
 
     public func rename(_ id: UUID, to name: String, at date: Date = Date()) {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = SessionLimits.name(name)
         guard !trimmed.isEmpty, !Faults.isActive(.renameIgnored) else { return }
         edit(id, at: date) { $0.name = trimmed }
     }
 
     public func setNotes(_ id: UUID, _ notes: String, at date: Date = Date()) {
         guard !Faults.isActive(.notesNotSaved) else { return }
-        edit(id, at: date) { $0.notes = notes }
+        edit(id, at: date) { $0.notes = SessionLimits.notes(notes) }
     }
 
     public func setTags(_ id: UUID, _ tags: [String], at date: Date = Date()) {
@@ -78,7 +79,6 @@ public final class SessionCatalog {
         save()
     }
 
-
     /// A proxy removed from the list leaves its sessions without one (never with a dangling id).
     public func forgetProxy(_ proxyID: UUID) {
         for index in sessions.indices where sessions[index].proxyID == proxyID { sessions[index].proxyID = nil }
@@ -101,14 +101,10 @@ public final class SessionCatalog {
         }
     }
 
-    /// "work, Ads ,work" → ["work", "Ads"]: trimmed, no empty ones, no repeats (ignoring case).
+    /// "work, Ads ,work" → ["work", "Ads"]: trimmed, no empty ones, no repeats (ignoring case), held
+    /// to the Mac's limits (`SessionLimits.tags`).
     public static func normalizedTags(_ tags: [String]) -> [String] {
-        var seen = Set<String>()
-        var out: [String] = []
-        for tag in tags.flatMap({ $0.split(separator: ",") }).map({ $0.trimmingCharacters(in: .whitespaces) }) where !tag.isEmpty {
-            if seen.insert(tag.lowercased()).inserted { out.append(tag) }
-        }
-        return out
+        SessionLimits.tags(tags)
     }
 
     private func nextDefaultName() -> String {
@@ -123,26 +119,31 @@ public final class SessionCatalog {
     /// the session as it is) and is bound to proxies at once; one whose proxy the iPhone cannot use
     /// comes with none, and bound: locked until a proxy is chosen (decision 6). The iPhone's own
     /// sessions are not touched; a profile the Mac no longer has stays here; one whose session was
-    /// deleted here is not made again (`notSyncedHere`). Returns the sessions made.
+    /// deleted here is not made again (`notSyncedHere`). `keepingEditsOf`: the profiles whose edit
+    /// made here the vault refused — their sessions keep it, still to go, and the name, description
+    /// and tags of the vault are not put over it. Returns the sessions made.
     @discardableResult
-    public func applySynced(_ profiles: [SyncedProfile], proxyID: (SyncedProfile.Proxy, Session) -> UUID) -> [Session] {
+    public func applySynced(_ profiles: [SyncedProfile], keepingEditsOf kept: Set<UUID> = [],
+                            proxyID: (SyncedProfile.Proxy, Session) -> UUID) -> [Session] {
         var made: [Session] = []
         for profile in profiles where !notSyncedHere.contains(profile.id) {
             var session: Session
             if let found = sessions.first(where: { $0.syncedProfileID == profile.id }) {
                 session = found
             } else {
-                session = Session(name: profile.name)
+                session = Session(name: SessionLimits.name(profile.name))
                 session.syncedProfileID = profile.id
                 made.append(session)
                 sessions.append(session)
             }
-            let trimmed = profile.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            session.name = trimmed.isEmpty ? session.name : trimmed
-            session.notes = profile.notes
-            session.tags = Self.normalizedTags(profile.tags)
-            session.syncedState = SyncedState(name: session.name, notes: session.notes, tags: session.tags)
-            session.syncedEditedAt = nil
+            if !kept.contains(profile.id) || session.syncedState == nil {
+                let trimmed = SessionLimits.name(profile.name)
+                session.name = trimmed.isEmpty ? session.name : trimmed
+                session.notes = profile.notes
+                session.tags = Self.normalizedTags(profile.tags)
+                session.syncedState = SyncedState(name: session.name, notes: session.notes, tags: session.tags)
+                session.syncedEditedAt = nil
+            }
             if let proxy = profile.proxy, !Faults.isActive(.syncedProxyNotBound) {
                 session.proxyID = proxyID(proxy, session)
                 session.boundToProxy = true

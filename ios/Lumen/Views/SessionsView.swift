@@ -198,7 +198,8 @@ struct SessionCard: View {
     }
 }
 
-/// Create or change a session's name, description and tags; delete it.
+/// Create or change a session's name, description and tags, within the Mac's limits (`SessionLimits`:
+/// a session made from a profile of the Mac's sends them there); delete it.
 struct SessionEditor: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -211,11 +212,23 @@ struct SessionEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section(L("Сессия")) {
+                Section {
                     TextField(L("Имя"), text: $name).accessibilityIdentifier("sessionName")
+                        .onChange(of: name) { _, text in
+                            if text.count > SessionLimits.nameLength { name = String(text.prefix(SessionLimits.nameLength)) }
+                        }
                     TextField(L("Описание"), text: $notes).accessibilityIdentifier("sessionNotes")
+                        .onChange(of: notes) { _, text in
+                            if text.count > SessionLimits.notesLength { notes = String(text.prefix(SessionLimits.notesLength)) }
+                        }
                     TextField(L("Метки через запятую"), text: $tags).accessibilityIdentifier("sessionTags")
                         .textInputAutocapitalization(.never)
+                } header: {
+                    Text(L("Сессия"))
+                } footer: {
+                    Text(L("Имя — до %@ символов, описание — до %@; меток — до %@, каждая до %@ символов.",
+                           "\(SessionLimits.nameLength)", "\(SessionLimits.notesLength)", "\(SessionLimits.tagCount)",
+                           "\(SessionLimits.tagLength)"))
                 }
                 .glassRow()
                 if let sessionID {

@@ -163,9 +163,14 @@ struct SyncView: View {
             case let .success(outcome):
                 SyncKeychain.generation = outcome.generation
                 SyncKeychain.profileTokens = outcome.profileTokens
-                let made = model.applySynced(outcome.profiles)
-                syncResult = L("Профилей с Mac: %@, новых: %@", "\(outcome.profiles.count)", "\(made)")
-                    + (outcome.cookiesSet + outcome.cookiesDeleted > 0 ? "\n" + L("Куки обновлены: %@", "\(outcome.cookiesSet + outcome.cookiesDeleted)") : "")
+                // An edit the vault refused stays on its session, to go when it can; the reason is said.
+                let made = model.applySynced(outcome.profiles, keepingEditsOf: Set(outcome.refusedEdits.map(\.profileID)))
+                var lines = [L("Профилей с Mac: %@, новых: %@", "\(outcome.profiles.count)", "\(made)")]
+                if outcome.cookiesSet + outcome.cookiesDeleted > 0 {
+                    lines.append(L("Куки обновлены: %@", "\(outcome.cookiesSet + outcome.cookiesDeleted)"))
+                }
+                lines += outcome.refusedEdits.map { refusalText($0) }
+                syncResult = lines.joined(separator: "\n")
             case .failure(.notInPlan):
                 stage = .notInPlan
             case .failure(.keyNoLongerOpens):
@@ -180,6 +185,21 @@ struct SyncView: View {
                 NSLog("Lumen: the sync's run failed: %@", text)
                 syncResult = AccountText.unreachable
             }
+        }
+    }
+
+    /// Why an edit made here did not go to the Mac, with the profile's name as the vault has it.
+    private func refusalText(_ refusal: SyncedEditRefusal) -> String {
+        let session = model.sessions.first { $0.syncedProfileID == refusal.profileID }
+        let name = String((session?.syncedState?.name ?? session?.name ?? "").prefix(40))
+        switch refusal.reason {
+        case .nameTooLong:
+            return L("«%@»: имя длиннее %@ символов, изменения не ушли на Mac.", name, "\(SessionLimits.nameLength)")
+        case .notesTooLong:
+            return L("«%@»: описание длиннее %@ символов, изменения не ушли на Mac.", name, "\(SessionLimits.notesLength)")
+        case let .other(text):
+            NSLog("Lumen: the vault refused an edit: %@", text)
+            return L("«%@»: Mac не принял изменения имени, описания или меток.", name)
         }
     }
 

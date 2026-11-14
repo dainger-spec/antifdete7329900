@@ -49,6 +49,26 @@ public struct SyncedEdit: Equatable, Sendable {
     }
 }
 
+/// An edit made here that the vault did not take, and why: it stays on the iPhone, to go when it can.
+public struct SyncedEditRefusal: Equatable, Sendable {
+    public enum Reason: Error, Equatable, Sendable {
+        /// A name longer than the Mac's `SessionLimits.nameLength` characters.
+        case nameTooLong
+        /// A description longer than the Mac's `SessionLimits.notesLength` characters.
+        case notesTooLong
+        /// The Mac's core refused it (its words, for the log).
+        case other(String)
+    }
+
+    public var profileID: UUID
+    public var reason: Reason
+
+    public init(profileID: UUID, reason: Reason) {
+        self.profileID = profileID
+        self.reason = reason
+    }
+}
+
 /// One read of the vault: the iPhone's copy of it set up (or opened) with the kept key, one run of
 /// the Mac's own engine through the iPhone's transport, and the profiles as they now are. The iPhone
 /// changes nothing in the vault in this step, so the run writes nothing to the server.
@@ -65,6 +85,9 @@ public enum SyncRead {
         /// The tokens of the synced profiles, for the renewal of the document of rights (CONTRACT.md
         /// §6.2: a profile on the Mac and on the iPhone takes one place of the license).
         public var profileTokens: [String] = []
+        /// Edits made here that the vault did not take: each stays, to go when it can — the rest of the
+        /// run went on.
+        public var refusedEdits: [SyncedEditRefusal] = []
     }
 
     /// Why a run did not go through, in the app's terms (the app does not see the Mac's core).
@@ -107,7 +130,8 @@ public enum SyncRead {
     /// tags; step 5). The run first takes what the Mac changed, then writes into the iPhone's copy
     /// only the fields edited here, onto the settings as they now are — never the copy from the last
     /// run, which would send the Mac's older settings back with them — stamped with the edit's own
-    /// time, and sends them. Of a field changed on both, the newer change stays (`apply`).
+    /// time, and sends them. Of a field changed on both, the newer change stays (`apply`). An edit
+    /// the vault refuses is refused for its profile alone (`Outcome.refusedEdits`).
     /// `notHere`: the profiles whose sessions were deleted on this iPhone — neither returned nor
     /// counted among this iPhone's (`profileTokens`).
     public static func pull(root: URL, key: Data, transport: LumenSyncTransport, keptGeneration: String?,
@@ -131,10 +155,17 @@ public enum SyncRead {
         // What the Mac changed first: the edits made here go onto it. (A vault copy set up again —
         // after a sign-out, or the vault forgotten — has its profiles only now.)
         _ = try await SyncEngine(repository: repository, transport: transport).sync()
+        var refused: [SyncedEditRefusal] = []
         if !Faults.isActive(.syncEditNotSent) {
             var written = false
             for edit in edits where repository.list().contains(where: { $0.id == edit.profileID }) {
-                try apply(edit, to: repository, written: &written)
+                do {
+                    try apply(edit, to: repository, written: &written)
+                } catch let reason as SyncedEditRefusal.Reason {
+                    refused.append(SyncedEditRefusal(profileID: edit.profileID, reason: reason))
+                } catch {
+                    refused.append(SyncedEditRefusal(profileID: edit.profileID, reason: .other("\(error)")))
+                }
             }
             // The edits go now, in this run.
             if written { _ = try await SyncEngine(repository: repository, transport: transport).sync() }
@@ -147,6 +178,7 @@ public enum SyncRead {
         // Only this iPhone's profiles: one deleted here takes no place of it.
         let gone = Set(notHere.compactMap { try? SyncProfileToken.token(for: $0, vault: repository.vault) })
         outcome.profileTokens = SyncProfileToken.tokens(in: repository).filter { !gone.contains($0) }
+        outcome.refusedEdits = refused
         if let cookies {
             let applied = await SyncCookieRun.run(repository: repository, stores: cookies, root: root)
             outcome.cookiesSet = applied.set
@@ -160,10 +192,13 @@ public enum SyncRead {
     /// the last run (it is no longer `edit.base`'s) at a time not older than the edit (the Mac's
     /// settings time stands for its rename too: the profile list keeps no time of a rename). The
     /// settings are stamped with the edit's time, or theirs if newer: a stamp never goes back, or an
-    /// older change on a third device would win over the Mac's.
+    /// older change on a third device would win over the Mac's. A field over the Mac's limits refuses
+    /// the whole edit before anything is written (`SyncedEditRefusal.Reason`).
     static func apply(_ edit: SyncedEdit, to repository: ProfileRepository, written: inout Bool) throws {
         let id = edit.profileID
         let name = edit.name.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.flatMap { $0.isEmpty ? nil : $0 }
+        if let name, name.count > SessionLimits.nameLength { throw SyncedEditRefusal.Reason.nameTooLong }
+        if let notes = edit.notes, notes.count > SessionLimits.notesLength { throw SyncedEditRefusal.Reason.notesTooLong }
         let tags = edit.tags.map { ProfileTags.normalized($0) }
 
         var configuration = try repository.loadConfiguration(id)

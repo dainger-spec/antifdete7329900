@@ -107,6 +107,7 @@
 "Удалить сессию" = "Delete Session";
 "Удаляются куки, хранилище, кэш, вкладки и история этой сессии." = "This deletes the session’s cookies, storage, cache, tabs and history.";
 "Удаляются куки, хранилище, кэш, вкладки и история этой сессии на iPhone. Профиль на Mac остаётся, но сюда больше не приходит; вернуть его можно на экране синхронизации." = "This deletes the session’s cookies, storage, cache, tabs and history on this iPhone. The profile stays on your Mac but no longer comes here; you can bring it back on the Sync screen.";
+"Имя — до %@ символов, описание — до %@; меток — до %@, каждая до %@ символов." = "Name: up to %@ characters; description: up to %@; up to %@ tags of up to %@ characters each.";
 "Удалить сессию со всеми её данными?" = "Delete the session with all its data?";
 "сеть" = "network";
 "смерть" = "death";
@@ -219,6 +220,9 @@
 "Профили с Mac появляются в списке сессий. Имя, описание и метки, изменённые на iPhone, уходят на Mac." = "Profiles from your Mac appear in the list of sessions. A name, description or tags changed on the iPhone go to the Mac.";
 "Вернуть удалённые профили" = "Bring Back Deleted Profiles";
 "Профили с Mac, удалённые на этом iPhone, сюда больше не приходят: %@." = "Profiles from your Mac deleted on this iPhone no longer come here: %@.";
+"«%@»: имя длиннее %@ символов, изменения не ушли на Mac." = "“%@”: the name is longer than %@ characters, so the changes were not sent to your Mac.";
+"«%@»: описание длиннее %@ символов, изменения не ушли на Mac." = "“%@”: the description is longer than %@ characters, so the changes were not sent to your Mac.";
+"«%@»: Mac не принял изменения имени, описания или меток." = "“%@”: your Mac did not accept the changed name, description or tags.";
 
 /* The account's notices of the release (AccountNotices, CONTRACT.md §17.4). */
 "Оплаченный период заканчивается %@." = "The paid period ends on %@.";

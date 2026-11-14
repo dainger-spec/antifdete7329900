@@ -186,10 +186,11 @@ final class AppModel: ObservableObject {
     /// profile's proxy becomes an entry of the list — the one already there with the same address,
     /// login and password; the session's own entry, its password brought up to date, when the Mac
     /// changed only that; or a new one (`SyncedProxyEntry`) — and the session is bound to it.
+    /// `keepingEditsOf`: the profiles whose edit made here the vault refused (they keep it).
     @discardableResult
-    func applySynced(_ profiles: [SyncedProfile]) -> Int {
+    func applySynced(_ profiles: [SyncedProfile], keepingEditsOf kept: Set<UUID> = []) -> Int {
         var changed: [UUID] = []
-        let made = catalog.applySynced(profiles) { proxy, session in
+        let made = catalog.applySynced(profiles, keepingEditsOf: kept) { proxy, session in
             let elsewhere = Set(catalog.sessions.filter { $0.id != session.id }.compactMap(\.proxyID))
             switch SyncedProxyEntry.choose(for: proxy, boundTo: session.proxyID, entries: proxies, usedElsewhere: elsewhere,
                                            password: { ProxyPasswords.get($0) }) {

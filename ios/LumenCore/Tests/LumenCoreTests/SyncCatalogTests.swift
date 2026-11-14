@@ -102,6 +102,34 @@ final class SyncCatalogTests: XCTestCase {
         XCTAssertEqual(catalog.localEdits(), [])
     }
 
+    /// Audit 3, #38: an edit the vault refused stays on its session, still to go; the vault's name is
+    /// not put over it.
+    func testAnEditTheVaultRefusedStaysToGo() throws {
+        let catalog = SessionCatalog(store: LumenStore(root: folder()))
+        let shopID = UUID()
+        let shop = SyncedProfile(id: shopID, name: "Магазин", notes: "", tags: [], proxy: nil, proxyUnusable: false)
+        let session = try XCTUnwrap(catalog.applySynced([shop]) { _, _ in UUID() }.first)
+        catalog.rename(session.id, to: "Магазин 2")
+        catalog.applySynced([shop], keepingEditsOf: [shopID]) { _, _ in UUID() }
+        XCTAssertEqual(catalog.session(session.id)?.name, "Магазин 2")
+        XCTAssertEqual(catalog.localEdits().map(\.name), ["Магазин 2"], "still to go")
+    }
+
+    /// Audit 3, #38: a session's name, description and tags are held to the Mac's limits.
+    func testTheMacsLimitsHold() {
+        let catalog = SessionCatalog(store: LumenStore(root: folder()))
+        let session = catalog.create(name: String(repeating: "a", count: 200), notes: String(repeating: "b", count: 5000),
+                                     tags: [String(repeating: "c", count: 40)] + (1...30).map { "t\($0)" })
+        XCTAssertEqual(session.name.count, SessionLimits.nameLength)
+        XCTAssertEqual(session.notes.count, SessionLimits.notesLength)
+        XCTAssertEqual(session.tags.count, SessionLimits.tagCount)
+        XCTAssertEqual(session.tags.first?.count, SessionLimits.tagLength)
+        catalog.rename(session.id, to: "  " + String(repeating: "я", count: 300))
+        XCTAssertEqual(catalog.session(session.id)?.name, String(repeating: "я", count: SessionLimits.nameLength))
+        catalog.setNotes(session.id, String(repeating: "d", count: 4001))
+        XCTAssertEqual(catalog.session(session.id)?.notes.count, SessionLimits.notesLength)
+    }
+
     /// Audit 3, #16: two of the Mac's profiles on one gateway, with the same login and different
     /// passwords (the country or the sticky session in the password), get an entry each — neither
     /// password written over the other's — and the entry of one profile follows its new password.

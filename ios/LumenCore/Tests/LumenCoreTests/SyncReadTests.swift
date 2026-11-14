@@ -161,6 +161,36 @@ final class SyncReadTests: XCTestCase {
         XCTAssertEqual(config.notes, "С iPhone, позже", "the iPhone's newer description stays")
     }
 
+    /// Audit 3, #38: an edit over the Mac's limits is refused for its profile, with its reason; the
+    /// run goes on, and the other profiles' edits go.
+    func testAnEditOverTheMacsLimitsIsRefusedForItsProfileAlone() async throws {
+        let (server, _, repository, macTransport, phone) = try macAndPhone()
+        let shop = try repository.create(name: "Магазин", configuration: ProfileConfiguration())
+        let mail = try repository.create(name: "Почта", configuration: ProfileConfiguration())
+        _ = try await SyncEngine(repository: repository, transport: macTransport).sync()
+        let key = try phoneKey(server)
+        let root = try folder().appendingPathComponent("vault")
+        let first = try await SyncRead.pull(root: root, key: key, transport: phone, keptGeneration: nil)
+
+        let edits = [
+            SyncedEdit(profileID: shop.id, name: String(repeating: "я", count: SessionLimits.nameLength + 1), notes: "Не уйдёт",
+                       base: SyncedState(name: "Магазин", notes: "", tags: [])),
+            SyncedEdit(profileID: mail.id, notes: "С iPhone", base: SyncedState(name: "Почта", notes: "", tags: [])),
+        ]
+        let second = try await SyncRead.pull(root: root, key: key, transport: phone, keptGeneration: first.generation, edits: edits)
+        XCTAssertEqual(second.refusedEdits, [SyncedEditRefusal(profileID: shop.id, reason: .nameTooLong)])
+        XCTAssertEqual(second.profiles.count, 2, "the run went on")
+        _ = try await SyncEngine(repository: repository, transport: macTransport).sync()
+        XCTAssertEqual(try repository.summary(for: shop.id).name, "Магазин")
+        XCTAssertEqual(try repository.loadConfiguration(shop.id).notes, "", "nothing of the refused edit was written")
+        XCTAssertEqual(try repository.loadConfiguration(mail.id).notes, "С iPhone", "the other profile's edit went")
+
+        let long = SyncedEdit(profileID: mail.id, notes: String(repeating: "a", count: SessionLimits.notesLength + 1),
+                              base: SyncedState(name: "Почта", notes: "С iPhone", tags: []))
+        let third = try await SyncRead.pull(root: root, key: key, transport: phone, keptGeneration: second.generation, edits: [long])
+        XCTAssertEqual(third.refusedEdits.map(\.reason), [.notesTooLong], "a description is refused, not cut")
+    }
+
     /// Audit 3, #39: edits made here wait through the iPhone's copy of the vault set up again (signed
     /// out and in, or the vault forgotten), and go at the next run.
     func testEditsWaitingWhenTheVaultCopyIsSetUpAgainGoToTheMac() async throws {
