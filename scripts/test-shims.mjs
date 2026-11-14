@@ -52,9 +52,11 @@ function makeWindow(config, parentContext, prelude) {
     globalThis.WeakRef = WeakRef;
     // Blob workers, as far as hookWorkers reaches them: a Blob, URL.createObjectURL and a Worker
     // that keeps the URL it was given.
-    globalThis.Blob = class Blob { constructor(parts, options) { this.parts = parts; this.type = (options && options.type) || ''; } };
+    // The parts are converted as a WebIDL sequence (through their @@iterator), and each URL's Blob is
+    // kept where only the engine (a test) reads it.
+    globalThis.Blob = class Blob { constructor(parts, options) { this.parts = []; for (const part of parts) this.parts.push(part); this.type = (options && options.type) || ''; } };
     let blobCount = 0;
-    globalThis.URL = class URL { static createObjectURL(blob) { return 'blob:test/' + (++blobCount); } };
+    globalThis.URL = class URL { static createObjectURL(blob) { const url = 'blob:test/' + (++blobCount); engine.blobs.set(url, blob); return url; } };
     globalThis.Worker = class Worker { constructor(url) { this.url = String(url); } };
     class Navigator {
       get platform() { illegal(this, Navigator); return 'MacIntel'; } get maxTouchPoints() { illegal(this, Navigator); return 0; }
@@ -119,7 +121,7 @@ function makeWindow(config, parentContext, prelude) {
     };
     globalThis.RTCStatsReport = class RTCStatsReport extends Map {};
     // What only the engine knows: every peer connection it made (a test reads it; pages never get it).
-    const engine = { instances: [], added: [], resolved: [] };
+    const engine = { instances: [], added: [], resolved: [], blobs: new Map() };
     // As libwebrtc: a candidate's address that is a name (not IPv4, not IPv6) is resolved by this Mac.
     const resolveNamed = (line) => {
       const m = reflectApply(RegExp.prototype.exec, /^(?:a=)?candidate:\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+(\\S+)/i, [line]);
@@ -517,6 +519,43 @@ test('workers made from a blob are hooked whenever a substitution reaches them, 
   assert.equal(hooked({ ...base, fingerprint: { ...real, webgl: 'off' } }), true, 'WebGL off');
   assert.equal(hooked({ ...base, fingerprint: { ...real, audio: 'noise' } }), true, 'audio noise');
   assert.equal(hooked({ ...base, fingerprint: { ...real, language: 'de-DE' } }), true, 'a language');
+});
+
+// What a blob worker starts with: this script and the part of CONFIG a worker reads — never the
+// camera's media (copied into every frame's script, tens of MB with a video) nor the WebRTC relay's
+// credentials (a worker can read its own script back; a page that put its own Blob in place would be
+// handed it). Read where only the engine sees it: the Blob behind the worker's URL.
+test('a blob worker gets only what a worker uses: never the camera\'s media, never the relay\'s credentials', () => {
+  const relay = { urls: ['turn:127.0.0.1:50000?transport=udp'], username: 'relay-user-7', credential: 'relay-secret-7' };
+  const video = 'data:video/mp4;base64,' + 'QUJD'.repeat(32) + 'VIDEO-MEDIA';
+  const config = { ...base, timeZone: 'Europe/Berlin', storageQuota: 0.6 * 128 * 2 ** 30, webRTC: 'tunnel', webRTCRelay: relay,
+                   camera: { ...noCamera.camera, mode: 'substitute', source: 'video', videoURL: video },
+                   systemCamera: { sentinel: 'Lumen Camera', usedHere: false, label: 'FaceTime HD Camera' } };
+  const w = makeWindow(config);
+  const scriptOf = (url) => run(w, `__engine.blobs.get(${JSON.stringify(url)}).parts.filter((p) => typeof p === 'string').join('')`);
+  const url = run(w, `new Worker(URL.createObjectURL(new Blob(['postMessage(1)']))).url`);
+  const script = scriptOf(url);
+  for (const secret of ['relay-user-7', 'relay-secret-7', 'turn:127.0.0.1', 'VIDEO-MEDIA', 'Lumen Camera']) {
+    assert.ok(!script.includes(secret), `the worker's script carries ${secret}`);
+  }
+  // The page's own Blob, put in place before its worker starts, is not handed the script; the
+  // worker is still made of it.
+  run(w, `var handed = []; var PageBlob = Blob; window.Blob = class Blob extends PageBlob { constructor(parts, o) { super(parts, o); handed.push(this.parts.join('')); } };`);
+  const second = run(w, `new Worker(URL.createObjectURL(new PageBlob(['postMessage(2)']))).url`);
+  assert.equal(run(w, `handed.length`), 0, 'the page\'s Blob was handed the worker\'s script');
+  assert.ok(scriptOf(second).startsWith('try { (0, eval)('), 'the worker made of the page\'s blob starts with the script');
+  // What it does carry: the shim, run with the worker's part of CONFIG.
+  const evaluated = JSON.parse(/^try \{ \(0, eval\)\((.*)\); \} catch \(e\) \{\}/s.exec(script)[1]);
+  assert.ok(evaluated.startsWith('(function install(CONFIG) {'));
+  const workerConfig = JSON.parse(evaluated.slice(evaluated.lastIndexOf('})(') + 3, -2));
+  assert.deepEqual(workerConfig, { timeZone: 'Europe/Berlin', storageQuota: config.storageQuota });
+  // The iOS app's fingerprint and an iPhone's platform go too: a worker answers them.
+  const phone = { platform: 'iPhone', width: 402, height: 874, maxTouchPoints: 5 };
+  const fingerprint = { seed: 's', canvas: 'noise', webgl: 'real', audio: 'real', language: null, unstable: false, naive: false };
+  const ios = makeWindow({ ...base, phone, fingerprint });
+  const iosURL = run(ios, `new Worker(URL.createObjectURL(new Blob(['postMessage(1)']))).url`);
+  const iosScript = JSON.parse(/^try \{ \(0, eval\)\((.*)\); \} catch \(e\) \{\}/s.exec(run(ios, `__engine.blobs.get(${JSON.stringify(iosURL)}).parts.join('')`))[1]);
+  assert.deepEqual(JSON.parse(iosScript.slice(iosScript.lastIndexOf('})(') + 3, -2)), { phone, fingerprint });
 });
 
 test('storage quota: Safari\'s instead of the app default', async () => {

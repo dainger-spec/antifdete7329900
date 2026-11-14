@@ -303,8 +303,9 @@ function patchWindow(w) {
   try { patchToString(w); } catch (e) {}
   if (CONFIG.timeZone) { try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {} }
   if (CONFIG.phone) { try { patchPhone(w, CONFIG.phone); } catch (e) {} }
-  // Workers made from a blob run this same function with the same CONFIG (hookWorkers): every
-  // substitution above `if (IS_WORKER) return` reaches them — the time zone, an iPhone's
+  // Workers made from a blob run this same function with the part of CONFIG read here
+  // (`WORKER_KEYS`, hookWorkers): every substitution above `if (IS_WORKER) return` reaches them —
+  // and a key read here must be in WORKER_KEYS too — the time zone, an iPhone's
   // platform, the storage quota, and the iOS app's fingerprint (ios/shim/fingerprint.js, put in
   // this function by ios/scripts/build-shim.py). So they are hooked whenever any of those is on,
   // and only then (substitutesInWorkers): a worker left unhooked beside a substituted page answers
@@ -2098,17 +2099,42 @@ function substitutesInWorkers(config) {
   return !!(config.timeZone || config.phone || config.storageQuota) || fingerprint;
 }
 
+// What a worker is given of CONFIG: what the script reads there before `if (IS_WORKER) return` —
+// the time zone, an iPhone's platform, the storage quota, the iOS app's fingerprint — and nothing
+// else. Never the camera (its media is tens of MB, which every frame would copy into its bootstrap)
+// nor the WebRTC relay's credentials (a worker's script can read its own source back, and they are
+// the page's to use, never to read). Written out once, here, before any page script runs.
+const WORKER_KEYS = ['timeZone', 'phone', 'storageQuota', 'fingerprint'];
+const JSONStringify = JSON.stringify;
+const WORKER_CONFIG = (function () {
+  const out = {};
+  for (let i = 0; i < WORKER_KEYS.length; i++) {
+    const value = CONFIG[WORKER_KEYS[i]];
+    if (value !== undefined && value !== null) out[WORKER_KEYS[i]] = value;
+  }
+  return ReflectApply(JSONStringify, null, [out]);
+})();
+
 function hookWorkers(w) {
   const URLClass = w.URL;
   const nativeCreate = URLClass && URLClass.createObjectURL;
-  if (!SOURCE || typeof nativeCreate !== 'function' || typeof w.Blob !== 'function' || typeof w.WeakRef !== 'function') return;
+  // The engine's Blob, taken now: the page's own, put in its place later, is never handed the script.
+  const NativeBlob = w.Blob;
+  if (!SOURCE || typeof nativeCreate !== 'function' || typeof NativeBlob !== 'function' || typeof w.WeakRef !== 'function') return;
   const blobs = new Map();        // blob: URL this realm created → WeakRef to its Blob
   const replacements = new Map(); // that URL → the URL of the same Blob behind this script
-  // A CSP without 'unsafe-eval' stops the eval, never the page's own code after it.
-  const bootstrap = 'try { (0, eval)(' + JSON.stringify('(' + SOURCE + ')(' + JSON.stringify(CONFIG) + ');') + '); } catch (e) {}';
+  // A CSP without 'unsafe-eval' stops the eval, never the page's own code after it. Made at the
+  // first worker, not for every frame that never starts one.
+  let bootstrapText = null;
+  const bootstrap = () => {
+    if (bootstrapText === null) {
+      bootstrapText = 'try { (0, eval)(' + ReflectApply(JSONStringify, null, ['(' + SOURCE + ')(' + WORKER_CONFIG + ');']) + '); } catch (e) {}';
+    }
+    return bootstrapText;
+  };
   define(URLClass, 'createObjectURL', method('createObjectURL', 1, function (object) {
     const url = nativeCreate.apply(this, arguments);
-    if (object instanceof w.Blob) {
+    if (object instanceof NativeBlob) {
       if (blobs.size > 500) blobs.forEach((ref, key) => { if (!ref.deref()) blobs.delete(key); });
       blobs.set(url, new w.WeakRef(object));
     }
@@ -2137,15 +2163,19 @@ function hookWorkers(w) {
     const blob = blobs.has(key) ? blobs.get(key).deref() : undefined;
     if (!blob) return null;
     const text = read(key);
-    let parts = [bootstrap, blob];
+    let parts = [bootstrap(), blob];
     if (text !== null) {
       const prologue = PROLOGUE.exec(text)[0];
       // On the directive's own line, so the page's next line keeps its columns too.
       const newline = /\r?\n$/.exec(prologue);
-      parts = newline ? [prologue.slice(0, newline.index) + ';', bootstrap, text.slice(newline.index)]
-                      : [prologue, bootstrap, text.slice(prologue.length)];
+      parts = newline ? [prologue.slice(0, newline.index) + ';', bootstrap(), text.slice(newline.index)]
+                      : [prologue, bootstrap(), text.slice(prologue.length)];
     }
-    const replacement = nativeCreate.call(URLClass, new w.Blob(parts, { type: blob.type || 'text/javascript' }));
+    // Handed to the engine through closures of this script (`sequenceOf`, ReflectApply), not an
+    // array iterator or a Function.prototype.call a page can replace.
+    const options = ObjectCreate(null);
+    options.type = blob.type || 'text/javascript';
+    const replacement = ReflectApply(nativeCreate, URLClass, [new NativeBlob(sequenceOf(parts), options)]);
     replacements.set(key, replacement);
     return replacement;
   }
