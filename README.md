@@ -288,8 +288,11 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 9. **Stop**, or closing the last window, saves history and encrypts the profile's website
    data. **Lock** stops every profile and forgets the keys. Quitting (⌘Q) does the same,
    and waits until every profile is sealed.
-10. **Sync (optional):** **More → Sync…** offers a folder (local-only) or a server (client
-   for the documented API; no server is included). Stop all profiles before syncing. A
+10. **Sync (optional):** **More → Sync…** offers the **Lumen account** (while this Mac is signed
+   in: the Lumen server, reached with this Mac's own sign-in, which Lumen for iPhone syncs with
+   too), a folder (local-only), or an **own server** (client for the documented API; its address
+   and token typed in). The vault is end-to-end encrypted the same way for each: the server keeps
+   ciphertext only. Stop all profiles before syncing. A
    profile's settings, passwords, bookmarks, history and persistent cookies sync, encrypted;
    another Mac gets the cookies at its next launch of the profile, before the first page
    (**⋯ → Edit…** → **Sync cookies with other devices** turns that off for a profile).
@@ -449,7 +452,8 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 
 - True engine-level iOS WebKit (private APIs or bundled core required). TLS ClientHello, real GPU renderer, full font set, touch behavior remain Mac.
 - Per-profile `Accept-Language` header (JS navigator.language is spoofed).
-- Sync server (only the client and its API spec), syncing of WebKit website data other than
+- Sync server (only the client and its API spec here; the Lumen account's server is its own
+  project), a second Mac joining another Mac's vault from the app, syncing of WebKit website data other than
   cookies (localStorage, IndexedDB, caches), and per-entry merging of passwords (concurrent
   edits keep the remote version plus a `.conflict` copy). Synced data reaches a running profile
   only at its next launch.

@@ -55,7 +55,7 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 │  SyncCodec / SyncEngine ── encrypted sync client with per-record merges                    │
 │  SyncTransport ── backend contract                                                         │
 │     ├── LocalDirectorySyncTransport  (local-only)                                          │
-│     └── HTTPSyncTransport            (server-ready client, docs/SYNC_SERVER_API.md)        │
+│     └── HTTPSyncTransport            (own server, or the Lumen account: AccountSync)       │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌──────────── NetworkGuardExtension (system extension, NE=1 builds; docs/TUNNEL.md) ─────────┐
 │  GuardFilterProvider ── content filter: a held profile's flows to its proxy and loopback   │

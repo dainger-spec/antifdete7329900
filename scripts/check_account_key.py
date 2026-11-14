@@ -37,6 +37,9 @@ ALLOWED = {
         "the transport: a token in the Authorization header",
     os.path.join("PrivacyBrowser", "UI", "NewKeyView.swift"):
         "the new key shown once after a replacement, and copied at the person's click (CONTRACT §11.1, key.replaced)",
+    os.path.join("BrowserCore", "Sync", "AccountSync.swift"):
+        "sync through the account: the device token handed to HTTPSyncTransport for the run, which sends it in the "
+        "Authorization header only (CONTRACT §16.1)",
 }
 
 

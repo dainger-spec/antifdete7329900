@@ -88,9 +88,18 @@ Now (`LicenseModel`, `RefreshSchedule`, `LicenseClient.refreshReport`):
   that refuses a renewal for its label (HTTP 400, `invalid_request`, `field: "label"`) gets it
   again without one at once, and no label for the rest of the run: the renewal matters more than
   the label.
+- **Before sync through the account.** The device token is also this Mac's key to the Lumen sync
+  server (the **Lumen account** sync target, CONTRACT §16.1; docs/SYNC_FORMAT.md). The first sync
+  after the app starts — and a header published after a change of the master password — waits for a
+  renewal of this run that reached the server with this Mac still signed in
+  (`LicenseModel.renewForSync`): a token copied to another Mac with the app's files is
+  `machine_mismatch` or `device_revoked` by then and gone (§9.4), so nothing syncs in its name. A
+  renewal that does not reach the server holds the sync back with a word of why; a `401` from the
+  sync server renews again, which signs an unlinked Mac out. Signing out leaves the target chosen,
+  and the sync waits for a sign-in.
 - **Said.** Each renewal in the app's log (subsystem `PrivacyBrowser`, category `License`): asked,
   and why (`launch`, `unlocked`, `profiles`, `timer`, `network`, `wake`, `active`, `retry`,
-  `manual`); done, and for how long the document works; or `License renewal failed` at `error`
+  `manual`, `sync`); done, and for how long the document works; or `License renewal failed` at `error`
   level, with why (no answer and the error's kind, the server's HTTP status and code, an answer
   not taken and the check's name), the next try, and how long this Mac works without the server.
   Nothing of the person's: no address, no message, no label. And to the person: once renewals

@@ -694,6 +694,8 @@ final class AppModel: ObservableObject {
 
     private func passwordRevisionThere(_ target: DeviceSettings.SyncTarget?, repository: ProfileRepository) async -> Int? {
         guard let target, !isSyncing else { return nil }
+        // Through the account, as a sync: after a renewal of this run (CONTRACT §16.1).
+        if target == .account { _ = await license.renewForSync() }
         var folder: URL?
         defer { folder?.stopAccessingSecurityScopedResource() }
         do {
@@ -708,6 +710,7 @@ final class AppModel: ObservableObject {
     /// The header of a change of the master password made here, to the sync location (header only:
     /// no profile's files, so not held back by running profiles).
     private func publishPasswordChange(_ target: DeviceSettings.SyncTarget, repository: ProfileRepository) async {
+        if target == .account { _ = await license.renewForSync() }
         var folder: URL?
         defer { folder?.stopAccessingSecurityScopedResource() }
         do {
@@ -1198,6 +1201,25 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Sync through the Lumen account (`AccountSync`): the account server, with this Mac's device token;
+    /// nothing to type. Offered while this Mac is signed in (`accountSyncOffered`).
+    func setSyncThroughAccount() {
+        guard accountSyncOffered else { return }
+        do {
+            try updateDeviceSettings { $0.syncTarget = .account }
+            // With sync a renewal carries the synced profiles' tokens, without it none: the license is told.
+            refresh()
+        } catch {
+            showError(errorText(error))
+        }
+    }
+
+    /// "Lumen account" is offered among the places to sync to: this Mac is signed in to an account
+    /// (`AccountSync.isOffered`).
+    var accountSyncOffered: Bool {
+        license.isConfigured && AccountSync.isOffered(signedIn: license.record.isSignedIn, entitlement: license.state?.entitlement)
+    }
+
     func clearSyncTarget() {
         do {
             try updateDeviceSettings { $0.syncTarget = nil }
@@ -1215,6 +1237,11 @@ final class AppModel: ObservableObject {
             showError(L("sync.error.profilesRunning"))
             return
         }
+        // Through the account, a device the server holds back is not asked again before its time (§16.1).
+        if target == .account, let held = deviceSettings.lastSync?.heldUntil, held > Date() {
+            showError(AccountSyncText.onHold(held))
+            return
+        }
         isWorking = true
         defer { isWorking = false }
         isSyncing = true
@@ -1225,13 +1252,24 @@ final class AppModel: ObservableObject {
             showError(L("sync.error.profilesRunning"))
             return
         }
+        // Through the account: after a renewal of this run reached the server, this Mac still signed
+        // in (CONTRACT §16.1); `syncTransport` refuses before.
+        if target == .account { _ = await license.renewForSync() }
         var scopedFolder: URL?
         defer { scopedFolder?.stopAccessingSecurityScopedResource() }
-        let status: DeviceSettings.SyncStatus
+        var status: DeviceSettings.SyncStatus?
         do {
             let (transport, folder) = try syncTransport(for: target, vaultID: repository.vault.vaultID)
             scopedFolder = folder
-            let report = try await SyncEngine(repository: repository, transport: transport).sync()
+            let report: SyncReport
+            do {
+                report = try await SyncEngine(repository: repository, transport: transport).sync()
+            } catch {
+                // The server's data changed under the run (§16.2): nothing more was written, and the
+                // next run starts over from the list — this one, at once, once. Nothing is said.
+                guard (error as? SyncServerRefusal)?.isGenerationChanged == true else { throw error }
+                report = try await SyncEngine(repository: repository, transport: transport).sync()
+            }
             if report.pulled.contains("labels") { loadTagColors(from: repository.vault) }
             // A profile deleted on another device: nothing of it is deleted here. Its folder stays
             // for the person to bring back or remove (R3); WebKit's store of it outside the vault —
@@ -1247,14 +1285,49 @@ final class AppModel: ObservableObject {
             for id in report.settingsVersionsToReview {
                 showError(String(format: L("sync.versions.review"), name(id), repository.keptSettings(for: id).count))
             }
+            // Objects the server refused for the plan's space or their size wait; the rest synced (§16.1).
+            if !report.deferredOverQuota.isEmpty { showError(L("sync.account.overQuota")) }
+            if !report.deferredTooLarge.isEmpty {
+                Logger(subsystem: "PrivacyBrowser", category: "Sync")
+                    .notice("Sync: \(report.deferredTooLarge.count, privacy: .public) object(s) larger than the server takes, deferred")
+                showError(L("sync.account.tooLarge"))
+            }
             status = DeviceSettings.SyncStatus(report: report)
         } catch {
-            let message = errorText(error)
-            status = DeviceSettings.SyncStatus(error: message)
-            showError(String(format: L("sync.error.failed"), message))
+            status = await syncFailure(error, target: target)
         }
-        try? updateDeviceSettings { $0.lastSync = status }
+        if let status { try? updateDeviceSettings { $0.lastSync = status } }
         refresh()
+    }
+
+    /// A sync that failed: said, and its status to keep (nil: nothing to say or keep). Through the
+    /// account the server's refusals are states, each in its own words (CONTRACT §16.1); nothing on this
+    /// Mac is changed by any of them.
+    private func syncFailure(_ error: Error, target: DeviceSettings.SyncTarget) async -> DeviceSettings.SyncStatus? {
+        guard target == .account else {
+            let message = errorText(error)
+            showError(String(format: L("sync.error.failed"), message))
+            return DeviceSettings.SyncStatus(error: message)
+        }
+        let outcome = AccountSync.outcome(of: error)
+        switch outcome {
+        case .generationChanged:
+            // Twice in a row: the next sync starts over (§16.2, 7) — not a failure to show.
+            return nil
+        case .unauthorized:
+            // The token is no longer the server's: the renewal says why — `device_revoked` signs this
+            // Mac out (§9.4), and the status says so.
+            _ = await license.renewForSync(again: true)
+        case .onHold(let until):
+            let text = AccountSyncText.onHold(until)
+            showError(text)
+            return DeviceSettings.SyncStatus(error: text, heldUntil: until)
+        default:
+            break
+        }
+        let message = AccountSyncText.text(outcome, error: error, signedIn: license.record.isSignedIn)
+        showError(String(format: L("sync.error.failed"), message))
+        return DeviceSettings.SyncStatus(error: message)
     }
 
     // MARK: Scenarios
@@ -1453,6 +1526,17 @@ final class AppModel: ObservableObject {
             return (LocalDirectorySyncTransport(directory: folder), scoped)
         case let .server(baseURL, token):
             return (try HTTPSyncTransport(configuration: .init(baseURL: baseURL, vaultID: vaultID, bearerToken: token)), nil)
+        case .account:
+            // The account server and this Mac's device token (CONTRACT §16.1), once a renewal of this
+            // run reached the server with this Mac signed in. A development build's own server on this
+            // Mac may be plain HTTP, as its license's is (`AccountConfiguration`).
+            guard let configuration = license.configuration, let token = license.record.deviceToken, !token.isEmpty else {
+                throw AccountSyncUnavailable(reason: .notSignedIn)
+            }
+            guard license.renewedForSync else { throw AccountSyncUnavailable(reason: .notChecked) }
+            return (try AccountSync.transport(server: configuration.serverURL, deviceToken: token, vaultID: vaultID,
+                                              allowInsecureLocalhost: configuration.source == .environment,
+                                              session: AccountSyncText.session), nil)
         }
     }
 

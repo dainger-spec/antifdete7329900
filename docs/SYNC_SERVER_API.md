@@ -3,10 +3,11 @@
 This is the HTTP contract `HTTPSyncTransport` speaks
 (`Sources/BrowserCore/Sync/Transports/HTTPSyncTransport.swift`). **No server is included in this
 repository.** The Lumen account server implements it (its own repository, `docs/SYNC_SERVER.md` and
-`docs/CONTRACT.md` §16 there). The client is tested against in-process stubs that implement exactly
-these semantics (`Tests/BrowserCoreTests/SyncImprovementTests.swift`, `StubSyncServer`; with the Lumen
-server's generation and error bodies, `Tests/BrowserCoreTests/ServerGenerationTests.swift`,
-`GenerationStubServer`).
+`docs/CONTRACT.md` §16 there), and the app syncs to it with the **Lumen account** target
+([SYNC_FORMAT.md](SYNC_FORMAT.md#where-a-mac-syncs-to)); a server of one's own is the **Own server**
+target. The client is tested against in-process stubs that implement exactly these semantics
+(`Tests/BrowserCoreTests/SyncImprovementTests.swift`, `StubSyncServer`; with the Lumen server's
+generation and error bodies, `Tests/BrowserCoreTests/AccountSyncTests.swift`, `GenerationStubServer`).
 
 The server is a dumb blob store. Every blob it receives is already end-to-end encrypted,
 except `vault-header`, which holds only the KDF salt, the KDF parameters and the wrapped
@@ -124,5 +125,6 @@ append-only log of `(object, revision, sha256(blob))`. That is not part of v1.
 | HTTP client for this API | ready, tested against in-process stubs |
 | Folder transport | ready, **local-only** (NAS share, external disk) |
 | Server implementation | **not in this repository**; the Lumen account server implements it |
-| Accounts, token issuance, vault sharing between users | **not designed** |
+| Sync through the Lumen account | the account's server and this Mac's device token (`AccountSync`) |
+| Vault sharing between users | **not designed** |
 | Push notifications / live sync | not designed; the client syncs on demand |
