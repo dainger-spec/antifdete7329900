@@ -204,6 +204,32 @@ keep there, with the real share mounted beside it under another name from then o
 has not mounted the share after 25 seconds the script mounts it itself; a copy of the script that
 a newer one takes the place of hands the folder it found on (tools 6).
 
+The shared folder is writable from inside the machine — by any process of the person's there,
+not only by root — and the daemon runs as root, so it treats what is in the folder as the
+person's (tools 7):
+
+- A newer copy of the script is taken **only** from a second folder the helper gives the machine
+  read-only (`VMLibrary.MachineFiles.tools`, virtio-fs tag `io.lumenbrowser.tools`), which the
+  daemon mounts itself at `/var/run/lumen-tools` where only root reaches it. The app puts the
+  script there at every start. A script found in the shared folder is not run, whatever its
+  version: the guest cannot write the read-only folder, so an update still comes only from the
+  Mac. (The app also leaves the script in the shared folder, where a machine with tools 6 or
+  older looks: that machine takes it from there once, and from then on only from the tools'
+  folder. A machine with tools 6 is as exposed to a planted script as it was until that start.)
+- What the daemon keeps for itself — the desktop pictures, what the system said — is in
+  `/Library/Application Support/Lumen`, a folder of root's (755), not in `/Users/Shared`, which
+  anyone can write. Files are made with `mktemp` and moved into place.
+- The picture in the shared folder is read as the signed-in person (a link there to a file only
+  root may read does not become a picture anyone may read), at most 64 MB, and taken only if its
+  checksum is the one it had when it was looked at. A link in the picture's or the settings'
+  place is not read.
+- The status file is written to a new file in the shared folder and moved into place: a link left
+  in its place is replaced, not written through or followed into a folder.
+
+On the Mac's side the app reads what the guest writes there (its status, the picture's marker)
+with `VMShareFile`: no link followed, no pipe waited on, a regular file of a few kilobytes at
+most, off the main thread; anything else is ignored and logged by its kind.
+
 ## A machine's settings
 
 | | |

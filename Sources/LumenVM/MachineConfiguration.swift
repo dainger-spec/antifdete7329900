@@ -99,7 +99,12 @@ enum MachineConfiguration {
         try FileManager.default.createDirectory(at: files.share, withIntermediateDirectories: true)
         let share = VZVirtioFileSystemDeviceConfiguration(tag: VZVirtioFileSystemDeviceConfiguration.macOSGuestAutomountTag)
         share.share = VZSingleDirectoryShare(directory: VZSharedDirectory(url: files.share, readOnly: false))
-        configuration.directorySharingDevices = [share]
+        // And the tools' folder, read-only: the boot script takes a newer copy of itself only from
+        // here (it runs as root in the guest), never from the share, which the guest can write.
+        try FileManager.default.createDirectory(at: files.tools, withIntermediateDirectories: true)
+        let tools = VZVirtioFileSystemDeviceConfiguration(tag: VMGuestSettings.toolsShareTag)
+        tools.share = VZSingleDirectoryShare(directory: VZSharedDirectory(url: files.tools, readOnly: true))
+        configuration.directorySharingDevices = [share, tools]
         return configuration
     }
 }

@@ -93,6 +93,13 @@ public struct VMGuestSettings: Equatable, Sendable {
     /// Lumen's desktop picture for the machine's screen, which the app draws and leaves in the
     /// shared folder; the boot script sets it when `LUMEN_WALLPAPER` is 1.
     public static let wallpaperFileName = "lumen-wallpaper.png"
+    /// The boot script's own file name, in the tools' folder (`VMLibrary.MachineFiles.tools`) and,
+    /// for a machine whose script is older than tools 7, in the shared folder.
+    public static let scriptFileName = "lumen-guest.sh"
+    /// The tag of the second folder a machine is given: the tools' (`VMLibrary.MachineFiles.tools`),
+    /// shared read-only, which the boot script mounts as root and takes a newer copy of itself
+    /// from. Not the automount tag: macOS does not put it in front of the person.
+    public static let toolsShareTag = "io.lumenbrowser.tools"
 
     /// The file's text.
     public var text: String { lines(withRevision: true).joined(separator: "\n") + "\n" }

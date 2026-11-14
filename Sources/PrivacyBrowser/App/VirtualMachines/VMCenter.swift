@@ -673,13 +673,18 @@ final class VMCenter: ObservableObject {
             // plain file (a link) goes, itself, before the settings are written.
             if !VMShareFile.isRegularFile(files.settings) { try? FileManager.default.removeItem(at: files.settings) }
             try Data(VMGuestSettings(profile: profile).text.utf8).write(to: files.settings, options: .atomic)
-            // The boot script as this Lumen has it: a machine whose own is older takes it (tools 2
-            // on), so that a later Lumen's settings need no visit to the base system.
-            if let script = Bundle.main.resourceURL?.appendingPathComponent("VMGuest/lumen-guest.sh"),
+            // The boot script as this Lumen has it: a machine whose own is older takes it, so that a
+            // later Lumen's settings need no visit to the base system. From the tools' folder, which
+            // the machine is given read-only (tools 7 on take it from there only); and, for a
+            // machine whose script is older than that, in the shared folder, where those look.
+            if let script = Bundle.main.resourceURL?.appendingPathComponent("VMGuest/" + VMGuestSettings.scriptFileName),
                FileManager.default.fileExists(atPath: script.path) {
-                let copy = files.share.appendingPathComponent("lumen-guest.sh")
-                try? FileManager.default.removeItem(at: copy)
-                try? FileManager.default.copyItem(at: script, to: copy)
+                try? FileManager.default.createDirectory(at: files.tools, withIntermediateDirectories: true)
+                for folder in [files.tools, files.share] {
+                    let copy = folder.appendingPathComponent(VMGuestSettings.scriptFileName)
+                    try? FileManager.default.removeItem(at: copy)
+                    try? FileManager.default.copyItem(at: script, to: copy)
+                }
             }
             if profile.lumenWallpaper {
                 // Lumen's desktop picture for this machine's screen, drawn once and left where the

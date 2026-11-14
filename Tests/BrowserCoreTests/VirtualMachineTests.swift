@@ -715,4 +715,24 @@ final class VMGuestToolsTests: XCTestCase {
         XCTAssertTrue(plist.contains("/usr/local/lumen/lumen-guest.sh"))
         XCTAssertTrue(try script("install.sh").contains("DEST=/usr/local/lumen\n"))
     }
+
+    /// The boot script runs as root in the guest and takes a newer copy of itself only from the
+    /// folder the Mac shares read-only for it — the same tag on both sides — and never from the
+    /// shared folder, which anything in the guest can write.
+    func testANewerScriptComesOnlyFromTheReadOnlyToolsFolder() throws {
+        let boot = try script("lumen-guest.sh")
+        XCTAssertTrue(boot.contains("TOOLS_TAG=\(VMGuestSettings.toolsShareTag)\n"))
+        XCTAssertTrue(boot.contains("newer=\"$tools/\(VMGuestSettings.scriptFileName)\""))
+        XCTAssertFalse(boot.contains("newer=\"$share/"), "a script is taken from the shared folder")
+        XCTAssertLessThanOrEqual(VMGuestSettings.toolsShareTag.utf8.count, 36, "virtio-fs tags are 36 bytes at most")
+        // What root keeps for itself is in a folder of root's, not one anyone may write.
+        XCTAssertTrue(boot.contains("WALLPAPERS=\"/Library/Application Support/Lumen\"\n"))
+        let configuration = try String(contentsOf: Self.folder.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/LumenVM/MachineConfiguration.swift"), encoding: .utf8)
+        XCTAssertTrue(configuration.contains("VZVirtioFileSystemDeviceConfiguration(tag: VMGuestSettings.toolsShareTag)"))
+        XCTAssertTrue(configuration.contains("VZSharedDirectory(url: files.tools, readOnly: true)"))
+        let files = VMLibrary.MachineFiles(directory: URL(fileURLWithPath: "/m", isDirectory: true))
+        XCTAssertEqual(files.tools.path, "/m/tools")
+        XCTAssertNotEqual(files.tools, files.share)
+    }
 }

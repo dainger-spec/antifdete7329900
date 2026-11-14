@@ -12,7 +12,8 @@ import Foundation
 ///     machine-id.bin          the base's own identifier (a profile's machine gets another)
 ///     share/                  the folder the guest sees during setup: the tools' installer, its status
 ///   machines/<profile id>/    one per profile: disk.img (a copy-on-write clone), aux.img,
-///                             hardware-model.bin, machine-id.bin, share/ (settings in, status out)
+///                             hardware-model.bin, machine-id.bin, share/ (settings in, status out),
+///                             tools/ (the boot script, shared read-only)
 ///   downloads/
 ///     restore.ipsw.partial    Apple's restore image while it is fetched; restore.ipsw when whole
 ///     restore.json            VMDownloadState: what is being fetched, and how to go on with it
@@ -61,6 +62,10 @@ public struct VMLibrary: Equatable, Sendable {
         public var share: URL { directory.appendingPathComponent("share", isDirectory: true) }
         public var settings: URL { share.appendingPathComponent(VMGuestSettings.fileName) }
         public var status: URL { share.appendingPathComponent(VMGuestSettings.statusFileName) }
+        /// The folder the machine is given read-only (`VMGuestSettings.toolsShareTag`): the boot
+        /// script a machine takes a newer copy of itself from. The guest cannot write it, as it
+        /// can the share — and what is taken from it runs as root in the guest.
+        public var tools: URL { directory.appendingPathComponent("tools", isDirectory: true) }
 
         /// Everything a machine needs to start is there.
         public var isComplete: Bool {
@@ -218,8 +223,13 @@ public enum VMSetupState: Equatable, Sendable {
 ///
 /// 6: the shared folder is told from a folder of its name left behind, and handed on to a newer
 /// copy of the script; what the system prints beside the wallpaper's answer is not the answer.
+///
+/// 7: a newer copy of the script is taken only from the tools' folder, which the Mac shares
+/// read-only (`VMGuestSettings.toolsShareTag`), not from the shared folder, which anything in
+/// the machine can write; the pictures are kept in a folder of root's; what the script writes into
+/// the shared folder is moved into place, and a picture there is read as the person.
 public enum VMGuestTools {
-    public static let version = 6
+    public static let version = 7
     /// From this version on an installed boot script takes a newer copy of itself at a machine's
     /// start: a base with tools this new needs nothing done to it for a later version's settings.
     public static let updatesItselfFrom = 2
