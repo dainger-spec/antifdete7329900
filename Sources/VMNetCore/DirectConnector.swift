@@ -584,9 +584,9 @@ public final class VMNetDirectConnector: @unchecked Sendable {
     /// wait); with the resolver's code when it has nothing.
     ///
     /// An address written out ("192.168.1.10") is read as it is written: the system's resolver is
-    /// asked for names only. (Asking it of an address literal does not by itself bring up macOS's
-    /// question about the local network — tried alone on a CI Mac, 14 November — but there is
-    /// nothing for it to answer that the address does not already say.)
+    /// asked for names only. (Asked of such a literal alone, on a CI Mac, it did not bring up
+    /// macOS's question about the local network — 14 November — but there is nothing for it to
+    /// answer that the address does not already say.)
     private static func addresses(of host: String, port: UInt16) -> (found: [Address], code: Int32) {
         var hints = addrinfo()
         hints.ai_family = AF_UNSPEC
@@ -654,6 +654,13 @@ public final class VMNetDirectConnector: @unchecked Sendable {
 
     /// The address as text, for the tests' answer about its route.
     /// Written by `inet_ntop` from its bytes: nothing of the system's resolver is asked.
+    ///
+    /// It was `getnameinfo` (`NI_NUMERICHOST`). With it, the test that has a local network's
+    /// address refused brought up macOS's question about the local network on CI's Macs — over
+    /// what a later step of the full pipeline took a picture of; with this and the literals read
+    /// as written, that test alone and every test of the package (878) did not (14 November).
+    /// `getnameinfo` was not tried alone: that it was the cause is the likely reading, not a
+    /// measured one.
     private static func text(of address: Address) -> String {
         var storage = address.storage
         var bytes = withUnsafeMutablePointer(to: &storage) { pointer in

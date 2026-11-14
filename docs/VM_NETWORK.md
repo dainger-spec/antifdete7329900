@@ -203,12 +203,16 @@ on a Mac that runs a VPN or a proxy tool they went nowhere.
   every interface with that source address is point-to-point, up and not loopback (a VPN's
   `utun`), and the source is not the destination (the Mac itself). Before any socket is opened
   the interfaces' own addresses and masks are read: an address that is this Mac's own, or of a
-  network the Mac is on by an interface that is not a tunnel's, is refused there. On a Mac, so
-  much as "connecting" a socket to such an address is a use of the local network, which macOS
-  asks the person about in a window of its own — the full pipeline, 14 November: a test that
-  connected to the runner's own address brought that window up over the disk image's window a
-  later step takes a picture of, and in front of Safari's Print sheet in the menu walk. The
-  tests make no such connection on a Mac. Never taken, whatever the
+  network the Mac is on by an interface that is not a tunnel's, is refused there: on a Mac a
+  connection there is a use of the local network, which macOS asks the person about in a window
+  of its own. Addresses written out are read as written (`AI_NUMERICHOST`), not asked of the
+  resolver, and written as text with `inet_ntop`. The full pipeline, 14 November: macOS's window
+  stood over the disk image's window a later step takes a picture of, and in front of Safari's
+  Print sheet in the menu walk. Found on CI's Macs by running the tests one group to a runner
+  (scratch branch): it came with the test of private addresses alone, which on a Mac opens no
+  socket but to loopback; with `getnameinfo` replaced by `inet_ntop` and the literals read as
+  written, neither that test nor all 878 of the package brought it up. The resolver asked of
+  such a literal alone did not either; `getnameinfo` alone was not tried. Never taken, whatever the
   routes: loopback, link-local, multicast, 0.0.0.0/8, the broadcast address — and a private
   address the guest wrote itself rather than a name (the network refuses those before the
   connector hears of them). What this lets through that the rule did not: a name that resolves
