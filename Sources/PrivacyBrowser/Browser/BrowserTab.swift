@@ -36,6 +36,9 @@ struct BrowserTabContext {
     let phonePlatform: String?
     /// The profile proxy's user name and password, answered to the proxy's own auth challenges.
     let proxyCredential: URLCredential?
+    /// The profile's pages get a drawn camera, or none ("No camera"), from its script
+    /// (`PrivacyScripts.cameraScript`): the engine is refused every camera request, unasked.
+    var refusesCamera = false
 }
 
 /// One tab: a `WKWebView` and its navigation, UI and download delegates.
@@ -589,9 +592,16 @@ extension BrowserTab: WKUIDelegate {
     }
 
     /// Camera / microphone: ask every time (WebKit forwards the request only after the page called getUserMedia).
+    /// While the profile's camera is the script's (drawn, or "No camera"), the script never asks the
+    /// engine for the camera: a camera request that reaches it came past the script, and is refused
+    /// without a question — never the Mac's real camera (docs/CAMERA.md).
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
                  initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
                  decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        if context.refusesCamera, type != .microphone {
+            decisionHandler(.deny)
+            return
+        }
         let what: String
         switch type {
         case .camera: what = L("media.camera")

@@ -66,6 +66,22 @@ same bar as the rest of the file:
 - the replaced methods (`getUserMedia`, `enumerateDevices`, the track's `getSettings` and the rest)
   print as native code (one registry per page), carry the right `name`/`length`, and keep the
   engine's receiver checks; a real track or a real `MediaDeviceInfo` falls through untouched;
+- **a request is the shim's, whatever it is made through.** The engine's receiver check takes a
+  `MediaDevices` of any frame, so a frame's `getUserMedia` called on another frame's
+  `navigator.mediaDevices` — the usual way a script takes an untouched function from a fresh
+  iframe — is a request the engine serves. Every frame's copy of the shim therefore substitutes
+  (or, "No camera", refuses) a request on any frame's `MediaDevices`, asked of an accessor of the
+  engine's taken before the page runs; only what is no `MediaDevices` at all gets the engine's
+  TypeError. The request's members are read once, as WebIDL reads them (`video: null` asks for the
+  camera), and the engine is only ever handed an object of the shim's, which asks for no camera:
+  a getter that answers differently on a second read, or a `video` a page put on
+  `Object.prototype`, reaches nothing. `enumerateDevices` filters the list whichever frame's
+  object or function it came through, follows the engine's promise with the engine's own `then`
+  and reads each entry's kind with the engine's own getter. Until the third audit (14 November
+  2026) another frame's `MediaDevices` went straight to the engine and got the Mac's real camera
+  in both "Substitute" and "No camera". In the app's own window (`BrowserTab`) the engine is told
+  no for every camera request while the drawing shim is on, whatever a page did; Safari's window
+  asks with Safari's own prompt;
 - `enumerateDevices` lists our one camera with the label only after the page is granted it (as a
   real browser hides labels until then), its `deviceId`/`groupId` salted per origin;
 - faint, moving sensor-like grain on every frame, so the picture is never frozen (the first thing a

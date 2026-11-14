@@ -11,13 +11,23 @@ import assert from 'node:assert/strict';
 const swift = readFileSync(new URL('../Sources/PrivacyBrowser/Browser/PrivacyScripts.swift', import.meta.url), 'utf8');
 const body = swift.split('static let shimBody = #"""')[1].split('"""#')[0];
 
+// What the engine knows of its own objects whatever their realm: a WebIDL receiver check accepts a
+// platform object of the right interface from any frame (WebKit: jsDynamicCast), not only one of the
+// function's own realm. Shared by every window made here, for the interfaces whose checks a test
+// calls across frames (RTCPeerConnection, MediaDevices).
+const engineObjects = new WeakSet();
+
 // A realm shaped like a WebKit window: navigator and screen values are accessors on the
 // prototypes that reject other receivers; window attributes are own accessors.
 function makeWindow(config, parentContext, prelude) {
   const context = vm.createContext({});
+  // Taken by the realm's code and the prelude, and gone before the shim installs.
+  Object.defineProperty(context, '__engineObjects', { value: engineObjects, configurable: true });
   vm.runInContext(`
     var window = globalThis;
     const illegal = (o, C) => { if (!(o instanceof C)) throw new TypeError('illegal invocation'); };
+    const engineObjects = globalThis.__engineObjects;
+    const branded = (o) => { if (!engineObjects.has(o)) throw new TypeError('illegal invocation'); };
     class Geolocation { getCurrentPosition() { illegal(this, Geolocation); throw new Error('native called'); } watchPosition() { illegal(this, Geolocation); } clearWatch() { illegal(this, Geolocation); } }
     // As WebKit shapes them: values behind prototype getters that reject other receivers.
     const slots = new WeakMap();
@@ -187,6 +197,7 @@ function makeWindow(config, parentContext, prelude) {
   context.top = parentContext ? parentContext.top : context;
   // What a test adds to the realm before the shim installs (the camera's devices, below).
   if (prelude) vm.runInContext(prelude, context);
+  vm.runInContext('delete globalThis.__engineObjects;', context);
   vm.runInContext(`(function install(CONFIG) {\n${body}\n})(${JSON.stringify(config)});`, context);
   return context;
 }
@@ -730,10 +741,16 @@ test('WebRTC unrestricted', () => {
 // that reject other receivers; before the page holds the camera permission one unnamed placeholder
 // per kind (Media Capture and Streams, "device information exposure"), after it every device with
 // its id and label. getUserMedia opens the device a deviceId pins, else the Mac's default camera;
-// with nothing asked it is a TypeError, as in the engine. Every call and stop is recorded.
+// with nothing asked it is a TypeError, as in the engine. Every call and stop is recorded. Its
+// receiver check takes a MediaDevices of any frame, as WebKit's does, and it reads a request as
+// WebIDL converts it: each member once, null or any object asking for the device. `canvas`: a
+// document whose canvas gives a stream, for the drawn camera (`patchCamera`).
 const cameraPrelude = ({ granted = false, micGranted = false, defaultCamera = 'real-cam', withVirtual = true, deny = false,
-                        virtualFails = false } = {}) => `(() => {
+                        virtualFails = false, canvas = false } = {}) => `(() => {
   const reject = (o, C) => { if (!(o instanceof C)) throw new TypeError('illegal invocation'); };
+  const engineObjects = globalThis.__engineObjects;
+  const branded = (o) => { if (!engineObjects.has(o)) throw new TypeError('illegal invocation'); };
+  const askedFor = (v) => v === null || (v !== undefined && (typeof v === 'object' || typeof v === 'function' || !!v));
   // The engine's DOMException (a bare vm realm has none).
   if (typeof globalThis.DOMException !== 'function') {
     globalThis.DOMException = class DOMException extends Error { constructor(message, name) { super(message); this.name = name || 'Error'; } };
@@ -771,8 +788,9 @@ const cameraPrelude = ({ granted = false, micGranted = false, defaultCamera = 'r
   }
   globalThis.MediaStream = MediaStream;
   class MediaDevices {
+    get ondevicechange() { branded(this); return null; }
     enumerateDevices() {
-      reject(this, MediaDevices);
+      branded(this);
       // Per kind: a kind the page holds no permission for is one unnamed placeholder.
       const out = [];
       for (const kind of ['videoinput', 'audioinput']) {
@@ -783,25 +801,35 @@ const cameraPrelude = ({ granted = false, micGranted = false, defaultCamera = 'r
       return Promise.resolve(out);
     }
     getUserMedia(constraints) {
-      reject(this, MediaDevices);
+      branded(this);
       camera.calls.push(constraints === undefined ? null : JSON.parse(JSON.stringify(constraints)));
-      if (!constraints || (!constraints.video && !constraints.audio)) return Promise.reject(new TypeError('At least one of audio and video must be requested'));
+      const audio = constraints === undefined || constraints === null ? undefined : constraints.audio;
+      const video = constraints === undefined || constraints === null ? undefined : constraints.video;
+      if (!askedFor(video) && !askedFor(audio)) return Promise.reject(new TypeError('At least one of audio and video must be requested'));
       if (${deny}) { const e = new Error('The request is not allowed'); e.name = 'NotAllowedError'; return Promise.reject(e); }
-      if (constraints.video) camera.granted = true; else camera.micGranted = true;
+      if (askedFor(video)) camera.granted = true; else camera.micGranted = true;
       const tracks = [];
-      if (constraints.video) {
-        const pin = constraints.video.deviceId;
+      if (askedFor(video)) {
+        const pin = video && video.deviceId;
         const id = typeof pin === 'string' ? pin : (pin && pin.exact) || '${defaultCamera}';
         if (${virtualFails} && id === 'lumen-cam') { const e = new Error('Could not start video source'); e.name = 'NotReadableError'; return Promise.reject(e); }
         camera.opened.push(id);
         tracks.push(new MediaStreamTrack('video', id));
       }
-      if (constraints.audio) tracks.push(new MediaStreamTrack('audio', 'mic'));
+      if (askedFor(audio)) tracks.push(new MediaStreamTrack('audio', 'mic'));
       return Promise.resolve(new MediaStream(tracks));
     }
   }
   globalThis.MediaDevices = MediaDevices;
   navigator.mediaDevices = Object.create(MediaDevices.prototype);
+  engineObjects.add(navigator.mediaDevices);
+  if (${canvas}) {
+    // What the drawn camera draws on: a canvas whose stream has one video track (its frames are not modelled).
+    globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => ({}),
+                                                    captureStream: () => new MediaStream([new MediaStreamTrack('video', 'drawn')]) }) };
+    globalThis.requestAnimationFrame = () => 1;
+    globalThis.cancelAnimationFrame = () => {};
+  }
 })();`;
 
 const systemCamera = (usedHere) => ({ ...base, systemCamera: { sentinel: 'Lumen Camera', usedHere, label: 'FaceTime HD Camera' } });
@@ -913,6 +941,63 @@ test('"No camera": none listed before the permission or after, a camera request 
   await assert.rejects(run(w, `navigator.mediaDevices.getUserMedia({ video: true, audio: true })`), (e) => e.name === 'NotFoundError');
   assert.deepEqual(cameraState(w).opened, []);   // no camera opened for it
   assert.deepEqual(await openedBy(w, { audio: true }), [['audio', 'mic', 'live']]);
+});
+
+// The drawn camera ("Substitute", delivered by the shim) and "No camera": no request reaches the
+// Mac's camera, whatever object it is made on, whichever frame's function makes it, and however its
+// members answer. The engine's receiver check takes a MediaDevices of any frame (WebIDL), so a frame's
+// function called on another frame's object (or the other way round) is a request the engine serves.
+const drawnCamera = { ...base, camera: { ...noCamera.camera, mode: 'substitute' } };
+const cameraCalls = [
+  // This frame's function, a frame's MediaDevices.
+  ['this function, a frame\'s object', `MediaDevices.prototype.getUserMedia.call(__frameDevices, { video: true })`],
+  // A frame's function — the "clean function from an iframe" — on this frame's own object.
+  ['a frame\'s function, this object', `__frameGetUserMedia.call(navigator.mediaDevices, { video: true })`],
+  // WebIDL: a member that is null asks for the device, as an object does.
+  ['video: null', `navigator.mediaDevices.getUserMedia({ video: null })`],
+];
+const cameraOpened = (...windows) => windows.flatMap((w) => cameraState(w).opened);
+
+test('drawn camera and "No camera": another frame\'s MediaDevices or getUserMedia never reaches the Mac\'s camera', async () => {
+  for (const [mode, config] of [['block', noCamera], ['substitute', drawnCamera]]) {
+    const top = makeWindow(config, null, cameraPrelude({ granted: true, canvas: true }));
+    const frame = makeWindow(config, top, cameraPrelude({ granted: true, canvas: true }));
+    top.__frameDevices = run(frame, 'navigator.mediaDevices');
+    top.__frameGetUserMedia = run(frame, 'MediaDevices.prototype.getUserMedia');
+    for (const [name, call] of cameraCalls) {
+      const outcome = await run(top, call).then((stream) => stream.getTracks().map((t) => t.deviceId).join(), (e) => e.name);
+      assert.equal(outcome, mode === 'block' ? 'NotFoundError' : 'drawn', `${mode}, ${name}`);
+      assert.deepEqual(cameraOpened(top, frame), [], `${mode}, ${name}: the Mac's camera was opened`);
+    }
+    // What is no MediaDevices at all still gets the engine's TypeError, and opens nothing.
+    await assert.rejects(async () => run(top, `MediaDevices.prototype.getUserMedia.call({}, { video: true })`), (e) => e.name === 'TypeError');
+    assert.deepEqual(cameraOpened(top, frame), [], `${mode}: no MediaDevices`);
+    // The list, asked of either object through either function, has no real camera in it: only the
+    // drawn one, or none.
+    top.__frameEnumerate = run(frame, 'MediaDevices.prototype.enumerateDevices');
+    for (const call of [`MediaDevices.prototype.enumerateDevices.call(__frameDevices)`, `__frameEnumerate.call(navigator.mediaDevices)`]) {
+      const cameras = await run(top, `${call}.then((l) => JSON.stringify(l.filter((d) => d.kind === 'videoinput').map((d) => d.deviceId)))`).then(JSON.parse);
+      assert.equal(cameras.length, mode === 'block' ? 0 : 1, `${mode}, ${call}: ${JSON.stringify(cameras)}`);
+      assert.ok(!cameras.includes('real-cam'), `${mode}, ${call}: ${JSON.stringify(cameras)}`);
+    }
+  }
+});
+
+test('drawn camera and "No camera": a request that answers the engine otherwise than the shim never reaches the Mac\'s camera', async () => {
+  for (const [mode, config] of [['block', noCamera], ['substitute', drawnCamera]]) {
+    const w = makeWindow(config, null, cameraPrelude({ granted: true, canvas: true }));
+    // No video the first time it is read, a video after: the engine is never handed the page's object.
+    await assert.rejects(run(w, `(() => { let n = 0; return navigator.mediaDevices.getUserMedia({ get video() { return n++ > 0; } }); })()`),
+                         (e) => e.name === 'TypeError', mode);
+    assert.deepEqual(cameraOpened(w), [], `${mode}: a getter that changes its answer`);
+    // The microphone's request ("real" audio) is the shim's own object: what a page puts on
+    // Object.prototype is no member of it.
+    run(w, `var reads = 0; Object.defineProperty(Object.prototype, 'video', { get() { return reads++ > 0; }, configurable: true });`);
+    const audioOnly = await run(w, `navigator.mediaDevices.getUserMedia({ audio: true }).then((s) => s.getTracks().map((t) => t.kind).join(), (e) => e.name)`);
+    run(w, `delete Object.prototype.video;`);
+    assert.equal(audioOnly, 'audio', mode);
+    assert.deepEqual(cameraOpened(w), [], `${mode}: a video member on Object.prototype`);
+  }
 });
 
 test('system camera installed, not this profile\'s: the virtual device is hidden, the Mac\'s camera stays as it is', async () => {

@@ -177,16 +177,24 @@ enum PrivacyScripts {
         return .init(sentinel: CameraSubstitution.systemDeviceName, usedHere: camera.usesSystemCamera, label: label)
     }
 
+    /// Whether the drawing camera shim has the pages' camera — drawing it, or refusing it ("No
+    /// camera", or a substitution through a system camera that is not on): when `cameraScript` gives
+    /// one. Its pages then never need the engine's camera (`BrowserTabContext.refusesCamera`).
+    static func scriptHasCamera(for configuration: ProfileConfiguration, systemCameraActive: Bool = false) -> Bool {
+        let camera = configuration.cameraSubstitution
+        guard camera.isActive else { return false }
+        return camera.mode == .block || camera.delivery != .systemCamera || !systemCameraActive
+    }
+
     /// What the drawing camera shim is given; nil for a profile that substitutes nothing, or whose
     /// substitution the system camera delivers (`systemCameraScript`). "No camera" blocks whatever
     /// the delivery was last set to (the editor keeps it while hiding the picker). A substitution
     /// through the system camera while it is not on falls back to "No camera" too: the page then
     /// gets no camera, never the Mac's real one.
     static func cameraScript(for configuration: ProfileConfiguration, systemCameraActive: Bool = false) -> ShimConfiguration.Camera? {
+        guard scriptHasCamera(for: configuration, systemCameraActive: systemCameraActive) else { return nil }
         let camera = configuration.cameraSubstitution
-        guard camera.isActive else { return nil }
         let blocks = camera.mode == .block || (camera.delivery == .systemCamera && !systemCameraActive)
-        if !blocks && camera.delivery == .systemCamera { return nil }
         return .init(mode: blocks ? "block" : "substitute",
                      source: camera.source.rawValue,
                      width: camera.width, height: camera.height, frameRate: camera.frameRate,
@@ -1862,7 +1870,11 @@ function patchCamera(w, cam) {
   async function audioTrack(request, nativeGUM) {
     if (cam.audio === 'off') return null;
     if (cam.audio === 'real' && typeof nativeGUM === 'function') {
-      try { const s = await ReflectApply(nativeGUM, md, [{ audio: request }]); return s.getAudioTracks()[0] || null; } catch (e) { return null; }
+      // A request without a prototype: the engine reads its `video` as missing, whatever a page
+      // put on Object.prototype.
+      const only = ObjectCreate(null);
+      only.audio = request;
+      try { const s = await ReflectApply(nativeGUM, md, [only]); return s.getAudioTracks()[0] || null; } catch (e) { return null; }
     }
     return silentAudioTrack();
   }
@@ -1872,27 +1884,49 @@ function patchCamera(w, cam) {
     const nativeGUM = MDP.getUserMedia;
     const nativeEnum = MDP.enumerateDevices;
     const nativeDisplay = MDP.getDisplayMedia;
+    // Whether the engine takes `self` for a MediaDevices: its receiver check is not tied to a realm,
+    // so another frame's MediaDevices (or this one's handed to another frame's function) is one as
+    // much as this realm's own. Asked of an accessor of the engine's that does nothing else,
+    // captured before the page runs; nothing the page can replace (`w.MediaDevices`, instanceof) is
+    // asked. Without that accessor, anything is taken for one: the substitution, never the camera.
+    const devicechange = ObjectGetOwnPropertyDescriptor(MDP, 'ondevicechange');
+    const brandCheck = devicechange && typeof devicechange.get === 'function' ? devicechange.get : null;
+    const isMediaDevices = function (self) {
+      if (!brandCheck) return true;
+      try { ReflectApply(brandCheck, self, []); return true; } catch (e) { return false; }
+    };
+    // A member of a request as the engine reads it (WebIDL `boolean or MediaTrackConstraints`, false
+    // when missing): null or any object asks for the device, anything else by its truth.
+    const asked = function (value) {
+      return value === null || (value !== undefined && (typeof value === 'object' || typeof value === 'function' || !!value));
+    };
 
     if (typeof nativeGUM === 'function') {
       define(MDP, 'getUserMedia', method('getUserMedia', 1, function (constraints) {
         const self = this;
-        if (w.MediaDevices && !(self instanceof w.MediaDevices)) return ReflectApply(nativeGUM, self, arguments);
-        const wantVideo = constraints && constraints.video;
-        const wantAudio = constraints && constraints.audio;
-        if (!wantVideo && !wantAudio) return ReflectApply(nativeGUM, self, arguments); // the engine's own TypeError
+        // The engine is never handed the page's own request (a getter could answer it otherwise
+        // than it answered here) nor a receiver it would take: what reaches it asks for no device,
+        // so all that can come back is its own TypeError.
+        if (!isMediaDevices(self)) return ReflectApply(nativeGUM, self, [ObjectCreate(null)]);
+        const isRequest = constraints !== null && (typeof constraints === 'object' || typeof constraints === 'function');
+        if (!isRequest) return ReflectApply(nativeGUM, self, arguments); // undefined, null or not a dictionary
+        // Each member read once, in the engine's (lexicographic) order.
+        const wantAudio = constraints.audio;
+        const wantVideo = constraints.video;
+        if (!asked(wantVideo) && !asked(wantAudio)) return ReflectApply(nativeGUM, self, [ObjectCreate(null)]);
         return new w.Promise(function (resolve, reject) {
           (async function () {
             try {
               const tracks = [];
-              if (wantVideo) {
+              if (asked(wantVideo)) {
                 if (mode === 'block') { reject(notFound()); return; }
                 tracks.push(makeVideoTrack(resolveVideo(wantVideo)));
                 videoGranted = true;
               }
-              if (wantAudio) {
+              if (asked(wantAudio)) {
                 const a = await audioTrack(wantAudio, nativeGUM);
                 if (a) tracks.push(a);
-                else if (!wantVideo) { reject(notFound()); return; }
+                else if (!asked(wantVideo)) { reject(notFound()); return; }
               }
               resolve(new w.MediaStream(tracks));
             } catch (e) { reject(e); }
@@ -1906,15 +1940,24 @@ function patchCamera(w, cam) {
         const self = this;
         let real;
         try { real = ReflectApply(nativeEnum, self, []); } catch (e) { return w.Promise.reject(e); }
-        return real.then(function (list) { return buildDeviceList(list); },
-                         function () { return buildDeviceList([]); });
+        // Whatever realm `self` is of, the list is filtered here; its promise is followed with the
+        // engine's own `then`, so a page's Promise.prototype.then never sees the list as it came.
+        return call(PromiseThen, real, function (list) { return buildDeviceList(list); },
+                    function () { return buildDeviceList([]); });
       }));
     }
 
     if (cam.screenShare && mode === 'substitute' && typeof nativeDisplay === 'function') {
       define(MDP, 'getDisplayMedia', method('getDisplayMedia', 0, function (constraints) {
         const self = this;
-        if (w.MediaDevices && !(self instanceof w.MediaDevices)) return ReflectApply(nativeDisplay, self, arguments);
+        // Any MediaDevices gets the substitution, as for getUserMedia; what is no MediaDevices gets
+        // the engine's TypeError from a request for nothing.
+        if (!isMediaDevices(self)) {
+          const none = ObjectCreate(null);
+          none.audio = false;
+          none.video = false;
+          return ReflectApply(nativeDisplay, self, [none]);
+        }
         return new w.Promise(function (resolve, reject) {
           try {
             const res = resolveVideo(constraints && constraints.video);
@@ -1926,9 +1969,22 @@ function patchCamera(w, cam) {
     }
   }
 
+  // The engine's own `kind` getter, taken before `serveDeviceGetters` replaces it and before the
+  // page could: a real camera's entry is never handed to anything the page put in its place.
+  const nativeKind = (function () {
+    const proto = w.MediaDeviceInfo && w.MediaDeviceInfo.prototype;
+    const d = proto && ObjectGetOwnPropertyDescriptor(proto, 'kind');
+    return d && typeof d.get === 'function' ? d.get : null;
+  })();
   function buildDeviceList(list) {
     const out = [];
-    for (let i = 0; i < list.length; i++) { const d = list[i]; if (d && d.kind === 'videoinput') continue; out.push(d); }
+    for (let i = 0; i < list.length; i++) {
+      const d = list[i];
+      let kind;
+      try { kind = nativeKind ? call(nativeKind, d) : d.kind; } catch (e) { continue; } // unreadable: left out
+      if (kind === 'videoinput') continue;
+      out.push(d);
+    }
     if (mode === 'substitute') { const fake = makeFakeCamera(); if (fake) out.unshift(fake); }
     return out;
   }
