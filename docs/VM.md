@@ -282,7 +282,12 @@ one base system, and this is what that means:
 - **What was in the base when a machine was made is in the machine.** The account, its password,
   the system's settings — and whatever Safari in the base held. A site opened in the base leaves
   its cookies in every machine made after. The base is set up without a network for that reason
-  too, and both the base's window and the list say not to browse in it.
+  too, and both the base's window and the list say not to browse in it. The account's password
+  is kept in the machine for automatic sign-in (macOS's own `/etc/kcpassword`, which is
+  obfuscated, not encrypted) and is in every machine: the setup's steps, the base's window and
+  the installer ask for a password made up for the machine, not the Mac's or one used anywhere
+  else. The installer gives it to `sudo` on standard input; `sysadminctl`, which reads it from no
+  input, gets it as an argument for the moment it runs.
 - **The same Mac, as far as a page can tell.** The same macOS and Safari, the same fonts, the same
   virtual GPU — as two Macs of one model and one macOS are the same to a page. What differs is
   what the profile sets: the screen, the time zone and language, the appearance and accent, and
