@@ -93,6 +93,35 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(again.loadHistory(of: id).map(\.title), ["A"])
     }
 
+    /// Audit 3, #40: a session's history keeps what the Mac keeps of a profile's by default — 90 days,
+    /// at most 10 000 visits — instead of growing for ever.
+    func testHistoryKeepsTheMacsNinetyDaysAndTenThousandVisits() {
+        let now = Date()
+        let old = HistoryEntry(url: "https://old.example/", title: "old", visitedAt: now.addingTimeInterval(-91 * 86_400))
+        let recent = HistoryEntry(url: "https://new.example/", title: "new", visitedAt: now.addingTimeInterval(-89 * 86_400))
+        XCTAssertEqual(HistoryRetention.kept([old, recent], now: now).map(\.title), ["new"])
+        let many = (0..<(HistoryRetention.maximumEntries + 5)).map { HistoryEntry(url: "https://e.example/\($0)", title: "\($0)", visitedAt: now) }
+        let kept = HistoryRetention.kept(many, now: now)
+        XCTAssertEqual(kept.count, HistoryRetention.maximumEntries)
+        XCTAssertEqual(kept.first?.title, "5", "the oldest go first")
+    }
+
+    /// Audit 3, #40: history is written off the caller's thread, in order — the version read is the last
+    /// one saved — and a write still on its way never puts a deleted session's folder back.
+    func testHistoryIsWrittenInOrderAndNeverAfterItsSessionWent() {
+        let store = LumenStore(root: root)
+        let id = UUID()
+        for count in 1...50 {
+            store.saveHistory((1...count).map { HistoryEntry(url: "https://e.example/\($0)", title: "\($0)") }, of: id)
+        }
+        XCTAssertEqual(LumenStore(root: root).loadHistory(of: id).count, 50, "the last version saved is the one read")
+        store.saveHistory([HistoryEntry(url: "https://late.example/", title: "late")], of: id)
+        store.removeSessionFiles(id)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.sessionFolder(id).path))
+        XCTAssertEqual(store.loadHistory(of: id), [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.sessionFolder(id).path), "nothing came back after it")
+    }
+
     func testSettingsSurviveARelaunch() {
         let catalog = SessionCatalog(store: LumenStore(root: root))
         let s = catalog.create(name: "A")

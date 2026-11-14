@@ -118,6 +118,12 @@ struct HistoryView: View {
                     .accessibilityIdentifier("historyRow")
                     .glassRow()
                 }
+                // As the Mac keeps a profile's by default (HistoryRetention).
+                if !runtime.history.isEmpty {
+                    Text(L("Хранятся посещения за последние %@ дней.", "\(HistoryRetention.days)"))
+                        .font(.system(size: 13)).foregroundStyle(Theme.tertiary)
+                        .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                }
             }
             .eclipseSheet()
             .navigationTitle(L("История"))

@@ -51,6 +51,7 @@
 "Новая вкладка" = "New Tab";
 "Закрыть вкладку" = "Close Tab";
 "История пуста" = "No history";
+"Хранятся посещения за последние %@ дней." = "Visits from the last %@ days are kept.";
 "История" = "History";
 "Очистить" = "Clear";
 "Как у устройства" = "Same as the device";

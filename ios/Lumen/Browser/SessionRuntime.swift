@@ -64,15 +64,19 @@ final class SessionRuntime: ObservableObject {
         // The session's own store; the planted fault puts every session on WebKit's default one.
         dataStore = Faults.isActive(.sharedStore) ? .default() : WKWebsiteDataStore(forIdentifier: session.storeID)
         relay = Relay(label: session.id.uuidString)
-        history = store.loadHistory(of: session.id)
+        // What is kept of it (HistoryRetention: the Mac's 90 days, at most 10 000 visits).
+        let saved = store.loadHistory(of: session.id)
+        let kept = HistoryRetention.kept(saved)
+        history = kept
+        if kept.count != saved.count { store.saveHistory(kept, of: session.id) }
         // Until the relay listens, a proxy nothing answers on, without fallback: nothing leaves.
         dataStore.proxyConfigurations = Relay.configurations(port: nil, password: relay.password)
         applyProxy()
         applyPageSettings()
-        let saved = store.loadTabs(of: session.id)
-        tabs = saved.tabs.map { makeTab($0, configuration: nil) }
+        let savedTabs = store.loadTabs(of: session.id)
+        tabs = savedTabs.tabs.map { makeTab($0, configuration: nil) }
         if tabs.isEmpty { tabs = [makeTab(TabRecord(), configuration: nil)] }
-        selectedID = saved.selected.flatMap { id in tabs.contains { $0.id == id } ? id : nil } ?? tabs.last?.id
+        selectedID = savedTabs.selected.flatMap { id in tabs.contains { $0.id == id } ? id : nil } ?? tabs.last?.id
         relay.onPort = { [weak self] port in
             guard let runtime = self else { return }
             Task { @MainActor in runtime.relayListens(on: port) }
@@ -253,6 +257,7 @@ final class SessionRuntime: ObservableObject {
 
     // MARK: History
 
+    /// Kept for `HistoryRetention`'s time and count; written off the main thread (`LumenStore.saveHistory`).
     func recordVisit(url: URL, title: String) {
         guard !Faults.isActive(.historyNotRecorded), let scheme = url.scheme, scheme == "http" || scheme == "https" else { return }
         if let last = history.last, last.url == url.absoluteString {
@@ -260,6 +265,7 @@ final class SessionRuntime: ObservableObject {
             history[history.count - 1].title = title.isEmpty ? last.title : title
         } else {
             history.append(HistoryEntry(url: url.absoluteString, title: title))
+            history = HistoryRetention.kept(history)
         }
         store.saveHistory(history, of: sessionID)
     }
