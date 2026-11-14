@@ -1,17 +1,32 @@
 name: diag — who brings up the local network question
-# A diagnosis, on a scratch branch only: which step of the pipeline's start makes macOS ask the
-# runner's person "Allow … to find devices on local networks?" (the full pipeline, 14 November).
-# The windows on screen are listed after each step and each VMNetCore test; a change names it.
+# A diagnosis, on a scratch branch only: which test makes macOS ask the runner's person "Allow … to
+# find devices on local networks?" (the full pipeline, 14 November). The first run of this found
+# the window after the eighth of DirectConnectorTests; here each suspect runs alone on a runner of
+# its own, and the windows are listed fifteen seconds after it.
 on:
   push:
     branches: ['claude/zen-bohr-2xzxfp']
 jobs:
   diag:
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: nowhere
+            args: "--filter DirectConnectorTests/testADestinationThatIsNotThereIsRefusedAtOnce"
+          - name: private
+            args: "--filter DirectConnectorTests/testAPrivateAddressIsTakenOnlyWhereItGoesIntoATunnel"
+          - name: proxy-gone
+            args: "--filter DirectConnectorTests/testAProxyThatRefusesOrIsNotThereIsSaidSo"
+          - name: first-others
+            args: "--filter DirectConnectorTests/(testAConnectionIsCarried|testAFailureSays|testAGuestWithoutAProxy|testALocalAddressIsToldApart|testANameIsResolved)"
+          - name: all-but-the-first-eight
+            args: "--skip DirectConnectorTests/(testAConnectionIsCarried|testADestinationThatIsNotThere|testAFailureSays|testAGuestWithoutAProxy|testALocalAddressIsToldApart|testANameIsResolved|testAPrivateAddressIsTaken|testAProxyThatRefuses)"
     steps:
       - uses: actions/checkout@v4
-      - name: The windows at the start
+      - name: The tests built, and the windows before
         run: |
           mkdir -p shots
           cat > /tmp/windows.swift <<'SWIFT'
@@ -21,53 +36,26 @@ jobs:
           for window in list {
               let owner = window[kCGWindowOwnerName as String] as? String ?? "?"
               let layer = window[kCGWindowLayer as String] as? Int ?? 0
-              let bounds = window[kCGWindowBounds as String] as? [String: Any] ?? [:]
-              print("WINDOW \(owner) | layer \(layer) | \(bounds["Width"] ?? 0)x\(bounds["Height"] ?? 0)")
+              if layer > 2_000_000_000 { continue }
+              print("WINDOW \(owner) | layer \(layer)")
           }
           SWIFT
           swiftc -O /tmp/windows.swift -o /tmp/windows
-          echo "== at the start"; /tmp/windows | sort | uniq -c
-          screencapture -x shots/0-start.png
-      - name: The tests built
+          swift build --build-tests 2>&1 | tail -1
+          sleep 10
+          echo "== before"; /tmp/windows | sort | uniq -c
+          /tmp/windows | grep -c UserNotificationCenter || true
+      - name: The suspect, alone
         run: |
-          swift build --build-tests 2>&1 | tail -2
-          echo "== after the build"; /tmp/windows | sort | uniq -c
-          screencapture -x shots/1-built.png
-      - name: Each VMNetCore test, and the windows after it
-        run: |
-          swift test list --skip-build 2>/dev/null | grep '^VMNetCoreTests\.' > /tmp/tests.txt || true
-          wc -l < /tmp/tests.txt
-          before="$(/tmp/windows | sort | uniq -c)"
-          n=0
-          while read -r name; do
-            swift test --skip-build --filter "^${name}\$" >/dev/null 2>&1 || echo "FAILED $name"
-            now="$(/tmp/windows | sort | uniq -c)"
-            if [ "$now" != "$before" ]; then
-              n=$((n + 1))
-              echo "CHANGED AFTER $name"
-              diff <(echo "$before") <(echo "$now") || true
-              screencapture -x "shots/2-after-$n.png"
-              before="$now"
-            fi
-          done < /tmp/tests.txt
-          echo "== after the VMNetCore tests"; /tmp/windows | sort | uniq -c
-      - name: The machines' tests of the core
-        run: |
-          swift test --skip-build --filter 'VMGuestScriptTests|VMProfileTests|VMGuestToolsTests|VMLibraryTests|VMDownloadTests' >/dev/null 2>&1 || echo "a test failed"
-          echo "== after the machines' core tests"; /tmp/windows | sort | uniq -c
-          screencapture -x shots/3-vm-core.png
-      - name: Every test
-        run: |
-          swift test --skip-build >/dev/null 2>&1 || echo "a test failed"
-          echo "== after every test"; /tmp/windows | sort | uniq -c
-          screencapture -x shots/4-all-tests.png
-      - name: The build with the machines' helper
-        run: |
-          VM=check SANDBOX=0 scripts/build-app.sh >/dev/null 2>&1; echo "build status $?"
-          echo "== after the build with VM=check"; /tmp/windows | sort | uniq -c
-          screencapture -x shots/5-vm-check.png
+          date -u +%T
+          swift test --skip-build ${{ matrix.args }} 2>&1 | grep -E "Executed [0-9]+ tests|error:" | tail -3 || true
+          date -u +%T
+          sleep 15
+          echo "== after ${{ matrix.name }}"; /tmp/windows | sort | uniq -c
+          if /tmp/windows | grep -q UserNotificationCenter; then echo "VERDICT ${{ matrix.name }}: THE QUESTION IS ON SCREEN"; else echo "VERDICT ${{ matrix.name }}: no question"; fi
+          screencapture -x "shots/${{ matrix.name }}.png"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: diag-shots
+          name: diag-${{ matrix.name }}
           path: shots
