@@ -123,9 +123,13 @@ Record ── AppModel.startRecording(on:) ── the profile started with a win
   `data-cy`; `name`, `aria-label`, `placeholder`, `title` with the tag; for a link or button, its
   text (`text=…`) when exactly one element has it; else the path from the nearest ancestor that
   can be named, by position among siblings of its kind.
-- **A password is never recorded.** The page's side sends no text for a password's field, the
+- **A password is never recorded.** The page's side sends no text for a secret's field, the
   profile's process drops any that came, and the line is
-  `await page.type(selector, params.password || '');` with a comment that says so.
+  `await page.type(selector, params.password || '');` with a comment that says so. A secret's
+  field is a password field — or one that was while the person was in it (a "show password"
+  button makes it a text field) — and any field whose `autocomplete` is `current-password`,
+  `new-password`, `one-time-code` (the numeric code fields too) or a card's (`cc-…`); a card's
+  month or year chosen in a list is noted without the value.
 - **Typing over text.** A field that held text when the person came to it gets
   `click; press('Meta+a'); type` — the typing replaces what was there, as it did.
 - **Enter in a form's field** is `page.press('Enter')`; the click the browser makes on the form's

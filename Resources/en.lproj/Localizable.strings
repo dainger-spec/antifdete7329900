@@ -2078,7 +2078,7 @@
 "help.scenarios.record" = "Recording a scenario";
 "help.scenarios.record.text" = "A scenario need not be written by hand. Choose a profile and press Record, then do in the profile's window what is to be repeated. Each page opened, click and typing appears as a line; Stop Recording adds them to the scenario's end, where they can be changed. In a new scenario that still holds the example, what was recorded takes its place.";
 "help.scenarios.record.selectors" = "Elements are found by what lasts: an id, a name, data-testid, a label, a button's text — and only when there is none of these, by their place on the page.";
-"help.scenarios.record.password" = "What is typed into a password's field is not recorded: the line has params.password. Write the password in its place, or pass it as a parameter when the run is started through the API.";
+"help.scenarios.record.password" = "What is typed into a password's field — or a one-time code's, or a card's — is not recorded: the line has params.password. Write the password in its place, or pass it as a parameter when the run is started through the API.";
 "help.scenarios.record.limits" = "What is recorded is what is done on the page itself. A choice in a drop-down list goes into the scenario as a comment; dragging, file uploads and embedded frames are not recorded.";
 "help.scenarios.schedule" = "Schedule";
 "help.scenarios.schedule.text" = "Schedule is at the bottom left of the Scenarios window, and On a Schedule…, beside Run, schedules the scenario that is open. A scenario or a profile's warm-up can start every day at a set time or every few hours, with a random shift, so that runs do not fall on the same minute.";

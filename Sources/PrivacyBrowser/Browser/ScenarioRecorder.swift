@@ -102,7 +102,8 @@ final class ScenarioRecorder: NSObject, WKScriptMessageHandlerWithReply {
         }
         replyHandler(nil, nil)
         guard isRecording, shown, let kind = RecordedStep.Kind(rawValue: type), kind != .goto, kind != .load else { return }
-        // A password's text never leaves the page's process, whatever the page's side sent.
+        // A secret's text (a password, a one-time code, a card's) never leaves the page's process,
+        // whatever the page's side sent.
         let secret = body["secret"] as? Bool == true
         onEvent?(.acted(RecordedStep(kind, selector: body["selector"] as? String, value: secret ? nil : body["value"] as? String,
                                      secret: secret ? true : nil, replaces: body["replaces"] as? Bool == true ? true : nil)))
