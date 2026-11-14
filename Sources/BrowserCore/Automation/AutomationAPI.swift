@@ -182,6 +182,21 @@ public enum AutomationHTTP {
         return .request(Request(method: String(requestLine[0]).uppercased(), path: path, query: query,
                                 headers: headers, body: Data(body), headerLines: headerLines))
     }
+
+    /// The answer to a connection the listener has no room for, from the first bytes it sent (the
+    /// request line is in them): nothing was done, send it again. Under `/wd/` the WebDriver
+    /// protocol's own error — "unknown error", whose status is 500 (the protocol has no "busy", and
+    /// Selenium's Python client takes a status above 500 for a success) — else the API's `503 busy`.
+    public static func busy(firstBytes: Data) -> Response {
+        let message = "Too many requests are arriving at once; this one was not acted on. Send it again in a moment."
+        let line = String(decoding: firstBytes.prefix(while: { $0 != 0x0D && $0 != 0x0A }), as: UTF8.self)
+        let parts = line.split(separator: " ")
+        if parts.count >= 2, WebDriverRoute.handles(String(parts[1])) {
+            let error = WebDriverError("unknown error", 500, message)
+            return Response(status: error.status, contentType: "application/json; charset=utf-8", body: error.body)
+        }
+        return .error(503, "busy", message)
+    }
 }
 
 /// Whether the API is on, where it listens and the token it asks for. This Mac's, kept in the

@@ -111,6 +111,25 @@ final class AutomationAPITests: XCTestCase {
         XCTAssertEqual(try refusal(["Host": "attacker.example:50777"]), 403)
     }
 
+    /// A connection past the listener's room is answered, in the protocol its request line names.
+    func testABusyAnswerSpeaksTheProtocolOfTheRequest() throws {
+        let webDriver = AutomationHTTP.busy(firstBytes: raw("POST", "/wd/abc/Shop/session", headers: ["Host": "127.0.0.1:50777"], body: "{}"))
+        XCTAssertEqual(webDriver.status, 500, "the protocol's \"unknown error\": every client raises it")
+        let value = try XCTUnwrap((try JSONSerialization.jsonObject(with: webDriver.body) as? [String: Any])?["value"] as? [String: Any])
+        XCTAssertEqual(value["error"] as? String, "unknown error")
+        XCTAssertTrue((value["message"] as? String)?.contains("not acted on") == true)
+
+        for first in [raw("GET", "/v1/profiles", headers: ["Host": "127.0.0.1:50777"]), Data("POST /v1/profiles/a/st".utf8), Data("\r\n".utf8)] {
+            let api = AutomationHTTP.busy(firstBytes: first)
+            XCTAssertEqual(api.status, 503)
+            let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: api.body) as? [String: Any])
+            XCTAssertEqual(body["error"] as? String, "busy")
+            XCTAssertTrue(String(decoding: api.serialized(), as: UTF8.self).hasPrefix("HTTP/1.1 503 Service Unavailable\r\n"))
+        }
+        // Only the start of a WebDriver request has come: the path is enough.
+        XCTAssertEqual(AutomationHTTP.busy(firstBytes: Data("GET /wd/abc/Shop/session/1/url HT".utf8)).status, 500)
+    }
+
     func testNoAnswerCarriesACORSHeaderOrIsCached() {
         let wire = String(decoding: AutomationHTTP.Response.error(401, "unauthorized", "no").serialized(), as: UTF8.self)
         XCTAssertTrue(wire.hasPrefix("HTTP/1.1 401 Unauthorized\r\n"))

@@ -21,6 +21,11 @@ allowed to accept connections. It listens only while the vault is unlocked.
 | What answers hold | A profile's proxy is shown as `socks5://host:port` or `http://host:port`, never with its username or password. Cookies — a session's secret — only from the cookie endpoint, when asked for by name. |
 
 One request per connection (`Connection: close`); bodies up to 8 MB, with a `Content-Length`.
+Requests are answered side by side, as many as come: one waiting for a launch or a page's load
+holds no other up. What is limited is connections whose request is still arriving — 32 at once
+(each must send its whole request within 15 s); one past that is answered `503 busy` (under
+`/wd/`, the WebDriver protocol's `unknown error`, status 500), is not acted on, and can be sent
+again.
 
 ## Requests
 

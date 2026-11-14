@@ -17,8 +17,11 @@ final class AutomationServer {
     }
 
     private static let log = Logger(subsystem: "PrivacyBrowser", category: "Automation")
-    /// Connections at once; more are closed at once.
-    static let maximumConnections = 8
+    /// Connections whose request is still arriving, at once (`waiting`). A request that has
+    /// arrived is not counted while it is answered, however long that takes — a launch, a page's
+    /// load, a find's implicit wait — so any number of profiles can be driven side by side. One past
+    /// this is answered "busy" (`turnAway`), never acted on and never closed unanswered.
+    static let maximumWaitingConnections = 32
     /// A connection that has not sent its whole request by then is closed.
     static let requestTimeout: TimeInterval = 15
 
@@ -31,6 +34,10 @@ final class AutomationServer {
     private let handler: AutomationHandler
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: NWConnection] = [:]
+    /// Of `connections`, those whose request has not all arrived (`maximumWaitingConnections`).
+    private var waiting: Set<ObjectIdentifier> = []
+    /// Of `connections`, those being answered "busy" (`turnAway`): as many again at most.
+    private var turnedAway: Set<ObjectIdentifier> = []
 
     static var isAvailable: Bool { !AppEnvironment.isSandboxed }
 
@@ -97,6 +104,8 @@ final class AutomationServer {
         listener = nil
         for connection in connections.values { connection.cancel() }
         connections = [:]
+        waiting = []
+        turnedAway = []
         state = .stopped
     }
 
@@ -124,20 +133,14 @@ final class AutomationServer {
     }
 
     private func accept(_ connection: NWConnection) {
-        guard connections.count < Self.maximumConnections else {
-            connection.cancel()
+        guard waiting.count < Self.maximumWaitingConnections else {
+            turnAway(connection)
             return
         }
         let id = ObjectIdentifier(connection)
         connections[id] = connection
-        connection.stateUpdateHandler = { [weak self] update in
-            switch update {
-            case .failed, .cancelled:
-                MainActor.assumeIsolated { _ = self?.connections.removeValue(forKey: id) }
-            default:
-                break
-            }
-        }
+        waiting.insert(id)
+        forgetOnClose(connection)
         connection.start(queue: .main)
         receive(on: connection, buffer: Data())
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.requestTimeout) { [weak self] in
@@ -150,6 +153,51 @@ final class AutomationServer {
 
     /// Connections whose request is being acted on (a launch can take longer than the timeout).
     private var answering: Set<ObjectIdentifier> = []
+
+    private func forgetOnClose(_ connection: NWConnection) {
+        let id = ObjectIdentifier(connection)
+        connection.stateUpdateHandler = { [weak self] update in
+            switch update {
+            case .failed, .cancelled:
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.connections.removeValue(forKey: id)
+                    self.waiting.remove(id)
+                    self.turnedAway.remove(id)
+                }
+            default:
+                break
+            }
+        }
+    }
+
+    /// A connection past `maximumWaitingConnections`: its first bytes are read only to answer in
+    /// the protocol they name that nothing was done (`AutomationHTTP.busy`: 503, or the WebDriver
+    /// protocol's error), and it is closed. Past as many of these again, closed at once.
+    private func turnAway(_ connection: NWConnection) {
+        guard turnedAway.count < Self.maximumWaitingConnections else {
+            connection.cancel()
+            return
+        }
+        let id = ObjectIdentifier(connection)
+        connections[id] = connection
+        turnedAway.insert(id)
+        forgetOnClose(connection)
+        connection.start(queue: .main)
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self] data, _, _, _ in
+            MainActor.assumeIsolated {
+                guard let self, self.connections[id] != nil, let data, !data.isEmpty else {
+                    connection.cancel()
+                    return
+                }
+                Self.log.notice("Automation API answered a connection busy: too many requests arriving at once")
+                self.send(AutomationHTTP.busy(firstBytes: data), on: connection)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.requestTimeout) { [weak self] in
+            MainActor.assumeIsolated { self?.connections[id]?.cancel() }
+        }
+    }
 
     private func receive(on connection: NWConnection, buffer: Data) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
@@ -165,8 +213,12 @@ final class AutomationServer {
                         self.receive(on: connection, buffer: buffer)
                     }
                 case .invalid(let response):
+                    self.waiting.remove(ObjectIdentifier(connection))
                     self.send(response, on: connection)
                 case .request(let request):
+                    // Arrived: however long its answer takes, it no longer counts against the
+                    // connections still sending theirs.
+                    self.waiting.remove(ObjectIdentifier(connection))
                     self.answer(request, on: connection)
                 }
             }

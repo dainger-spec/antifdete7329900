@@ -238,6 +238,11 @@ a client (Selenium) ── http://127.0.0.1:<port>/wd/<profile's token>/<profile
   profile's address. 127.0.0.1 only.
 - **A session is a launch.** One session a profile at a time; ending it closes its window, and
   stops the profile when the session started it (a profile that was running stays).
+- **Many profiles at once:** one script per profile, side by side, as many as the plan's
+  profiles. A command being answered — a launch, a page's load, a find's implicit wait — holds
+  no other up; only connections still sending their request are limited (32 at once), and one
+  past that is answered with the protocol's `unknown error` ("Too many requests are arriving at
+  once"), not acted on, and can be sent again (docs/AUTOMATION_API.md).
 - **What a page can tell.** Nothing new: `navigator.webdriver` stays false, and clicks and keys
   are the driver's own (docs/PAGE_INPUT.md). `clear`, choosing an `<option>` and text put in
   where the layout has no key set values from the driver's world, as AutoFill does.
