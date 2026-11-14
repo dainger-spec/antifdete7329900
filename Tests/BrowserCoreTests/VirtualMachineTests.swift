@@ -320,6 +320,35 @@ final class VMGuestSettingsTests: XCTestCase {
         XCTAssertTrue(VMGuestStatus(text: "LUMEN_KEYBOARD_STATE=next\n").keyboardFromNextStart)
         XCTAssertFalse(VMGuestStatus(text: "LUMEN_KEYBOARD_STATE=set\n").keyboardFromNextStart)
     }
+
+    /// A layout or browser mode's menu bar written at a start waits for the next one — which a
+    /// machine with instant wake, woken rather than started, never has until it is shut down.
+    func testWhatWaitsForTheNextStartIsSaidAndIsOfTheMacOSThatWroteIt() {
+        let keyboard = VMGuestStatus(text: "LUMEN_TOOLS_VERSION=12\nLUMEN_KEYBOARD_STATE=next\n")
+        let menuBar = VMGuestStatus(text: "LUMEN_TOOLS_VERSION=12\nLUMEN_KEYBOARD_STATE=set\nLUMEN_MENU_BAR_STATE=next\n")
+        XCTAssertTrue(keyboard.waitsForTheNextStart)
+        XCTAssertFalse(keyboard.menuBarFromNextStart)
+        XCTAssertTrue(menuBar.menuBarFromNextStart)
+        XCTAssertTrue(menuBar.waitsForTheNextStart)
+        XCTAssertFalse(VMGuestStatus(text: "LUMEN_TOOLS_VERSION=12\nLUMEN_KEYBOARD_STATE=set\n").waitsForTheNextStart)
+        XCTAssertFalse(VMGuestStatus(text: "LUMEN_TOOLS_VERSION=11\n").waitsForTheNextStart)
+
+        // Woken (no start of a new macOS): what the file says is the running macOS's own, however old.
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        XCTAssertEqual(keyboard.asOf(start: nil, written: start.addingTimeInterval(-86_400)), keyboard)
+        XCTAssertEqual(menuBar.asOf(start: nil, written: nil), menuBar)
+        // Written since the machine's macOS started anew: its own.
+        XCTAssertTrue(keyboard.asOf(start: start, written: start.addingTimeInterval(60)).waitsForTheNextStart)
+        XCTAssertTrue(menuBar.asOf(start: start, written: start).waitsForTheNextStart)
+        // Written before it, or when is not known: that start was the next one, and what waited for
+        // it is in use — the rest of what the file says stays.
+        let before = keyboard.asOf(start: start, written: start.addingTimeInterval(-1))
+        XCTAssertFalse(before.waitsForTheNextStart)
+        XCTAssertNil(before.keyboardState)
+        XCTAssertEqual(before.toolsVersion, 12)
+        XCTAssertFalse(menuBar.asOf(start: start, written: nil).waitsForTheNextStart)
+        XCTAssertNil(menuBar.asOf(start: start, written: nil).menuBarState)
+    }
 }
 
 final class VMLibraryTests: XCTestCase {
@@ -739,8 +768,9 @@ final class VMGuestToolsTests: XCTestCase {
             }
             XCTAssertTrue(text.contains("TOOLS_VERSION=\(VMGuestTools.version)\n"), "\(name) is not the tools' version the app expects")
             if name == "lumen-guest.sh" {
-                // What came of Lumen's desktop picture, and what the system said when nothing did.
-                for key in ["LUMEN_WALLPAPER_STATE", "LUMEN_WALLPAPER_NOTE"] {
+                // What came of Lumen's desktop picture, and what the system said when nothing did;
+                // and what waits for the machine's next start.
+                for key in ["LUMEN_WALLPAPER_STATE", "LUMEN_WALLPAPER_NOTE", "LUMEN_KEYBOARD_STATE", "LUMEN_MENU_BAR_STATE"] {
                     XCTAssertTrue(text.contains("'\(key)="), "\(name) does not write \(key)")
                 }
             }

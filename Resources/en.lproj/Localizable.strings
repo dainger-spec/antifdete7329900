@@ -2800,6 +2800,9 @@
 "vm.window.sleeping" = "saving…";
 "vm.window.opening" = "Opening…";
 "vm.window.guestFullScreen" = "Full Screen in the Machine";
+"vm.window.nextStartQuestion" = "Shut down this machine this time?";
+"vm.window.nextStartDetail" = "A keyboard layout or a menu bar setting was written in its macOS, which takes it only when it starts — and a machine put to sleep is woken, not started. Shut down, it has it from its next start; what is open in it is closed.";
+"vm.window.keep" = "Keep as It Is";
 "vm.startAnew.title" = "Start “%@” anew?";
 "vm.startAnew.confirm" = "Start Anew";
 "vm.startAnew.message" = "The machine sleeps with everything in it open. Starting it anew gives that up: its macOS starts as after a Mac lost power, and what was not saved in it is lost. Its disk — files, sign-ins, history — stays.";
@@ -2820,7 +2823,7 @@
 "vm.row.startAnew" = "Start Anew…";
 "vm.editor.instantWake" = "Instant wake";
 "vm.editor.instantWake.detail" = "Closing the machine keeps it as it is — every page and app open — and opening it brings it back in seconds instead of starting its macOS. A machine like this has no sound.";
-"vm.editor.instantWake.note" = "While it sleeps, the machine takes about as much disk as it has memory: up to %d GB. It starts anew — the usual way — when its settings change, and after the first switch-on of this setting.";
+"vm.editor.instantWake.note" = "While it sleeps, the machine takes about as much disk as it has memory: up to %d GB. It starts anew — the usual way — when its settings change, and after the first switch-on of this setting. A new keyboard layout, or browser mode's menu bar, takes only at a start: after either changes, the machine's next Close shuts it down once.";
 "vm.editor.browserMode" = "Browser mode";
 "vm.editor.browserMode.detail" = "The machine is shown as a browser: Safari over its whole screen, the menu bar and the Dock out of sight, and its desktop covered while it starts. With instant wake it opens as a browser window in seconds.";
 "vm.editor.sound.asleep" = "A machine with instant wake has no sound: macOS cannot save a machine that has it.";
@@ -2991,12 +2994,14 @@
 "vm.editor.keyboard.spanish" = "Spanish";
 "vm.editor.keyboard.russian" = "Russian (with a Latin one)";
 "vm.editor.keyboard.abc" = "ABC (plain Latin)";
-"vm.editor.keyboard.note" = "The base system's layouts are the ones chosen when it was set up, the same in every machine. “By the machine's language” gives a machine its country's: U.S. for English in the United States, and so on; a language Lumen has no layout for gets the plain Latin one, or keeps the base's. macOS takes a new layout at sign-in, so it is in use from the machine's next start.";
+"vm.editor.keyboard.note" = "The base system's layouts are the ones chosen when it was set up, the same in every machine. “By the machine's language” gives a machine its country's: U.S. for English in the United States, and so on; a language Lumen has no layout for gets the plain Latin one, or keeps the base's. macOS takes a new layout at sign-in, so it is in use from the machine's next start. A machine with instant wake is woken rather than started: its next Close shuts it down once, for the layout to take.";
 "vm.row.differs" = "In this machine's macOS, not what was set: %@. Restart the machine; if it stays, install Lumen Tools in the base system again.";
 "vm.row.differs.timeZone" = "the time zone is %1$@ (set: %2$@)";
 "vm.row.differs.language" = "the language is %1$@ (set: %2$@)";
 "vm.row.differs.locale" = "the region's formats are %1$@ (set: %2$@)";
 "vm.row.keyboard.next" = "The keyboard layout is written; macOS takes it from the machine's next start.";
+"vm.row.keyboard.next.wake" = "The keyboard layout is written, but macOS takes it only when it starts, and this machine is woken rather than started. So it is shut down this once — Shut Down here, or closing its window — and the layout is in use from its next start.";
+"vm.row.menuBar.next.wake" = "Browser mode's menu bar setting is written, but macOS takes it only when it starts, and this machine is woken rather than started. So it is shut down this once — Shut Down here, or closing its window — and the setting is in use from its next start.";
 "vm.editor.scrollBars" = "Scroll bars";
 "vm.editor.scrollBars.whenScrolling" = "While scrolling";
 "vm.editor.scrollBars.always" = "Always";

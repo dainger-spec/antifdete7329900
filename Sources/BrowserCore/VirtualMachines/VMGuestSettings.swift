@@ -234,11 +234,32 @@ public struct VMGuestStatus: Equatable, Sendable {
     /// What came of the keyboard's layouts (tools 10): "set" — in place since an earlier start —
     /// or "next": written at this start, which macOS takes at the next sign-in.
     public var keyboardState: String?
+    /// What came of browser mode's menu bar (tools 12): "next" — hidden, or given back, at this
+    /// start, which macOS takes at the next sign-in. Nil: nothing of it was changed.
+    public var menuBarState: String?
 
     /// The guest could not put Lumen's picture on its desktop.
     public var wallpaperFailed: Bool { wallpaperState == "failed" }
     /// The keyboard's layouts were written at this start and are in use from the next one.
     public var keyboardFromNextStart: Bool { keyboardState == "next" }
+    /// The menu bar's setting was written at this start and is in use from the next one.
+    public var menuBarFromNextStart: Bool { menuBarState == "next" }
+    /// Something was written at this start that macOS takes only at the next one. A machine put
+    /// to sleep (instant wake) is woken, not started: it has it only once its macOS starts again.
+    public var waitsForTheNextStart: Bool { keyboardFromNextStart || menuBarFromNextStart }
+
+    /// The status as it stands for the macOS that started at `start` — nil: the machine was woken
+    /// from a saved state, and its macOS is the one that wrote the file (or no start is known). A
+    /// file `written` before that start is of a macOS that has since shut down: what it wrote for
+    /// "the next start" is in use now, and is left out until the script says again.
+    public func asOf(start: Date?, written: Date?) -> VMGuestStatus {
+        guard let start else { return self }
+        if let written, written >= start { return self }
+        var status = self
+        status.keyboardState = nil
+        status.menuBarState = nil
+        return status
+    }
 
     /// One thing the guest's system has that is not what its settings asked for.
     public struct Difference: Equatable, Sendable {
@@ -291,6 +312,7 @@ public struct VMGuestStatus: Equatable, Sendable {
         languageNow = values["LUMEN_LANGUAGE_NOW"]
         localeNow = values["LUMEN_LOCALE_NOW"]
         keyboardState = values["LUMEN_KEYBOARD_STATE"]
+        menuBarState = values["LUMEN_MENU_BAR_STATE"]
         setupDone = values["LUMEN_SETUP_DONE"] == "1"
     }
 }

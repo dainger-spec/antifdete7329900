@@ -65,6 +65,8 @@ final class VMCenter: ObservableObject {
         var viaSystemProxy = false
         /// It was woken from a saved state at this start: it is as it was closed.
         var woke = false
+        /// Its macOS is being shut down (`shutDown`), not put to sleep.
+        var shuttingDown = false
     }
 
     @Published private(set) var list: VMProfiles
@@ -89,6 +91,9 @@ final class VMCenter: ObservableObject {
     @Published private(set) var asleep: Set<UUID> = []
     /// Why a machine with instant wake was started anew at its last start instead of woken.
     @Published private(set) var wakeNotes: [UUID: VMWakeRefusal] = [:]
+    /// When each machine's macOS last started anew rather than woken (since unlock): what its
+    /// status file said before that is of a macOS that has since shut down (`VMGuestStatus.asOf`).
+    private var startedAnew: [UUID: Date] = [:]
     /// Where a running machine's macOS connects, while its network panel is open — the person's
     /// browsing: shown, never kept or logged.
     @Published private(set) var hosts: [UUID: [VMHelperEvent.Host]] = [:]
@@ -826,6 +831,15 @@ final class VMCenter: ObservableObject {
             if running[id]?.phase == .starting { running[id]?.phase = .running }
             running[id]?.woke = event.woke == true
             wakeNotes[id] = event.notWoken.flatMap(VMWakeRefusal.init(rawValue:))
+            // Started anew, its macOS has what the one before wrote for "the next start"; woken,
+            // it is the macOS that wrote it.
+            if event.woke == true {
+                startedAnew[id] = nil
+            } else {
+                let now = Date()
+                startedAnew[id] = now
+                guests[id] = guests[id]?.asOf(start: now, written: nil)
+            }
             // Woken or started anew, the saved state is used up.
             asleep.remove(id)
             // What the guest says of itself — its system, its tools, whether Lumen's picture is on
@@ -867,6 +881,7 @@ final class VMCenter: ObservableObject {
     func shutDown(_ id: UUID) {
         guard let state = running[id], state.phase != .checkingProxy else { return stop(id) }
         running[id]?.phase = .stopping
+        running[id]?.shuttingDown = true
         helpers[id]?.send(.shutdown)
     }
 
@@ -973,9 +988,14 @@ final class VMCenter: ObservableObject {
     private func readGuestStatus(of id: UUID) {
         let url = library.machine(for: id).status
         Task { [weak self] in
-            let read = await Task.detached(priority: .utility) { VMGuestStatus.read(from: url) }.value
+            // And when it was written — read first, so that a file put in place meanwhile is taken
+            // as older, not newer: one from before the machine's macOS last started anew.
+            let (read, written) = await Task.detached(priority: .utility) { () -> (Result<VMGuestStatus, VMShareFile.Refusal>, Date?) in
+                let written = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+                return (VMGuestStatus.read(from: url), written)
+            }.value
             guard let self, let status = self.accepted(read) else { return }
-            self.guests[id] = status
+            self.guests[id] = status.asOf(start: self.startedAnew[id], written: written)
         }
     }
 
@@ -1036,7 +1056,8 @@ final class VMCenter: ObservableObject {
         ["stop": L("vm.window.stop"), "stopQuestion": L("vm.window.stopQuestion"), "stopDetail": L("vm.window.stopDetail"),
          "stopNow": L("vm.window.stopNow"), "cancel": L("common.cancel"), "stopping": L("vm.window.stopping"),
          "sleep": L("vm.window.sleep"), "sleeping": L("vm.window.sleeping"), "opening": L("vm.window.opening"),
-         "guestFullScreen": L("vm.window.guestFullScreen")]
+         "guestFullScreen": L("vm.window.guestFullScreen"), "nextStartQuestion": L("vm.window.nextStartQuestion"),
+         "nextStartDetail": L("vm.window.nextStartDetail"), "keep": L("vm.window.keep")]
             .merging(VMNetworkTrouble.allCases.map { ("trouble." + $0.rawValue, L("vm.window.trouble")) }) { first, _ in first }
     }
 }

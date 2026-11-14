@@ -22,7 +22,7 @@
 # link left in its place is replaced, not followed. What it keeps for itself is in a folder of
 # root's (/Library/Application Support/Lumen), not in /Users/Shared.
 
-TOOLS_VERSION=11
+TOOLS_VERSION=12
 SHARE="/Volumes/My Shared Files"
 OWN_MOUNT=/var/run/lumen-share
 TAG=com.apple.virtio-fs.automount
@@ -289,6 +289,7 @@ write_status() {
     [ -z "$wallpaper_state" ] || printf 'LUMEN_WALLPAPER_STATE=%s\n' "$wallpaper_state"
     [ -z "$wallpaper_note" ] || printf 'LUMEN_WALLPAPER_NOTE=%s\n' "$wallpaper_note"
     [ -z "$keyboard_state" ] || printf 'LUMEN_KEYBOARD_STATE=%s\n' "$keyboard_state"
+    [ -z "$menu_bar_state" ] || printf 'LUMEN_MENU_BAR_STATE=%s\n' "$menu_bar_state"
     # What the system has now, read back from it: Lumen compares it with what it asked for.
     zone_now="$(/usr/bin/readlink /etc/localtime 2>/dev/null)"
     zone_now="${zone_now#/var/db/timezone/zoneinfo/}"
@@ -394,10 +395,12 @@ set_wallpaper() {
 }
 
 # The keyboard's layouts, the first the one in use: macOS keeps them per person and takes them at
-# sign-in, so what is written here — after it — is in use from the machine's next start. Written
-# once per choice (the choice is noted beside the person's settings): layouts the person adds in
-# the machine afterwards stay until the profile's choice changes.
+# sign-in, so what is written here — after it — is in use from the machine's next start, which
+# the status says (a machine with instant wake is woken, not started: Lumen shuts it down once for
+# it). Written once per choice (the choice is noted beside the person's settings): layouts the
+# person adds in the machine afterwards stay until the profile's choice changes.
 keyboard_state=""
+menu_bar_state=""
 set_keyboard() {
   [ -n "$keyboard" ] || return 0
   if [ "$(as_user /usr/bin/defaults read io.lumenbrowser.guest keyboard 2>/dev/null)" = "$keyboard" ]; then
@@ -493,19 +496,22 @@ apply_for_user() {
   # only when something of it was changed — it takes its settings as it starts.
   # A machine shown as a browser: the menu bar and the Dock stay out of sight, whatever is in
   # front (Safari full screen hides both by itself; this is for the moments it is not). The menu
-  # bar takes it at the next sign-in. Noted beside the person's settings, so that a machine no
-  # longer shown so gets its menu bar back, and its Dock unless the profile hides it.
+  # bar takes it at the next sign-in, which the status says (a machine with instant wake is woken,
+  # not started: Lumen shuts it down once for it). Noted beside the person's settings, so that a
+  # machine no longer shown so gets its menu bar back, and its Dock unless the profile hides it.
   browser_was="$(as_user /usr/bin/defaults read io.lumenbrowser.guest browser 2>/dev/null)"
   if [ "$browser_mode" = 1 ]; then
     dock_autohide=1
     if [ "$browser_was" != 1 ]; then
       as_user /usr/bin/defaults write -g _HIHideMenuBar -bool true
       as_user /usr/bin/defaults write io.lumenbrowser.guest browser -string 1 2>/dev/null
+      menu_bar_state=next
     fi
   elif [ "$browser_was" = 1 ]; then
     as_user /usr/bin/defaults delete -g _HIHideMenuBar 2>/dev/null
     as_user /usr/bin/defaults delete io.lumenbrowser.guest browser 2>/dev/null
     [ -n "$dock_autohide" ] || dock_autohide=0
+    menu_bar_state=next
   fi
   dock_changed=0
   if [ -n "$dock_position" ] && [ "$(as_user /usr/bin/defaults read com.apple.dock orientation 2>/dev/null)" != "$dock_position" ]; then
