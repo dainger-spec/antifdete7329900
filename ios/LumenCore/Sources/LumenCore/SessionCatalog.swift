@@ -101,12 +101,12 @@ public final class SessionCatalog {
 
     /// The Mac's profiles as the sync read them (step 3 of ios/SYNC_PLAN.md): each one a session here,
     /// found again by its id in the vault — made the first time, its name, description and tags the
-    /// Mac's after that. A profile with a proxy gets it (`proxyID` gives the entry for it) and is bound
-    /// to proxies at once; one whose proxy the iPhone cannot use comes with none, and bound: locked
-    /// until a proxy is chosen (decision 6). The iPhone's own sessions are not touched; a profile the
-    /// Mac no longer has stays here. Returns the sessions made.
+    /// Mac's after that. A profile with a proxy gets it (`proxyID` gives the entry for it, asked with
+    /// the session as it is) and is bound to proxies at once; one whose proxy the iPhone cannot use
+    /// comes with none, and bound: locked until a proxy is chosen (decision 6). The iPhone's own
+    /// sessions are not touched; a profile the Mac no longer has stays here. Returns the sessions made.
     @discardableResult
-    public func applySynced(_ profiles: [SyncedProfile], proxyID: (SyncedProfile.Proxy) -> UUID) -> [Session] {
+    public func applySynced(_ profiles: [SyncedProfile], proxyID: (SyncedProfile.Proxy, Session) -> UUID) -> [Session] {
         var made: [Session] = []
         for profile in profiles {
             var session: Session
@@ -124,7 +124,7 @@ public final class SessionCatalog {
             session.tags = Self.normalizedTags(profile.tags)
             session.syncedState = SyncedState(name: session.name, notes: session.notes, tags: session.tags)
             if let proxy = profile.proxy, !Faults.isActive(.syncedProxyNotBound) {
-                session.proxyID = proxyID(proxy)
+                session.proxyID = proxyID(proxy, session)
                 session.boundToProxy = true
             } else if profile.proxyUnusable {
                 session.proxyID = nil
