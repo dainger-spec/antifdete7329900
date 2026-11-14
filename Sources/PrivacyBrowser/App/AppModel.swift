@@ -263,9 +263,12 @@ final class AppModel: ObservableObject {
     /// §10.1: a new master password that is the account's password (typed in this session) or the
     /// license's key (typed in this session, or kept in the vault) — the refusal's text; nil when it
     /// is neither. Compared in memory only; nothing is derived from either, nothing is tried with them.
+    /// And one too short or too weak (`MasterPasswordStrength`, APP-06), which the screens already
+    /// keep from being sent: held here too, for a new password only — unlocking takes any.
     func refusalOfMasterPassword(_ password: String) -> String? {
         if license.isAccountPassword(password) { return L("contract.master_password.same_as_account") }
         if license.isLicenseKey(password) { return L("contract.master_password.same_as_key") }
+        if !MasterPasswordStrength.isAcceptable(password) { return L("setup.refusal.weak") }
         return nil
     }
 

@@ -1237,6 +1237,8 @@
 "setup.strength.4" = "strong";
 "setup.req.length" = "At least 10 characters";
 "setup.req.match" = "Passwords match";
+"setup.req.strength" = "Strength at least “fair”";
+"setup.refusal.weak" = "This password is too weak to be the master password: make it at least 10 characters and at least “fair” — longer, or with upper case, lower case and digits or symbols.";
 "setup.req.met" = "met";
 "setup.req.notMet" = "not met";
 "setup.warning" = "It cannot be recovered: if the password is forgotten, the profiles' data cannot be opened.";
