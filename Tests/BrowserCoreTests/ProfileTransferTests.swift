@@ -241,4 +241,64 @@ final class ProfileTransferTests: XCTestCase {
         try ProfileTransfer.export(warmed, from: source, to: file, password: "third pw", kdf: fastKDF)
         XCTAssertTrue(try ProfileTransfer.manifest(of: file, password: "third pw").hasWebsiteData)
     }
+
+    /// A file is often handed to someone else: it does not carry the name of the Mac each saved
+    /// login was changed on (the computer's name, often its owner's), when the logins were last
+    /// used, nor where a profile without a proxy last came out — this Mac's own address, country
+    /// and time zone. A proxy's location stays, without its exit IP. A file made before this still
+    /// holds them: they are dropped as it is imported (audit 3, #4).
+    func testAFileCarriesNothingOfTheMacThatMadeIt() throws {
+        let previousName = PasswordVault.deviceName
+        PasswordVault.deviceName = "Ivan's MacBook Air"
+        defer { PasswordVault.deviceName = previousName }
+
+        var direct = ProfileConfiguration()
+        direct.lastProxyLocation = ProxyLocation(timeZoneIdentifier: "Europe/Moscow", countryCode: "RU",
+                                                 proxyEndpoint: ProxyLocation.directEndpoint, exitIP: "198.51.100.7")
+        let id = try source.create(name: "Direct", configuration: direct).id
+        let vault = try source.passwordVault(for: id)
+        try vault.upsert(PasswordEntry(origin: "https://shop.example", username: "me", password: "one"))
+        try vault.upsert(PasswordEntry(origin: "https://shop.example", username: "me", password: "two"))
+        let login = try XCTUnwrap(vault.allEntries().first)
+        try vault.markUsed(id: login.id)
+        XCTAssertEqual(vault.allEntries().first?.device, "Ivan's MacBook Air")
+        XCTAssertEqual(vault.allEntries().first?.ancestors?.isEmpty, false)
+
+        let file = root.appendingPathComponent("handed-over.\(ProfileTransfer.fileExtension)")
+        let manifest = try ProfileTransfer.export(id, from: source, to: file, password: "pw", kdf: fastKDF)
+        XCTAssertNil(manifest.configuration.lastProxyLocation, "a direct connection's location is this Mac's")
+        XCTAssertNil(try ProfileTransfer.manifest(of: file, password: "pw").configuration.lastProxyLocation)
+        let imported = try ProfileTransfer.importProfile(from: file, password: "pw", into: target)
+        let entries = try target.passwordVault(for: imported.id).allEntries()
+        XCTAssertEqual(entries.map(\.password), ["two"])
+        XCTAssertEqual(entries.first?.version, login.version, "the login is the same version")
+        XCTAssertNil(entries.first?.device)
+        XCTAssertNil(entries.first?.lastUsedAt)
+        XCTAssertEqual(entries.first?.ancestors, [])
+        XCTAssertNil(try target.loadConfiguration(imported.id, key: target.profileKey(for: imported.id)).lastProxyLocation)
+
+        // A proxied profile: its proxy's location goes, without the exit IP.
+        var proxied = ProfileConfiguration(proxy: ProxySettings(kind: .socks5, host: "203.0.113.5", port: 1080))
+        let proxy = try XCTUnwrap(proxied.proxy)
+        proxied.lastProxyLocation = ProxyLocation(timeZoneIdentifier: "Europe/Berlin", countryCode: "DE",
+                                                  proxyEndpoint: ProxyLocation.endpoint(of: proxy), exitIP: "203.0.113.9")
+        let proxiedID = try source.create(name: "Proxied", configuration: proxied).id
+        let proxiedFile = root.appendingPathComponent("proxied.\(ProfileTransfer.fileExtension)")
+        let carried = try ProfileTransfer.export(proxiedID, from: source, to: proxiedFile, password: "pw", kdf: fastKDF)
+        XCTAssertEqual(carried.configuration.lastProxyLocation?.countryCode, "DE")
+        XCTAssertNil(carried.configuration.lastProxyLocation?.exitIP)
+
+        // A file an earlier version wrote, with all of it in: the import drops it.
+        let earlier = root.appendingPathComponent("earlier.\(ProfileTransfer.fileExtension)")
+        try ProfileTransfer.export(id, key: source.profileKey(for: id), name: "Direct", createdAt: Date(), from: source,
+                                   to: earlier, password: "pw", kdf: fastKDF, keepingThisMac: true)
+        let old = try ProfileTransfer.manifest(of: earlier, password: "pw")
+        XCTAssertEqual(old.configuration.lastProxyLocation?.exitIP, "198.51.100.7")
+        let fromEarlier = try ProfileTransfer.importProfile(from: earlier, password: "pw", into: target, name: "Earlier")
+        let earlierEntries = try target.passwordVault(for: fromEarlier.id).allEntries()
+        XCTAssertEqual(earlierEntries.map(\.password), ["two"])
+        XCTAssertNil(earlierEntries.first?.device)
+        XCTAssertNil(earlierEntries.first?.lastUsedAt)
+        XCTAssertNil(try target.loadConfiguration(fromEarlier.id, key: target.profileKey(for: fromEarlier.id)).lastProxyLocation)
+    }
 }

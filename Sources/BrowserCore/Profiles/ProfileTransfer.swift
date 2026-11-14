@@ -14,7 +14,10 @@ import Foundation
 /// IndexedDB, caches — what makes a warmed-up profile worth carrying) and Safari's own state of
 /// it (`safarihome.pbsa`, for a profile whose window is Safari's chrome). Not what belongs to this
 /// Mac: the synced-cookie record and its baseline (sync rebuilds them), cookies queued for the
-/// next launch (they are applied first, when the profile next runs here), the exit IP last seen.
+/// next launch (they are applied first, when the profile next runs here), the exit IP last seen —
+/// and where a profile without a proxy last came out at all, which is this Mac's own connection —
+/// nor this Mac's name and history on the saved logins (`withoutThisMac`). A file is often handed
+/// to someone else; what would tell them who made it stays here.
 ///
 /// FILE FORMAT (integers big-endian):
 /// ```
@@ -126,13 +129,21 @@ public enum ProfileTransfer {
 
     /// The export of the profile `id` whose folder is in `repository`, with its key, name and date
     /// given rather than read from the index: also for a deleted profile's kept folder (R3).
+    /// `keepingThisMac`: the file goes nowhere but back into this vault (`bringBack`), and keeps what
+    /// an export for someone else leaves out (`withoutThisMac`).
     @discardableResult
     static func export(_ id: UUID, key: SymmetricKey, name: String, createdAt: Date, from repository: ProfileRepository,
-                       to destination: URL, password: String, kdf: KDFParameters, now: Date = Date()) throws -> Manifest {
+                       to destination: URL, password: String, kdf: KDFParameters, now: Date = Date(),
+                       keepingThisMac: Bool = false) throws -> Manifest {
         guard !password.isEmpty else { throw CoreError.invalidConfiguration("an export needs a password") }
-        let configuration = try repository.loadConfiguration(id, key: key)
+        var configuration = try repository.loadConfiguration(id, key: key)
+        var passwords = try PasswordVault(fileURL: repository.passwordsURL(for: id), profileID: id, profileKey: key).allEntries()
+        if !keepingThisMac {
+            withoutThisMac(&configuration)
+            passwords = withoutThisMac(passwords)
+        }
         let documents = Documents(
-            passwords: try PasswordVault(fileURL: repository.passwordsURL(for: id), profileID: id, profileKey: key).allEntries(),
+            passwords: passwords,
             history: try HistoryStore.file(url: repository.historyURL(for: id), profileID: id, profileKey: key).load(),
             bookmarks: try BookmarkStore.file(url: repository.bookmarksURL(for: id), profileID: id, profileKey: key).load(),
             warmUpPlan: try repository.warmUpPlanFile(for: id, key: key).load())
@@ -172,6 +183,31 @@ public enum ProfileTransfer {
         return manifest
     }
 
+    /// Settings as a file for someone else holds them: without the exit IP last seen, and without
+    /// where a profile with no proxy last came out at all — this Mac's own connection, its country
+    /// and time zone (the exporter's real place). A proxy's own location, without its IP, stays:
+    /// it is the proxy's, and the profile's first launch uses it until it looks again.
+    static func withoutThisMac(_ configuration: inout ProfileConfiguration) {
+        configuration.lastProxyLocation?.exitIP = nil
+        if configuration.lastProxyLocation?.proxyEndpoint == ProxyLocation.directEndpoint {
+            configuration.lastProxyLocation = nil
+        }
+    }
+
+    /// Saved logins as a file for someone else holds them: without the name of the Mac each
+    /// version was made on (`PasswordEntry.device`, the computer's name — often its owner's), when
+    /// each was last filled in, and the versions each was made from. What a login is, and the
+    /// versions kept after a conflict, stay.
+    static func withoutThisMac(_ entries: [PasswordEntry]) -> [PasswordEntry] {
+        entries.map { entry in
+            var plain = entry
+            plain.device = nil
+            plain.lastUsedAt = nil
+            if plain.ancestors != nil { plain.ancestors = [] }
+            return plain
+        }
+    }
+
     // MARK: Reading
 
     /// The file's manifest, with its password. Throws `CoreError.authenticationFailed` for a
@@ -195,7 +231,7 @@ public enum ProfileTransfer {
     public static func importProfile(from url: URL, password: String, into repository: ProfileRepository,
                                      name: String? = nil) throws -> ProfileSummary {
         try importProfile(from: url, password: password, into: repository, name: name, createdAt: Date(),
-                          adjusting: { LeftOut.leaveOut(&$0) })
+                          adjusting: { LeftOut.leaveOut(&$0) }, keepingTheirMac: false)
     }
 
     /// Of a file's settings, those an import leaves out (the security audit of 12 November 2026,
@@ -235,18 +271,25 @@ public enum ProfileTransfer {
     }
 
     /// `importProfile`, the profile made at `createdAt`, its settings adjusted by `adjust` before
-    /// they are written (a deleted profile brought back: `bringBack`).
+    /// they are written (a deleted profile brought back: `bringBack`). `keepingTheirMac`: the file
+    /// is this vault's own (`bringBack`); any other file loses what an export no longer carries of
+    /// the Mac that made it (`withoutThisMac`), which files made before that still hold.
     static func importProfile(from url: URL, password: String, into repository: ProfileRepository, name: String?,
-                              createdAt: Date, adjusting adjust: (inout ProfileConfiguration) -> Void) throws -> ProfileSummary {
+                              createdAt: Date, adjusting adjust: (inout ProfileConfiguration) -> Void,
+                              keepingTheirMac: Bool = true) throws -> ProfileSummary {
         let parsed = try parse(url)
         let keys = try Keys(password: password, kdf: parsed.header.kdf)
         let manifest = try JSONCoding.decoder.decode(Manifest.self, from: AEAD.open(parsed.header.manifest, key: keys.manifest, aad: manifestAAD))
-        let documents = try JSONCoding.decoder.decode(Documents.self, from: AEAD.open(parsed.documents, key: keys.documents, aad: documentsAAD))
+        var documents = try JSONCoding.decoder.decode(Documents.self, from: AEAD.open(parsed.documents, key: keys.documents, aad: documentsAAD))
 
         var configuration = manifest.configuration
         // What was learnt about the proxy on the other Mac is not this one's to trust.
         configuration.lastProxyLocation?.exitIP = nil
         configuration.webRTCRelay = nil
+        if !keepingTheirMac {
+            withoutThisMac(&configuration)
+            documents.passwords = withoutThisMac(documents.passwords)
+        }
         adjust(&configuration)
         let summary = try repository.create(name: name ?? manifest.name, configuration: configuration, createdAt: createdAt)
         let id = summary.id
@@ -310,7 +353,7 @@ public enum ProfileTransfer {
         defer { try? FileManager.default.removeItem(at: file) }
         let password = UUID().uuidString + UUID().uuidString
         try export(id, key: key, name: copy.name, createdAt: copy.createdAt, from: repository, to: file, password: password,
-                   kdf: .generate(iterations: 1_000))
+                   kdf: .generate(iterations: 1_000), keepingThisMac: true)
         // As the person saw it: its name, when it was made (its place in the list), and its colour —
         // one never chosen came from the old id, and is kept as chosen.
         let summary = try importProfile(from: file, password: password, into: repository, name: copy.name,
