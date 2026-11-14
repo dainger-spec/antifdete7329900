@@ -227,6 +227,9 @@ enum ProfileSessionHost {
             Task { @MainActor in
                 do {
                     try await manager.launch(self.profileID, openingWindow: !self.isForWarmUpOnly)
+                    // A launch that found a Lock or quit under way returns without the profile:
+                    // this process is quitting, and has nothing to announce.
+                    guard manager.isRunning(self.profileID) else { return }
                     self.showedWindow = !self.isForWarmUpOnly
                     self.isReady = true
                     ProfileSessionHost.send(.running(hostsSafariChrome: SafariChromeHost.isHosting))

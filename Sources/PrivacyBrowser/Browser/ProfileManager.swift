@@ -444,6 +444,12 @@ final class ProfileManager: ObservableObject {
         if let lookup { proxyLookupFinished(lookup, for: id, name: summary.name, stored: stored) }
         var configuration = stored.applying(location)
         configuration.webRTCRelay = await webRTCRelay(for: id, configuration)
+        // Lock or Quit began while the manager's word on WebRTC was awaited (`shutDown` ends that
+        // wait): as above, nothing is opened, and what was decrypted is sealed again.
+        if isShuttingDown {
+            if !stored.ephemeral { try await webDataVault.seal(profileID: id, key: key, activeStore: false) }
+            return
+        }
         // Camera substitution is the plan's (docs/CAMERA.md). Below pro/team the profile's camera is
         // turned off here — before the session's shim or the system camera's config is built from it —
         // so a stored camera never reaches a page on a plan that does not open it.
@@ -862,9 +868,24 @@ final class ProfileManager: ObservableObject {
         for waiter in waiters { waiter.resume(returning: message) }
     }
 
+    /// This process is quitting (`shutDown`): a launch waits for the manager's word no longer.
+    private static var webRTCWaitEnded = false
+
+    /// Lock or quit in a profile's own process: a launch waiting for the manager's word on WebRTC
+    /// goes on without it, to find the quit. The manager sends no word to a process it has stopped,
+    /// and the wait (up to 40 s) held the quit past the 30 s the manager gives a stopping process
+    /// before it kills it (audit 3, #22).
+    private static func endWebRTCWait() {
+        webRTCWaitEnded = true
+        let waiters = webRTCWaiters
+        webRTCWaiters.removeAll()
+        for waiter in waiters { waiter.resume(returning: webRTCMessage) }
+    }
+
     /// The manager's decision, waited for at most `seconds`; nil when none came (WebRTC then off).
     private static func webRTCDecision(within seconds: Double) async -> WebRTCLaunchMessage? {
         if let webRTCMessage { return webRTCMessage }
+        if webRTCWaitEnded { return nil }
         return await withCheckedContinuation { continuation in
             webRTCWaiters.append(continuation)
             Task { @MainActor in
@@ -1296,7 +1317,7 @@ final class ProfileManager: ObservableObject {
         if runsInProfileProcess {
             // The manager answers within the time its proxy check takes (`ProxyUDPCheck`).
             guard let message = await Self.webRTCDecision(within: 40) else {
-                log.error("No word from the manager on this launch's WebRTC: it stays off")
+                if !isShuttingDown { log.error("No word from the manager on this launch's WebRTC: it stays off") }
                 return nil
             }
             return message.relay.map { WebRTCRelay(urls: $0.urls, username: $0.username, credential: $0.credential) }
@@ -1439,6 +1460,7 @@ final class ProfileManager: ObservableObject {
     /// running profile. Returns when nothing is running, launching or sealing.
     func shutDown() async {
         isShuttingDown = true
+        if runsInProfileProcess { Self.endWebRTCWait() }
         await waitWhileBusy()
         await stopAll()
         await waitWhileBusy()
