@@ -1240,7 +1240,10 @@ enum ProfileNetworkGuard {
             if let address = parts.url { report.openedInAnotherApp = NSWorkspace.shared.open(address) }
         }
         report.sharingServices = NSSharingService.sharingServices(forItems: [probe ?? URL(string: "https://example.org/")!]).count
-        NSPasteboard.general.clearContents()
+        // The copy is the self-test's alone (it always passes a probe): clearing the pasteboard
+        // empties the system's, whatever another app put there, so the person's own check
+        // ("Check the Profile", no probe) never does it.
+        if probe != nil { NSPasteboard.general.clearContents() }
         report.credentialsKept = URLCredential(user: "pb", password: "pb", persistence: .permanent).persistence != .forSession
         report.handOffsRefused = HandOffs.refused
         if report.hasProxy {

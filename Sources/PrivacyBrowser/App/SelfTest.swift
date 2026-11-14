@@ -4771,7 +4771,15 @@ final class SelfTest {
             finding(topic).map { "\($0.key) \($0.values) fix \($0.fix?.rawValue ?? "none")" } ?? "no finding (\(run.step))"
         }
 
+        // The check asks the profile's process for its network report, without the self-test's probe:
+        // what another app left on the clipboard must still be there after it.
+        let clipboardMarker = "pb-selftest-clipboard-\(UUID().uuidString)"
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(clipboardMarker, forType: .string)
         await run.run()
+        let clipboardAfter = NSPasteboard.general.string(forType: .string)
+        check("profile check: what is on the clipboard stays there (only the self-test's own probe clears it)",
+              clipboardAfter == clipboardMarker, clipboardAfter == nil ? "the clipboard was emptied" : "the clipboard holds something else")
         check("profile check: the proxy's exit is found through the proxy, and named",
               finding(.proxy)?.key == "check.proxy.alive" && finding(.proxy)?.values.first == "country:DE", said(.proxy))
         check("profile check: a time zone set elsewhere than the exit is found, with the fix that takes it from the connection",
