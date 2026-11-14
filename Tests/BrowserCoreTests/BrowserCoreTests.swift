@@ -15,6 +15,25 @@ final class KeyDerivationTests: XCTestCase {
         XCTAssertEqual(portable, derived)
     }
 
+    /// A header's PBKDF2 iterations are bounded (1…10 000 000) and refused as an invalid
+    /// configuration before anything is derived — a count past UInt32 included, which CommonCrypto's
+    /// argument would trap on.
+    func testPBKDF2IterationsOutOfRangeAreRefused() throws {
+        let salt = Data(repeating: 1, count: 16)
+        for iterations in [0, -1, 10_000_001, Int(UInt32.max) + 1, Int.max] {
+            let parameters = KDFParameters(algorithm: KDFParameters.pbkdf2SHA256, iterations: iterations, salt: salt)
+            XCTAssertThrowsError(try KeyDerivation.validate(parameters), "\(iterations)") { error in
+                XCTAssertEqual(error as? CoreError, .invalidConfiguration("PBKDF2 iterations out of range"))
+            }
+            XCTAssertThrowsError(try KeyDerivation.deriveKey(password: "pw", parameters: parameters), "\(iterations)")
+            XCTAssertThrowsError(try KeyDerivation.pbkdf2SHA256(password: Data("pw".utf8), salt: salt, iterations: iterations, keyLength: 32))
+        }
+        XCTAssertEqual(KeyDerivation.pbkdf2Iterations, 1...10_000_000)
+        XCTAssertNoThrow(try KeyDerivation.validate(KDFParameters.generate(iterations: testIterations)))
+        XCTAssertNoThrow(try KeyDerivation.validate(KDFParameters.generate()))
+        XCTAssertThrowsError(try KeyDerivation.validate(KDFParameters(algorithm: "scrypt", iterations: 1, salt: salt)))
+    }
+
     func testPortableMatchesPlatformForManyIterations() throws {
         let salt = Data(repeating: 7, count: 16)
         XCTAssertEqual(KeyDerivation.portablePBKDF2SHA256(password: Data("pw".utf8), salt: salt, iterations: 4096, keyLength: 32),

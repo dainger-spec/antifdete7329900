@@ -56,14 +56,18 @@ public enum KeyDerivation {
     static let maximumMemoryKiB = 2 * 1024 * 1024
     static let maximumPasses = 10
     static let maximumLanes = 16
+    /// The bounds of a header's PBKDF2 iterations. Ten million is over sixteen times OWASP's
+    /// recommendation (`KDFParameters.recommendedIterations`) and a few seconds on a Mac; a header
+    /// asking for more (also one fetched for sync, or a file from someone else) is refused as an
+    /// invalid configuration before anything is derived — and before the count is narrowed to
+    /// CommonCrypto's UInt32, which a larger value would trap on.
+    public static let pbkdf2Iterations = 1...10_000_000
 
-    public static func deriveKey(password: String, parameters: KDFParameters) throws -> SymmetricKey {
+    /// Whether `parameters` are ones this derivation takes: a salt of 16 bytes or more, and costs
+    /// within the bounds above. Throws `CoreError.invalidConfiguration` otherwise, and
+    /// `unsupportedFormat` for an algorithm it does not know.
+    public static func validate(_ parameters: KDFParameters) throws {
         guard parameters.salt.count >= 16 else { throw CoreError.invalidConfiguration("weak KDF parameters") }
-        // Normalise so the same password typed via different input methods
-        // (composed vs decomposed Unicode) derives the same key.
-        var passwordBytes = [UInt8](password.precomposedStringWithCanonicalMapping.utf8)
-        defer { wipe(&passwordBytes) }
-        var derived: [UInt8]
         switch parameters.algorithm {
         case KDFParameters.argon2id:
             guard let memory = parameters.memoryKiB, let lanes = parameters.parallelism,
@@ -71,10 +75,31 @@ public enum KeyDerivation {
                   (8 * lanes...maximumMemoryKiB).contains(memory) else {
                 throw CoreError.invalidConfiguration("Argon2id parameters out of range")
             }
+        case KDFParameters.pbkdf2SHA256:
+            guard pbkdf2Iterations.contains(parameters.iterations) else {
+                throw CoreError.invalidConfiguration("PBKDF2 iterations out of range")
+            }
+        default:
+            throw CoreError.unsupportedFormat("KDF \(parameters.algorithm)")
+        }
+    }
+
+    public static func deriveKey(password: String, parameters: KDFParameters) throws -> SymmetricKey {
+        try validate(parameters)
+        // Normalise so the same password typed via different input methods
+        // (composed vs decomposed Unicode) derives the same key.
+        var passwordBytes = [UInt8](password.precomposedStringWithCanonicalMapping.utf8)
+        defer { wipe(&passwordBytes) }
+        var derived: [UInt8]
+        switch parameters.algorithm {
+        case KDFParameters.argon2id:
+            // In range: `validate` above.
+            guard let memory = parameters.memoryKiB, let lanes = parameters.parallelism else {
+                throw CoreError.invalidConfiguration("Argon2id parameters out of range")
+            }
             derived = Argon2id.hash(password: passwordBytes, salt: [UInt8](parameters.salt), passes: parameters.iterations,
                                     memoryKiB: memory, lanes: lanes, tagLength: 32)
         case KDFParameters.pbkdf2SHA256:
-            guard parameters.iterations >= 1 else { throw CoreError.invalidConfiguration("weak KDF parameters") }
             var passwordData = Data(passwordBytes)
             defer { wipe(&passwordData) }
             var key = try pbkdf2SHA256(password: passwordData, salt: parameters.salt,
@@ -89,6 +114,7 @@ public enum KeyDerivation {
     }
 
     static func pbkdf2SHA256(password: Data, salt: Data, iterations: Int, keyLength: Int) throws -> Data {
+        guard pbkdf2Iterations.contains(iterations) else { throw CoreError.invalidConfiguration("PBKDF2 iterations out of range") }
         #if canImport(CommonCrypto)
         var derived = Data(count: keyLength)
         let status: Int32 = derived.withUnsafeMutableBytes { derivedPtr in
