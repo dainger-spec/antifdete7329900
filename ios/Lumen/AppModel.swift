@@ -218,13 +218,18 @@ final class AppModel: ObservableObject {
         check(entry.id)
     }
 
+    /// Checks the entry; one checking already is checked again when that check ends, if the entry was
+    /// changed meanwhile (its result is the old line's, never stored on the new one).
     func check(_ id: UUID) {
         guard let entry = proxies.first(where: { $0.id == id }), !checking.contains(id) else { return }
         checking.insert(id)
+        let password = ProxyPasswords.get(id)
         Task {
-            let result = await ProxyChecker.check(entry, password: ProxyPasswords.get(id))
+            let result = await ProxyChecker.check(entry, password: password)
             checking.remove(id)
             guard let index = proxies.firstIndex(where: { $0.id == id }) else { return }
+            // Edited while it ran — another address, login or password: this result is not the entry's.
+            guard proxies[index].sameConnection(as: entry), ProxyPasswords.get(id) == password else { return check(id) }
             if Faults.isActive(.recheckDropsProxy), proxies[index].check?.alive == true, !result.alive {
                 // The planted fault: a proxy found dead is taken off its sessions, which then go direct — the
                 // binding cleared too, or the lock (SessionLock) would keep them shut and the fault would

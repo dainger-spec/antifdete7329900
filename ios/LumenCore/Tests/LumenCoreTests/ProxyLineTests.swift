@@ -75,4 +75,24 @@ final class ProxyLineTests: XCTestCase {
         let written = ProxyLine.write(kind: .http, host: "1.2.3.4", port: 3128, username: "team@corp")
         XCTAssertEqual(line(written), ProxyLine(kind: .http, host: "1.2.3.4", port: 3128, username: "team@corp", password: ""))
     }
+
+    /// Audit 3, #37: a check's result is stored on an entry only while the entry is the proxy checked —
+    /// its name aside; an entry edited while its check ran is checked again (AppModel.check).
+    func testACheckIsTheEntrysOnlyForTheSameConnection() {
+        let checked = ProxyEntry(kind: .socks5, host: "1.2.3.4", port: 1080, username: "anna")
+        var renamed = checked
+        renamed.name = "Берлин"
+        XCTAssertTrue(renamed.sameConnection(as: checked), "a new name is the same proxy")
+        for edit in [\ProxyEntry.host, \ProxyEntry.username] {
+            var edited = checked
+            edited[keyPath: edit] = "5.6.7.8"
+            XCTAssertFalse(edited.sameConnection(as: checked))
+        }
+        var port = checked
+        port.port = 1081
+        XCTAssertFalse(port.sameConnection(as: checked))
+        var kind = checked
+        kind.kind = .http
+        XCTAssertFalse(kind.sameConnection(as: checked))
+    }
 }

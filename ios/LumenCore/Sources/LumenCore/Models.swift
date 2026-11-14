@@ -176,6 +176,11 @@ public struct ProxyEntry: Codable, Identifiable, Equatable, Sendable {
 
     /// What the list shows when the entry has no name of its own.
     public var displayName: String { name.isEmpty ? "\(host):\(port)" : name }
+
+    /// The same proxy to connect to: kind, address and login (the password is in the Keychain).
+    public func sameConnection(as other: ProxyEntry) -> Bool {
+        kind == other.kind && host == other.host && port == other.port && username == other.username
+    }
 }
 
 /// What the last check of a proxy found.
