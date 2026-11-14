@@ -1,8 +1,9 @@
 name: diag — who brings up the local network question
-# A diagnosis, on a scratch branch only: which test makes macOS ask the runner's person "Allow … to
-# find devices on local networks?" (the full pipeline, 14 November). The first run of this found
-# the window after the eighth of DirectConnectorTests; here each suspect runs alone on a runner of
-# its own, and the windows are listed fifteen seconds after it.
+# A diagnosis, on a scratch branch only (the full pipeline, 14 November). The second run of this
+# found the window after DirectConnectorTests' test of private addresses alone, which on a Mac
+# opens no socket but its own — and reads address literals through the system's resolver. Here,
+# with the literals read as written: that test alone, every test as the pipeline runs them, and
+# the resolver asked one literal of a local network on a runner of its own (the cause, shown).
 on:
   push:
     branches: ['claude/zen-bohr-2xzxfp']
@@ -13,20 +14,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: nowhere
-            args: "--filter DirectConnectorTests/testADestinationThatIsNotThereIsRefusedAtOnce"
-          - name: private
-            args: "--filter DirectConnectorTests/testAPrivateAddressIsTakenOnlyWhereItGoesIntoATunnel"
-          - name: proxy-gone
-            args: "--filter DirectConnectorTests/testAProxyThatRefusesOrIsNotThereIsSaidSo"
-          - name: first-others
-            args: "--filter DirectConnectorTests/(testAConnectionIsCarried|testAFailureSays|testAGuestWithoutAProxy|testALocalAddressIsToldApart|testANameIsResolved)"
-          - name: all-but-the-first-eight
-            args: "--skip DirectConnectorTests/(testAConnectionIsCarried|testADestinationThatIsNotThere|testAFailureSays|testAGuestWithoutAProxy|testALocalAddressIsToldApart|testANameIsResolved|testAPrivateAddressIsTaken|testAProxyThatRefuses)"
+        what: [private-fixed, every-test, resolver-literal, resolver-literal-numeric]
     steps:
       - uses: actions/checkout@v4
-      - name: The tests built, and the windows before
+      - name: The windows before
         run: |
           mkdir -p shots
           cat > /tmp/windows.swift <<'SWIFT'
@@ -41,21 +32,38 @@ jobs:
           }
           SWIFT
           swiftc -O /tmp/windows.swift -o /tmp/windows
-          swift build --build-tests 2>&1 | tail -1
-          sleep 10
+          cat > /tmp/resolve.swift <<'SWIFT'
+          import Darwin
+          // getaddrinfo of one address literal of a local network, AF_UNSPEC; with "numeric", as written.
+          var hints = addrinfo()
+          hints.ai_family = AF_UNSPEC
+          hints.ai_socktype = SOCK_STREAM
+          hints.ai_flags = CommandLine.arguments.contains("numeric") ? (AI_NUMERICSERV | AI_NUMERICHOST) : AI_NUMERICSERV
+          for host in ["192.168.1.10", "169.254.169.254"] {
+              var list: UnsafeMutablePointer<addrinfo>?
+              print(host, getaddrinfo(host, "80", &hints, &list))
+              if list != nil { freeaddrinfo(list) }
+          }
+          SWIFT
+          swiftc -O /tmp/resolve.swift -o /tmp/resolve
+          sleep 5
           echo "== before"; /tmp/windows | sort | uniq -c
-          /tmp/windows | grep -c UserNotificationCenter || true
-      - name: The suspect, alone
+      - name: What is tried
         run: |
           date -u +%T
-          swift test --skip-build ${{ matrix.args }} 2>&1 | grep -E "Executed [0-9]+ tests|error:" | tail -3 || true
+          case '${{ matrix.what }}' in
+            private-fixed) swift test --filter 'DirectConnectorTests/testAPrivateAddressIsTakenOnlyWhereItGoesIntoATunnel' 2>&1 | grep -E 'Executed [0-9]+ tests|error:' | tail -3 ;;
+            every-test) swift test 2>&1 | grep -E 'Executed [0-9]+ tests|error:' | tail -3 ;;
+            resolver-literal) /tmp/resolve ;;
+            resolver-literal-numeric) /tmp/resolve numeric ;;
+          esac
           date -u +%T
-          sleep 15
-          echo "== after ${{ matrix.name }}"; /tmp/windows | sort | uniq -c
-          if /tmp/windows | grep -q UserNotificationCenter; then echo "VERDICT ${{ matrix.name }}: THE QUESTION IS ON SCREEN"; else echo "VERDICT ${{ matrix.name }}: no question"; fi
-          screencapture -x "shots/${{ matrix.name }}.png"
+          sleep 20
+          echo "== after"; /tmp/windows | sort | uniq -c
+          if /tmp/windows | grep -q UserNotificationCenter; then echo "VERDICT ${{ matrix.what }}: THE QUESTION IS ON SCREEN"; else echo "VERDICT ${{ matrix.what }}: no question"; fi
+          screencapture -x "shots/${{ matrix.what }}.png"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: diag-${{ matrix.name }}
+          name: diag-${{ matrix.what }}
           path: shots

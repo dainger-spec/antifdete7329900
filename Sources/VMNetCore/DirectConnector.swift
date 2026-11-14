@@ -582,13 +582,25 @@ public final class VMNetDirectConnector: @unchecked Sendable {
 
     /// What the system has for a host, IPv4 first (a Mac whose IPv6 goes nowhere then costs no
     /// wait); with the resolver's code when it has nothing.
+    ///
+    /// An address written out ("192.168.1.10") is read as it is written, and the system's resolver
+    /// is not asked: on a Mac, asking it of an address of a local network or a link's own counts as
+    /// a use of the local network, which macOS asks the person about in a window of its own (the
+    /// full pipeline, 14 November — a test that only had such addresses read, and refused, brought
+    /// the window up over what a later step took a picture of).
     private static func addresses(of host: String, port: UInt16) -> (found: [Address], code: Int32) {
         var hints = addrinfo()
         hints.ai_family = AF_UNSPEC
         hints.ai_socktype = Sys.streamType
-        hints.ai_flags = AI_NUMERICSERV
+        hints.ai_flags = AI_NUMERICSERV | AI_NUMERICHOST
         var list: UnsafeMutablePointer<addrinfo>?
-        let code = getaddrinfo(host, String(port), &hints, &list)
+        var code = getaddrinfo(host, String(port), &hints, &list)
+        if code != 0 {
+            // A name: the resolver.
+            hints.ai_flags = AI_NUMERICSERV
+            list = nil
+            code = getaddrinfo(host, String(port), &hints, &list)
+        }
         guard code == 0 else { return ([], code) }
         defer { freeaddrinfo(list) }
         var found: [Address] = []
@@ -642,15 +654,16 @@ public final class VMNetDirectConnector: @unchecked Sendable {
     }
 
     /// The address as text, for the tests' answer about its route.
+    /// Written by `inet_ntop` from its bytes: nothing of the system's resolver is asked.
     private static func text(of address: Address) -> String {
         var storage = address.storage
-        var buffer = [CChar](repeating: 0, count: 64)
-        let done = withUnsafeMutablePointer(to: &storage) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                getnameinfo($0, address.length, &buffer, socklen_t(buffer.count), nil, 0, NI_NUMERICHOST)
-            }
+        var bytes = withUnsafeMutablePointer(to: &storage) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { addressBytes($0, family: address.family) }
         }
-        return done == 0 ? String(cString: buffer) : ""
+        guard bytes.count == 4 || bytes.count == 16 else { return "" }
+        var buffer = [CChar](repeating: 0, count: 64)
+        let written = inet_ntop(address.family, &bytes, &buffer, socklen_t(buffer.count))
+        return written == nil ? "" : String(cString: buffer)
     }
 
     /// The bytes of the address in a socket address (4 or 16), or none.
