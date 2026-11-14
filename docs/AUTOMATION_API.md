@@ -17,7 +17,7 @@ allowed to accept connections. It listens only while the vault is unlocked.
 |---|---|
 | Address | `127.0.0.1` and the port chosen (50777 by default). Bound to the loopback interface: no other machine can connect. |
 | Token | Every request carries `Authorization: Bearer <token>`. The token (43 characters, random) is shown in the same window, with **Copy** and **New Token**; it is kept encrypted in the vault's device settings and never synced. Anyone who has it can start the profiles and read their cookies: keep it like a password. |
-| Web pages | A request that carries `Origin` or any `Sec-Fetch-*` header — every request a browser makes for a page to another origin does — is refused before the token is looked at, and no answer carries a CORS header. A page that points a name of its own at 127.0.0.1 (DNS rebinding) is refused by the `Host` check: only `127.0.0.1:<port>`, `localhost:<port>` and `[::1]:<port>` are answered. |
+| Web pages | A request that carries `Origin`, `Sec-Fetch-Site` or another of the `Sec-Fetch-*` headers a browser adds — every request a browser makes for a page to 127.0.0.1 carries `Sec-Fetch-Site` — is refused before the token is looked at, and no answer carries a CORS header. `Sec-Fetch-Mode` on its own is not refused: Node's built-in `fetch` (and so WebdriverIO) sends that one header on every request, and a browser never sends it without `Sec-Fetch-Site`. A page that points a name of its own at 127.0.0.1 (DNS rebinding) is refused by the `Host` check: only `127.0.0.1:<port>`, `localhost:<port>` and `[::1]:<port>` are answered. |
 | What answers hold | A profile's proxy is shown as `socks5://host:port` or `http://host:port`, never with its username or password. Cookies — a session's secret — only from the cookie endpoint, when asked for by name. |
 
 One request per connection (`Connection: close`); bodies up to 8 MB, with a `Content-Length`.
@@ -130,7 +130,7 @@ API's; the API's token itself is not taken under `/wd/`, nor a profile's under `
 ## Checked
 
 Unit tests (`AutomationAPITests`): the request reader, the gate (token, `Host`, `Origin` and
-`Sec-Fetch-*`), the routes, a profile found by id or exact name, no credentials in an answer. The
+`Sec-Fetch-*`; a browser's header set refused, Node's fetch's answered), the routes, a profile found by id or exact name, no credentials in an answer. The
 self-test, on a real listener: no token, a wrong token, a web page's request and a rebinding name
 refused (401, before the plan); every route — the old ones too — refused without automation in
 the plan (403 `automation_not_in_plan`; red on the code before the gate, claude/measure-api-gate-red);

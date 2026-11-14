@@ -248,6 +248,10 @@ a client (Selenium) ── http://127.0.0.1:<port>/wd/<profile's token>/<profile
   session, the Actions API (ActionChains), file uploads, printing. Each answers with the
   protocol's own error ("unsupported operation", "no such alert").
 - **The plan:** part of automation (`allowsAutomation`), refused without it with the reason.
+- **Clients:** Selenium in any language, WebdriverIO, or anything else that speaks the protocol.
+  A web page's request is refused (it carries `Origin` or `Sec-Fetch-Site`); Node's built-in
+  `fetch`, which WebdriverIO sends every command with, adds `Sec-Fetch-Mode` alone of those
+  headers, and that is answered.
 
 ### Selenium (Python)
 
