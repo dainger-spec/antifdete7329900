@@ -45,7 +45,7 @@ only() {
 
 # Every profile's machine is, to its macOS, a Mac it has never seen: a hardware identity of its
 # own. At the first sign-in on such a Mac, macOS shows the person its panes for a new Mac — and on
-# macOS 26 its "Welcome" screen, whose "Get Started" did not answer a click in a machine (a
+# recent macOS its "Welcome" screen, whose "Get Started" did not answer a click in a machine (a
 # client's report, 14 November). The person signed in by itself (the base's account) has seen
 # them all in the base's setup: they are marked seen for them here, at the start, before the
 # sign-in. Keys macOS does not know are not read; nothing of it reaches the network.
