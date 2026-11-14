@@ -207,7 +207,10 @@ takes no arguments and makes no network request.
 3. waits until no process runs from the bundle — the app first of all — and **kills nothing**:
    after 10 minutes it gives up and keeps the archive for the next quit; a process of the bundle
    started after the request (the app opened again) ends the request at once, since that quit is
-   over and the next one asks again;
+   over and the next one asks again. It looks again right before the swap (step 6) and right after
+   it, at the old app's new place: the app opened again while steps 4 and 5 ran (a Dock click, a
+   link, a profile's file) ends the request the same way — the old app swapped back if need be,
+   nothing replaced, the archive kept — and never runs on from a bundle swapped away and deleted;
 4. checks the release again: newer than the installed build, for this macOS, the archive's
    length, SHA-256 and Ed25519 signature with a key the installed app carries;
 5. extracts it with `ditto` next to the app (same volume): exactly one app, the installed app's

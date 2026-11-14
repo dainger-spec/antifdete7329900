@@ -10,7 +10,9 @@ import Foundation
 /// 2. the request is for this app, and recent;
 /// 3. nothing runs from the bundle any more — the app first of all — and nothing was started since
 ///    the request (a relaunch ends this quit; the next quit asks again). Nothing is ever killed;
-///    after `patience` the request is given up;
+///    after `patience` the request is given up. Looked at again right before the swap, and right
+///    after it at the old app's new place: the app opened again while the release was checked ends
+///    the request too, and is never left running from a bundle swapped away and deleted;
 /// 4. the release is newer than the installed build, for this macOS, signed with a carried key;
 ///    the archive's length, SHA-256 and Ed25519 signature;
 /// 5. extracted next to the app (so the swap is a rename on one volume): exactly one app, the same
@@ -156,6 +158,15 @@ public final class Installer {
             return finish(.refused, "\(error)")
         }
 
+        // The checks above take seconds, in which the app can be opened again (its Dock icon, a
+        // link, a profile's file): such a process would run on from a bundle swapped away and then
+        // deleted, and use the new build's helpers. It ends the request as a start during the wait
+        // does — nothing replaced, the archive kept for the next quit.
+        let startedAgain = "the app was started again before it could be replaced"
+        guard environment.processes(app).isEmpty else {
+            consumed = false
+            return finish(.gaveUp, startedAgain)
+        }
         guard renamex_np(candidate.path, app.path, UInt32(RENAME_SWAP)) == 0 else {
             return finish(.refused, "the swap failed (errno \(errno)); the installed app is untouched")
         }
@@ -167,6 +178,15 @@ public final class Installer {
             let kept = app.deletingLastPathComponent().appendingPathComponent("\(app.deletingPathExtension().lastPathComponent) (previous version).app")
             try? FileManager.default.moveItem(at: candidate, to: kept)
             return "swapping back failed (errno \(failure)); the previous app is at \(kept.path)"
+        }
+        // One started between that look and the swap runs from the old app at its new place (the
+        // kernel names a running executable by where it is now): the old app goes back.
+        guard environment.processes(candidate).isEmpty else {
+            guard let failure = swapBack() else {
+                consumed = false
+                return finish(.gaveUp, startedAgain)
+            }
+            return finish(.gaveUp, "\(startedAgain); \(failure)")
         }
         do {
             try check(app, against: request.item, installed: installed)
