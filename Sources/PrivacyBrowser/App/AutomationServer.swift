@@ -55,6 +55,14 @@ final class AutomationServer {
         // The loopback address and nothing else: no other machine can reach it.
         parameters.requiredInterfaceType = .loopback
         parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: port)
+        // Kept for a restart on the same port: a new token, the API switched off and on, the vault
+        // locked and unlocked all make a new listener at once, while the old one's cancelling is
+        // still under way and the connections it answered (it closes them first) sit in TIME_WAIT on
+        // this port — without reuse that listener fails "address in use" for up to half a minute.
+        // What it costs: another program of this Mac's user that asks for reuse as well may be let
+        // onto the same port while this one listens (audit APP-02). That program could already
+        // listen there whenever Lumen does not; a WebDriver address carries a profile's token only
+        // (`WebDriverRoute.token`), never the API's.
         parameters.allowLocalEndpointReuse = true
         let listener: NWListener
         do {
