@@ -602,14 +602,24 @@ final class VMCenter: ObservableObject {
         let share = library.base.share
         try FileManager.default.createDirectory(at: share, withIntermediateDirectories: true)
         for name in names where !name.hasPrefix(".") {
-            let target = share.appendingPathComponent(name)
-            try? FileManager.default.removeItem(at: target)
-            try FileManager.default.copyItem(at: source.appendingPathComponent(name), to: target)
             let runs = name.hasSuffix(".command") || name.hasSuffix(".sh")
-            try FileManager.default.setAttributes([.posixPermissions: runs ? 0o755 : 0o644], ofItemAtPath: target.path)
+            try Self.placeFresh(source.appendingPathComponent(name), at: share.appendingPathComponent(name), runs: runs)
         }
         // What an earlier setup said is not this one's.
         try? FileManager.default.removeItem(at: library.base.status)
+    }
+
+    /// One of the tools, into a folder the guest reads: its bytes in a new file, not a copy of the
+    /// file. A copy keeps the file's extended attributes, and in a Lumen downloaded from the
+    /// internet those may be the download's quarantine — on which macOS in the machine would
+    /// refuse to run "Install Lumen Tools" (or ask about it), with nothing of it from the internet.
+    static func placeFresh(_ source: URL, at target: URL, runs: Bool) throws {
+        let data = try Data(contentsOf: source)
+        try? FileManager.default.removeItem(at: target)
+        guard FileManager.default.createFile(atPath: target.path, contents: data,
+                                             attributes: [.posixPermissions: runs ? 0o755 : 0o644]) else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: target.path])
+        }
     }
 
     // MARK: Profiles
@@ -774,9 +784,7 @@ final class VMCenter: ObservableObject {
                FileManager.default.fileExists(atPath: script.path) {
                 try? FileManager.default.createDirectory(at: files.tools, withIntermediateDirectories: true)
                 for folder in [files.tools, files.share] {
-                    let copy = folder.appendingPathComponent(VMGuestSettings.scriptFileName)
-                    try? FileManager.default.removeItem(at: copy)
-                    try? FileManager.default.copyItem(at: script, to: copy)
+                    try? Self.placeFresh(script, at: folder.appendingPathComponent(VMGuestSettings.scriptFileName), runs: true)
                 }
             }
             if profile.lumenWallpaper {

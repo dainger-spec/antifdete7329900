@@ -185,8 +185,12 @@ machine: nothing of a proxied machine goes direct.
 
 ### The guest's tools
 
-`Resources/VMGuest/` is copied into the folder the base shares with the app, and the person runs
-`Install Lumen Tools.command` there once (it refuses to run on anything but a virtual Mac). It:
+`Resources/VMGuest/` is put into the folder the base shares with the app — each file's bytes in a
+new file, not a copy of the file: a copy keeps extended attributes, and a Lumen downloaded from the
+internet may carry the download's quarantine on them, on which macOS in the machine would refuse
+to run the installer or ask about it — and the person runs `Install Lumen Tools.command` there once
+(it refuses to run on anything but a virtual Mac). Opened from Terminal it is the same:
+`sh "/Volumes/My Shared Files/install.sh"`. It:
 
 - turns on automatic sign-in for the account the person made (not possible with FileVault on in
   the guest — it says so, and how to turn it on by hand);
