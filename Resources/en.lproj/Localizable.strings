@@ -2094,7 +2094,7 @@
 "help.commands.loadState" = "Waits for the page’s state: 'load' or 'domcontentloaded'.";
 "help.commands.waiting" = "Waiting";
 "help.commands.waitFor" = "Waits for an element. {state: 'visible'} by default; also 'hidden', 'attached', 'detached'. Not there within the timeout is an error.";
-"help.commands.sleep" = "A pause, in milliseconds.";
+"help.commands.sleep" = "A pause, in milliseconds. sleep(Infinity) waits until the run is stopped.";
 "help.commands.acting" = "Acting";
 "help.commands.click" = "Waits for the element, scrolls it into view with the wheel, moves the pointer onto it and clicks. An element covered by another is an error naming what covers it.";
 "help.commands.dblclick" = "A double click. The same as page.click(selector, {clickCount: 2}).";

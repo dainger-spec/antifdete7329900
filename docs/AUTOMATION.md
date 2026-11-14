@@ -69,6 +69,9 @@ the page's own record.
   `page.evaluate(fn, arg, {world: 'page'})` takes a function or a function body;
   `page.url()` and `page.title()` are promises too (in Playwright they are not);
 - `log(...)` for the run's log, `sleep(ms)`, `params` (the run's parameters, read-only).
+  `sleep(Infinity)` — or any wait longer than a year — waits until Stop; a negative number or
+  `NaN` does not wait. A `type` delay is held to a year a key the same way (`ScenarioWait`:
+  a number past what the system's sleep holds stopped the profile's process).
 
 A script's commands act one at a time, in the order they were asked for, whatever the script awaits
 (two at once — a forgotten `await`, `Promise.all` — moved one pointer two ways). Lines logged faster

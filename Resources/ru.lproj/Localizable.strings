@@ -2094,7 +2094,7 @@
 "help.commands.loadState" = "Дождаться состояния страницы: 'load' или 'domcontentloaded'.";
 "help.commands.waiting" = "Ожидание";
 "help.commands.waitFor" = "Дождаться элемента. {state: 'visible'} по умолчанию; ещё 'hidden', 'attached', 'detached'. Не дождались за timeout — ошибка.";
-"help.commands.sleep" = "Пауза в миллисекундах.";
+"help.commands.sleep" = "Пауза в миллисекундах. sleep(Infinity) ждёт, пока запуск не остановят.";
 "help.commands.acting" = "Действия";
 "help.commands.click" = "Дождаться элемента, прокрутить к нему колесом, навести указатель и нажать. Если элемент закрыт другим — ошибка с названием того, что его закрывает.";
 "help.commands.dblclick" = "Двойной щелчок. То же, что page.click(selector, {clickCount: 2}).";
