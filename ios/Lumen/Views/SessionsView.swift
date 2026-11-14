@@ -218,12 +218,15 @@ struct SessionEditor: View {
                         .textInputAutocapitalization(.never)
                 }
                 .glassRow()
-                if sessionID != nil {
+                if let sessionID {
                     Section {
                         Button(L("Удалить сессию"), role: .destructive) { confirmDelete = true }
                             .accessibilityIdentifier("deleteSession")
                     } footer: {
-                        Text(L("Удаляются куки, хранилище, кэш, вкладки и история этой сессии."))
+                        // A session made from the Mac's profile: deleted here, it is not synced here again.
+                        Text(model.session(sessionID)?.syncedProfileID == nil
+                             ? L("Удаляются куки, хранилище, кэш, вкладки и история этой сессии.")
+                             : L("Удаляются куки, хранилище, кэш, вкладки и история этой сессии на iPhone. Профиль на Mac остаётся, но сюда больше не приходит; вернуть его можно на экране синхронизации."))
                     }
                     .glassRow()
                 }

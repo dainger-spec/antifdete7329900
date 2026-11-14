@@ -72,10 +72,11 @@ public enum SyncRead {
 
     /// `pull`, its failures said in the app's terms.
     public static func run(root: URL, key: Data, transport: LumenSyncTransport, keptGeneration: String?,
-                           edits: [SyncedEdit] = [], cookies: SyncCookieStores? = nil) async -> Result<Outcome, Failure> {
+                           edits: [SyncedEdit] = [], cookies: SyncCookieStores? = nil,
+                           notHere: Set<UUID> = []) async -> Result<Outcome, Failure> {
         do {
             return .success(try await pull(root: root, key: key, transport: transport, keptGeneration: keptGeneration,
-                                           edits: edits, cookies: cookies))
+                                           edits: edits, cookies: cookies, notHere: notHere))
         } catch CoreError.syncServer(403, "sync_not_in_plan") {
             return .failure(.notInPlan)
         } catch CoreError.wrongPassword {
@@ -95,8 +96,11 @@ public enum SyncRead {
     /// `edits`: what was changed here in the sessions made from the vault (their name, description,
     /// tags) — written into the iPhone's copy before the run, as an edit made now, and so sent by
     /// the run (step 5). The Mac's newer-wins rule decides between an edit here and one there.
+    /// `notHere`: the profiles whose sessions were deleted on this iPhone — neither returned nor
+    /// counted among this iPhone's (`profileTokens`).
     public static func pull(root: URL, key: Data, transport: LumenSyncTransport, keptGeneration: String?,
-                            edits: [SyncedEdit] = [], cookies: SyncCookieStores? = nil) async throws -> Outcome {
+                            edits: [SyncedEdit] = [], cookies: SyncCookieStores? = nil,
+                            notHere: Set<UUID> = []) async throws -> Outcome {
         let vault: UnlockedVault
         if MasterVault.exists(in: root) {
             vault = try MasterVault.open(in: root, deviceUnlockKey: key)
@@ -129,13 +133,15 @@ public enum SyncRead {
         }
         _ = try await SyncEngine(repository: repository, transport: transport).sync()
         let profiles = repository.list().compactMap { summary -> SyncedProfile? in
-            guard let configuration = try? repository.loadConfiguration(summary.id) else { return nil }
+            guard !notHere.contains(summary.id), let configuration = try? repository.loadConfiguration(summary.id) else { return nil }
             return profile(summary, configuration)
         }
         var outcome = Outcome(profiles: profiles, generation: generation, deferredForSpace: transport.deferredForSpace)
-        outcome.profileTokens = SyncProfileToken.tokens(in: repository)
+        // Only this iPhone's profiles: one deleted here takes no place of it.
+        let gone = Set(notHere.compactMap { try? SyncProfileToken.token(for: $0, vault: repository.vault) })
+        outcome.profileTokens = SyncProfileToken.tokens(in: repository).filter { !gone.contains($0) }
         if let cookies {
-            let applied = await SyncCookieRun.run(repository: repository, stores: cookies)
+            let applied = await SyncCookieRun.run(repository: repository, stores: cookies, root: root)
             outcome.cookiesSet = applied.set
             outcome.cookiesDeleted = applied.deleted
         }

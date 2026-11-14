@@ -68,6 +68,39 @@ final class SyncReadTests: XCTestCase {
         XCTAssertEqual(Set(second.profileTokens), Set(try [shop.id, mail.id].map { try SyncProfileToken.token(for: $0, vault: mac) }))
     }
 
+    /// A Mac's vault on the stand-in server, and the iPhone's transport to it.
+    func macAndPhone() throws -> (server: SyncTransportTests.Server, mac: UnlockedVault, repository: ProfileRepository,
+                                  macTransport: LumenSyncTransport, phone: LumenSyncTransport) {
+        let server = SyncTransportTests.Server()
+        server.generation = nil
+        let mac = try MasterVault.create(in: try folder(), password: "vault-pass-1", iterations: 1_000)
+        let macTransport = LumenSyncTransport(vaultID: mac.vaultID) { m, p, b, h in server.answer(m, p, b, h) }
+        let phone = LumenSyncTransport(vaultID: mac.vaultID) { m, p, b, h in server.answer(m, p, b, h) }
+        return (server, mac, try ProfileRepository(vault: mac), macTransport, phone)
+    }
+
+    /// The key the iPhone keeps for the vault on `server` (once the Mac has synced).
+    func phoneKey(_ server: SyncTransportTests.Server) throws -> Data {
+        let header = try VaultHeader.decodeChecked(XCTUnwrap(server.objects["vault-header"]?.data))
+        return try MasterVault.deviceUnlockKey(password: "vault-pass-1", header: header)
+    }
+
+    /// Audit 3, #2: a profile whose session was deleted here is not this iPhone's — not returned to be
+    /// made a session again, not counted among its profiles — and stays on the Mac.
+    func testAProfileDeletedHereIsNeitherReturnedNorCounted() async throws {
+        let (server, mac, repository, macTransport, phone) = try macAndPhone()
+        let shop = try repository.create(name: "Магазин", configuration: ProfileConfiguration())
+        let mail = try repository.create(name: "Почта", configuration: ProfileConfiguration())
+        _ = try await SyncEngine(repository: repository, transport: macTransport).sync()
+        let outcome = try await SyncRead.pull(root: try folder().appendingPathComponent("vault"), key: try phoneKey(server),
+                                              transport: phone, keptGeneration: nil, notHere: [shop.id])
+        XCTAssertEqual(outcome.profiles.map(\.id), [mail.id])
+        let mailToken = try SyncProfileToken.token(for: mail.id, vault: mac)
+        XCTAssertEqual(outcome.profileTokens, [mailToken], "only this iPhone's profiles take a place of it")
+        _ = try await SyncEngine(repository: repository, transport: macTransport).sync()
+        XCTAssertEqual(try repository.summary(for: shop.id).name, "Магазин", "the Mac's profile is not touched")
+    }
+
     func testAProxyTheIPhoneCannotUseComesBoundAndLocked() throws {
         let repository = try ProfileRepository(vault: MasterVault.create(in: try folder(), password: "p", iterations: 1_000))
         let tlsID = try repository.create(name: "TLS", configuration: ProfileConfiguration(

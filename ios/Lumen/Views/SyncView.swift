@@ -84,6 +84,20 @@ struct SyncView: View {
                             .accessibilityIdentifier("syncNow")
                             .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
                     }
+                    // Deleting a session made from the Mac's profile stopped that profile's sync to here.
+                    if !model.notSyncedHere.isEmpty {
+                        Section {
+                            Button(L("Вернуть удалённые профили")) {
+                                model.syncAgainHere()
+                                syncNow()
+                            }
+                            .disabled(syncing)
+                            .accessibilityIdentifier("syncBringBack")
+                        } footer: {
+                            Text(L("Профили с Mac, удалённые на этом iPhone, сюда больше не приходят: %@.", "\(model.notSyncedHere.count)"))
+                        }
+                        .glassRow()
+                    }
                     Section {
                         Button(L("Забыть хранилище"), role: .destructive) {
                             SyncKeychain.erase()
@@ -145,7 +159,7 @@ struct SyncView: View {
             synced.forEach { SessionRuntimes.shared.close($0.id) }
             switch await SyncRead.run(root: SyncKeychain.vaultFolder, key: kept.unlockKey, transport: transport,
                                       keptGeneration: SyncKeychain.generation, edits: model.catalog.localEdits(),
-                                      cookies: CookieBridge(sessions: synced)) {
+                                      cookies: CookieBridge(sessions: synced), notHere: model.notSyncedHere) {
             case let .success(outcome):
                 SyncKeychain.generation = outcome.generation
                 SyncKeychain.profileTokens = outcome.profileTokens

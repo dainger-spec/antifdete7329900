@@ -28,6 +28,8 @@ public final class LumenStore: @unchecked Sendable {
     struct Catalogue: Codable {
         var version = 1
         var sessions: [Session]
+        /// `SessionCatalog.notSyncedHere`; absent when there are none (and in a catalogue from before).
+        var notSyncedHere: [UUID]?
     }
 
     struct ProxyFile: Codable {
@@ -42,13 +44,20 @@ public final class LumenStore: @unchecked Sendable {
 
     // MARK: Sessions
 
-    public func loadSessions() -> [Session] {
-        (read(Catalogue.self, at: root.appendingPathComponent("sessions.json"))?.sessions) ?? []
+    public func loadSessions() -> [Session] { loadCatalogue().sessions }
+
+    /// The sessions, and the Mac's profiles whose sessions were deleted here (`SessionCatalog`).
+    public func loadCatalogue() -> (sessions: [Session], notSyncedHere: Set<UUID>) {
+        let catalogue = read(Catalogue.self, at: root.appendingPathComponent("sessions.json"))
+        return (catalogue?.sessions ?? [], Set(catalogue?.notSyncedHere ?? []))
     }
 
-    public func saveSessions(_ sessions: [Session]) {
+    /// The whole catalogue, in one file: `notSyncedHere` with the sessions, so that a deleted
+    /// session and the profile it leaves unsynced are written together.
+    public func saveSessions(_ sessions: [Session], notSyncedHere: Set<UUID> = []) {
         if Faults.isActive(.sessionsNotSaved) { return }
-        write(Catalogue(sessions: sessions), to: root.appendingPathComponent("sessions.json"))
+        let unsynced = notSyncedHere.isEmpty ? nil : notSyncedHere.sorted { $0.uuidString < $1.uuidString }
+        write(Catalogue(sessions: sessions, notSyncedHere: unsynced), to: root.appendingPathComponent("sessions.json"))
     }
 
     // MARK: Proxies

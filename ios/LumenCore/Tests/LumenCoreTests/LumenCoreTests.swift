@@ -122,6 +122,26 @@ final class CatalogTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: store.sessionFolder(id).path), "nothing came back after it")
     }
 
+    /// Audit 3, #2: the Mac's profiles deleted here are kept with the catalogue; a catalogue written
+    /// before there were any reads as it was.
+    func testACatalogueFromBeforeReadsAndDeletedProfilesAreKept() throws {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let session = Session(name: "A")
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let before = try JSONSerialization.jsonObject(with: encoder.encode(session))
+        let written: [String: Any] = ["version": 1, "sessions": [before]]
+        let file = try JSONSerialization.data(withJSONObject: written)
+        try file.write(to: root.appendingPathComponent("sessions.json"))
+        let catalogue = LumenStore(root: root).loadCatalogue()
+        XCTAssertEqual(catalogue.sessions.map(\.id), [session.id])
+        XCTAssertEqual(catalogue.notSyncedHere, [])
+        let profile = UUID()
+        LumenStore(root: root).saveSessions(catalogue.sessions, notSyncedHere: [profile])
+        XCTAssertEqual(LumenStore(root: root).loadCatalogue().notSyncedHere, [profile])
+        XCTAssertEqual(LumenStore(root: root).loadSessions().map(\.id), [session.id])
+    }
+
     func testSettingsSurviveARelaunch() {
         let catalog = SessionCatalog(store: LumenStore(root: root))
         let s = catalog.create(name: "A")

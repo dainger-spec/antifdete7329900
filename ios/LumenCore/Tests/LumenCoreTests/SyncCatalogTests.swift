@@ -51,6 +51,32 @@ final class SyncCatalogTests: XCTestCase {
         return url
     }
 
+    /// Audit 3, #2: deleting a session made from the Mac's profile stops that profile's sync to this
+    /// iPhone — the next sync does not make it again (with a new, empty store) — until the person
+    /// brings the deleted ones back. The iPhone's own sessions leave nothing behind.
+    func testASessionDeletedHereIsNotMadeAgainUntilBroughtBack() throws {
+        let root = folder()
+        let catalog = SessionCatalog(store: LumenStore(root: root))
+        let shopID = UUID()
+        let shop = SyncedProfile(id: shopID, name: "Магазин", notes: "", tags: [], proxy: nil, proxyUnusable: false)
+        let first = try XCTUnwrap(catalog.applySynced([shop]) { _, _ in UUID() }.first)
+        catalog.delete(first.id)
+        XCTAssertEqual(catalog.notSyncedHere, [shopID])
+        XCTAssertTrue(catalog.applySynced([shop]) { _, _ in UUID() }.isEmpty, "deleted here: the next sync does not make it again")
+        XCTAssertFalse(catalog.sessions.contains { $0.syncedProfileID == shopID })
+
+        let reloaded = SessionCatalog(store: LumenStore(root: root))
+        XCTAssertEqual(reloaded.notSyncedHere, [shopID], "remembered across a relaunch")
+        let own = reloaded.create(name: "Своя")
+        reloaded.delete(own.id)
+        XCTAssertEqual(reloaded.notSyncedHere, [shopID], "an iPhone's own session leaves nothing behind")
+
+        reloaded.syncAgainHere()
+        let again = try XCTUnwrap(reloaded.applySynced([shop]) { _, _ in UUID() }.first, "brought back: made again")
+        XCTAssertNotEqual(again.storeID, first.storeID, "with a store of its own, new")
+        XCTAssertTrue(SessionCatalog(store: LumenStore(root: root)).notSyncedHere.isEmpty)
+    }
+
     /// Audit 3, #16: two of the Mac's profiles on one gateway, with the same login and different
     /// passwords (the country or the sticky session in the password), get an entry each — neither
     /// password written over the other's — and the entry of one profile follows its new password.

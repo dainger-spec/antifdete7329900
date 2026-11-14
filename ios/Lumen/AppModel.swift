@@ -45,6 +45,9 @@ final class AppModel: ObservableObject {
     let store: LumenStore
     let catalog: SessionCatalog
     @Published private(set) var sessions: [Session] = []
+    /// The Mac's profiles whose sessions were deleted here: the sync does not bring them back
+    /// (`SessionCatalog.notSyncedHere`).
+    @Published private(set) var notSyncedHere: Set<UUID> = []
     @Published private(set) var proxies: [ProxyEntry] = []
     @Published var path: [UUID] = []
     /// Set once a reset launch has removed every WebKit store (the UI waits for it).
@@ -107,6 +110,7 @@ final class AppModel: ObservableObject {
 
     func refresh() {
         sessions = catalog.sessions
+        if notSyncedHere != catalog.notSyncedHere { notSyncedHere = catalog.notSyncedHere }
         if proxies.isEmpty { proxies = store.loadProxies() }
     }
 
@@ -216,6 +220,12 @@ final class AppModel: ObservableObject {
         refreshRuntimes()
         changed.forEach(check)
         return made.count
+    }
+
+    /// The Mac's profiles deleted here come back as sessions at the next sync.
+    func syncAgainHere() {
+        catalog.syncAgainHere()
+        refresh()
     }
 
     // MARK: Proxies

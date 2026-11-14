@@ -4,11 +4,18 @@ import Foundation
 /// delete. Every change is written at once.
 public final class SessionCatalog {
     public private(set) var sessions: [Session]
+    /// The Mac's profiles whose sessions were deleted on this iPhone: the sync makes none of them a
+    /// session again. Deleting a session made from the vault stops that profile's sync to this
+    /// iPhone — the profile on the Mac is not touched — until the person brings them back
+    /// (`syncAgainHere`).
+    public private(set) var notSyncedHere: Set<UUID>
     private let store: LumenStore
 
     public init(store: LumenStore) {
         self.store = store
-        sessions = store.loadSessions()
+        let catalogue = store.loadCatalogue()
+        sessions = catalogue.sessions
+        notSyncedHere = catalogue.notSyncedHere
     }
 
     @discardableResult
@@ -54,12 +61,23 @@ public final class SessionCatalog {
         update(id) { $0.lastOpenedAt = date }
     }
 
-    /// Removes the session from the list and its files; the caller removes its WebKit store.
+    /// Removes the session from the list and its files; the caller removes its WebKit store. A
+    /// session made from the Mac's vault is not made again by the next sync (`notSyncedHere`).
     public func delete(_ id: UUID) {
+        if let profileID = session(id)?.syncedProfileID { notSyncedHere.insert(profileID) }
         sessions.removeAll { $0.id == id }
         store.removeSessionFiles(id)
         save()
     }
+
+    /// The Mac's profiles deleted here come back as sessions at the next sync (new ones: their
+    /// cookies come from the vault, as a profile's first time here).
+    public func syncAgainHere() {
+        guard !notSyncedHere.isEmpty else { return }
+        notSyncedHere = []
+        save()
+    }
+
 
     /// A proxy removed from the list leaves its sessions without one (never with a dangling id).
     public func forgetProxy(_ proxyID: UUID) {
@@ -104,11 +122,12 @@ public final class SessionCatalog {
     /// Mac's after that. A profile with a proxy gets it (`proxyID` gives the entry for it, asked with
     /// the session as it is) and is bound to proxies at once; one whose proxy the iPhone cannot use
     /// comes with none, and bound: locked until a proxy is chosen (decision 6). The iPhone's own
-    /// sessions are not touched; a profile the Mac no longer has stays here. Returns the sessions made.
+    /// sessions are not touched; a profile the Mac no longer has stays here; one whose session was
+    /// deleted here is not made again (`notSyncedHere`). Returns the sessions made.
     @discardableResult
     public func applySynced(_ profiles: [SyncedProfile], proxyID: (SyncedProfile.Proxy, Session) -> UUID) -> [Session] {
         var made: [Session] = []
-        for profile in profiles {
+        for profile in profiles where !notSyncedHere.contains(profile.id) {
             var session: Session
             if let found = sessions.first(where: { $0.syncedProfileID == profile.id }) {
                 session = found
@@ -152,5 +171,5 @@ public final class SessionCatalog {
         save()
     }
 
-    private func save() { store.saveSessions(sessions) }
+    private func save() { store.saveSessions(sessions, notSyncedHere: notSyncedHere) }
 }

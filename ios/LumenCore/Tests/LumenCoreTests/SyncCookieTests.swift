@@ -8,8 +8,12 @@ final class SyncCookieTests: XCTestCase {
     final class Stores: SyncCookieStores, @unchecked Sendable {
         let lock = NSLock()
         var stores: [UUID: [SyncedCookie]] = [:]
+        /// Which store each session has, as the app's WebKit stores tell it; none: the stores do not tell.
+        var ids: [UUID: UUID] = [:]
 
         func persistentCookies(profileID: UUID) async -> [SyncedCookie]? { lock.withLock { stores[profileID] } }
+
+        func storeID(profileID: UUID) async -> UUID? { lock.withLock { ids[profileID] } }
 
         func apply(set: [SyncedCookie], delete: [SyncedCookie], profileID: UUID) async {
             lock.withLock {
@@ -73,5 +77,86 @@ final class SyncCookieTests: XCTestCase {
         // A profile with no session here is passed over.
         let none = await stores.persistentCookies(profileID: UUID())
         XCTAssertNil(none)
+    }
+
+    /// The Mac's profile with its sign-in on the server, and the iPhone's key and folder for its vault.
+    func signedInOnTheMac() async throws -> (repository: ProfileRepository, shop: UUID, mac: LumenSyncTransport,
+                                              phone: LumenSyncTransport, key: Data, root: URL) {
+        let server = SyncTransportTests.Server()
+        server.generation = nil
+        let vault = try MasterVault.create(in: try folder(), password: "vault-pass-1", iterations: 1_000)
+        let repository = try ProfileRepository(vault: vault)
+        let shop = try repository.create(name: "Магазин", configuration: ProfileConfiguration())
+        let expires = Date().addingTimeInterval(30 * 86400)
+        let signedInOnMac = Date().addingTimeInterval(-3600)
+        let signIn = ["sid", "csrf"].map { name in
+            CookieJarDocument.Entry(cookie: ImportedCookie(name: name, value: "mac-\(name)", domain: "shop.example", hostOnly: true,
+                                                           path: "/", expires: expires, secure: true), updatedAt: signedInOnMac)
+        }
+        try repository.saveCookieJar(CookieJarDocument(cookies: signIn), for: shop.id)
+        let mac = LumenSyncTransport(vaultID: vault.vaultID) { m, p, b, h in server.answer(m, p, b, h) }
+        _ = try await SyncEngine(repository: repository, transport: mac).sync()
+        let header = try VaultHeader.decodeChecked(XCTUnwrap(server.objects["vault-header"]?.data))
+        let key = try MasterVault.deviceUnlockKey(password: "vault-pass-1", header: header)
+        let phone = LumenSyncTransport(vaultID: vault.vaultID) { m, p, b, h in server.answer(m, p, b, h) }
+        return (repository, shop.id, mac, phone, key, try folder().appendingPathComponent("vault"))
+    }
+
+    /// Audit 3, #2: a session deleted on the iPhone and made again has a new, empty store. Measured
+    /// against the old store's baseline, every cookie of the profile would be recorded as deleted —
+    /// and, synced, deleted on the Mac. A baseline counts only for the store it was taken from.
+    func testASessionMadeAgainDeletesNoCookieOfTheMacs() async throws {
+        let (repository, shop, mac, phone, key, root) = try await signedInOnTheMac()
+        let stores = Stores()
+        stores.stores[shop] = []
+        stores.ids[shop] = UUID()
+        let first = try await SyncRead.pull(root: root, key: key, transport: phone, keptGeneration: nil, cookies: stores)
+        XCTAssertEqual(stores.value("sid", shop), "mac-sid", "the Mac's sign-in came to the session")
+
+        // Deleted and made again before the next run: another store, empty.
+        try await Task.sleep(nanoseconds: 1_100_000_000)
+        stores.stores[shop] = []
+        stores.ids[shop] = UUID()
+        let second = try await SyncRead.pull(root: root, key: key, transport: phone, keptGeneration: first.generation, cookies: stores)
+        XCTAssertEqual(stores.value("sid", shop), "mac-sid", "the new store gets the Mac's sign-in, as a first time")
+        XCTAssertEqual(stores.value("csrf", shop), "mac-csrf")
+        let copy = try ProfileRepository(vault: MasterVault.open(in: root, deviceUnlockKey: key))
+        XCTAssertEqual(try copy.cookieJar(for: shop).deleted, [], "the old store's cookies are not recorded as deleted")
+
+        // The runs after it send no deletion: the Mac keeps its sign-in.
+        _ = try await SyncRead.pull(root: root, key: key, transport: phone, keptGeneration: second.generation, cookies: stores)
+        _ = try await SyncEngine(repository: repository, transport: mac).sync()
+        let jar = try repository.cookieJar(for: shop)
+        XCTAssertEqual(Set(jar.cookies.map(\.cookie.name)), ["sid", "csrf"], "the Mac's sign-in stays")
+        XCTAssertEqual(jar.deleted, [])
+    }
+
+    /// A profile with no session here keeps no baseline: a session made for it later starts from none.
+    func testAProfileWithNoSessionHereKeepsNoBaseline() async throws {
+        let (repository, shop, mac, phone, key, root) = try await signedInOnTheMac()
+        let stores = Stores()
+        stores.stores[shop] = []
+        stores.ids[shop] = UUID()
+        let first = try await SyncRead.pull(root: root, key: key, transport: phone, keptGeneration: nil, cookies: stores)
+        XCTAssertEqual(BaselineStores.load(root: root)[shop], stores.ids[shop], "the baseline names its store")
+
+        // The session deleted: the next run drops the baseline it had.
+        stores.stores[shop] = nil
+        stores.ids[shop] = nil
+        let second = try await SyncRead.pull(root: root, key: key, transport: phone, keptGeneration: first.generation, cookies: stores)
+        let copy = try ProfileRepository(vault: MasterVault.open(in: root, deviceUnlockKey: key))
+        XCTAssertEqual(try copy.cookieBaseline(for: shop), CookieBaseline(), "no baseline without a session")
+        XCTAssertNil(BaselineStores.load(root: root)[shop])
+
+        // Made again: its new store gets the Mac's cookies, and nothing is deleted anywhere.
+        try await Task.sleep(nanoseconds: 1_100_000_000)
+        stores.stores[shop] = []
+        stores.ids[shop] = UUID()
+        let third = try await SyncRead.pull(root: root, key: key, transport: phone, keptGeneration: second.generation, cookies: stores)
+        XCTAssertEqual(stores.value("sid", shop), "mac-sid")
+        XCTAssertEqual(third.cookiesDeleted, 0)
+        _ = try await SyncRead.pull(root: root, key: key, transport: phone, keptGeneration: third.generation, cookies: stores)
+        _ = try await SyncEngine(repository: repository, transport: mac).sync()
+        XCTAssertEqual(try repository.cookieJar(for: shop).deleted, [], "no deletion reached the Mac")
     }
 }
