@@ -451,6 +451,18 @@ final class NetworkGuard: NSObject, ObservableObject {
         return data.flatMap { try? JSONDecoder().decode(GuardReport.self, from: $0) }
     }
 
+    /// The kernel's UDP sockets on local port `port`, as the guard reads them — as root, where
+    /// macOS 27 lists to this process only its own (`NetworkGuardControl.udpSockets`). Nil without a
+    /// guard that answers, or when it could not read them.
+    func udpSockets(onPort port: UInt16) async -> [KernelSocket]? {
+        guard let connection else { return nil }
+        let data = await call(connection, { (guardian: NetworkGuardControl, done: @escaping (Data) -> Void) in
+            guardian.udpSockets(onPort: port) { done($0) }
+        })
+        guard let data, !data.isEmpty else { return nil }
+        return try? JSONDecoder().decode([KernelSocket].self, from: data)
+    }
+
     /// While it holds processes, the guard is asked every 5 seconds whether its filter still runs:
     /// switched off in System Settings, the extension lives on but filters nothing.
     private func startHeartbeat() {

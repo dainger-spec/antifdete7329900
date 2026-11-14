@@ -955,12 +955,16 @@ extension BrowserWindowController: BrowserTabHost {
     }
 
     func tab(_ tab: BrowserTab, createTabWith configuration: WKWebViewConfiguration) -> WKWebView? {
+        // The warm-up's window holds the robot's tab alone, out of sight: a window a page opens there
+        // (a popunder on the robot's click) is refused — taken as a tab, it would take the robot's
+        // place in the window, and nothing would stop it saving a file.
+        guard !isForWarmUp else { return nil }
         // The configuration WebKit passes in carries the opener's data store and user scripts.
-        addTab(url: nil, configuration: configuration, select: true)?.webView
+        return addTab(url: nil, configuration: configuration, select: true)?.webView
     }
 
     func tab(_ tab: BrowserTab, openInBackground request: URLRequest) {
-        guard let url = request.url else { return }
+        guard !isForWarmUp, let url = request.url else { return }
         addTab(url: url, select: false)
     }
 
@@ -970,6 +974,8 @@ extension BrowserWindowController: BrowserTabHost {
 
     func tabNeedsAttention(_ tab: BrowserTab) {
         if let index = tabs.firstIndex(where: { $0 === tab }), index != selectedIndex { selectTab(at: index) }
+        // A minimised window is brought back: the dialog is a sheet on it.
+        if window?.isMiniaturized == true { window?.deminiaturize(nil) }
         window?.makeKeyAndOrderFront(nil)
     }
 }

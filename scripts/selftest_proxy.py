@@ -47,7 +47,8 @@ checks.
 `/pb-warmup/<name>?run=<id>` are pages for the session warm-up robot: each sets a cookie
 (`pbwarm_<name>=<id>`), is tall enough to scroll, and has, in view, one plain link to the same site
 (`Next article` → `/pb-warmup/<name>-next`) next to links the robot must never follow (sign-out,
-another site, a file, a new window); a page-world listener reports the page's scroll, wheel and
+another site, a file, a new window); its first click anywhere opens a window by script, as a
+popunder does (`/pb-warmup/popunder`, which the warm-up refuses); a page-world listener reports the page's scroll, wheel and
 click events and whether they were trusted (`/pb-warmup/event/<id>/<name>-<what>`), and what its page
 world can see of a robot (`window.webkit`, globals named like one) at its first scroll and click; a
 jump to a fragment `#x` is rewritten to `#/x`, as a single-page app's router might. `<name>` `alert`
@@ -300,6 +301,9 @@ def warmup_page(name: str, run: str) -> bytes:
         " addEventListener('wheel', (e) => report(e.isTrusted ? 'wheel' : 'wheel-untrusted'), {passive: true});"
         " document.addEventListener('click', (e) => { report(e.isTrusted ? 'click' : 'click-untrusted');"
         " try { localStorage.setItem('pbwarm-click', name + '-' + probe()); } catch (e) {} }, true);"
+        # A popunder: the first click anywhere opens a window by script, which the click lets through.
+        " let opened = false; document.addEventListener('click', () => { if (opened) return; opened = true;"
+        " try { window.open('/pb-warmup/popunder?run=' + encodeURIComponent(run), '_blank'); } catch (e) {} }, true);"
         # A router that writes `#part` as `#/part`, at load and when the fragment changes, as a
         # single-page app's might: WebKit 27 makes a new document of a jump to a fragment of a page
         # loaded through a proxy, where WebKit 26 keeps the page and sends it a hashchange.

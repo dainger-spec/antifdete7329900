@@ -37,8 +37,8 @@ public struct WarmUpStatus: Codable, Equatable, Sendable {
     /// until the last count has come back (a run stopped mid-page gets it a moment later).
     public var sites: [WarmUpCookieSite]?
     /// Why a run that did not finish stopped, or why a running one waits: "byUser",
-    /// "profileStopped", "tabClosed", "pageNeedsAttention", "waitingForTab". Nil otherwise (and from
-    /// a profile process of an older build).
+    /// "profileStopped", "tabClosed", "pageNeedsAttention", "tabNotShown", "waitingForTab". Nil
+    /// otherwise (and from a profile process of an older build).
     public var stopReason: String?
 
     public init(phase: Phase, visited: Int, total: Int, failed: Int = 0, cookies: Int = 0,

@@ -485,6 +485,100 @@ final class TURNServerTests: XCTestCase {
         XCTAssertEqual(server.allocationCount, 0)
     }
 
+    // MARK: Which clients may allocate
+
+    /// The server, asking `admit` about each client; the answers are given by the test.
+    func admittingServer(_ admit: @escaping TURNServer.Admit) -> TURNServer {
+        TURNServer(route: route(), relays: relays, now: { [unowned self] in self.clock },
+                   send: { [unowned self] payload, _, _ in self.sent.append(payload) }, admit: admit)
+    }
+
+    /// A client with the credentials whose socket is not the profile's: 403, and nothing is opened
+    /// through the proxy for it — not before the answer, not after.
+    func testAClientNotAdmittedIsForbiddenAndNoAssociationIsOpened() throws {
+        var asked: [(client: SocketAddress, server: SocketAddress)] = []
+        var answers: [(Bool) -> Void] = []
+        server = admittingServer { client, server, answer in
+            asked.append((client, server))
+            answers.append(answer)
+        }
+        let attributes: [(UInt16, [UInt8])] = [(STUNMessage.Attribute.requestedTransport, [17, 0, 0, 0])]
+        // The first, unauthenticated Allocate is challenged without asking.
+        let challenge = try exchange(turn.request(.allocate, attributes, authenticated: false))
+        XCTAssertEqual(challenge.attribute(STUNMessage.Attribute.errorCode).flatMap(STUNMessage.decodeErrorCode), 401)
+        XCTAssertTrue(asked.isEmpty)
+        turn.nonce = try XCTUnwrap(challenge.attribute(STUNMessage.Attribute.nonce))
+        let request = turn.request(.allocate, attributes)
+        sent.removeAll()
+        server.receive(request, from: client, to: relayAddress)
+        XCTAssertEqual(asked.count, 1)
+        XCTAssertEqual(asked.first?.client, client)
+        XCTAssertEqual(asked.first?.server, relayAddress)
+        XCTAssertTrue(sent.isEmpty, "no answer while the client is looked at")
+        XCTAssertTrue(relays.relays.isEmpty, "no association before the client is admitted")
+        // Its retransmission is the same transaction: not asked again, not answered yet.
+        server.receive(request, from: client, to: relayAddress)
+        XCTAssertEqual(asked.count, 1)
+        XCTAssertTrue(sent.isEmpty)
+        answers[0](false)
+        let raw = try XCTUnwrap(sent.last)
+        let refused = try XCTUnwrap(STUNMessage.parse(raw))
+        XCTAssertEqual(refused.messageClass, .error)
+        XCTAssertEqual(refused.attribute(STUNMessage.Attribute.errorCode).flatMap(STUNMessage.decodeErrorCode), 403)
+        XCTAssertTrue(STUNMessage.verifyIntegrity(raw, key: turn.key))
+        XCTAssertEqual(server.allocationCount, 0)
+        XCTAssertTrue(relays.relays.isEmpty)
+        // Its Bindings get the failed tuple's 500, never a relayed address.
+        let binding = try exchange(bindingRequest())
+        XCTAssertEqual(binding.attribute(STUNMessage.Attribute.errorCode).flatMap(STUNMessage.decodeErrorCode), 500)
+        // A late second answer changes nothing.
+        answers[0](true)
+        XCTAssertTrue(relays.relays.isEmpty)
+        XCTAssertEqual(server.allocationCount, 0)
+    }
+
+    /// A client admitted — at once or later — allocates as without the check.
+    func testAnAdmittedClientAllocates() throws {
+        server = admittingServer { _, _, answer in answer(true) }
+        let success = try allocate()
+        XCTAssertEqual(success.messageClass, .success)
+        XCTAssertEqual(STUNMessage.decodeXorAddress(try XCTUnwrap(success.attribute(STUNMessage.Attribute.xorRelayedAddress)),
+                                                    transactionID: success.transactionID), egress)
+        XCTAssertEqual(relays.relays.count, 1)
+
+        var pending: ((Bool) -> Void)?
+        let later = SocketAddress(ip: IPAddr("192.168.1.20")!, port: 50001)
+        sent.removeAll()
+        let other = admittingServer { _, _, answer in pending = answer }
+        var otherTurn = TURNTestClient(username: "user", realm: TunnelAddressing.realm, password: "secret", nonce: nil)
+        let attributes: [(UInt16, [UInt8])] = [(STUNMessage.Attribute.requestedTransport, [17, 0, 0, 0])]
+        other.receive(otherTurn.request(.allocate, attributes, authenticated: false), from: later, to: relayAddress)
+        otherTurn.nonce = try XCTUnwrap(STUNMessage.parse(try XCTUnwrap(sent.last))?.attribute(STUNMessage.Attribute.nonce))
+        sent.removeAll()
+        other.receive(otherTurn.request(.allocate, attributes), from: later, to: relayAddress)
+        XCTAssertTrue(sent.isEmpty)
+        XCTAssertEqual(relays.relays.count, 1)
+        try XCTUnwrap(pending)(true)
+        let answer = try XCTUnwrap(STUNMessage.parse(try XCTUnwrap(sent.last)))
+        XCTAssertEqual(answer.messageClass, .success)
+        XCTAssertEqual(other.allocationCount, 1)
+        XCTAssertEqual(relays.relays.count, 2)
+    }
+
+    /// The allocation went (its client deallocated it) before the answer came: nothing is opened.
+    func testAnAnswerForAnAllocationThatWentOpensNothing() throws {
+        var pending: ((Bool) -> Void)?
+        server = admittingServer { _, _, answer in pending = answer }
+        let attributes: [(UInt16, [UInt8])] = [(STUNMessage.Attribute.requestedTransport, [17, 0, 0, 0])]
+        turn.nonce = try XCTUnwrap(exchange(turn.request(.allocate, attributes, authenticated: false)).attribute(STUNMessage.Attribute.nonce))
+        server.receive(turn.request(.allocate, attributes), from: client, to: relayAddress)
+        _ = try exchange(turn.request(.refresh, [(STUNMessage.Attribute.lifetime, STUNMessage.uint32(0))]))
+        XCTAssertEqual(server.allocationCount, 0)
+        try XCTUnwrap(pending)(true)
+        XCTAssertTrue(relays.relays.isEmpty)
+        XCTAssertEqual(server.allocationCount, 0)
+    }
+
     func testExitTrace() {
         let trace = "fl=12f34\nh=1.1.1.1\nip=198.51.100.23\nts=1762000000.123\nvisit_scheme=https\nuag=Mozilla/5.0\ncolo=AMS\n"
         XCTAssertEqual(ExitTrace.ipv4(in: trace), IPAddr("198.51.100.23"))

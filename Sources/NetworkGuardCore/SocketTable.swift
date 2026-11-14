@@ -252,3 +252,41 @@ public enum GuardAttribution {
         return nil
     }
 }
+
+/// Whose socket a client of a profile's WebRTC relay sends from (`WebRTCRelays`, docs/TUNNEL.md).
+///
+/// The relay's credentials are the profile's pages' to use, and what a page holds a script can send
+/// elsewhere: with them alone, any process of this Mac — another profile, another browser — could
+/// allocate on the relay and get a relayed address at the profile's proxy exit. The relay therefore
+/// takes an allocation only from a UDP socket the kernel counts for the profile's process: WebKit's
+/// network process opens a page's WebRTC sockets on that process's behalf, and the kernel counts
+/// them for it (`KernelSocket.countedFor`), as the network guard reads them.
+public enum RelayClients {
+    public enum Verdict: Equatable, Sendable {
+        /// Every socket the client can be sending from is counted for the profile's process.
+        case profile
+        /// One is counted for this other process.
+        case other(Int32)
+        /// No socket of the client is in the table read (macOS 27 lists to a process that is not
+        /// root only its own sockets).
+        case notListed
+    }
+
+    /// The client at `clientAddress`:`clientPort` of the relay at `relayAddress`:`relayPort` (IP
+    /// literals), as `sockets` (the kernel's UDP table) has it: the sockets on the client's port bound
+    /// to its address or to any, connected to the relay, else those not connected — the ones a
+    /// datagram from that address and port can have come from.
+    public static func verdict(clientAddress: String, clientPort: UInt16, relayAddress: String, relayPort: UInt16,
+                               profilePID: Int32, in sockets: [KernelSocket]) -> Verdict {
+        guard clientPort != 0, let client = GuardPolicy.canonicalAddress(clientAddress),
+              let relay = GuardPolicy.canonicalAddress(relayAddress) else { return .notListed }
+        let onPort = sockets.filter {
+            $0.transport == .udp && $0.localPort == clientPort && ($0.localAddress == nil || $0.localAddress == client)
+        }
+        let toRelay = onPort.filter { $0.remoteAddress == relay && $0.remotePort == relayPort }
+        let candidates = toRelay.isEmpty ? onPort.filter { $0.remoteAddress == nil } : toRelay
+        guard !candidates.isEmpty else { return .notListed }
+        if let other = candidates.first(where: { $0.countedFor != profilePID }) { return .other(other.countedFor) }
+        return .profile
+    }
+}

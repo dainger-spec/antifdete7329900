@@ -226,8 +226,9 @@ itself: it comes only inside Lumen.app.
  profile process (pid P, SOCKS5 proxy X)          manager process (Lumen)
  ───────────────────────────────────────          ──────────────────────────────────────────────
  page: RTCPeerConnection                           WebRTCRelays: TURNUDPHost on 127.0.0.1:port
-   iceServers := [turn:127.0.0.1:port] (only)        per-launch username/password, 401 otherwise
-   iceTransportPolicy := relay                       allocation → SOCKS5 UDP ASSOCIATE @ X
+   iceServers := [turn:127.0.0.1:port] (only)        per-launch username/password, 401 otherwise;
+   iceTransportPolicy := relay                       a socket not counted for P → 403
+                                                     allocation → SOCKS5 UDP ASSOCIATE @ X
    (user script; the page sees its own config)       │                       (TCP control + UDP)
         │                                            ▼
  WebKit network process (for P)                    the proxy X ─────────► peers, STUN servers
@@ -245,7 +246,19 @@ itself: it comes only inside Lumen.app.
 - **The relay is in the manager**, not in the profile's process: a profile process with a proxy has
   the kernel refuse it every UDP datagram (`ProfileNetworkGuard.closeTheProcess`), and stays so.
   On 127.0.0.1 nothing outside this Mac can reach the relay; any process of this Mac can, and needs
-  the launch's own credentials (401 otherwise). Measured with WebKit's own TURN client (CI runs 609,
+  the launch's own credentials (401 otherwise) — and, since the third audit (14 November 2026), a
+  socket the kernel counts for the profile's process: the credentials are its pages' to use, a
+  script of a page could send them to a page of another profile or browser on this Mac, and with
+  them alone that page would get a relayed address at this profile's proxy exit. The relay asks the
+  kernel's table of UDP sockets whom the client's socket is counted for (`RelayClients`, the
+  attribution the guard holds flows by: WebKit's network process opens a page's WebRTC sockets on
+  the profile process's behalf); this process reads it where macOS shows it every socket (26), and
+  asks the guard, which reads it as root, where it shows a process that is not root only its own
+  (27). A socket of any other process, or one neither can read, gets 403 and no association. The
+  pages cannot read the credentials either: a blob worker's script carries no relay, and every
+  frame's `getConfiguration` hides it, also for a connection another frame made (`PrivacyScripts`).
+  The self-test's stand-in for the guard (CI cannot load one) and the capture harness let in a
+  client no table shows them. Measured with WebKit's own TURN client (CI runs 609,
   610, 612, macOS 26.6.2 and 27.0.1): relay candidates only, at the proxy's address; a data channel
   and a video call through the proxy; 0 packets of the app outside loopback but to the proxy.
 - **The order at a launch** (`ProfileManager.decideWebRTC`): the guard's state (once asking macOS
@@ -522,8 +535,14 @@ the guard drops each of those flows, because they are counted for the held profi
   (the same address, another one, the exit unknown).
 - `TURNServerTests`, one address: the exit's address on another port is relayed; another address,
   no exit, an IPv6 egress next to an IPv4 exit get 403, no allocation, the association closed;
-  the trace's parser.
-- The shim tests: the page's configuration, urls, tampering, named candidates.
+  the trace's parser. Which clients: a client not admitted gets 403 and no association, before
+  the answer nothing is opened, an admitted one allocates.
+- `SocketTableTests`, the relay's client: a socket counted for the profile's process (a flow of the
+  user-space stack, a delegated socket) is the profile's; one of another process, or the network
+  process's own, is not; only the sockets the datagram can have come from count; on macOS, this
+  process's own socket read from the kernel.
+- The shim tests: the page's configuration, urls, tampering, named candidates; another frame's
+  `getConfiguration` on a connection, and a blob worker's script, without the relay.
 - `NE=check`: the extension compiles, its plists lint, the provider is the filter alone, its
   entitlements give it no network.
 - The layout the kernel lets start ("What the kernel kills"): in the builds made there the app's own

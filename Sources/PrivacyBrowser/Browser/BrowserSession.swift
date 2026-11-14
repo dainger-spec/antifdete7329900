@@ -50,6 +50,10 @@ final class BrowserSession {
     static var onExitLocation: ((UUID, ProxyLocation?) -> Void)?
 
     private(set) var dataStore: WKWebsiteDataStore?
+    /// The pages' camera is drawn by the script, or refused by it ("No camera"): the engine itself
+    /// is never asked for the camera on their behalf, so a request that reaches it is refused
+    /// (`BrowserTab`, the app's own window).
+    private let cameraIsTheScripts: Bool
     private let userContentController: WKUserContentController
     /// Receives the AutoFill script's messages (registered in its own content world only).
     private let passwordHandler = PasswordAutoFillHandler()
@@ -76,6 +80,7 @@ final class BrowserSession {
         self.passwordVault = passwordVault
         self.passwordSettings = passwordSettings
         self.library = library
+        cameraIsTheScripts = PrivacyScripts.scriptHasCamera(for: configuration, systemCameraActive: systemCameraActive)
 
         // `.nonPersistent()` needs WebKit initialized but does not initialize it, and an ephemeral
         // profile can be the first WebKit use after unlock (see `ensureWebKitInitialized`).
@@ -154,7 +159,8 @@ final class BrowserSession {
                           phonePlatform: PhoneEngine.phone(of: configuration)?.platform,
                           proxyCredential: configuration.proxy.flatMap { proxy in
                               proxy.username.map { URLCredential(user: $0, password: proxy.password ?? "", persistence: .forSession) }
-                          })
+                          },
+                          refusesCamera: cameraIsTheScripts)
     }
 
     /// Applies this profile to a `WKWebViewConfiguration` that something else built — in a

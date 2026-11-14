@@ -4772,7 +4772,15 @@ final class SelfTest {
             finding(topic).map { "\($0.key) \($0.values) fix \($0.fix?.rawValue ?? "none")" } ?? "no finding (\(run.step))"
         }
 
+        // The check asks the profile's process for its network report, without the self-test's probe:
+        // what another app left on the clipboard must still be there after it.
+        let clipboardMarker = "pb-selftest-clipboard-\(UUID().uuidString)"
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(clipboardMarker, forType: .string)
         await run.run()
+        let clipboardAfter = NSPasteboard.general.string(forType: .string)
+        check("profile check: what is on the clipboard stays there (only the self-test's own probe clears it)",
+              clipboardAfter == clipboardMarker, clipboardAfter == nil ? "the clipboard was emptied" : "the clipboard holds something else")
         check("profile check: the proxy's exit is found through the proxy, and named",
               finding(.proxy)?.key == "check.proxy.alive" && finding(.proxy)?.values.first == "country:DE", said(.proxy))
         check("profile check: a time zone set elsewhere than the exit is found, with the fix that takes it from the connection",
@@ -7767,8 +7775,10 @@ final class SelfTest {
         check("warm-up: trusted pointer moves reach its pages (pages see a pointer before a click)",
               ["a", "b", "c"].contains { events.contains("\($0)-move") }, "\(events.filter { $0.contains("move") }.sorted())")
         let referers = Dictionary(log.map { ($0.path, $0.referer) }, uniquingKeysWith: { first, _ in first })
-        let refused = ["/pb-warmup/logout", "/pb-warmup/partner", "/pb-warmup/file.zip", "/pb-warmup/popup"]
-        check("warm-up: from each page it follows only the plain link of the same site (with the page as Referer), never sign-out, another site, a file or a new window",
+        // A window a page opens by script on the robot's click (the popunder of each page) is refused:
+        // it never loads, and never takes the robot's place in its window.
+        let refused = ["/pb-warmup/logout", "/pb-warmup/partner", "/pb-warmup/file.zip", "/pb-warmup/popup", "/pb-warmup/popunder"]
+        check("warm-up: from each page it follows only the plain link of the same site (with the page as Referer), never sign-out, another site, a file or a new window, and a window a page opens is refused",
               ["a", "b", "c"].allSatisfy { referers["/pb-warmup/\($0)-next"] == page($0) }
                   && !log.contains { refused.contains($0.path) }
                   && loaded.allSatisfy { $0.followed?.path == "\($0.url.path)-next" && $0.followedOutcome == .loaded },
