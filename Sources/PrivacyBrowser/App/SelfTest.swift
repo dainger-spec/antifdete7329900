@@ -401,6 +401,7 @@ final class SelfTest {
         await group("processor count") { try await processorCountInOwnProcess(repository) }
         await group("a phone's window") { try await phoneWindowAndSearch(repository) }
         await group("closing a profile's window") { try await closingTheWindowEndsTheProfile(repository) }
+        await group("a profile's process leaves nothing open") { try await profileProcessLeavesNothingOpen(repository) }
         await group("interface and websites' languages") { try await interfaceApartFromWebsites(repository) }
         await group("languages per profile") { try await languagesPerProfile(repository) }
         await group("a direct connection is an exit") { try await directConnectionIsAnExit(repository) }
@@ -5688,6 +5689,54 @@ final class SelfTest {
               "ended \(ended ? "with status \(exited.map(String.init) ?? "?")" : "NOT within 60 s"), seal \(sealReport == nil ? "NOT reported" : "reported"), "
               + "in plaintext: \(plaintext.isEmpty ? "nothing" : plaintext.joined(separator: ", ")), messages \(messages)")
         if !ended { await manager.shutDown() }
+    }
+
+    /// Every run of a profile in its own process gives back what the app opened for it: the object
+    /// that stands for the process, and both its pipes, go once the process has ended. Each run used
+    /// to keep two descriptors for as long as the app ran, and after a hundred or so runs the app
+    /// could open no file (audit 3, #5). Started and stopped six times, the app holds no more
+    /// descriptors than after the first run, and no process had to be killed.
+    private func profileProcessLeavesNothingOpen(_ repository: ProfileRepository) async throws {
+        let name = "profile process: started and stopped six times, the app holds no more descriptors than after the first, and kills none"
+        guard !AppEnvironment.isSandboxed else {
+            skip(name, "the sandboxed build runs no process per profile", .build)
+            return
+        }
+        let profile = try repository.create(name: "Runs and descriptors", configuration: ProfileConfiguration(
+            ephemeral: true, matchProxyLocation: false))
+        defer { try? repository.delete(profile.id) }
+        let manager = ProfileManager(repository: repository)
+        var running = false
+        manager.onProfileRunning = { _, _ in running = true }
+        func openDescriptors() -> Int { (try? FileManager.default.contentsOfDirectory(atPath: "/dev/fd"))?.count ?? -1 }
+        let given = ProcessInfo.processInfo.environment["PB_PROFILE_PROCESS"]
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        defer { if let given { setenv("PB_PROFILE_PROCESS", given, 1) } else { unsetenv("PB_PROFILE_PROCESS") } }
+        let killedBefore = ProfileProcess.forcedExits
+        var counts: [Int] = []
+        var failure: String?
+        for run in 1...6 {
+            running = false
+            do {
+                try await manager.launch(profile.id, openingWindow: false)
+            } catch {
+                failure = "run \(run) did not start: \(error)"
+                break
+            }
+            guard await waitUntil(timeout: 60, { running }) else {
+                failure = "run \(run) did not come up"
+                break
+            }
+            try await manager.stop(profile.id)
+            // Its last words are read, and its event pipe closed, a moment after its exit.
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            counts.append(openDescriptors())
+        }
+        await manager.shutDown()
+        let killed = ProfileProcess.forcedExits - killedBefore
+        // The first run opens what stays open for every later one (the log's, WebKit's): from the first on.
+        let grew = counts.count == 6 ? counts[5] - counts[0] : Int.max
+        check(name, failure == nil && killed == 0 && grew < 3, failure ?? "descriptors after each run \(counts), killed \(killed)")
     }
 
     private func mobileViewInItsOwnProcess(_ repository: ProfileRepository) async throws {

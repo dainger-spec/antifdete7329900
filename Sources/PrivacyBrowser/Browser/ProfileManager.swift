@@ -589,12 +589,17 @@ final class ProfileManager: ObservableObject {
             processorCores: stored.deviceGeneration.processorCores,
             cameraAllowed: cameraAllowed(),
             systemCameraActive: systemCameraActive)
-        child.onEvent = { [weak self] event in
-            guard let self else { return }
+        // The process object is held by `children` and, until its exit has been handled, by its own
+        // termination handler — never by what it calls: each of these held it, and it and its
+        // pipes were never freed (`ProfileProcess.didExit`).
+        child.onEvent = { [weak self, weak child] event in
+            guard let self, let child else { return }
             switch event {
             case .error(let message):
                 self.onError?(message)
             case .running(let hostsSafariChrome):
+                // A process stopped meanwhile says it too, as its launch returns into its quit.
+                guard self.children[id] === child else { break }
                 self.windowsUp.insert(id)
                 self.resumeWindowWaiters(of: id, up: true)
                 self.onProfileRunning?(id, hostsSafariChrome)
@@ -651,8 +656,8 @@ final class ProfileManager: ObservableObject {
                 self.onWindowLook?(id, look)
             }
         }
-        child.onExit = { [weak self] status in
-            guard let self else { return }
+        child.onExit = { [weak self, weak child] status in
+            guard let self, let child else { return }
             guard self.children[id] === child else {
                 // The manager no longer holds this process for the profile: nothing below runs for
                 // it (its home is sealed by whatever took it out, or at the next launch). Said, so
