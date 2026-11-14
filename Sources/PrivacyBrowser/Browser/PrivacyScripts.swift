@@ -1579,18 +1579,31 @@ function patchSystemCamera(w, sc) {
     const nativeGUM = MDP.getUserMedia;
     define(MDP, 'getUserMedia', method('getUserMedia', 1, function (constraints) {
       const self = this;
-      // The page's own arguments, kept here: inside the async function below `arguments` is that
-      // function's own (empty), and getUserMedia() with nothing in it is a TypeError.
-      const args = arguments;
-      const wantVideo = constraints && constraints.video;
-      if (!wantVideo) return ReflectApply(nativeGUM, self, args);
-      const videoObj = (typeof wantVideo === 'object') ? wantVideo : null;
+      // Nothing, null or not a dictionary: the engine's own answer to it, which asks for no device.
+      if (constraints === null || (typeof constraints !== 'object' && typeof constraints !== 'function')) {
+        return ReflectApply(nativeGUM, self, arguments);
+      }
+      // The request's members read once, in the engine's (lexicographic) order, and the engine handed
+      // a copy of what was read here, never the page's object: a getter answering it "video" where it
+      // answered this script "none" would open the Mac's default camera. WebIDL: null or any object
+      // asks for the device, anything else by its truth. Kept here too because inside the async
+      // function below `arguments` is that function's own.
+      const wantAudio = constraints.audio;
+      const wantVideo = constraints.video;
+      const request = ObjectCreate(null);
+      if (wantAudio !== undefined) request.audio = wantAudio;
+      if (wantVideo !== undefined) request.video = wantVideo;
+      const args = [request];
+      const askedVideo = wantVideo === null
+        || (wantVideo !== undefined && (typeof wantVideo === 'object' || typeof wantVideo === 'function' || !!wantVideo));
+      if (!askedVideo) return ReflectApply(nativeGUM, self, args);
+      const videoObj = (wantVideo !== null && typeof wantVideo === 'object') ? wantVideo : null;
       const already = videoObj && videoObj.deviceId && (videoObj.deviceId.exact || typeof videoObj.deviceId === 'string');
       if (already) return ReflectApply(nativeGUM, self, args);
-      // The page's constraints with the video pinned to the sentinel; everything else as it asked.
+      // The request with the video pinned to the sentinel; its video constraints and audio as asked.
       const onSentinel = function (id) {
-        const merged = {};
-        for (const key in constraints) merged[key] = constraints[key];
+        const merged = ObjectCreate(null);
+        if (wantAudio !== undefined) merged.audio = wantAudio;
         const vc = {};
         if (videoObj) { for (const k in videoObj) vc[k] = videoObj[k]; }
         vc.deviceId = { exact: id };

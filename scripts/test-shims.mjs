@@ -981,6 +981,21 @@ test('system camera: a denial, a call without video and a pinned device are the 
   await assert.rejects(run(w, `navigator.mediaDevices.getUserMedia()`), (e) => e.name === 'TypeError');
 });
 
+test('system camera: a request is read once, as the engine reads it — a getter that changes its answer never opens the Mac\'s camera', async () => {
+  for (const granted of [true, false]) {
+    const w = makeWindow(systemCamera(true), null, cameraPrelude({ granted }));
+    // No video the first time it is read, a video after: the engine is handed what was read, which asks for nothing.
+    await assert.rejects(run(w, `(() => { let n = 0; return navigator.mediaDevices.getUserMedia({ get video() { return n++ > 0; } }); })()`),
+                         (e) => e.name === 'TypeError', `granted ${granted}`);
+    assert.deepEqual(cameraState(w).opened, [], `granted ${granted}: a getter that changes its answer`);
+    // WebIDL: video null asks for the camera: the virtual one.
+    assert.deepEqual(await openedBy(w, { video: null }), [['video', 'lumen-cam', 'live']], `granted ${granted}: video null`);
+    const state = cameraState(w);
+    assert.equal(state.opened.filter((id) => id === 'real-cam').length, state.stopped.filter((id) => id === 'real-cam').length,
+                 `granted ${granted}: a real camera opened was stopped unseen`);
+  }
+});
+
 test('system camera: the track a page holds names the virtual camera with the profile\'s name, never "Lumen Camera"', async () => {
   const labels = (w, constraints) => run(w, `navigator.mediaDevices.getUserMedia(${JSON.stringify(constraints)}).then((s) => JSON.stringify(s.getTracks().map((t) => t.label)))`).then(JSON.parse);
   const w = makeWindow(systemCamera(true), null, cameraPrelude({ granted: true }));

@@ -210,7 +210,11 @@ all when the virtual one is not there, the same as "No camera":
 - the permission held and the devices named, none the sentinel → `NotFoundError`, and the real
   camera is not even opened;
 - a first visit whose grant shows no sentinel → what the engine opened is stopped unseen,
-  `NotFoundError`; a sentinel that will not open → its error, the real stream stopped.
+  `NotFoundError`; a sentinel that will not open → its error, the real stream stopped;
+- the request's members are read once, as WebIDL reads them (`video: null` asks for a camera, and
+  gets the virtual one), and the engine is handed a copy: a getter that answers "no video" to the
+  shim and "video" to the engine reached the Mac's default camera until the third audit
+  (14 November 2026).
 
 Until 0.1.8 each of these handed the page the Mac's real camera — a substitution that silently did
 not happen. "No camera" itself now blocks whatever the delivery was last set to (the editor keeps
