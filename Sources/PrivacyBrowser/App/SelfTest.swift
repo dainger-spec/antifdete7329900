@@ -4241,7 +4241,10 @@ final class SelfTest {
             .staleAppcast(generatedAt: Date(), newestAccepted: Date()), .invalidItem("x"), .notNewer(build: "1", running: "2"),
             .needsNewerSystem("26.0"), .archiveLength(expected: 2, found: 1), .archiveHash,
         ]
+        // A sync server's refusal by its code (`HTTPSyncTransport`): the Lumen server's, or one's own.
+        let refusals = [SyncServerRefusal(status: 507, code: "quota_exceeded"), SyncServerRefusal(status: 403, code: "forbidden")]
         let errors: [(Error, String)] = core.map { ($0, $0.description) } + update.map { ($0, $0.description) }
+            + refusals.map { ($0, $0.description) }
             + [(PasswordVaultError.duplicate, ""), (PasswordVaultError.notFound, "")]
         var wrong: [String] = []
         for (error, english) in errors {

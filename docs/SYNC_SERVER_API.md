@@ -1,9 +1,12 @@
 # Sync server API (v1)
 
 This is the HTTP contract `HTTPSyncTransport` speaks
-(`Sources/BrowserCore/Sync/Transports/HTTPSyncTransport.swift`). **No server is included.**
-The client is tested against an in-process stub that implements exactly these semantics
-(`Tests/BrowserCoreTests/SyncImprovementTests.swift`, `StubSyncServer`).
+(`Sources/BrowserCore/Sync/Transports/HTTPSyncTransport.swift`). **No server is included in this
+repository.** The Lumen account server implements it (its own repository, `docs/SYNC_SERVER.md` and
+`docs/CONTRACT.md` §16 there). The client is tested against in-process stubs that implement exactly
+these semantics (`Tests/BrowserCoreTests/SyncImprovementTests.swift`, `StubSyncServer`; with the Lumen
+server's generation and error bodies, `Tests/BrowserCoreTests/ServerGenerationTests.swift`,
+`GenerationStubServer`).
 
 The server is a dumb blob store. Every blob it receives is already end-to-end encrypted,
 except `vault-header`, which holds only the KDF salt, the KDF parameters and the wrapped
@@ -68,7 +71,32 @@ body = blob
 The check of the precondition and the write must be atomic, for example as a single
 conditional UPDATE in a database. `412` is not an error for the client: the engine reports
 the object as `deferred` and retries it on the next sync, after merging where the object
-type allows it.
+type allows it. So are `413` and `507` (no room left in the account's space, the Lumen server's):
+about that object only, which waits while the rest of the run goes on.
+
+### Optional: the server's generation of a vault
+
+A server that can lose a vault's data or go back to an older copy of it (a database restored from a
+backup, the data deleted by its owner) tells the client with a generation — the Lumen server does
+(its CONTRACT §16.2):
+
+```
+→ X-Lumen-Server-Generation: <32 lowercase hex> | none          on the list, a read, and a write's answer
+PUT … X-Lumen-Server-Generation: <the one the client works with>  on every write of a run
+→ 409 {"error": {"code": "generation_changed"}}                   another one there: nothing written
+```
+
+`none`: no such vault (a write with `none` makes it). The client keeps the generation with its sync
+state, and when a list names another one it forgets what it last synced and compares everything
+anew (SYNC_FORMAT.md, Engine algorithm, step 0); a `409` stops the run. A server that never sends
+the header is spoken to as before: the client sends none.
+
+### Errors
+
+A refusal may name its reason in the body, `{"error": {"code": "…", …}}` — the Lumen server's
+shape. `HTTPSyncTransport` then throws `SyncServerRefusal` with the code (and `availableAt`,
+`retryAfter` when they come with it); any other body stays `CoreError.syncServer` with its first
+200 characters.
 
 ## Limits and expectations
 
@@ -93,8 +121,8 @@ append-only log of `(object, revision, sha256(blob))`. That is not part of v1.
 |---|---|
 | Wire format (envelope, object IDs, AAD binding) | ready (`pbsync-2` since the vault's generation 2; `pbsync-1` still read) |
 | Client engine (merge, CAS, deferral, tombstones) | ready, unit-tested |
-| HTTP client for this API | ready, tested against an in-process stub |
+| HTTP client for this API | ready, tested against in-process stubs |
 | Folder transport | ready, **local-only** (NAS share, external disk) |
-| Server implementation | **not included** |
+| Server implementation | **not in this repository**; the Lumen account server implements it |
 | Accounts, token issuance, vault sharing between users | **not designed** |
 | Push notifications / live sync | not designed; the client syncs on demand |

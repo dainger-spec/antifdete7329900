@@ -490,13 +490,14 @@ final class FormatPolicyTests: XCTestCase {
     }
 
     /// What sync last saw, written by a newer version: the sync stops before it fetches or pushes
-    /// anything (starting over from nothing would push this device's files over newer ones).
+    /// anything (starting over from nothing would push this device's files over newer ones). Format 2
+    /// is this version's own: the records with the server generation they are of (CONTRACT §16.2).
     func testSyncStateOfANewerVersion() async throws {
         let transport = LocalDirectorySyncTransport(directory: root.appendingPathComponent("server"))
         let engine = try SyncEngine(repository: repository, transport: transport)
-        try SecureFile.write(AEAD.seal(newer, key: vault.syncEnvelopeKey, aad: engine.stateAAD), to: engine.stateURL)
+        try SecureFile.write(AEAD.seal(newerThan2, key: vault.syncEnvelopeKey, aad: engine.stateAAD), to: engine.stateURL)
         let state = try Data(contentsOf: engine.stateURL)
-        await assertRefused("sync-state.bin") { _ = try await engine.sync() }
+        await assertRefused("sync-state.bin", supported: 2) { _ = try await engine.sync() }
         let objects = try await transport.listObjects()
         XCTAssertTrue(objects.isEmpty)
         XCTAssertEqual(try Data(contentsOf: engine.stateURL), state)
