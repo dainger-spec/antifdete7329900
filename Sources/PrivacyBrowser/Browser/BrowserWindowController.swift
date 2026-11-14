@@ -974,6 +974,8 @@ extension BrowserWindowController: BrowserTabHost {
 
     func tabNeedsAttention(_ tab: BrowserTab) {
         if let index = tabs.firstIndex(where: { $0 === tab }), index != selectedIndex { selectTab(at: index) }
+        // A minimised window is brought back: the dialog is a sheet on it.
+        if window?.isMiniaturized == true { window?.deminiaturize(nil) }
         window?.makeKeyAndOrderFront(nil)
     }
 }

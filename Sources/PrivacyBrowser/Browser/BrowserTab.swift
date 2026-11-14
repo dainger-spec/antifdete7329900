@@ -634,16 +634,20 @@ extension BrowserTab: WKDownloadDelegate {
             if let destination { Self.pendingDownloads[key] = destination }
             completionHandler(destination)
         }
-        guard preferences.askWhereToSave, let window = webView.window, window.isVisible else {
+        guard preferences.askWhereToSave else {
             decide(Self.uniqueDownloadURL(suggestedFilename: suggestedFilename, in: preferences.downloadFolderURL))
             return
         }
+        // Asked for every download, as the setting says: one that starts in a tab not shown, or in a
+        // window minimised, brings that tab and its window up for the panel, as a page's dialog does
+        // (`presentSheet`). No window to ask in (the tab is closing) and the panel cancelled alike:
+        // no destination, so WebKit cancels the download and nothing is written.
         let panel = NSSavePanel()
         panel.nameFieldStringValue = Self.safeDownloadName(suggestedFilename)
         panel.directoryURL = preferences.downloadFolderURL
         panel.canCreateDirectories = true
-        // No destination: WebKit cancels the download, and nothing is written.
-        panel.beginSheetModal(for: window) { answer in decide(answer == .OK ? panel.url : nil) }
+        presentSheet(panel, begin: { panel.beginSheetModal(for: $0, completionHandler: $1) },
+                     respond: { answer in decide(answer == .OK ? panel.url : nil) })
     }
 
     /// A download's challenges: its certificate as a page's (`ServerTrust`), the proxy's own with

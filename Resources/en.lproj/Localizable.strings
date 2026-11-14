@@ -1670,7 +1670,7 @@
 "settings.downloads.folder.choosePrompt" = "Save Downloads Here";
 "settings.downloads.folder.default" = "Downloads Folder";
 "settings.downloads.ask" = "Ask where to save each download";
-"settings.downloads.ask.detail" = "A save panel opens over the window; cancelling it cancels the download.";
+"settings.downloads.ask.detail" = "A save panel opens over the window the download started in, for a background tab or a minimised window too (its tab is brought forward); cancelling it cancels the download.";
 "settings.downloads.note" = "Downloaded files are outside the profiles' encrypted storage: they stay where they were saved, unencrypted, when the profile stops.";
 "settings.updates.policy.detail" = "At quit, an update goes in once every profile is encrypted; Install Now asks first and lists what it stops.";
 "settings.shortcuts.subtitle" = "In the app's own windows.";

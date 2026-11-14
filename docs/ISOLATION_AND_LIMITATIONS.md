@@ -132,7 +132,7 @@ Background tabs keep running. WebKit may throttle timers in views that aren't in
 |---|---|---|
 | WebKit networking process | WebKit runs one network process per app, with one session per data store inside it | Isolation is per session (logical), not per OS process |
 | Device fingerprint | see §2 | Profiles can be linked by fingerprinting |
-| Downloads folder | Downloads go to `~/Downloads` in plaintext — or the folder Settings → Downloads names, or where the save panel is told (asking each time) | Outside the encrypted storage |
+| Downloads folder | Downloads go to `~/Downloads` in plaintext — or the folder Settings → Downloads names, or where the save panel is told (asking each time: also for a download of a background tab or a minimised window, whose tab and window are brought up for the panel; until the third audit, 14 November 2026, those went to the folder unasked) | Outside the encrypted storage |
 
 ## 2. Fingerprinting and "Apple device" consistency
 
