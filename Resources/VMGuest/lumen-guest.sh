@@ -22,7 +22,7 @@
 # link left in its place is replaced, not followed. What it keeps for itself is in a folder of
 # root's (/Library/Application Support/Lumen), not in /Users/Shared.
 
-TOOLS_VERSION=7
+TOOLS_VERSION=8
 SHARE="/Volumes/My Shared Files"
 OWN_MOUNT=/var/run/lumen-share
 TAG=com.apple.virtio-fs.automount
@@ -42,6 +42,39 @@ only() {
   esac
   return 0
 }
+
+# Every profile's machine is, to its macOS, a Mac it has never seen: a hardware identity of its
+# own. At the first sign-in on such a Mac, macOS shows the person its panes for a new Mac — and on
+# macOS 26 its "Welcome" screen, whose "Get Started" did not answer a click in a machine (a
+# client's report, 14 November). The person signed in by itself (the base's account) has seen
+# them all in the base's setup: they are marked seen for them here, at the start, before the
+# sign-in. Keys macOS does not know are not read; nothing of it reaches the network.
+quiet_setup_assistant() {
+  who="$1"
+  only 'A-Za-z0-9._-' "$who" || return 0
+  /usr/bin/id -u "$who" >/dev/null 2>&1 || return 0
+  version="$(/usr/bin/sw_vers -productVersion 2>/dev/null)"
+  build="$(/usr/bin/sw_vers -buildVersion 2>/dev/null)"
+  for key in DidSeeCloudSetup DidSeePrivacy DidSeeSiriSetup DidSeeTouchIDSetup DidSeeScreenTime \
+      DidSeeAppearanceSetup DidSeeAccessibility DidSeeActivationLock DidSeeApplePaySetup DidSeeAvatarSetup \
+      DidSeeiCloudLoginForStorageServices DidSeeSyncSetup DidSeeSyncSetup2 DidSeeTermsOfAddress \
+      DidSeeTrueTonePrivacy DidSeeIntelligence DidSeeLockdownMode DidSeeWelcome; do
+    /usr/bin/sudo -u "$who" /usr/bin/defaults write com.apple.SetupAssistant "$key" -bool true 2>/dev/null
+  done
+  if only '0-9.' "$version"; then
+    for key in LastSeenCloudProductVersion LastSeenDiagnosticsProductVersion LastSeenSiriProductVersion \
+        LastPreLoginTasksPerformedVersion; do
+      /usr/bin/sudo -u "$who" /usr/bin/defaults write com.apple.SetupAssistant "$key" -string "$version" 2>/dev/null
+    done
+  fi
+  if only 'A-Za-z0-9' "$build"; then
+    for key in LastSeenBuddyBuildVersion LastPreLoginTasksPerformedBuild; do
+      /usr/bin/sudo -u "$who" /usr/bin/defaults write com.apple.SetupAssistant "$key" -string "$build" 2>/dev/null
+    done
+  fi
+  /usr/bin/sudo -u "$who" /usr/bin/defaults write com.apple.SetupAssistant LastPrivacyBundleVersion -string 9999 2>/dev/null
+}
+quiet_setup_assistant "$(/usr/bin/defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser 2>/dev/null)"
 
 # mounted DIRECTORY: true when a volume is mounted there (it is on another device than the folder
 # it is in).

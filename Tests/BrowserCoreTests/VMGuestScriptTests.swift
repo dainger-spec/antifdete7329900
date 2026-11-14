@@ -68,6 +68,7 @@ final class VMGuestScriptTests: XCTestCase {
             if [ "$1" = read ]; then
               case "$2 $3" in
                 "/Applications/Safari.app/Contents/Info CFBundleShortVersionString") echo 27.2 ;;
+                "/Library/Preferences/com.apple.loginwindow autoLoginUser") [ -z "${AUTOLOGIN_USER-tester}" ] && exit 1; echo "${AUTOLOGIN_USER-tester}" ;;
                 "com.apple.dock orientation") [ -z "$DOCK_ORIENTATION" ] && exit 1; echo "$DOCK_ORIENTATION" ;;
                 "com.apple.dock autohide") [ -z "$DOCK_AUTOHIDE" ] && exit 1; echo "$DOCK_AUTOHIDE" ;;
                 "com.apple.dock tilesize") [ -z "$DOCK_TILESIZE" ] && exit 1; echo "$DOCK_TILESIZE" ;;
@@ -376,12 +377,36 @@ final class VMGuestScriptTests: XCTestCase {
             let run = try boot(settings: VMGuestSettings(profile: VMProfile(name: "A", appearance: "dark")).text,
                                environment: ["CONSOLE_USER": nobody])
             XCTAssertEqual(run.status, 0, nobody)
-            XCTAssertFalse(run.calls.contains { $0.hasPrefix("tester ") }, "\(nobody): \(run.calls)")
+            // Nothing of a person's — but macOS's panes for a new Mac, marked seen before any sign-in.
+            XCTAssertFalse(run.calls.contains { $0.hasPrefix("tester ") && !$0.contains("com.apple.SetupAssistant") }, "\(nobody): \(run.calls)")
             XCTAssertFalse(run.calls.contains { $0.contains("AppleInterfaceStyle") || $0.contains(" open ") }, "\(nobody): \(run.calls)")
             // The system's own is set all the same, and the status says which system this is.
             XCTAssertTrue(run.has("root scutil --set HostName MacBook-Air"), nobody)
             XCTAssertEqual(status().systemVersion, "27.2.1", nobody)
             XCTAssertNil(status().appliedRevision, nobody)
+        }
+    }
+
+    /// Each machine is a Mac its macOS has never seen: its panes for a new Mac — the "Welcome"
+    /// screen whose button did not answer in a client's machine — are marked seen for the person
+    /// who signs in by themselves, before anything else, and so before the sign-in.
+    func testMacOSsPanesForANewMacAreMarkedSeenBeforeTheSignIn() throws {
+        let run = try boot(settings: VMGuestSettings(profile: VMProfile(name: "A")).text)
+        for key in ["DidSeeCloudSetup", "DidSeePrivacy", "DidSeeIntelligence", "DidSeeWelcome", "DidSeeScreenTime"] {
+            XCTAssertTrue(run.has("tester defaults write com.apple.SetupAssistant \(key) -bool true"), "\(key): \(run.calls)")
+        }
+        XCTAssertTrue(run.has("tester defaults write com.apple.SetupAssistant LastSeenCloudProductVersion -string 27.2.1"))
+        XCTAssertTrue(run.has("tester defaults write com.apple.SetupAssistant LastSeenBuddyBuildVersion -string 26B131"))
+        XCTAssertTrue(run.has("tester defaults write com.apple.SetupAssistant LastPrivacyBundleVersion -string 9999"))
+        // First of all: before the shared folder is looked for, before any setting of the person's.
+        let marked = try XCTUnwrap(run.calls.firstIndex { $0.contains("com.apple.SetupAssistant") })
+        let firstOther = try XCTUnwrap(run.calls.firstIndex { !$0.contains("com.apple.SetupAssistant") && !$0.contains("loginwindow autoLoginUser") })
+        XCTAssertLessThan(marked, firstOther)
+
+        // No one signs in by themselves, or a name that is no account's: nothing is written.
+        for who in ["", "nobody-here", "a b; touch x"] {
+            let quiet = try boot(settings: VMGuestSettings(profile: VMProfile(name: "A")).text, environment: ["AUTOLOGIN_USER": who])
+            XCTAssertFalse(quiet.calls.contains { $0.contains("com.apple.SetupAssistant") }, "\(who): \(quiet.calls)")
         }
     }
 

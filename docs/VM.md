@@ -205,6 +205,14 @@ language and region (for the signed-in account), the computer's name; opens Safa
 profile's start page, if it has one); writes back which macOS and Safari this is; then waits for a
 file named `lumen-shutdown`, which it answers by quitting Safari and shutting macOS down.
 
+Before all that — at the start, before the automatic sign-in — it marks macOS's panes for a new
+Mac as seen for the person who signs in by themselves (`com.apple.SetupAssistant`: `DidSee…`,
+`LastSeen…` with this macOS's version and build; tools 8). Every profile's machine is a Mac its
+macOS has never seen, a hardware identity of its own, and at its first sign-in macOS showed them
+again — on macOS 26 its "Welcome" screen, whose "Get Started" did not answer a click in a client's
+machine (14 November). The person saw them all in the base's setup. Not measured on a Mac yet:
+which of the keys that screen reads.
+
 Shut Down in the app (or closing the machine's window) asks that way first — no question on the
 guest's screen — then presses the virtual power button after 20 seconds, and ends the machine after
 a minute.

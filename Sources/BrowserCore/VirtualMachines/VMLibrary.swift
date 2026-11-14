@@ -235,8 +235,11 @@ public enum VMSetupState: Equatable, Sendable {
 /// read-only (`VMGuestSettings.toolsShareTag`), not from the shared folder, which anything in
 /// the machine can write; the pictures are kept in a folder of root's; what the script writes into
 /// the shared folder is moved into place, and a picture there is read as the person.
+///
+/// 8: macOS's panes for a new Mac — its "Welcome" screen among them — marked seen for the person
+/// who signs in by themselves, at the start, before the sign-in.
 public enum VMGuestTools {
-    public static let version = 7
+    public static let version = 8
     /// From this version on an installed boot script takes a newer copy of itself at a machine's
     /// start: a base with tools this new needs nothing done to it for a later version's settings.
     public static let updatesItselfFrom = 2
