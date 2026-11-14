@@ -135,9 +135,17 @@ public struct ProxyListEntry: Codable, Equatable, Identifiable, Sendable {
     public var lastCheck: ProxyCheckResult?
     /// Added by the user, or given by the service. Nothing the list does yet depends on it.
     public var origin: ProxyOrigin
+    /// The provider's link that gives the proxy a new exit IP when it is opened — what mobile
+    /// proxies are sold with (`ProxyIPChange`). It holds the provider's key: it is kept as the
+    /// password is, in the encrypted list, and never logged.
+    public var changeIPURL: URL?
+    /// Change the IP (`changeIPURL`) each time a profile on this proxy is started from the app —
+    /// never while another running profile uses it (`ProxyIPChange.mayChange`).
+    public var changesIPOnLaunch: Bool
 
     public init(id: UUID = UUID(), label: String = "", proxy: ProxySettings, kindKnown: Bool = true, addedAt: Date = Date(),
-                lastCheck: ProxyCheckResult? = nil, origin: ProxyOrigin = .user) {
+                lastCheck: ProxyCheckResult? = nil, origin: ProxyOrigin = .user, changeIPURL: URL? = nil,
+                changesIPOnLaunch: Bool = false) {
         self.id = id
         self.label = label
         self.proxy = proxy
@@ -145,6 +153,8 @@ public struct ProxyListEntry: Codable, Equatable, Identifiable, Sendable {
         self.addedAt = addedAt
         self.lastCheck = lastCheck
         self.origin = origin
+        self.changeIPURL = changeIPURL
+        self.changesIPOnLaunch = changesIPOnLaunch
     }
 
     /// "host:port", an IPv6 host in brackets.
@@ -157,8 +167,12 @@ public struct ProxyListEntry: Codable, Equatable, Identifiable, Sendable {
     public var displayName: String { label.isEmpty ? address : label }
 
     private enum CodingKeys: String, CodingKey {
-        case id, label, proxy, kindKnown, addedAt, lastCheck, origin
+        case id, label, proxy, kindKnown, addedAt, lastCheck, origin, changeIPURL, changesIPOnLaunch
     }
+
+    /// Something of it a version from before IP changes would drop when it writes the list back
+    /// (R4): the list is then written in format 3 (`ProxyList.format(for:)`).
+    var hasIPChange: Bool { changeIPURL != nil || changesIPOnLaunch }
 
     /// Tolerant: a check result that no longer decodes (written by a later build) is dropped, never
     /// a reason to lose the proxy. An entry from before types could be unknown has a known one; one
@@ -172,6 +186,10 @@ public struct ProxyListEntry: Codable, Equatable, Identifiable, Sendable {
         addedAt = try c.decodeIfPresent(Date.self, forKey: .addedAt) ?? Date(timeIntervalSince1970: 0)
         lastCheck = (try? c.decodeIfPresent(ProxyCheckResult.self, forKey: .lastCheck)) ?? nil
         origin = try c.decodeIfPresent(ProxyOrigin.self, forKey: .origin) ?? .user
+        // As it was saved, even to a host the rule on entered links refuses: never dropped here
+        // (`ProxyIPChange.storedLink`); opening it is what is refused (`ProxyIPChange.mayOpen`).
+        changeIPURL = (try? c.decodeIfPresent(String.self, forKey: .changeIPURL)).flatMap { ProxyIPChange.storedLink(from: $0) }
+        changesIPOnLaunch = (try? c.decodeIfPresent(Bool.self, forKey: .changesIPOnLaunch)) ?? false
     }
 
     /// The user's own proxies are written as they were before origins (no key), so that a list of
@@ -185,6 +203,9 @@ public struct ProxyListEntry: Codable, Equatable, Identifiable, Sendable {
         try c.encode(addedAt, forKey: .addedAt)
         try c.encodeIfPresent(lastCheck, forKey: .lastCheck)
         if origin != .user { try c.encode(origin, forKey: .origin) }
+        // Only when set: a list without them is written as before.
+        try c.encodeIfPresent(changeIPURL?.absoluteString, forKey: .changeIPURL)
+        if changesIPOnLaunch { try c.encode(true, forKey: .changesIPOnLaunch) }
     }
 
     /// The proxy as a profile can use it: nil while its type is unknown.
@@ -267,7 +288,8 @@ public struct ProxyList: Codable, Equatable, Sendable {
                 result.overLimit += 1
                 continue
             }
-            let entry = ProxyListEntry(label: Self.cleanLabel(line.label), proxy: line.proxy, kindKnown: line.kindGiven, addedAt: time)
+            let entry = ProxyListEntry(label: Self.cleanLabel(line.label), proxy: line.proxy, kindKnown: line.kindGiven, addedAt: time,
+                                       changeIPURL: line.changeIPURL)
             entries.append(entry)
             known.insert(identity)
             result.added.append(entry.id)
@@ -363,6 +385,14 @@ public struct ProxyList: Codable, Equatable, Sendable {
         return before
     }
 
+    /// Sets entry `id`'s IP-change link (nil: none) and whether a launch changes the IP first —
+    /// which needs a link, so it is off without one.
+    public mutating func setIPChange(_ id: UUID, link: URL?, onLaunch: Bool) throws {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { throw EditProblem.notFound }
+        entries[index].changeIPURL = link
+        entries[index].changesIPOnLaunch = link != nil && onLaunch
+    }
+
     /// `a` and `b` are the same proxy (`identity(of:)`) reached the same way: the same type, TLS
     /// and password. A profile's proxy and an entry that are not have gone apart — say a password
     /// changed in the profile's editor — and the one never overwrites the other.
@@ -378,6 +408,8 @@ public struct ProxyList: Codable, Equatable, Sendable {
         var lines = ["# Lumen proxies. The user names and passwords below are in plaintext."]
         for entry in entries {
             var line = ProxyListImport.line(for: entry.proxy, kindKnown: entry.kindKnown)
+            // As providers and other browsers write it: the link in brackets right after the proxy.
+            if let link = entry.changeIPURL { line += "[" + link.absoluteString + "]" }
             let label = Self.cleanLabel(entry.label)
             if !label.isEmpty { line += "  # " + label }
             lines.append(line)
@@ -440,17 +472,20 @@ public struct ProxyList: Codable, Equatable, Sendable {
     }
 
     /// The newest format of the file this version reads and writes.
-    static let supportedFormat = 2
+    static let supportedFormat = 3
 
     /// The format this list is written in.
     var format: Int { Self.format(for: entries) }
 
     /// The format the list is written in: 1 while every proxy in it is the user's own — the file
-    /// as every version reads it — and 2 once one came from the service. A version from before
-    /// origins would read that one as the user's and write it back without its origin, so it is to
-    /// refuse the file instead (docs/UPDATES.md, R4).
+    /// as every version reads it — 2 once one came from the service, and 3 once one has an IP-change
+    /// link (or changes its IP at launch). A version from before origins would read a service's
+    /// proxy as the user's and write it back without its origin, and one from before IP changes
+    /// would write a proxy back without its link: each is to refuse the file instead
+    /// (docs/UPDATES.md, R4).
     static func format(for entries: [ProxyListEntry]) -> Int {
-        entries.contains { $0.origin != .user } ? 2 : 1
+        if entries.contains(where: \.hasIPChange) { return 3 }
+        return entries.contains { $0.origin != .user } ? 2 : 1
     }
 
     /// Moves an unkeyed container past an element that did not decode.

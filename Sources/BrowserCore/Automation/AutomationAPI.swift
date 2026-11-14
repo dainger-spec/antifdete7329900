@@ -271,8 +271,67 @@ public struct ScenarioRunSpec: Equatable, Sendable {
 }
 
 /// What a request asks for. A profile is named by its id or by its exact name.
+/// A profile the API is asked to make (`POST /v1/profiles`): by default a temporary one — it keeps
+/// nothing between launches — with the proxy given, started at once when asked. The one-call way
+/// to a fresh browser for a script: make it, take its WebDriver address, use it. It is not deleted
+/// by the API: deleting a profile is the person's alone (scripts/check_deletion_paths.py); a
+/// temporary profile has nothing to delete but its line in the list.
+public struct AutomationNewProfile: Equatable, Sendable {
+    /// Nil: "Temporary 2", "Temporary 3"… (`ProfileClone.names`).
+    public var name: String?
+    public var ephemeral: Bool
+    public var proxy: ProxySettings?
+    public var start: Bool
+    /// Started with a window of its own (false: out of sight, as a warm-up).
+    public var window: Bool
+
+    public init(name: String? = nil, ephemeral: Bool = true, proxy: ProxySettings? = nil, start: Bool = false, window: Bool = true) {
+        self.name = name
+        self.ephemeral = ephemeral
+        self.proxy = proxy
+        self.start = start
+        self.window = window
+    }
+
+    /// The request's body: `{"name", "temporary" (default true), "proxy": "socks5://user:pass@host:port",
+    /// "start" (default false), "window" (default true)}`.
+    static func read(_ body: [String: Any]) -> Result<AutomationNewProfile, AutomationRefusal> {
+        func bad(_ message: String) -> Result<AutomationNewProfile, AutomationRefusal> {
+            .failure(AutomationRefusal(.error(400, "bad_request", message)))
+        }
+        var request = AutomationNewProfile()
+        if let value = body["name"] {
+            guard let name = value as? String, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  name.trimmingCharacters(in: .whitespacesAndNewlines).count <= 128 else { return bad("name is 1–128 characters.") }
+            request.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let flags: [(String, WritableKeyPath<AutomationNewProfile, Bool>)] = [("temporary", \.ephemeral), ("start", \.start), ("window", \.window)]
+        for (key, keyPath) in flags {
+            guard let value = body[key] else { continue }
+            guard let flag = value as? Bool else { return bad("\(key) is true or false.") }
+            request[keyPath: keyPath] = flag
+        }
+        if let value = body["proxy"] {
+            guard let text = value as? String else { return bad("proxy is text: scheme://user:password@host:port.") }
+            switch ProxyListImport.readField(text) {
+            case .proxy(let line) where line.kindGiven:
+                request.proxy = line.proxy
+            case .proxy:
+                return bad("Give the proxy's scheme (socks5://, http:// or https://): its type is not guessed here.")
+            case .empty:
+                break
+            case .problem, .several:
+                return bad("proxy is one proxy: scheme://user:password@host:port.")
+            }
+        }
+        return .success(request)
+    }
+}
+
 public enum AutomationRoute: Equatable, Sendable {
     case listProfiles
+    /// Make a profile (`AutomationNewProfile`), and start it when asked.
+    case create(AutomationNewProfile)
     case profile(String)
     /// `window`: false starts it out of sight, as a warm-up does.
     case start(String, window: Bool)
@@ -304,6 +363,10 @@ public enum AutomationRoute: Equatable, Sendable {
         }
         switch rest.count {
         case 0:
+            if request.method == "POST" {
+                guard let body = object(request.body) else { return .failure(badJSON) }
+                return AutomationNewProfile.read(body).map { .create($0) }
+            }
             return only("GET") { .success(.listProfiles) }
         case 1 where !rest[0].isEmpty:
             return only("GET") { .success(.profile(rest[0])) }

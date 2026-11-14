@@ -114,7 +114,7 @@ jobs:
       - name: Build unsandboxed app, and the network guard and camera extensions (unsigned, NE=check CAM=check)
         # The extension needs a provisioned team to be signed and loaded (NE=1); CI compiles it
         # against this SDK and lays out its bundle so its plists are checked.
-        run: NE=check CAM=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+        run: NE=check CAM=check VM=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
       - name: Release, dry run (no Apple account, a throwaway update key)
         # scripts/release.sh end to end: the app built without the App Sandbox with an update feed and
         # keys, signed (ad hoc, the hardened runtime), its signature read back, then the release gate —
@@ -420,7 +420,7 @@ jobs:
         if: matrix.variant == 'unsandboxed'
         # The extension needs a provisioned team to be signed and loaded (NE=1); CI compiles it
         # against this SDK and lays out its bundle so its plists are checked.
-        run: NE=check CAM=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+        run: NE=check CAM=check VM=check SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
       - name: Self-test against real WebKit (${{ matrix.variant }})
         env:
           # A check skipped on this runner fails the step, but for the ones this runner cannot make

@@ -400,7 +400,8 @@ struct ProfileEditorForm: View {
                 Picker(L("editor.generation"), selection: $draft.deviceGenerationID) {
                     // The Mac's generation is this Mac's Safari, by its version (its catalog name
                     // said "macOS 26" on a Mac with Safari 27).
-                    ForEach(DeviceGenerations.all) { generation in
+                    // The iPad view is no longer offered; a profile that has it still shows it.
+                    ForEach(DeviceGenerations.offered + (generation.platform == .iPadOS ? [generation] : [])) { generation in
                         Text(generation.matchesEngine ? String(format: L("gen.macos.host"), HostSafari.version) : L(generation.nameKey))
                             .tag(generation.id)
                     }
@@ -630,13 +631,17 @@ struct ProfileEditorForm: View {
                 }
             }
             if draft.geoMode == .fixed {
+                LocationPicker(latitude: $draft.latitude, longitude: $draft.longitude, accuracy: $draft.accuracy,
+                               proxyPlace: draft.proxyPlace)
                 HStack(alignment: .top, spacing: 12) {
                     EditorField(L("editor.geo.lat")) { TextField(L("editor.geo.lat"), text: $draft.latitude, prompt: Text(verbatim: "")).lumenField("52.52", isEmpty: draft.latitude.isEmpty) }
                     EditorField(L("editor.geo.lon")) { TextField(L("editor.geo.lon"), text: $draft.longitude, prompt: Text(verbatim: "")).lumenField("13.405", isEmpty: draft.longitude.isEmpty) }
                     EditorField(L("editor.geo.accuracy")) { TextField(L("editor.geo.accuracy"), text: $draft.accuracy, prompt: Text(verbatim: "")).lumenField("50", isEmpty: draft.accuracy.isEmpty) }
                         .frame(width: 120)
                 }
+                EditorNote(L("editor.geo.search.privacy"))
             }
+            EditorNote(L("editor.geo.engine.note"))
             EditorDivider()
             localeChoice
             EditorNote(L("editor.location.footer"))
@@ -1637,7 +1642,8 @@ struct EditorField<Content: View>: View {
 }
 
 /// A setting with a switch on the right: its title, and what it does below.
-private struct EditorToggle: View {
+/// A switch with its title and, under it, what it does — the editor's, and the proxy sheet's.
+struct EditorToggle: View {
     let title: String
     var detail: String?
     @Binding var isOn: Bool

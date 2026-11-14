@@ -102,6 +102,9 @@ profile key (random 256-bit per profile, stored only wrapped)
    ├─ HKDF "cookie-baseline"   → cookies-baseline.bin          (AAD "cookie-baseline:v1:<uuid>")
    ├─ HKDF "warm-up"           → warmup.bin                    (AAD "warm-up:v1:<uuid>")
    ├─ HKDF "warm-up-schedule"  → warmup-schedule.bin           (AAD "warm-up-schedule:v1:<uuid>")
+   ├─ HKDF "warm-up-last"      → warmup-last.bin               (AAD "warm-up-last:v1:<uuid>")
+   ├─ HKDF "journal"           → journal.bin                   (AAD "journal:v1:<uuid>")
+   ├─ HKDF "restore-point"     → restore-points/<p>/point.bin  (AAD "restore-point:v1:<uuid>:<p>")
    └─ HKDF "webdata-archive", salt = random per archive → webdata.pbsa chunk key
 ```
 
@@ -173,6 +176,11 @@ Application Support/PrivacyBrowser/      (0700)
     cookies-baseline.bin          AES-GCM(cookie-baseline key, CookieBaseline JSON)   [this Mac only: the store at the last record or apply]
     warmup.bin                    AES-GCM(warm-up key, WarmUpPlan JSON)               [this Mac only: the last warm-up plan]
     warmup-schedule.bin           AES-GCM(warm-up-schedule key, WarmUpSchedule JSON)  [this Mac only, not exported: every N hours, last run]
+    warmup-last.bin               AES-GCM(warm-up-last key, WarmUpRecord JSON)        [this Mac only, not exported: how the last run went]
+    journal.bin                   AES-GCM(journal key, ProfileJournal JSON)           [this Mac only, not exported: what happened to the profile]
+    restore-points/<p>/           copies of webdata.pbsa, safarihome.pbsa, history.bin, cookies.bin, cookies-baseline.bin,
+                                  tabs.bin as they were (still encrypted), and point.bin AES-GCM(restore-point key,
+                                  RestorePoint JSON)                                   [this Mac only, not exported]
     tabs.bin                      AES-GCM(open-tabs key, OpenTabs JSON)               [this Mac only, not synced or exported: http(s) tabs
                                                                                        left open, with Settings → Startup → restore tabs]
     <file>.unreadable             a file that could not be read (damaged, cut short, another key's), moved aside instead of being
@@ -480,6 +488,27 @@ ProfilesScreen ── ProfileSelection (click / ⌘-click / ⇧-click) ── Pr
   row, ⌘-click toggles, ⇧-click extends in display order; rows the filter or search hides are never
   acted on. Warm-up of several profiles goes through `ProfileActions.warmUpSeveral`, which today
   opens the warm-up of the first: the hook a warm-up queue takes.
+
+## Virtual machines
+
+A build made with `VM=1` has profiles that are whole Macs (docs/VM.md). They are a separate kind of
+profile, beside the ordinary ones, with their own list (`vms.bin`, encrypted in the vault, like the
+proxy list) and their own section of the Profiles window:
+
+- `BrowserCore/VirtualMachines` — the model: `VMProfile`/`VMProfiles`, the library on disk
+  (`VMLibrary`), the setup's state, the resumable download's decisions (`VMDownload`), what the
+  guest is told (`VMGuestSettings`), and the helper's protocol (`VMHelperRequest`, `VMHelperEvent`).
+  Platform-independent, tested on Linux.
+- `VMNetCore` — the network of a machine with a proxy: a userspace stack at the other end of the
+  machine's network card that carries every connection through the proxy (docs/VM_NETWORK.md).
+- `LumenVM` — the helper executable, the only code that loads Virtualization.framework and holds
+  `com.apple.security.virtualization`. One process per machine; a request on stdin, events on stdout.
+- `VMCenter` (the app) — made at unlock, dropped at lock: the one-time setup (ask Apple, fetch,
+  install, first-run setup in the base), the profiles, the machines running now, their shutdown
+  before Lock and Quit.
+
+The machines' disks are in `<vault folder>/VirtualMachines`, not sealed by the vault (docs/VM.md
+says why, and what protects them).
 
 ## Tabs
 

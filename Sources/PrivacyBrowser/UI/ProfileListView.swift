@@ -116,6 +116,8 @@ struct ProfileListView: View {
     @State private var passwordsFor: ProfileSummary?
     @State private var importingCookiesFor: ProfileSummary?
     @State private var warmingUp: ProfileSummary?
+    @State private var restoringFor: ProfileSummary?
+    @State private var duplicating: ProfileSummary?
     @State private var whatSitesSeeFor: ProfileSummary?
     @State private var warmingUpSeveral = false
     /// The profiles the warm-up queue opens with ticked (the selection's bar).
@@ -154,6 +156,9 @@ struct ProfileListView: View {
             .sheet(item: $passwordsFor) { profile in PasswordListView(profile: profile) }
             .sheet(item: $importingCookiesFor) { profile in CookieImportView(profile: profile) }
             .sheet(item: $warmingUp) { profile in WarmUpView(profile: profile) }
+            // What it changes reaches the inspector through the journal (`AppModel.recordInJournal`).
+            .sheet(item: $restoringFor) { profile in RestorePointsView(profile: profile) }
+            .sheet(item: $duplicating) { profile in DuplicateProfileView(profile: profile) }
             .sheet(item: $whatSitesSeeFor) { profile in
                 WhatSitesSeeView(name: profile.name, snapshot: WhatSitesSee(profileID: profile.id, manager: { model.manager },
                                                                             launch: { await model.launch($0) }),
@@ -338,6 +343,7 @@ struct ProfileListView: View {
                        filter: $filter, search: $search, actions: actions,
                        section: $section, proxyCount: proxyCount,
                        proxies: AnyView(ProxyListView(selection: $proxySelection)),
+                       virtualMachines: VMCenter.isOffered ? AnyView(VirtualMachinesView(openAccount: actions.openAccount)) : nil,
                        indexNotice: model.indexNotice, revealVault: { model.revealVaultFolder() },
                        keptDeleted: model.keptDeletedProfiles,
                        bringBack: { id in Task { await model.bringBackDeletedProfile(id) } },
@@ -456,7 +462,10 @@ struct ProfileListView: View {
             let running = model.isRunning(profile.id)
             let busy = model.isBusy(profile.id)
             let details = model.details[profile.id]
-            let activity: ProfileRowItem.Activity = busy ? (running ? .starting : .sealing) : (running ? .running : .stopped)
+            // Its proxy getting a new IP before it starts is part of starting.
+            let changingIP = !running && model.changingIPBeforeLaunch.contains(profile.id)
+            let activity: ProfileRowItem.Activity = changingIP ? .starting
+                : busy ? (running ? .starting : .sealing) : (running ? .running : .stopped)
             let warmUp = model.manager?.warmUpStatus(of: profile.id)
             let problem = model.proxyProblems.first { $0.profileID == profile.id }
             // No details: its settings could not be read (`AppModel.refresh`) — not "Direct" (R1).
@@ -478,6 +487,7 @@ struct ProfileListView: View {
             }
             return ProfileRowItem(
                 id: profile.id, name: profile.name, activity: activity,
+                changingIP: changingIP,
                 exit: exit,
                 ephemeral: details?.ephemeral ?? false,
                 // Settings that could not be read say nothing of how it appears: no default shown for them.
@@ -541,6 +551,8 @@ struct ProfileListView: View {
             importCookies: { id in importingCookiesFor = summary(id) },
             exportCookies: { id in exportingCookies = summary(id) },
             warmUp: { id in warmingUp = summary(id) },
+            restorePoints: { id in restoringFor = summary(id) },
+            duplicate: { id in duplicating = summary(id) },
             whatSitesSee: { id in whatSitesSeeFor = summary(id) },
             exportProfile: { id in exporting = summary(id) },
             importProfile: { importingProfile = true },
@@ -587,10 +599,12 @@ enum ProxySheet: Identifiable, Equatable {
     var id: String { "problems" }
 }
 
-/// What the Profiles window's main area shows: the profiles (through a filter), or the proxy list.
+/// What the Profiles window's main area shows: the profiles (through a filter), the proxy list, or
+/// the virtual machines (docs/VM.md).
 enum ProfilesSection: Equatable {
     case profiles
     case proxies
+    case virtualMachines
 }
 
 // MARK: - What the screen shows
@@ -602,6 +616,8 @@ struct ProfileRowItem: Identifiable {
     let id: UUID
     var name: String
     var activity: Activity
+    /// Starting, and first its proxy is getting a new IP (`ProxyListEntry.changesIPOnLaunch`).
+    var changingIP = false
     var exit: ProfileExit
     var ephemeral: Bool
     var appearsAs: String
@@ -632,6 +648,8 @@ struct ProfileRowItem: Identifiable {
     var directCountry: String?
 
     var isRunning: Bool { activity == .running }
+    /// "Starting…", or "Changing IP…" while its proxy gets a new IP first.
+    var startingText: String { changingIP ? L("profiles.row.changingIP") : L("profiles.row.starting") }
     /// Grouped under "Need attention": its last launch failed, or its settings cannot be read (R1).
     var needsAttention: Bool { problem != nil || exit == .unreadable }
     var isBusy: Bool { activity == .starting || activity == .sealing }
@@ -764,6 +782,10 @@ struct ProfileActions {
     var importCookies: (UUID) -> Void = { _ in }
     var exportCookies: (UUID) -> Void = { _ in }
     var warmUp: (UUID) -> Void = { _ in }
+    /// The profile's restore points and journal (`RestorePointsView`).
+    var restorePoints: (UUID) -> Void = { _ in }
+    /// Copies of the profile (`DuplicateProfileView`).
+    var duplicate: (UUID) -> Void = { _ in }
     /// What a page measures in the profile next to Safari (`WhatSitesSeeView`).
     var whatSitesSee: (UUID) -> Void = { _ in }
     var exportProfile: (UUID) -> Void = { _ in }
@@ -826,6 +848,9 @@ struct ProfilesScreen: View {
     var section: Binding<ProfilesSection> = .constant(.profiles)
     var proxyCount: Int?
     var proxies: AnyView?
+    /// The virtual machines as a section of the window (`VirtualMachinesView`); nil: this build
+    /// carries no machines (`VMCenter.isOffered`), and the sidebar has no such item.
+    var virtualMachines: AnyView?
     /// The vault's profile index missing or unreadable, or profile folders it does not list
     /// (AppModel.indexNotice): said above the list, with the vault's folder in the Finder.
     var indexNotice: AppModel.IndexNotice?
@@ -915,7 +940,8 @@ struct ProfilesScreen: View {
             let inspectorFits = geometry.size.width - Self.sidebarWidth - Self.inspectorWidth >= ProfileColumns.minimumContentWidth
             HStack(spacing: 0) {
                 ProfilesSidebar(rows: rows, sync: sync, filter: $filter, section: section, proxyCount: proxyCount,
-                                proxyAlerts: proxyAlerts, actions: actions, rights: rights)
+                                proxyAlerts: proxyAlerts, showsVirtualMachines: virtualMachines != nil,
+                                actions: actions, rights: rights)
                     .frame(width: Self.sidebarWidth)
                     .lumenFrost()
                     .overlay(alignment: .trailing) { Rectangle().fill(Theme.divider).frame(width: 1) }
@@ -959,6 +985,8 @@ struct ProfilesScreen: View {
         Group {
             if section.wrappedValue == .proxies, let proxies {
                 proxies
+            } else if section.wrappedValue == .virtualMachines, let virtualMachines {
+                virtualMachines
             } else {
                 VStack(spacing: 0) {
                     header
@@ -1213,7 +1241,7 @@ struct ProfilesScreen: View {
             .accessibilityLabel(showsInspector.wrappedValue ? L("inspector.hide") : L("inspector.show"))
             // Only what is done rarely, in groups: import, sync, the network guard, automation and the
             // master password (they are in Settings and ⌘K too).
-            Menu {
+            MoreMenu {
                 Button(L("profiles.menu.import"), action: actions.importProfile)
                 Divider()
                 Button(L("profiles.menu.sync"), action: actions.openSync)
@@ -1224,15 +1252,7 @@ struct ProfilesScreen: View {
                 Button(L("profiles.menu.automation"), action: actions.openAutomation)
                 Divider()
                 Button(L("profiles.menu.changePassword"), action: actions.changePassword)
-            } label: {
-                Image(systemName: "ellipsis")
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .tint(Theme.textSecondary)
-            .fixedSize()
-            .frame(width: 30, height: 30)
-            .hoverHighlight(cornerRadius: Theme.controlRadius)
             .help(L("profiles.menu.more"))
             .accessibilityLabel(L("profiles.menu.more"))
             Button(action: actions.newProfile) {
@@ -1309,7 +1329,9 @@ struct ProfilesScreen: View {
     private func listItems(_ columns: ProfileColumns) -> some View {
         columnHeader(columns)
         ForEach(groups) { group in
-            groupView(group.kind, group.rows, columns)
+            // One group alone has no caption: "Ready to launch 50" under the column titles read as
+            // a second header, and the count is the header's own ("Profiles: 50").
+            groupView(group.kind, group.rows, columns, showsCaption: groups.count > 1)
         }
         footnote
     }
@@ -1331,21 +1353,27 @@ struct ProfilesScreen: View {
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.divider).frame(height: 1) }
     }
 
-    private func groupView(_ kind: GroupKind, _ rows: [ProfileRowItem], _ columns: ProfileColumns) -> some View {
+    private func groupView(_ kind: GroupKind, _ rows: [ProfileRowItem], _ columns: ProfileColumns,
+                           showsCaption: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Text(groupTitle(kind)).lumenCaps(kind == .attention ? Theme.danger : Theme.textTertiary)
-                Text(verbatim: "\(rows.count)").lumenCaps(kind == .attention ? Theme.danger : Theme.textTertiary)
-                    .monospacedDigit()
+            if showsCaption {
+                HStack(spacing: 8) {
+                    Text(groupTitle(kind)).lumenCaps(kind == .attention ? Theme.danger : Theme.textTertiary)
+                    Text(verbatim: "\(rows.count)").lumenCaps(kind == .attention ? Theme.danger : Theme.textTertiary)
+                        .monospacedDigit()
+                }
+                .padding(.leading, ProfileColumns.rowPadding + ProfileColumns.nameInset)
+                .frame(height: 42, alignment: .bottomLeading)
+                .padding(.bottom, 6)
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isHeader)
+            } else {
+                Color.clear.frame(height: 6)
             }
-            .padding(.leading, ProfileColumns.rowPadding + ProfileColumns.nameInset)
-            .frame(height: 42, alignment: .bottomLeading)
-            .padding(.bottom, 6)
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.isHeader)
             ForEach(rows) { row in
                 ProfileRow(row: row, columns: columns, actions: actions, isSelected: selection.contains(row.id),
                            showsCheckbox: selectedRows.count >= 2, height: appearance.density.rowHeight,
+                           countryBackdrop: appearance.countryBackdrop,
                            onClick: { click in selection.click(row.id, click, order: displayOrder.map(\.id)) },
                            // A double click is what a person opens a thing with: the profile is
                            // launched, and stays the chosen one.
@@ -1418,6 +1446,8 @@ private struct ProfilesSidebar: View {
     /// Nil: the window has no Proxies section (no list model).
     let proxyCount: Int?
     var proxyAlerts = 0
+    /// The window has the Virtual machines section (the build carries them).
+    var showsVirtualMachines = false
     let actions: ProfileActions
     var rights: RightsLine?
 
@@ -1432,6 +1462,7 @@ private struct ProfilesSidebar: View {
                 .padding(.bottom, 10)
             item(.all, title: L("profiles.title"))
             if let proxyCount { proxiesItem(proxyCount) }
+            if showsVirtualMachines { virtualMachinesItem }
             // What was behind a menu, in the interface (the owner, 10 November): the scenario
             // editor, the automation API's settings, the app's help.
             toolItem(symbol: "play.rectangle", title: L("scenarios.title"), action: actions.openScenarios)
@@ -1579,6 +1610,14 @@ private struct ProfilesSidebar: View {
         }
     }
 
+    /// The virtual machines: profiles that are whole Macs (docs/VM.md), a section of their own.
+    private var virtualMachinesItem: some View {
+        SidebarItem(symbol: "macwindow.on.rectangle", title: L("vm.title"), count: nil,
+                    selected: section == .virtualMachines) {
+            withAnimation(Theme.appearAnimation) { section = .virtualMachines }
+        }
+    }
+
     private func sidebarButton(symbol: String, title: String, count: Int, alert: Bool = false, selected: Bool,
                                choose: @escaping () -> Void) -> some View {
         SidebarItem(symbol: symbol, title: title, count: count, alert: alert, selected: selected) {
@@ -1707,6 +1746,8 @@ private struct ProfileRow: View {
     /// Several rows are selected: every row shows its checkbox (one selected — the inspector's — shows its own).
     var showsCheckbox = false
     var height: CGFloat = 52
+    /// Settings › Appearance: the exit country's flag fading behind the row (`CountryBackdrop`).
+    var countryBackdrop = false
     /// A click on the row itself (not on its buttons or menu): selects it (`ProfileSelection`).
     var onClick: (ProfileSelection.Click) -> Void = { _ in }
     var onDoubleClick: () -> Void = {}
@@ -1715,7 +1756,10 @@ private struct ProfileRow: View {
     var body: some View {
         HStack(spacing: ProfileColumns.gap) {
             checkbox
-            nameCell.frame(maxWidth: .infinity, alignment: .leading)
+            // Over a flag: a soft shadow keeps the avatar and the name apart from its colours.
+            nameCell
+                .shadow(color: backdropCountry == nil ? .clear : Color.black.opacity(0.6), radius: 2.5, y: 1)
+                .frame(maxWidth: .infinity, alignment: .leading)
             exitCell.frame(width: ProfileColumns.exit, alignment: .leading)
             if columns.showsAppearsAs {
                 seenCell.frame(width: ProfileColumns.appearsAs, alignment: .leading)
@@ -1727,6 +1771,12 @@ private struct ProfileRow: View {
         .frame(height: height)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
             .fill(isSelected ? Theme.rowSelected : (hovered ? Theme.rowHover : Color.clear)))
+        .background(alignment: .leading) {
+            if let code = backdropCountry {
+                CountryBackdrop(code: code)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+        }
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.divider).frame(height: 1)
                 .padding(.leading, ProfileColumns.rowPadding + ProfileColumns.nameInset - 18)
@@ -1771,6 +1821,13 @@ private struct ProfileRow: View {
         .opacity(isSelected || showsCheckbox || hovered ? 1 : 0)
         .accessibilityLabel(String(format: L("profiles.row.select"), row.name))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    /// The country whose flag is behind the row: where its proxy exits, once known (a profile
+    /// without a proxy keeps the plain row, as "Direct" says).
+    private var backdropCountry: String? {
+        guard countryBackdrop, case let .proxy(_, code) = row.exit, let code, !code.isEmpty else { return nil }
+        return code
     }
 
     private var nameCell: some View {
@@ -1845,7 +1902,7 @@ private struct ProfileRow: View {
         } else {
             switch row.activity {
             case .starting:
-                busyLine(L("profiles.row.starting"))
+                busyLine(row.startingText)
             case .sealing:
                 busyLine(L("profiles.row.encrypting"))
             case .running:
@@ -1928,17 +1985,9 @@ private struct ProfileRow: View {
             case .starting, .sealing:
                 EmptyView()
             }
-            Menu {
+            MoreMenu(side: 28) {
                 ProfileMenuItems(row: row, actions: actions)
-            } label: {
-                Image(systemName: "ellipsis")
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .tint(Theme.textSecondary)
-            .fixedSize()
-            .frame(width: 28, height: 28)
-            .hoverHighlight(cornerRadius: Theme.controlRadius)
             .disabled(row.isBusy)
             .accessibilityLabel(String(format: L("profiles.row.moreFor"), row.name))
         }
@@ -1983,11 +2032,14 @@ private struct ProfileMenuItems: View {
             Button(L("profiles.row.library")) { actions.library(row.id) }
         }
         Button(L("profiles.row.edit")) { actions.edit(row.id) }
+        Button(L("profiles.row.duplicate")) { actions.duplicate(row.id) }
+            .disabled(row.exit == .unreadable)
         Button(L("profiles.row.check")) { actions.whatSitesSee(row.id) }
         Button(L("profiles.row.passwords")) { actions.passwords(row.id) }
         Button(L("profiles.row.importCookies")) { actions.importCookies(row.id) }
         Button(L("profiles.row.exportCookies")) { actions.exportCookies(row.id) }
         Button(L("profiles.row.warmUp")) { actions.warmUp(row.id) }
+        Button(L("profiles.row.restorePoints")) { actions.restorePoints(row.id) }
         // Absent while there is no address (the API is off, or not in the plan): the inspector's
         // Selenium row says why.
         if let copyAddress = actions.copyWebDriverAddress, row.exit != .unreadable {

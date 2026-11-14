@@ -16,12 +16,22 @@ public struct ProfileCounts: Equatable, Sendable {
     public var historyEntries: Int?
     /// The cookies sync keeps of the profile (`cookies.bin`).
     public var syncedCookies: Int?
+    /// How the profile's last warm-up went; nil when it was never warmed on this Mac, or its
+    /// record does not open.
+    public var lastWarmUp: WarmUpRecord?
+    /// Its restore points (`RestorePoint`; nil: none), and the newest events of its journal.
+    public var restorePoints: Int?
+    public var recentEvents: [ProfileJournal.Event] = []
 
-    public init(logins: Int? = nil, bookmarks: Int? = nil, historyEntries: Int? = nil, syncedCookies: Int? = nil) {
+    public init(logins: Int? = nil, bookmarks: Int? = nil, historyEntries: Int? = nil, syncedCookies: Int? = nil,
+                lastWarmUp: WarmUpRecord? = nil, restorePoints: Int? = nil, recentEvents: [ProfileJournal.Event] = []) {
         self.logins = logins
         self.bookmarks = bookmarks
         self.historyEntries = historyEntries
         self.syncedCookies = syncedCookies
+        self.lastWarmUp = lastWarmUp
+        self.restorePoints = restorePoints
+        self.recentEvents = recentEvents
     }
 }
 
@@ -57,6 +67,10 @@ extension ProfileRepository {
                 try Self.cookieJarFile(url: url, profileID: id, profileKey: key).load()?.cookies.count ?? 0
             }
         }
+        counts.lastWarmUp = try? warmUpRecord(for: id)
+        let points = restorePoints(for: id).count
+        counts.restorePoints = points > 0 ? points : nil
+        counts.recentEvents = (try? journal(for: id))?.latest(4) ?? []
         return counts
     }
 

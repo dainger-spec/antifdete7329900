@@ -39,17 +39,40 @@ final class WarmUpCoordinator: ObservableObject {
     static var sealWait: TimeInterval = 60
     /// How often the schedule is looked at.
     static var tickInterval: TimeInterval = 60
+    /// How many profiles the queue warms at once (1–3; the person's setting, 2 when not set): each
+    /// in its own profile process, so they do not slow one another much on a modern Mac.
+    static let concurrencyKey = "warmup.concurrency"
+    static let concurrencyRange: ClosedRange<Int> = 1...3
+    static var concurrency: Int {
+        get {
+            let stored = UserDefaults.standard.object(forKey: concurrencyKey) as? Int ?? 2
+            return min(max(stored, concurrencyRange.lowerBound), concurrencyRange.upperBound)
+        }
+        set { UserDefaults.standard.set(min(max(newValue, concurrencyRange.lowerBound), concurrencyRange.upperBound), forKey: concurrencyKey) }
+    }
+
+    /// What every warm-up's tab leaves out to spare the proxies' traffic (the person's setting on
+    /// the warm-up screen; nil: nothing). Put into each plan as it starts (`AppModel.startWarmUp`),
+    /// whoever starts it — the screen, a queue, the schedule.
+    static let trafficSavingKey = "warmup.trafficSaving"
+    static var trafficSaving: WarmUpTrafficSaving? {
+        get { (UserDefaults.standard.string(forKey: trafficSavingKey)).flatMap(WarmUpTrafficSaving.init(rawValue:)) }
+        set { UserDefaults.standard.set(newValue?.rawValue, forKey: trafficSavingKey) }
+    }
 
     private let manager: ProfileManager
     private let repository: ProfileRepository
     private let start: Start
-    private var runner: Task<Void, Never>?
+    /// The queue's runs going on, by entry: as many as `concurrency` at once.
+    private var runners: [Int: Task<Void, Never>] = [:]
     private var ticker: Task<Void, Never>?
     /// Profiles whose warm-up was last seen running: one that is seen not running any more has
     /// ended a run, wherever it was started from.
     private var seenRunning: Set<UUID> = []
     private var isShutDown = false
     private var forwarding: AnyCancellable?
+    /// A run ended and its record was stored (`WarmUpRecord`): the inspector reads it again.
+    var onRecorded: ((UUID) -> Void)?
     private let log = Logger(subsystem: "PrivacyBrowser", category: "WarmUpQueue")
 
     init(manager: ProfileManager, repository: ProfileRepository, start: @escaping Start) {
@@ -103,8 +126,8 @@ final class WarmUpCoordinator: ObservableObject {
         isShutDown = true
         ticker?.cancel()
         ticker = nil
-        runner?.cancel()
-        runner = nil
+        for runner in runners.values { runner.cancel() }
+        runners = [:]
         queue.cancelAll()
         forwarding = nil
     }
@@ -141,18 +164,19 @@ final class WarmUpCoordinator: ObservableObject {
     /// then stops and seals as after any run).
     func stopAll() {
         cancelWaiting()
-        if let current = queue.current { manager.stopWarmUp(current.profileID) }
+        for entry in queue.running { manager.stopWarmUp(entry.profileID) }
     }
 
-    /// Starts the next waiting entry when nothing of the queue runs.
+    /// Starts waiting entries while fewer than `concurrency` of the queue run.
     private func pump() {
-        guard runner == nil, !isShutDown, let entry = queue.startNext() else { return }
-        runner = Task { @MainActor [weak self] in
-            guard let self else { return }
-            let outcome = await self.run(entry)
-            self.queue.finish(entry.id, as: outcome)
-            self.runner = nil
-            self.pump()
+        while !isShutDown, let entry = queue.startNext(limit: Self.concurrency) {
+            runners[entry.id] = Task { @MainActor [weak self] in
+                guard let self else { return }
+                let outcome = await self.run(entry)
+                self.queue.finish(entry.id, as: outcome)
+                self.runners[entry.id] = nil
+                self.pump()
+            }
         }
     }
 
@@ -162,8 +186,8 @@ final class WarmUpCoordinator: ObservableObject {
     private func run(_ entry: WarmUpQueue.Entry) async -> WarmUpQueue.Entry.State {
         let id = entry.profileID
         let scheduled = entry.source == .schedule
-        // One at a time, a run started from the warm-up screen included.
-        while isAnyWarmUpRunning {
+        // No more at once than the setting, runs started from the warm-up screen included.
+        while runningWarmUps(besides: id) >= Self.concurrency {
             guard await pause(1) else { return .cancelled }
         }
         guard repository.list().contains(where: { $0.id == id }) else { return .skipped(.profileGone) }
@@ -199,9 +223,9 @@ final class WarmUpCoordinator: ObservableObject {
         return .done(manager.warmUpStatus(of: id) ?? last)
     }
 
-    /// A warm-up runs in some profile.
-    private var isAnyWarmUpRunning: Bool {
-        repository.list().contains { manager.warmUpStatus(of: $0.id)?.isRunning == true }
+    /// How many profiles other than `id` run a warm-up now.
+    private func runningWarmUps(besides id: UUID) -> Int {
+        repository.list().filter { $0.id != id && manager.warmUpStatus(of: $0.id)?.isRunning == true }.count
     }
 
     /// Sleeps; false when the coordinator is going (Lock) and the caller should give up.
@@ -266,14 +290,22 @@ final class WarmUpCoordinator: ObservableObject {
     }
 
     /// A warm-up moved on somewhere. A run seen running before and over now has ended: when it
-    /// visited pages, it is the profile's last run as far as its schedule goes.
+    /// visited pages, it is the profile's last run, for its schedule and for the inspector
+    /// (`WarmUpRecord`).
     private func warmUpProgressed(_ id: UUID) {
         guard let status = manager.warmUpStatus(of: id) else { return }
         if status.isRunning {
             seenRunning.insert(id)
-        } else if seenRunning.remove(id) != nil, status.visited > 0,
-                  let schedule = scheduler.recordRun(id, at: Date()) {
-            save(schedule, for: id)
+        } else if seenRunning.remove(id) != nil, let record = WarmUpRecord(status, at: Date()) {
+            do {
+                try repository.saveWarmUpRecord(record, for: id)
+            } catch {
+                log.error("Could not store the last warm-up of \(id.uuidString, privacy: .public): \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
+            }
+            if let schedule = scheduler.recordRun(id, at: record.endedAt) {
+                save(schedule, for: id)
+            }
+            onRecorded?(id)
         }
     }
 

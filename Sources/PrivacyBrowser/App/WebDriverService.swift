@@ -3,7 +3,7 @@ import Foundation
 import os
 
 /// The WebDriver's sessions (docs/AUTOMATION.md, "WebDriver"): a client — Selenium, or anything
-/// that speaks the W3C protocol — is given a profile's address, `…/wd/<token>/<profile>`; a new
+/// that speaks the W3C protocol — is given a profile's address, `…/wd/<profile's token>/<profile>`; a new
 /// session starts the profile if it is stopped and opens the window its commands act in; the
 /// commands go to the process that has that window (`ProfileManager.webDriver`); ending the
 /// session closes the window, and stops the profile when the session started it.
@@ -31,6 +31,13 @@ final class WebDriverService {
     init(manager: ProfileManager, repository: ProfileRepository) {
         self.manager = manager
         self.repository = repository
+    }
+
+    /// The id of the profile an address names (its id, or its exact name), whose WebDriver token
+    /// the address must carry. Nil when it names none, or several.
+    func profileID(_ reference: String) -> UUID? {
+        guard case let .success(profile) = AutomationProfiles.find(reference, in: repository.list()) else { return nil }
+        return profile.id
     }
 
     /// The request answered: the HTTP status and the JSON body.

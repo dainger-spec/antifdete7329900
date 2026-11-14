@@ -244,6 +244,11 @@ public enum DeviceGenerations {
             matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior),
     ]
 
+    /// What a new choice is made from: every generation but the iPad view (the owner, 13
+    /// November: taken out of the list). A profile stored with it keeps it and still resolves
+    /// (`all`); the editor shows it beside these only for such a profile.
+    public static var offered: [DeviceGeneration] { all.filter { $0.platform != .iPadOS } }
+
     public static func generation(id: String?) -> DeviceGeneration? {
         guard let id else { return nil }
         return all.first { $0.id == id }

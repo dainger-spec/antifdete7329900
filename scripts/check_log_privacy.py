@@ -42,6 +42,8 @@ ALLOWED_EXPRESSIONS = {
     "bundled": "a yes/no: whether a bundled file was used",
     "absent": "names of private classes and methods this macOS does not have",
     "onProfile": "a yes/no",
+    "accepted": "a yes/no: whether a proxy provider took an IP change",
+    "newIPSeen": "a yes/no: whether the proxy answered after an IP change",
     "status": "a process exit status",
     "pid": "a process identifier (a profile's own process, held by the network guard)",
     "decoded.pid": "a process identifier the app asked the network guard to hold",
@@ -71,6 +73,9 @@ ALLOWED_EXPRESSIONS = {
 
 # Safe in one file only, where the name means something harmless.
 ALLOWED_IN_FILE = {
+    ("VMHelperProcess.swift", "helperLine"):
+        "a line the machines' helper wrote itself (HelperIO.log): what a machine's network did, in kinds and "
+        "counts — the network and the connector never put a name or an address in one (VMNetCore's tests hold them to it)",
     ("NetworkGuard.swift", "cause"): "why the network guard was lost: a fixed word from the code or a state's name",
     ("NetworkGuard.swift", "refusal"): "why the network guard did not take a process: a fixed text of its own (GuardService) or of the app",
     ("GuardFilterProvider.swift", "opener.name"): "the name of the process that opened a dropped flow (WebKit's, the system's), not an address",

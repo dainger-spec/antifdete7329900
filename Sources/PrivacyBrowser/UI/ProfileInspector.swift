@@ -76,6 +76,17 @@ struct ProfileInspectorView: View {
                 links
                 // Only an address makes a section: any other state is a row of the links above it.
                 if case let .address(address)? = info.webDriver, row.exit != .unreadable { automation(address) }
+                // What the profile went through lately (`ProfileJournal`); the whole of it is in its
+                // restore points' sheet.
+                if let events = info.counts?.recentEvents, !events.isEmpty {
+                    section(L("journal.title")) {
+                        ForEach(events) { event in JournalLine(event: event) }
+                        Button(L("journal.all")) { actions.restorePoints(row.id) }
+                            .buttonStyle(.lumenGhost)
+                            .padding(.top, 2)
+                            .padding(.leading, -11)
+                    }
+                }
             }
         }
         .scrollIndicators(.automatic)
@@ -132,7 +143,7 @@ struct ProfileInspectorView: View {
                 case .starting, .sealing:
                     HStack(spacing: 7) {
                         ProgressView().controlSize(.small)
-                        Text(row.activity == .starting ? L("profiles.row.starting") : L("profiles.row.encrypting"))
+                        Text(row.activity == .starting ? row.startingText : L("profiles.row.encrypting"))
                             .font(.lumenBody)
                             .foregroundStyle(Theme.textSecondary)
                     }
@@ -168,7 +179,7 @@ struct ProfileInspectorView: View {
                 return warmUp.cookies > 0 ? pages + " " + String(format: L("profiles.row.warmUpCookies"), warmUp.cookies) : pages
             }
             return L("profiles.row.running")
-        case .starting: return L("profiles.row.starting")
+        case .starting: return row.startingText
         case .sealing: return L("profiles.row.encrypting")
         case .stopped:
             guard let date = row.lastUsed else { return L("profiles.row.neverLaunched") }
@@ -296,7 +307,7 @@ struct ProfileInspectorView: View {
         }
     }
 
-    /// The address as it is shown: the API's token as dots. Split at "/", an address
+    /// The address as it is shown: the profile's token as dots. Split at "/", an address
     /// (`WebDriverRoute.address`) is "http:", "", host and port, "wd", the token, the profile; the
     /// token is base64url and has no "/" of its own. An address of any other shape is not shown at
     /// all: where its token is cannot be told.
@@ -325,6 +336,14 @@ struct ProfileInspectorView: View {
         }
     }
 
+    /// "2 days ago, pages: 14"; "not yet" when it was never warmed here; nothing before the counts
+    /// are read.
+    private func lastWarmUpNote(_ counts: ProfileCounts?) -> String? {
+        guard let counts else { return nil }
+        guard let record = counts.lastWarmUp else { return L("inspector.warmUp.never") }
+        return String(format: L("inspector.warmUp.last"), record.endedAt.shownRelative, record.pages)
+    }
+
     // MARK: What it keeps
 
     private var links: some View {
@@ -345,7 +364,13 @@ struct ProfileInspectorView: View {
                 Button(L("profiles.row.importCookies")) { actions.importCookies(row.id) }
                 Button(L("profiles.row.exportCookies")) { actions.exportCookies(row.id) }
             }
-            InspectorLink(title: L("profiles.row.warmUp"), count: nil) { actions.warmUp(row.id) }
+            // When it was last warmed, and how much: a profile never warmed, or not for a month, is
+            // told from one warmed this morning without opening its warm-up.
+            InspectorLink(title: L("profiles.row.warmUp"), count: nil, note: lastWarmUpNote(counts)) { actions.warmUp(row.id) }
+            // A temporary profile keeps nothing to go back to.
+            if !row.ephemeral {
+                InspectorLink(title: L("inspector.restorePoints"), count: counts?.restorePoints) { actions.restorePoints(row.id) }
+            }
             // No WebDriver address to show: one quiet row that says why and leads to where that is
             // settled. R1: a profile that does not start is not driven either.
             if row.exit != .unreadable, let state = webDriverState {

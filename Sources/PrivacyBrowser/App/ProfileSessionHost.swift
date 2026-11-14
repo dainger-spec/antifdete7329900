@@ -294,7 +294,8 @@ enum ProfileSessionHost {
                 showedWindow = true
                 if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }
                 if manager?.runScenario(profileID, name: request.name, source: request.source,
-                                        parametersJSON: request.parametersJSON, runID: request.runID) != true {
+                                        parametersJSON: request.parametersJSON, runID: request.runID,
+                                        inBackground: request.inBackground == true) != true {
                     ProfileSessionHost.send(.scenarioEnded(runID: request.runID, .failed("the profile could not start the run")))
                 }
             case .stopScenario(let reason):

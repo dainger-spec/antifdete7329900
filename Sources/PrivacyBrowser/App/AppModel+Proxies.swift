@@ -17,7 +17,10 @@ extension AppModel {
         let outcome = repository.assign(assignments)
         for assignment in assignments {
             let id = assignment.profileID
-            guard var reason = outcome.failed[id] else { continue }
+            guard var reason = outcome.failed[id] else {
+                recordInJournal(.proxyChanged, detail: assignment.entry.displayName, for: id)
+                continue
+            }
             // The core gives this one in English (it has no strings): said in the person's language.
             if assignment.entry.usableProxy == nil { reason = L("proxies.assign.failed.typeUnknown") }
             let name = profiles.first { $0.id == id }?.name ?? id.uuidString

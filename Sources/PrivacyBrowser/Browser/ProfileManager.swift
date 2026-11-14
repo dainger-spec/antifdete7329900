@@ -219,6 +219,53 @@ final class ProfileManager: ObservableObject {
 
     func isRunning(_ id: UUID) -> Bool { sessions[id] != nil || children[id] != nil }
 
+    // MARK: Restore points
+
+    /// Why a restore point was not made or restored here, beyond `RestorePointProblem`.
+    enum RestorePointRefusal: Error, Equatable {
+        /// The profile runs, starts or is being sealed: its files on disk are not the whole of it.
+        case inUse
+        /// Data of a run that did not get to seal is on disk beside the archives (a crash): the
+        /// profile is to be started and stopped once first, which seals it.
+        case unsealed
+    }
+
+    /// The profile can have a point made or restored now: stopped, nothing under way, and its
+    /// website data and Safari's home sealed (the archives on disk are the whole of it).
+    private func checkRestorable(_ id: UUID) throws {
+        guard !isRunning(id), !busyProfileIDs.contains(id) else { throw RestorePointRefusal.inUse }
+        guard !webDataVault.holdsUnsealedData(profileID: id), !safariHomeVault.holdsUnsealedHome(profileID: id) else {
+            throw RestorePointRefusal.unsealed
+        }
+    }
+
+    /// Makes a restore point of a stopped profile (`ProfileRepository.createRestorePoint`); the
+    /// profile is busy meanwhile, so it does not start while its files are copied.
+    func createRestorePoint(_ id: UUID, name: String) async throws -> RestorePoint {
+        try checkRestorable(id)
+        busyProfileIDs.insert(id)
+        defer { busyProfileIDs.remove(id) }
+        let repository = repository
+        return try await Task.detached(priority: .userInitiated) {
+            try repository.createRestorePoint(for: id, name: name)
+        }.value
+    }
+
+    /// Puts a stopped profile back as point `pointID` holds it (`ProfileRepository.restore`), the
+    /// state it replaces kept as a point first. Returns that point.
+    @discardableResult
+    func restore(_ id: UUID, to pointID: UUID) async throws -> RestorePoint {
+        try checkRestorable(id)
+        busyProfileIDs.insert(id)
+        defer { busyProfileIDs.remove(id) }
+        let repository = repository
+        let kept = try await Task.detached(priority: .userInitiated) {
+            try repository.restore(pointID, for: id)
+        }.value
+        log.notice("Profile \(id.uuidString, privacy: .public) restored to a restore point")
+        return kept
+    }
+
     /// Whether `id`'s window is up: at once for a profile run in this process, whose launch returns
     /// with its window; for one in a process of its own, once that process says so — false when it
     /// ends first, or after `seconds` (the selection's Launch, `LaunchQueue`).
@@ -348,6 +395,8 @@ final class ProfileManager: ObservableObject {
             }
         }
         if ContentRules.needed(by: stored) { await ContentRules.prepare() }
+        // A warm-up that spares traffic needs its tab's list as it starts (`openOffscreenWindow`).
+        if !stored.ephemeral { await ContentRules.prepareWarmUp() }
         var restored = WebDataStoreVault.Restored.nothing
         if !stored.ephemeral {
             // Must happen before WKWebsiteDataStore(forIdentifier:) is created.
@@ -404,6 +453,9 @@ final class ProfileManager: ObservableObject {
         // here (docs/CAMERA.md).
         let systemCameraActive: Bool
         if runsInProfileProcess {
+            // One profile in this process: its geolocation is the engine's own answer, before any
+            // web view exists (`NativeGeolocation`; the page script answers where WebKit cannot).
+            NativeGeolocation.engage(configuration.geolocation)
             systemCameraActive = ProfileProcess.systemCameraActiveForThisProcess
         } else {
             let usesSystemCamera = configuration.cameraSubstitution.usesSystemCamera
@@ -1491,13 +1543,16 @@ final class ProfileManager: ObservableObject {
     // MARK: Scenarios
 
     /// Runs `source` in the running profile, in a window of its own (docs/AUTOMATION.md). False when
-    /// the profile is not running or a run of it is still going.
+    /// the profile is not running or a run of it is still going. `inBackground`: a scheduled run,
+    /// whose window neither takes the keyboard nor activates the app (`SafariChromeHost.openScenarioPage`).
     @discardableResult
-    func runScenario(_ id: UUID, name: String, source: String, parametersJSON: String = "{}", runID: UUID = UUID()) -> Bool {
+    func runScenario(_ id: UUID, name: String, source: String, parametersJSON: String = "{}", runID: UUID = UUID(),
+                     inBackground: Bool = false) -> Bool {
         guard !isShuttingDown, scenarioRuns[id]?.isRunning != true else { return false }
         if let child = children[id] {
             scenarioRuns[id] = ScenarioRunState(runID: runID, name: name, startedAt: Date(), lines: [], outcome: nil)
-            child.send(.runScenario(ScenarioRunRequest(runID: runID, name: name, source: source, parametersJSON: parametersJSON)))
+            child.send(.runScenario(ScenarioRunRequest(runID: runID, name: name, source: source, parametersJSON: parametersJSON,
+                                                       inBackground: inBackground ? true : nil)))
             objectWillChange.send()
             return true
         }
@@ -1510,7 +1565,7 @@ final class ProfileManager: ObservableObject {
             scenarioRuns[id] = ScenarioRunState(runID: runID, name: name, startedAt: Date(), lines: [], outcome: nil)
             objectWillChange.send()
             Task { @MainActor [weak self] in
-                let page = await SafariChromeHost.openScenarioPage(session: session)
+                let page = await SafariChromeHost.openScenarioPage(session: session, inBackground: inBackground)
                 // Stopped, or the profile gone, while the window was opening: nothing runs.
                 guard let self, let run = self.scenarioRuns[id], run.runID == runID, run.isRunning else { return }
                 guard let page else {

@@ -30,6 +30,7 @@ profiles share is refused (`409 ambiguous`) — use the id.
 | Request | What it does | Answer |
 |---|---|---|
 | `GET /v1/profiles` | Every profile | `[Profile]` |
+| `POST /v1/profiles` | Makes a profile, as the app's New Profile does (the plan's profile limit counts it): body `{"name": "…", "temporary": true, "proxy": "socks5://user:pass@host:port", "start": false, "window": true}` — all optional. By default a **temporary** profile ("Temporary 2", "Temporary 3"…), which keeps nothing between launches; `"start": true` starts it in the same call, so one request gives a fresh browser whose WebDriver address is `/wd/<profile's token>/<id>` (the profile's token is made from the API's: docs/AUTOMATION.md, "WebDriver"; `pbctl webdriver <profile>` prints the address). The proxy needs its scheme (its type is not guessed). The API never deletes it: deleting a profile is the person's alone, from the app (scripts/check_deletion_paths.py); a temporary one has nothing in it to delete but its line in the list. | `201`, `Profile`; `409 launch_failed` (the message names the profile made) |
 | `GET /v1/profiles/{profile}` | One profile | `Profile` |
 | `POST /v1/profiles/{profile}/start` | Starts it; body `{"window": false}` starts it out of sight (as a warm-up does), default `true`. A running profile is left as it is. | `Profile` |
 | `POST /v1/profiles/{profile}/stop` | Stops it; its data is sealed before the answer comes. | `Profile` |
@@ -50,7 +51,8 @@ profiles share is refused (`409 ambiguous`) — use the id.
 
 Errors are `{"error": "<code>", "message": "<text>"}`: `401 unauthorized`, `403 forbidden`,
 `404 not_found`, `405 method_not_allowed`, `400 bad_request`, `409 ambiguous` / `launch_failed` /
-`not_running` / `busy`, `411`, `413`, `431`.
+`not_running` / `busy` / `not_created` (the plan's limit, the profile list unreadable), `503 not_available`,
+`411`, `413`, `431`.
 
 ## From a script
 
@@ -67,6 +69,7 @@ curl -s -H "Authorization: Bearer $PB_API_TOKEN" \
 
 ```sh
 scripts/pbctl list
+scripts/pbctl create --proxy socks5://user:pass@de.gw.example:1080 --start   # a temporary profile, started
 scripts/pbctl start "Shop DE" --hidden
 scripts/pbctl open "Shop DE" https://example.com/
 scripts/pbctl cookies "Shop DE" --format playwright > state-cookies.json
@@ -120,8 +123,9 @@ There is no remote-debugging protocol: WebKit's embedded web views hand none out
 browsers hand out CDP for Puppeteer or Playwright to attach to — and one would be visible to pages.
 Scripts drive pages through scenarios above, run inside the app — and, command by command from
 outside, through WebDriver: the same listener answers the W3C WebDriver protocol under
-`/wd/<token>/<profile>`, which Selenium speaks (docs/AUTOMATION.md, "WebDriver"; the profile's
-inspector gives its address to copy).
+`/wd/<profile's token>/<profile>`, which Selenium speaks (docs/AUTOMATION.md, "WebDriver"; the
+profile's inspector gives its address to copy). The token there is the profile's own, made from the
+API's; the API's token itself is not taken under `/wd/`, nor a profile's under `/v1/`.
 
 ## Checked
 

@@ -46,7 +46,24 @@ public struct WarmUpSchedule: Codable, Equatable, Sendable {
     /// When the next run is due: one interval after the latest of `since`, the last run and the
     /// last attempt. A Mac that slept through several intervals runs once when it wakes, not once
     /// per interval missed: the profile wants warming, not catching up.
-    public var nextRun: Date { countedFrom.addingTimeInterval(interval) }
+    ///
+    /// Not to the second: up to 15 % of the interval earlier or later (`jitter`), so a profile is
+    /// not warmed at the very same minute every day. The share is fixed by the time counted from,
+    /// so the next run does not move each time it is asked for.
+    public var nextRun: Date { countedFrom.addingTimeInterval(interval * (1 + Self.jitter * Self.share(for: countedFrom))) }
+
+    /// The most a run moves from its interval, as a share of it.
+    public static let jitter = 0.15
+
+    /// A share in -1...1 drawn from `date` (SplitMix64 of its whole seconds): the same date, the
+    /// same share.
+    static func share(for date: Date) -> Double {
+        var z = UInt64(bitPattern: Int64(date.timeIntervalSince1970.rounded())) &+ 0x9E37_79B9_7F4A_7C15
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        z ^= z >> 31
+        return Double(z >> 11) / Double(1 << 53) * 2 - 1
+    }
 
     public func isDue(at now: Date) -> Bool { isEnabled && nextRun <= now }
 

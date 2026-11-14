@@ -251,7 +251,7 @@ private struct HelpTopicMenuItems: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        ForEach(HelpTopic.allCases) { topic in
+        ForEach(HelpTopic.shown) { topic in
             Button(topic.title) {
                 model.helpTopic = topic
                 openWindow(id: "help")
