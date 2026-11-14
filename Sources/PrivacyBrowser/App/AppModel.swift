@@ -670,13 +670,15 @@ final class AppModel: ObservableObject {
     /// the data saved after the change included (docs/ARCHITECTURE.md, Changing the master
     /// password). With sync set up, the new header goes to the sync location right away, so that a
     /// new device joins with the new password and not the old; out of reach, it goes at the next
-    /// sync, and the person is told so.
-    func changePassword(current: String, new: String) async {
-        guard let repository else { return }
+    /// sync, and the person is told so. True when the password was changed, whatever was said
+    /// after: the sheet closes on it, not on there being no message.
+    @discardableResult
+    func changePassword(current: String, new: String) async -> Bool {
+        guard let repository else { return false }
         // §10.1: the new master password is held to the rule a first one is.
         if let refusal = refusalOfMasterPassword(new) {
             masterPasswordRefusal = refusal
-            return
+            return false
         }
         masterPasswordRefusal = nil
         let vault = repository.vault
@@ -692,6 +694,7 @@ final class AppModel: ObservableObject {
             changed = true
         }
         if changed, let target { await publishPasswordChange(target, repository: repository) }
+        return changed
     }
 
     private func passwordRevisionThere(_ target: DeviceSettings.SyncTarget?, repository: ProfileRepository) async -> Int? {
