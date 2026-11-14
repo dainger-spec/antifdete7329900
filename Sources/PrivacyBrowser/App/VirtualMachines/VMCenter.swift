@@ -381,31 +381,41 @@ final class VMCenter: ObservableObject {
             self.setupHelper = nil
             self.activity = nil
             if let failure { self.setupError = failure }
-            // The tools' installer says in the shared folder that it has done its work.
-            let status = (try? String(contentsOf: self.library.base.status, encoding: .utf8)).map(VMGuestStatus.init(text:))
-            if let status, status.setupDone {
-                // The base is set up: the restore image has done its work, and its gigabytes go
-                // back to the disk.
-                self.removeDownloads()
-                var ready = info
-                ready.stage = .ready
-                ready.toolsVersion = status.toolsVersion ?? VMGuestTools.version
-                if let version = status.systemVersion, !version.isEmpty { ready.version = version }
-                if let build = status.systemBuild, !build.isEmpty { ready.build = build }
-                do {
-                    try self.library.saveBaseInfo(ready)
-                } catch {
-                    self.setupError = errorText(error)
-                }
+            // The tools' installer says in the shared folder that it has done its work — read off
+            // the main thread, as a file the guest may have made anything of (`VMShareFile`).
+            let statusURL = self.library.base.status
+            Task { [weak self] in
+                let read = await Task.detached(priority: .userInitiated) { VMGuestStatus.read(from: statusURL) }.value
+                guard let self else { return }
+                self.finishBaseSetup(info, status: self.accepted(read))
             }
-            self.setup = self.library.setupState()
-            self.measureDisk()
         })
         start(helper, VMHelperRequest(mode: .run, machineDirectory: library.baseDirectory.path,
                                       cores: VMRequirements.cores(hostCores: ProcessInfo.processInfo.activeProcessorCount),
                                       memoryBytes: Int64(Self.setupMemoryGB) * VMRequirements.gibibyte,
                                       macAddress: VMProfile.randomMACAddress(), network: network,
                                       windowTitle: L("vm.base.window"), texts: baseTexts))
+    }
+
+    /// After the base's window has closed: the base is set up when its installer said so.
+    private func finishBaseSetup(_ info: VMBaseInfo, status: VMGuestStatus?) {
+        if let status, status.setupDone {
+            // The base is set up: the restore image has done its work, and its gigabytes go
+            // back to the disk.
+            self.removeDownloads()
+            var ready = info
+            ready.stage = .ready
+            ready.toolsVersion = status.toolsVersion ?? VMGuestTools.version
+            if let version = status.systemVersion, !version.isEmpty { ready.version = version }
+            if let build = status.systemBuild, !build.isEmpty { ready.build = build }
+            do {
+                try self.library.saveBaseInfo(ready)
+            } catch {
+                self.setupError = errorText(error)
+            }
+        }
+        self.setup = self.library.setupState()
+        self.measureDisk()
     }
 
     /// Shuts the base down (its window's own close button does the same).
@@ -659,6 +669,9 @@ final class VMCenter: ObservableObject {
         do {
             excludeFromBackups()
             try FileManager.default.createDirectory(at: files.share, withIntermediateDirectories: true)
+            // The guest writes the share too: what it left in the settings' place that is not a
+            // plain file (a link) goes, itself, before the settings are written.
+            if !VMShareFile.isRegularFile(files.settings) { try? FileManager.default.removeItem(at: files.settings) }
             try Data(VMGuestSettings(profile: profile).text.utf8).write(to: files.settings, options: .atomic)
             // The boot script as this Lumen has it: a machine whose own is older takes it (tools 2
             // on), so that a later Lumen's settings need no visit to the base system.
@@ -768,9 +781,29 @@ final class VMCenter: ObservableObject {
 
     // MARK: What the machines say and take
 
+    /// What a machine's guest says of itself (`VMGuestStatus`), read off the main thread as a file
+    /// the guest may have made anything of: a link, a pipe or a file too large is ignored, and the
+    /// log says of it its kind only.
     private func readGuestStatus(of id: UUID) {
-        guard let text = try? String(contentsOf: library.machine(for: id).status, encoding: .utf8) else { return }
-        guests[id] = VMGuestStatus(text: text)
+        let url = library.machine(for: id).status
+        Task { [weak self] in
+            let read = await Task.detached(priority: .utility) { VMGuestStatus.read(from: url) }.value
+            guard let self, let status = self.accepted(read) else { return }
+            self.guests[id] = status
+        }
+    }
+
+    /// The status, or nil — with a word in the log when the file was there and was not one to read.
+    private func accepted(_ read: Result<VMGuestStatus, VMShareFile.Refusal>) -> VMGuestStatus? {
+        switch read {
+        case .success(let status):
+            return status
+        case .failure(let refusal):
+            if refusal != .missing {
+                log.notice("A machine's status file was not read: \(refusal.rawValue, privacy: .public)")
+            }
+            return nil
+        }
     }
 
     /// What each machine, and the base, takes on disk — counted off the main thread (a sparse

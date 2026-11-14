@@ -395,6 +395,8 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         }
         stopping = true
         window?.title = request.windowTitle + " — " + text("stopping", "shutting down…")
+        // The guest writes the share too: a link left in the request's place goes, itself, first.
+        if !VMShareFile.isRegularFile(shutdownRequestURL) { try? FileManager.default.removeItem(at: shutdownRequestURL) }
         FileManager.default.createFile(atPath: shutdownRequestURL.path, contents: Data())
         // The boot script looks every two seconds and gives Safari up to ten to quit.
         DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
