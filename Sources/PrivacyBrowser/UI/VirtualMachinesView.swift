@@ -601,7 +601,8 @@ private struct VMRow: View {
         case .checkingProxy?, .starting?:
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Button(L("vm.row.stop"), action: stop)
+                // A sleeping machine being woken is closed as it is: put back to sleep once awake.
+                Button(L(profile.instantWake && asleep ? "vm.row.sleep" : "vm.row.stop"), action: stop)
                     .buttonStyle(.lumenGhost)
             }
         case .running?:

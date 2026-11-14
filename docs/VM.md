@@ -370,6 +370,13 @@ What holds it together, in `MachineRunner` and `VMSavedState`:
   says no) is no reason to lose what is open in it: the machine goes on and is shut down as a Mac
   is. "Shut Down macOS" in the row's menu and in the window's is a real shutdown; "Start Anew…"
   gives a sleeping machine's state up, after a question.
+- **Closed while it wakes.** For the seconds a wake takes (the state read, then the machine
+  resumed) it can be neither paused nor saved. A close in that time — its window, the row's Close,
+  Lock, Quit, this Mac's logout or shutdown — is kept for when it is awake, and the machine is put
+  to sleep again then; it is not shut down, and its state is not removed for it. A state the
+  framework does not take leaves nothing to keep: the machine, which never ran, is then not
+  started. A wake that has not ended in 45 seconds is not waited for (the app gives a machine 75 on
+  Lock and Quit): the helper ends, and a state not yet taken stays for the next start.
 - **The network.** The guest's connections are this process's and end with it: woken, the guest
   finds them reset and opens new ones. What it still holds are the stand-in addresses its DNS was
   given for names; the network takes those back by the same addresses (`VMNetConfiguration.knownNames`,
@@ -604,7 +611,9 @@ What is checked where:
    it back as it was — the same pages — in seconds, its clock right within a few more, and pages
    load again. Change its memory and open it: it starts anew, and the row says why. A row that
    says the machine cannot be saved names the one thing to look into first: the helper's log
-   line "wake: this machine cannot be saved".
+   line "wake: this machine cannot be saved". Open it and close its window at once, while it is
+   still black: it is put to sleep again once awake ("asleep" in the row), not shut down, and
+   the next Open brings it back as it was.
 9. Browser mode on: the machine's start is covered, and the cover goes when Safari is over the
    whole screen; "Safari Full Screen (in the Machine)" in the row's menu toggles it. If the
    cover goes and Safari is in a window, the machine's view did not take the key made for it.
