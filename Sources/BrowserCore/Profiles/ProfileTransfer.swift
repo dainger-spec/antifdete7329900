@@ -162,18 +162,12 @@ public enum ProfileTransfer {
         try appendLengthPrefixed(JSONCoding.encoder.encode(header), to: &prefix)
         try appendLengthPrefixed(sealedDocuments, to: &prefix)
 
+        // Written whatever the sources held: a profile with no website data at all still makes a
+        // complete file, its archive part empty — and replaces a file of that name chosen in the save
+        // panel, as every export does (one that left the earlier file there said "Saved" over it).
         try EncryptedDirectoryArchive.transcode(
-            sources: sources, to: [.init(url: destination, key: keys.archive, prefix: prefix)]) { source, label in
+            sources: sources, to: [.init(url: destination, key: keys.archive, prefix: prefix, writtenWhenEmpty: true)]) { source, label in
             kinds[source] == webDataPrefix ? (destination: 0, label: webDataPrefix + label) : (destination: 0, label: safariHomeRoot)
-        }
-        // A profile with no website data at all still makes a complete file: the archive part is
-        // then empty, and written here.
-        if !FileManager.default.fileExists(atPath: destination.path) {
-            try EncryptedDirectoryArchive.seal(roots: [:], to: destination.appendingPathExtension("archive"), key: keys.archive)
-            defer { try? FileManager.default.removeItem(at: destination.appendingPathExtension("archive")) }
-            var file = prefix
-            file.append(try Data(contentsOf: destination.appendingPathExtension("archive")))
-            try SecureFile.write(file, to: destination)
         }
         return manifest
     }

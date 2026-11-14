@@ -216,4 +216,29 @@ final class ProfileTransferTests: XCTestCase {
         XCTAssertEqual(imported.name, "Fresh")
         XCTAssertFalse(FileManager.default.fileExists(atPath: target.webDataArchiveURL(for: imported.id).path))
     }
+
+    /// An export saved over a file of the same name (the save panel's Replace) is that file
+    /// afterwards — also for a profile with no website data, whose archive part is empty: such an
+    /// export used to say "Saved" and leave the earlier file in place (audit 3, #3).
+    func testAnExportReplacesTheFileItIsSavedOver() throws {
+        let file = root.appendingPathComponent("same.\(ProfileTransfer.fileExtension)")
+        let (warmed, _) = try makeProfile()
+        try ProfileTransfer.export(warmed, from: source, to: file, password: "old pw", kdf: fastKDF)
+        let fresh = try source.create(name: "Fresh", configuration: ProfileConfiguration()).id
+        let manifest = try ProfileTransfer.export(fresh, from: source, to: file, password: "new pw", kdf: fastKDF)
+        XCTAssertFalse(manifest.hasWebsiteData || manifest.hasSafariState)
+
+        XCTAssertEqual(try ProfileTransfer.manifest(of: file, password: "new pw").name, "Fresh")
+        XCTAssertThrowsError(try ProfileTransfer.manifest(of: file, password: "old pw"), "the earlier file is gone")
+        let imported = try ProfileTransfer.importProfile(from: file, password: "new pw", into: target)
+        XCTAssertEqual(imported.name, "Fresh")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.webDataArchiveURL(for: imported.id).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.safariHomeArchiveURL(for: imported.id).path))
+        // Nothing of the export's own is left beside it.
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path).filter { $0.contains("same.") }, [file.lastPathComponent])
+
+        // And the other way: a profile with website data over the empty one.
+        try ProfileTransfer.export(warmed, from: source, to: file, password: "third pw", kdf: fastKDF)
+        XCTAssertTrue(try ProfileTransfer.manifest(of: file, password: "third pw").hasWebsiteData)
+    }
 }
