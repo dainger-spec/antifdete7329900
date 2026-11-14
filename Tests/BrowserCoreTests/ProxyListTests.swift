@@ -293,6 +293,41 @@ final class ProxyListTests: XCTestCase {
         XCTAssertEqual(list.entries.map(\.id), [ids[0]])
     }
 
+    /// A result is about the proxy as it was when its check began: an entry edited before it came
+    /// keeps what the edit left — not the old proxy's verdict, exit and type, which the profiles on
+    /// it would then take.
+    func testACheckOfTheProxyAsItWasIsNotKeptByAnEntryEditedSince() throws {
+        var list = ProxyList()
+        let ids = list.add(lines("socks5://a.example:1080\nhttp://u:p@b.example:3128")).added
+        let asChecked = try XCTUnwrap(list.entry(ids[0])?.proxy)
+        // The old server answers as SOCKS5 only, from Berlin.
+        var found = ProxyCheckResult.alive(location: ProxyLocation(timeZoneIdentifier: "Europe/Berlin", countryCode: "DE",
+                                                                   proxyEndpoint: "x", exitIP: "203.0.113.7"), latency: 0.1)
+        found.diagnosis = ProxyDiagnosis(verdict: .works, kinds: [.socks5])
+        // Meanwhile the line is replaced by another server, of another type.
+        _ = try list.update(ids[0], label: "", proxy: ProxySettings(kind: .httpConnect, host: "c.example", port: 3128))
+        let stale = list.record(found, for: ids[0], checked: asChecked)
+        XCTAssertFalse(stale.kept)
+        XCTAssertNil(stale.previous, "the profiles on it are not moved")
+        XCTAssertNil(list.entry(ids[0])?.lastCheck)
+        XCTAssertEqual(list.entry(ids[0])?.proxy.kind, .httpConnect, "the old server's type is not the new one's")
+        // A password fixed meanwhile: the old one's "credentials rejected" is not the new one's.
+        let second = try XCTUnwrap(list.entry(ids[1])?.proxy)
+        var fixed = second
+        fixed.password = "right"
+        _ = try list.update(ids[1], label: "", proxy: fixed)
+        XCTAssertFalse(list.record(.dead(.noAnswer), for: ids[1], checked: second).kept)
+        XCTAssertNil(list.entry(ids[1])?.lastCheck)
+        // The entry as it was checked: kept, as record(_:for:) keeps it.
+        let current = try XCTUnwrap(list.entry(ids[1])?.proxy)
+        XCTAssertTrue(list.record(found, for: ids[1], checked: current).kept)
+        XCTAssertEqual(list.entry(ids[1])?.lastCheck?.exitIP, "203.0.113.7")
+        // An entry removed meanwhile stays removed: nothing is kept, nothing brings it back.
+        list.remove([ids[1]])
+        XCTAssertFalse(list.record(found, for: ids[1], checked: current).kept)
+        XCTAssertNil(list.entry(ids[1]))
+    }
+
     func testCheckResults() {
         let proxy = ProxySettings(kind: .httpConnect, host: "h.example", port: 80, username: "u", password: "p")
         XCTAssertEqual(ProxyCheckResult.alive(location: nil, latency: 0.00001).latencyMilliseconds, 1)

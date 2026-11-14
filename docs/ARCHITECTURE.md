@@ -422,7 +422,9 @@ ProxyListView (the Profiles window's Proxies section, its sidebar) ── ProxyL
    │                 proxy) → 2 more tunnels for the latency → ProxyDiagnosis (one verdict per way of failing)
    │              2. working: ProxyGeoLookup.lookUp through the proxy, as the type found
    │                 (ProxyConfigurationFactory, allowFailover = false) → exit IP, country, city, network
-   │            → ProxyCheckResult → ProxyList.record (a type found is the entry's) → profiles follow
+   │            → ProxyCheckResult → ProxyList.record (a type found is the entry's) → profiles follow;
+   │            kept only while the entry still connects as it was checked (record(_:for:checked:)):
+   │            one edited during the run keeps what the edit left and is checked again after it
    │  Add/Edit  ProxyEditView: ProxyLineField (one line → ProxyListImport.readField; Check → ProxyChecker.check)
    │            → ProxyListModel.addOne / update (+ the check from the sheet → ProxyList.record)
    │            → ProfileRepository.follow (the profiles that use it as it was)
