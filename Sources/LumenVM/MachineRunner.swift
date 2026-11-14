@@ -221,6 +221,13 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     private var machineView: VZVirtualMachineView?
     /// Instant wake is asked for and this machine can be saved (the framework says so).
     private var canKeepState = false
+    /// The machine is being woken — its saved state read, then the machine resumed: until that is
+    /// done it can be neither paused nor saved.
+    private var waking = false
+    /// A close that came while the machine was being woken: done once it is awake (`sleep`).
+    private var sleepAfterWake = false
+    /// This start woke the machine: its macOS is the one that was put to sleep.
+    private var woken = false
     /// The app's panel of where the machine connects is open (`hosts on`).
     private var watchingHosts = false
     /// Browser mode's cover, while it is up, and when the machine was started.
@@ -707,22 +714,32 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     /// runs again, taken or not: from that moment its disk goes on, and the state is no longer
     /// its own. A state the framework does not take is no reason not to start: the machine then
     /// starts anew, as after a Mac lost power.
+    ///
+    /// Closed while this goes on (`sleepAfterWake`): put to sleep again once it is awake. A state
+    /// the framework did not take leaves nothing to keep, and a machine that never ran is not
+    /// started only to be closed.
     private func wake(_ machine: VZVirtualMachine) {
+        waking = true
         machine.restoreMachineStateFrom(url: files.state) { error in
             DispatchQueue.main.async {
                 self.removeSavedState()
                 if let error {
+                    self.waking = false
                     HelperIO.log("wake: the saved state was not taken (\(Self.kind(of: error)))")
+                    if self.sleepAfterWake { self.finish() }
                     return self.start(machine, notWoken: .failed)
                 }
                 machine.resume { result in
                     DispatchQueue.main.async {
+                        self.waking = false
                         switch result {
                         case .failure(let error):
                             self.fail(error)
                         case .success:
+                            self.woken = true
                             self.tellTheGuestItWoke()
                             HelperIO.emit(VMHelperEvent(kind: .started, woke: true))
+                            if self.sleepAfterWake { self.sleep() }
                         }
                     }
                 }
@@ -745,17 +762,75 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
 
     /// Closes the machine: put to sleep, at once and without a question, where its state is
     /// kept (instant wake) — nothing in it is lost; shut down otherwise.
+    ///
+    /// The window's own close (`asking`) asks once where the guest's script wrote something at
+    /// its macOS's start that macOS takes only at the next one — a keyboard layout, browser mode's
+    /// menu bar (`VMGuestStatus.waitsForTheNextStart`): a machine put to sleep is woken, never
+    /// started, and would never have it. Shut down this once, it has it from its next start.
+    /// Lock, Quit, this Mac's own shutdown and "Close and Keep" put it to sleep as always: nothing
+    /// is closed in it that nobody chose to close.
     func stop(asking: Bool) {
         guard canKeepState else { return shutDown(asking: asking) }
+        if asking, let window, !waking, !stopping, !finished, guestWaitsForItsNextStart() {
+            let alert = NSAlert()
+            alert.messageText = text("nextStartQuestion", "Shut down this machine this time?")
+            alert.informativeText = text("nextStartDetail", "A keyboard layout or a menu bar setting was written in its macOS, "
+                + "which takes it only when it starts — and a machine put to sleep is woken, not started. Shut down, it has it "
+                + "from its next start; what is open in it is closed.")
+            alert.addButton(withTitle: text("stopNow", "Shut Down"))
+            alert.addButton(withTitle: text("keep", "Keep as It Is"))
+            alert.addButton(withTitle: text("cancel", "Cancel"))
+            alert.beginSheetModal(for: window) { [weak self] response in
+                switch response {
+                case .alertFirstButtonReturn: self?.shutDown(asking: false)
+                case .alertSecondButtonReturn: self?.sleep()
+                default: break
+                }
+            }
+            return
+        }
         sleep()
     }
+
+    /// Whether the guest's script said, at the start of the macOS running now, that something it
+    /// wrote waits for the next start. For a machine started anew, a status written before this
+    /// start is of a macOS that has since shut down (`VMGuestStatus.asOf`); for one woken, it is
+    /// this macOS's own.
+    private func guestWaitsForItsNextStart() -> Bool {
+        // The time first: a file put in place meanwhile is then taken as older, not newer, than it is.
+        let written = (try? FileManager.default.attributesOfItem(atPath: files.status.path))?[.modificationDate] as? Date
+        guard case .success(let said) = VMGuestStatus.read(from: files.status) else { return false }
+        return said.asOf(start: woken ? nil : startedAt, written: written).waitsForTheNextStart
+    }
+
+    /// How long a close that came during a wake waits for the wake to end: the app gives a machine
+    /// 75 seconds on Lock and Quit (`VMCenter.stopAll`), and the save after the wake needs time too.
+    static let wakePatience: TimeInterval = 45
 
     /// Saves the machine as it is — paused, its memory written beside its disk, then ended — for
     /// its next start to wake. What goes wrong on the way is no reason to lose what is open in
     /// it: the machine then goes on, and is shut down as a Mac is.
+    ///
+    /// Asked for while the machine is being woken (its window closed, Lock, Quit, this Mac's
+    /// shutdown — in the seconds a wake takes), it cannot be paused yet, and what it was put to
+    /// sleep with is in the state being read: it is put to sleep again once it is awake (`wake`),
+    /// not shut down. A wake that has not ended in `wakePatience` is not waited for: the process
+    /// ends, and a state not yet taken stays for the next start.
     private func sleep() {
         guard let machine, !finished else { exit(0) }
         guard !stopping else { return }
+        if waking {
+            guard !sleepAfterWake else { return }
+            sleepAfterWake = true
+            window?.title = request.windowTitle + " — " + text("sleeping", "saving…")
+            HelperIO.log("sleep: asked for while the machine is being woken; it is put to sleep once it is awake")
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.wakePatience) { [weak self] in
+                guard let self, self.waking, !self.stopping, !self.finished else { return }
+                HelperIO.log("sleep: the wake did not end in time; the machine is ended")
+                self.finish()
+            }
+            return
+        }
         stopping = true
         window?.title = request.windowTitle + " — " + text("sleeping", "saving…")
         let giveUp: (String) -> Void = { [weak self] why in

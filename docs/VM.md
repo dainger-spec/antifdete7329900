@@ -319,6 +319,8 @@ on a machine: none could be run here):
   `AppleInputSourceHistory`, `AppleCurrentKeyboardLayoutInputSourceID`) — once per choice, noted in
   the person's `io.lumenbrowser.guest` — and macOS takes them at sign-in: in use from the
   machine's **next** start, which the status says (`LUMEN_KEYBOARD_STATE=next`) and the row repeats.
+  A machine with instant wake is woken, not started, so its next Close is a shutdown, once ("Instant
+  wake" below).
 - **What macOS wrote down for the old region**: its units and temperature scale
   (`AppleMeasurementUnits`, `AppleMetricUnits`, `AppleTemperatureUnit`), its own formats of dates
   and numbers (`AppleICU…`), its clock and week. With only `AppleLocale` changed they stood: a
@@ -370,6 +372,21 @@ What holds it together, in `MachineRunner` and `VMSavedState`:
   says no) is no reason to lose what is open in it: the machine goes on and is shut down as a Mac
   is. "Shut Down macOS" in the row's menu and in the window's is a real shutdown; "Start Anew…"
   gives a sleeping machine's state up, after a question.
+- **Closed while it wakes.** For the seconds a wake takes (the state read, then the machine
+  resumed) it can be neither paused nor saved. A close in that time — its window, the row's Close,
+  Lock, Quit, this Mac's logout or shutdown — is kept for when it is awake, and the machine is put
+  to sleep again then; it is not shut down, and its state is not removed for it. A state the
+  framework does not take leaves nothing to keep: the machine, which never ran, is then not
+  started. A wake that has not ended in 45 seconds is not waited for (the app gives a machine 75 on
+  Lock and Quit): the helper ends, and a state not yet taken stays for the next start.
+- **What macOS takes only at a start.** A keyboard layout and browser mode's menu bar are written
+  after sign-in and taken at the next one (the status says `LUMEN_KEYBOARD_STATE=next`,
+  `LUMEN_MENU_BAR_STATE=next`), and a machine put to sleep is woken, never started. So while one of
+  them waits, the row's Close is "Shut Down" and says why, and the window's close asks — shut down
+  this once, or keep it as it is; Lock, Quit, this Mac's shutdown and the window's "Close and Keep"
+  put it to sleep as always, and it waits on. A machine started anew has what the macOS before it
+  wrote: a status file from before that start is not taken for one about the macOS running now
+  (`VMGuestStatus.asOf`, by the file's time).
 - **The network.** The guest's connections are this process's and end with it: woken, the guest
   finds them reset and opens new ones. What it still holds are the stand-in addresses its DNS was
   given for names; the network takes those back by the same addresses (`VMNetConfiguration.knownNames`,
@@ -392,7 +409,9 @@ A machine is a Mac in a window: a desktop, a Dock, a menu bar, Safari somewhere 
 
 - its macOS keeps the menu bar and the Dock out of sight (`_HIHideMenuBar`, the Dock's hiding;
   tools 11 — noted beside the person's settings, so that a machine no longer shown so gets them
-  back), and Safari is opened whatever else the profile says;
+  back), and Safari is opened whatever else the profile says. The menu bar takes it at the next
+  sign-in, which the status says (`LUMEN_MENU_BAR_STATE=next`, tools 12): with instant wake the
+  machine is shut down once for it, as for a keyboard layout;
 - when the boot script says it has opened Safari (the status file), the helper presses
   Control-Command-F on the machine's own keyboard — events made for the machine's view, as a
   person's are; nothing in the guest is asked for a permission — which puts Safari over the
@@ -604,7 +623,11 @@ What is checked where:
    it back as it was — the same pages — in seconds, its clock right within a few more, and pages
    load again. Change its memory and open it: it starts anew, and the row says why. A row that
    says the machine cannot be saved names the one thing to look into first: the helper's log
-   line "wake: this machine cannot be saved".
+   line "wake: this machine cannot be saved". Open it and close its window at once, while it is
+   still black: it is put to sleep again once awake ("asleep" in the row), not shut down, and
+   the next Open brings it back as it was. On its first start with a new keyboard layout the row
+   says the layout waits, its button is Shut Down, and the window's close asks; after that one
+   shutdown the layout is in use.
 9. Browser mode on: the machine's start is covered, and the cover goes when Safari is over the
    whole screen; "Safari Full Screen (in the Machine)" in the row's menu toggles it. If the
    cover goes and Safari is in a window, the machine's view did not take the key made for it.

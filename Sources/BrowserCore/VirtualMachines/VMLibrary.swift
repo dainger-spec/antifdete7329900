@@ -257,8 +257,11 @@ public enum VMSetupState: Equatable, Sendable {
 /// 10: the keyboard's layouts; what the base's region left behind (units, formats) removed when a
 /// machine comes to another; and the time zone, language and locale read back from the system
 /// into the status file, for Lumen to compare with what it asked for.
+///
+/// 12: the status says when browser mode's menu bar was changed at this start, which macOS takes
+/// at the next sign-in — a machine with instant wake is shut down once for it, as for a layout.
 public enum VMGuestTools {
-    public static let version = 11
+    public static let version = 12
     /// From this version on an installed boot script takes a newer copy of itself at a machine's
     /// start: a base with tools this new needs nothing done to it for a later version's settings.
     public static let updatesItselfFrom = 2

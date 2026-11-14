@@ -656,12 +656,14 @@ final class VMGuestScriptTests: XCTestCase {
         XCTAssertTrue(first.has("tester defaults write io.lumenbrowser.guest keyboard -string us"))
         XCTAssertEqual(status().keyboardState, "next")
         XCTAssertTrue(status().keyboardFromNextStart)
+        XCTAssertTrue(status().waitsForTheNextStart)
 
         // The same choice at the next start: nothing is written again — what the person added
         // in the machine since stays.
         let second = try boot(settings: american.text, environment: ["KEYBOARD_NOTED": "us"])
         XCTAssertFalse(second.calls.contains { $0.contains("defaults write com.apple.HIToolbox") }, "\(second.calls)")
         XCTAssertEqual(status().keyboardState, "set")
+        XCTAssertFalse(status().waitsForTheNextStart)
 
         // A layout that types no Latin letters comes with the plain Latin one, and is the one in use.
         let russian = VMGuestSettings(profile: VMProfile(name: "A", lumenWallpaper: false, keyboard: "russian"))
@@ -748,11 +750,17 @@ final class VMGuestScriptTests: XCTestCase {
         XCTAssertTrue(first.has("tester defaults write com.apple.dock autohide -bool true"))
         XCTAssertTrue(first.has("tester defaults write io.lumenbrowser.guest browser -string 1"))
         XCTAssertTrue(first.has("root killall Dock"))
+        // The menu bar takes it at the next sign-in, and the status says so: a machine with
+        // instant wake is shut down once for it.
+        XCTAssertEqual(status().menuBarState, "next")
+        XCTAssertTrue(status().waitsForTheNextStart)
 
         // So already: nothing is written again, and the Dock is left running.
         let second = try boot(settings: browser.text, environment: ["BROWSER_NOTED": "1", "DOCK_AUTOHIDE": "1"])
         XCTAssertFalse(second.calls.contains { $0.contains("_HIHideMenuBar") || $0.contains("write com.apple.dock") || $0.contains("killall Dock") },
                        "\(second.calls)")
+        XCTAssertNil(status().menuBarState)
+        XCTAssertFalse(status().waitsForTheNextStart)
 
         // No longer shown so: the menu bar is back, and the Dock too — unless the profile hides it.
         let plain = VMGuestSettings(profile: VMProfile(name: "A", lumenWallpaper: false))
@@ -761,6 +769,7 @@ final class VMGuestScriptTests: XCTestCase {
         XCTAssertTrue(third.has("tester defaults delete -g _HIHideMenuBar"), "\(third.calls)")
         XCTAssertTrue(third.has("tester defaults delete io.lumenbrowser.guest browser"))
         XCTAssertTrue(third.has("tester defaults write com.apple.dock autohide -bool false"))
+        XCTAssertEqual(status().menuBarState, "next", "the menu bar comes back at the next sign-in too")
         let hidden = VMGuestSettings(profile: VMProfile(name: "A", lumenWallpaper: false, dockAutohide: true))
         let fourth = try boot(settings: hidden.text, environment: ["BROWSER_NOTED": "1", "DOCK_AUTOHIDE": "1"])
         XCTAssertTrue(fourth.has("tester defaults delete -g _HIHideMenuBar"))
@@ -769,6 +778,7 @@ final class VMGuestScriptTests: XCTestCase {
         // A machine never shown so: none of it is touched.
         let fifth = try boot(settings: plain.text)
         XCTAssertFalse(fifth.calls.contains { $0.contains("_HIHideMenuBar") || $0.contains("write com.apple.dock") }, "\(fifth.calls)")
+        XCTAssertNil(status().menuBarState)
     }
 
     func testAMachineWokenFromASavedStateAsksForTheTimeOnce() throws {

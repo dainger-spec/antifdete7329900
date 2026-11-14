@@ -504,8 +504,8 @@ private struct VMRow: View {
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    if profile.keyboard != nil, guest.keyboardFromNextStart {
-                        Text(L("vm.row.keyboard.next"))
+                    if let note = nextStartNote {
+                        Text(note)
                             .font(.lumenSecondary)
                             .foregroundStyle(Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -550,6 +550,21 @@ private struct VMRow: View {
         .card(padding: 0)
     }
 
+    /// The keyboard's layouts, or browser mode's menu bar, were written in the machine's macOS at
+    /// its last start, and macOS takes them only at its next (`VMGuestStatus.waitsForTheNextStart`).
+    private var keyboardWaits: Bool { profile.keyboard != nil && guest?.keyboardFromNextStart == true }
+    private var menuBarWaits: Bool { guest?.menuBarFromNextStart == true }
+
+    /// With instant wake a machine put to sleep is woken, never started: it is shut down this once,
+    /// and its button says so. (A machine macOS cannot save is shut down when closed anyway.)
+    private var closeShutsDown: Bool { profile.instantWake && wakeNote != .unsupported && (keyboardWaits || menuBarWaits) }
+
+    /// What waits for the machine's next start, said while it runs.
+    private var nextStartNote: String? {
+        if closeShutsDown { return L(keyboardWaits ? "vm.row.keyboard.next.wake" : "vm.row.menuBar.next.wake") }
+        return keyboardWaits ? L("vm.row.keyboard.next") : nil
+    }
+
     private var country: String? {
         guard profile.proxy != nil || profile.localeFollowsConnection else { return nil }
         return (exit?.countryCode ?? profile.countryCode)?.uppercased()
@@ -560,7 +575,7 @@ private struct VMRow: View {
         case .checkingProxy?: return L(profile.proxy == nil ? "vm.row.checkingConnection" : "vm.row.checkingProxy")
         case .starting?: return L("vm.row.starting")
         case .running?: return L(state?.woke == true ? "vm.row.running.woke" : "vm.row.running")
-        case .stopping?: return L(profile.instantWake ? "vm.row.sleeping" : "vm.row.stopping")
+        case .stopping?: return L(profile.instantWake && state?.shuttingDown != true ? "vm.row.sleeping" : "vm.row.stopping")
         case nil: return asleep ? L("vm.row.asleep") : nil
         }
     }
@@ -601,13 +616,20 @@ private struct VMRow: View {
         case .checkingProxy?, .starting?:
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Button(L("vm.row.stop"), action: stop)
+                // A sleeping machine being woken is closed as it is: put back to sleep once awake.
+                Button(L(profile.instantWake && asleep ? "vm.row.sleep" : "vm.row.stop"), action: stop)
                     .buttonStyle(.lumenGhost)
             }
         case .running?:
-            Button(L(profile.instantWake ? "vm.row.sleep" : "vm.row.stop"), action: stop)
-                .buttonStyle(.lumenGhost)
-                .help(L(profile.instantWake ? "vm.row.sleep.help" : "vm.row.stop.help"))
+            if closeShutsDown {
+                Button(L("vm.row.stop"), action: shutDown)
+                    .buttonStyle(.lumenGhost)
+                    .help(L("vm.row.stop.help"))
+            } else {
+                Button(L(profile.instantWake ? "vm.row.sleep" : "vm.row.stop"), action: stop)
+                    .buttonStyle(.lumenGhost)
+                    .help(L(profile.instantWake ? "vm.row.sleep.help" : "vm.row.stop.help"))
+            }
         case .stopping?:
             ProgressView().controlSize(.small)
         }
