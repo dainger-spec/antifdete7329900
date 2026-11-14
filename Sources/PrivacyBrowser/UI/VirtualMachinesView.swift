@@ -164,6 +164,8 @@ private struct VirtualMachinesScreen: View {
                        actionEnabled: !center.requirements.contains(where: VMRequirements.stops),
                        footnote: L("vm.hero.note"), facts: facts,
                        problems: center.requirements, error: center.setupError, width: width,
+                       secondaryTitle: L("vm.import.choose"), secondaryHelp: L("vm.import.choose.help"),
+                       secondaryAction: { VMImageFilePanel.choose(for: center) },
                        action: { center.continueSetup() })
             } else {
                 VMSetupPanel(center: center, width: width)

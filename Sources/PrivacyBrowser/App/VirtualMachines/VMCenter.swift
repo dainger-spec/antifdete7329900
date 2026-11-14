@@ -103,6 +103,10 @@ final class VMCenter: ObservableObject {
     private var helpers: [UUID: VMHelperProcess] = [:]
     private var setupHelper: VMHelperProcess?
     private var downloader: VMImageDownloader?
+    /// A restore image the person already had, being checked (the helper's `inspect`) and then
+    /// taken into the library: the setup's first step says so instead of "downloading".
+    @Published private(set) var importingFile = false
+    private var importer: VMImageImport?
     /// The current run of the setup: what an earlier one still says is not listened to.
     private var setupRun: UUID?
     private var awake: NSObjectProtocol?
@@ -274,11 +278,97 @@ final class VMCenter: ObservableObject {
         guard case .downloading? = activity else { return }
         downloader?.pause()
         downloader = nil
+        // A copy of the person's file is called off, not paused: it starts over if chosen again.
+        importer?.cancel()
+        importer = nil
+        importingFile = false
         setupRun = nil
         activity = nil
         holdAwake(false)
         setup = library.setupState()
         measureDisk()
+    }
+
+    /// The person chose a restore image they already have (`VMImageImport`): the helper loads it
+    /// as the installer would and says which macOS it is and that it runs on this Mac; it is then
+    /// cloned or copied into the download's place, and the setup goes on with the installation as
+    /// after a download. The person's own file is never moved or changed.
+    func useImageFile(_ source: URL) {
+        guard activity == nil, Self.availability == .available else { return }
+        guard isAllowed() else {
+            setupError = L("vm.error.notInPlan")
+            return
+        }
+        switch library.setupState() {
+        case .ready, .needsGuestSetup:
+            return
+        case .none, .downloading, .downloaded:
+            break
+        }
+        if let problem = VMImageImport.problem(with: source) {
+            setupError = Self.text(of: problem)
+            return
+        }
+        setupError = nil
+        importingFile = true
+        let run = beginRun()
+        activity = .asking
+        var image: VMRestoreImage?
+        let helper = VMHelperProcess(onEvent: { event in
+            if event.kind == .catalog { image = event.image }
+        }, onEnd: { [weak self] failure in
+            guard let self, self.setupRun == run else { return }
+            self.setupHelper = nil
+            guard let image, failure == nil else {
+                return self.setupFailed(String(format: L("vm.import.error.notAnImage"), failure ?? L("vm.error.unknown")))
+            }
+            self.offeredImage = image
+            self.takeImage(from: source, run: run)
+        })
+        start(helper, VMHelperRequest(mode: .inspect, restoreImagePath: source.path))
+    }
+
+    private func takeImage(from source: URL, run: UUID) {
+        holdAwake(true)
+        excludeFromBackups()
+        activity = .downloading(VMImageDownloader.Progress(have: 0, total: VMLibrary.fileSize(source), speed: nil))
+        let importer = VMImageImport(source: source, library: library, onProgress: { [weak self] progress in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, self.setupRun == run else { return }
+                    self.activity = .downloading(progress)
+                }
+            }
+        }, onFinish: { [weak self] result in
+            let failure: Error?
+            if case .failure(let error) = result { failure = error } else { failure = nil }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, self.setupRun == run else { return }
+                    self.importer = nil
+                    self.importingFile = false
+                    if let failure {
+                        return self.setupFailed((failure as? VMImageImport.Problem).map(Self.text(of:)) ?? errorText(failure))
+                    }
+                    self.measureDisk()
+                    self.install()
+                }
+            }
+        })
+        self.importer = importer
+        importer.start()
+    }
+
+    /// What is wrong with a file the person chose, in their language.
+    static func text(of problem: VMImageImport.Problem) -> String {
+        switch problem {
+        case .notAFile: return L("vm.import.error.notAFile")
+        case .tooSmall: return L("vm.import.error.tooSmall")
+        case .notARestoreImage: return L("vm.import.error.notAZip")
+        case .unreadable: return L("vm.import.error.unreadable")
+        case .notEnoughSpace(let needed, let free):
+            return String(format: L("vm.import.error.space"), VMText.bytes(needed), VMText.bytes(free))
+        }
     }
 
     private func install() {
@@ -449,6 +539,9 @@ final class VMCenter: ObservableObject {
         setupRun = nil
         setupHelper = nil
         downloader = nil
+        importer?.cancel()
+        importer = nil
+        importingFile = false
         activity = nil
         holdAwake(false)
         setupError = text
@@ -764,6 +857,7 @@ final class VMCenter: ObservableObject {
             setupHelper?.terminate()
             setupHelper = nil
             activity = nil
+            importingFile = false
         case .downloading?: pauseDownload()
         case .installing?: cancelInstallation()
         case .guestSetup?: closeBase()

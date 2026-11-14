@@ -353,6 +353,10 @@ final class VMHelperProtocolTests: XCTestCase {
         XCTAssertEqual(try VMHelperRequest.parse(line), request)
         XCTAssertEqual(VMHelperRequest.run(profile: VMProfile(name: "Direct"), library: library, hostCores: 8, texts: [:]).network, .direct)
         // The base's first-run setup: no network card at all — and never a profile's machine.
+        // A file the person has, asked of the helper before it is copied.
+        let inspect = VMHelperRequest(mode: .inspect, restoreImagePath: "/Users/a/Downloads/UniversalMac.ipsw")
+        XCTAssertEqual(try VMHelperRequest.parse(try inspect.line()), inspect)
+        XCTAssertTrue(try inspect.line().contains(#""mode":"inspect""#))
         let offline = VMHelperRequest(mode: .run, machineDirectory: "/tmp/lib/base", network: .absent)
         XCTAssertEqual(try VMHelperRequest.parse(try offline.line()).network, .absent)
         XCTAssertTrue(try offline.line().contains(#""network":"absent""#))

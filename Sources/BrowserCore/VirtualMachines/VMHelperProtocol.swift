@@ -11,6 +11,9 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
     public enum Mode: String, Codable, Sendable {
         /// Which macOS Apple offers for this Mac's virtual machines (a `catalog` event, then exit).
         case catalog
+        /// Which macOS the restore image at `restoreImagePath` holds — one the person already had —
+        /// and whether it runs on this Mac: a `catalog` event (its address the file's), then exit.
+        case inspect
         /// Install the restore image into `machineDirectory` (the base): `progress` events, then
         /// `installed`.
         case install

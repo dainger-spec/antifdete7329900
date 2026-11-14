@@ -128,6 +128,26 @@ enum MachineCatalog {
         }
     }
 
+    /// A restore image the person already has: loaded as the installer would load it, and said
+    /// as Apple's would be — which macOS, which build, and that it runs on this Mac — or why not.
+    static func inspect(_ path: String?) {
+        guard let path, !path.isEmpty else { HelperIO.fail("The request names no restore image.") }
+        VZMacOSRestoreImage.load(from: URL(fileURLWithPath: path)) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .failure(let error):
+                    HelperIO.fail(error)
+                case .success(let image):
+                    guard let requirements = image.mostFeaturefulSupportedConfiguration, requirements.hardwareModel.isSupported else {
+                        HelperIO.fail("This restore image's macOS cannot run in a virtual machine on this Mac.")
+                    }
+                    HelperIO.emit(VMHelperEvent(kind: .catalog, image: restoreImage(image)))
+                    exit(0)
+                }
+            }
+        }
+    }
+
     static func restoreImage(_ image: VZMacOSRestoreImage) -> VMRestoreImage {
         let version = image.operatingSystemVersion
         let text = version.patchVersion == 0 ? "\(version.majorVersion).\(version.minorVersion)"

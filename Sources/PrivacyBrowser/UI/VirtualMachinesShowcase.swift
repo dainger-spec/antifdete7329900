@@ -1,5 +1,25 @@
+import AppKit
 import BrowserCore
 import SwiftUI
+import UniformTypeIdentifiers
+
+/// The person's own restore image: a file panel for an `.ipsw`, then the setup takes it
+/// (`VMCenter.useImageFile`).
+enum VMImageFilePanel {
+    @MainActor
+    static func choose(for center: VMCenter) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.title = L("vm.import.panel.title")
+        panel.message = L("vm.import.panel.message")
+        panel.prompt = L("vm.import.panel.prompt")
+        if let ipsw = UTType(filenameExtension: "ipsw") { panel.allowedContentTypes = [ipsw] }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        center.useImageFile(url)
+    }
+}
 
 // The Virtual machines section before there are machines: its opening, and its setup while macOS
 // is fetched and installed. Both are one composition the width of the section — the words and
@@ -277,6 +297,10 @@ struct VMHero: View {
     var error: String?
     /// The section's width: a narrow one puts the picture under the words.
     let width: CGFloat
+    /// Under the button, a second way: its title and what it does.
+    var secondaryTitle: String?
+    var secondaryHelp: String?
+    var secondaryAction: (() -> Void)?
     let action: () -> Void
 
     private var isWide: Bool { width >= 940 }
@@ -341,9 +365,17 @@ struct VMHero: View {
             if let error {
                 VMNote(error, tone: .danger).padding(.bottom, 16)
             }
-            Button(action: action) { Label(actionTitle, systemImage: actionSymbol) }
-                .buttonStyle(LumenButtonStyle(kind: .primary, height: 40))
-                .disabled(!actionEnabled)
+            HStack(spacing: 10) {
+                Button(action: action) { Label(actionTitle, systemImage: actionSymbol) }
+                    .buttonStyle(LumenButtonStyle(kind: .primary, height: 40))
+                    .disabled(!actionEnabled)
+                if let secondaryTitle, let secondaryAction {
+                    Button(secondaryTitle, action: secondaryAction)
+                        .buttonStyle(.lumenGhost)
+                        .disabled(!actionEnabled)
+                        .help(secondaryHelp ?? "")
+                }
+            }
             if let footnote {
                 Text(footnote)
                     .font(.lumenSecondary)
@@ -489,14 +521,14 @@ struct VMSetupPanel: View {
 
     /// Under the buttons: what the person may do meanwhile.
     private var hint: String? {
-        if case .downloading? = center.activity { return L("vm.setup.download.hint") }
+        if case .downloading? = center.activity, !center.importingFile { return L("vm.setup.download.hint") }
         return nil
     }
 
     private var headline: String {
         switch center.activity {
-        case .asking?: return L("vm.setup.asking")
-        case .downloading?: return L("vm.setup.download")
+        case .asking?: return L(center.importingFile ? "vm.import.checking" : "vm.setup.asking")
+        case .downloading?: return L(center.importingFile ? "vm.import.copying" : "vm.setup.download")
         case .installing?: return L("vm.setup.install")
         case .guestSetup?: return L("vm.setup.guest")
         case nil: break
@@ -511,7 +543,7 @@ struct VMSetupPanel: View {
 
     private var detail: String {
         switch center.activity {
-        case .asking?: return L("vm.setup.asking.detail")
+        case .asking?: return L(center.importingFile ? "vm.import.checking.detail" : "vm.setup.asking.detail")
         case .downloading(let progress)?: return downloadText(progress)
         case .installing?: return L("vm.setup.install.note")
         case .guestSetup?: return L("vm.setup.guest.detail")
@@ -533,8 +565,23 @@ struct VMSetupPanel: View {
             case .asking?:
                 EmptyView()
             case .downloading?:
-                Button(L("vm.setup.pause")) { center.pauseDownload() }
-                    .buttonStyle(.lumenSecondary)
+                if center.importingFile {
+                    Button(L("common.cancel")) { center.pauseDownload() }
+                        .buttonStyle(.lumenSecondary)
+                } else {
+                    Button(L("vm.setup.pause")) { center.pauseDownload() }
+                        .buttonStyle(.lumenSecondary)
+                    // The file's address at Apple, for a download manager of the person's own;
+                    // the file it brings is then chosen with "I have the file".
+                    if let image = center.offeredImage, image.isFetchable {
+                        Button(L("vm.setup.copyLink")) {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(image.url.absoluteString, forType: .string)
+                        }
+                        .buttonStyle(.lumenGhost)
+                        .help(L("vm.setup.copyLink.help"))
+                    }
+                }
             case .installing?:
                 Button(L("common.cancel")) { center.cancelInstallation() }
                     .buttonStyle(.lumenSecondary)
@@ -556,6 +603,11 @@ struct VMSetupPanel: View {
             Button(L("vm.setup.continue")) { center.continueSetup() }
                 .buttonStyle(.lumenPrimary)
                 .disabled(center.requirements.contains(where: VMRequirements.stops))
+            if isPausedDownload {
+                Button(L("vm.import.choose")) { VMImageFilePanel.choose(for: center) }
+                    .buttonStyle(.lumenGhost)
+                    .help(L("vm.import.choose.help"))
+            }
             Button(L("vm.setup.removeDownload")) { center.removeDownloadedImage() }
                 .buttonStyle(.lumenGhost)
         case .needsGuestSetup:
@@ -571,6 +623,12 @@ struct VMSetupPanel: View {
         case .none, .ready:
             EmptyView()
         }
+    }
+
+    /// A download of Apple's file that was stopped part-way: the person's own file may take its place.
+    private var isPausedDownload: Bool {
+        if case .downloading = center.setup { return true }
+        return false
     }
 
     private func downloadText(_ progress: VMImageDownloader.Progress) -> String {

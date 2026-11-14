@@ -26,7 +26,11 @@ licensing, and has the machines.
    network that gives each connection only so much — far from Apple's servers, through a VPN,
    under a provider's shaping — gives six several times that (people's reports, 14 November: one
    connection was slow). The download can be paused, and goes on with the chunks that are not here
-   yet — also after a quit, a lost connection or a restart of the Mac;
+   yet — also after a quit, a lost connection or a restart of the Mac. **Or the person's own file:**
+   "I have the file…" (on the opening screen, and beside a paused download) takes a restore image
+   (`.ipsw`) they already have — downloaded by Lumen on another Mac, by a download manager ("Copy
+   Apple's link" while Lumen downloads gives the address), or a colleague's — see "A file the person
+   has" below;
 3. installs macOS from it (10–20 minutes) into the **base system**; the downloaded image is
    removed when the base is set up (until then, starting over is an installation, not a download);
 4. opens the base in a window, for macOS's own first-run setup (the country, an account) and
@@ -373,6 +377,24 @@ at a pause. The setup shows what the chunks that are here come to, not the parti
   nothing again and again is given up on, with what is here kept. A server's own trouble (5xx,
   408, 429) is tried again; any other refusal is said.
 - The connections go the way any app's do on this Mac — its VPN, its system proxy.
+
+### A file the person has
+
+"I have the file…" opens a file panel for an `.ipsw`. `VMImageImport.problem` first tells, without
+Apple, what is no restore image (not a file, smaller than 1 GB, not a ZIP archive — every `.ipsw`
+is one). Then the helper loads it as the installer would (`inspect`, a `catalog` event with the
+file's macOS and build) and says whether it runs in a virtual machine on this Mac; Apple's
+installer verifies it again as it installs. It is then cloned into the download's place where the
+volume can (APFS, the same volume: no room taken, at once) and copied otherwise — into a file of
+its own (`restore.ipsw.importing`), put in the image's place only when whole, the room checked
+first. A paused download of Lumen's own is set aside only then. The person's file is never moved
+or changed; the copy is removed with the downloaded image once the base is set up. A copy can be
+called off (Cancel) and leaves things as they were.
+
+`Tests/BrowserCoreTests/VMImageImportTests.swift`: what is no restore image said before Apple is
+asked, the file copied into the image's place with the person's own left as it was, a clone or a
+copy the same, a paused download set aside only once the file is whole (and kept when the copy is
+called off), a file that is not there.
 
 ## What is not measured, and what does not work
 
