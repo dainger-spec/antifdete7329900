@@ -159,6 +159,22 @@ enum UpdateSelfTest {
             check("changed archive: refused once downloaded", failed(updater) { $0 == .archiveHash }, "\(updater.state)")
             check("changed archive: not kept", !archiveStaged(configuration))
 
+            // A release's archive left by a build that did not remove it when a newer release
+            // replaced it before a quit: the next launch removes it, as nothing names it any more.
+            try FileManager.default.createDirectory(at: configuration.staging, withIntermediateDirectories: true,
+                                                    attributes: [.posixPermissions: 0o700])
+            let superseded = configuration.staging.appendingPathComponent("PrivacyBrowser-0.zip")
+            try Data("an earlier release".utf8).write(to: superseded) // l10n: not text
+            let launchSuite = "PBUpdateLaunch-\(UUID().uuidString)"
+            if let launchDefaults = UserDefaults(suiteName: launchSuite) {
+                _ = AppUpdater(configuration: configuration, defaults: launchDefaults)
+                launchDefaults.removePersistentDomain(forName: launchSuite)
+                check("an archive of a release replaced before a quit is removed at the next launch",
+                      !FileManager.default.fileExists(atPath: superseded.path))
+            } else {
+                check("an archive of a release replaced before a quit is removed at the next launch", false, "no defaults of its own")
+            }
+
             try await serve("valid")
             await updater.checkNow()
             guard case .ready(let item) = updater.state else {

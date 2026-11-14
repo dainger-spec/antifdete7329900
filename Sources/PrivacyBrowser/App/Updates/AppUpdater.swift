@@ -287,7 +287,7 @@ final class AppUpdater: ObservableObject, Updater {
     func download() async {
         guard !isPreview, case .available(let item) = state else { return }
         state = .downloading(item)
-        let name = "PrivacyBrowser-\(item.build).zip"
+        let name = Self.archivePrefix + "\(item.build).zip"
         do {
             try FileManager.default.createDirectory(at: configuration.staging, withIntermediateDirectories: true,
                                                     attributes: [.posixPermissions: 0o700])
@@ -296,6 +296,9 @@ final class AppUpdater: ObservableObject, Updater {
             try? FileManager.default.removeItem(at: archive)
             try FileManager.default.moveItem(at: downloaded, to: archive)
             try UpdateVerifier.checkArchive(at: archive, item: item, keys: configuration.keys)
+            // The release this one replaces, downloaded and never installed (a newer one came out
+            // before a quit), goes: it stayed in the folder for good.
+            if let previous = loadStaged(), previous.archive != name { removeArchive(named: previous.archive) }
             saveStaged(Staged(item: item, archive: name))
             state = .ready(item)
             log.notice("Update downloaded and checked; it installs at the next quit that seals every profile")
@@ -397,9 +400,32 @@ final class AppUpdater: ObservableObject, Updater {
         defaults.removeObject(forKey: Key.staged)
     }
 
+    /// What every release's archive is called in the staging folder, before its build.
+    private static let archivePrefix = "PrivacyBrowser-"
+
+    /// Removes a release's archive from the staging folder — never the one a request hands the
+    /// installer, nor anything named as no archive of ours is.
+    private func removeArchive(named name: String) {
+        guard name.hasPrefix(Self.archivePrefix), name.hasSuffix(".zip"), !name.contains("/") else { return }
+        if let request = try? UpdateRequest.read(from: configuration.staging), request.archive == name { return }
+        try? FileManager.default.removeItem(at: configuration.staging.appendingPathComponent(name))
+    }
+
+    /// At launch: the archives of releases downloaded and never installed that nothing names any
+    /// more — each replaced by a newer one before a quit, by a build that did not remove it — go.
+    /// The one staged stays (`restoreStaged` decides about it), and the one a request names.
+    private func removeSupersededArchives() {
+        let staged = loadStaged()?.archive
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: configuration.staging.path)) ?? [] where name != staged {
+            removeArchive(named: name)
+        }
+    }
+
     /// At launch: a staged release still newer than this build, with its archive, is ready again;
-    /// anything else staged (installed meanwhile, or gone) is removed.
+    /// anything else staged (installed meanwhile, or gone) is removed, and so is every archive
+    /// nothing names (`removeSupersededArchives`).
     private func restoreStaged() {
+        defer { removeSupersededArchives() }
         guard let staged = loadStaged() else { return }
         if let build = BuildVersion(staged.item.build), build > configuration.build, archiveExists(staged) {
             state = .ready(staged.item)

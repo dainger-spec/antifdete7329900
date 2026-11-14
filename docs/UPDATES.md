@@ -320,7 +320,9 @@ read before any vault is unlocked.
   one exception is the end-to-end scenarios' local feed, accepted by its certificate's hash only in
   their own mode (§8). The archive is downloaded by the same
   session into a temporary file and moved into the staging folder, where its length, SHA-256 and
-  Ed25519 signature are checked before it counts as downloaded.
+  Ed25519 signature are checked before it counts as downloaded. A release downloaded and never
+  installed — a newer one came out before a quit — goes when the newer one has checked; at each
+  launch the folder keeps no archive but the one staged and the one a request names.
 
 ## 6. Signing, notarization, `scripts/release.sh`
 
@@ -707,6 +709,7 @@ handed over at the last quit — is said once at the next launch. In the UI snap
   - an older build is never offered (a feed of build 1 and 0.9 to build 1);
   - a stale appcast (validly signed, older than one accepted), a forged one (its list changed
     under the signature) and a changed archive (one byte) are refused, nothing kept;
+  - an archive nothing names any more (a release replaced before a quit) is removed at a launch;
   - the release is downloaded and checked; with a profile running in a window and another warming
     up without one — in the unsandboxed build, each in its own process — the gate does not pass
     and nothing is handed over: no request written, no installer running;
