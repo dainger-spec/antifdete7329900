@@ -128,6 +128,9 @@ final class ProfileProcess {
 
         let keyPipe = Pipe()
         process.standardInput = keyPipe
+        // A command written in the moment between the child's exit and this process noticing it
+        // fails, and is not a signal that ends the app (SIGPIPE, which the app ignores too: main).
+        _ = fcntl(keyPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         // What the profile says back. Safari's own frameworks print on this stream too, so only
         // prefixed lines are ours and the rest is passed on to the log as it was.
         let eventPipe = Pipe()
@@ -138,8 +141,9 @@ final class ProfileProcess {
 
         // The profile's grant first: its key and its entry in the index, not the vault's master
         // key (`ProfileGrant`). Written after the fork so that it exists only in the two
-        // processes' memory and the pipe buffer.
-        keyPipe.fileHandleForWriting.write(record)
+        // processes' memory and the pipe buffer. A child that is already gone gets none, and its
+        // exit is handled as any other.
+        try? keyPipe.fileHandleForWriting.write(contentsOf: record)
 
         let child = ProfileProcess(profileID: profileID, isForWarmUpOnly: forWarmUpOnly, process: process)
         // The same pipe carries the commands after the grant; it stays open until the child exits.

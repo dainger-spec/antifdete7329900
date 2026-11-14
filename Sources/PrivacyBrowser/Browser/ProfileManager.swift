@@ -183,10 +183,14 @@ final class ProfileManager: ObservableObject {
         case invalidProxy(host: String)
         /// The proxy answered 407 and the profile has no user name and password for it.
         case proxyNeedsCredentials(host: String)
+        /// A process of the profile that an earlier run of the app left behind is still sealing
+        /// its data (`launch`).
+        case stillSealing(name: String)
         var errorDescription: String? {
             switch self {
             case .invalidProxy(let host): return String(format: L("launch.error.proxyInvalid"), host)
             case .proxyNeedsCredentials(let host): return String(format: L("launch.error.proxyNeedsCredentials"), host)
+            case .stillSealing(let name): return String(format: L("launch.error.stillSealing"), name)
             }
         }
     }
@@ -314,6 +318,17 @@ final class ProfileManager: ObservableObject {
         busyProfileIDs.insert(id)
         defer { busyProfileIDs.remove(id) }
 
+        // A process of this profile that an app before this one left running (it crashed or was
+        // killed) quits by itself when its channel closes, and seals the profile's data as it goes:
+        // a second process on the same home and website data would write under it. Waited for, as
+        // long as a stop waits for a process to seal, then refused.
+        if ProfileProcess.isEnabled, !runsInProfileProcess, safariHomeVault.isInUse(profileID: id) {
+            log.notice("\(id.uuidString, privacy: .public) is still held by a process an earlier run left: waiting for it to seal and quit")
+            guard await waitUntilHomeIsFree(of: id, seconds: 30) else {
+                if isShuttingDown { return }
+                throw LaunchError.stillSealing(name: (try? repository.summary(for: id).name) ?? "")
+            }
+        }
         // Partial plaintext an unseal of this profile that did not finish left (R8): first, whatever
         // the launch then does, and before its archives are extracted again.
         AppEnvironment.removeUnsealLeftovers(vault: repository.root, of: id)
@@ -1835,6 +1850,17 @@ final class ProfileManager: ObservableObject {
             try await webDataVault.seal(profileID: id, key: key, activeStore: false)
         }
         try safariHomeVault.seal(profileID: id, key: key)
+    }
+
+    /// Returns true once no process holds the profile's home (`SafariHomeVault.isInUse`), false if
+    /// one still does after `seconds` or a Lock or Quit began meanwhile.
+    private func waitUntilHomeIsFree(of id: UUID, seconds: TimeInterval) async -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while safariHomeVault.isInUse(profileID: id) {
+            guard Date() < deadline, !isShuttingDown else { return false }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        return true
     }
 
     /// A home still held by a profile's process that a crashed manager left behind is sealed once

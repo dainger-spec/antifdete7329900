@@ -7,6 +7,11 @@ import SystemConfiguration
 // otherwise the SwiftUI app starts.
 // Top-level code runs on the main thread; Swift 5 mode does not infer main-actor isolation for it.
 MainActor.assumeIsolated {
+    // A write to a pipe nobody reads any more fails, and is not a signal that ends the process:
+    // the app's commands to a profile's process that has just exited, and a profile's process
+    // telling a manager that crashed or was force-quit that it is sealing — which is what it does
+    // then, on its own, and what SIGPIPE ended before it could (LumenVM/main.swift does the same).
+    signal(SIGPIPE, SIG_IGN)
     let arguments = CommandLine.arguments
     // A profile's process: started with the websites' languages, its interface's language fixed
     // before anything asks a bundle for its own (Localization.pinInterfaceLanguage).

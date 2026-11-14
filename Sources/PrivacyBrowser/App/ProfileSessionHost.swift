@@ -28,6 +28,11 @@ enum ProfileSessionHost {
     }
 
     static func start(arguments: [String]) {
+        // What this process says goes to the manager alone. With the manager gone (it crashed, or
+        // was force-quit), saying it fails — and must not end this process with SIGPIPE before it
+        // has sealed the profile's data (main.swift ignores the signal; this holds even if
+        // something loaded later puts it back).
+        _ = fcntl(STDOUT_FILENO, F_SETNOSIGPIPE, 1)
         guard let index = arguments.firstIndex(of: "--profile-session"),
               arguments.indices.contains(index + 1),
               let profileID = UUID(uuidString: arguments[index + 1]) else {

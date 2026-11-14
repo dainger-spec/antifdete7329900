@@ -1002,9 +1002,12 @@ refuses the rest (`CoreError.notGranted`): the other profiles' keys and names, t
 this Mac's settings and the sync keys stay with the manager, and the index is written only by the
 manager. So a compromise of the process that loads websites and Safari's frameworks reaches the
 profile it runs, not the vault (`ProfileGrantTests`). It quits — sealing
-its data — when the manager's channel closes (the manager quit or crashed), and holds a lock on its
-home while it runs, so that a manager started after a crash seals a home left in plaintext only
-once its process is gone.
+its data — when the manager's channel closes (the manager quit or crashed): a write to that channel
+then fails rather than ending the process (SIGPIPE is ignored, in the app as in the profile's
+process). It holds a lock on its home while it runs, so that a manager started after a crash seals a
+home left in plaintext only once its process is gone, and starts the profile again only then: a
+launch waits up to 30 s for such a process to seal and quit, and is refused, saying so, if it has
+not.
 
 Its environment is built from a list (`ProfileProcess.childEnvironment`), not inherited: the
 user's name and shell, the text encoding, the app's language and Safari-chrome switches, a fixed
