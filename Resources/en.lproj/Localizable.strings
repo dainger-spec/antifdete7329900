@@ -2087,7 +2087,7 @@
 "help.scenarios.schedule" = "Schedule";
 "help.scenarios.schedule.text" = "Schedule is at the bottom left of the Scenarios window, and On a Schedule…, beside Run, schedules the scenario that is open. A scenario or a profile's warm-up can start every day at a set time or every few hours, with a random shift, so that runs do not fall on the same minute.";
 "help.scenarios.schedule.running" = "A schedule runs while Lumen is open and the vault is unlocked: it does not wake the Mac or start the app. A run missed by more than 6 hours is not made; it waits for the next time. If the profile is busy then, the run moves on by 10 minutes.";
-"help.commands.intro" = "The commands belong to page. A selector is CSS (#login, .buy, input[name=q]) or text=…, the smallest visible element holding that text. Options go last, in braces, such as {timeout: 30000}, in milliseconds.";
+"help.commands.intro" = "The commands belong to page. A selector is CSS (#login, .buy, input[name=q]) or text=…, the smallest visible element holding that text; login-box >>> input[name=email] looks inside a page component (its open shadow root). Options go last, in braces, such as {timeout: 30000}, in milliseconds.";
 "help.commands.navigation" = "Going to pages";
 "help.commands.goto" = "Goes to an http or https address, as the address bar does, and waits for the page. {waitUntil: 'domcontentloaded'} does not wait for pictures and styles.";
 "help.commands.history" = "Back, forward, reload, as the toolbar’s buttons; they wait for the page.";

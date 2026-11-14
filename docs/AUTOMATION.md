@@ -31,7 +31,10 @@ Names follow Playwright's so that a script moves over quickly; full compatibilit
 | `screenshot(selector?)` | A PNG of the viewport or of an element's part in view |
 | `pause(range)` | A pause of random length |
 
-Selectors are CSS, or `text=…` for the smallest visible elements whose text holds it.
+Selectors are CSS, or `text=…` for the smallest visible elements whose text holds it. Neither
+looks into a web component's own elements (an open shadow root): `host >>> inner` does — `inner`
+(CSS or `text=`) inside the shadow root of each element `host` finds, and again for a component
+in a component (`a >>> b >>> c`). Clicks aim at the element itself there, not at its host.
 
 The driver reads the page (where an element is, whether it shows, its text) in a content world of
 its own; it never acts on the page from a script. Clicks, typing and scrolling are input events.
@@ -125,7 +128,11 @@ Record ── AppModel.startRecording(on:) ── the profile started with a win
   `ember123`, long runs of digits); `data-testid`, `data-test-id`, `data-test`, `data-qa`,
   `data-cy`; `name`, `aria-label`, `placeholder`, `title` with the tag; for a link or button, its
   text (`text=…`) when exactly one element has it; else the path from the nearest ancestor that
-  can be named, by position among siblings of its kind.
+  can be named, by position among siblings of its kind. An element inside a web component's open
+  shadow root is named by the same rules within that root, after its host's selector and `>>>`
+  (`body > login-box >>> input[name="email"]`): a selector of the page itself would find nothing
+  there on a replay, or a look-alike outside the component. A closed shadow root shows the page
+  only its host, which is what is recorded.
 - **A password is never recorded.** The page's side sends no text for a secret's field, the
   profile's process drops any that came, and the line is
   `await page.type(selector, params.password || '');` with a comment that says so. A secret's
@@ -149,7 +156,9 @@ Checked: `ScenarioRecordingTests` (which loads are steps, what typing leaves, ea
 the self-test's "automation commands" (a recording of the driver's own click and typing comes out
 as the lines that repeat them, and nothing is recorded after Stop); the page's script against
 real input in a browser while it was written (the fields, a password, a checkbox's label, a
-button without an id, Enter).
+button without an id, Enter); `scripts/test-shims.mjs` runs the page's script and the driver's
+find on a stub page — secrets, and a field and a button in a component's shadow root named
+through its host and found there rather than in a look-alike form of the page.
 
 ## By the clock
 
