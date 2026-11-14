@@ -239,7 +239,8 @@ a client (Selenium) ── http://127.0.0.1:<port>/wd/<profile's token>/<profile
   drives that one profile and nothing else of the API. Renewing the API's token changes every
   profile's address. 127.0.0.1 only.
 - **A session is a launch.** One session a profile at a time; ending it closes its window, and
-  stops the profile when the session started it (a profile that was running stays).
+  stops the profile when the session started it (a profile that was running stays — out of
+  sight, too: the session's window closing is not the profile's last window closing).
 - **A window of its own.** A session never acts in a scenario's run's window, and no run takes
   the session's: a run started from the editor opens its own. While a session drives a
   profile, a schedule's run on it waits (the profile is busy, looked at again ten minutes on)

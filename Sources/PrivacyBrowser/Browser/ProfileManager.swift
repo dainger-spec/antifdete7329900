@@ -1127,7 +1127,9 @@ final class ProfileManager: ObservableObject {
 
     /// The page a WebDriver session of profile `id` acts in: the one it has, while its window is
     /// there; else a new one of its own, where a scenario's run would get one — never a run's
-    /// window, nor one a run takes after (`openScenarioPage(forWebDriver:)`).
+    /// window, nor one a run takes after (`openScenarioPage(forWebDriver:)`). Closing it as the
+    /// session ends is not the profile's last window closing: a profile the session found running
+    /// stays, and one it started is stopped by the session's end (`WebDriverService.end`).
     private func webDriverExecutor(for id: UUID, _ session: BrowserSession) async throws -> WebDriverExecutor {
         if let executor = webDriverExecutors[id], executor.driver.webView.window != nil { return executor }
         webDriverExecutors.removeValue(forKey: id)?.close()
@@ -1135,7 +1137,8 @@ final class ProfileManager: ObservableObject {
            let page = await SafariChromeHost.openScenarioPage(session: session, forWebDriver: true) {
             let window = page.webView.window
             let executor = WebDriverExecutor(driver: PageDriver(webView: page.webView, navigate: page.navigate), windowKind: "Safari's") {
-                [weak window] in window?.performClose(nil)
+                [weak window] in
+                if let window { SafariChromeHost.closeKeepingProfile(window) }
             }
             webDriverExecutors[id] = executor
             return executor
@@ -1143,7 +1146,12 @@ final class ProfileManager: ObservableObject {
         let controller = session.openWindow(url: nil)
         guard let tab = controller.selectedTab else { throw WebDriverError.sessionNotCreated("the profile gave no window to act in") }
         let executor = WebDriverExecutor(driver: PageDriver(webView: tab.webView) { [weak tab] url in _ = tab?.load(url) },
-                                         windowKind: "the app's own") { [weak controller] in controller?.close() }
+                                         windowKind: "the app's own") { [weak controller] in
+            // Not one of the profile's own windows as it closes, as the warm-up's is not: its
+            // closing is not the profile's last window closing (`BrowserSession.windowDidClose`).
+            controller?.isForWarmUp = true
+            controller?.close()
+        }
         webDriverExecutors[id] = executor
         return executor
     }

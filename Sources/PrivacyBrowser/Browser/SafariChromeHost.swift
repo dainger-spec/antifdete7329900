@@ -313,6 +313,17 @@ enum SafariChromeHost {
     static var onLastWindowClosed: (() -> Void)?
     private static var isWatchingWindows = false
     private static var isClosingEveryWindow = false
+    /// Windows whose closing is not the profile's last window closing (`closeKeepingProfile`).
+    private static let closingKeepsProfile = NSHashTable<NSWindow>.weakObjects()
+
+    /// Closes `window` as its close button does, but its being the last of Safari's windows does not
+    /// quit the profile: a WebDriver session's window, closed as the session ends. A profile the
+    /// session found running — out of sight, say — stays as it was (docs/AUTOMATION.md, "WebDriver");
+    /// one the session started is stopped by the session's end, which seals its data.
+    static func closeKeepingProfile(_ window: NSWindow) {
+        closingKeepsProfile.add(window)
+        window.performClose(nil)
+    }
 
     private static func watchWindows() {
         guard !isWatchingWindows else { return }
@@ -323,7 +334,7 @@ enum SafariChromeHost {
                 // Where it was, for the profile's next first window — closed by the user, or by a
                 // stop or a quit before the seal.
                 if isBrowserWindow(closing) { SavedWindowFrame.save(closing.frame, for: savedFrameSize) }
-                guard !isClosingEveryWindow, isBrowserWindow(closing) else { return }
+                guard !isClosingEveryWindow, isBrowserWindow(closing), !closingKeepsProfile.contains(closing) else { return }
                 let others = NSApp.windows.filter { $0 !== closing && $0.isVisible && isBrowserWindow($0) }
                 if others.isEmpty {
                     log.notice("Safari's last window of this profile closed: the profile quits")
