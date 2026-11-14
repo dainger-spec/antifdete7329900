@@ -401,6 +401,26 @@ final class LicenseClientTests: XCTestCase {
         XCTAssertEqual(error.availableAt, time("2026-11-08T09:00:00Z"))
     }
 
+    /// iPhones in the list (CONTRACT §4.3): told apart by `platform`, with their own count; a device
+    /// of a server before iPhones (no `platform`) is a Mac.
+    func testTheDevicesListTellsIPhonesFromMacs() async throws {
+        let list: [String: Any] = [
+            "devices": [["deviceID": "m1", "code": "B119", "label": "Studio", "platform": "mac"],
+                        ["deviceID": "p1", "code": "K7Q2", "label": "", "platform": "ios"],
+                        ["deviceID": "m2", "code": "3KQ9"]],
+            "limit": 3, "used": 2, "phoneLimit": 3, "phonesUsed": 1, "unlinkAvailableAt": "2026-11-20T09:00:00Z"]
+        let server = FakeServer { _ in self.ok(list) }
+        let devices = try await client(server).devices(.session(ServerToken("lms_s"))).get()
+        XCTAssertEqual(devices.macs.map(\.code), ["B119", "3KQ9"])
+        XCTAssertEqual(devices.phones.map(\.code), ["K7Q2"])
+        XCTAssertEqual(devices.devices.map(\.isPhone), [false, true, false])
+        XCTAssertEqual([devices.phoneLimit, devices.phonesUsed], [3, 1])
+        XCTAssertEqual(devices.unlinkAvailableAt, time("2026-11-20T09:00:00Z"), "the Macs' pause, which an iPhone's unlink is not held by")
+        // A platform of another type is left empty, as any odd field: the device reads as a Mac.
+        let odd = try JSONDecoder().decode(AccountDevice.self, from: Data("{\"deviceID\": \"x\", \"platform\": 7}".utf8))
+        XCTAssertFalse(odd.isPhone)
+    }
+
     // MARK: A purchase without registration: an email, a new key (§11.1)
 
     private let keyText = "LMK-0123-4567-89AB-CDEF-GHJK-MNMT"

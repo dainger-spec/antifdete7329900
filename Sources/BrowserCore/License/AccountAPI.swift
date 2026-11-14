@@ -61,11 +61,17 @@ public struct AccountDevice: Codable, Equatable, Sendable, Identifiable {
     public var mine: Bool?
     /// A team member's email, shown to the team's owner only.
     public var accountEmail: String?
+    /// `"mac"` or `"ios"` (CONTRACT §4.3); absent from a server before iPhones: a Mac.
+    public var platform: String?
 
     public var id: String { deviceID }
 
+    /// An iPhone: it takes no Mac's place, and its unlink is never refused for the Macs' pause nor
+    /// starts it (CONTRACT §4.3) — shown apart, with texts of its own.
+    public var isPhone: Bool { platform == "ios" }
+
     enum CodingKeys: String, CodingKey {
-        case deviceID, code, label, createdAt, lastSeenAt, profileCount, appVersion, mine, accountEmail
+        case deviceID, code, label, createdAt, lastSeenAt, profileCount, appVersion, mine, accountEmail, platform
     }
 
     /// Read leniently: a field missing or of another type is left empty, so that one odd device
@@ -81,10 +87,12 @@ public struct AccountDevice: Codable, Equatable, Sendable, Identifiable {
         appVersion = try? container.decode(String.self, forKey: .appVersion)
         mine = try? container.decode(Bool.self, forKey: .mine)
         accountEmail = try? container.decode(String.self, forKey: .accountEmail)
+        platform = try? container.decode(String.self, forKey: .platform)
     }
 
     public init(deviceID: String, code: String, label: String = "", createdAt: Date? = nil, lastSeenAt: Date? = nil,
-                profileCount: Int? = nil, appVersion: String? = nil, mine: Bool? = nil, accountEmail: String? = nil) {
+                profileCount: Int? = nil, appVersion: String? = nil, mine: Bool? = nil, accountEmail: String? = nil,
+                platform: String? = nil) {
         self.deviceID = deviceID
         self.code = code
         self.label = label
@@ -94,6 +102,7 @@ public struct AccountDevice: Codable, Equatable, Sendable, Identifiable {
         self.appVersion = appVersion
         self.mine = mine
         self.accountEmail = accountEmail
+        self.platform = platform
     }
 }
 
@@ -102,15 +111,20 @@ public struct AccountDevices: Codable, Equatable, Sendable {
     public var devices: [AccountDevice]
     public var limit: Int?
     public var used: Int?
+    /// When the next unlink of a Mac is possible (the Macs' pause); an iPhone's is not held by it.
     public var unlinkAvailableAt: Date?
     public var unlinkCooldownSeconds: Int?
     public var offlineWorkSeconds: Int?
     /// Only in the key's view of its license (`POST /v1/anonymous/license`, §11.1): an email is linked
     /// to the purchase. The address itself is not shown to whoever holds the key.
     public var emailLinked: Bool?
+    /// The iPhones' own places (CONTRACT §4.3): how many the license has, and how many are taken.
+    public var phoneLimit: Int?
+    public var phonesUsed: Int?
 
     public init(devices: [AccountDevice], limit: Int? = nil, used: Int? = nil, unlinkAvailableAt: Date? = nil,
-                unlinkCooldownSeconds: Int? = nil, offlineWorkSeconds: Int? = nil, emailLinked: Bool? = nil) {
+                unlinkCooldownSeconds: Int? = nil, offlineWorkSeconds: Int? = nil, emailLinked: Bool? = nil,
+                phoneLimit: Int? = nil, phonesUsed: Int? = nil) {
         self.devices = devices
         self.limit = limit
         self.used = used
@@ -118,7 +132,13 @@ public struct AccountDevices: Codable, Equatable, Sendable {
         self.unlinkCooldownSeconds = unlinkCooldownSeconds
         self.offlineWorkSeconds = offlineWorkSeconds
         self.emailLinked = emailLinked
+        self.phoneLimit = phoneLimit
+        self.phonesUsed = phonesUsed
     }
+
+    /// The Macs, and the iPhones (`AccountDevice.isPhone`), each shown under a count of its own.
+    public var macs: [AccountDevice] { devices.filter { !$0.isPhone } }
+    public var phones: [AccountDevice] { devices.filter(\.isPhone) }
 }
 
 /// A session after signing in with an email and a password (§5.2).

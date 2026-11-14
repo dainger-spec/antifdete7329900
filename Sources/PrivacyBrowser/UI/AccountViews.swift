@@ -583,15 +583,21 @@ private struct DeviceLimitList: View {
     }
 }
 
-/// "Mac B119 · Рабочий", when it was seen, how many profiles; this Mac marked.
+/// "Mac B119 · Рабочий" or "iPhone K7Q2" (an iPhone has no label), when it was seen, how many
+/// profiles; this Mac marked.
 private struct DeviceLine: View {
     let device: AccountDevice
     let isThisMac: Bool
 
+    private var title: String {
+        if device.isPhone { return String(format: L("license.account.device.phone"), device.code) }
+        return String(format: L("license.account.device.title"), device.code) + (device.label.isEmpty ? "" : " · " + device.label)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 8) {
-                Text(String(format: L("license.account.device.title"), device.code) + (device.label.isEmpty ? "" : " · " + device.label))
+                Text(title)
                     .font(.lumenRowTitle)
                     .foregroundStyle(Theme.textPrimary)
                 if isThisMac {
@@ -876,7 +882,10 @@ struct AccountSettingsPage: View {
                 Task { await loadDevices() }
             }
         }
-        .alert(confirmingUnlink.map { String(format: L("license.account.unlink.confirm"), $0.code) } ?? "",
+        .alert(confirmingUnlink.map { device in
+                   device.isPhone ? String(format: L("license.account.unlink.confirm.phone"), device.code)
+                                  : String(format: L("license.account.unlink.confirm"), device.code)
+               } ?? "",
                isPresented: Binding(get: { confirmingUnlink != nil }, set: { if !$0 { confirmingUnlink = nil } })) {
             if devicesByTypedKey {
                 // The key is not kept (§10.1): asked for again for this request, forgotten after it.
@@ -911,9 +920,14 @@ struct AccountSettingsPage: View {
                 }
             }
         } message: {
-            Text(String(format: L("contract.unlink.consequences"),
-                        LicenseText.duration(TimeInterval(devices?.offlineWorkSeconds ?? 0)),
-                        LicenseText.duration(TimeInterval(devices?.unlinkCooldownSeconds ?? 0))))
+            // An iPhone's unlink starts no pause for the Macs (CONTRACT §4.3): its own words.
+            if confirmingUnlink?.isPhone == true {
+                Text(L("license.account.unlink.phone.consequences"))
+            } else {
+                Text(String(format: L("contract.unlink.consequences"),
+                            LicenseText.duration(TimeInterval(devices?.offlineWorkSeconds ?? 0)),
+                            LicenseText.duration(TimeInterval(devices?.unlinkCooldownSeconds ?? 0))))
+            }
         }
     }
 
@@ -1106,27 +1120,38 @@ struct AccountSettingsPage: View {
                 }
             }
         } else if let devices {
-            ForEach(devices.devices) { device in
-                let isThisMac = device.deviceID == license.record.deviceID
-                HStack(spacing: 12) {
-                    DeviceLine(device: device, isThisMac: isThisMac)
-                    Spacer(minLength: 8)
-                    if !isThisMac {
-                        Button(L("license.activate.unlink")) { confirmingUnlink = device }
-                            .buttonStyle(.lumenSecondary)
-                            .disabled(devices.unlinkAvailableAt != nil || license.isWorking)
-                    }
-                }
-                .padding(.vertical, 12)
-                .overlay(alignment: .top) { Rectangle().fill(Theme.divider).frame(height: 1) }
-            }
+            ForEach(devices.macs) { device in deviceRow(device, in: devices) }
             if let available = devices.unlinkAvailableAt {
                 note(String(format: L("contract.error.unlink_cooldown"), LicenseText.date(available)))
+            }
+            // The iPhones apart, under a count of their own (CONTRACT §4.3): they take no Mac's
+            // place, and the Macs' pause neither holds their unlink nor is started by it.
+            if !devices.phones.isEmpty {
+                SettingsCaption(String(format: L("license.account.caption.phones"),
+                                       devices.phonesUsed ?? devices.phones.count, devices.phoneLimit ?? devices.phones.count))
+                ForEach(devices.phones) { device in deviceRow(device, in: devices) }
+                note(L("license.account.phones.hint"))
             }
         } else if loadingDevices {
             note(L("license.account.loading"))
         }
         if let devicesProblem { note(devicesProblem) }
+    }
+
+    /// One device of the list, with its Unlink — a Mac's held by the Macs' pause, an iPhone's never.
+    private func deviceRow(_ device: AccountDevice, in devices: AccountDevices) -> some View {
+        let isThisMac = device.deviceID == license.record.deviceID
+        return HStack(spacing: 12) {
+            DeviceLine(device: device, isThisMac: isThisMac)
+            Spacer(minLength: 8)
+            if !isThisMac {
+                Button(L("license.activate.unlink")) { confirmingUnlink = device }
+                    .buttonStyle(.lumenSecondary)
+                    .disabled((!device.isPhone && devices.unlinkAvailableAt != nil) || license.isWorking)
+            }
+        }
+        .padding(.vertical, 12)
+        .overlay(alignment: .top) { Rectangle().fill(Theme.divider).frame(height: 1) }
     }
 
     private var noSessionText: String {

@@ -2507,7 +2507,12 @@
 "license.account.thisMacBadge" = "This Mac";
 "license.account.device.seen" = "Seen %1$@ · %2$@";
 "license.account.device.title" = "Mac %@";
+"license.account.device.phone" = "iPhone %@";
 "license.account.unlink.confirm" = "Unlink Mac %@?";
+"license.account.unlink.confirm.phone" = "Unlink iPhone %@?";
+"license.account.unlink.phone.consequences" = "The iPhone loses access to the license and sync the next time it reaches the server. Its profiles stay on it. This starts no pause for unlinking a Mac.";
+"license.account.caption.phones" = "iPhone · %1$ld of %2$ld";
+"license.account.phones.hint" = "An iPhone takes no Mac’s place. You can unlink it at any time, and that starts no pause for Macs.";
 "license.account.signIn" = "Sign In";
 "license.account.devicesOnSite" = "Devices on the Website";
 "license.account.cabinet" = "Your account";

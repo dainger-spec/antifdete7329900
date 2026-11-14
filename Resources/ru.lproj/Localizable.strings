@@ -2507,7 +2507,12 @@
 "license.account.thisMacBadge" = "Этот Mac";
 "license.account.device.seen" = "На связи %1$@ · %2$@";
 "license.account.device.title" = "Mac %@";
+"license.account.device.phone" = "iPhone %@";
 "license.account.unlink.confirm" = "Отвязать Mac %@?";
+"license.account.unlink.confirm.phone" = "Отвязать iPhone %@?";
+"license.account.unlink.phone.consequences" = "iPhone потеряет доступ к лицензии и синхронизации при следующей связи с сервером. Профили на нём останутся. Пауза для отвязки Mac от этого не начнётся.";
+"license.account.caption.phones" = "iPhone · %1$ld из %2$ld";
+"license.account.phones.hint" = "iPhone не занимает места Mac. Отвязать его можно в любой момент, и пауза для Mac после этого не начинается.";
 "license.account.signIn" = "Войти";
 "license.account.devicesOnSite" = "Устройства на сайте";
 "license.account.cabinet" = "Кабинет";
