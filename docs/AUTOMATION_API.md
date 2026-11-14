@@ -113,7 +113,8 @@ pointer, wheel and keyboard, which pages cannot tell from a person's.
 | `GET /v1/profiles/{profile}/scenario` | The profile's last run: `running`, `outcome` (`finished`, `failed`, `stopped`), `reason`, and its `lines` (`at`, `kind`, `text`) |
 | `POST /v1/profiles/{profile}/scenario/stop` | Stops it: a wait under way ends, a pressed button or key is let go first |
 
-A profile not running answers **409** `not_running`; a run already going, **409** `busy`. The log
+A profile not running answers **409** `not_running`; a run already going, or a WebDriver session
+driving the profile, **409** `busy`. The log
 never holds what was typed — only how many characters.
 
 ```sh

@@ -314,6 +314,9 @@ final class AutomationHandler {
     var allowsAutomation: () -> Bool = { false }
     /// A saved scenario by its exact name (one), for `{"scenario": "…"}`.
     var savedScenario: (String) -> Scenario? = { _ in nil }
+    /// Whether a WebDriver session drives the profile now (`WebDriverService.hasSession`): a run
+    /// is refused beside it, as beside another run.
+    var hasWebDriverSession: (UUID) -> Bool = { _ in false }
     /// Makes a profile as the app's New Profile does — the plan's limit and an unreadable index
     /// refuse it (`AppModel.createProfile`). Nil: no profile can be made here.
     var createProfile: ((String, ProfileConfiguration) throws -> UUID?)?
@@ -415,6 +418,9 @@ final class AutomationHandler {
                     (name, source) = (saved.name, saved.source)
                 } else {
                     return .error(404, "no_scenario", "No saved scenario is named \(spec.scenario ?? "") (exactly, one).")
+                }
+                guard !hasWebDriverSession(summary.id) else {
+                    return .error(409, "busy", "A WebDriver session drives this profile; end it (quit) before a run.")
                 }
                 let runID = UUID()
                 guard manager.runScenario(summary.id, name: name, source: source, parametersJSON: spec.parametersJSON, runID: runID) else {

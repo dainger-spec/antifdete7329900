@@ -500,6 +500,7 @@ final class AppModel: ObservableObject {
             isBusy: { [weak self] id in
                 guard let self else { return true }
                 return self.isBusy(id) || self.scenarioRun(of: id)?.isRunning == true || self.recordingProfile == id
+                    || self.automationServer?.webDriver?.hasSession(id) == true
             },
             // A schedule's run: in front, but without the keyboard or the app's activation.
             runScenario: { [weak self] scenario, id in await self?.runScenario(scenario, on: id, inBackground: true) ?? false },
@@ -1561,6 +1562,7 @@ final class AppModel: ObservableObject {
             }
         }
         webDriver.stop = { [weak self] id in await self?.stop(id) }
+        handler.hasWebDriverSession = { [weak webDriver] id in webDriver?.hasSession(id) ?? false }
         server.webDriver = webDriver
         server.onStateChange = { [weak self] state in self?.automationState = state }
         automationServer = server

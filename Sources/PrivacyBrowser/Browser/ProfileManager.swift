@@ -1126,12 +1126,13 @@ final class ProfileManager: ObservableObject {
     }
 
     /// The page a WebDriver session of profile `id` acts in: the one it has, while its window is
-    /// there; else a new one, where a scenario's run would get its own.
+    /// there; else a new one of its own, where a scenario's run would get one — never a run's
+    /// window, nor one a run takes after (`openScenarioPage(forWebDriver:)`).
     private func webDriverExecutor(for id: UUID, _ session: BrowserSession) async throws -> WebDriverExecutor {
         if let executor = webDriverExecutors[id], executor.driver.webView.window != nil { return executor }
         webDriverExecutors.removeValue(forKey: id)?.close()
         if SafariChromeHost.isHosting, SafariChromeHost.canHost(session.configuration),
-           let page = await SafariChromeHost.openScenarioPage(session: session) {
+           let page = await SafariChromeHost.openScenarioPage(session: session, forWebDriver: true) {
             let window = page.webView.window
             let executor = WebDriverExecutor(driver: PageDriver(webView: page.webView, navigate: page.navigate), windowKind: "Safari's") {
                 [weak window] in window?.performClose(nil)

@@ -164,7 +164,8 @@ deleting one asks first; saving a change leaves the schedule's switch as it was.
 - `ScenarioScheduleCoordinator` looks at the clock once a minute while the vault is open: a due
   scenario is run as the editor's Run runs it (`AppModel.runScenario`), a due warm-up goes into
   the warm-up queue with the profile's own plan. A profile that is starting, being sealed,
-  running a scenario or being recorded in is looked at again ten minutes on. A run found more
+  running a scenario, being recorded in or driven by a WebDriver session is looked at again ten
+  minutes on. A run found more
   than six hours late is not made ("missed"); without automation in the plan nothing is run and
   the schedule says so. Schedules of deleted profiles and scenarios go with them.
 - Nothing wakes the Mac or starts the app: a schedule runs while Lumen does.
@@ -202,8 +203,9 @@ a client (Selenium) ── http://127.0.0.1:<port>/wd/<profile's token>/<profile
        a command:   ProfileManager.webDriver(id, WebDriverCall) ── ProfileCommand.webDriver to the
                     profile's own process, answered by ProfileEvent.webDriverAnswer (by the call's id)
        quit:        "close"; a profile the session started is stopped
-   WebDriverExecutor (where the window is) ── PageDriver for a window of Safari's
-       (SafariChromeHost.openScenarioPage) or, where Safari's chrome is not hosted, of the app's own
+   WebDriverExecutor (where the window is) ── PageDriver for a window of Safari's, the session's
+       own (SafariChromeHost.openScenarioPage(forWebDriver:): never a run's) or, where Safari's
+       chrome is not hosted, of the app's own
        navigate (http, https or about:blank only; else "invalid argument"), back, forward,
        refresh, title, url, source ── PageDriver
        find (css selector, xpath, link text, partial link text, tag name), with the implicit wait
@@ -238,6 +240,10 @@ a client (Selenium) ── http://127.0.0.1:<port>/wd/<profile's token>/<profile
   profile's address. 127.0.0.1 only.
 - **A session is a launch.** One session a profile at a time; ending it closes its window, and
   stops the profile when the session started it (a profile that was running stays).
+- **A window of its own.** A session never acts in a scenario's run's window, and no run takes
+  the session's: a run started from the editor opens its own. While a session drives a
+  profile, a schedule's run on it waits (the profile is busy, looked at again ten minutes on)
+  and the API's run is refused (`409 busy`).
 - **Many profiles at once:** one script per profile, side by side, as many as the plan's
   profiles. A command being answered — a launch, a page's load, a find's implicit wait — holds
   no other up; only connections still sending their request are limited (32 at once), and one

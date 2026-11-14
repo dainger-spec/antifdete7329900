@@ -210,13 +210,18 @@ enum SafariChromeHost {
     /// `inBackground`: a run nobody asked for just now (a schedule's): the window is put in front
     /// without being made key and without activating the app, so whatever the person is typing
     /// into keeps the keyboard. A run started from the app (Run) brings it forward as before.
-    static func openScenarioPage(session: BrowserSession, inBackground: Bool = false) async -> (webView: WKWebView, navigate: (URL) -> Void)? {
+    ///
+    /// `forWebDriver`: a WebDriver session's page, in a new window that is the session's alone —
+    /// neither the window a run had before nor one the next run takes, so a run and a session on
+    /// the same profile never act on the same page, and the session's end closes no run's window.
+    static func openScenarioPage(session: BrowserSession, inBackground: Bool = false,
+                                 forWebDriver: Bool = false) async -> (webView: WKWebView, navigate: (URL) -> Void)? {
         guard isPrepared, canHost(session.configuration), let blank = URL(string: "about:blank") else { return nil }
         // The window of the run before, while it is open: a window for each run left as many
         // windows — and web processes — as there were runs (a script calling the API in a loop).
         // Whatever tab a person chose in it since, its page is the one acted on, and addresses go
         // to that page itself.
-        if let window = scenarioWindow, window.isVisible, let webView = pageWebView(in: window) {
+        if !forWebDriver, let window = scenarioWindow, window.isVisible, let webView = pageWebView(in: window) {
             if inBackground {
                 window.orderFrontRegardless()
             } else {
@@ -248,8 +253,12 @@ enum SafariChromeHost {
         // Safari builds the tab's web view as it loads the page.
         for _ in 0..<60 {
             if let webView = pageWebView(in: controller.window) {
-                log.notice("A scenario's run has a window of Safari's")
-                scenarioWindow = controller.window
+                if forWebDriver {
+                    log.notice("A WebDriver session has a window of Safari's of its own")
+                } else {
+                    log.notice("A scenario's run has a window of Safari's")
+                    scenarioWindow = controller.window
+                }
                 return (webView, navigation(tab: tab, webView: webView))
             }
             try? await Task.sleep(nanoseconds: 100_000_000)
