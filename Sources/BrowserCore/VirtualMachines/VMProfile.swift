@@ -99,6 +99,13 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
     /// chose in macOS's setup, the same in every machine made from it — a Russian one in a machine
     /// whose language follows a proxy in the United States, unless this says otherwise.
     public var keyboard: String?
+    /// Closing the machine keeps it as it is — every app and page open — and opening it brings it
+    /// back in seconds, instead of shutting its macOS down and starting it again (docs/VM.md,
+    /// "Instant wake"). The kept state takes about as much disk as the machine has memory.
+    public var instantWake: Bool
+    /// The machine is shown as a browser: Safari over its whole screen, the menu bar and the Dock
+    /// out of sight (docs/VM.md, "Browser mode").
+    public var browserMode: Bool
 
     public init(id: UUID = UUID(), name: String, createdAt: Date = Date(), lastLaunchedAt: Date? = nil,
                 proxy: ProxySettings? = nil, timeZoneIdentifier: String? = nil, language: String? = nil,
@@ -110,7 +117,7 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
                 regionCode: String? = nil, hourCycle: String? = nil, firstWeekday: Int? = nil, dockPosition: String? = nil,
                 dockAutohide: Bool? = nil, dockSize: String? = nil, scrollBars: String? = nil, moreStartURLs: [String] = [],
                 blockedHosts: [String] = [], startsFullScreen: Bool = false, localeFollowsConnection: Bool = false,
-                keyboard: String? = nil) {
+                keyboard: String? = nil, instantWake: Bool = false, browserMode: Bool = false) {
         self.id = id
         self.name = name
         self.createdAt = createdAt
@@ -145,13 +152,16 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         self.startsFullScreen = startsFullScreen
         self.localeFollowsConnection = localeFollowsConnection
         self.keyboard = keyboard
+        self.instantWake = instantWake
+        self.browserMode = browserMode
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, createdAt, lastLaunchedAt, proxy, timeZoneIdentifier, language, countryCode, localeFollowsProxy,
              displayID, memoryGB, macAddress, startURL, notes, cores, soundEnabled, appearance, accent, computerName,
              opensSafari, colorIndex, lumenWallpaper, regionCode, hourCycle, firstWeekday, dockPosition, dockAutohide, dockSize,
-             scrollBars, moreStartURLs, blockedHosts, startsFullScreen, localeFollowsConnection, keyboard
+             scrollBars, moreStartURLs, blockedHosts, startsFullScreen, localeFollowsConnection, keyboard,
+             instantWake, browserMode
     }
 
     /// Tolerant of what a later version adds or an earlier one lacked: defaults for what is absent.
@@ -192,6 +202,8 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         startsFullScreen = try c.decodeIfPresent(Bool.self, forKey: .startsFullScreen) ?? false
         localeFollowsConnection = try c.decodeIfPresent(Bool.self, forKey: .localeFollowsConnection) ?? false
         keyboard = try c.decodeIfPresent(String.self, forKey: .keyboard)
+        instantWake = try c.decodeIfPresent(Bool.self, forKey: .instantWake) ?? false
+        browserMode = try c.decodeIfPresent(Bool.self, forKey: .browserMode) ?? false
     }
 
     /// How many pages Safari may be told to open at start beside the first.

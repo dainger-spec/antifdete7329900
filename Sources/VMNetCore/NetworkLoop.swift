@@ -152,6 +152,8 @@ final class Flow {
 
     let key: FlowKey
     let tcp: TCPConnection
+    /// The name the guest asked for, or the address it connected to as written.
+    let host: String
     var handshake: ProxyHandshake
     var phase = Phase.waiting
     var descriptor: Int32 = -1
@@ -171,9 +173,10 @@ final class Flow {
     var holdUntil = 0.0
     var isDirty = false
 
-    init(key: FlowKey, tcp: TCPConnection, handshake: ProxyHandshake, deadline: Double) {
+    init(key: FlowKey, tcp: TCPConnection, host: String, handshake: ProxyHandshake, deadline: Double) {
         self.key = key
         self.tcp = tcp
+        self.host = host
         self.handshake = handshake
         self.deadline = deadline
     }
@@ -212,6 +215,9 @@ final class NetworkLoop: @unchecked Sendable {
     // Shared with other threads, under `lock`.
     private let lock = NSLock()
     private var published: VMNetCounters
+    private var publishedHosts: [String: HostRecord] = [:]
+    private var pendingBlocks: [String] = []
+    private var finalNames: [VMNetKnownName] = []
     private var stopRequested = false
     private let ended = NSCondition()
     private var hasEnded = false
@@ -230,6 +236,10 @@ final class NetworkLoop: @unchecked Sendable {
     private var flows: [FlowKey: Flow] = [:]
     private var dirty: [Flow] = []
     private var counters: VMNetCounters
+    /// What went to and from each host the guest asked for (`VMNetHost`): in memory only.
+    private var hosts: [String: HostRecord] = [:]
+    private var hostsChanged = false
+    private var hostsPublishedAt = -Double.infinity
     private var wireOpen = true
     private var wireHoldUntil = 0.0
     private var nextTimerCheck = Double.infinity
@@ -251,6 +261,22 @@ final class NetworkLoop: @unchecked Sendable {
     }
 
     private let connectionLimit: Int
+
+    /// One host's counts; `seen` is when it was last asked for or carried anything (`Sys.now`).
+    struct HostRecord {
+        var connections: UInt64 = 0
+        var open = 0
+        var bytesFromGuest: UInt64 = 0
+        var bytesToGuest: UInt64 = 0
+        var blocked: UInt64 = 0
+        var seen = 0.0
+    }
+
+    /// How many hosts are remembered; one more, and the one unseen the longest that has no
+    /// connection open is forgotten.
+    static let hostLimit = 400
+    /// How often the hosts' counts are handed to other threads, at most.
+    static let hostInterval = 0.5
 
     /// How often the reasons connections failed for are written to the log, at most.
     static let noteInterval = 10.0
@@ -298,6 +324,34 @@ final class NetworkLoop: @unchecked Sendable {
         wake.signal()
     }
 
+    /// What went to and from each host so far, the one seen last first.
+    var hostSnapshot: [VMNetHost] {
+        lock.lock()
+        let records = publishedHosts
+        lock.unlock()
+        let now = Sys.now
+        return records.sorted { $0.value.seen != $1.value.seen ? $0.value.seen > $1.value.seen : $0.key < $1.key }.map { name, record in
+            VMNetHost(name: name, connections: record.connections, open: record.open, bytesFromGuest: record.bytesFromGuest,
+                      bytesToGuest: record.bytesToGuest, blocked: record.blocked, idle: max(now - record.seen, 0))
+        }
+    }
+
+    /// Blocks a name and everything under it from now on: its questions are answered "no such
+    /// name", its connections refused, and those open are ended.
+    func block(_ suffix: String) {
+        lock.lock()
+        pendingBlocks.append(suffix)
+        lock.unlock()
+        wake.signal()
+    }
+
+    /// Every name the guest was given a fake address for, as the loop left them when it ended.
+    var namesAtEnd: [VMNetKnownName] {
+        lock.lock()
+        defer { lock.unlock() }
+        return finalNames
+    }
+
     func waitUntilEnded() {
         ended.lock()
         while !hasEnded { ended.wait() }
@@ -337,6 +391,8 @@ final class NetworkLoop: @unchecked Sendable {
             entries.append(pollfd(fd: wireWaits ? channel.descriptor : -1, events: Sys.readable, revents: 0))
             var wakeAt = min(timerCheckDue, channel.retryAt, notesDue)
             if wireOpen && !wireWaits { wakeAt = min(wakeAt, wireHoldUntil) }
+            // Hosts' counts that changed since they were last handed over are handed over when due.
+            if hostsChanged { wakeAt = min(wakeAt, hostsPublishedAt + Self.hostInterval) }
             for flow in flows.values where flow.descriptor >= 0 {
                 if flow.holdUntil > now {
                     wakeAt = min(wakeAt, flow.holdUntil)
@@ -358,6 +414,7 @@ final class NetworkLoop: @unchecked Sendable {
             channel.now = now
             if entries[0].revents != 0 { wake.drain() }
             if shouldStop { break }
+            applyBlocks(now)
             resolverAnswered(now)
             if channel.isCongested && now >= channel.retryAt && channel.retry() {
                 // The wire has room again: every connection with something to send may go on.
@@ -381,7 +438,14 @@ final class NetworkLoop: @unchecked Sendable {
         }
         flows.removeAll()
         counters.connectionsActive = 0
+        for name in Array(hosts.keys) { hosts[name]?.open = 0 }
+        hostsChanged = true
+        hostsPublishedAt = -Double.infinity
         publish()
+        let names = responder.knownNames
+        lock.lock()
+        finalNames = names
+        lock.unlock()
         flushNotes(.infinity)
         let lost = channel.lost
         say("network stopped: connections opened \(counters.connectionsOpened), failed \(counters.connectionsFailed); "
@@ -396,9 +460,48 @@ final class NetworkLoop: @unchecked Sendable {
     }
 
     private func publish() {
+        var records: [String: HostRecord]?
+        if hostsChanged {
+            let now = Sys.now
+            if now - hostsPublishedAt >= Self.hostInterval {
+                hostsChanged = false
+                hostsPublishedAt = now
+                records = hosts
+            }
+        }
         lock.lock()
         published = counters
+        if let records { publishedHosts = records }
         lock.unlock()
+    }
+
+    // MARK: - The hosts
+
+    /// Changes a host's counts, making room for a new one where there is none left.
+    private func withHost(_ name: String, _ now: Double, _ change: (inout HostRecord) -> Void) {
+        if hosts[name] == nil, hosts.count >= Self.hostLimit,
+           let oldest = hosts.filter({ $0.value.open == 0 }).min(by: { $0.value.seen < $1.value.seen })?.key {
+            hosts[oldest] = nil
+        }
+        var record = hosts[name] ?? HostRecord()
+        record.seen = now
+        change(&record)
+        hosts[name] = record
+        hostsChanged = true
+    }
+
+    /// The names other threads asked to have blocked: from now on, and what is open to them ends.
+    private func applyBlocks(_ now: Double) {
+        lock.lock()
+        let wanted = pendingBlocks
+        pendingBlocks.removeAll()
+        lock.unlock()
+        guard !wanted.isEmpty else { return }
+        for suffix in wanted { responder.block(suffix) }
+        for flow in flows.values where flow.tcp.state != .closed && responder.isBlocked(flow.host) {
+            flow.tcp.upstreamBroke(now: now)
+            markDirty(flow)
+        }
     }
 
     private func interest(of flow: Flow) -> Int16 {
@@ -455,7 +558,9 @@ final class NetworkLoop: @unchecked Sendable {
                 count += 1
                 if options.lossFromGuest > 0, Double.random(in: 0..<1) < options.lossFromGuest { continue }
                 let bytes = UnsafeRawBufferPointer(rebasing: frameBuffer[0..<length])
-                switch responder.handle(bytes, now: now, counters: &counters) {
+                let verdict = responder.handle(bytes, now: now, counters: &counters)
+                if let name = responder.takeBlockedName() { withHost(name, now) { $0.blocked += 1 } }
+                switch verdict {
                 case .ignore:
                     break
                 case .reply(let frame):
@@ -477,7 +582,11 @@ final class NetworkLoop: @unchecked Sendable {
                 Sys.close(flow.descriptor)
                 flow.descriptor = -1
             }
-            if flow.phase == .open { counters.connectionsActive -= 1 }
+            if flow.phase == .open {
+                counters.connectionsActive -= 1
+                hosts[flow.host]?.open -= 1
+                hostsChanged = true
+            }
         }
         flows.removeAll()
         dirty.removeAll()
@@ -517,6 +626,13 @@ final class NetworkLoop: @unchecked Sendable {
         case .connect(let chosen):
             target = chosen
         }
+        if case .name(let name, _) = target, responder.isBlocked(name) {
+            // Blocked since the guest was given an address for it: the address leads nowhere now.
+            withHost(name, now) { $0.blocked += 1 }
+            note("refused, a blocked name", now)
+            refuse(segment, in: packet, from: source)
+            return
+        }
         guard let handshake = configuration.upstream.handshake(for: target) else {
             // No proxy: nothing leaves.
             counters.connectionsFailed += 1
@@ -531,7 +647,8 @@ final class NetworkLoop: @unchecked Sendable {
         }
         let tcp = TCPConnection(key: key, guestMAC: source, gatewayMAC: configuration.gatewayMAC, mtu: configuration.effectiveMTU,
                                 syn: segment, now: now, tuning: options.tcp, scratch: scratch, sink: channel)
-        let flow = Flow(key: key, tcp: tcp, handshake: handshake, deadline: now + options.connectTimeout)
+        let flow = Flow(key: key, tcp: tcp, host: target.hostText, handshake: handshake, deadline: now + options.connectTimeout)
+        withHost(flow.host, now) { $0.connections += 1 }
         flows[key] = flow
         startConnecting(flow, now)
     }
@@ -643,6 +760,7 @@ final class NetworkLoop: @unchecked Sendable {
             flow.outgoing = []
             counters.connectionsOpened += 1
             counters.connectionsActive += 1
+            withHost(flow.host, now) { $0.open += 1 }
             flow.tcp.tunnelEstablished(now: now)
             if !leftover.isEmpty { leftover.withUnsafeBytes { flow.tcp.upstreamData($0, now: now) } }
             markDirty(flow)
@@ -807,6 +925,7 @@ final class NetworkLoop: @unchecked Sendable {
             if sent.0 > 0 {
                 progressed = true
                 counters.bytesFromGuest += UInt64(sent.0)
+                withHost(flow.host, now) { $0.bytesFromGuest += UInt64(sent.0) }
                 tcp.upstreamConsumed(sent.0, now: now)
             } else if sent.1 == EINTR {
                 continue
@@ -839,7 +958,9 @@ final class NetworkLoop: @unchecked Sendable {
                 }
                 tcp.flush(now: now)
             }
-            counters.bytesToGuest += tcp.takeDeliveredBytes()
+            let delivered = tcp.takeDeliveredBytes()
+            counters.bytesToGuest += delivered
+            if delivered > 0 { withHost(flow.host, now) { $0.bytesToGuest += delivered } }
             if tcp.state == .closed {
                 putAway(flow, now)
             } else {
@@ -854,7 +975,11 @@ final class NetworkLoop: @unchecked Sendable {
             Sys.close(flow.descriptor)
             flow.descriptor = -1
         }
-        if flow.phase == .open { counters.connectionsActive -= 1 }
+        if flow.phase == .open {
+            counters.connectionsActive -= 1
+            hosts[flow.host]?.open -= 1
+            hostsChanged = true
+        }
         guard flow.phase != .done else { return }
         flow.phase = .done
         switch flow.tcp.ending {

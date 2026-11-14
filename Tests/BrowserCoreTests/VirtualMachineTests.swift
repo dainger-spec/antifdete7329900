@@ -810,3 +810,141 @@ final class VMGuestToolsTests: XCTestCase {
         XCTAssertNotEqual(files.tools, files.share)
     }
 }
+
+/// Instant wake, browser mode and the network panel, as the app and the helper tell each other of them.
+final class VMWakeAndNetworkProtocolTests: XCTestCase {
+    private let library = VMLibrary(root: URL(fileURLWithPath: "/tmp/lib"))
+
+    private func request(_ profile: VMProfile) -> VMHelperRequest {
+        VMHelperRequest.run(profile: profile, library: library, hostCores: 8, texts: [:])
+    }
+
+    func testAProfilesInstantWakeAndBrowserModeReachTheHelperAndAreOffUnlessChosen() throws {
+        let plain = request(VMProfile(name: "A"))
+        XCTAssertNil(plain.keepsState)
+        XCTAssertNil(plain.browserMode)
+        XCTAssertNotNil(plain.stateStamp)
+        let chosen = request(VMProfile(name: "A", instantWake: true, browserMode: true))
+        XCTAssertEqual(chosen.keepsState, true)
+        XCTAssertEqual(chosen.browserMode, true)
+        XCTAssertEqual(try VMHelperRequest.parse(try chosen.line()), chosen)
+        // A list from before these settings: a machine as it was then.
+        let old = try JSONDecoder().decode(VMProfile.self, from: JSONEncoder().encode(VMProfile(name: "A")))
+        XCTAssertFalse(old.instantWake)
+        XCTAssertFalse(old.browserMode)
+        let kept = try JSONDecoder().decode(VMProfile.self, from: JSONEncoder().encode(VMProfile(name: "A", instantWake: true, browserMode: true)))
+        XCTAssertTrue(kept.instantWake)
+        XCTAssertTrue(kept.browserMode)
+        // A machine shown as a browser has Safari open, and its macOS is told to keep the bars away.
+        let settings = VMGuestSettings(profile: VMProfile(name: "A", opensSafari: false, browserMode: true))
+        XCTAssertTrue(settings.opensSafari)
+        XCTAssertTrue(settings.browserMode)
+        XCTAssertFalse(VMGuestSettings(profile: VMProfile(name: "A", opensSafari: false)).opensSafari)
+        XCTAssertNotEqual(settings.revision, VMGuestSettings(profile: VMProfile(name: "A")).revision)
+    }
+
+    func testASavedStateGoesWithTheMachinesHardwareAndItsSettingsAndNothingElse() {
+        let id = UUID()
+        func stamp(_ change: (inout VMProfile) -> Void = { _ in }) -> String? {
+            var profile = VMProfile(id: id, name: "A", language: "en-US", localeFollowsProxy: false, macAddress: "02:00:00:00:00:01",
+                                    instantWake: true)
+            change(&profile)
+            return request(profile).stateStamp
+        }
+        let base = stamp()
+        XCTAssertEqual(base, stamp())
+        // What the framework is told of the machine, and what its macOS starts with: a change is
+        // another machine to a saved state.
+        XCTAssertNotEqual(base, stamp { $0.memoryGB = 6 })
+        XCTAssertNotEqual(base, stamp { $0.cores = 4 })
+        XCTAssertNotEqual(base, stamp { $0.displayID = "imac-24" })
+        XCTAssertNotEqual(base, stamp { $0.macAddress = "02:00:00:00:00:02" })
+        XCTAssertNotEqual(base, stamp { $0.language = "de-DE" })
+        XCTAssertNotEqual(base, stamp { $0.timeZoneIdentifier = "Europe/Berlin" })
+        XCTAssertNotEqual(base, stamp { $0.browserMode = true })
+        // What is this Mac's side of it — the name, the notes, the window, what is blocked, the
+        // proxy's own address — changes nothing in the machine.
+        XCTAssertEqual(base, stamp { $0.name = "B" })
+        XCTAssertEqual(base, stamp { $0.notes = "x" })
+        XCTAssertEqual(base, stamp { $0.startsFullScreen = true })
+        XCTAssertEqual(base, stamp { $0.blockedHosts = ["ads.example.com"] })
+        XCTAssertEqual(base, stamp { $0.soundEnabled = false })
+    }
+
+    func testTheHelpersCommandsAreOneLineEachAndNothingElseIsOne() {
+        let commands: [VMHelperCommand] = [.stop, .shutdown, .kill, .hosts(true), .hosts(false), .block("ads.example.com"), .fullScreen]
+        XCTAssertEqual(commands.map(\.line), ["stop", "shutdown", "kill", "hosts on", "hosts off", "block ads.example.com", "fullscreen"])
+        for command in commands { XCTAssertEqual(VMHelperCommand(line: command.line), command) }
+        XCTAssertEqual(VMHelperCommand(line: "  stop  "), .stop)
+        for line in ["", "sleep", "stop now", "hosts", "hosts maybe", "block", "block Ads.Example.com", "block *.example.com",
+                     "block localhost", "block 10.0.0.1", "block a.example.com b.example.com", "block ads.example.com;reboot",
+                     "fullscreen 2", "STOP"] {
+            XCTAssertNil(VMHelperCommand(line: line), line)
+        }
+    }
+
+    func testWhatTheHelperSaysOfAWakeAndOfTheHostsIsRead() throws {
+        let woke = VMHelperEvent(kind: .started, woke: true)
+        XCTAssertEqual(VMHelperEvent.parse(woke.line()), woke)
+        let anew = VMHelperEvent(kind: .started, notWoken: VMWakeRefusal.changed.rawValue)
+        XCTAssertEqual(VMHelperEvent.parse(anew.line())?.notWoken.flatMap(VMWakeRefusal.init(rawValue:)), .changed)
+        let asleep = VMHelperEvent(kind: .stopped, asleep: true)
+        XCTAssertEqual(VMHelperEvent.parse(asleep.line())?.asleep, true)
+        // An event from before these words reads as it did.
+        XCTAssertNil(VMHelperEvent.parse(#"{"kind":"started"}"#)?.woke)
+        XCTAssertNil(VMHelperEvent.parse(#"{"kind":"stopped"}"#)?.asleep)
+        let hosts = VMHelperEvent(kind: .hosts, hosts: [
+            VMHelperEvent.Host(name: "www.example.com", connections: 3, open: 1, bytesUp: 1_200, bytesDown: 96_000, blocked: 0, idle: 0),
+            VMHelperEvent.Host(name: "ads.example.net", connections: 0, open: 0, bytesUp: 0, bytesDown: 0, blocked: 4, idle: 12),
+        ])
+        let read = try XCTUnwrap(VMHelperEvent.parse(hosts.line()))
+        XCTAssertEqual(read, hosts)
+        XCTAssertEqual(read.hosts?.map(\.id), ["www.example.com", "ads.example.net"])
+        XCTAssertEqual(Set(VMWakeRefusal.allCases.map(\.rawValue)), ["changed", "stale", "failed", "unsupported"])
+    }
+
+    func testASavedStateIsGoodOnlyForItsStampAndTheDiskAsItWasLeft() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-vmstate-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let files = VMLibrary.MachineFiles(directory: root)
+        XCTAssertEqual(files.state.lastPathComponent, "state.vzvmsave")
+        XCTAssertEqual(files.stateInfo.lastPathComponent, "state.json")
+        XCTAssertFalse(files.hasSavedState)
+        try Data(repeating: 7, count: 4_096).write(to: files.disk)
+        let mark = try XCTUnwrap(VMSavedState.mark(ofDisk: files.disk))
+        XCTAssertEqual(mark.length, 4_096)
+        XCTAssertNil(VMSavedState.mark(ofDisk: root.appendingPathComponent("no-disk")))
+
+        let state = VMSavedState(stamp: "abc", diskLength: mark.length, diskModified: mark.modified,
+                                 names: [VMSavedState.Name(name: "www.example.com", address: 0xC612_0001)])
+        try state.write(to: files.stateInfo)
+        // The note alone is no saved state: the state itself must be there too.
+        XCTAssertFalse(files.hasSavedState)
+        try Data("state".utf8).write(to: files.state)
+        XCTAssertTrue(files.hasSavedState)
+        let read = try XCTUnwrap(VMSavedState.read(from: files.stateInfo))
+        XCTAssertEqual(read.stamp, "abc")
+        XCTAssertEqual(read.names, state.names)
+        XCTAssertEqual(read.diskLength, mark.length)
+        XCTAssertEqual(read.diskModified, mark.modified)
+
+        XCTAssertNil(read.refusal(stamp: "abc", disk: files.disk))
+        // Other hardware or other settings: the change must take.
+        XCTAssertEqual(read.refusal(stamp: "abd", disk: files.disk), .changed)
+        XCTAssertEqual(read.refusal(stamp: nil, disk: files.disk), .changed)
+        // A disk written since — longer, or the same length at another time — is not this state's.
+        try Data(repeating: 7, count: 8_192).write(to: files.disk)
+        XCTAssertEqual(read.refusal(stamp: "abc", disk: files.disk), .stale)
+        try Data(repeating: 7, count: 4_096).write(to: files.disk)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: mark.modified + 5)], ofItemAtPath: files.disk.path)
+        XCTAssertEqual(read.refusal(stamp: "abc", disk: files.disk), .stale)
+        try FileManager.default.removeItem(at: files.disk)
+        XCTAssertEqual(read.refusal(stamp: "abc", disk: files.disk), .stale)
+
+        // What is no note is none.
+        try Data("{not json".utf8).write(to: files.stateInfo)
+        XCTAssertNil(VMSavedState.read(from: files.stateInfo))
+        XCTAssertNil(VMSavedState.read(from: root.appendingPathComponent("nothing.json")))
+    }
+}

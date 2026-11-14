@@ -22,7 +22,7 @@
 # link left in its place is replaced, not followed. What it keeps for itself is in a folder of
 # root's (/Library/Application Support/Lumen), not in /Users/Shared.
 
-TOOLS_VERSION=10
+TOOLS_VERSION=11
 SHARE="/Volumes/My Shared Files"
 OWN_MOUNT=/var/run/lumen-share
 TAG=com.apple.virtio-fs.automount
@@ -155,7 +155,7 @@ fi
 
 revision="" timezone="" language="" locale="" hostname="" start_url="" computer="" appearance="" accent="" open_safari=1
 wallpaper=0 hours="" first_weekday="" dock_position="" dock_autohide="" dock_size="" scrollbars=""
-start_url_2="" start_url_3="" start_url_4="" start_url_5="" start_url_6="" keyboard=""
+start_url_2="" start_url_3="" start_url_4="" start_url_5="" start_url_6="" keyboard="" browser_mode=0
 settings="$share/lumen-settings.env"
 if [ -n "$share" ] && [ -f "$settings" ] && [ ! -L "$settings" ]; then
   revision="$(value LUMEN_REVISION "$settings")"
@@ -181,6 +181,7 @@ if [ -n "$share" ] && [ -f "$settings" ] && [ ! -L "$settings" ]; then
   start_url_5="$(value LUMEN_START_URL_5 "$settings")"
   start_url_6="$(value LUMEN_START_URL_6 "$settings")"
   keyboard="$(value LUMEN_KEYBOARD "$settings")"
+  browser_mode="$(value LUMEN_BROWSER_MODE "$settings")"
 fi
 only 'A-Za-z0-9' "$revision" || revision=""
 only 'A-Za-z0-9_+/-' "$timezone" || timezone=""
@@ -212,6 +213,7 @@ case "$dock_autohide" in 0|1) ;; *) dock_autohide="" ;; esac
 case "$dock_size" in 16|[2-9][0-9]|1[01][0-9]|12[0-8]) ;; *) dock_size="" ;; esac
 case "$scrollbars" in Automatic|WhenScrolling|Always) ;; *) scrollbars="" ;; esac
 only 'a-z,' "$keyboard" || keyboard=""
+[ "$browser_mode" = 1 ] || browser_mode=0
 
 # layout NAME: macOS's own number, name and identifier of a keyboard layout Lumen names, into
 # layout_id, layout_name and layout_source; false for a name that is none of them.
@@ -489,6 +491,22 @@ apply_for_user() {
   [ -z "$scrollbars" ] || as_user /usr/bin/defaults write -g AppleShowScrollBars -string "$scrollbars"
   # The Dock: what it leaves of the screen is what a page is told is free. It is started again
   # only when something of it was changed — it takes its settings as it starts.
+  # A machine shown as a browser: the menu bar and the Dock stay out of sight, whatever is in
+  # front (Safari full screen hides both by itself; this is for the moments it is not). The menu
+  # bar takes it at the next sign-in. Noted beside the person's settings, so that a machine no
+  # longer shown so gets its menu bar back, and its Dock unless the profile hides it.
+  browser_was="$(as_user /usr/bin/defaults read io.lumenbrowser.guest browser 2>/dev/null)"
+  if [ "$browser_mode" = 1 ]; then
+    dock_autohide=1
+    if [ "$browser_was" != 1 ]; then
+      as_user /usr/bin/defaults write -g _HIHideMenuBar -bool true
+      as_user /usr/bin/defaults write io.lumenbrowser.guest browser -string 1 2>/dev/null
+    fi
+  elif [ "$browser_was" = 1 ]; then
+    as_user /usr/bin/defaults delete -g _HIHideMenuBar 2>/dev/null
+    as_user /usr/bin/defaults delete io.lumenbrowser.guest browser 2>/dev/null
+    [ -n "$dock_autohide" ] || dock_autohide=0
+  fi
   dock_changed=0
   if [ -n "$dock_position" ] && [ "$(as_user /usr/bin/defaults read com.apple.dock orientation 2>/dev/null)" != "$dock_position" ]; then
     as_user /usr/bin/defaults write com.apple.dock orientation -string "$dock_position"
@@ -542,8 +560,24 @@ quit_safari() {
 
 write_status ""
 ticks=0
+woke_word=""
 while :; do
   [ "$user_done" = 1 ] || apply_for_user
+  # Lumen woke this machine from a saved state (it leaves a word of its own in the shared folder
+  # each time): this script went on where it was, and so did the clock — at the moment the
+  # machine was put to sleep. The time is asked for; the machine's network answers with the
+  # Mac's clock, whoever is asked, and nothing leaves.
+  if [ -n "$share" ] && [ -f "$share/lumen-woke" ] && [ ! -L "$share/lumen-woke" ]; then
+    word="$(/usr/bin/head -c 64 "$share/lumen-woke" 2>/dev/null)"
+    /bin/rm -f "$share/lumen-woke" 2>/dev/null
+    if only 'A-Za-z0-9' "$word" && [ "$word" != "$woke_word" ]; then
+      woke_word="$word"
+      log "woken from a saved state: asking for the time"
+      # Answered at once by the machine's own network; waited for, so that the clock is right
+      # before anything else here goes on.
+      /usr/bin/sntp -sS time.apple.com >/dev/null 2>&1
+    fi
+  fi
   # The picture again at about 10, 20, 40 and 80 seconds after sign-in; then it is left for good.
   if [ "$user_done" = 1 ] && [ "$wallpaper_looks" -lt 4 ]; then
     ticks=$((ticks + 1))

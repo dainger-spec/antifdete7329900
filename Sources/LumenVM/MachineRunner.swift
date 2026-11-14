@@ -76,7 +76,9 @@ final class MachineNetwork {
         _ = setrlimit(RLIMIT_NOFILE, &limit)
     }
 
-    init(request: VMHelperRequest) throws {
+    /// `knownNames`: the names a machine woken from a saved state was given stand-in addresses
+    /// for before it was put to sleep (`VMSavedState.names`) — it still holds the addresses.
+    init(request: VMHelperRequest, knownNames: [VMNetKnownName] = []) throws {
         if request.network == .absent {
             attachment = nil
             network = nil
@@ -127,10 +129,11 @@ final class MachineNetwork {
         // The guest's address on its own little network, as a Mac has one behind a home router:
         // 192.168.1.x, x from its card's address so that it stays the same from start to start.
         let last = 2 + guestMAC.bytes.reduce(0) { ($0 &* 31 &+ Int($1)) % 200 }
-        let configuration = VMNetConfiguration(guestMAC: guestMAC, gatewayMAC: VMNetMAC(bytes: [0x02, 0x1A, 0x11, 0x00, 0x00, 0x01]),
+        var configuration = VMNetConfiguration(guestMAC: guestMAC, gatewayMAC: VMNetMAC(bytes: [0x02, 0x1A, 0x11, 0x00, 0x00, 0x01]),
                                                gatewayAddress: VMNetIPv4(string: "192.168.1.1")!,
                                                guestAddress: VMNetIPv4(string: "192.168.1.\(last)")!,
                                                prefixLength: 24, upstream: upstream, blockedHostSuffixes: request.blockedHosts)
+        configuration.knownNames = knownNames
         let network = VMNetwork(configuration: configuration, frameDescriptor: descriptor)
         // Without a proxy each connection holds three descriptors of this process, not one.
         if direct != nil { network.descriptorsPerConnection = VMNetDirectConnector.descriptorsPerConnection }
@@ -158,11 +161,37 @@ final class MachineNetwork {
         }
     }
 
+    /// Where the machine's macOS connects, the host seen last first — the person's browsing, for
+    /// the app's panel while the machine runs: never logged, never written down.
+    func hosts() -> [VMNetHost] { network?.hosts() ?? [] }
+
+    /// Blocks a host name, and every name under it, from now on.
+    func block(_ host: String) { network?.block(host: host) }
+
+    /// Called more than once without harm: the second time there is nothing left to stop.
     func stop() {
+        guard !stopped else { return }
+        stopped = true
         network?.stop()
         connector?.stop()
         if descriptor >= 0 { close(descriptor) }
     }
+
+    /// After `stop()`: the names the machine was given stand-in addresses for, to be kept beside
+    /// a saved state.
+    func knownNames() -> [VMNetKnownName] { network?.knownNames() ?? [] }
+
+    private var stopped = false
+}
+
+/// What covers the machine's screen while a machine shown as a browser starts: its macOS's
+/// sign-in and desktop are not what the person opened. A click takes it away — nobody is ever
+/// kept from the machine by it.
+private final class StartCover: NSView {
+    var dismiss: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) { dismiss?() }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
 /// The guide's scrolled content, top to bottom.
@@ -189,6 +218,14 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     private var lastViaSystemProxy = false
     private var stopping = false
     private var finished = false
+    private var machineView: VZVirtualMachineView?
+    /// Instant wake is asked for and this machine can be saved (the framework says so).
+    private var canKeepState = false
+    /// The app's panel of where the machine connects is open (`hosts on`).
+    private var watchingHosts = false
+    /// Browser mode's cover, while it is up, and when the machine was started.
+    private var cover: NSView?
+    private var startedAt = Date()
 
     init(request: VMHelperRequest) {
         self.request = request
@@ -210,31 +247,57 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
             guard let identifier = VZMacMachineIdentifier(dataRepresentation: try Data(contentsOf: files.machineIdentifier)) else {
                 HelperIO.fail("This machine's identifier cannot be read.")
             }
-            // A request the guest made before, and never took: not this start's.
+            // A request the guest made before, and never took: not this start's. The same for
+            // the word that says the machine was woken.
             try? FileManager.default.removeItem(at: shutdownRequestURL)
-            let network = try MachineNetwork(request: request)
+            try? FileManager.default.removeItem(at: wokeURL)
+            // A saved state is used by this start or removed by it: never left beside a disk
+            // that goes on without it.
+            var (saved, refusal) = savedState()
+            let network = try MachineNetwork(request: request,
+                                             knownNames: saved?.names.map { VMNetKnownName(name: $0.name, address: $0.address) } ?? [])
             self.network = network
             let configuration = try MachineConfiguration.make(files: files, request: request, hardwareModel: hardwareModel,
                                                               machineIdentifier: identifier,
                                                               auxiliaryStorage: VZMacAuxiliaryStorage(url: files.auxiliaryStorage),
                                                               network: network.attachment)
+            if request.keepsState == true {
+                do {
+                    try configuration.validateSaveRestoreSupport()
+                    canKeepState = true
+                } catch {
+                    // This machine, as it is made on this Mac, cannot be saved: it starts and
+                    // shuts down as a Mac does, and the app says so.
+                    HelperIO.log("wake: this machine cannot be saved (\(Self.kind(of: error)))")
+                    if saved != nil { removeSavedState() }
+                    saved = nil
+                    refusal = .unsupported
+                }
+            }
             let machine = VZVirtualMachine(configuration: configuration)
             machine.delegate = self
             self.machine = machine
-            showWindow(for: machine)
-            machine.start { result in
-                DispatchQueue.main.async {
-                    switch result {
-                    case .failure(let error): self.fail(error)
-                    case .success: HelperIO.emit(VMHelperEvent(kind: .started))
-                    }
-                }
+            showWindow(for: machine, covered: request.browserMode == true && saved == nil)
+            if saved != nil {
+                wake(machine)
+            } else {
+                start(machine, notWoken: refusal)
             }
-            HelperIO.readCommands { [weak self] command in
+            HelperIO.readCommands { [weak self] line in
+                guard let self, let command = VMHelperCommand(line: line) else { return }
                 switch command {
-                case "stop": self?.stop(asking: false)
-                case "kill": self?.forceStop()
-                default: break
+                case .stop: self.stop(asking: false)
+                case .shutdown: self.shutDown(asking: false)
+                case .kill: self.forceStop()
+                case .hosts(let on):
+                    self.watchingHosts = on
+                    if on { self.reportHosts() }
+                case .block(let name):
+                    self.network?.block(name)
+                    if self.watchingHosts {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in self?.reportHosts() }
+                    }
+                case .fullScreen: self.pressGuestFullScreen()
                 }
             }
             trafficTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.reportTraffic() }
@@ -277,8 +340,9 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
 
     // MARK: The window
 
-    private func showWindow(for machine: VZVirtualMachine) {
+    private func showWindow(for machine: VZVirtualMachine, covered: Bool) {
         let view = VZVirtualMachineView()
+        machineView = view
         view.virtualMachine = machine
         view.capturesSystemKeys = true
         // The guest's screen stays the Mac's it is, whatever size this window has: scaled, not changed.
@@ -306,6 +370,11 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
             // What is left to do in this machine, said in its own window: the app's window, which
             // has the same words, is behind this one.
             window.contentView = Self.content(of: view, under: hint)
+        } else if covered {
+            // A machine shown as a browser, starting: its macOS's sign-in and desktop are behind
+            // a cover until Safari is over its whole screen.
+            window.contentAspectRatio = NSSize(width: display.pixelsWide, height: display.pixelsHigh)
+            window.contentView = content(of: view, coveredWith: text("opening", "Opening…"))
         } else {
             window.contentAspectRatio = NSSize(width: display.pixelsWide, height: display.pixelsHigh)
             window.contentView = view
@@ -331,6 +400,117 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     }
 
     static let guideWidth: CGFloat = 320
+
+    /// The machine's screen under a cover with the machine's name and a word on it.
+    private func content(of view: NSView, coveredWith words: String) -> NSView {
+        let cover = StartCover()
+        cover.wantsLayer = true
+        cover.layer?.backgroundColor = NSColor(calibratedWhite: 0.07, alpha: 1).cgColor
+        cover.dismiss = { [weak self] in self?.uncover() }
+        let title = NSTextField(labelWithString: request.windowTitle)
+        title.font = .systemFont(ofSize: 20, weight: .semibold)
+        title.textColor = NSColor(calibratedWhite: 0.96, alpha: 1)
+        let label = NSTextField(labelWithString: words)
+        label.font = .systemFont(ofSize: 13)
+        label.textColor = NSColor(calibratedWhite: 0.62, alpha: 1)
+        let spinner = NSProgressIndicator()
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.appearance = NSAppearance(named: .darkAqua)
+        spinner.startAnimation(nil)
+        let stack = NSStackView(views: [title, spinner, label])
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.spacing = 12
+        let container = NSView()
+        for subview in [view, cover] {
+            subview.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(subview)
+        }
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        cover.addSubview(stack)
+        NSLayoutConstraint.activate([
+            view.topAnchor.constraint(equalTo: container.topAnchor),
+            view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            cover.topAnchor.constraint(equalTo: container.topAnchor),
+            cover.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            cover.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            cover.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            stack.centerXAnchor.constraint(equalTo: cover.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: cover.centerYAnchor),
+        ])
+        self.cover = cover
+        return container
+    }
+
+    /// Takes the cover away, and gives the keys back to the machine.
+    private func uncover() {
+        guard let cover else { return }
+        self.cover = nil
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.25
+            cover.animator().alphaValue = 0
+        }, completionHandler: { cover.removeFromSuperview() })
+        if let machineView { window?.makeFirstResponder(machineView) }
+    }
+
+    // MARK: Browser mode
+
+    /// A machine shown as a browser, started anew: when its boot script says it has opened
+    /// Safari (the status file, written after), Safari is put over the machine's whole screen
+    /// and the cover goes. A machine whose script never says so is uncovered after two minutes,
+    /// as it is.
+    private func watchForSafari() {
+        guard request.browserMode == true, cover != nil else { return }
+        let started = startedAt
+        let status = files.status
+        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] timer in
+            guard let self, !self.finished, self.cover != nil else { return timer.invalidate() }
+            let age = Date().timeIntervalSince(started)
+            var applied = false
+            if let modified = (try? FileManager.default.attributesOfItem(atPath: status.path))?[.modificationDate] as? Date,
+               modified > started, case .success(let said) = VMGuestStatus.read(from: status), said.appliedRevision != nil {
+                applied = true
+            }
+            guard applied || age > 120 else { return }
+            timer.invalidate()
+            guard applied else { return self.uncover() }
+            // Safari's window is on the screen a few seconds after it was opened.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                guard let self, !self.finished else { return }
+                self.pressGuestFullScreen()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.uncover() }
+            }
+        }
+    }
+
+    /// Control-Command-F, as from the machine's own keyboard: what puts the front window of its
+    /// macOS full screen, or back. The events are made here and given to the machine's view, which
+    /// takes a person's the same way — nothing in the guest is asked for a permission.
+    private func pressGuestFullScreen() {
+        guard let machineView, let window, machine != nil, !finished, !stopping else { return }
+        let number = window.windowNumber
+        func event(_ type: NSEvent.EventType, _ flags: NSEvent.ModifierFlags, _ code: UInt16, _ characters: String) -> NSEvent? {
+            NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
+                             windowNumber: number, context: nil, characters: characters, charactersIgnoringModifiers: characters,
+                             isARepeat: false, keyCode: code)
+        }
+        // Key codes: 59 the left Control, 55 the left Command, 3 the letter F.
+        let both: NSEvent.ModifierFlags = [.control, .command]
+        if let down = event(.flagsChanged, .control, 59, "") { machineView.flagsChanged(with: down) }
+        if let down = event(.flagsChanged, both, 55, "") { machineView.flagsChanged(with: down) }
+        if let key = event(.keyDown, both, 3, "f") { machineView.keyDown(with: key) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+            guard let self, let machineView = self.machineView, !self.finished else { return }
+            if let key = event(.keyUp, both, 3, "f") { machineView.keyUp(with: key) }
+            if let up = event(.flagsChanged, .control, 55, "") { machineView.flagsChanged(with: up) }
+            if let up = event(.flagsChanged, [], 59, "") { machineView.flagsChanged(with: up) }
+        }
+    }
+
+    @objc private func guestFullScreenFromMenu() { pressGuestFullScreen() }
 
     /// The machine's screen with a panel beside it: what to press on each of macOS's setup
     /// screens, the choices that matter marked. Lines of `guide`: "# " a title, "! " a step that
@@ -449,19 +629,113 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         let main = NSMenu()
         let item = NSMenuItem()
         let menu = NSMenu()
+        if canKeepState {
+            let sleep = NSMenuItem(title: text("sleep", "Close and Keep the Machine as It Is"), action: #selector(sleepFromMenu), keyEquivalent: "")
+            sleep.target = self
+            menu.addItem(sleep)
+        }
         let stop = NSMenuItem(title: text("stop", "Shut Down the Virtual Machine…"), action: #selector(stopFromMenu), keyEquivalent: "")
         stop.target = self
         menu.addItem(stop)
+        menu.addItem(.separator())
+        let full = NSMenuItem(title: text("guestFullScreen", "Full Screen in the Machine"), action: #selector(guestFullScreenFromMenu), keyEquivalent: "")
+        full.target = self
+        menu.addItem(full)
         item.submenu = menu
         main.addItem(item)
         NSApp.mainMenu = main
     }
 
-    @objc private func stopFromMenu() { stop(asking: true) }
+    @objc private func stopFromMenu() { shutDown(asking: true) }
+    @objc private func sleepFromMenu() { stop(asking: false) }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         stop(asking: true)
         return false
+    }
+
+    // MARK: Starting, and waking
+
+    private static func kind(of error: Error) -> String {
+        let error = error as NSError
+        return "\(error.domain) \(error.code)"
+    }
+
+    private var wokeURL: URL { files.share.appendingPathComponent(VMGuestSettings.wokeFileName) }
+
+    private func removeSavedState() {
+        for url in [files.state, files.stateInfo] { try? FileManager.default.removeItem(at: url) }
+    }
+
+    /// The saved state this start may wake the machine from, or why the one that was there is
+    /// not used — it is then removed here.
+    private func savedState() -> (state: VMSavedState?, refusal: VMWakeRefusal?) {
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: files.state.path) || manager.fileExists(atPath: files.stateInfo.path) else { return (nil, nil) }
+        guard request.keepsState == true else {
+            // Instant wake is off for this machine now: it starts as a Mac does.
+            removeSavedState()
+            return (nil, nil)
+        }
+        guard manager.fileExists(atPath: files.state.path), let info = VMSavedState.read(from: files.stateInfo) else {
+            removeSavedState()
+            return (nil, .stale)
+        }
+        if let refusal = info.refusal(stamp: request.stateStamp, disk: files.disk) {
+            HelperIO.log("wake: the saved state is not used (\(refusal.rawValue))")
+            removeSavedState()
+            return (nil, refusal)
+        }
+        return (info, nil)
+    }
+
+    private func start(_ machine: VZVirtualMachine, notWoken refusal: VMWakeRefusal?) {
+        startedAt = Date()
+        machine.start { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .failure(let error): self.fail(error)
+                case .success:
+                    HelperIO.emit(VMHelperEvent(kind: .started, notWoken: refusal?.rawValue))
+                    self.watchForSafari()
+                }
+            }
+        }
+    }
+
+    /// Brings the machine back as it was put to sleep. The state is removed before the machine
+    /// runs again, taken or not: from that moment its disk goes on, and the state is no longer
+    /// its own. A state the framework does not take is no reason not to start: the machine then
+    /// starts anew, as after a Mac lost power.
+    private func wake(_ machine: VZVirtualMachine) {
+        machine.restoreMachineStateFrom(url: files.state) { error in
+            DispatchQueue.main.async {
+                self.removeSavedState()
+                if let error {
+                    HelperIO.log("wake: the saved state was not taken (\(Self.kind(of: error)))")
+                    return self.start(machine, notWoken: .failed)
+                }
+                machine.resume { result in
+                    DispatchQueue.main.async {
+                        switch result {
+                        case .failure(let error):
+                            self.fail(error)
+                        case .success:
+                            self.tellTheGuestItWoke()
+                            HelperIO.emit(VMHelperEvent(kind: .started, woke: true))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// A word of this wake's own in the shared folder: the boot script, which went on where it
+    /// was, asks for the time when it finds one (the machine's clock is that of its sleep).
+    private func tellTheGuestItWoke() {
+        if !VMShareFile.isRegularFile(wokeURL) { try? FileManager.default.removeItem(at: wokeURL) }
+        let word = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        FileManager.default.createFile(atPath: wokeURL.path, contents: Data(word.utf8))
     }
 
     // MARK: Stopping
@@ -469,10 +743,70 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     /// Where the guest's boot script looks for a request to shut down (Resources/VMGuest).
     private var shutdownRequestURL: URL { files.share.appendingPathComponent("lumen-shutdown") }
 
+    /// Closes the machine: put to sleep, at once and without a question, where its state is
+    /// kept (instant wake) — nothing in it is lost; shut down otherwise.
+    func stop(asking: Bool) {
+        guard canKeepState else { return shutDown(asking: asking) }
+        sleep()
+    }
+
+    /// Saves the machine as it is — paused, its memory written beside its disk, then ended — for
+    /// its next start to wake. What goes wrong on the way is no reason to lose what is open in
+    /// it: the machine then goes on, and is shut down as a Mac is.
+    private func sleep() {
+        guard let machine, !finished else { exit(0) }
+        guard !stopping else { return }
+        stopping = true
+        window?.title = request.windowTitle + " — " + text("sleeping", "saving…")
+        let giveUp: (String) -> Void = { [weak self] why in
+            HelperIO.log("sleep: the state was not saved (\(why)); the machine is shut down instead")
+            guard let self, !self.finished else { return }
+            self.removeSavedState()
+            self.canKeepState = false
+            self.stopping = false
+            guard machine.state == .paused, machine.canResume else { return self.shutDown(asking: false) }
+            machine.resume { _ in DispatchQueue.main.async { self.shutDown(asking: false) } }
+        }
+        guard machine.canPause else { return giveUp("the machine cannot be paused now") }
+        machine.pause { result in
+            DispatchQueue.main.async {
+                if case .failure(let error) = result { return giveUp(Self.kind(of: error)) }
+                self.removeSavedState()
+                machine.saveMachineStateTo(url: self.files.state) { error in
+                    DispatchQueue.main.async {
+                        if let error { return giveUp(Self.kind(of: error)) }
+                        guard machine.canStop else { return self.finishAsleep() }
+                        machine.stop { _ in DispatchQueue.main.async { self.finishAsleep() } }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The machine has stopped with its state saved: what the state goes with is written beside
+    /// it — this start's stamp, the disk as it was left, the names its network knew — and
+    /// without that note the state is not kept.
+    private func finishAsleep() -> Never {
+        finished = true
+        trafficTimer?.invalidate()
+        network?.stop()
+        var asleep = false
+        if let stamp = request.stateStamp, let mark = VMSavedState.mark(ofDisk: files.disk),
+           FileManager.default.fileExists(atPath: files.state.path) {
+            let names = (network?.knownNames() ?? []).map { VMSavedState.Name(name: $0.name, address: $0.address) }
+            let info = VMSavedState(stamp: stamp, diskLength: mark.length, diskModified: mark.modified, names: names)
+            asleep = (try? info.write(to: files.stateInfo)) != nil
+        }
+        if !asleep { removeSavedState() }
+        try? FileManager.default.removeItem(at: shutdownRequestURL)
+        HelperIO.emit(VMHelperEvent(kind: .stopped, asleep: asleep))
+        exit(0)
+    }
+
     /// Shuts the guest's macOS down as its own menu would — first by asking its boot script (a
     /// file in the shared folder, taken within seconds, with no question on the guest's screen),
     /// then by the power button, and after a minute by ending the machine.
-    func stop(asking: Bool) {
+    func shutDown(asking: Bool) {
         guard let machine, !finished else { exit(0) }
         guard !stopping else { return }
         if asking, let window {
@@ -482,7 +816,7 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
             alert.addButton(withTitle: text("stopNow", "Shut Down"))
             alert.addButton(withTitle: text("cancel", "Cancel"))
             alert.beginSheetModal(for: window) { [weak self] response in
-                if response == .alertFirstButtonReturn { self?.stop(asking: false) }
+                if response == .alertFirstButtonReturn { self?.shutDown(asking: false) }
             }
             return
         }
@@ -515,7 +849,19 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         fail(error)
     }
 
+    /// Where the machine connects, for the app's panel: at most two hundred hosts, the one seen
+    /// last first. Said to the app only — this is the person's browsing, and no log gets it.
+    private func reportHosts() {
+        guard watchingHosts, let network, !finished else { return }
+        let hosts = network.hosts().prefix(200).map {
+            VMHelperEvent.Host(name: $0.name, connections: $0.connections, open: $0.open, bytesUp: $0.bytesFromGuest,
+                               bytesDown: $0.bytesToGuest, blocked: $0.blocked, idle: $0.idle.rounded())
+        }
+        HelperIO.emit(VMHelperEvent(kind: .hosts, hosts: Array(hosts)))
+    }
+
     private func reportTraffic() {
+        reportHosts()
         guard let network, let counters = network.counters() else { return }
         if let notes = network.takeNotes() { HelperIO.log("way out: " + notes) }
         // A machine without a proxy whose connections fail one after another has no way out:

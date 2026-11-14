@@ -78,12 +78,19 @@ enum MachineConfiguration {
             configuration.networkDevices = [card]
         }
 
-        configuration.pointingDevices = [VZMacTrackpadConfiguration(), VZUSBScreenCoordinatePointingDeviceConfiguration()]
+        // A machine whose state is kept (instant wake) is made of what Apple's framework can save
+        // and bring back: a Mac's own trackpad and keyboard, and neither the USB pointer, nor a
+        // source of random numbers of the framework's, nor sound — a machine with any of them is
+        // refused a saved state (`validateSaveRestoreSupport`). Its macOS has its own randomness;
+        // the pointer is the trackpad's; and it is silent, which the setting says.
+        let keepsState = request.keepsState == true
+        configuration.pointingDevices = keepsState ? [VZMacTrackpadConfiguration()]
+            : [VZMacTrackpadConfiguration(), VZUSBScreenCoordinatePointingDeviceConfiguration()]
         configuration.keyboards = [VZMacKeyboardConfiguration()]
-        configuration.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
+        if !keepsState { configuration.entropyDevices = [VZVirtioEntropyDeviceConfiguration()] }
         if extras.balloon { configuration.memoryBalloonDevices = [VZVirtioTraditionalMemoryBalloonDeviceConfiguration()] }
 
-        if extras.sound {
+        if extras.sound && !keepsState {
             // Speakers, as every Mac has: what the guest plays is heard here. A microphone that
             // hears nothing — no source is given to it, so nothing of this Mac's is recorded — as
             // a Mac has one too.

@@ -66,6 +66,15 @@ public struct VMLibrary: Equatable, Sendable {
         /// script a machine takes a newer copy of itself from. The guest cannot write it, as it
         /// can the share — and what is taken from it runs as root in the guest.
         public var tools: URL { directory.appendingPathComponent("tools", isDirectory: true) }
+        /// The machine as it was when it was closed with instant wake on — its memory, as Apple's
+        /// framework saved it — and what it goes with (`VMSavedState`). Both are there only
+        /// between a close and the next start, which uses them once or removes them.
+        public var state: URL { directory.appendingPathComponent("state.vzvmsave") }
+        public var stateInfo: URL { directory.appendingPathComponent("state.json") }
+        /// A saved state waits for the machine's next start.
+        public var hasSavedState: Bool {
+            FileManager.default.fileExists(atPath: state.path) && FileManager.default.fileExists(atPath: stateInfo.path)
+        }
 
         /// Everything a machine needs to start is there.
         public var isComplete: Bool {
@@ -242,11 +251,14 @@ public enum VMSetupState: Equatable, Sendable {
 /// 9: the installer stops on a base signed in to an Apple ID, or with FileVault on, and says what
 /// to do (both would be in, or keep from signing in, every machine made from it).
 ///
+/// 11: the menu bar and the Dock out of sight for a machine shown as a browser; and the time asked
+/// for when Lumen says the machine was woken from a saved state.
+///
 /// 10: the keyboard's layouts; what the base's region left behind (units, formats) removed when a
 /// machine comes to another; and the time zone, language and locale read back from the system
 /// into the status file, for Lumen to compare with what it asked for.
 public enum VMGuestTools {
-    public static let version = 10
+    public static let version = 11
     /// From this version on an installed boot script takes a newer copy of itself at a machine's
     /// start: a base with tools this new needs nothing done to it for a later version's settings.
     public static let updatesItselfFrom = 2

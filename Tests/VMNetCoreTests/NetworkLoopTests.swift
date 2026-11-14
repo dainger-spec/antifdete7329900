@@ -44,11 +44,14 @@ final class NetworkLoopTests: XCTestCase {
 
     /// Starts a network with `upstream` and returns the guest at the other end of its wire.
     @discardableResult
-    private func start(_ upstream: VMNetUpstream, blocked: [String] = [], configure: (inout NetworkLoop.Options) -> Void = { _ in }) -> TestGuest {
+    private func start(_ upstream: VMNetUpstream, blocked: [String] = [], known: [VMNetKnownName] = [],
+                       configure: (inout NetworkLoop.Options) -> Void = { _ in }) -> TestGuest {
         let (first, second) = TestSocket.datagramPair()
         stackEnd = first
         guestEnd = second
-        let network = VMNetwork(configuration: Wire.configuration(upstream: upstream, blocked: blocked), frameDescriptor: first)
+        var configuration = Wire.configuration(upstream: upstream, blocked: blocked)
+        configuration.knownNames = known
+        let network = VMNetwork(configuration: configuration, frameDescriptor: first)
         var options = network.options
         configure(&options)
         network.options = options
@@ -856,6 +859,129 @@ final class NetworkLoopTests: XCTestCase {
                 XCTAssertFalse(line.contains(word), "the log line \"\(line)\" holds \"\(word)\"")
             }
         }
+    }
+
+    // MARK: - The hosts a machine talks to, blocking one, and a network that goes on after a wake
+
+    /// Waits until the hosts' counts say what `condition` wants (they are handed over twice a second).
+    private func waitForHosts(timeout: Double = 4, _ condition: ([VMNetHost]) -> Bool) -> [VMNetHost] {
+        let deadline = Sys.now + timeout
+        while true {
+            let hosts = network!.hosts()
+            if condition(hosts) || Sys.now >= deadline { return hosts }
+            usleep(5_000)
+        }
+    }
+
+    func testWhatGoesToEachHostIsCountedAndAHostCanBeBlockedWhileTheNetworkRuns() throws {
+        let socks = proxy(.socks5, origin: FakeProxy.echo)
+        let guest = start(socks.upstream(), blocked: ["updates.example"])
+        let address = try XCTUnwrap(guest.resolve("www.ads.example")?.address)
+        let other = try XCTUnwrap(guest.resolve("fine.example")?.address)
+        XCTAssertEqual(guest.resolve("swscan.updates.example")?.code, 3)
+        let connection = try XCTUnwrap(open(guest, address))
+        let sent = bytes(5_000)
+        XCTAssertTrue(connection.write(sent))
+        connection.read(atLeast: sent.count)
+        let kept = try XCTUnwrap(open(guest, other))
+
+        var hosts = waitForHosts { hosts in
+            hosts.first { $0.name == "www.ads.example" }?.bytesToGuest == UInt64(sent.count) && hosts.contains { $0.name == "fine.example" && $0.open == 1 }
+        }
+        let ads = try XCTUnwrap(hosts.first { $0.name == "www.ads.example" })
+        XCTAssertEqual(ads.connections, 1)
+        XCTAssertEqual(ads.open, 1)
+        XCTAssertEqual(ads.bytesFromGuest, UInt64(sent.count))
+        XCTAssertEqual(ads.bytesToGuest, UInt64(sent.count))
+        XCTAssertEqual(ads.blocked, 0)
+        XCTAssertLessThan(ads.idle, 5)
+        // A name that was blocked from the start is there too, with nothing but the refusal.
+        let updates = try XCTUnwrap(hosts.first { $0.name == "swscan.updates.example" })
+        XCTAssertEqual(updates.connections, 0)
+        XCTAssertEqual(updates.blocked, 1)
+
+        // Blocked now: what is open to it ends, its name is gone, and the address the guest
+        // still holds for it leads nowhere. Another host's connection is not touched.
+        network?.block(host: "ADS.example.")
+        XCTAssertTrue(connection.waitForReset())
+        XCTAssertEqual(guest.resolve("www.ads.example")?.code, 3)
+        XCTAssertEqual(guest.resolve("ads.example")?.code, 3)
+        assertRefused(guest, address)
+        XCTAssertTrue(kept.write([1, 2, 3]))
+        kept.read(atLeast: 3)
+        XCTAssertEqual(kept.takeReceived(), [1, 2, 3])
+        hosts = waitForHosts { hosts in hosts.first { $0.name == "www.ads.example" }.map { $0.open == 0 && $0.blocked >= 2 } ?? false }
+        let blocked = try XCTUnwrap(hosts.first { $0.name == "www.ads.example" })
+        XCTAssertEqual(blocked.open, 0)
+        XCTAssertGreaterThanOrEqual(blocked.blocked, 2)
+        XCTAssertEqual(blocked.connections, 1, "a refused connection is not one that was opened")
+        XCTAssertEqual(hosts.first { $0.name == "fine.example" }?.open, 1)
+        XCTAssertEqual(socks.requests.value.map(\.host), ["www.ads.example", "fine.example"])
+        // And not a name of it in the log.
+        network?.stop()
+        XCTAssertFalse(logLines.value.contains { $0.contains("example") }, "\(logLines.value)")
+    }
+
+    func testAHostsOfALiteralAddressAndTheLimitOfHostsRemembered() throws {
+        let socks = proxy(.socks5, origin: FakeProxy.echo)
+        let guest = start(socks.upstream())
+        let literal = VMNetIPv4(string: "203.0.113.9")!
+        let connection = try XCTUnwrap(open(guest, literal))
+        for index in 0..<(NetworkLoop.hostLimit + 20) { XCTAssertNotNil(guest.resolve("blocked\(index).example")) }
+        _ = connection
+        let hosts = waitForHosts { $0.contains { $0.name == "203.0.113.9" && $0.open == 1 } }
+        XCTAssertEqual(hosts.first { $0.name == "203.0.113.9" }?.connections, 1)
+        // Names only asked for are not hosts anything went to: nothing of them is kept.
+        XCTAssertEqual(hosts.count, 1)
+        XCTAssertLessThanOrEqual(hosts.count, NetworkLoop.hostLimit)
+    }
+
+    func testAMachineWokenFromASavedStateFindsTheSameNamesBehindItsAddresses() throws {
+        let socks = proxy(.socks5, origin: FakeProxy.echo)
+        let guest = start(socks.upstream())
+        let first = try XCTUnwrap(guest.resolve("one.example")?.address)
+        let second = try XCTUnwrap(guest.resolve("two.example")?.address)
+        XCTAssertEqual(network?.knownNames(), [], "names are handed over when the network has stopped")
+        network?.stop()
+        let known = try XCTUnwrap(network?.knownNames())
+        XCTAssertEqual(known, [VMNetKnownName(name: "one.example", address: first.value), VMNetKnownName(name: "two.example", address: second.value)])
+        Sys.close(guestEnd)
+        Sys.close(stackEnd)
+
+        // The next run: the guest asks nothing, and connects to the address it still holds.
+        let woken = start(socks.upstream(), known: known)
+        let connection = try XCTUnwrap(open(woken, second))
+        XCTAssertTrue(connection.write([7]))
+        connection.read(atLeast: 1)
+        XCTAssertEqual(socks.requests.value.last, FakeProxy.Request(host: "two.example", port: 80, byName: true))
+        // A new name gets an address nobody has, and the old ones keep theirs.
+        let third = try XCTUnwrap(woken.resolve("three.example")?.address)
+        XCTAssertFalse([first, second].contains(third))
+        XCTAssertEqual(woken.resolve("one.example")?.address, first)
+    }
+
+    func testTheGuestIsToldTheTimeWhoeverItAsks() throws {
+        let guest = start(.none)
+        var request = [UInt8](repeating: 0, count: 48)
+        request[0] = 0x23
+        for index in 0..<8 { request[40 + index] = UInt8(0xA0 + index) }
+        let server = VMNetIPv4(string: "17.253.52.125")!
+        let before = Date().timeIntervalSince1970
+        guest.send(Wire.udp(from: 50_500, to: server, 123, payload: request))
+        let reply = try XCTUnwrap(guest.expect { frame -> [UInt8]? in
+            guard let udp = Wire.seenUDP(frame), udp.sourcePort == 123, udp.destinationPort == 50_500, udp.source == server else { return nil }
+            return Array(udp.payload)
+        })
+        XCTAssertEqual(reply.count, 48)
+        XCTAssertEqual(reply[0], 0x24)
+        XCTAssertEqual(Array(reply[24..<32]), Array(request[40..<48]))
+        let seconds = UInt64(reply[40]) << 24 | UInt64(reply[41]) << 16 | UInt64(reply[42]) << 8 | UInt64(reply[43])
+        let told = Double(seconds) - 2_208_988_800
+        XCTAssertGreaterThanOrEqual(told, before.rounded(.down))
+        XCTAssertLessThan(told, before + 10)
+        let counters = waitForCounters { $0.timeQueries == 1 }
+        XCTAssertEqual(counters.timeQueries, 1)
+        XCTAssertEqual(counters.datagramsDropped, 0)
     }
 }
 

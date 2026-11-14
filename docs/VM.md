@@ -283,6 +283,8 @@ most, off the main thread; anything else is ignored and logged by its kind.
 | Dock | bottom, left or right; always shown or hiding; small, medium or large. What it leaves of the screen is what a page is told is free (`screen.availWidth`, `availHeight`) |
 | Wallpaper | Lumen's eclipse, drawn by the app for the machine's screen pixel for pixel (`VMWallpaper`; no picture is carried in the app); or the picture left as it is in the machine |
 | At start | Safari opened or not; its start page, and up to five more, each in a tab; the window full screen |
+| Instant wake | off unless chosen. Closing the machine keeps it as it is, and opening it brings it back in seconds ("Instant wake" below). Such a machine has no sound |
+| Browser mode | off unless chosen. The machine is shown as a browser: Safari over its whole screen, the menu bar and the Dock out of sight ("Browser mode" below) |
 
 Those of the guest's own system are applied in it by the boot script and need **tools 2** (the
 wallpaper: tools 3; the region's clock and week, the scroll bars, the Dock and the pages after
@@ -335,6 +337,77 @@ What was looked at and needs nothing: the network (no DNS query, UDP or IPv6 lea
 anew at every start, not the last check in the list), the clock (the host's; automatic time zone
 is switched off). The layouts' numbers and names are macOS's own, as known; that a machine takes
 them, and the units, is to be seen on a Mac.
+
+## Instant wake
+
+A machine's start is its macOS's: half a minute to the desktop, and everything in it closed when
+it was shut down. With **instant wake** on (a profile's setting, off unless chosen) closing the
+machine *saves* it instead — its memory, as Apple's framework writes it
+(`VZVirtualMachine.saveMachineStateTo`, macOS 14) — and its next start brings that back
+(`restoreMachineStateFrom`, then `resume`): the same pages, the same place, in seconds.
+
+What holds it together, in `MachineRunner` and `VMSavedState`:
+
+- **A state is one disk's, at one moment.** A machine's memory, woken on a disk that has gone on
+  without it, would write what it remembers over what is there. So the state is used by the next
+  start or removed by it, and removed *before* the machine runs again, taken or not; and beside
+  it lies a note (`state.json`) of the disk as it was left when the machine had stopped after the
+  save — its length and the time of its last write. A disk that is not exactly that is not this
+  state's (`VMWakeRefusal.stale`), and the machine starts anew, as after a Mac lost power.
+- **A state is one machine's.** The note carries the request's `stateStamp`: the hardware the
+  framework is told of (processors, memory, screen, network card) and the revision of the settings
+  the machine's macOS starts with. Anything of them changed — more memory, another language, a
+  proxy that came out in another time zone — and the machine starts anew (`.changed`), so that
+  the change takes; the row says why. What is this Mac's side only (the name, what is blocked,
+  the proxy's address) is not in the stamp.
+- **What can be saved.** The framework saves a Mac's own trackpad and keyboard, a disk, a network
+  card and shared folders — and refuses a machine with sound, with the framework's source of
+  random numbers, or with the USB pointer (`validateSaveRestoreSupport`). A machine with instant
+  wake is made without them (`MachineConfiguration`): it is **silent**, which the setting says. A
+  machine the framework still refuses is shut down when closed, as before, and the row says so
+  (`.unsupported`).
+- **Nothing is lost on the way.** A save that fails (the machine cannot be paused, the framework
+  says no) is no reason to lose what is open in it: the machine goes on and is shut down as a Mac
+  is. "Shut Down macOS" in the row's menu and in the window's is a real shutdown; "Start Anew…"
+  gives a sleeping machine's state up, after a question.
+- **The network.** The guest's connections are this process's and end with it: woken, the guest
+  finds them reset and opens new ones. What it still holds are the stand-in addresses its DNS was
+  given for names; the network takes those back by the same addresses (`VMNetConfiguration.knownNames`,
+  kept in the note — a machine's browsing, beside its memory, which holds the same and more).
+- **The clock.** A woken machine has the clock of the moment it was put to sleep. The helper
+  leaves a word in the shared folder (`lumen-woke`), and the boot script — which went on where it
+  was — asks for the time then (`sntp -sS`, tools 11); the machine's network answers every such
+  question with this Mac's clock, and nothing leaves (docs/VM_NETWORK.md).
+
+A sleeping machine takes about as much disk as it has memory. Lock, Quit and this Mac's own
+shutdown put such a machine to sleep too — faster than shutting it down.
+
+Not run on a Mac: that the framework takes this set of devices (it is the set other tools use
+for it), how long a save and a wake take, and that `sntp` sets the clock as written.
+
+## Browser mode
+
+A machine is a Mac in a window: a desktop, a Dock, a menu bar, Safari somewhere in it. In
+**browser mode** (a profile's setting, off unless chosen) it is shown as a browser:
+
+- its macOS keeps the menu bar and the Dock out of sight (`_HIHideMenuBar`, the Dock's hiding;
+  tools 11 — noted beside the person's settings, so that a machine no longer shown so gets them
+  back), and Safari is opened whatever else the profile says;
+- when the boot script says it has opened Safari (the status file), the helper presses
+  Control-Command-F on the machine's own keyboard — events made for the machine's view, as a
+  person's are; nothing in the guest is asked for a permission — which puts Safari over the
+  machine's whole screen;
+- until then the machine's screen is behind a cover with its name (a click takes it away; two
+  minutes do too), so that the sign-in and the desktop are not what the person opened.
+
+With instant wake a machine in browser mode opens as a browser window in seconds, with no cover:
+it is as it was closed. "Safari Full Screen (in the Machine)" in the row's menu and "Full Screen
+in the Machine" in the window's press the same key again — for a Safari that was not in front
+when it was pressed, or to leave full screen.
+
+Not run on a Mac: that the machine's view takes events made here as it takes a person's, and how
+the menu bar's setting reads on the newest macOS. The key is a toggle: a Safari that macOS
+itself brought back full screen would leave it; the menu's command puts it back.
 
 ## What machines have in common
 
@@ -453,10 +526,13 @@ called off), a file that is not there.
 ## What is not measured, and what does not work
 
 - **How a machine looks to a site that studies the device.** Safari in the guest is real and
-  nothing is injected, but the guest's graphics are Apple's paravirtual GPU, not a Mac's own. What
-  that changes in what a page can read (WebGL limits and extensions, canvas output, timing) is not
-  measured yet: nothing here could run a machine. The app's own probe ("What sites see") opened in
-  a machine's Safari, beside the same on a real Mac, is the measurement to make before any claim.
+  nothing is injected, but the guest's graphics are Apple's paravirtual GPU, not a Mac's own.
+  **WebGL, measured** (the owner, 14 November, browserleaks.com/webgl in a machine's Safari 27.2
+  and in the same Mac's own Safari 27.2): the unmasked renderer is "Apple GPU" in both — Safari
+  names no graphics card to a page —, every limit shown is the same, and so are the report's hash
+  (97C494A4D0C794F1C38D869698CD4F4A) and the drawn image's (52497E308A4259F66BF07A8977E40D65).
+  By WebGL a machine is that Mac. **Not measured**: WebGPU, the 2D canvas, audio, timing — no
+  claim is made of them, and "cannot be told from a Mac" is not said.
 - **No camera.** A guest has no camera device; a site that asks for one finds none.
 - **UDP through a proxy**: none, by design (above). A site that needs WebRTC media will not have it
   in a proxied machine.
@@ -523,3 +599,14 @@ What is checked where:
 6. Shut Down closes the guest within some seconds; Lock with a machine running waits for it.
 7. "What sites see" in the machine's Safari, beside a real Mac's: the first measurement of the
    paravirtual GPU's fingerprint.
+8. Instant wake on for a machine: its first start is the usual one; Close puts it to sleep in
+   seconds ("asleep · opens at once" in its row, a `state.vzvmsave` beside its disk); Open brings
+   it back as it was — the same pages — in seconds, its clock right within a few more, and pages
+   load again. Change its memory and open it: it starts anew, and the row says why. A row that
+   says the machine cannot be saved names the one thing to look into first: the helper's log
+   line "wake: this machine cannot be saved".
+9. Browser mode on: the machine's start is covered, and the cover goes when Safari is over the
+   whole screen; "Safari Full Screen (in the Machine)" in the row's menu toggles it. If the
+   cover goes and Safari is in a window, the machine's view did not take the key made for it.
+10. "Network…" in a running machine's menu: hosts appear as pages load, with their counts;
+    Block ends a host's connections at once and the page that needs it stops loading.

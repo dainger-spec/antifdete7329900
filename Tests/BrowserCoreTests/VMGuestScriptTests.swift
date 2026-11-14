@@ -43,7 +43,7 @@ final class VMGuestScriptTests: XCTestCase {
     /// or works on the test's own files, a recorder where it would change a system.
     private static let passedOn = ["sed", "head", "ls", "mkdir", "cksum", "cut", "tr", "cp", "chmod", "rm", "mv", "mktemp", "grep"]
     private static let recorded = ["defaults", "scutil", "systemsetup", "osascript", "open", "killall", "shutdown", "chown", "ln",
-                                   "mount", "mount_virtiofs", "sysadminctl", "pmset", "mdutil", "softwareupdate"]
+                                   "mount", "mount_virtiofs", "sysadminctl", "pmset", "mdutil", "softwareupdate", "sntp"]
     private static let answered = ["sh", "sleep", "launchctl", "sudo", "stat", "id", "pgrep", "sw_vers", "logger",
                                    "sysctl", "fdesetup", "stty", "readlink"]
 
@@ -78,6 +78,7 @@ final class VMGuestScriptTests: XCTestCase {
                 "-g AppleLanguages") [ -z "$APPLE_LANGUAGES" ] && exit 1; printf '(\n    "%s",\n    "ru-RU"\n)\n' "$APPLE_LANGUAGES" ;;
                 "io.lumenbrowser.guest keyboard") [ -z "$KEYBOARD_NOTED" ] && exit 1; echo "$KEYBOARD_NOTED" ;;
                 "io.lumenbrowser.guest locale") [ -z "$LOCALE_NOTED" ] && exit 1; echo "$LOCALE_NOTED" ;;
+                "io.lumenbrowser.guest browser") [ -z "$BROWSER_NOTED" ] && exit 1; echo "$BROWSER_NOTED" ;;
                 *) exit 1 ;;
               esac
             fi
@@ -735,5 +736,62 @@ final class VMGuestScriptTests: XCTestCase {
         XCTAssertNil(said.timeZoneNow)
         XCTAssertNil(said.localeNow)
         XCTAssertEqual(said.differences(from: settings).map(\.what), said.languageNow == nil ? [] : [.language])
+    }
+
+    // MARK: - A machine shown as a browser, and one woken from a saved state
+
+    func testAMachineShownAsABrowserHidesItsMenuBarAndDockAndGetsThemBack() throws {
+        let browser = VMGuestSettings(profile: VMProfile(name: "A", lumenWallpaper: false, browserMode: true))
+        XCTAssertTrue(browser.text.contains("LUMEN_BROWSER_MODE=1\n"), browser.text)
+        let first = try boot(settings: browser.text)
+        XCTAssertTrue(first.has("tester defaults write -g _HIHideMenuBar -bool true"), "\(first.calls)")
+        XCTAssertTrue(first.has("tester defaults write com.apple.dock autohide -bool true"))
+        XCTAssertTrue(first.has("tester defaults write io.lumenbrowser.guest browser -string 1"))
+        XCTAssertTrue(first.has("root killall Dock"))
+
+        // So already: nothing is written again, and the Dock is left running.
+        let second = try boot(settings: browser.text, environment: ["BROWSER_NOTED": "1", "DOCK_AUTOHIDE": "1"])
+        XCTAssertFalse(second.calls.contains { $0.contains("_HIHideMenuBar") || $0.contains("write com.apple.dock") || $0.contains("killall Dock") },
+                       "\(second.calls)")
+
+        // No longer shown so: the menu bar is back, and the Dock too — unless the profile hides it.
+        let plain = VMGuestSettings(profile: VMProfile(name: "A", lumenWallpaper: false))
+        XCTAssertFalse(plain.text.contains("LUMEN_BROWSER_MODE"))
+        let third = try boot(settings: plain.text, environment: ["BROWSER_NOTED": "1", "DOCK_AUTOHIDE": "1"])
+        XCTAssertTrue(third.has("tester defaults delete -g _HIHideMenuBar"), "\(third.calls)")
+        XCTAssertTrue(third.has("tester defaults delete io.lumenbrowser.guest browser"))
+        XCTAssertTrue(third.has("tester defaults write com.apple.dock autohide -bool false"))
+        let hidden = VMGuestSettings(profile: VMProfile(name: "A", lumenWallpaper: false, dockAutohide: true))
+        let fourth = try boot(settings: hidden.text, environment: ["BROWSER_NOTED": "1", "DOCK_AUTOHIDE": "1"])
+        XCTAssertTrue(fourth.has("tester defaults delete -g _HIHideMenuBar"))
+        XCTAssertFalse(fourth.calls.contains { $0.contains("write com.apple.dock autohide") }, "\(fourth.calls)")
+
+        // A machine never shown so: none of it is touched.
+        let fifth = try boot(settings: plain.text)
+        XCTAssertFalse(fifth.calls.contains { $0.contains("_HIHideMenuBar") || $0.contains("write com.apple.dock") }, "\(fifth.calls)")
+    }
+
+    func testAMachineWokenFromASavedStateAsksForTheTimeOnce() throws {
+        let settings = VMGuestSettings(profile: VMProfile(name: "A", lumenWallpaper: false)).text
+        let woke = share.appendingPathComponent(VMGuestSettings.wokeFileName)
+        try Data("abc123".utf8).write(to: woke)
+        let asked = "root sntp -sS time.apple.com"
+        let first = try boot(settings: settings)
+        XCTAssertEqual(first.count(asked), 1, "\(first.calls)")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: woke.path), "the word is taken once")
+        // The clock is set before the machine is asked anything else: before its shutdown here.
+        XCTAssertLessThan(try XCTUnwrap(first.calls.firstIndex(of: asked)), try XCTUnwrap(first.calls.firstIndex(of: "root shutdown -h now")))
+
+        // Not woken: the time is not asked for.
+        XCTAssertEqual(try boot(settings: settings).count(asked), 0)
+        // What is no word of Lumen's, or a link left in its place, asks for nothing.
+        try Data("$(reboot) ;".utf8).write(to: woke)
+        XCTAssertEqual(try boot(settings: settings).count(asked), 0)
+        try? FileManager.default.removeItem(at: woke)
+        let secret = root.appendingPathComponent("secret")
+        try Data("abc123".utf8).write(to: secret)
+        try FileManager.default.createSymbolicLink(at: woke, withDestinationURL: secret)
+        XCTAssertEqual(try boot(settings: settings).count(asked), 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secret.path))
     }
 }

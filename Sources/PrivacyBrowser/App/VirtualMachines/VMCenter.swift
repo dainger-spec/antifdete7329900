@@ -63,6 +63,8 @@ final class VMCenter: ObservableObject {
         var troubleDetail: String?
         /// Its connections go through the proxy this Mac's network settings name.
         var viaSystemProxy = false
+        /// It was woken from a saved state at this start: it is as it was closed.
+        var woke = false
     }
 
     @Published private(set) var list: VMProfiles
@@ -83,6 +85,13 @@ final class VMCenter: ObservableObject {
     @Published private(set) var guests: [UUID: VMGuestStatus] = [:]
     /// What each machine's files take on disk; the base's under `VMCenter.baseID`.
     @Published private(set) var diskUsage: [UUID: Int64] = [:]
+    /// The machines put to sleep (instant wake): each has a saved state for its next start.
+    @Published private(set) var asleep: Set<UUID> = []
+    /// Why a machine with instant wake was started anew at its last start instead of woken.
+    @Published private(set) var wakeNotes: [UUID: VMWakeRefusal] = [:]
+    /// Where a running machine's macOS connects, while its network panel is open — the person's
+    /// browsing: shown, never kept or logged.
+    @Published private(set) var hosts: [UUID: [VMHelperEvent.Host]] = [:]
 
     /// The base's place in `diskUsage`, and the place of what was fetched for it (Apple's restore
     /// image, whole or in part).
@@ -128,6 +137,7 @@ final class VMCenter: ObservableObject {
             log.error("The virtual machines' list could not be read: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
         }
         for profile in list.profiles { readGuestStatus(of: profile.id) }
+        asleep = Set(list.profiles.map(\.id).filter { library.machine(for: $0).hasSavedState })
         measureDisk()
     }
 
@@ -664,6 +674,8 @@ final class VMCenter: ObservableObject {
         exits[id] = nil
         guests[id] = nil
         diskUsage[id] = nil
+        asleep.remove(id)
+        wakeNotes[id] = nil
     }
 
     // MARK: Running
@@ -693,6 +705,7 @@ final class VMCenter: ObservableObject {
             return
         }
         problems[id] = nil
+        wakeNotes[id] = nil
         guard let proxy = profile.proxy else {
             guard profile.asksWhereTheConnectionComesOut else {
                 running[id] = Running(phase: .starting)
@@ -811,6 +824,10 @@ final class VMCenter: ObservableObject {
         switch event.kind {
         case .started:
             if running[id]?.phase == .starting { running[id]?.phase = .running }
+            running[id]?.woke = event.woke == true
+            wakeNotes[id] = event.notWoken.flatMap(VMWakeRefusal.init(rawValue:))
+            // Woken or started anew, the saved state is used up.
+            asleep.remove(id)
             // What the guest says of itself — its system, its tools, whether Lumen's picture is on
             // its desktop — is read while it runs too, not only when it has stopped.
             for delay in [25.0, 60, 120, 240] {
@@ -827,6 +844,9 @@ final class VMCenter: ObservableObject {
             running[id]?.trouble = event.trouble.flatMap(VMNetworkTrouble.init(rawValue:))
             running[id]?.troubleDetail = event.troubleDetail
             running[id]?.viaSystemProxy = event.viaSystemProxy ?? false
+        case .hosts:
+            // Only while the panel asks: an answer that comes after it was closed is dropped.
+            if hosts[id] != nil { hosts[id] = event.hosts ?? [] }
         default:
             break
         }
@@ -835,12 +855,71 @@ final class VMCenter: ObservableObject {
     private func ended(_ id: UUID, failure: String?) {
         helpers[id] = nil
         running[id] = nil
+        hosts[id] = nil
         if let failure { problems[id] = failure }
+        if library.machine(for: id).hasSavedState { asleep.insert(id) } else { asleep.remove(id) }
         readGuestStatus(of: id)
         measureDisk()
     }
 
-    /// Shuts the machine's macOS down as its own menu would.
+    /// Shuts the machine's macOS down as its own menu would, whatever its instant wake says:
+    /// nothing is kept for the next start.
+    func shutDown(_ id: UUID) {
+        guard let state = running[id], state.phase != .checkingProxy else { return stop(id) }
+        running[id]?.phase = .stopping
+        helpers[id]?.send(.shutdown)
+    }
+
+    /// The person asked for a machine that sleeps to be started anew: its saved state — what was
+    /// open in it — is given up, and its macOS starts as after a shutdown that did not happen.
+    func startAnewBecauseThePersonAsked(_ id: UUID) {
+        guard running[id] == nil, helpers[id] == nil else { return }
+        let files = library.machine(for: id)
+        for url in [files.state, files.stateInfo] { try? FileManager.default.removeItem(at: url) }
+        asleep.remove(id)
+        start(id)
+    }
+
+    /// The network panel of a running machine was opened or closed: the helper says where the
+    /// machine connects only while it is open.
+    func watchNetwork(of id: UUID, _ watching: Bool) {
+        if watching {
+            guard helpers[id] != nil else { return }
+            if hosts[id] == nil { hosts[id] = [] }
+            helpers[id]?.send(.hosts(true))
+        } else {
+            hosts[id] = nil
+            helpers[id]?.send(.hosts(false))
+        }
+    }
+
+    /// Blocks a host for the machine: at once in the running machine, and — written into its
+    /// profile — at every later start. Throws what is wrong with the name or the list.
+    func block(_ host: String, in id: UUID) throws {
+        guard let name = VMProfile.blockedHost(host), var profile = list.profile(id) else {
+            throw CoreError.invalidConfiguration("a blocked name must be a host name such as ads.example.com")
+        }
+        if !profile.blockedHosts.contains(name) {
+            profile.blockedHosts.append(name)
+            try save(profile)
+        }
+        helpers[id]?.send(.block(name))
+    }
+
+    /// Whether a host is one the machine's profile blocks, or under one.
+    func isBlocked(_ host: String, in id: UUID) -> Bool {
+        guard let profile = list.profile(id) else { return false }
+        return profile.blockedHosts.contains { host == $0 || host.hasSuffix("." + $0) }
+    }
+
+    /// Puts the front window of the machine's macOS full screen, or back (the key a person would
+    /// press for it).
+    func toggleGuestFullScreen(_ id: UUID) {
+        helpers[id]?.send(.fullScreen)
+    }
+
+    /// Closes the machine: with instant wake it is put to sleep as it is; otherwise its macOS is
+    /// shut down as its own menu would.
     func stop(_ id: UUID) {
         guard let state = running[id] else { return }
         if state.phase == .checkingProxy {
@@ -955,7 +1034,9 @@ final class VMCenter: ObservableObject {
     /// The helper's few words, in the person's language (it has no strings of its own).
     static var helperTexts: [String: String] {
         ["stop": L("vm.window.stop"), "stopQuestion": L("vm.window.stopQuestion"), "stopDetail": L("vm.window.stopDetail"),
-         "stopNow": L("vm.window.stopNow"), "cancel": L("common.cancel"), "stopping": L("vm.window.stopping")]
+         "stopNow": L("vm.window.stopNow"), "cancel": L("common.cancel"), "stopping": L("vm.window.stopping"),
+         "sleep": L("vm.window.sleep"), "sleeping": L("vm.window.sleeping"), "opening": L("vm.window.opening"),
+         "guestFullScreen": L("vm.window.guestFullScreen")]
             .merging(VMNetworkTrouble.allCases.map { ("trouble." + $0.rawValue, L("vm.window.trouble")) }) { first, _ in first }
     }
 }

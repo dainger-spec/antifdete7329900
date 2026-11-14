@@ -41,12 +41,14 @@ public struct VMGuestSettings: Equatable, Sendable {
     public var moreStartURLs: [String]
     /// The keyboard's layouts, the first the one in use; empty leaves the machine's own. (Tools 10.)
     public var keyboard: [VMKeyboardLayout]
+    /// The machine is shown as a browser: the menu bar and the Dock stay out of sight. (Tools 11.)
+    public var browserMode: Bool
 
     public init(timeZone: String?, language: String?, hostName: String, startURL: String?, computerName: String? = nil,
                 appearance: VMAppearance? = nil, accent: VMAccent? = nil, opensSafari: Bool = true, wallpaper: Bool = false,
                 region: String? = nil, hourCycle: VMHourCycle? = nil, firstWeekday: Int? = nil, dockPosition: VMDockPosition? = nil,
                 dockAutohide: Bool? = nil, dockSize: VMDockSize? = nil, scrollBars: VMScrollBars? = nil, moreStartURLs: [String] = [],
-                keyboard: [VMKeyboardLayout] = []) {
+                keyboard: [VMKeyboardLayout] = [], browserMode: Bool = false) {
         self.timeZone = timeZone.flatMap { Self.isTimeZone($0) ? $0 : nil }
         self.language = language.flatMap { LocalePlaces.isLanguageTag($0) ? $0 : nil }
         self.computerName = computerName.flatMap(Self.computerName)
@@ -69,6 +71,7 @@ public struct VMGuestSettings: Equatable, Sendable {
         // After a first page only: pages without one would be Safari's own start, and these.
         self.moreStartURLs = self.startURL == nil ? [] : Array(moreStartURLs.compactMap(Self.startURL).prefix(VMProfile.moreStartURLsLimit))
         self.keyboard = keyboard
+        self.browserMode = browserMode
         revision = ""
         revision = Self.revision(of: lines(withRevision: false))
     }
@@ -81,7 +84,9 @@ public struct VMGuestSettings: Equatable, Sendable {
                       : profile.display.id.hasPrefix("imac") ? "iMac" : "Mac-mini",
                   startURL: profile.startURL, computerName: profile.computerName,
                   appearance: profile.appearance.flatMap(VMAppearance.init(rawValue:)),
-                  accent: profile.accent.flatMap(VMAccent.init(rawValue:)), opensSafari: profile.opensSafari,
+                  accent: profile.accent.flatMap(VMAccent.init(rawValue:)),
+                  // A machine shown as a browser has Safari open, whatever else the profile says.
+                  opensSafari: profile.opensSafari || profile.browserMode,
                   wallpaper: profile.lumenWallpaper,
                   // A region of the person's choosing goes with a language of their choosing: where
                   // the language is found — by the proxy, or by this Mac's connection — it has its own.
@@ -90,7 +95,8 @@ public struct VMGuestSettings: Equatable, Sendable {
                   dockPosition: profile.dockPosition.flatMap(VMDockPosition.init(rawValue:)), dockAutohide: profile.dockAutohide,
                   dockSize: profile.dockSize.flatMap(VMDockSize.init(rawValue:)),
                   scrollBars: profile.scrollBars.flatMap(VMScrollBars.init(rawValue:)), moreStartURLs: profile.moreStartURLs,
-                  keyboard: VMKeyboardLayout.layouts(setting: profile.keyboard, language: profile.language))
+                  keyboard: VMKeyboardLayout.layouts(setting: profile.keyboard, language: profile.language),
+                  browserMode: profile.browserMode)
     }
 
     public static let fileName = "lumen-settings.env"
@@ -101,6 +107,10 @@ public struct VMGuestSettings: Equatable, Sendable {
     /// The boot script's own file name, in the tools' folder (`VMLibrary.MachineFiles.tools`) and,
     /// for a machine whose script is older than tools 7, in the shared folder.
     public static let scriptFileName = "lumen-guest.sh"
+    /// What the helper leaves in the shared folder when it has woken a machine from a saved state
+    /// (a word of its own each time): the boot script, which went on where it was, asks for the
+    /// time then — the machine's clock is that of the moment it was put to sleep. (Tools 11.)
+    public static let wokeFileName = "lumen-woke"
     /// The tag of the second folder a machine is given: the tools' (`VMLibrary.MachineFiles.tools`),
     /// shared read-only, which the boot script mounts as root and takes a newer copy of itself
     /// from. Not the automount tag: macOS does not put it in front of the person.
@@ -132,6 +142,7 @@ public struct VMGuestSettings: Equatable, Sendable {
         if let startURL { lines.append("LUMEN_START_URL=\(startURL)") }
         for (index, url) in moreStartURLs.enumerated() { lines.append("LUMEN_START_URL_\(index + 2)=\(url)") }
         if !keyboard.isEmpty { lines.append("LUMEN_KEYBOARD=\(keyboard.map(\.rawValue).joined(separator: ","))") }
+        if browserMode { lines.append("LUMEN_BROWSER_MODE=1") }
         return lines
     }
 
