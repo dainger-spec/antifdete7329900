@@ -895,7 +895,8 @@ final class AppModel: ObservableObject {
         // The settings this edit is of. Settings that cannot be read stop the save (R1): the form
         // was opened without them, and saved, the profile would start without its proxy.
         let stored = try repository.loadConfiguration(id)
-        let saved = configuration.savingEdit(over: stored)
+        // Another proxy: the location its check found in the editor, not the old proxy's.
+        let saved = configuration.savingEditorEdit(over: stored)
         try repository.saveConfiguration(saved, for: id)
         if saved.proxy != stored.proxy {
             let entry = saved.proxy.flatMap { proxyList?.list.entry(for: $0) }

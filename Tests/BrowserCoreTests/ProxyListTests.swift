@@ -654,6 +654,42 @@ final class ProxyAssignmentTests: XCTestCase {
         XCTAssertEqual(edit.lastProxyLocation, stored.lastProxyLocation)
     }
 
+    /// The editor's Save of another proxy keeps what its check found through the new proxy, as
+    /// Assign does — not the old proxy's location, which no launch through the new one would use.
+    func testTheEditorsSaveOfAnotherProxyKeepsWhatItsCheckFound() {
+        let stored = configuration()
+        var edit = stored
+        edit.proxy = new
+        edit.lastProxyLocation = checked.location(for: new)
+        let saved = edit.savingEditorEdit(over: stored, at: now)
+        XCTAssertEqual(saved.proxy, new)
+        XCTAssertEqual(saved.settingsModifiedAt, now)
+        XCTAssertEqual(saved.rememberedProxyLocation?.timeZoneIdentifier, "Asia/Tokyo")
+        XCTAssertEqual(saved.rememberedProxyLocation?.countryCode, "JP")
+        XCTAssertNil(saved.lastProxyLocation?.exitIP, "the exit IP only with the warning")
+        XCTAssertEqual(saved.passwordNeverSaveSites, ["https://bank.example"])
+        var warned = edit
+        warned.warnOnProxyIPChange = true
+        XCTAssertEqual(warned.savingEditorEdit(over: configuration(warn: true), at: now).lastProxyLocation?.exitIP, "198.51.100.4")
+        // Not checked — the editor's copy of the location is still the one it opened with, the
+        // old proxy's: nothing of either is kept.
+        var unchecked = stored
+        unchecked.proxy = new
+        XCTAssertNil(unchecked.savingEditorEdit(over: stored, at: now).lastProxyLocation)
+        // The old way kept the old proxy's location, which a launch through the new one ignores.
+        XCTAssertNil(edit.savingEdit(over: stored, at: now).rememberedProxyLocation)
+        // The same proxy: what is stored stays, newer than the editor's copy as it may be.
+        var later = stored
+        later.lastProxyLocation?.timeZoneIdentifier = "Europe/Paris"
+        var sameProxy = stored
+        sameProxy.notes = "a note"
+        XCTAssertEqual(sameProxy.savingEditorEdit(over: later, at: now).lastProxyLocation?.timeZoneIdentifier, "Europe/Paris")
+        // The proxy removed: the old proxy's location goes too.
+        var direct = stored
+        direct.proxy = nil
+        XCTAssertNil(direct.savingEditorEdit(over: stored, at: now).lastProxyLocation)
+    }
+
     func testAssigningThroughTheRepository() throws {
         let repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "pw", iterations: 1_000))
         let a = try repository.create(name: "A", configuration: configuration())

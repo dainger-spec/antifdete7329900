@@ -483,7 +483,9 @@ ProfilesScreen ── ProfileSelection (click / ⌘-click / ⇧-click) ── Pr
   newer-wins time for sync moves only when the proxy changes; the location found through the old
   proxy goes (it is about another proxy), and the check's location of the new one is remembered,
   its exit IP only while the profile asks to be warned of changes. Rotation is round-robin in list
-  order. Running profiles get their new proxy at their next launch.
+  order. Running profiles get their new proxy at their next launch. The editor's Save of another
+  proxy does the same with what its own check found (`savingEditorEdit`): "From the list" takes
+  the entry's last check, "New" the Check made there; unchecked, nothing is remembered.
 - The Profiles list's selection lives in the screen (`ProfileSelection`): a plain click selects one
   row, ⌘-click toggles, ⇧-click extends in display order; rows the filter or search hides are never
   acted on. Warm-up of several profiles goes through `ProfileActions.warmUpSeveral`, which today
