@@ -191,6 +191,19 @@ final class ProfileRepositoryTests: XCTestCase {
         XCTAssertTrue(reopened.entries(for: URL(string: "http://example.com/")!).isEmpty)
         XCTAssertTrue(reopened.entries(for: URL(string: "https://sub.example.com/")!).isEmpty)
 
+        // HTTP authentication answered by itself: over https, with a password — never one without
+        // a password, never over plain http.
+        let other = try repo.passwordVault(for: repo.create(name: "HTTP auth", configuration: ProfileConfiguration()).id)
+        try other.upsert(PasswordEntry(origin: "https://site.example", username: "a", password: "2"))
+        try other.upsert(PasswordEntry(origin: "https://codes.example", username: "only-a-code", password: ""))
+        try other.upsert(PasswordEntry(origin: "http://plain.example", username: "a", password: "4"))
+        XCTAssertEqual(other.httpAuthenticationEntry(for: URL(string: "https://site.example/")!)?.password, "2")
+        XCTAssertNil(other.httpAuthenticationEntry(for: URL(string: "https://codes.example/")!), "no password, nothing sent")
+        XCTAssertEqual(other.entries(for: URL(string: "http://plain.example/")!).count, 1)
+        XCTAssertNil(other.httpAuthenticationEntry(for: URL(string: "http://plain.example/")!), "not over plain http")
+        try other.upsert(PasswordEntry(origin: "https://codes.example", username: "with-password", password: "5"))
+        XCTAssertEqual(other.httpAuthenticationEntry(for: URL(string: "https://codes.example:443/")!)?.password, "5")
+
         try reopened.remove(id: reopened.allEntries()[0].id)
         XCTAssertEqual(try repo.passwordVault(for: profile.id).allEntries().count, 1)
     }
