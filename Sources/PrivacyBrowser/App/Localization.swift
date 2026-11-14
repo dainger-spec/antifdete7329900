@@ -207,6 +207,13 @@ func translatedErrorText(_ error: Error) -> String? {
                           L("profiles.menu.syncNow"), L("profiles.menu.more"))
         }
     }
+    // A sync server's refusal that names its code (`HTTPSyncTransport`): said as `syncServer` is, the
+    // code in place of the body. Through the Lumen account the app says each in words of its own
+    // (`AccountSyncText`).
+    if let refusal = error as? SyncServerRefusal {
+        if refusal.status == 401 || refusal.status == 403 { return String(format: L("error.core.syncServerToken"), refusal.status) }
+        return String(format: L("error.core.syncServer"), refusal.status, refusal.code)
+    }
     if let error = error as? PasswordVaultError {
         return L(error == .duplicate ? "passwords.error.duplicate" : "passwords.error.notFound")
     }

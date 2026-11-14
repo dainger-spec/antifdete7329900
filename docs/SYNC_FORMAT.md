@@ -5,6 +5,43 @@ document describes the client: wire format, objects and merge rules. The HTTP co
 for a server is in [SYNC_SERVER_API.md](SYNC_SERVER_API.md). A server and an account page are
 built to the decisions below.
 
+## Where a Mac syncs to
+
+`DeviceSettings.SyncTarget`, chosen in **Settings → Sync** (or **More → Sync…**); one at a time, the
+same vault and the same objects whichever it is:
+
+| Target | Transport | What is typed in | Stored in `settings.bin` |
+|---|---|---|---|
+| **Lumen account** (`.account`) | `HTTPSyncTransport` at the account server (`PBAccountServerURL`), `Authorization: Bearer` this Mac's device token from `account.json` (`AccountSync`; the account server's CONTRACT §16.1) | nothing | the choice only: `{"account": {}}` |
+| **Folder** (`.folder`) | `LocalDirectorySyncTransport`: local-only, a NAS share or an external disk | a folder | a security-scoped bookmark and the path |
+| **Own server** (`.server`) | `HTTPSyncTransport`: a server of one's own that speaks SYNC_SERVER_API.md | its HTTPS address and an access token | the address and the token |
+
+**Lumen account** is offered while this Mac is signed in to an account (`AccountSync.isOffered`): a
+Mac's sync is in every plan — the server does not hold it back after the paid period, and the space
+follows the plan, 100 MiB at least — but not on an account the server has disabled. The vault's
+encryption is exactly the other targets': the server receives ciphertext and the plaintext
+`vault-header` only, and the key never leaves the user's devices. Lumen for iPhone signed in to the
+same account finds this vault with `GET /v1/device/sync/vaults` and opens it with the master
+password; the vault's id in the URL is the vault's own (`UnlockedVault.vaultID`), the one its header
+names. A second Mac does not join another Mac's vault from the app yet (`SyncEngine.bootstrap` has
+no screen): each Mac syncs its own, and the server keeps up to 3 vaults per account.
+
+Sync through the account:
+- **Waits for the license.** The first sync after the app starts follows a renewal of the document
+  of rights that reached the server with this Mac still signed in (`LicenseModel.renewForSync`,
+  CONTRACT §16.1): a token copied to another Mac with the app's files is `device_revoked` or
+  `machine_mismatch` by then, and gone (§9.4). A `401` from the sync renews again, which signs an
+  unlinked Mac out. Signed out, the target stays and nothing syncs: the status says to sign in.
+- **Says the server's refusals as states**, in both languages, and changes nothing on this Mac for
+  any of them: `403 forbidden` (the vault is another account's), `too_many_vaults`,
+  `account_disabled`, `sync_on_hold` (no request before its `availableAt`, kept in the status),
+  `sync_not_in_plan` (an iPhone's, said if a Mac ever gets it), `429`. `507 quota_exceeded` and
+  `413 too_large` are about one object: it waits (`SyncReport.deferredOverQuota`,
+  `deferredTooLarge`), the rest syncs, and the status says the plan's space is full, with the
+  account page a click away.
+- **`409 generation_changed`** stops the run with nothing more written and nothing said; the app
+  runs again at once, once, and that run starts over (below).
+
 ## Accepted decisions for a server (October 2026)
 
 Accepted by the project's owner before any server exists, so that a server and its account page
@@ -70,7 +107,8 @@ buyer can check it the same way the competitor was checked.
 | Wire format: envelope, opaque object IDs, AAD binding | `SyncEnvelope.swift` | ready (`pbsync-2` written since the vault's generation 2; `pbsync-1` still read) |
 | Engine: CAS writes, deferral, tombstones, per-record merges | `SyncEngine.swift` | ready, unit-tested |
 | Backend contract | `SyncTransport` protocol | ready; this is all a backend implements |
-| `HTTPSyncTransport` | `Sync/Transports/HTTPSyncTransport.swift` | **server-ready client**: speaks SYNC_SERVER_API.md, tested against an in-process stub; no server included |
+| `HTTPSyncTransport` | `Sync/Transports/HTTPSyncTransport.swift` | client: speaks SYNC_SERVER_API.md and the Lumen server's generation header and error bodies; tested against in-process stubs (`StubSyncServer`, `GenerationStubServer`) |
+| Sync through the Lumen account | `Sync/AccountSync.swift`, `AppModel.syncNow` | the account server with the device token; built to the account server's CONTRACT §16; not run against the live server from this repository |
 | `LocalDirectorySyncTransport` | `Sync/Transports/LocalDirectorySyncTransport.swift` | **local-only**: a folder (NAS share, external disk); CAS is atomic within one process only |
 | Sync target and last status | `DeviceSettings` (`settings.bin`, encrypted, never synced) | ready; folders are kept as security-scoped bookmarks so access survives relaunch in the App Sandbox |
 
@@ -139,8 +177,29 @@ bound), settings, proxy credentials, passwords, URLs, or cookies (names, values,
 ## Engine algorithm
 
 The engine keeps per-object local state in `sync-state.bin`, encrypted: the last synced
-revision and the SHA-256 of the last synced bytes.
+revision and the SHA-256 of the last synced bytes — and, from a server that keeps a generation of
+its data (`ServerGenerationTransport`: the Lumen server), the generation those records are of, with
+the server's address and the vault (format 2; without one the file stays the map of records,
+format 1, as every version before wrote it).
 
+0. **Start over when the records are not of the server's data** (the account server's CONTRACT
+   §16.2). The list names the server's generation (`X-Lumen-Server-Generation`: 32 hex, or `none`
+   when the server has no such vault). Another one than the one kept — the server's database put
+   back from a copy, its sync data deleted on the account page, another server, or the first run of
+   a client that knows of generations — and the records are forgotten, the new one kept. Whatever the
+   generation, an object the records name that is missing from the list or listed at a lower
+   revision forgets them too (a disk snapshot put back, another folder chosen): objects are never
+   deleted one by one there, and revisions only grow. A server that names no generation is spoken to
+   as before, and a generation kept for another address is dropped. Forgotten records mean every
+   object counts as changed here, and the steps below do the rest: what only this device has goes
+   up (`If-None-Match: *`), what both have is merged — a config by its times, the other version kept
+   beside it; without times, or equal ones, **this device's stays** and the server's is kept beside
+   it, in a file of its own, never over one kept before — and what only the server has comes down.
+   No object is taken from the server only because its revision differs from a forgotten record.
+   Local data is never touched by the step itself (`SyncReport.startedOver`). Every write of the run
+   names the generation (`none` too); a write the server accepts may name a new one (the vault made
+   anew), which is the run's from then on. `409 generation_changed` stops the run: nothing more is
+   written, the records stay as they are, and the next run starts over.
 1. Publish `vault-header` if it is absent. If the server's header has a different vault
    ID, refuse; if a newer version of the app wrote it (its `format`), stop with
    `CoreError.newerFormat` — this device needs that version first (docs/UPDATES.md §4).
@@ -186,7 +245,10 @@ revision and the SHA-256 of the last synced bytes.
 4. Delete local directories of profiles removed from the index, and report their IDs so
    the app also removes their WebKit stores.
 
-A lost CAS race leaves the object in `report.deferred`; the next sync retries it.
+A lost CAS race leaves the object in `report.deferred`; the next sync retries it. So does a write
+the server refuses for that object alone — `413` (too large) or `507` (no room left in the plan's
+sync space): the object waits (`report.deferredTooLarge`, `report.deferredOverQuota`) and the run
+goes on with the rest.
 
 A profile file this device cannot open — damaged, cut short, under another key — is handled before
 any of the above, and never pushed: it once was, over the server's good copy of the settings, which
@@ -287,9 +349,12 @@ _ = try await SyncEngine(repository: repo, transport: t).sync()
 
 ## Limitations
 
-- No rollback protection across devices. A server can serve an older complete set of
-  blobs with their original revisions. Fixing this needs a signed, monotonic manifest,
-  or a counter kept on a trusted device.
+- No rollback protection across devices against a server that hides it. A server can serve an
+  older complete set of blobs with their original revisions. An honest server that goes back — the
+  Lumen server after its database is restored from a copy — says so with a new generation, and a
+  set older than the device's records is noticed by its revisions (Engine algorithm, step 0); a
+  server set on deceiving cannot be caught without a signed, monotonic manifest, or a counter kept
+  on a trusted device.
 - `LocalDirectorySyncTransport` CAS is atomic only within one process. File-syncing
   services can still produce conflict copies, which the transport ignores.
 - A master-password change wraps the same VMK anew and counts the change in the header

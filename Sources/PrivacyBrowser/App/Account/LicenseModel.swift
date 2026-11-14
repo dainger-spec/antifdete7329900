@@ -72,6 +72,9 @@ final class LicenseModel: ObservableObject {
     /// tick redraws nothing; written with it to `account.json`.
     private var floor: EffectiveClock?
     private var refreshing = false
+    /// A renewal of this run reached the server and left this Mac signed in: sync through the account
+    /// waits for one (`renewForSync`, CONTRACT §16.1).
+    private var renewedThisRun = false
     /// A renewal asked while another was out, for what only a new one can say (the number of
     /// profiles, a person's click): made right after it.
     private var renewAgain: RenewalReason?
@@ -247,7 +250,7 @@ final class LicenseModel: ObservableObject {
     /// Why a renewal is asked — said in the log, so that a renewal not asked, one that failed and one
     /// that went through are told apart (the owner, 3 November: the app's log said nothing at all).
     enum RenewalReason: String {
-        case launch, unlocked, profiles, timer, network, wake, active, retry, manual
+        case launch, unlocked, profiles, timer, network, wake, active, retry, manual, sync
     }
 
     /// Starts the minute's decision, the renewals and their retries. Once, from the app's own process.
@@ -423,6 +426,7 @@ final class LicenseModel: ObservableObject {
         case .accepted(let paid):
             failures = 0
             nextRetry = nil
+            renewedThisRun = true
             sentProfileCount = count
             // What was asked with — refused or not: the same tokens are not a reason to ask again.
             sentProfileTokens = knownProfileCount != nil ? knownProfileTokens : record.profileTokens
@@ -459,6 +463,7 @@ final class LicenseModel: ObservableObject {
         case .appOutdated:
             failures = 0
             nextRetry = nil
+            renewedThisRun = true
             save()
             log.notice("License renewal: the server sent a document this version cannot judge; an update is asked for")
             onAppOutdated?()
@@ -471,6 +476,23 @@ final class LicenseModel: ObservableObject {
             renewAgain = nil
             await refresh(because: again)
         }
+    }
+
+    /// Sync through the account may go (CONTRACT §16.1): a renewal of this run reached the server, and
+    /// this Mac is still signed in. Before the first sync after the launch the app renews: a token the
+    /// server no longer knows (`device_revoked`, `machine_mismatch` — the app's files copied to another
+    /// Mac) is gone by then (§9.4), and nothing syncs in its name.
+    var renewedForSync: Bool { renewedThisRun && record.isSignedIn }
+
+    /// Renews now when no renewal of this run has reached the server — or `again`, after the sync
+    /// server refused the token (`401`: the renewal says why) — and waits for it, or for the one
+    /// already out. Returns `renewedForSync`.
+    func renewForSync(again: Bool = false) async -> Bool {
+        if again || !renewedThisRun {
+            await refresh(because: .sync)
+            while refreshing { try? await Task.sleep(nanoseconds: 100_000_000) }
+        }
+        return renewedForSync
     }
 
     // MARK: Signing in
