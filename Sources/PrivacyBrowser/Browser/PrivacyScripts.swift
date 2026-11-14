@@ -1210,12 +1210,32 @@ function patchWebRTC(w, policy, relay) {
       }
       return copies;
     };
+    // The relay as the engine reports it back: by its credentials, which are this launch's alone.
+    const isRelayServer = (server) => {
+      if (!isObject(server)) return false;
+      for (let i = 0; i < relayServers.length; i++) {
+        if (server.username === relayServers[i].username || server.credential === relayServers[i].credential) return true;
+      }
+      return false;
+    };
     define(nativeProto, 'getConfiguration', method('getConfiguration', 0, function () {
       const result = call(nativeGetConfiguration, this); // the engine's receiver check
       const view = call(WeakMapGet, pageView, this);
       if (view) {
         ObjectDefineProperty(result, 'iceServers', { value: copyServers(view.iceServers), writable: true, enumerable: true, configurable: true });
         ObjectDefineProperty(result, 'iceTransportPolicy', { value: view.iceTransportPolicy, writable: true, enumerable: true, configurable: true });
+      } else {
+        // A connection this realm did not make — another frame's, asked through this frame's
+        // function, or the other way round — keeps the relay in the engine all the same, and its
+        // view is that frame's: the relay is taken out, never shown with its credentials.
+        const servers = result.iceServers;
+        const kept = [];
+        let removed = false;
+        for (let i = 0; servers && i < servers.length; i++) {
+          if (isRelayServer(servers[i])) removed = true;
+          else kept[kept.length] = servers[i];
+        }
+        if (removed) ObjectDefineProperty(result, 'iceServers', { value: kept, writable: true, enumerable: true, configurable: true });
       }
       return result;
     }));

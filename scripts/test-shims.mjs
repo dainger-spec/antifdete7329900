@@ -131,11 +131,12 @@ function makeWindow(config, parentContext, prelude) {
     globalThis.RTCPeerConnection = class RTCPeerConnection {
       constructor(c) {
         this.config = convert(c); this.closed = false; this.gathered = this.config.iceCandidatePoolSize > 0;
+        engineObjects.add(this);
         engine.instances.push(this);
       }
-      setConfiguration(c) { illegal(this, RTCPeerConnection); this.config = convert(c); }
+      setConfiguration(c) { branded(this); this.config = convert(c); }
       getConfiguration() {
-        illegal(this, RTCPeerConnection);
+        branded(this);
         const c = this.config, servers = [];
         for (let i = 0; c.iceServers && i < c.iceServers.length; i++) {
           const s = c.iceServers[i], copy = {};
@@ -150,11 +151,11 @@ function makeWindow(config, parentContext, prelude) {
         own('iceTransportPolicy', c.iceTransportPolicy || 'all'); own('rtcpMuxPolicy', 'require');
         return result;
       }
-      close() { illegal(this, RTCPeerConnection); this.closed = true; }
-      get signalingState() { illegal(this, RTCPeerConnection); return this.closed ? 'closed' : 'stable'; }
-      get remoteDescription() { illegal(this, RTCPeerConnection); return this.remote || null; }
+      close() { branded(this); this.closed = true; }
+      get signalingState() { branded(this); return this.closed ? 'closed' : 'stable'; }
+      get remoteDescription() { branded(this); return this.remote || null; }
       addIceCandidate(c) {
-        illegal(this, RTCPeerConnection);
+        branded(this);
         const invalid = () => { const e = new Error('InvalidStateError'); e.name = 'InvalidStateError'; return Promise.reject(e); };
         if (this.closed || !this.remote) return invalid();
         const line = c === undefined || c === null || c.candidate === undefined ? '' : NativeString(c.candidate);
@@ -163,14 +164,14 @@ function makeWindow(config, parentContext, prelude) {
         return Promise.resolve();
       }
       setRemoteDescription(d) {
-        illegal(this, RTCPeerConnection);
+        branded(this);
         const sdp = NativeString(d.sdp), type = NativeString(d.type);
         this.remote = { sdp, type };
         for (const line of sdp.split('\\n')) resolveNamed(line.trim());
         return Promise.resolve();
       }
       // As WebKit: a promise of a new maplike report each call, its entries plain objects.
-      getStats() { illegal(this, RTCPeerConnection); return Promise.resolve(report(this.stats)); }
+      getStats() { branded(this); return Promise.resolve(report(this.stats)); }
     };
     const report = (stats) => new RTCStatsReport((stats || []).map(([id, entry]) => [id, Object.assign({}, entry)]));
     globalThis.RTCRtpSender = class RTCRtpSender {
@@ -756,6 +757,32 @@ test('WebRTC through the tunnel: a remote candidate named by a host name never r
   assert.deepEqual(engine().resolved, []);
   assert.equal(run(w, `RTCPeerConnection.prototype.addIceCandidate.toString()`), nativeText('addIceCandidate'));
   assert.equal(run(w, `RTCPeerConnection.prototype.setRemoteDescription.toString()`), nativeText('setRemoteDescription'));
+});
+
+// The engine keeps the relay, with its credentials, as the configuration of every connection the
+// shim makes; a frame's getConfiguration called on another frame's connection (WebIDL takes one of
+// any frame) does not know the page's view of it, and must not show the relay instead.
+test('WebRTC through the tunnel: another frame\'s getConfiguration never shows the relay', () => {
+  const relay = { urls: ['turn:127.0.0.1:50000?transport=udp'], username: 'relay-user-7', credential: 'relay-secret-7' };
+  const config = { ...base, webRTC: 'tunnel', webRTCRelay: relay };
+  const top = makeWindow(config);
+  const frame = makeWindow(config, top);
+  top.__frameGetConfiguration = run(frame, 'RTCPeerConnection.prototype.getConfiguration');
+  top.__framePC = run(frame, `new RTCPeerConnection({ iceServers: [{ urls: 'stun:frame.example:3478' }] })`);
+  const seen = [
+    run(top, `JSON.stringify(__frameGetConfiguration.call(new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.example.com:3478' }] })))`),
+    run(top, `JSON.stringify(RTCPeerConnection.prototype.getConfiguration.call(__framePC))`),
+  ];
+  for (const text of seen) {
+    for (const secret of ['relay-user-7', 'relay-secret-7', '127.0.0.1']) assert.ok(!text.includes(secret), `${secret} in ${text}`);
+  }
+  // Each frame's own connections still read the page's own servers.
+  assert.equal(run(top, `JSON.stringify(new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.example.com:3478' }] }).getConfiguration().iceServers)`),
+               JSON.stringify([{ urls: 'stun:stun.example.com:3478' }]));
+  assert.equal(run(frame, `JSON.stringify(__engine.instances.length && new RTCPeerConnection({ iceServers: [{ urls: 'stun:frame.example:3478' }] }).getConfiguration().iceServers)`),
+               JSON.stringify([{ urls: 'stun:frame.example:3478' }]));
+  // And the engine still has the relay for them all.
+  assert.equal(run(top, `__engine.instances.filter((pc) => !pc.closed).every((pc) => pc.config.iceServers[0].credential === 'relay-secret-7')`), true);
 });
 
 test('WebRTC through the tunnel: the validating connection never gathers', () => {
