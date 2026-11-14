@@ -85,6 +85,103 @@ final class SyncReadTests: XCTestCase {
         return try MasterVault.deviceUnlockKey(password: "vault-pass-1", header: header)
     }
 
+    /// Audit 3, #15: an edit made here before the Mac's newer change of the profile's proxy goes onto
+    /// the Mac's settings as they now are — never back with the iPhone's older copy of them — and the
+    /// settings keep the newer time, not the time of the sync.
+    func testAnEditHereGoesOntoTheMacsNewerSettings() async throws {
+        let (server, _, repository, macTransport, phone) = try macAndPhone()
+        let shop = try repository.create(name: "Магазин", configuration: ProfileConfiguration(
+            proxy: ProxySettings(kind: .socks5, host: "de.gw.example", port: 1080, username: "anna", password: "s3cret"),
+            tags: ["shop"], notes: "Кабинет"))
+        _ = try await SyncEngine(repository: repository, transport: macTransport).sync()
+        let key = try phoneKey(server)
+        let root = try folder().appendingPathComponent("vault")
+        let first = try await SyncRead.pull(root: root, key: key, transport: phone, keptGeneration: nil)
+        let base = SyncedState(name: "Магазин", notes: "Кабинет", tags: ["shop"])
+
+        // On the iPhone the description is edited, not synced; later, on the Mac, the proxy is changed and synced.
+        let editedAt = Date().addingTimeInterval(-120)
+        var changed = try repository.loadConfiguration(shop.id)
+        changed.proxy = ProxySettings(kind: .socks5, host: "us.gw.example", port: 1080, username: "anna", password: "n3w")
+        let macChangedAt = Date().addingTimeInterval(-60)
+        changed.settingsModifiedAt = macChangedAt
+        try repository.saveConfiguration(changed, for: shop.id)
+        _ = try await SyncEngine(repository: repository, transport: macTransport).sync()
+
+        // Then the iPhone syncs, and the Mac.
+        let edit = SyncedEdit(profileID: shop.id, notes: "Кабинет (iPhone)", editedAt: editedAt, base: base)
+        let second = try await SyncRead.pull(root: root, key: key, transport: phone, keptGeneration: first.generation, edits: [edit])
+        XCTAssertEqual(second.profiles.first?.proxy?.host, "us.gw.example", "the iPhone has the Mac's new proxy")
+        XCTAssertEqual(second.profiles.first?.notes, "Кабинет (iPhone)")
+        _ = try await SyncEngine(repository: repository, transport: macTransport).sync()
+        let config = try repository.loadConfiguration(shop.id)
+        XCTAssertEqual(config.proxy?.host, "us.gw.example", "the Mac's newer proxy stays: the iPhone sent only its description")
+        XCTAssertEqual(config.proxy?.password, "n3w")
+        XCTAssertEqual(config.notes, "Кабинет (iPhone)", "the iPhone's description reached the Mac")
+        XCTAssertEqual(config.tags, ["shop"])
+        XCTAssertEqual(try XCTUnwrap(config.settingsModifiedAt).timeIntervalSince1970, macChangedAt.timeIntervalSince1970, accuracy: 1,
+                       "the settings' time is the newer change's, not the sync's")
+    }
+
+    /// Of a field changed on the Mac and here since the last run, the newer change stays; a field
+    /// changed only here goes.
+    func testOfAFieldChangedOnBothTheNewerChangeStays() async throws {
+        let (server, _, repository, macTransport, phone) = try macAndPhone()
+        let shop = try repository.create(name: "Магазин", configuration: ProfileConfiguration(tags: ["shop"], notes: "Кабинет"))
+        _ = try await SyncEngine(repository: repository, transport: macTransport).sync()
+        let key = try phoneKey(server)
+        let root = try folder().appendingPathComponent("vault")
+        let first = try await SyncRead.pull(root: root, key: key, transport: phone, keptGeneration: nil)
+
+        // Here: description and tags, a while ago. On the Mac: the description, since.
+        let older = SyncedEdit(profileID: shop.id, notes: "С iPhone", tags: ["shop", "iphone"], editedAt: Date().addingTimeInterval(-120),
+                               base: SyncedState(name: "Магазин", notes: "Кабинет", tags: ["shop"]))
+        var changed = try repository.loadConfiguration(shop.id)
+        changed.notes = "С Mac"
+        changed.settingsModifiedAt = Date().addingTimeInterval(-60)
+        try repository.saveConfiguration(changed, for: shop.id)
+        _ = try await SyncEngine(repository: repository, transport: macTransport).sync()
+        let second = try await SyncRead.pull(root: root, key: key, transport: phone, keptGeneration: first.generation, edits: [older])
+        _ = try await SyncEngine(repository: repository, transport: macTransport).sync()
+        var config = try repository.loadConfiguration(shop.id)
+        XCTAssertEqual(config.notes, "С Mac", "the Mac's newer description stays")
+        XCTAssertEqual(config.tags, ["shop", "iphone"], "the tags, changed only here, went")
+
+        // The other way round: an edit here newer than the Mac's change of the same field wins.
+        changed = try repository.loadConfiguration(shop.id)
+        changed.notes = "С Mac, снова"
+        changed.settingsModifiedAt = Date().addingTimeInterval(-30)
+        try repository.saveConfiguration(changed, for: shop.id)
+        _ = try await SyncEngine(repository: repository, transport: macTransport).sync()
+        let newer = SyncedEdit(profileID: shop.id, notes: "С iPhone, позже", editedAt: Date(),
+                               base: SyncedState(name: "Магазин", notes: "С Mac", tags: ["shop", "iphone"]))
+        _ = try await SyncRead.pull(root: root, key: key, transport: phone, keptGeneration: second.generation, edits: [newer])
+        _ = try await SyncEngine(repository: repository, transport: macTransport).sync()
+        config = try repository.loadConfiguration(shop.id)
+        XCTAssertEqual(config.notes, "С iPhone, позже", "the iPhone's newer description stays")
+    }
+
+    /// Audit 3, #39: edits made here wait through the iPhone's copy of the vault set up again (signed
+    /// out and in, or the vault forgotten), and go at the next run.
+    func testEditsWaitingWhenTheVaultCopyIsSetUpAgainGoToTheMac() async throws {
+        let (server, _, repository, macTransport, phone) = try macAndPhone()
+        let shop = try repository.create(name: "Магазин", configuration: ProfileConfiguration(tags: ["shop"]))
+        _ = try await SyncEngine(repository: repository, transport: macTransport).sync()
+        let key = try phoneKey(server)
+        let firstRoot = try folder().appendingPathComponent("vault")
+        _ = try await SyncRead.pull(root: firstRoot, key: key, transport: phone, keptGeneration: nil)
+
+        try FileManager.default.removeItem(at: firstRoot)
+        let edit = SyncedEdit(profileID: shop.id, name: "Магазин (iPhone)", tags: ["shop", "iphone"],
+                              base: SyncedState(name: "Магазин", notes: "", tags: ["shop"]))
+        let again = try await SyncRead.pull(root: try folder().appendingPathComponent("vault"), key: key, transport: phone,
+                                            keptGeneration: nil, edits: [edit])
+        XCTAssertEqual(again.profiles.first?.name, "Магазин (iPhone)", "the edit is in the new copy")
+        _ = try await SyncEngine(repository: repository, transport: macTransport).sync()
+        XCTAssertEqual(try repository.summary(for: shop.id).name, "Магазин (iPhone)", "and on the Mac")
+        XCTAssertEqual(try repository.loadConfiguration(shop.id).tags, ["shop", "iphone"])
+    }
+
     /// Audit 3, #2: a profile whose session was deleted here is not this iPhone's — not returned to be
     /// made a session again, not counted among its profiles — and stays on the Mac.
     func testAProfileDeletedHereIsNeitherReturnedNorCounted() async throws {

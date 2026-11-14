@@ -24,18 +24,28 @@ public struct SyncedProfile: Equatable, Sendable {
     public var proxyUnusable: Bool
 }
 
-/// A change made on the iPhone to a session made from the vault, to go to the vault.
+/// A change made on the iPhone to a session made from the vault, to go to the vault: only the
+/// fields changed here (nil: left as the vault had it), when, and what the vault had at the last run.
 public struct SyncedEdit: Equatable, Sendable {
     public var profileID: UUID
-    public var name: String
-    public var notes: String
-    public var tags: [String]
+    public var name: String?
+    public var notes: String?
+    public var tags: [String]?
+    /// When the person made it (the newest of its fields).
+    public var editedAt: Date
+    /// The name, description and tags the vault had at the last run: a field that is no longer that
+    /// in the vault was changed on the Mac too. Nil: not known — a field the vault has otherwise
+    /// counts as changed on both, and the newer change stays.
+    public var base: SyncedState?
 
-    public init(profileID: UUID, name: String, notes: String, tags: [String]) {
+    public init(profileID: UUID, name: String? = nil, notes: String? = nil, tags: [String]? = nil, editedAt: Date = Date(),
+                base: SyncedState? = nil) {
         self.profileID = profileID
         self.name = name
         self.notes = notes
         self.tags = tags
+        self.editedAt = editedAt
+        self.base = base
     }
 }
 
@@ -94,8 +104,10 @@ public enum SyncRead {
     /// each gets its profile's cookies by the Mac's rules (step 4). A profile made a session by this
     /// run gets them at the next one.
     /// `edits`: what was changed here in the sessions made from the vault (their name, description,
-    /// tags) — written into the iPhone's copy before the run, as an edit made now, and so sent by
-    /// the run (step 5). The Mac's newer-wins rule decides between an edit here and one there.
+    /// tags; step 5). The run first takes what the Mac changed, then writes into the iPhone's copy
+    /// only the fields edited here, onto the settings as they now are — never the copy from the last
+    /// run, which would send the Mac's older settings back with them — stamped with the edit's own
+    /// time, and sends them. Of a field changed on both, the newer change stays (`apply`).
     /// `notHere`: the profiles whose sessions were deleted on this iPhone — neither returned nor
     /// counted among this iPhone's (`profileTokens`).
     public static func pull(root: URL, key: Data, transport: LumenSyncTransport, keptGeneration: String?,
@@ -116,22 +128,17 @@ public enum SyncRead {
         _ = try await transport.listObjects()
         let generation = SyncGeneration.reconcile(root: root, listed: transport.generation, kept: keptGeneration)
         let repository = try ProfileRepository(vault: vault)
-        if !Faults.isActive(.syncEditNotSent) {
-            for edit in edits where repository.list().contains(where: { $0.id == edit.profileID }) {
-                let name = edit.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !name.isEmpty, (try? repository.summary(for: edit.profileID).name) != name {
-                    try repository.rename(edit.profileID, to: name)
-                }
-                var configuration = try repository.loadConfiguration(edit.profileID)
-                if configuration.notes != edit.notes || configuration.tags != edit.tags {
-                    configuration.notes = edit.notes
-                    configuration.tags = edit.tags
-                    configuration.settingsModifiedAt = Date()
-                    try repository.saveConfiguration(configuration, for: edit.profileID)
-                }
-            }
-        }
+        // What the Mac changed first: the edits made here go onto it. (A vault copy set up again —
+        // after a sign-out, or the vault forgotten — has its profiles only now.)
         _ = try await SyncEngine(repository: repository, transport: transport).sync()
+        if !Faults.isActive(.syncEditNotSent) {
+            var written = false
+            for edit in edits where repository.list().contains(where: { $0.id == edit.profileID }) {
+                try apply(edit, to: repository, written: &written)
+            }
+            // The edits go now, in this run.
+            if written { _ = try await SyncEngine(repository: repository, transport: transport).sync() }
+        }
         let profiles = repository.list().compactMap { summary -> SyncedProfile? in
             guard !notHere.contains(summary.id), let configuration = try? repository.loadConfiguration(summary.id) else { return nil }
             return profile(summary, configuration)
@@ -146,6 +153,43 @@ public enum SyncRead {
             outcome.cookiesDeleted = applied.deleted
         }
         return outcome
+    }
+
+    /// One edit made here, written into the iPhone's copy as the vault now has the profile: each field
+    /// edited here that the vault does not have already — unless the Mac changed that field too since
+    /// the last run (it is no longer `edit.base`'s) at a time not older than the edit (the Mac's
+    /// settings time stands for its rename too: the profile list keeps no time of a rename). The
+    /// settings are stamped with the edit's time, or theirs if newer: a stamp never goes back, or an
+    /// older change on a third device would win over the Mac's.
+    static func apply(_ edit: SyncedEdit, to repository: ProfileRepository, written: inout Bool) throws {
+        let id = edit.profileID
+        let name = edit.name.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.flatMap { $0.isEmpty ? nil : $0 }
+        let tags = edit.tags.map { ProfileTags.normalized($0) }
+
+        var configuration = try repository.loadConfiguration(id)
+        let theirs = configuration.settingsModifiedAt
+        func taken<T: Equatable>(_ mine: T?, now: T, base: T?) -> T? {
+            guard let mine, mine != now else { return nil }
+            // Changed on the Mac as well since the last run (or not known to be otherwise): the newer stays.
+            if base.map({ $0 != now }) ?? true, let theirs, theirs >= edit.editedAt { return nil }
+            return mine
+        }
+        let currentName = try repository.summary(for: id).name
+        let newName = taken(name, now: currentName, base: edit.base?.name)
+        let newNotes = taken(edit.notes, now: configuration.notes, base: edit.base?.notes)
+        let newTags = taken(tags, now: configuration.tags, base: edit.base?.tags)
+
+        if let newName {
+            try repository.rename(id, to: newName)
+            written = true
+        }
+        if newNotes != nil || newTags != nil {
+            if let newNotes { configuration.notes = newNotes }
+            if let newTags { configuration.tags = newTags }
+            configuration.settingsModifiedAt = max(theirs ?? edit.editedAt, edit.editedAt)
+            try repository.saveConfiguration(configuration, for: id)
+            written = true
+        }
     }
 
     static func profile(_ summary: ProfileSummary, _ configuration: ProfileConfiguration) -> SyncedProfile {

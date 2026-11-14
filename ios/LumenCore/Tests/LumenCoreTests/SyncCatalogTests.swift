@@ -77,6 +77,31 @@ final class SyncCatalogTests: XCTestCase {
         XCTAssertTrue(SessionCatalog(store: LumenStore(root: root)).notSyncedHere.isEmpty)
     }
 
+    /// Audit 3, #15: an edit made here carries only the fields changed, what the vault had, and the
+    /// time it was made — not the time of the sync. Once the sync took it, nothing is left to send.
+    func testAnEditHereIsTimedAndCarriesOnlyItsFields() throws {
+        let catalog = SessionCatalog(store: LumenStore(root: folder()))
+        let shopID = UUID()
+        let shop = SyncedProfile(id: shopID, name: "Магазин", notes: "Кабинет", tags: ["shop"], proxy: nil, proxyUnusable: false)
+        let session = try XCTUnwrap(catalog.applySynced([shop]) { _, _ in UUID() }.first)
+        let at = Date(timeIntervalSince1970: 1_800_000_000)
+        catalog.setNotes(session.id, "С iPhone", at: at)
+        catalog.rename(session.id, to: "Магазин", at: at.addingTimeInterval(60))   // the same: not an edit
+        catalog.setTags(session.id, ["shop"], at: at.addingTimeInterval(60))
+        XCTAssertEqual(catalog.localEdits(), [SyncedEdit(profileID: shopID, notes: "С iPhone", editedAt: at,
+                                                         base: SyncedState(name: "Магазин", notes: "Кабинет", tags: ["shop"]))])
+        var taken = shop
+        taken.notes = "С iPhone"
+        catalog.applySynced([taken]) { _, _ in UUID() }
+        XCTAssertEqual(catalog.localEdits(), [])
+        XCTAssertNil(catalog.session(session.id)?.syncedEditedAt)
+        // The iPhone's own sessions have no edits to send.
+        let own = catalog.create(name: "Своя")
+        catalog.setNotes(own.id, "заметка")
+        XCTAssertNil(catalog.session(own.id)?.syncedEditedAt)
+        XCTAssertEqual(catalog.localEdits(), [])
+    }
+
     /// Audit 3, #16: two of the Mac's profiles on one gateway, with the same login and different
     /// passwords (the country or the sticky session in the password), get an entry each — neither
     /// password written over the other's — and the entry of one profile follows its new password.

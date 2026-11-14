@@ -28,19 +28,19 @@ public final class SessionCatalog {
         return session
     }
 
-    public func rename(_ id: UUID, to name: String) {
+    public func rename(_ id: UUID, to name: String, at date: Date = Date()) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !Faults.isActive(.renameIgnored) else { return }
-        update(id) { $0.name = trimmed }
+        edit(id, at: date) { $0.name = trimmed }
     }
 
-    public func setNotes(_ id: UUID, _ notes: String) {
+    public func setNotes(_ id: UUID, _ notes: String, at date: Date = Date()) {
         guard !Faults.isActive(.notesNotSaved) else { return }
-        update(id) { $0.notes = notes }
+        edit(id, at: date) { $0.notes = notes }
     }
 
-    public func setTags(_ id: UUID, _ tags: [String]) {
-        update(id) { $0.tags = Self.normalizedTags(tags) }
+    public func setTags(_ id: UUID, _ tags: [String], at date: Date = Date()) {
+        edit(id, at: date) { $0.tags = Self.normalizedTags(tags) }
     }
 
     /// A proxy given to a session binds it to proxies for good; taking it away leaves it bound (locked)
@@ -142,6 +142,7 @@ public final class SessionCatalog {
             session.notes = profile.notes
             session.tags = Self.normalizedTags(profile.tags)
             session.syncedState = SyncedState(name: session.name, notes: session.notes, tags: session.tags)
+            session.syncedEditedAt = nil
             if let proxy = profile.proxy, !Faults.isActive(.syncedProxyNotBound) {
                 session.proxyID = proxyID(proxy, session)
                 session.boundToProxy = true
@@ -155,13 +156,20 @@ public final class SessionCatalog {
         return made
     }
 
-    /// What was changed here in the sessions made from the vault since the last run: their name,
-    /// description and tags, to go to the vault (step 5).
+    /// What was changed here in the sessions made from the vault since the last run, to go to the
+    /// vault (step 5): of their name, description and tags only the ones changed, with what the vault
+    /// had at the last run and when the change was made — the run puts them on the vault's settings
+    /// as they are then, and of a field the Mac changed too, the newer change stays.
     public func localEdits() -> [SyncedEdit] {
         sessions.compactMap { session in
             guard let profileID = session.syncedProfileID, let state = session.syncedState else { return nil }
             let now = SyncedState(name: session.name, notes: session.notes, tags: session.tags)
-            return now == state ? nil : SyncedEdit(profileID: profileID, name: now.name, notes: now.notes, tags: now.tags)
+            guard now != state else { return nil }
+            return SyncedEdit(profileID: profileID,
+                              name: now.name == state.name ? nil : now.name,
+                              notes: now.notes == state.notes ? nil : now.notes,
+                              tags: now.tags == state.tags ? nil : now.tags,
+                              editedAt: session.syncedEditedAt ?? Date(), base: state)
         }
     }
 
@@ -169,6 +177,18 @@ public final class SessionCatalog {
         guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
         change(&sessions[index])
         save()
+    }
+
+    /// A change of a session's name, description or tags. One that changes a session made from the
+    /// vault is timed: that time decides between it and the Mac's change of the same field.
+    private func edit(_ id: UUID, at date: Date, _ change: (inout Session) -> Void) {
+        update(id) { session in
+            let before = SyncedState(name: session.name, notes: session.notes, tags: session.tags)
+            change(&session)
+            if session.syncedProfileID != nil, SyncedState(name: session.name, notes: session.notes, tags: session.tags) != before {
+                session.syncedEditedAt = date
+            }
+        }
     }
 
     private func save() { store.saveSessions(sessions, notSyncedHere: notSyncedHere) }
