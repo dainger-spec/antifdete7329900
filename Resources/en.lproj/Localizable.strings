@@ -2648,7 +2648,7 @@
 "vm.setup.remaining.hours" = "about %1$d h %2$d min left";
 "vm.setup.install.note" = "10–20 minutes. Keep Lumen open.";
 "vm.setup.install.ready" = "macOS is downloaded and ready to install.";
-"vm.setup.guest.step1" = "Go through macOS's own setup: the country, an account with a password. Give the account a new password of its own, made up for this machine — not your Mac's or any other you use: the tools keep it in the machine to sign in by themselves, and every machine made from this one has it. Asked how the Mac connects, choose “My computer does not connect to the internet”; on the other screens press “Set Up Later” or “Not Now”; leave FileVault off.";
+"vm.setup.guest.step1" = "Go through macOS's own setup — the machine's window says what to press on each screen. What matters: do not sign in to an Apple ID (\"Set Up Later\"), do not turn on FileVault, and give the account a new password made up for this machine, not your Mac's. How it connects to the internet does not matter.";
 "vm.setup.guest.step2" = "In the machine's Finder, open “My Shared Files” (Go → Computer) and open “Install Lumen Tools”.";
 "vm.setup.guest.step3" = "Type the password of the account you made in the machine (the new one, not your Mac's). The machine shuts down by itself — and everything is ready.";
 "vm.setup.guest.fallback" = "If the file does not open, run this in the machine's Terminal:";
@@ -2867,8 +2867,7 @@
 "vm.import.error.space" = "A copy of the file needs %@ of free space; this Mac has %@ there.";
 "vm.setup.copyLink" = "Copy Apple's link";
 "vm.setup.copyLink.help" = "The file's address on Apple's servers: a download manager of your own can fetch it, and \"I have the file\" takes it from there.";
-"vm.base.hint" = "1. Finish macOS's setup (asked how the Mac connects: “My computer does not connect to the internet”); give the account a new password made up for this machine, not your Mac's.   2. Then, in Finder: Go → Computer → My Shared Files → open “Install Lumen Tools” and type that password.   There is no internet in this system on purpose; the machines made from it have it.";
-"vm.base.hint.online" = "1. Finish macOS's setup; give the account a new password made up for this machine, not your Mac's.   2. Then, in Finder: Go → Computer → My Shared Files → open “Install Lumen Tools” and type that password. The machine shuts down by itself.   Do not browse here: what stays in this Safari is copied into every machine.";
+"vm.base.guide" = "# What to press in macOS's setup\nLanguage and country: any.\nInternet connection: any — \"My computer does not connect to the Internet\" or a cable. The machines do not depend on it.\nTransfer information: \"Not Now\".\n! Apple ID: \"Set Up Later\", then \"Skip\". Do not sign in: the Apple ID would be in every machine.\nTerms: \"Agree\".\nAccount: any name; a new password made up for this machine only, not your Mac's.\nLocation, analytics, Screen Time, Siri: off, or \"Set Up Later\".\n! FileVault: do not turn it on — with it the machines cannot sign in by themselves.\nAppearance: any.\n! At the desktop: Finder → Go → Computer → \"My Shared Files\" → \"Install Lumen Tools\", and type this account's password. The machine shuts down by itself, and that is all.\n> Chose something else? \"Install Lumen Tools\" checks, and says what to change.\n> If a double-click does not start it: Terminal → sh \"/Volumes/My Shared Files/install.sh\"";
 "vm.editor.section.machine" = "Machine";
 "vm.editor.section.network" = "Network";
 "vm.editor.section.region" = "Region";

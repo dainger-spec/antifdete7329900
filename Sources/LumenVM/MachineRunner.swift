@@ -165,6 +165,11 @@ final class MachineNetwork {
     }
 }
 
+/// The guide's scrolled content, top to bottom.
+private final class GuideDocument: NSView {
+    override var isFlipped: Bool { true }
+}
+
 /// Runs a profile's machine (or the base, while it is being set up) in a window, until its macOS
 /// has shut down.
 final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate {
@@ -281,16 +286,23 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
 
         let display = request.display
         let scale: CGFloat = display.pixelsPerInch >= 150 ? 2 : 1
+        let guide = request.texts["guide"].flatMap { $0.isEmpty ? nil : $0 }
+        let beside: CGFloat = guide == nil ? 0 : Self.guideWidth
         var size = NSSize(width: CGFloat(display.pixelsWide) / scale, height: CGFloat(display.pixelsHigh) / scale)
         if let visible = NSScreen.main?.visibleFrame.size {
-            let fit = min(1, min(visible.width * 0.92 / size.width, (visible.height * 0.92 - 28) / size.height))
+            let fit = min(1, min((visible.width * 0.92 - beside) / size.width, (visible.height * 0.92 - 28) / size.height))
             size = NSSize(width: (size.width * fit).rounded(), height: (size.height * fit).rounded())
         }
+        size.width += beside
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = request.windowTitle
-        window.contentMinSize = NSSize(width: 480, height: 480 * CGFloat(display.pixelsHigh) / CGFloat(display.pixelsWide))
-        if let hint = request.texts["hint"], !hint.isEmpty {
+        window.contentMinSize = NSSize(width: 480 + beside, height: 480 * CGFloat(display.pixelsHigh) / CGFloat(display.pixelsWide))
+        if let guide {
+            // What to press on each of macOS's setup screens, beside them: people chose what made
+            // a poor base (an Apple ID in every machine, FileVault) with one line to go by.
+            window.contentView = Self.content(of: view, beside: guide)
+        } else if let hint = request.texts["hint"], !hint.isEmpty {
             // What is left to do in this machine, said in its own window: the app's window, which
             // has the same words, is behind this one.
             window.contentView = Self.content(of: view, under: hint)
@@ -316,6 +328,87 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
             NSApp.applicationIconImage = NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath)
         }
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    static let guideWidth: CGFloat = 320
+
+    /// The machine's screen with a panel beside it: what to press on each of macOS's setup
+    /// screens, the choices that matter marked. Lines of `guide`: "# " a title, "! " a step that
+    /// matters, "> " a note, anything else a step; the steps are numbered here.
+    private static func content(of view: NSView, beside guide: String) -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 11
+        stack.edgeInsets = NSEdgeInsets(top: 20, left: 18, bottom: 20, right: 18)
+        let textWidth = guideWidth - 36
+        var number = 0
+        for raw in guide.split(separator: "\n", omittingEmptySubsequences: true) {
+            let line = String(raw)
+            let label: NSTextField
+            if line.hasPrefix("# ") {
+                label = NSTextField(wrappingLabelWithString: String(line.dropFirst(2)))
+                label.font = .systemFont(ofSize: 15, weight: .semibold)
+                label.textColor = NSColor(calibratedWhite: 0.97, alpha: 1)
+            } else if line.hasPrefix("> ") {
+                label = NSTextField(wrappingLabelWithString: String(line.dropFirst(2)))
+                label.font = .systemFont(ofSize: 11.5)
+                label.textColor = NSColor(calibratedWhite: 0.6, alpha: 1)
+            } else {
+                let matters = line.hasPrefix("! ")
+                number += 1
+                label = NSTextField(wrappingLabelWithString: "\(number). " + (matters ? String(line.dropFirst(2)) : line))
+                label.font = .systemFont(ofSize: 12.5, weight: matters ? .semibold : .regular)
+                label.textColor = matters ? NSColor.systemOrange : NSColor(calibratedWhite: 0.88, alpha: 1)
+            }
+            label.isSelectable = false
+            label.preferredMaxLayoutWidth = textWidth
+            label.translatesAutoresizingMaskIntoConstraints = false
+            label.widthAnchor.constraint(equalToConstant: textWidth).isActive = true
+            stack.addArrangedSubview(label)
+        }
+        // Top to bottom, and scrolled where a small screen has no room for all of it.
+        let document = GuideDocument()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(stack)
+        let scroll = NSScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.documentView = document
+        let panel = NSView()
+        panel.wantsLayer = true
+        panel.layer?.backgroundColor = NSColor(calibratedWhite: 0.09, alpha: 1).cgColor
+        panel.translatesAutoresizingMaskIntoConstraints = false
+        panel.addSubview(scroll)
+        let container = NSView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(panel)
+        container.addSubview(view)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: document.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: document.trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: document.bottomAnchor),
+            document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            scroll.topAnchor.constraint(equalTo: panel.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: panel.bottomAnchor),
+            scroll.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
+            panel.topAnchor.constraint(equalTo: container.topAnchor),
+            panel.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            panel.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            panel.widthAnchor.constraint(equalToConstant: guideWidth),
+            view.topAnchor.constraint(equalTo: container.topAnchor),
+            view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            view.leadingAnchor.constraint(equalTo: panel.trailingAnchor),
+            view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+        ])
+        return container
     }
 
     /// The machine's screen with a line of words above it.

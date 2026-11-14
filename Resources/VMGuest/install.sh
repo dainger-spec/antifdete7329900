@@ -11,7 +11,7 @@
 #   - says in the shared folder that the base is ready, and shuts the machine down.
 set -u
 
-TOOLS_VERSION=8
+TOOLS_VERSION=9
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DEST=/usr/local/lumen
 PLIST=/Library/LaunchDaemons/io.lumenbrowser.guest.plist
@@ -33,6 +33,29 @@ esac
 
 USER_NAME="$(/usr/bin/id -un)"
 [ "$USER_NAME" != root ] || fail "run this as the account you made in macOS's setup, not as root."
+
+# stop ENGLISH RUSSIAN: a choice of macOS's setup that would make a poor base, said in both of the
+# languages the person may have (this installer has no others), with what to do; nothing changed.
+stop() {
+  say ""
+  say "Stopped: $1"
+  say "Остановлено: $2"
+  say ""
+  say "Fix it, then open \"Install Lumen Tools\" again."
+  say "Исправьте это и снова откройте «Install Lumen Tools»."
+  exit 1
+}
+
+# The choices of macOS's setup that matter here, checked before anything is changed: every machine
+# is a copy of this one, so what is in it is in all of them; and a machine has to sign in by itself.
+if /usr/bin/defaults read MobileMeAccounts Accounts 2>/dev/null | /usr/bin/grep -q AccountID; then
+  stop "this machine is signed in to an Apple ID, and every machine made from it would be too. Sign out: System Settings > your name > Sign Out." \
+       "в этой машине выполнен вход в Apple ID, и он был бы в каждой машине, сделанной из неё. Выйдите: Системные настройки > ваше имя > Выйти."
+fi
+if /usr/bin/fdesetup isactive 2>/dev/null | /usr/bin/grep -q true; then
+  stop "FileVault is on in this machine: machines made from it could not sign in by themselves. Turn it off: System Settings > Privacy & Security > FileVault > Turn Off, and wait until it is off." \
+       "в этой машине включён FileVault: машины из неё не смогут входить в учётную запись сами. Выключите: Системные настройки > Конфиденциальность и безопасность > FileVault > Выключить, и дождитесь, пока он выключится."
+fi
 
 say "Lumen — tools for this virtual machine"
 say ""

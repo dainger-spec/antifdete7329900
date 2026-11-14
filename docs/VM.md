@@ -185,6 +185,13 @@ machine: nothing of a proxied machine goes direct.
 
 ### The guest's tools
 
+While the base is set up, its window has a panel beside macOS's screen: what to press on each of
+the setup's screens, the choices that matter in orange (no Apple ID, no FileVault, a password made
+up for the machine, then Install Lumen Tools) — the app sends it as `texts["guide"]`, lines of
+`# ` a title, `! ` a step that matters, `> ` a note. People chose what made a poor base with one
+line above the screen to go by (14 November); how the base connects to the internet during its
+setup does not matter to the machines, and the guide says so.
+
 `Resources/VMGuest/` is put into the folder the base shares with the app — each file's bytes in a
 new file, not a copy of the file: a copy keeps extended attributes, and a Lumen downloaded from the
 internet may carry the download's quarantine on them, on which macOS in the machine would refuse
@@ -192,8 +199,11 @@ to run the installer or ask about it — and the person runs `Install Lumen Tool
 (it refuses to run on anything but a virtual Mac). Opened from Terminal it is the same:
 `sh "/Volumes/My Shared Files/install.sh"`. It:
 
-- turns on automatic sign-in for the account the person made (not possible with FileVault on in
-  the guest — it says so, and how to turn it on by hand);
+- first, before it changes anything or asks for the password, stops on the two choices of macOS's
+  setup that make a poor base, and says in English and Russian what to do (tools 9): an Apple ID
+  signed in (it would be in every machine made from this one — `MobileMeAccounts`), FileVault on
+  (no machine could sign in by itself — `fdesetup isactive`);
+- turns on automatic sign-in for the account the person made;
 - turns off sleep, the screen saver's lock and automatic macOS updates;
 - installs `lumen-guest.sh` as the root LaunchDaemon `io.lumenbrowser.guest`;
 - writes `lumen-status.env` into the shared folder and shuts the machine down.

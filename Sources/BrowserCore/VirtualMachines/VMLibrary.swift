@@ -238,8 +238,11 @@ public enum VMSetupState: Equatable, Sendable {
 ///
 /// 8: macOS's panes for a new Mac — its "Welcome" screen among them — marked seen for the person
 /// who signs in by themselves, at the start, before the sign-in.
+///
+/// 9: the installer stops on a base signed in to an Apple ID, or with FileVault on, and says what
+/// to do (both would be in, or keep from signing in, every machine made from it).
 public enum VMGuestTools {
-    public static let version = 8
+    public static let version = 9
     /// From this version on an installed boot script takes a newer copy of itself at a machine's
     /// start: a base with tools this new needs nothing done to it for a later version's settings.
     public static let updatesItselfFrom = 2

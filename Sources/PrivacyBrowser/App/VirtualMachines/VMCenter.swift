@@ -462,7 +462,7 @@ final class VMCenter: ObservableObject {
         // A base not set up yet says in its own window what is left to do in it.
         var baseTexts = Self.helperTexts
         if info.stage != .ready {
-            baseTexts["hint"] = L(network == .absent ? "vm.base.hint" : "vm.base.hint.online")
+            baseTexts["guide"] = L("vm.base.guide")
         }
         let run = beginRun()
         activity = .guestSetup

@@ -41,10 +41,11 @@ final class VMGuestScriptTests: XCTestCase {
 
     /// The commands the script calls and what stands for each: the real tool where it only reads
     /// or works on the test's own files, a recorder where it would change a system.
-    private static let passedOn = ["sed", "head", "ls", "mkdir", "cksum", "cut", "tr", "cp", "chmod", "rm", "mv", "mktemp"]
+    private static let passedOn = ["sed", "head", "ls", "mkdir", "cksum", "cut", "tr", "cp", "chmod", "rm", "mv", "mktemp", "grep"]
     private static let recorded = ["defaults", "scutil", "systemsetup", "osascript", "open", "killall", "shutdown", "chown", "ln",
-                                   "mount", "mount_virtiofs"]
-    private static let answered = ["sh", "sleep", "launchctl", "sudo", "stat", "id", "pgrep", "sw_vers", "logger"]
+                                   "mount", "mount_virtiofs", "sysadminctl", "pmset", "mdutil", "softwareupdate"]
+    private static let answered = ["sh", "sleep", "launchctl", "sudo", "stat", "id", "pgrep", "sw_vers", "logger",
+                                   "sysctl", "fdesetup", "stty"]
 
     private func writeStubs() throws {
         let bin = root.appendingPathComponent("bin")
@@ -69,6 +70,7 @@ final class VMGuestScriptTests: XCTestCase {
               case "$2 $3" in
                 "/Applications/Safari.app/Contents/Info CFBundleShortVersionString") echo 27.2 ;;
                 "/Library/Preferences/com.apple.loginwindow autoLoginUser") [ -z "${AUTOLOGIN_USER-tester}" ] && exit 1; echo "${AUTOLOGIN_USER-tester}" ;;
+                "MobileMeAccounts Accounts") [ -z "$APPLE_ID" ] && exit 1; printf '(\n    {\n        AccountID = "%s";\n    }\n)\n' "$APPLE_ID" ;;
                 "com.apple.dock orientation") [ -z "$DOCK_ORIENTATION" ] && exit 1; echo "$DOCK_ORIENTATION" ;;
                 "com.apple.dock autohide") [ -z "$DOCK_AUTOHIDE" ] && exit 1; echo "$DOCK_AUTOHIDE" ;;
                 "com.apple.dock tilesize") [ -z "$DOCK_TILESIZE" ] && exit 1; echo "$DOCK_TILESIZE" ;;
@@ -105,7 +107,11 @@ final class VMGuestScriptTests: XCTestCase {
               printf '%s\n' "${CONSOLE_USER-tester}"
             fi
             """)
-        try stub("id", "[ \"$1\" = -u ] && [ \"$2\" = tester ] && echo 501")
+        try stub("id", "case \"$1\" in -un) echo \"${INSTALL_USER-tester}\" ;; -u) [ \"$2\" = tester ] && echo 501 ;; *) exit 1 ;; esac")
+        // The installer's: a virtual Mac, FileVault as the test says, no terminal to set.
+        try stub("sysctl", "[ \"$2\" = hw.model ] && echo \"${HW_MODEL-VirtualMac2,1}\"")
+        try stub("fdesetup", "[ \"$1\" = isactive ] && echo \"${FILEVAULT-false}\"")
+        try stub("stty", "exit 0")
         try stub("pgrep", "exit 1")
         try stub("sw_vers", "case \"$1\" in -productVersion) echo 27.2.1 ;; -buildVersion) echo 26B131 ;; esac")
         try stub("logger", "exit 0")
@@ -408,6 +414,64 @@ final class VMGuestScriptTests: XCTestCase {
             let quiet = try boot(settings: VMGuestSettings(profile: VMProfile(name: "A")).text, environment: ["AUTOLOGIN_USER": who])
             XCTAssertFalse(quiet.calls.contains { $0.contains("com.apple.SetupAssistant") }, "\(who): \(quiet.calls)")
         }
+    }
+
+    // MARK: - The installer
+
+    /// The installer (install.sh) on the test's ground, beside the files it installs, with nothing
+    /// on its input (no password typed): what it said, and what it called.
+    private func install(environment: [String: String] = [:]) throws -> (status: Int32, said: String, calls: [String]) {
+        let folder = root.appendingPathComponent("installer", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for name in ["lumen-guest.sh", "io.lumenbrowser.guest.plist"] {
+            try Data(contentsOf: Self.folder.appendingPathComponent(name)).write(to: folder.appendingPathComponent(name))
+        }
+        let text = try onTestGround(try String(contentsOf: Self.folder.appendingPathComponent("install.sh"), encoding: .utf8))
+        let file = folder.appendingPathComponent("install.sh")
+        try Data(text.utf8).write(to: file)
+        try? FileManager.default.removeItem(at: root.appendingPathComponent("calls.log"))
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [file.path]
+        process.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"].merging(environment) { _, mine in mine }
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        process.standardInput = FileHandle.nullDevice
+        try process.run()
+        let said = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
+        let log = (try? String(contentsOf: root.appendingPathComponent("calls.log"), encoding: .utf8)) ?? ""
+        return (process.terminationStatus, said, log.split(separator: "\n").map(String.init))
+    }
+
+    /// The choices of macOS's setup that would make a poor base — an Apple ID, which would be in
+    /// every machine; FileVault, with which none signs in by itself — stop the installer before it
+    /// changes anything or asks for the password, said in both languages with what to do.
+    func testTheInstallerStopsOnAnAppleIDOrFileVaultAndSaysWhatToDo() throws {
+        let signedIn = try install(environment: ["APPLE_ID": "someone@example.com"])
+        XCTAssertEqual(signedIn.status, 1)
+        XCTAssertTrue(signedIn.said.contains("signed in to an Apple ID"), signedIn.said)
+        XCTAssertTrue(signedIn.said.contains("выполнен вход в Apple ID"), signedIn.said)
+        XCTAssertTrue(signedIn.said.contains("Sign Out"), signedIn.said)
+        XCTAssertFalse(signedIn.said.contains("Password of"), "asked for the password first")
+        XCTAssertFalse(signedIn.calls.contains { $0.contains("sysadminctl") || $0.contains("pmset") }, "\(signedIn.calls)")
+
+        let encrypted = try install(environment: ["FILEVAULT": "true"])
+        XCTAssertEqual(encrypted.status, 1)
+        XCTAssertTrue(encrypted.said.contains("FileVault is on"), encrypted.said)
+        XCTAssertTrue(encrypted.said.contains("включён FileVault"), encrypted.said)
+        XCTAssertFalse(encrypted.said.contains("Password of"))
+
+        // Neither: on to the password (none is typed here, and it stops there).
+        let fine = try install()
+        XCTAssertTrue(fine.said.contains("Password of \"tester\""), fine.said)
+        XCTAssertTrue(fine.said.contains("an empty password"), fine.said)
+        XCTAssertFalse(fine.said.contains("Остановлено"), fine.said)
+
+        // Not a virtual Mac, or as root: refused as before.
+        XCTAssertTrue(try install(environment: ["HW_MODEL": "Mac15,3"]).said.contains("for a Lumen virtual machine"))
+        XCTAssertTrue(try install(environment: ["INSTALL_USER": "root"]).said.contains("not as root"))
     }
 
     func testAMachineWithoutSettingsKeepsWhatItHas() throws {
