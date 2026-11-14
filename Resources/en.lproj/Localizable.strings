@@ -1377,6 +1377,7 @@
 "warmup.status.starting" = "Starting the profile…";
 "warmup.status.stopped" = "Stopped.";
 "warmup.status.tabClosed" = "Stopped: its tab was closed.";
+"warmup.status.tabNotShown" = "Stopped: its tab was not shown in its window for 30 seconds.";
 "warmup.status.waitingForTab" = "Waiting: its tab is not the one shown.";
 "warmup.stop" = "Stop";
 "warmup.title" = "Warm Up — %@";

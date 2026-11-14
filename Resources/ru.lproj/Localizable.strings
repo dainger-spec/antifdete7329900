@@ -1377,6 +1377,7 @@
 "warmup.status.starting" = "Запуск профиля…";
 "warmup.status.stopped" = "Остановлен.";
 "warmup.status.tabClosed" = "Остановлен: его вкладка закрыта.";
+"warmup.status.tabNotShown" = "Остановлен: его вкладка 30 секунд не была показана в своём окне.";
 "warmup.status.waitingForTab" = "Ожидание: его вкладка сейчас не показана.";
 "warmup.stop" = "Остановить";
 "warmup.title" = "Прогрев — %@";

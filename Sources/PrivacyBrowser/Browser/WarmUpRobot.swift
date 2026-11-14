@@ -42,6 +42,8 @@ final class WarmUpRobot: ObservableObject {
         case tabClosed
         /// A page of the robot's tab shows a dialog (alert, sign-in…) that waits for the user.
         case pageNeedsAttention
+        /// Its tab was not the one its window shows for longer than `Limits.tabWait`.
+        case tabNotShown
     }
 
     enum Input: String, Equatable {
@@ -59,6 +61,9 @@ final class WarmUpRobot: ObservableObject {
         var startTimeout: TimeInterval = 10
         /// A script of the robot that has not answered after this is given up.
         var scriptTimeout: TimeInterval = 5
+        /// Its tab not the one shown for longer than this ends the run: in its own window, out of the
+        /// person's reach, nothing would ever show it again.
+        var tabWait: TimeInterval = 30
         /// The plan's times are kept to `WarmUpPlan.dwellLimits`, and the pause between pages
         /// is `WarmUpTiming.pause`, unless set here (self-test).
         var dwellOverride: ClosedRange<TimeInterval>?
@@ -102,6 +107,7 @@ final class WarmUpRobot: ObservableObject {
             case .profileStopped: reason = "profileStopped"
             case .tabClosed: reason = "tabClosed"
             case .pageNeedsAttention: reason = "pageNeedsAttention"
+            case .tabNotShown: reason = "tabNotShown"
             }
         } else if isRunning, waitingForTab {
             reason = "waitingForTab"
@@ -422,13 +428,28 @@ final class WarmUpRobot: ObservableObject {
         return true
     }
 
-    /// Waits while the robot's tab is not the one its window shows.
+    /// Waits while the robot's tab is not the one its window shows, at most `limits.tabWait`: the
+    /// window is the robot's own and out of sight, so a tab that is still not shown then never will
+    /// be, and the run ends rather than holding its place in the queue (and its profile's data open)
+    /// for ever.
     private func waitUntilShown(_ run: Int) async -> Bool {
+        let deadline = Date().addingTimeInterval(limits.tabWait)
         while let tab = liveTab(run), !tab.isSelected {
-            if !waitingForTab { waitingForTab = true }
+            if !waitingForTab {
+                waitingForTab = true
+                onProgress?()
+            }
+            if Date() >= deadline {
+                waitingForTab = false
+                stop(.tabNotShown)
+                return false
+            }
             guard await wait(0.25, run: run) else { break }
         }
-        if waitingForTab { waitingForTab = false }
+        if waitingForTab {
+            waitingForTab = false
+            onProgress?()
+        }
         return liveTab(run) != nil
     }
 

@@ -1436,7 +1436,10 @@ only, at most 50; other lines are listed with the reason and skipped). For each 
   else; each link is judged by itself, `<base target>` included; it stays on that page half as long.
 
 Nothing is typed or submitted but a search's words in the engine's own search box, and nothing is downloaded: while a run drives its tab, a response
-the browser would save as a file fails as a load instead. A page that does not load is reported and skipped; one still
+the browser would save as a file fails as a load instead. A window a page opens (a popunder on the robot's click, say) is
+refused in the warm-up's window: until the third audit (14 November 2026) it became a tab there that took the robot's place,
+loaded out of sight, could save files, and left the run waiting for ever. A run whose tab is not the one its window shows
+for 30 s now stops and says so. A page that does not load is reported and skipped; one still
 loading after 30 s is left as it is. A page counts as come once its own load has committed (or
 ended, or — an address that only jumps within the page shown — the tab shows that page) and
 nothing loads any more, not merely once the tab's address changed with nothing loading. The robot
