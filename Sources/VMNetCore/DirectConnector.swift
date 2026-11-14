@@ -17,10 +17,22 @@ import Foundation
 ///
 /// It is a SOCKS5 server on loopback that the machine's network (`VMNetwork`) uses as its proxy:
 /// the two parts already speak that between them, and nothing of the network changes. Only
-/// CONNECT, no sign-in (nothing but this process reaches a port on loopback that the system chose
-/// a moment ago), names resolved here. Like the network itself, it connects to public addresses
-/// only: a name that resolves to this Mac, or to somebody's local network, is refused — a page in
-/// a guest must not reach the Mac's own services by naming them.
+/// CONNECT, names resolved here — and a sign-in (RFC 1929) with a user name and password made up
+/// at random for this run, which only the machine's network is given (`upstream`): any process
+/// on this Mac can reach a port on loopback, and without it any of them could have its
+/// connections made here, past whatever the Mac does about that process. Like the network
+/// itself, it connects to public addresses only: a name that resolves to this Mac, or to
+/// somebody's local network, is refused — and so is an address of the Mac's own (its public
+/// IPv4, its global IPv6) or of a network it is on, public or not. A name that is local by the
+/// way it is written (one label, `localhost`, `.local`, an address written as a name) is never
+/// looked up or asked of a proxy.
+///
+/// Where the connection is asked of the Mac's own proxy (below), that proxy resolves the name, and
+/// where it then connects is its decision: a proxy tool that sends some public names straight to
+/// an address of the local network (a rule of its own, a resolver that answers so) takes a
+/// machine's connection there too, as it takes Safari's on this Mac. That is the limit of this
+/// rule, said in docs/VM_NETWORK.md; the settings' own exceptions (`VMNetSystemProxy.applies`)
+/// go by the rule above.
 ///
 /// With one exception, which is a VPN's: many VPN tools answer every name with an address of
 /// their own making from a private range (100.64.x.x, 10.x.x.x, …) and take the connection to it
@@ -37,8 +49,22 @@ import Foundation
 /// One thread per direction of a connection, blocking: a few hundred connections of a browser
 /// are a few hundred idle threads, and the code is what can be read.
 public final class VMNetDirectConnector: @unchecked Sendable {
-    /// Connections carried at once; one more is refused.
+    /// Connections carried at once; one more is refused. Fewer where the process may not open
+    /// enough descriptors for them (`connectionsAllowed`).
     public static let maximumConnections = 1024
+
+    /// Each connection of a machine without a proxy holds three descriptors of the helper: the
+    /// machine's network's socket to this connector, the one this connector accepted, and the
+    /// one to the destination.
+    public static let descriptorsPerConnection = 3
+
+    /// How many connections may be carried at once with `descriptorLimit` descriptors to the
+    /// process: as the machine's network counts them (`NetworkLoop.connectionLimit`), three
+    /// descriptors each.
+    static func connectionsAllowed(descriptorLimit: Int) -> Int {
+        NetworkLoop.connectionLimit(wanted: maximumConnections, descriptorLimit: descriptorLimit,
+                                    descriptorsPerConnection: descriptorsPerConnection)
+    }
 
     /// Why a connection was not made: a kind, never where it was going.
     public enum Trouble: String, Sendable, Codable, CaseIterable {
@@ -52,6 +78,10 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         case proxyUnreachable
         /// That proxy answered, and said no.
         case proxyRefused
+        /// This Mac's network settings have the proxy chosen by a configuration file (PAC) or
+        /// found on the network (WPAD), which a machine cannot follow: nothing is connected — not
+        /// without the proxy either, which would be going out where the Mac's apps do not.
+        case proxyConfigurationFile
     }
 
     /// What the connector has done so far. Counts and a kind only.
@@ -80,6 +110,13 @@ public final class VMNetDirectConnector: @unchecked Sendable {
     /// The tests' own answer to "does this machine send packets for this address into a tunnel"
     /// (the address as text): nil asks the system (`goesIntoATunnel`).
     private let routesIntoTunnel: (@Sendable (String) -> Bool)?
+
+    /// The sign-in the SOCKS5 server asks for: made up at random for each connector, never
+    /// written anywhere but into `upstream`.
+    private let username = VMNetDirectConnector.randomToken()
+    private let password = VMNetDirectConnector.randomToken()
+    /// Connections carried at once, by the descriptors this process may open.
+    private let connectionLimit = VMNetDirectConnector.connectionsAllowed(descriptorLimit: Sys.descriptorLimit)
 
     private let lock = NSLock()
     private var listener: Int32 = -1
@@ -117,9 +154,15 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         case alreadyStarted
     }
 
-    /// The connector as `VMNetwork` is told of a proxy. Call after `start()`.
+    /// The connector as `VMNetwork` is told of a proxy, with its sign-in. Call after `start()`.
     public var upstream: VMNetUpstream {
-        .socks5(host: "127.0.0.1", port: port, username: nil, password: nil)
+        .socks5(host: "127.0.0.1", port: port, username: username, password: password)
+    }
+
+    /// 16 random bytes as hex: a user name or a password nobody guesses.
+    private static func randomToken() -> String {
+        var generator = SystemRandomNumberGenerator()
+        return (0..<16).map { _ in String(format: "%02x", UInt8.random(in: 0...255, using: &generator)) }.joined()
     }
 
     /// The loopback port it listens on; 0 before `start()`.
@@ -279,7 +322,8 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         defer { lock.unlock() }
         guard !stopped else { return false }
         if countsAsConnection {
-            guard open.count < Self.maximumConnections * 2 else { return false }
+            // Two sockets of this connector's a connection (the third is the network's).
+            guard open.count < connectionLimit * 2 else { return false }
             threads += 1
         }
         open.insert(descriptor)
@@ -304,7 +348,17 @@ public final class VMNetDirectConnector: @unchecked Sendable {
             #else
             let client = Glibc.accept(descriptor, nil, nil)
             #endif
-            guard client >= 0 else { continue }
+            guard client >= 0 else {
+                let code = errno
+                // Out of descriptors or memory: the connection waiting stays waiting, and the
+                // listener reads as ready again at once — asked again now, it would be asked in
+                // a loop as fast as the processor goes. Left alone for a moment instead.
+                if code != EINTR, code != EAGAIN, code != EWOULDBLOCK, code != ECONNABORTED {
+                    noteAcceptFailure(code)
+                    usleep(250_000)
+                }
+                continue
+            }
             Sys.setNoSigPipe(client)
             Sys.setNoDelay(client)
             guard register(client, countsAsConnection: true) else {
@@ -320,6 +374,12 @@ public final class VMNetDirectConnector: @unchecked Sendable {
             thread.stackSize = 512 << 10
             thread.start()
         }
+    }
+
+    private func noteAcceptFailure(_ code: Int32) {
+        lock.lock()
+        notes["a connection could not be taken (\(Sys.describe(code)))", default: 0] += 1
+        lock.unlock()
     }
 
     private static func systemListen(_ descriptor: Int32) -> Int32 {
@@ -377,15 +437,27 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         back.wait()
     }
 
-    /// Reads SOCKS5's greeting and its one request; nil for anything but a CONNECT.
+    /// Reads SOCKS5's greeting, the sign-in and its one request; nil for anything but a CONNECT
+    /// from a client that has this connector's user name and password. Without a sign-in (method
+    /// 0) nothing is taken: any process on this Mac reaches a port on loopback.
     private func request(from client: Int32) -> (Target, UInt16)? {
         guard let greeting = Self.read(client, exactly: 2), greeting[0] == 5,
               let methods = Self.read(client, exactly: Int(greeting[1])) else { return nil }
-        guard methods.contains(0) else {
+        guard methods.contains(2) else {
             _ = Self.sendAll(client, [5, 0xFF])
             return nil
         }
-        guard Self.sendAll(client, [5, 0]) else { return nil }
+        guard Self.sendAll(client, [5, 2]) else { return nil }
+        // RFC 1929: version 1, the user name, the password — each its length and its bytes.
+        guard let version = Self.read(client, exactly: 2), version[0] == 1,
+              let user = Self.read(client, exactly: Int(version[1])),
+              let length = Self.read(client, exactly: 1),
+              let secret = Self.read(client, exactly: Int(length[0])) else { return nil }
+        guard Self.same(user, Array(username.utf8)), Self.same(secret, Array(password.utf8)) else {
+            _ = Self.sendAll(client, [1, 1])
+            return nil
+        }
+        guard Self.sendAll(client, [1, 0]) else { return nil }
         guard let head = Self.read(client, exactly: 4), head[0] == 5 else { return nil }
         let target: Target
         switch head[3] {
@@ -414,6 +486,14 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         return (target, port)
     }
 
+    /// Whether two byte strings are the same, in a time that does not depend on where they differ.
+    private static func same(_ given: [UInt8], _ expected: [UInt8]) -> Bool {
+        guard given.count == expected.count else { return false }
+        var difference: UInt8 = 0
+        for index in given.indices { difference |= given[index] ^ expected[index] }
+        return difference == 0
+    }
+
     // MARK: - Connecting
 
     private enum Tunnel {
@@ -438,8 +518,23 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         case .name(let name): host = name
         case .address(let address): host = address.string
         }
-        if let proxy = systemProxy?(), proxy.applies(to: host) {
-            return tunnel(through: proxy.upstream, to: target, port: port, deadline: deadline)
+        // A name that is this machine's or the local network's by the way it is written, or an
+        // address written as a name: not looked up here, not asked of a proxy — whichever way the
+        // connection would go, and before the Mac's settings are asked which.
+        if case .name(let name) = target, !allowsLocalDestinations, Self.isLocalName(name) {
+            return .failed(.notPublic, "a name of this machine or the local network, or an address written as a name")
+        }
+        if let proxy = systemProxy?() {
+            // A configuration file is a program to run for every address, which a machine does not
+            // follow; and going out without the proxy would be going out where the Mac's own apps
+            // do not. Nothing is connected — as with a proxy that is down.
+            if proxy.usesConfigurationFile {
+                return .failed(.proxyConfigurationFile,
+                               "this Mac's proxy is set by a configuration file (PAC or WPAD), which a machine cannot follow")
+            }
+            if proxy.applies(to: host) {
+                return tunnel(through: proxy.upstream, to: target, port: port, deadline: deadline)
+            }
         }
         var hosts = [host]
         // A name's addresses are this Mac's resolver's — a VPN's own among them, which go into
@@ -471,15 +566,15 @@ public final class VMNetDirectConnector: @unchecked Sendable {
     }
 
     private func allows(_ address: Address, by rule: Rule) -> Bool {
-        switch rule {
-        case .any: return true
-        case .publicOnly: return Self.isPublic(address)
-        case .publicOrIntoATunnel:
-            if Self.isPublic(address) { return true }
-            guard Self.isPrivate(address) else { return false }
-            if let routesIntoTunnel { return routesIntoTunnel(Self.text(of: address)) }
-            return Self.goesIntoATunnel(address)
-        }
+        if rule == .any { return true }
+        // A public address may still be this Mac's own (a public IPv4 of its, its global IPv6) or
+        // of a network it is on (a public prefix on its link): refused like a private one. Read
+        // from the interfaces, with no socket.
+        if Self.isPublic(address) { return !Self.isOnOwnNetwork(address) }
+        guard rule == .publicOrIntoATunnel, Self.isPrivate(address) else { return false }
+        if let routesIntoTunnel { return routesIntoTunnel(Self.text(of: address)) }
+        // Which refuses the Mac's own addresses and networks first, too.
+        return Self.goesIntoATunnel(address)
     }
 
     /// A connected socket to one of the host's addresses that `rule` allows, or why there is none.
@@ -531,6 +626,11 @@ public final class VMNetDirectConnector: @unchecked Sendable {
             }
             asked = .name(name, port: port)
         case .address(let address):
+            // An address of this Mac or a local network is not asked of a proxy either (the
+            // machine's network refuses those before they come here).
+            if !allowsLocalDestinations, DestinationPolicy.isRefusedRange(address) {
+                return .failed(.notPublic, "not a public address (not asked of this Mac's proxy)")
+            }
             asked = .address(address, port: port)
         }
         guard let endpoint = proxy.endpoint, (1...65535).contains(endpoint.port), var handshake = proxy.handshake(for: asked) else {
@@ -572,7 +672,8 @@ public final class VMNetDirectConnector: @unchecked Sendable {
     }
 
     /// A name that is this machine's own or the local network's by the way it is written — one
-    /// label, `localhost`, anything under `.local` — or that is not written as a name at all.
+    /// label, `localhost`, anything under `.local` — or that is not written as a name at all
+    /// (an address written as a name included: `DNSResponder.isResolvable`).
     /// (The machine's own resolver gives such names no address, so its network never asks for
     /// one: this is the same rule, held here too.)
     static func isLocalName(_ name: String) -> Bool {
@@ -746,26 +847,35 @@ public final class VMNetDirectConnector: @unchecked Sendable {
     /// is on is a use of the local network, which macOS asks the person about in a window of its
     /// own (seen on CI, 14 November: the window stood over what a later check took a picture
     /// of). Such an address is refused anyway, so it is refused here, before anything is opened.
+    ///
+    /// An IPv6 address that carries an IPv4 one (`::ffff:a.b.c.d`, NAT64's `64:ff9b::a.b.c.d`) is
+    /// asked about as that IPv4 address too: it is where the connection ends up.
     static func isOnOwnNetwork(_ address: Address) -> Bool {
         var storage = address.storage
         let target = withUnsafeMutablePointer(to: &storage) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { addressBytes($0, family: address.family) }
         }
         guard !target.isEmpty else { return false }
+        if address.family == AF_INET6, let inner = embeddedIPv4(target), isOnOwnNetwork(family: AF_INET, target: inner) { return true }
+        return isOnOwnNetwork(family: address.family, target: target)
+    }
+
+    /// The same, of an address's bytes (4 or 16, as the system has them) in `family`.
+    private static func isOnOwnNetwork(family: Int32, target: [UInt8]) -> Bool {
         var list: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&list) == 0 else { return false }
         defer { freeifaddrs(list) }
         var next = list
         while let entry = next {
             next = entry.pointee.ifa_next
-            guard let own = entry.pointee.ifa_addr, Int32(own.pointee.sa_family) == address.family else { continue }
+            guard let own = entry.pointee.ifa_addr, Int32(own.pointee.sa_family) == family else { continue }
             let flags = Int(entry.pointee.ifa_flags)
             guard flags & Int(IFF_UP) != 0 else { continue }
-            let mine = addressBytes(own, family: address.family)
+            let mine = addressBytes(own, family: family)
             if mine == target { return true }
             // A tunnel's far side is not a network the machine is on: it is what is asked about.
             guard flags & Int(IFF_POINTOPOINT) == 0, flags & Int(IFF_LOOPBACK) == 0, let netmask = entry.pointee.ifa_netmask else { continue }
-            let mask = addressBytes(netmask, family: address.family)
+            let mask = addressBytes(netmask, family: family)
             guard mask.count == target.count, mine.count == target.count, mask.contains(where: { $0 != 0 }) else { continue }
             var same = true
             for index in 0..<target.count where mine[index] & mask[index] != target[index] & mask[index] {
@@ -835,10 +945,14 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         return isPublicIPv6(bytes)
     }
 
-    /// An IPv6 address of the public internet: not unspecified or loopback, not link-local or
-    /// unique-local, not multicast; one that carries an IPv4 address is judged by that.
+    /// An IPv6 address of the public internet: not unspecified or loopback, not link-local,
+    /// site-local or unique-local, not multicast; one that carries an IPv4 address (mapped, or
+    /// behind NAT64's well-known prefix) is judged by that.
     static func isPublicIPv6(_ bytes: [UInt8]) -> Bool {
         guard bytes.count == 16 else { return false }
+        if bytes[0..<12].elementsEqual(nat64Prefix), let inner = embeddedIPv4(bytes) {
+            return !DestinationPolicy.isRefusedRange(VMNetIPv4(UInt32(inner[0]) << 24 | UInt32(inner[1]) << 16 | UInt32(inner[2]) << 8 | UInt32(inner[3])))
+        }
         if bytes[0..<10].allSatisfy({ $0 == 0 }) {
             // ::, ::1, IPv4-compatible and IPv4-mapped (::ffff:a.b.c.d).
             let mapped = bytes[10] == 0xFF && bytes[11] == 0xFF
@@ -848,9 +962,21 @@ public final class VMNetDirectConnector: @unchecked Sendable {
             return mapped && !DestinationPolicy.isRefusedRange(VMNetIPv4(value))
         }
         if bytes[0] == 0xFF { return false }                       // ff00::/8, multicast
-        if bytes[0] == 0xFE && bytes[1] & 0xC0 == 0x80 { return false }  // fe80::/10, link-local
+        if bytes[0] == 0xFE && bytes[1] & 0x80 == 0x80 { return false }  // fe80::/10, link-local; fec0::/10, site-local
         if bytes[0] & 0xFE == 0xFC { return false }                // fc00::/7, unique local
         return true
+    }
+
+    /// NAT64's well-known prefix, 64:ff9b::/96: its last four bytes are an IPv4 address.
+    private static let nat64Prefix: [UInt8] = [0x00, 0x64, 0xFF, 0x9B, 0, 0, 0, 0, 0, 0, 0, 0]
+
+    /// The IPv4 address an IPv6 address carries — IPv4-mapped (`::ffff:a.b.c.d`) or behind NAT64's
+    /// well-known prefix — as its four bytes; nil for any other.
+    static func embeddedIPv4(_ bytes: [UInt8]) -> [UInt8]? {
+        guard bytes.count == 16 else { return nil }
+        let mapped = bytes[0..<10].allSatisfy { $0 == 0 } && bytes[10] == 0xFF && bytes[11] == 0xFF
+        guard mapped || bytes[0..<12].elementsEqual(nat64Prefix) else { return nil }
+        return Array(bytes[12..<16])
     }
 
     // MARK: - Bytes

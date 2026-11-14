@@ -191,6 +191,9 @@ public enum VMNetworkTrouble: String, Codable, Sendable, CaseIterable {
     case proxyUnreachable
     /// That proxy answers, and says no.
     case proxyRefused
+    /// This Mac's proxy is set by a configuration file (PAC) or found on the network (WPAD),
+    /// which a machine cannot follow: its network stays closed, as for a proxy that is down.
+    case proxyConfigurationFile
 
     /// How many connections must fail one after another, none made since, before the machine is
     /// said to have no way out: a page's one dead address is not that.

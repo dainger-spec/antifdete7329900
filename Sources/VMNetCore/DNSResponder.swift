@@ -231,15 +231,36 @@ struct DNSResponder {
     }
 
     /// Whether a name may be handed to the proxy at all. Not: a single label and `localhost`
-    /// (this machine's own names), `.local` (the local network's, which mDNS owns), and anything
-    /// that is not letters, digits, hyphens and underscores — a name goes into the proxy's request
-    /// as text, and a space or a line break in it would be read there as something else.
+    /// (this machine's own names), `.local` (the local network's, which mDNS owns), an address
+    /// written as a name (below), and anything that is not letters, digits, hyphens and
+    /// underscores — a name goes into the proxy's request as text, and a space or a line break in
+    /// it would be read there as something else.
+    ///
+    /// An address written as a name — "192.168.1.1", "127.1", "0x7f.1", "2130706433" — would be
+    /// read as that address by whatever resolves it (a proxy, this Mac's resolver, `inet_aton`),
+    /// so a fake address standing for it would carry the guest to that address by a name: to the
+    /// Mac itself or its local network. No top-level domain is a number, so a name whose last
+    /// label is one (digits, or `0x` and hex digits — every form `inet_aton` reads the last part
+    /// of an address in) is refused, and with it every such address.
     static func isResolvable(labels: [String], name: String) -> Bool {
-        guard labels.count >= 2, let last = labels.last?.lowercased(), last != "localhost", last != "local" else { return false }
+        guard labels.count >= 2, let last = labels.last?.lowercased(), last != "localhost", last != "local",
+              !isNumeric(label: last) else { return false }
         return labels.allSatisfy { label in
             !label.isEmpty && label.utf8.allSatisfy { byte in
                 (byte >= 0x61 && byte <= 0x7A) || (byte >= 0x41 && byte <= 0x5A) || (byte >= 0x30 && byte <= 0x39) || byte == 0x2D || byte == 0x5F
             }
         }
+    }
+
+    /// A label that is a number as `inet_aton` reads one part of an address: decimal or octal
+    /// digits, or `0x`/`0X` and hex digits (none at all included: some readers take "0x" for 0).
+    static func isNumeric(label: String) -> Bool {
+        let bytes = Array(label.utf8)
+        guard !bytes.isEmpty else { return false }
+        func isDigit(_ byte: UInt8) -> Bool { byte >= 0x30 && byte <= 0x39 }
+        if bytes.count >= 2, bytes[0] == 0x30, bytes[1] == 0x78 || bytes[1] == 0x58 {
+            return bytes.dropFirst(2).allSatisfy { isDigit($0) || ($0 >= 0x61 && $0 <= 0x66) || ($0 >= 0x41 && $0 <= 0x46) }
+        }
+        return bytes.allSatisfy(isDigit)
     }
 }

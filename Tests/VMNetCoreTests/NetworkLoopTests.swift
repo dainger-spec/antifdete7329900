@@ -277,6 +277,23 @@ final class NetworkLoopTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(Sys.descriptorLimit, 64)
     }
 
+    /// Without a proxy elsewhere each connection holds three of the process's descriptors (the
+    /// connector in the same process holds two more): a third as many connections.
+    func testConnectionsThatHoldThreeDescriptorsAreAThirdAsMany() {
+        XCTAssertEqual(NetworkLoop.connectionLimit(wanted: 2048, descriptorLimit: 256, descriptorsPerConnection: 3), 42)
+        XCTAssertEqual(NetworkLoop.connectionLimit(wanted: 2048, descriptorLimit: 8192, descriptorsPerConnection: 3), 1365)
+        XCTAssertEqual(NetworkLoop.connectionLimit(wanted: 2048, descriptorLimit: 64, descriptorsPerConnection: 3), 16)
+        XCTAssertEqual(NetworkLoop.connectionLimit(wanted: 2048, descriptorLimit: 4096, descriptorsPerConnection: 1), 2048)
+        XCTAssertEqual(NetworkLoop.connectionLimit(wanted: 2048, descriptorLimit: 4096, descriptorsPerConnection: 0), 2048)
+        XCTAssertEqual(NetworkLoop.Options().descriptorsPerConnection, 1)
+        let network = VMNetwork(configuration: Wire.configuration(upstream: .none), frameDescriptor: -1)
+        XCTAssertEqual(network.descriptorsPerConnection, 1)
+        network.descriptorsPerConnection = 3
+        XCTAssertEqual(network.options.descriptorsPerConnection, 3)
+        network.descriptorsPerConnection = 0
+        XCTAssertEqual(network.descriptorsPerConnection, 1)
+    }
+
     func testAProxyThatIsNotThereIsRefusedAtOnce() throws {
         // A port nobody listens on.
         let (listener, port) = TestSocket.listen()

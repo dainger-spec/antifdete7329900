@@ -2687,6 +2687,7 @@
 "vm.row.trouble.unreachable" = "No internet in this machine: sites do not answer connections made from this Mac. If a VPN is on, check that it carries all apps and not the browser alone.";
 "vm.row.trouble.proxyUnreachable" = "No internet in this machine: the proxy in this Mac's network settings does not answer. A VPN tool that was quit may have left its setting behind — switch the tool on, or the proxy off in System Settings → Network.";
 "vm.row.trouble.proxyRefused" = "No internet in this machine: the proxy in this Mac's network settings refuses its connections.";
+"vm.row.trouble.proxyConfigurationFile" = "No internet in this machine: the Mac's proxy is set by a configuration file (PAC or automatic discovery), which a machine cannot follow — and it does not go out past the proxy instead. Choose a proxy for the machine in its profile, or name the proxy in System Settings → Network → Proxies.";
 "vm.row.trouble.detail" = "Technical detail: %@";
 "vm.row.viaSystemProxy" = "Goes through the proxy in this Mac's network settings";
 "vm.row.tools.old" = "This machine was made with Lumen's first tools: the wallpaper, the appearance, the accent colour and the computer's name are not applied in it. Update the tools in the base system (⋯ → Open the Base System → Install Lumen Tools) and make the machine again.";

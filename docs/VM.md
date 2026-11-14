@@ -154,8 +154,15 @@ servers. Connections made by the helper itself go wherever any app's do.
 With a proxy the machine is **fail-closed by construction**: its card is not attached to any
 network of this Mac, names are resolved by the proxy and never by this Mac, and each connection is
 carried through the proxy (SOCKS5 or HTTP CONNECT). Without one, names are resolved by this Mac,
-and a name that resolves to this Mac or to a local network is refused: a page in a guest does not
-reach the Mac's own services. **UDP does not leave a machine**, with a proxy or without: QUIC
+and a name that resolves to this Mac (any address of its, public ones included) or to a network
+it is on is refused, as is an address written as a name. That holds for connections the helper
+makes itself. Where the Mac's network settings name a proxy, the connection is asked of that
+proxy by name, and where the proxy then connects is its decision: a proxy tool that sends a
+public name to an address of the local network takes a machine there as it takes Safari — a page
+in a guest is kept from the Mac's local network by this Mac's rules only so far as the tool keeps
+to them (docs/VM_NETWORK.md). A proxy set by a configuration file (PAC, WPAD) is not followed, and
+the machine then has no network, with its row saying why. A machine with a proxy of its own has
+no way to this Mac's network at all. **UDP does not leave a machine**, with a proxy or without: QUIC
 falls back to TCP, and WebRTC has no path that could show this Mac's address. Apple's software-update hosts are answered "no
 such name", so a machine does not fetch gigabytes of updates through a paid proxy. docs/VM_NETWORK.md
 has the details and the tests.

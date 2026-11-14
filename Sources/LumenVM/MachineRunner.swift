@@ -23,11 +23,11 @@ enum MacProxySettings {
         return proxy
     }
 
-    /// The settings name a proxy configuration file (PAC) and no proxy a machine can follow: its
-    /// connections are then made without one, which the log says.
-    static var namesOnlyAConfigurationFile: Bool {
-        guard let settings = settings(), VMNetSystemProxy(settings: settings) == nil else { return false }
-        return (settings["ProxyAutoConfigEnable"] as? Int ?? 0) != 0
+    /// The settings have the proxy chosen by a configuration file (PAC) or found on the network
+    /// (WPAD), which a machine cannot follow: its connections are then not made at all — not
+    /// without the proxy either — and the log and the machine's row say why.
+    static var usesConfigurationFile: Bool {
+        current()?.usesConfigurationFile == true
     }
 
     private static func settings() -> [String: Any]? {
@@ -94,8 +94,10 @@ final class MachineNetwork {
             let made = VMNetDirectConnector(systemProxy: { MacProxySettings.current() })
             try made.start()
             HelperIO.log("network: no proxy of the machine's own — this Mac's connection"
-                + (MacProxySettings.current() == nil ? "" : ", through the proxy its network settings name")
-                + (MacProxySettings.namesOnlyAConfigurationFile ? "; the settings name a proxy configuration file (PAC), which is not followed" : ""))
+                + (MacProxySettings.usesConfigurationFile
+                    ? "; the Mac's proxy is set by a configuration file (PAC or WPAD), which a machine cannot follow: "
+                        + "no connection is made until the Mac's settings name a proxy or none, or the machine has a proxy of its own"
+                    : (MacProxySettings.current() == nil ? "" : ", through the proxy its network settings name")))
             direct = made
             upstream = made.upstream
         case .proxy:
@@ -130,6 +132,8 @@ final class MachineNetwork {
                                                guestAddress: VMNetIPv4(string: "192.168.1.\(last)")!,
                                                prefixLength: 24, upstream: upstream, blockedHostSuffixes: request.blockedHosts)
         let network = VMNetwork(configuration: configuration, frameDescriptor: descriptor)
+        // Without a proxy each connection holds three descriptors of this process, not one.
+        if direct != nil { network.descriptorsPerConnection = VMNetDirectConnector.descriptorsPerConnection }
         self.network = network
         network.log = { HelperIO.log("network: " + $0) }
         network.start()
@@ -434,6 +438,7 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
             case .unreachable: named = .unreachable
             case .proxyUnreachable: named = .proxyUnreachable
             case .proxyRefused: named = .proxyRefused
+            case .proxyConfigurationFile: named = .proxyConfigurationFile
             }
             trouble = named.rawValue
             troubleDetail = report.detail.map { String($0.prefix(200)) }
