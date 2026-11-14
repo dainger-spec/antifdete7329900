@@ -24,6 +24,8 @@ final class AppearancePreferences: ObservableObject {
     @Published var density: Density { didSet { defaults.set(density.rawValue, forKey: Keys.density) } }
     /// Short transitions (up to 250 ms); off — only colour and opacity change, as under Reduce Motion.
     @Published var animations: Bool { didSet { defaults.set(animations, forKey: Keys.animations) } }
+    /// Each profile's exit country as a flag fading behind its row in the list (`CountryBackdrop`).
+    @Published var countryBackdrop: Bool { didSet { defaults.set(countryBackdrop, forKey: Keys.countryBackdrop) } }
 
     private let defaults: UserDefaults
 
@@ -31,6 +33,7 @@ final class AppearancePreferences: ObservableObject {
         static let entryLight = "appearance.entryLight"
         static let density = "appearance.density"
         static let animations = "appearance.animations"
+        static let countryBackdrop = "appearance.countryBackdrop"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -38,6 +41,7 @@ final class AppearancePreferences: ObservableObject {
         entryLight = defaults.object(forKey: Keys.entryLight) as? Bool ?? true
         density = defaults.string(forKey: Keys.density).flatMap(Density.init(rawValue:)) ?? .comfortable
         animations = defaults.object(forKey: Keys.animations) as? Bool ?? true
+        countryBackdrop = defaults.object(forKey: Keys.countryBackdrop) as? Bool ?? false
     }
 
     /// The animations setting as stored, from any thread.

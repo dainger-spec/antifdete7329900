@@ -444,6 +444,16 @@ public final class PasswordVault: @unchecked Sendable {
         return lock.withLock { liveEntries.filter { $0.origin == origin } }
     }
 
+    /// The saved login that HTTP authentication (Basic, Digest) is answered with by itself, with
+    /// nothing asked: one of exactly `url`'s origin that has a password — a login that is a
+    /// one-time code alone has none to send — and only over https. Over plain http the password
+    /// would cross the network as the request does (Basic: readable by anyone on the way), so
+    /// there the person is asked, as for a site with nothing saved. Nil: ask.
+    public func httpAuthenticationEntry(for url: URL) -> PasswordEntry? {
+        guard url.scheme?.lowercased() == "https" else { return nil }
+        return entries(for: url).first { !$0.password.isEmpty }
+    }
+
     /// Logins a page of `origin` is offered, best first (`PasswordMatching.candidates`).
     /// A login that is a one-time code alone (no password) is not among them: it has nothing for
     /// a password's field.

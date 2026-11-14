@@ -66,8 +66,8 @@ final class WebDriverExecutor {
         case "open":
             return Self.json(["window": windowKind])
         case "navigate":
-            guard let text = body["url"] as? String, let url = URL(string: text), url.scheme != nil else {
-                throw WebDriverError.invalidArgument("url must be an address")
+            guard let text = body["url"] as? String, let url = WebDriverRoute.navigableURL(text) else {
+                throw WebDriverError.invalidArgument("url must be an http or https address, or about:blank")
             }
             try await driver.goto(url)
             return "null"

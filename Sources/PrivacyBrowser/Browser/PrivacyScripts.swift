@@ -141,6 +141,9 @@ enum PrivacyScripts {
         }
         let geolocation: ShimConfiguration.Geolocation
         switch configuration.geolocation {
+        case _ where NativeGeolocation.isEngaged:
+            // The engine answers in this process (`NativeGeolocation`): nothing of ours in the page.
+            geolocation = .init(mode: "native")
         case .deny:
             geolocation = .init(mode: "deny")
         case let .fixed(latitude, longitude, accuracy):
@@ -305,7 +308,10 @@ function patchWindow(w) {
   if (CONFIG.storageQuota) { try { patchStorageQuota(w, CONFIG.storageQuota); } catch (e) {} }
   if (IS_WORKER) return; // no window, geolocation, WebRTC or frames in a worker
   if (CONFIG.safariObject) { try { patchSafariObject(w); } catch (e) {} }
-  try { patchGeolocation(w, CONFIG.geolocation || { mode: 'deny' }); } catch (e) {}
+  // 'native': the engine itself answers the profile's geolocation (NativeGeolocation.swift).
+  if (!CONFIG.geolocation || CONFIG.geolocation.mode !== 'native') {
+    try { patchGeolocation(w, CONFIG.geolocation || { mode: 'deny' }); } catch (e) {}
+  }
   try { patchWebRTC(w, CONFIG.webRTC || 'disabled', CONFIG.webRTCRelay); } catch (e) {}
   if (CONFIG.camera) { try { patchCamera(w, CONFIG.camera); } catch (e) {} }
   if (CONFIG.systemCamera) { try { patchSystemCamera(w, CONFIG.systemCamera); } catch (e) {} }

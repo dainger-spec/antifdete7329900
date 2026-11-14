@@ -84,6 +84,26 @@ public enum ProfileTransfer {
         }
     }
 
+    /// The key derivations a file is read with: those this app writes, nothing else — Argon2id (an
+    /// export's) within `KeyDerivation`'s bounds, and PBKDF2-HMAC-SHA256 (a profile brought back
+    /// goes through a file of its own under it, and tests write fast ones) with no more than the
+    /// iterations this app ever asked of it (`KDFParameters.recommendedIterations`). A file that
+    /// asks for anything else — another algorithm, a cost out of range — is refused as it is
+    /// opened, before a key is derived: a file is often someone else's (APP2-1).
+    static func checkReadable(_ kdf: KDFParameters) throws {
+        switch kdf.algorithm {
+        case KDFParameters.argon2id:
+            break
+        case KDFParameters.pbkdf2SHA256:
+            guard kdf.iterations <= KDFParameters.recommendedIterations else {
+                throw CoreError.invalidConfiguration("the file's key derivation is not one Lumen writes")
+            }
+        default:
+            throw CoreError.unsupportedFormat("the file's key derivation (\(kdf.algorithm)) is not one Lumen writes")
+        }
+        try KeyDerivation.validate(kdf)
+    }
+
     static let manifestAAD = "pbprofile:v1:manifest"
     static let documentsAAD = "pbprofile:v1:documents"
     static let webDataPrefix = "webdata~"
@@ -348,6 +368,7 @@ public enum ProfileTransfer {
         try DocumentFormat.check(headerData, supported: format, what: url.lastPathComponent)
         let header = try JSONCoding.decoder.decode(Header.self, from: headerData)
         guard readableFormats.contains(header.format) else { throw CoreError.unsupportedFormat("profile export format \(header.format)") }
+        try checkReadable(header.kdf)
         let documents = try readLengthPrefixed(handle)
         return Parsed(header: header, documents: documents, archiveOffset: try handle.offset())
     }

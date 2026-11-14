@@ -36,6 +36,10 @@
 #                              NE=1 the release then carries two system extensions (the guard and the
 #                              camera), each signed by TEAM_ID. Without CAM the camera is the in-page
 #                              shim only. Needs its own Developer ID provisioning profile.
+#   VM=1                       with the virtual machines (docs/VM.md): build-app.sh puts their
+#                              helper, Contents/MacOS/LumenVM, into the app, signed with Apple's
+#                              virtualization right alone. Without VM the release has no Virtual
+#                              machines section. Needs no provisioning profile.
 #   NOTES_FILE=path            the release notes, plain text
 #   OUT=build/release          where everything goes
 #
@@ -338,6 +342,18 @@ scripts/start_check.sh "$APP/Contents/MacOS/Lumen" "the app's executable" \
   || { echo "error: the kernel does not let this build start: no release" >&2; exit 1; }
 scripts/start_check.sh "$PROFILE_EXECUTABLE" "the profile's executable (LumenProfile)" \
   || { echo "error: the kernel does not let this build's profiles start: no release" >&2; exit 1; }
+# With the virtual machines (VM=1): their helper is in the app, signed with the virtualization right,
+# and the kernel lets it start.
+if [[ "${VM:-0}" == "1" ]]; then
+  VM_HELPER="$APP/Contents/MacOS/LumenVM"
+  [[ -x "$VM_HELPER" ]] || { echo "error: VM=1, but the app has no machines' helper (Contents/MacOS/LumenVM)" >&2; exit 1; }
+  codesign -d --entitlements - --xml "$VM_HELPER" 2>/dev/null | grep -F "com.apple.security.virtualization" >/dev/null \
+    || { echo "error: VM=1, but the machines' helper is not signed with the virtualization right" >&2; exit 1; }
+  "$VM_HELPER" --check \
+    || { echo "error: the machines' helper does not start: no release" >&2; exit 1; }
+  [[ -f "$APP/Contents/Resources/VMGuest/lumen-guest.sh" ]] \
+    || { echo "error: VM=1, but the app has no tools for the machines' macOS (Resources/VMGuest)" >&2; exit 1; }
+fi
 
 # 2. Notarize and staple (an Apple account's notary profile and a Developer ID signature).
 if [[ -n "${NOTARY_PROFILE:-}" && "$SIGN_IDENTITY" != "-" ]]; then

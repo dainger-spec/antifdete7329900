@@ -17,6 +17,11 @@ struct ProxyInspectorView: View {
     var checking = false
     /// The profiles that use it (`ProxyList.identity`).
     var profiles: [ProxyProfileReference] = []
+    /// Its IP is being changed now, and how the last change since unlock went.
+    var changingIP = false
+    var lastIPChange: ProxyListModel.IPChangeReport?
+    /// Nil: it has no IP-change link (or the list cannot be written).
+    var changeIP: (() -> Void)?
     var check: () -> Void = {}
     /// Nil while the list cannot be written.
     var edit: (() -> Void)?
@@ -68,6 +73,9 @@ struct ProxyInspectorView: View {
                         fact(L("inspector.latency"), String(format: L("proxies.latency"), latency))
                     }
                     fact(L("inspector.proxy.origin"), entry.originLine)
+                    if entry.changeIPURL != nil {
+                        fact(L("proxies.ipChange.fact"), L(entry.changesIPOnLaunch ? "proxies.ipChange.fact.onLaunch" : "proxies.ipChange.fact.byHand"))
+                    }
                 }
                 section(L("inspector.proxy.profiles")) {
                     if profiles.isEmpty {
@@ -95,6 +103,43 @@ struct ProxyInspectorView: View {
             }
         }
         .scrollIndicators(.automatic)
+    }
+
+    /// "Changing IP…", or how the last change went: the new IP, or what the provider said.
+    @ViewBuilder private var ipChangeLine: some View {
+        if changingIP {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.mini)
+                Text(L("proxies.ipChange.changing"))
+            }
+            .font(.lumenSecondary)
+            .foregroundStyle(Theme.textSecondary)
+        } else if let change = lastIPChange {
+            Group {
+                if change.accepted {
+                    if let after = change.after {
+                        if let before = change.before, before != after {
+                            Text(String(format: L("proxies.ipChange.changed"), before, after, change.at.shownRelative))
+                        } else if change.before == after {
+                            Text(String(format: L("proxies.ipChange.same"), after, change.at.shownRelative))
+                                .foregroundStyle(Theme.warning)
+                        } else {
+                            Text(String(format: L("proxies.ipChange.changedTo"), after, change.at.shownRelative))
+                        }
+                    } else {
+                        Text(String(format: L("proxies.ipChange.noAnswerYet"), change.at.shownRelative))
+                            .foregroundStyle(Theme.warning)
+                    }
+                } else {
+                    Text(String(format: L("proxies.ipChange.refused"), change.reason.isEmpty ? L("proxies.ipChange.noReason") : change.reason))
+                        .foregroundStyle(Theme.danger)
+                }
+            }
+            .font(.lumenSecondary)
+            .foregroundStyle(Theme.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
+        }
     }
 
     private func head(_ report: ProxyReport) -> some View {
@@ -129,13 +174,22 @@ struct ProxyInspectorView: View {
             HStack(spacing: 8) {
                 Button(L("proxies.menu.check"), action: check)
                     .buttonStyle(.lumenSecondary)
-                    .disabled(checking)
+                    .disabled(checking || changingIP)
+                if let changeIP {
+                    Button(L("proxies.ipChange.action"), action: changeIP)
+                        .buttonStyle(.lumenSecondary)
+                        .disabled(changingIP || checking)
+                }
                 if let edit {
                     Button(L("proxies.edit"), action: edit)
                         .buttonStyle(.lumenGhost)
                 }
             }
             .padding(.top, 14)
+            if changeIP != nil {
+                ipChangeLine
+                    .padding(.top, 8)
+            }
         }
         .padding(.horizontal, 24)
         .padding(.top, 24)

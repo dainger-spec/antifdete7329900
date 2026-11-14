@@ -15,6 +15,10 @@ final class ProxyListModel: ObservableObject {
     /// How many proxies the running check covers, and how many it has finished.
     @Published private(set) var checkedCount = 0
     @Published private(set) var checkTotal = 0
+    /// The proxies whose IP is being changed now (`changeIP`).
+    @Published private(set) var changingIP: Set<UUID> = []
+    /// The last IP change of each proxy since unlock, for the inspector to tell.
+    @Published private(set) var ipChanges: [UUID: IPChangeReport] = [:]
     /// Why the stored list could not be read (damaged, or from a later build). It is then shown
     /// empty and never written, so nothing of it is lost by saving over it.
     let loadError: String?
@@ -22,6 +26,9 @@ final class ProxyListModel: ObservableObject {
     /// An entry's proxy changed — edited, or a check found its type — and the profiles that used it
     /// as it was (`previous`) are to follow (`ProfileRepository.follow`, done by `AppModel`).
     var onEntryChanged: ((ProxyListEntry, ProxySettings) -> Void)?
+    /// An entry's IP was changed (`changeIP`) and the provider took it: the profiles on it say so
+    /// in their journals (done by `AppModel`).
+    var onIPChanged: ((ProxyListEntry, IPChangeReport) -> Void)?
 
     private let vault: UnlockedVault
     private let onError: (String) -> Void
@@ -141,6 +148,110 @@ final class ProxyListModel: ObservableObject {
         ProxyList.exportText(list.entries.filter { ids?.contains($0.id) ?? true })
     }
 
+    // MARK: Changing the IP
+
+    /// How a change of a proxy's IP went.
+    struct IPChangeReport: Equatable {
+        var at: Date
+        var answer: ProxyIPChange.Answer
+        /// The exit IP before (its last working check) and after (the check once it carried traffic
+        /// again); nil when not known.
+        var before: String?
+        var after: String?
+
+        var accepted: Bool { if case .accepted = answer { return true } else { return false } }
+
+        /// What the provider said, or why there was no answer, as a line for the person.
+        var reason: String {
+            switch answer {
+            case .accepted(let message): return message ?? ""
+            case .refused(let status, let message):
+                // 0: refused here, before anything was sent (`open`): no HTTP status to say.
+                let code = status == 0 || (200..<300).contains(status) ? "" : "HTTP \(status)"
+                return [code, message ?? ""].filter { !$0.isEmpty }.joined(separator: ": ")
+            case .unreachable(let message): return message
+            }
+        }
+    }
+
+    /// Sets entry `id`'s IP-change link and whether a launch changes the IP first. Nil when done,
+    /// otherwise what to tell the user.
+    func setIPChange(_ id: UUID, link: URL?, onLaunch: Bool) -> String? {
+        var updated = list
+        do {
+            try updated.setIPChange(id, link: link, onLaunch: onLaunch)
+        } catch {
+            return L("proxies.edit.gone")
+        }
+        guard updated != list else { return nil }
+        return save(updated) ? nil : L("proxies.edit.notSaved")
+    }
+
+    /// Opens entry `id`'s IP-change link (`ProxyIPChange`), then checks the proxy every few
+    /// seconds until it carries traffic again — its modem reconnects — and keeps that check as its
+    /// last: the new exit IP, country and latency. Nil when the entry has no link, or its IP is
+    /// already being changed.
+    @discardableResult
+    func changeIP(_ id: UUID) async -> IPChangeReport? {
+        guard let entry = list.entry(id), let link = entry.changeIPURL, !changingIP.contains(id) else { return nil }
+        changingIP.insert(id)
+        defer { changingIP.remove(id) }
+        let before = entry.lastCheck?.isAlive == true ? entry.lastCheck?.exitIP : nil
+        let answer = await Self.open(link)
+        var after: String?
+        if case .accepted = answer {
+            let begun = Date()
+            while Date().timeIntervalSince(begun) < ProxyIPChange.settleLimit {
+                try? await Task.sleep(nanoseconds: UInt64(ProxyIPChange.settleCheckInterval * 1_000_000_000))
+                guard let current = list.entry(id) else { break }
+                let result = await ProxyChecker.check(current.proxy)
+                guard result.isAlive else { continue }
+                after = result.exitIP
+                // A check of the whole list running over it keeps its own result.
+                if !checking.contains(id) {
+                    var updated = list
+                    let previous = updated.record(result, for: id)
+                    if save(updated), let previous, let changed = list.entry(id) { onEntryChanged?(changed, previous) }
+                }
+                break
+            }
+        }
+        let report = IPChangeReport(at: Date(), answer: answer, before: before, after: after)
+        ipChanges[id] = report
+        if report.accepted, let changed = list.entry(id) { onIPChanged?(changed, report) }
+        // Never the link: it holds the provider's key.
+        let accepted = report.accepted, newIPSeen = after != nil
+        log.notice("IP change of a proxy: accepted \(accepted, privacy: .public), new IP seen \(newIPSeen, privacy: .public)")
+        return report
+    }
+
+    /// Opens `link` from the app — not through the proxy — with nothing of the app on the request
+    /// (`ProxyIPChange.request`), and reads the provider's answer. A redirect is followed only on
+    /// the link's own host (`ProxyIPChange.mayFollowRedirect`); any other is the answer itself.
+    nonisolated static func open(_ link: URL) async -> ProxyIPChange.Answer {
+        // A link kept from before the rule on hosts (this Mac, its local network) is kept in the
+        // list but not opened. Logged by its kind alone: never the link, which holds the key.
+        guard ProxyIPChange.mayOpen(link) else {
+            Logger(subsystem: "PrivacyBrowser", category: "ProxyList")
+                .notice("IP change of a proxy not made: its link is not to a host on the internet")
+            return .refused(status: 0, message: L("proxies.ipChange.localLink"))
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.urlCache = nil
+        configuration.timeoutIntervalForRequest = ProxyIPChange.timeout
+        configuration.timeoutIntervalForResource = ProxyIPChange.timeout
+        let session = URLSession(configuration: configuration, delegate: IPChangeRedirects(link: link), delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+        do {
+            let (data, response) = try await session.data(for: ProxyIPChange.request(for: link))
+            return ProxyIPChange.answer(status: (response as? HTTPURLResponse)?.statusCode ?? 0, body: data)
+        } catch {
+            return .unreachable(error.localizedDescription)
+        }
+    }
+
     // MARK: Checks
 
     /// Checks the proxies `ids` (nil: all of them) through themselves, a few at a time
@@ -215,5 +326,24 @@ final class ProxyListModel: ObservableObject {
             onError(String(format: L("proxies.error.save"), error.localizedDescription))
             return false
         }
+    }
+}
+
+/// The IP-change request's redirects (`ProxyListModel.open`): followed on the link's own host
+/// only. Refused, the redirect's own answer (a 3xx) is what the provider is taken to have said.
+private final class IPChangeRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    let link: URL
+
+    init(link: URL) {
+        self.link = link
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        guard let target = request.url, ProxyIPChange.mayFollowRedirect(from: link, to: target) else {
+            completionHandler(nil)
+            return
+        }
+        completionHandler(request)
     }
 }

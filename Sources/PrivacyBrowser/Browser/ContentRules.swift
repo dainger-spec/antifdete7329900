@@ -29,6 +29,9 @@ enum ContentRules {
     /// What WebKit said when it refused a list (the self-test shows it).
     private(set) static var compileErrors: [String] = []
     private static var preparation: Task<Void, Never>?
+    /// The lists of a warm-up's tab that spares traffic (`WarmUpTrafficSaving`), once compiled.
+    private(set) static var warmUpLists: [WarmUpTrafficSaving: WKContentRuleList] = [:]
+    private static var warmUpPreparation: Task<Void, Never>?
     private static let log = Logger(subsystem: "PrivacyBrowser", category: "ContentRules")
 
     static let identifier = ProxiedContentRules.identifier
@@ -53,6 +56,21 @@ enum ContentRules {
             }
         }
         await preparation?.value
+    }
+
+    /// Compiles the warm-up's lists once per process (cached on disk by the store). A failure
+    /// leaves that saving off: the warm-up then loads everything, and the log says so.
+    static func prepareWarmUp() async {
+        if warmUpLists.count == WarmUpTrafficSaving.allCases.count { return }
+        if warmUpPreparation == nil {
+            warmUpPreparation = Task { @MainActor in
+                WebDataStoreVault.ensureWebKitInitialized()
+                for saving in WarmUpTrafficSaving.allCases {
+                    if let list = await compile(saving.ruleListIdentifier, saving.ruleListJSON) { warmUpLists[saving] = list }
+                }
+            }
+        }
+        await warmUpPreparation?.value
     }
 
     /// One list compiled into the default store (its compiled lists are cached on disk), or, if

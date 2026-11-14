@@ -68,8 +68,13 @@ public struct WarmUpQueue: Equatable, Sendable {
     /// "profile 2 of 5". Entries cancelled before their turn do not count: once the rest is
     /// cancelled, the run going on is the last of the queue. Nil while nothing runs.
     public var position: (number: Int, count: Int)? {
+        current.flatMap { position(of: $0.id) }
+    }
+
+    /// Entry `id`'s place in the queue — "profile 2 of 5" — the cancelled ones not counted.
+    public func position(of id: Int) -> (number: Int, count: Int)? {
         let counted = entries.filter { $0.state != .cancelled }
-        guard let index = counted.firstIndex(where: { $0.state == .running }) else { return nil }
+        guard let index = counted.firstIndex(where: { $0.id == id }) else { return nil }
         return (index + 1, counted.count)
     }
 
@@ -85,10 +90,13 @@ public struct WarmUpQueue: Equatable, Sendable {
         return true
     }
 
-    /// The next waiting entry, now running. Nil when one is already running (one at a time) or
-    /// none is waiting.
-    public mutating func startNext() -> Entry? {
-        guard current == nil, let index = entries.firstIndex(where: { $0.state == .waiting }) else { return nil }
+    /// The entries running now, in the queue's order.
+    public var running: [Entry] { entries.filter { $0.state == .running } }
+
+    /// The next waiting entry, now running. Nil when `limit` already run (one at a time unless the
+    /// person chose more on the queue's sheet) or none is waiting.
+    public mutating func startNext(limit: Int = 1) -> Entry? {
+        guard running.count < max(1, limit), let index = entries.firstIndex(where: { $0.state == .waiting }) else { return nil }
         entries[index].state = .running
         return entries[index]
     }

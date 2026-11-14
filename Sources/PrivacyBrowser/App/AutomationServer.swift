@@ -55,6 +55,14 @@ final class AutomationServer {
         // The loopback address and nothing else: no other machine can reach it.
         parameters.requiredInterfaceType = .loopback
         parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: port)
+        // Kept for a restart on the same port: a new token, the API switched off and on, the vault
+        // locked and unlocked all make a new listener at once, while the old one's cancelling is
+        // still under way and the connections it answered (it closes them first) sit in TIME_WAIT on
+        // this port — without reuse that listener fails "address in use" for up to half a minute.
+        // What it costs: another program of this Mac's user that asks for reuse as well may be let
+        // onto the same port while this one listens (audit APP-02). That program could already
+        // listen there whenever Lumen does not; a WebDriver address carries a profile's token only
+        // (`WebDriverRoute.token`), never the API's.
         parameters.allowLocalEndpointReuse = true
         let listener: NWListener
         do {
@@ -165,11 +173,12 @@ final class AutomationServer {
         }
     }
 
-    /// The WebDriver's sessions (`/wd/…`), on the same listener and under the same token.
+    /// The WebDriver's sessions (`/wd/…`), on the same listener, each profile under a token of its
+    /// own made from the API's (`WebDriverRoute.token`).
     var webDriver: WebDriverService?
 
-    /// A WebDriver request (docs/AUTOMATION.md, "WebDriver"): the token is in the address, the
-    /// answer is the protocol's `{"value": …}`.
+    /// A WebDriver request (docs/AUTOMATION.md, "WebDriver"): the profile's token is in the
+    /// address, the answer is the protocol's `{"value": …}`.
     private func answerWebDriver(_ request: AutomationHTTP.Request, on connection: NWConnection) {
         func reply(_ status: Int, _ body: Data) {
             send(AutomationHTTP.Response(status: status, contentType: "application/json; charset=utf-8", body: body), on: connection)
@@ -182,8 +191,12 @@ final class AutomationServer {
         case .failure(let error):
             reply(error.status, error.body)
         case .success(let parsed):
-            guard AutomationGate.tokenMatches(parsed.token, settings.token), let webDriver else {
-                let refusal = WebDriverError("unknown error", 401, "The token in the address is missing or wrong (…/wd/<token>/<profile>).")
+            // The profile's own token (`WebDriverRoute.token`), for the profile the address names
+            // and no other; the API's token itself is not taken here.
+            guard let webDriver, let profileID = webDriver.profileID(parsed.profile),
+                  WebDriverRoute.tokenMatches(parsed.token, masterToken: settings.token, profile: profileID) else {
+                let refusal = WebDriverError("unknown error", 401,
+                                             "The token in the address is missing or not this profile's (…/wd/<profile's token>/<profile>): copy the profile's WebDriver address again.")
                 Self.log.notice("WebDriver refused a request: \(refusal.status)")
                 reply(refusal.status, refusal.body)
                 return
@@ -249,6 +262,9 @@ final class AutomationHandler {
     var allowsAutomation: () -> Bool = { false }
     /// A saved scenario by its exact name (one), for `{"scenario": "…"}`.
     var savedScenario: (String) -> Scenario? = { _ in nil }
+    /// Makes a profile as the app's New Profile does — the plan's limit and an unreadable index
+    /// refuse it (`AppModel.createProfile`). Nil: no profile can be made here.
+    var createProfile: ((String, ProfileConfiguration) throws -> UUID?)?
 
     init(manager: ProfileManager, repository: ProfileRepository) {
         self.manager = manager
@@ -268,6 +284,31 @@ final class AutomationHandler {
         switch route {
         case .listProfiles:
             return .json(200, repository.list().map(entry))
+        case .create(let request):
+            guard let createProfile else { return .error(503, "not_available", "Profiles cannot be made here.") }
+            let name = request.name ?? ProfileClone.names(for: "Temporary", count: 1, taken: repository.list().map(\.name))[0]
+            let configuration = ProfileConfiguration(proxy: request.proxy, ephemeral: request.ephemeral)
+            let made: UUID?
+            do {
+                made = try createProfile(name, configuration)
+            } catch {
+                return .error(409, "not_created", error.localizedDescription)
+            }
+            guard let id = made, let summary = try? repository.summary(for: id) else {
+                return .error(503, "not_available", "The vault is locked.")
+            }
+            onChange()
+            if request.start {
+                await waitForSync()
+                do {
+                    try await manager.launch(id, openingWindow: request.window)
+                } catch {
+                    // Made, and said so: the profile is there, only its start failed.
+                    return .error(409, "launch_failed", "Profile \(id.uuidString) was made but did not start: \(error.localizedDescription)")
+                }
+                onChange()
+            }
+            return .json(201, entry(summary))
         case .profile(let reference):
             return await profile(reference) { .json(200, self.entry($0)) }
         case .start(let reference, let window):

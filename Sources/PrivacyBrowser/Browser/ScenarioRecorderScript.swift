@@ -1,7 +1,8 @@
 /// The page's side of a scenario's recording (`ScenarioRecorder`): in a world of its own, in the
 /// main frame, it watches what a person does — clicks, what a field ends up holding, Enter — and
 /// says each as a step with a selector that should still find the element tomorrow. Nothing is
-/// watched until the app says a recording is on; a password's text is never sent.
+/// watched until the app says a recording is on; a secret's text — a password, a one-time code, a
+/// card's — is never sent (`isSecret`).
 enum ScenarioRecorderScript {
     /// `handlerName`: the message handler of the recorder's world.
     static func source(handlerName: String) -> String {
@@ -107,6 +108,25 @@ enum ScenarioRecorderScript {
   const isField = (el) => (el instanceof HTMLInputElement
     && !/^(checkbox|radio|button|submit|reset|file|image|range|color|hidden)$/.test(el.type)) || el instanceof HTMLTextAreaElement;
 
+  // A field whose text is a secret, said as one (its text never sent; the scenario's
+  // params.password in its place): a password field, or one that was a password field while the
+  // person was in it — a "show password" button makes it a text field —, and a field whose
+  // autocomplete says a password, a one-time code (inputmode="numeric" ones included) or a
+  // card's number, name, date or code (cc-…). Once a secret, a field stays one for this page.
+  const secrets = new WeakSet();
+  const SECRET_AUTOCOMPLETE = /^(current-password|new-password|one-time-code|cc-.*)$/;
+  const markSecret = (el) => {
+    if (el instanceof HTMLInputElement && String(el.type).toLowerCase() === 'password') { secrets.add(el); }
+  };
+  const isSecret = (el) => {
+    if (!el || typeof el.getAttribute !== 'function') { return false; }
+    markSecret(el);
+    if (secrets.has(el)) { return true; }
+    const tokens = String(el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/);
+    if (tokens.some((token) => SECRET_AUTOCOMPLETE.test(token))) { secrets.add(el); return true; }
+    return false;
+  };
+
   // What a click is on: the link, button or control around the pixel that was hit.
   const CLICKABLE = 'a[href], button, input, select, textarea, label, summary, [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="checkbox"], [onclick]';
   const clicked = (el) => el.closest(CLICKABLE) || el;
@@ -115,7 +135,7 @@ enum ScenarioRecorderScript {
     const field = dirty;
     dirty = null;
     if (!field || !field.isConnected) { return; }
-    const secret = field instanceof HTMLInputElement && field.type === 'password';
+    const secret = isSecret(field);
     const value = secret ? '' : field.value;
     if (!secret && said.get(field) === value) { return; }
     said.set(field, value);
@@ -124,13 +144,18 @@ enum ScenarioRecorderScript {
 
   addEventListener('focusin', (event) => {
     const el = targetOf(event);
-    if (on && el && isField(el)) { held.set(el, el.value !== ''); }
+    if (el && isField(el)) {
+      // Marked whether or not a recording is on: one may begin while the person is in the field.
+      isSecret(el);
+      if (on) { held.set(el, el.value !== ''); }
+    }
   }, true);
 
   addEventListener('input', (event) => {
     if (!on || !event.isTrusted) { return; }
     const el = targetOf(event);
     if (el && isField(el)) {
+      isSecret(el);
       if (dirty && dirty !== el) { flush(); }
       dirty = el;
     }
@@ -142,7 +167,9 @@ enum ScenarioRecorderScript {
     if (!el) { return; }
     if (el instanceof HTMLSelectElement) {
       const option = el.selectedOptions[0];
-      post({ type: 'note', value: 'select ' + selectorOf(el) + ': ' + (option ? option.label : '') });
+      // A card's month or year chosen in a list is the card's too: which one, not what.
+      const label = isSecret(el) ? '•••' : (option ? option.label : '');
+      post({ type: 'note', value: 'select ' + selectorOf(el) + ': ' + label });
     } else if (el === dirty) {
       flush();
     }

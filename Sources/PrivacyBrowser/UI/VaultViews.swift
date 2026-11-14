@@ -1,4 +1,5 @@
 import AppKit
+import BrowserCore
 import SwiftUI
 
 /// The lock screen's backdrop: the window's black and, with the light on (Settings → Appearance),
@@ -297,21 +298,10 @@ struct LockNote: View {
     }
 }
 
-/// How strong a new master password looks: four steps, from its length and the kinds of
-/// characters in it. A rough guide shown as the person types; the rule that decides is the
-/// length (10 at least).
+/// How strong a new master password looks: four steps (`MasterPasswordStrength`, BrowserCore),
+/// shown as the person types. A new password must be at least 10 characters and at least "fair".
 enum PasswordStrength {
-    static func score(_ password: String) -> Int {
-        guard !password.isEmpty else { return 0 }
-        let kinds = [password.contains { $0.isLowercase }, password.contains { $0.isUppercase },
-                     password.contains { $0.isNumber }, password.contains { !$0.isLetter && !$0.isNumber }]
-            .filter { $0 }.count
-        var score = password.count >= 10 ? 1 : 0
-        if password.count >= 14 { score += 1 }
-        if password.count >= 20 { score += 1 }
-        if kinds >= 3 { score += 1 }
-        return min(max(score, 1), 4)
-    }
+    static func score(_ password: String) -> Int { MasterPasswordStrength.score(password) }
 
     static func word(_ score: Int) -> String {
         switch score {
@@ -332,7 +322,8 @@ struct SetupView: View {
     /// what was written down is then another password.
     @State private var writtenDown = false
 
-    private var longEnough: Bool { password.count >= 10 }
+    private var longEnough: Bool { MasterPasswordStrength.isLongEnough(password) }
+    private var strongEnough: Bool { MasterPasswordStrength.isStrongEnough(password) }
     private var matches: Bool { !confirmation.isEmpty && password == confirmation }
 
     var body: some View {
@@ -360,6 +351,7 @@ struct SetupView: View {
                     .padding(.top, 20)
                 VStack(alignment: .leading, spacing: 6) {
                     PasswordRequirement(text: L("setup.req.length"), met: longEnough, shown: !password.isEmpty)
+                    PasswordRequirement(text: L("setup.req.strength"), met: strongEnough, shown: !password.isEmpty)
                     PasswordRequirement(text: L("setup.req.match"), met: matches, shown: !confirmation.isEmpty)
                 }
                 .padding(.top, 14)
@@ -372,7 +364,7 @@ struct SetupView: View {
                 .toggleStyle(.lumenCheckbox)
                 .padding(.top, 22)
                 LockActionButton(title: L("setup.action.create"), working: model.isWorking,
-                                 workingTitle: L("setup.working"), enabled: longEnough && matches && writtenDown,
+                                 workingTitle: L("setup.working"), enabled: longEnough && strongEnough && matches && writtenDown,
                                  action: create)
                     .keyboardShortcut(.defaultAction)
                     .padding(.top, 22)
@@ -395,7 +387,7 @@ struct SetupView: View {
     }
 
     private func create() {
-        guard longEnough, matches, writtenDown, !model.isWorking else { return }
+        guard longEnough, strongEnough, matches, writtenDown, !model.isWorking else { return }
         Task { await model.createVault(password: password) }
     }
 }
@@ -612,9 +604,10 @@ struct ChangePasswordView: View {
     /// A change is on its way: a second click does not start another.
     @State private var changing = false
 
-    private var longEnough: Bool { new.count >= 10 }
+    private var longEnough: Bool { MasterPasswordStrength.isLongEnough(new) }
+    private var strongEnough: Bool { MasterPasswordStrength.isStrongEnough(new) }
     private var matches: Bool { !confirmation.isEmpty && new == confirmation }
-    private var canChange: Bool { !current.isEmpty && longEnough && matches && !changing }
+    private var canChange: Bool { !current.isEmpty && longEnough && strongEnough && matches && !changing }
 
     // The lock screen's fields (the design's), with Caps Lock said and the eye to show what was
     // typed; the new password's strength and requirements as at the first launch. Return presses
@@ -638,6 +631,7 @@ struct ChangePasswordView: View {
                         .padding(.top, 18)
                     VStack(alignment: .leading, spacing: 6) {
                         PasswordRequirement(text: L("setup.req.length"), met: longEnough, shown: !new.isEmpty)
+                        PasswordRequirement(text: L("setup.req.strength"), met: strongEnough, shown: !new.isEmpty)
                         PasswordRequirement(text: L("setup.req.match"), met: matches, shown: !confirmation.isEmpty)
                     }
                     .padding(.top, 12)

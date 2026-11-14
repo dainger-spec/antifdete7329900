@@ -45,6 +45,8 @@ private struct WarmUpPanel: View {
     @State private var starting = false
     /// After a run: its pages instead of the sites it left cookies on.
     @State private var showingPages = false
+    /// The person's own lists, read from the vault when the screen opens.
+    @State private var templates: [WarmUpTemplate] = []
 
     private var countryCode: String? { model.details[profile.id]?.exitCountryCode }
     private var status: WarmUpStatus? { manager.warmUpStatus(of: profile.id) }
@@ -59,7 +61,8 @@ private struct WarmUpPanel: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         unreadableNotice
-                        WarmUpPlanChooser(choice: $choice, manualPlan: $manualPlan, plan: plan, countryCode: countryCode)
+                        WarmUpPlanChooser(choice: $choice, manualPlan: $manualPlan, plan: plan, countryCode: countryCode,
+                                          templates: templates, onSaveTemplate: saveTemplate)
                             .disabled(isRunning || starting)
                         scheduleSection
                     }
@@ -92,6 +95,9 @@ private struct WarmUpPanel: View {
         .onAppear {
             guard !loaded else { return }
             loaded = true
+            if let vault = model.unlockedVaultForAccount {
+                templates = (try? WarmUpTemplates.load(from: vault))?.templates ?? []
+            }
             let (saved, unreadable) = model.warmUpPlan(for: profile.id)
             planUnreadable = unreadable
             manualPlan = saved
@@ -105,7 +111,18 @@ private struct WarmUpPanel: View {
     /// at Start, so that what the screen says — the pages, the estimate — is what runs.
     private func rebuild() {
         guard choice.source != .manual else { return }
-        builtPlan = choice.plan(countryCode: countryCode, composedName: L("warmup.source.composed")) ?? WarmUpPlan()
+        builtPlan = choice.plan(countryCode: countryCode, composedName: L("warmup.source.composed"), templates: templates) ?? WarmUpPlan()
+    }
+
+    /// The hand-written list kept as one of "My templates" (sealed in the vault, this Mac's).
+    private func saveTemplate(_ name: String) -> Bool {
+        guard let vault = model.unlockedVaultForAccount,
+              let template = WarmUpTemplate(name: name, typedAddresses: manualPlan.addresses, typedSearches: manualPlan.searchQuery)
+        else { return false }
+        var stored = (try? WarmUpTemplates.load(from: vault)) ?? WarmUpTemplates()
+        guard stored.save(template), (try? stored.save(to: vault)) != nil else { return false }
+        templates = stored.templates
+        return true
     }
 
     /// The plan to run or repeat, built here rather than read back from the screen's state, which
@@ -116,7 +133,7 @@ private struct WarmUpPanel: View {
             manualPlan = manualPlan.normalized
             plan = manualPlan
         } else {
-            plan = choice.plan(countryCode: countryCode, composedName: L("warmup.source.composed")) ?? WarmUpPlan()
+            plan = choice.plan(countryCode: countryCode, composedName: L("warmup.source.composed"), templates: templates) ?? WarmUpPlan()
             builtPlan = plan
         }
         plan.choice = choice
@@ -321,6 +338,7 @@ private struct WarmUpPanel: View {
             else { Image(systemName: "minus.circle").foregroundStyle(.secondary) }
         case .loaded?: Image(systemName: "checkmark.circle").foregroundStyle(Theme.running)
         case .timedOut?: Image(systemName: "clock").foregroundStyle(Theme.warning)
+        case .dialog?: Image(systemName: "exclamationmark.bubble").foregroundStyle(Theme.warning)
         case .failed?: Image(systemName: "xmark.circle").foregroundStyle(Theme.danger)
         }
     }
@@ -332,6 +350,8 @@ private struct WarmUpPanel: View {
         case .timedOut?: parts.append(L("warmup.visit.timedOut"))
         default: break
         }
+        if visit.typedSearch { parts.append(L("warmup.visit.typed")) }
+        if visit.consentsAccepted > 0 { parts.append(L("warmup.visit.consent")) }
         if visit.dwell > 0 { parts.append(String(format: L("warmup.visit.stayed"), Int(visit.dwell.rounded()), visit.scrolls)) }
         if let followed = visit.followed {
             let outcome: String
@@ -348,6 +368,9 @@ private struct WarmUpPanel: View {
     @ViewBuilder private var footerStatus: some View {
         if starting {
             Text(L("warmup.status.starting")).font(.lumenSecondary)
+        } else if let status, status.isRunning, status.stopReason == "waitingForTab" {
+            Label(L("warmup.status.waitingForTab"), systemImage: "pause.circle")
+                .font(.lumenSecondary).foregroundStyle(Theme.warning)
         } else if let status, status.isRunning {
             Text(String(format: L("warmup.status.running"), status.currentPage, status.total))
                 .font(.lumenSecondary).monospacedDigit()
@@ -357,6 +380,11 @@ private struct WarmUpPanel: View {
         } else if let status, status.phase == .finished {
             Label(String(format: L("warmup.status.finished"), status.visited, status.failed), systemImage: "checkmark.circle")
                 .font(.lumenSecondary).foregroundStyle(Theme.running)
+        } else if let status, status.phase == .stopped, let reason = status.stopReason, reason != "byUser" {
+            // Why it stopped, in words: the tab closed, the profile stopped, a page waits for an answer.
+            Label(L("warmup.status." + reason), systemImage: "exclamationmark.circle")
+                .font(.lumenSecondary).foregroundStyle(Theme.warning)
+                .lineLimit(2)
         } else if let status, status.phase == .stopped, status.visited > 0 {
             Label(L("warmup.status.stopped"), systemImage: "stop.circle")
                 .font(.lumenSecondary).foregroundStyle(Theme.textSecondary)
@@ -390,6 +418,15 @@ struct WarmUpPlanChooser: View {
     /// The country the profile's proxy exits in; nil when it is unknown, or for several profiles.
     let countryCode: String?
     var forSeveralProfiles = false
+    /// The person's own lists (`WarmUpTemplate`), shown first as "My templates".
+    var templates: [WarmUpTemplate] = []
+    /// Saves the hand-written list under a name as one of "My templates"; nil where not offered
+    /// (several profiles). True when it was saved.
+    var onSaveTemplate: ((String) -> Bool)?
+    @State private var templateName = ""
+    @State private var templateSaved = false
+    /// What every warm-up's tab leaves out (`WarmUpCoordinator.trafficSaving`: one setting for all runs).
+    @State private var trafficSaving = WarmUpCoordinator.trafficSaving
 
     private var reading: (pages: [WarmUpPlan.Page], problems: [WarmUpPlan.Problem]) { plan.pages() }
 
@@ -409,24 +446,103 @@ struct WarmUpPlanChooser: View {
         }
     }
 
+    /// The ready-made lists: the person's own first, then the everyday and interest lists as cards
+    /// (what each is, how many sites, a few of them), then the countries as flags — the one the
+    /// profile's proxy exits in first.
     private var presetChooser: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(WarmUpPreset.Group.allCases, id: \.self) { group in
-                let presets = WarmUpPresets.all.filter { $0.group == group }
-                if !presets.isEmpty {
-                    Text(L("warmup.group." + group.rawValue)).font(.lumenLabel).foregroundStyle(Theme.textSecondary)
-                    FlowRows(items: presets.map(\.id)) { id in
-                        if let preset = WarmUpPresets.preset(id: id) {
-                            presetChip(preset)
-                        }
-                    }
+        VStack(alignment: .leading, spacing: 10) {
+            if !templates.isEmpty {
+                groupTitle(.user)
+                FlowRows(items: templates.map(\.presetID)) { id in
+                    if let template = templates.first(where: { $0.presetID == id }) { presetChip(template.preset) }
                 }
             }
-            if let preset = WarmUpPresets.preset(id: choice.presetID) {
+            ForEach([WarmUpPreset.Group.general, .interest], id: \.self) { group in
+                groupTitle(group)
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                    ForEach(WarmUpPresets.all.filter { $0.group == group }, id: \.id) { preset in presetCard(preset) }
+                }
+            }
+            groupTitle(.country)
+            FlowRows(items: countryPresetIDs) { id in
+                if let preset = WarmUpPresets.preset(id: id) { presetChip(preset) }
+            }
+            if let preset = WarmUpPresets.preset(id: choice.presetID) ?? templates.first(where: { $0.presetID == choice.presetID })?.preset {
                 Text(WarmUpFormat.sites(of: preset)).font(.caption).foregroundStyle(Theme.textTertiary)
                     .lineLimit(3).fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    private func groupTitle(_ group: WarmUpPreset.Group) -> some View {
+        Text(L("warmup.group." + group.rawValue)).font(.lumenLabel).foregroundStyle(Theme.textSecondary)
+            .padding(.top, 2)
+    }
+
+    /// The countries, the profile's own first.
+    private var countryPresetIDs: [String] {
+        let ids = WarmUpPresets.all.filter { $0.group == .country }.map(\.id)
+        guard let own = countryCode?.lowercased(), ids.contains(own) else { return ids }
+        return [own] + ids.filter { $0 != own }
+    }
+
+    /// A list as a card: its symbol and name, how many sites, two of them.
+    private func presetCard(_ preset: WarmUpPreset) -> some View {
+        let selected = choice.presetID == preset.id
+        return Button { choice.presetID = preset.id } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Image(systemName: Self.symbol(for: preset.id))
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 16)
+                    Text(WarmUpFormat.name(of: preset)).font(.lumenLabel).lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                Text(String(format: L("warmup.card.sites"), preset.addresses.count))
+                    .font(.caption)
+                    .opacity(0.7)
+                Text(preset.addresses.prefix(2).map(Self.shortName).joined(separator: " · "))
+                    .font(.caption)
+                    .lineLimit(1)
+                    .opacity(0.6)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(selected ? Theme.accentFill : Theme.controlFill))
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .strokeBorder(selected ? Color.clear : Theme.hairline, lineWidth: 1))
+            .foregroundStyle(selected ? Theme.backdrop : Theme.textPrimary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    static func symbol(for id: String) -> String {
+        switch id {
+        case "general": return "sun.max"
+        case "light": return "bolt"
+        case "shopping": return "bag"
+        case "media": return "newspaper"
+        case "work": return "briefcase"
+        case "social": return "bubble.left.and.bubble.right"
+        case "video": return "play.rectangle"
+        case "travel": return "airplane"
+        case "finance": return "chart.line.uptrend.xyaxis"
+        case "games": return "gamecontroller"
+        case "tech": return "cpu"
+        case "food": return "fork.knife"
+        case "sports": return "sportscourt"
+        default: return "globe"
+        }
+    }
+
+    /// "wikipedia.org" for "https://www.wikipedia.org/".
+    static func shortName(_ address: String) -> String {
+        var text = address
+        for prefix in ["https://", "http://", "www."] where text.hasPrefix(prefix) { text.removeFirst(prefix.count) }
+        if let slash = text.firstIndex(of: "/") { text = String(text[..<slash]) }
+        return text
     }
 
     private func presetChip(_ preset: WarmUpPreset) -> some View {
@@ -434,6 +550,7 @@ struct WarmUpPlanChooser: View {
         return Button { choice.presetID = preset.id } label: {
             HStack(spacing: 5) {
                 if preset.group == .country { CountryFlag(code: preset.id, size: 12) }
+                if preset.group == .user { Image(systemName: "person.crop.square").font(.system(size: 11)) }
                 Text(WarmUpFormat.name(of: preset)).font(.lumenSecondary)
             }
             .padding(.horizontal, 9)
@@ -530,6 +647,20 @@ struct WarmUpPlanChooser: View {
                     .font(.caption).foregroundStyle(Theme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L("warmup.traffic")).font(.lumenLabel).foregroundStyle(Theme.textSecondary)
+                LumenSegmented(selection: $trafficSaving, options: [
+                    (value: nil, title: L("warmup.traffic.all")),
+                    (value: .media, title: L("warmup.traffic.media")),
+                    (value: .mediaAndImages, title: L("warmup.traffic.mediaAndImages")),
+                ])
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(L("warmup.traffic"))
+                .onChange(of: trafficSaving) { _, value in WarmUpCoordinator.trafficSaving = value }
+                Text(L("warmup.traffic.detail"))
+                    .font(.caption).foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -571,6 +702,23 @@ struct WarmUpPlanChooser: View {
                 .toggleStyle(.lumenSwitch).controlSize(.small)
             Toggle(L("warmup.followLinks"), isOn: $manualPlan.followLinks)
                 .toggleStyle(.lumenSwitch).controlSize(.small)
+            if let onSaveTemplate {
+                HStack(spacing: 8) {
+                    TextField(L("warmup.template.name"), text: $templateName, prompt: Text(verbatim: ""))
+                        .lumenField(L("warmup.template.name"), isEmpty: templateName.isEmpty)
+                    Button(L("warmup.template.save")) {
+                        templateSaved = onSaveTemplate(templateName)
+                        if templateSaved { templateName = "" }
+                    }
+                    .buttonStyle(.lumenSecondary)
+                    .fixedSize()
+                    .disabled(templateName.trimmingCharacters(in: .whitespaces).isEmpty || reading.pages.isEmpty)
+                }
+                if templateSaved {
+                    Label(L("warmup.template.saved"), systemImage: "checkmark.circle")
+                        .font(.caption).foregroundStyle(Theme.running)
+                }
+            }
             Text(L("warmup.note")).font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }

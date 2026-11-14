@@ -246,7 +246,7 @@ struct ProxyListPanel: View {
     /// Add one, Assign, Edit, Export and Delete: each also in a proxy's own menu (a right click),
     /// and Delete on the Delete key.
     private var moreMenu: some View {
-        Menu {
+        MoreMenu {
             Button(L("proxies.add")) { adding = true }
                 .disabled(proxies.loadError != nil)
             Button(L("proxies.assign")) {
@@ -261,15 +261,7 @@ struct ProxyListPanel: View {
             Divider()
             Button(L("proxies.delete"), role: .destructive) { confirmingDelete = true }
                 .disabled(selectedVisible.isEmpty)
-        } label: {
-            Image(systemName: "ellipsis")
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .tint(Theme.textSecondary)
-        .fixedSize()
-        .frame(width: 30, height: 30)
-        .hoverHighlight(cornerRadius: Theme.controlRadius)
         .help(L("profiles.menu.more"))
         .accessibilityLabel(L("profiles.menu.more"))
     }
@@ -343,6 +335,10 @@ struct ProxyListPanel: View {
         if ids.count == 1, let id = ids.first {
             Button(L("proxies.menu.edit")) { editing = proxies.list.entry(id) }
                 .disabled(proxies.loadError != nil)
+            if proxies.list.entry(id)?.changeIPURL != nil {
+                Button(L("proxies.ipChange.action")) { Task { await proxies.changeIP(id) } }
+                    .disabled(proxies.changingIP.contains(id) || proxies.loadError != nil)
+            }
         }
         Button(L("proxies.menu.assign")) {
             assigning = ProxyAssignView.Request(profileIDs: [], proxyIDs: ids)
@@ -367,6 +363,9 @@ struct ProxyListPanel: View {
             if let entry = single {
                 ProxyInspectorView(entry: entry, checking: proxies.checking.contains(entry.id),
                                    profiles: profilesUsing[ProxyList.identity(of: entry.proxy)] ?? [],
+                                   changingIP: proxies.changingIP.contains(entry.id),
+                                   lastIPChange: proxies.ipChanges[entry.id],
+                                   changeIP: entry.changeIPURL == nil || proxies.loadError != nil ? nil : { Task { await proxies.changeIP(entry.id) } },
                                    check: { proxies.check([entry.id]) },
                                    edit: proxies.loadError == nil ? { editing = entry } : nil,
                                    assign: { assigning = ProxyAssignView.Request(profileIDs: [], proxyIDs: [entry.id]) })
@@ -721,6 +720,9 @@ struct ProxyEditView: View {
     @State private var line: ProxyLine
     @State private var checking = false
     @State private var error: String?
+    /// The provider's IP-change link as typed, and whether a launch changes the IP first.
+    @State private var changeLink: String
+    @State private var changesOnLaunch: Bool
 
     /// `line`: what the field starts with (the screenshots' samples); by default the entry's proxy.
     init(proxies: ProxyListModel, entry: ProxyListEntry?, profileCount: Int, line: ProxyLine? = nil,
@@ -731,6 +733,16 @@ struct ProxyEditView: View {
         self.onAdded = onAdded
         _label = State(initialValue: entry?.label ?? "")
         _line = State(initialValue: line ?? entry.map { ProxyLine(proxy: $0.proxy, kindKnown: $0.kindKnown) } ?? ProxyLine())
+        _changeLink = State(initialValue: entry?.changeIPURL?.absoluteString ?? "")
+        _changesOnLaunch = State(initialValue: entry?.changesIPOnLaunch ?? false)
+    }
+
+    /// The link typed, or — the field empty — one pasted with the proxy (`[https://…]` after it).
+    private var linkText: String {
+        let typed = changeLink.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !typed.isEmpty { return typed }
+        if case .proxy(let read) = line.field, let link = read.changeIPURL { return link.absoluteString }
+        return ""
     }
 
     var body: some View {
@@ -745,6 +757,19 @@ struct ProxyEditView: View {
                 EditorField(L("proxies.edit.proxy")) {
                     ProxyLineField(line: $line, checking: checking, onCheck: check)
                 }
+                // Mobile proxies: the provider's link that gives the modem a new IP.
+                EditorField(L("proxies.ipChange.link")) {
+                    TextField(L("proxies.ipChange.link"), text: $changeLink, prompt: Text(verbatim: ""))
+                        .lumenField(linkText.isEmpty ? L("proxies.ipChange.link.placeholder") : linkText, isEmpty: changeLink.isEmpty)
+                        .autocorrectionDisabled()
+                    // Where the link is opened from: this Mac's own connection, not the proxy.
+                    Text(L("proxies.ipChange.link.note"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                EditorToggle(L("proxies.ipChange.onLaunch"), detail: L("proxies.ipChange.onLaunch.detail"), isOn: $changesOnLaunch)
+                    .disabled(linkText.isEmpty)
                 if profileCount > 0 {
                     Text(String(format: L("proxies.edit.profiles"), profileCount))
                         .font(.lumenSecondary)
@@ -824,21 +849,39 @@ struct ProxyEditView: View {
             proxy = read
             kindKnown = false
         }
+        // The IP-change link, read before anything is saved: a link that is not one is said.
+        let link: URL?
+        if linkText.isEmpty {
+            link = nil
+        } else if let read = ProxyIPChange.link(from: linkText) {
+            link = read
+        } else {
+            error = L("proxies.ipChange.badLink")
+            return
+        }
         // A check from here, of the proxy as it is now, is its last check.
         let check = line.currentCheck?.result
         let name = label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? lineLabel : label
+        let id: UUID
         if let entry {
             if let problem = proxies.update(entry.id, label: name, proxy: proxy, kindKnown: kindKnown, check: check) {
                 error = problem
                 return
             }
+            id = entry.id
         } else {
             switch proxies.addOne(label: name, proxy: proxy, kindKnown: kindKnown, check: check) {
-            case .added(let id): onAdded(id)
+            case .added(let added):
+                id = added
+                onAdded(added)
             case .failed(let problem):
                 error = problem
                 return
             }
+        }
+        if let problem = proxies.setIPChange(id, link: link, onLaunch: changesOnLaunch) {
+            error = problem
+            return
         }
         dismiss()
     }

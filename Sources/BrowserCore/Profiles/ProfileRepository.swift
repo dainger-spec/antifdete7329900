@@ -83,6 +83,12 @@ struct ProfileIndex: Codable, Equatable {
 ///                                  (this device only)
 /// profiles/<uuid>/warmup-schedule.bin AEAD(warmUpScheduleKey, WarmUpSchedule JSON): "warm up every
 ///                                  N hours" and when it last ran (this device only, not exported)
+/// profiles/<uuid>/warmup-last.bin AEAD(warmUpRecordKey, WarmUpRecord JSON): how the last warm-up
+///                                  went (this device only, not exported)
+/// profiles/<uuid>/journal.bin      AEAD(journalKey, ProfileJournal JSON): what happened to the
+///                                  profile (this device only, not exported)
+/// profiles/<uuid>/restore-points/<p>/ copies of the profile's browsing state as it was, still
+///                                  encrypted, and point.bin (`RestorePoint`; this device only)
 /// profiles/<uuid>/key.bin          AEAD(indexKey, ProfileKeyCopy JSON): the profile's wrapped key, name
 ///                                  and creation date, as the index has them (`takeInProfilesFromKeyCopies`)
 /// ```
@@ -649,6 +655,27 @@ public final class ProfileRepository: @unchecked Sendable {
     /// never written over (R1b).
     public func saveWarmUpSchedule(_ schedule: WarmUpSchedule, for id: UUID) throws {
         try warmUpScheduleFile(for: id).save(schedule)
+    }
+
+    // MARK: Last warm-up (this Mac only)
+
+    func warmUpRecordURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("warmup-last.bin") }
+
+    func warmUpRecordFile(for id: UUID) throws -> EncryptedDocumentFile<WarmUpRecord> {
+        EncryptedDocumentFile(url: warmUpRecordURL(for: id),
+                              key: try profileKey(for: id).derive(info: "warm-up-last", salt: id.rawBytes),
+                              aad: "warm-up-last:v1:\(id.uuidString)")
+    }
+
+    /// How the profile's last warm-up went (`WarmUpRecord`), or nil when it was never warmed.
+    public func warmUpRecord(for id: UUID) throws -> WarmUpRecord? {
+        try warmUpRecordFile(for: id).load()
+    }
+
+    /// A record that cannot be read is moved aside as `warmup-last.bin.unreadable`, never written
+    /// over (R1b).
+    public func saveWarmUpRecord(_ record: WarmUpRecord, for id: UUID) throws {
+        try warmUpRecordFile(for: id).save(record)
     }
 
     // MARK: Open tabs (this Mac only)

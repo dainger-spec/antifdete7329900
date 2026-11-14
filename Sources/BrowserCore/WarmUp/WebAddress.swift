@@ -31,6 +31,26 @@ public enum SearchEngine: String, Codable, CaseIterable, Sendable {
         case .yandex: return "https://yandex.ru/search/?text="
         }
     }
+
+    /// Its own page with the search box, where a person types a search — and the warm-up robot
+    /// does, now and then (`WarmUpTiming.typedSearchShare`).
+    public var homeURL: URL {
+        switch self {
+        case .duckDuckGo: return URL(string: "https://duckduckgo.com/")!
+        case .google: return URL(string: "https://www.google.com/")!
+        case .bing: return URL(string: "https://www.bing.com/")!
+        case .yahoo: return URL(string: "https://search.yahoo.com/")!
+        case .ecosia: return URL(string: "https://www.ecosia.org/")!
+        case .yandex: return URL(string: "https://ya.ru/")!
+        }
+    }
+
+    /// The engine whose results page `url` is (`searchURLTemplate`); nil for any other address.
+    public init?(resultsURL url: URL) {
+        let text = url.absoluteString
+        guard let engine = Self.allCases.first(where: { text.hasPrefix($0.searchURLTemplate) }) else { return nil }
+        self = engine
+    }
 }
 
 /// What the address bar (and the warm-up robot) makes of typed text: a web address, or a search.

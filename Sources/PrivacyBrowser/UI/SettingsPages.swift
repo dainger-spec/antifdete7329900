@@ -26,6 +26,50 @@ struct AppearanceSettings: View {
             SettingRow(L("settings.appearance.animations"), detail: L("settings.appearance.animations.detail"), effect: .now) {
                 SettingSwitch(isOn: $appearance.animations, label: L("settings.appearance.animations"))
             }
+            SettingRow(L("settings.appearance.countryBackdrop"), detail: L("settings.appearance.countryBackdrop.detail"), effect: .now) {
+                SettingSwitch(isOn: $appearance.countryBackdrop, label: L("settings.appearance.countryBackdrop"))
+            }
+            CountryBackdropSample(on: appearance.countryBackdrop)
+                .padding(.top, 4)
+        }
+    }
+}
+
+/// Two rows of the profile list in miniature, with the country's flag behind them or without:
+/// what the switch above changes, seen before choosing.
+private struct CountryBackdropSample: View {
+    let on: Bool
+
+    var body: some View {
+        VStack(spacing: 6) {
+            row(code: "DE", name: L("settings.appearance.countryBackdrop.sample1"))
+            row(code: "US", name: L("settings.appearance.countryBackdrop.sample2"))
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous).fill(Theme.backdrop))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous).stroke(Theme.hairline, lineWidth: 1))
+        .animation(Motion.toggle, value: on)
+        .accessibilityHidden(true)
+    }
+
+    private func row(code: String, name: String) -> some View {
+        HStack(spacing: 10) {
+            Circle().fill(Theme.raisedInset).frame(width: 24, height: 24)
+                .overlay(Text(verbatim: String(name.prefix(1))).font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.textSecondary))
+            Text(verbatim: name).font(.lumenLabel).foregroundStyle(Theme.textPrimary)
+                .shadow(color: on ? Color.black.opacity(0.6) : .clear, radius: 2.5, y: 1)
+            Spacer(minLength: 12)
+            CountryFlag(code: code, size: 14)
+            Text(verbatim: CountryNames.name(for: code)).font(.lumenSecondary).foregroundStyle(Theme.textSecondary)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 40)
+        .background(alignment: .leading) {
+            if on {
+                CountryBackdrop(code: code)
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .transition(.opacity)
+            }
         }
     }
 }

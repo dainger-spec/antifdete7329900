@@ -24,6 +24,13 @@
 #                                   # gets the app group, the one keychain entitlement an ad hoc
 #                                   # signature can carry, so CI sees profiles started without it
 #
+#   VM=1 SANDBOX=0 scripts/build-app.sh   # with the virtual machines (docs/VM.md): their helper,
+#                                   # Contents/MacOS/LumenVM, signed with Apple's virtualization
+#                                   # right and nothing else, and the guest's tools in Resources.
+#                                   # Without it the app has no Virtual machines section.
+#   VM=check scripts/build-app.sh   # builds the helper and starts it once, for CI; the app is as
+#                                   # without it
+#
 # A profile's process — and every process that runs Safari's code — is started from
 # Contents/MacOS/LumenProfile, a copy of the executable signed with the base entitlements and library
 # validation off: never the app's application identifier, app group or network extension rights,
@@ -54,6 +61,7 @@ APP_DIR="${APP_DIR:-build}"
 APP="$APP_DIR/Lumen.app"
 NE="${NE:-0}"
 CAM="${CAM:-0}"
+VM="${VM:-0}"
 EXTENSION_ID="${EXTENSION_ID:-$BUNDLE_ID.PacketTunnel}"
 if [[ "$NE" == "1" ]]; then
   : "${TEAM_ID:?NE=1 needs TEAM_ID (your Apple Developer team)}"
@@ -328,6 +336,36 @@ if [[ "$CAM" == "1" || "$CAM" == "check" ]]; then
   fi
 fi
 
+# The virtual machines' helper (docs/VM.md). The one executable that holds Apple's virtualization
+# right (com.apple.security.virtualization) and loads Virtualization.framework: the app's own
+# executable and LumenProfile are signed as without it. VM=1 puts it beside them, with the tools
+# the base system's macOS gets (Resources/VMGuest); VM=check builds it and starts it once.
+VM_HELPER=""
+if [[ "$VM" == "1" || "$VM" == "check" ]]; then
+  swift build -c "$CONFIG" --product LumenVM
+  # Started, and able to say so: a helper that does not load is found here, not at a person's click.
+  "$BIN_DIR/LumenVM" --check
+  plutil -lint Resources/LumenVM.entitlements >/dev/null
+  plutil -lint Resources/VMGuest/io.lumenbrowser.guest.plist >/dev/null
+  for script in "Resources/VMGuest/Install Lumen Tools.command" Resources/VMGuest/install.sh Resources/VMGuest/lumen-guest.sh; do
+    /bin/sh -n "$script" || { echo "error: $script does not parse" >&2; exit 1; }
+  done
+  # The right, and nothing beside it: a helper that could reach a keychain, or be debugged, or
+  # load other code, would be more than what runs a machine.
+  [[ "$(/usr/libexec/PlistBuddy -c 'Print' Resources/LumenVM.entitlements | grep -c ' = ')" == "1" ]] \
+    && /usr/libexec/PlistBuddy -c 'Print :com.apple.security.virtualization' Resources/LumenVM.entitlements >/dev/null 2>&1 \
+    || { echo "error: Resources/LumenVM.entitlements must hold com.apple.security.virtualization alone" >&2; exit 1; }
+  if [[ "$VM" == "1" ]]; then
+    [[ "$SANDBOX" != "1" ]] || { echo "error: VM=1 needs SANDBOX=0 (a sandboxed app's helper cannot reach the machines' disks)" >&2; exit 1; }
+    VM_HELPER="$APP/Contents/MacOS/LumenVM"
+    cp "$BIN_DIR/LumenVM" "$VM_HELPER"
+    mkdir -p "$APP/Contents/Resources/VMGuest"
+    cp Resources/VMGuest/* "$APP/Contents/Resources/VMGuest/"
+    chmod 755 "$APP/Contents/Resources/VMGuest/Install Lumen Tools.command" "$APP/Contents/Resources/VMGuest/install.sh" \
+      "$APP/Contents/Resources/VMGuest/lumen-guest.sh"
+  fi
+fi
+
 # DEBUGGABLE=1 adds get-task-allow so lldb can attach. Under the hardened runtime a signature
 # without it refuses the debugger ("Not allowed to attach to process"), and hosting Safari's chrome
 # is debugged by stopping inside Safari's own code. Never for a build that goes anywhere.
@@ -360,11 +398,32 @@ codesign --force --options runtime "$TIMESTAMP" --sign "$SIGN_IDENTITY" "$HELPER
 codesign --force --options runtime "$TIMESTAMP" --identifier "$BUNDLE_ID" \
   --entitlements "$PROFILE_ENTITLEMENTS" \
   --sign "$SIGN_IDENTITY" "$PROFILE_EXECUTABLE"
+# The machines' helper: under a name of its own (the network guard takes it for no profile), with
+# the virtualization right alone.
+if [[ -n "$VM_HELPER" ]]; then
+  codesign --force --options runtime "$TIMESTAMP" --identifier "$BUNDLE_ID.VirtualMachine" \
+    --entitlements Resources/LumenVM.entitlements \
+    --sign "$SIGN_IDENTITY" "$VM_HELPER"
+fi
 codesign --force --options runtime "$TIMESTAMP" \
   --entitlements "$ENTITLEMENTS" \
   --sign "$SIGN_IDENTITY" "$APP"
 codesign --verify --strict --deep "$APP"
 codesign --verify --strict "$PROFILE_EXECUTABLE"
+if [[ -n "$VM_HELPER" ]]; then
+  codesign --verify --strict "$VM_HELPER"
+  # Read back from its signature: the right is there, and no keychain of the app's with it.
+  VM_SIGNED="$(mktemp -t pbvmsigned).plist"
+  codesign -d --entitlements - --xml "$VM_HELPER" > "$VM_SIGNED" 2>/dev/null || true
+  /usr/libexec/PlistBuddy -c "Print :com.apple.security.virtualization" "$VM_SIGNED" >/dev/null 2>&1 \
+    || { echo "error: the machines' helper is not signed with the virtualization right" >&2; exit 1; }
+  for key in "${KEYCHAIN_KEYS[@]}" com.apple.security.cs.disable-library-validation com.apple.security.get-task-allow; do
+    if /usr/libexec/PlistBuddy -c "Print :$key" "$VM_SIGNED" >/dev/null 2>&1; then
+      echo "error: the machines' helper is signed with $key: it holds the virtualization right alone" >&2; exit 1
+    fi
+  done
+  "$VM_HELPER" --check
+fi
 # No executable holds a relaxation of the hardened runtime beside the network extension's right: the
 # kernel kills it at its start, after it was notarized (0.1.1, 3 November). Read from every
 # executable's signature (scripts/relaxation_check.sh holds the measured list; allow-jit is not on

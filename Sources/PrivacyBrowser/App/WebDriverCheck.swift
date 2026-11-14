@@ -78,7 +78,7 @@ enum WebDriverCheck {
             case let .listening(port):
                 guard !said else { return }
                 said = true
-                print("\(tag) ADDRESS \(WebDriverRoute.address(port: port, token: settings.token, profile: profile.id))")
+                print("\(tag) ADDRESS \(WebDriverRoute.address(port: port, masterToken: settings.token, profile: profile.id))")
             case let .failed(reason):
                 print("\(tag) FAIL the listener did not start: \(reason)")
                 exit(1)

@@ -386,6 +386,23 @@ struct ProfileDraft {
 
     /// What the last lookup through the proxy found, while these fields still describe that proxy
     /// (`ProxyLocation.endpoint(of:)`): nil once host, port or credentials name another one.
+    /// "City, Country" of where the chosen proxy exits — its last check's city, else its time zone's
+    /// — for the map's "Proxy's city" (`LocationPicker`). Nil without a proxy or anything known.
+    var proxyPlace: String? {
+        let check: ProxyCheckResult?
+        switch proxyMode {
+        case .direct: return nil
+        case .saved: check = savedProxy?.lastCheck
+        case .new: check = proxyLine.currentCheck?.result
+        }
+        let zone = check?.timeZoneIdentifier ?? knownProxyLocation?.timeZoneIdentifier
+        let zoneCity = zone.flatMap { $0.split(separator: "/").last }.map { $0.replacingOccurrences(of: "_", with: " ") }
+        guard let place = check?.city ?? zoneCity else { return nil }
+        let country = (check?.countryCode ?? knownProxyLocation?.countryCode)
+            .map { Locale(identifier: "en_US").localizedString(forRegionCode: $0) ?? $0 }
+        return [place, country].compactMap { $0 }.joined(separator: ", ")
+    }
+
     var knownProxyLocation: ProxyLocation? {
         guard let location = lastProxyLocation, let proxy = chosenProxy else { return nil }
         return location.proxyEndpoint == ProxyLocation.endpoint(of: proxy) ? location : nil

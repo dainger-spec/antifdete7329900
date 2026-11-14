@@ -1,6 +1,7 @@
 // Tests the JavaScript privacy shims embedded in PrivacyScripts.swift under Node.js
 // (V8 + full ICU). This checks the shim logic; it does not prove behaviour inside
 // WebKit/JavaScriptCore — the self-test's "surface" checks do that against real WebKit.
+// At its end: the scenario recorder's page side (ScenarioRecorderScript.swift) on a stub DOM.
 //
 //   TZ=America/New_York node scripts/test-shims.mjs
 import { readFileSync } from 'node:fs';
@@ -515,6 +516,14 @@ test('storage quota: Safari\'s instead of the app default', async () => {
   assert.equal(await run(plain, `navigator.storage.estimate().then((e) => e.quota)`), 1048576000);
 });
 
+test('geolocation native: the engine answers, the page meets its own Geolocation untouched', () => {
+  const keep = 'globalThis.__original = Object.getOwnPropertyDescriptor(Geolocation.prototype, "getCurrentPosition").value;';
+  const same = `String(Object.getOwnPropertyDescriptor(Geolocation.prototype, 'getCurrentPosition').value === __original)`;
+  assert.equal(run(makeWindow({ webRTC: 'disabled', geolocation: { mode: 'native' } }, null, keep), same), 'true');
+  // The control: with 'deny' the script does replace it.
+  assert.equal(run(makeWindow(base, null, keep), same), 'false');
+});
+
 test('geolocation fixed: position objects without own properties', async () => {
   const w = makeWindow({ ...base, geolocation: { mode: 'fixed', latitude: 48.8566, longitude: 2.3522, accuracy: 25 } });
   w.position = await run(w, `new Promise((res) => navigator.geolocation.getCurrentPosition((p) => res(p)))`);
@@ -910,6 +919,84 @@ test('system camera installed, not this profile\'s: the virtual device is hidden
   const w = makeWindow(systemCamera(false), null, cameraPrelude({ granted: true }));
   assert.deepEqual(await listed(w), [['videoinput', 'real-cam', 'Камера (MacBook Air)'], ['audioinput', 'mic', 'MacBook Air Microphone']]);
   assert.deepEqual(await openedBy(w, { video: true }), [['video', 'real-cam', 'live']]);
+});
+
+// The scenario recorder's page side (ScenarioRecorderScript.swift): what it says of a field a person
+// typed into. A secret — a password field, even one turned into text while focused, and what
+// autocomplete names a password, a one-time code or a card's — is said as one, without its text.
+const recorderSwift = readFileSync(new URL('../Sources/PrivacyBrowser/Browser/ScenarioRecorderScript.swift', import.meta.url), 'utf8');
+const recorderBody = recorderSwift.split('private static let body = #"""')[1].split('"""#')[0];
+
+async function recorderWindow() {
+  const context = vm.createContext({});
+  vm.runInContext(`
+    var window = globalThis;
+    window.top = window;
+    var posted = [];
+    var elements = [];
+    const listeners = {};
+    var addEventListener = (type, fn) => { (listeners[type] = listeners[type] || []).push(fn); };
+    var fire = (type, target, extra) => {
+      const event = Object.assign({ type, target, isTrusted: true, isComposing: false, detail: 1, composedPath: () => [target] }, extra || {});
+      for (const fn of listeners[type] || []) fn(event);
+    };
+    class Element {
+      constructor(tag, attrs) { this.tagName = tag.toUpperCase(); this.attrs = Object.assign({}, attrs); this.isConnected = true; this.parentElement = null; this.nodeType = 1; }
+      getAttribute(name) { return name in this.attrs ? String(this.attrs[name]) : null; }
+      get id() { return this.attrs.id || ''; }
+      closest() { return null; }
+    }
+    class HTMLInputElement extends Element { constructor(attrs) { super('input', attrs); this.type = this.attrs.type || 'text'; this.value = ''; } }
+    class HTMLTextAreaElement extends Element { constructor(attrs) { super('textarea', attrs); this.value = ''; } }
+    class HTMLSelectElement extends Element { constructor(attrs, label) { super('select', attrs); this.selectedOptions = [{ label }]; } }
+    class HTMLLabelElement extends Element {}
+    Object.assign(globalThis, { Element, HTMLInputElement, HTMLTextAreaElement, HTMLSelectElement, HTMLLabelElement });
+    var CSS = { escape: (text) => text };
+    var document = { querySelectorAll: (selector) => elements.filter((e) => '#' + e.id === selector), body: {}, documentElement: {} };
+    var location = { href: 'https://example.com/login' };
+    var performance = { now: () => 0 };
+    window.webkit = { messageHandlers: { rec: { postMessage: (message) => { posted.push(message); return { recording: true }; } } } };
+    var typeInto = (attrs, text, change) => {
+      const el = new HTMLInputElement(attrs);
+      elements.push(el);
+      fire('focusin', el);
+      if (change) change(el);
+      el.value = text;
+      fire('input', el);
+      fire('focusout', el);
+      return posted.filter((m) => m.type === 'fill').pop();
+    };
+  `, context);
+  vm.runInContext('const HANDLER = "rec";\n' + recorderBody, context);
+  await new Promise((resolve) => setImmediate(resolve));   // the hello's reply: recording
+  return context;
+}
+
+test('recorder: a password field, or one shown as text while focused, is said as a secret without its text', async () => {
+  const w = await recorderWindow();
+  assert.deepEqual(JSON.parse(run(w, `JSON.stringify(typeInto({ id: 'pw', type: 'password' }, 'hunter2'))`)),
+                   { type: 'fill', selector: '#pw', value: '', secret: true, replaces: false });
+  // "Show password": the field is a text field by the time it is typed into and left.
+  const shown = JSON.parse(run(w, `JSON.stringify(typeInto({ id: 'pw2', type: 'password' }, 'hunter2', (el) => { el.type = 'text'; }))`));
+  assert.equal(shown.secret, true);
+  assert.equal(shown.value, '');
+});
+
+test('recorder: autocomplete passwords, one-time codes and card fields are secrets; an e-mail is not', async () => {
+  const w = await recorderWindow();
+  for (const [id, attrs] of [['np', { autocomplete: 'new-password' }], ['cp', { autocomplete: 'section-login current-password' }],
+                             ['otp', { autocomplete: 'one-time-code', inputmode: 'numeric' }], ['cc', { autocomplete: 'billing cc-number' }],
+                             ['csc', { autocomplete: 'CC-CSC' }]]) {
+    const said = JSON.parse(run(w, `JSON.stringify(typeInto(${JSON.stringify({ id, ...attrs })}, '424242'))`));
+    assert.equal(said.secret, true, id);
+    assert.equal(said.value, '', id);
+  }
+  const email = JSON.parse(run(w, `JSON.stringify(typeInto({ id: 'mail', autocomplete: 'email' }, 'name@example.com'))`));
+  assert.deepEqual([email.secret, email.value], [false, 'name@example.com']);
+  // A card's month chosen in a list: which list, not which month.
+  const note = run(w, `const s = new HTMLSelectElement({ id: 'exp', autocomplete: 'cc-exp-month' }, '07'); elements.push(s); fire('change', s);
+                       posted.filter((m) => m.type === 'note').pop().value`);
+  assert.equal(note, 'select #exp: •••');
 });
 
 process.on('beforeExit', () => {

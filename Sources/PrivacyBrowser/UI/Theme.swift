@@ -474,6 +474,34 @@ private struct HoverHighlight: ViewModifier {
     }
 }
 
+/// The "more" button: three dots in a square that opens a menu.
+///
+/// The whole square answers a click. It used not to (the owner, 14 November: only the dots
+/// themselves did, everywhere such a button is): the menu was a borderless control the size of its
+/// three dots, with the square put round it as a frame — which gave it a size to lie in and a tone
+/// under the pointer, and nothing to click. Here the square is the button's own label, with a
+/// shape for clicks that fills it; a plain button's label is drawn — and hit — as it is written.
+struct MoreMenu<Items: View>: View {
+    var side: CGFloat = 30
+    @ViewBuilder let items: () -> Items
+
+    var body: some View {
+        Menu(content: items) {
+            Image(systemName: "ellipsis")
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: side, height: side)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .frame(width: side, height: side)
+        .contentShape(Rectangle())
+        .hoverHighlight(cornerRadius: Theme.controlRadius)
+    }
+}
+
 /// A section's symbol: a thin icon, no tile (the design replaced the coloured tiles). `tint` colours
 /// the symbol for a state (amber for attention, red for a problem); the default is `t2`.
 struct IconBadge: View {

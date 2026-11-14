@@ -360,6 +360,14 @@ final class WebDataStoreVault {
         throw VaultError.storeStillInUse(profileID)
     }
 
+    /// WebKit data of the profile is on disk unsealed — a run that did not get to seal (a crash),
+    /// or a forced seal's residue — so the archive is not the whole of it: the next launch takes
+    /// those directories, and the next stop seals them over the archive. A restore point is
+    /// neither made from nor put into such a profile.
+    func holdsUnsealedData(profileID: UUID) -> Bool {
+        !Self.discoverDirectories(for: profileID).isEmpty
+    }
+
     /// After a forced seal, the profile's WebKit directories hold only what WebKit wrote between
     /// that seal and the process exit, and the archive holds the profile's data: deletes the
     /// directories, then the marker. Returns false when there is no marker. Throws (keeping the

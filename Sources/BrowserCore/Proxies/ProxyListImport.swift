@@ -8,13 +8,16 @@ import Foundation
 ///     socks5://user:pass@1.2.3.4:1080      (socks5, socks5h, socks, http, https)
 ///     http://proxy.example.com:3128  # Berlin 1
 ///     [2001:db8::1]:1080
+///     socks5://user:pass@1.2.3.4:1080[https://provider.example/changeip?key=…]
 ///
 /// Each line is taken apart as the editor's Host field takes a pasted proxy apart
 /// (`ProxyHostField`), so a line the list accepts is one the editor would accept too. A line with a
 /// scheme is that type; `https://` means TLS to the proxy. A line without one gets the type chosen
 /// for the import (`defaultKind`) — or, chosen "find out", none yet: the first check finds it by
 /// asking the proxy both ways (`ProxyProbe`, `kindGiven` false). Text after ` #` is the proxy's
-/// label; blank lines and lines starting with `#` or `//` are skipped. Every other line that is not
+/// label; a link in brackets right after the address is the proxy's IP-change link
+/// (`ProxyIPChange`), as mobile proxies are sold; blank lines and lines starting with `#` or `//`
+/// are skipped. Every other line that is not
 /// a usable proxy is reported with its line number and why, as the cookie import reports its file —
 /// never silently dropped. The same proxy twice (the same host, port and user name,
 /// `ProxyList.identity(of:)`) is read once: the first time.
@@ -33,12 +36,15 @@ public enum ProxyListImport {
         /// had no scheme and the import was asked to find out, so `proxy.kind` is only a placeholder
         /// until the first check (`ProxyListEntry.kindKnown`).
         public var kindGiven: Bool
+        /// From `[https://…]` right after the address: the provider's IP-change link.
+        public var changeIPURL: URL?
 
-        public init(line: Int, proxy: ProxySettings, label: String = "", kindGiven: Bool = true) {
+        public init(line: Int, proxy: ProxySettings, label: String = "", kindGiven: Bool = true, changeIPURL: URL? = nil) {
             self.line = line
             self.proxy = proxy
             self.label = label
             self.kindGiven = kindGiven
+            self.changeIPURL = changeIPURL
         }
     }
 
@@ -101,7 +107,8 @@ public enum ProxyListImport {
                 report.problems.append(Problem(line: number, text: shown, reason: .tooMany(maximumProxies)))
                 break
             }
-            let (address, label) = splitLabel(trimmed)
+            let (written, label) = splitLabel(trimmed)
+            let (address, link) = splitChangeLink(written)
             switch proxy(in: address, defaultKind: defaultKind) {
             case .failure(let failure):
                 report.problems.append(Problem(line: number, text: shown, reason: failure.reason))
@@ -112,7 +119,8 @@ public enum ProxyListImport {
                     continue
                 }
                 firstLine[identity] = number
-                report.proxies.append(Line(line: number, proxy: proxy, label: ProxyList.cleanLabel(label), kindGiven: kindGiven))
+                report.proxies.append(Line(line: number, proxy: proxy, label: ProxyList.cleanLabel(label), kindGiven: kindGiven,
+                                           changeIPURL: link))
             }
         }
         return report
@@ -269,6 +277,21 @@ public enum ProxyListImport {
             previous = character
         }
         return (line, "")
+    }
+
+    /// "address[https://link]" → ("address", the link). Only a bracket that opens an http(s) link
+    /// and closes the line counts: an IPv6 host's brackets (`[2001:db8::1]:1080`) do not. A link
+    /// that is not one (`ProxyIPChange.link(from:)`) leaves the line as it was, for the address to
+    /// be found unreadable rather than a broken link to be dropped silently.
+    static func splitChangeLink(_ written: String) -> (address: String, link: URL?) {
+        guard written.hasSuffix("]") else { return (written, nil) }
+        for opening in ["[https://", "[http://", "[HTTPS://", "[HTTP://"] {
+            guard let range = written.range(of: opening, options: .backwards) else { continue }
+            let inner = String(written[written.index(after: range.lowerBound)..<written.index(before: written.endIndex)])
+            guard let link = ProxyIPChange.link(from: inner) else { return (written, nil) }
+            return (written[..<range.lowerBound].trimmingCharacters(in: junk), link)
+        }
+        return (written, nil)
     }
 
     /// Whitespace, control characters and the invisible ones copied with text (BOM, zero-width).

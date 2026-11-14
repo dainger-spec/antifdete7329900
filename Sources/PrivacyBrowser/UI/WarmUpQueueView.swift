@@ -35,6 +35,8 @@ private struct WarmUpQueuePanel: View {
     /// gets its own when the queue is filled (its proxy's country).
     @State private var builtPlan = WarmUpPlan()
     @State private var loaded = false
+    /// How many profiles are warmed at once (`WarmUpCoordinator.concurrency`).
+    @State private var atOnce = WarmUpCoordinator.concurrency
 
     private var queue: WarmUpQueue { warmUps.queue }
     private var plan: WarmUpPlan { choice.source == .manual ? manualPlan : builtPlan }
@@ -49,6 +51,16 @@ private struct WarmUpQueuePanel: View {
                         profilePicker
                         WarmUpPlanChooser(choice: $choice, manualPlan: $manualPlan, plan: plan, countryCode: nil,
                                           forSeveralProfiles: true)
+                        HStack(spacing: 10) {
+                            Text(L("warmupQueue.atOnce")).font(.lumenLabel).foregroundStyle(Theme.textPrimary)
+                            Spacer(minLength: 8)
+                            LumenSegmented(selection: $atOnce, options: WarmUpCoordinator.concurrencyRange.map { (value: $0, title: String($0)) })
+                                .fixedSize()
+                                .accessibilityLabel(L("warmupQueue.atOnce"))
+                        }
+                        .onChange(of: atOnce) { WarmUpCoordinator.concurrency = atOnce }
+                        Text(L("warmupQueue.atOnce.note")).font(.caption).foregroundStyle(Theme.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
                         total
                     }
                     .padding(.trailing, 2)
@@ -206,21 +218,14 @@ private struct WarmUpQueuePanel: View {
         .card(padding: 14, fill: Theme.raisedInset)
     }
 
+    /// Every profile of the queue warming now (up to three at once), each with its own progress.
     @ViewBuilder private var currentRun: some View {
-        if let current = queue.current, let position = queue.position {
-            let status = manager.warmUpStatus(of: current.profileID)
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(String(format: L("warmupQueue.position"), position.number, position.count, name(of: current.profileID)))
-                        .font(.lumenSheetTitle).foregroundStyle(Theme.textPrimary).lineLimit(1)
-                    Spacer()
-                    ProgressView().controlSize(.small)
+        let running = queue.running
+        if !running.isEmpty {
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(running, id: \.id) { entry in
+                    runBlock(entry, prominent: running.count == 1)
                 }
-                GeometryReader { geometry in
-                    LumenProgressBar(fraction: status?.isRunning == true ? (status?.fraction ?? 0) : 0, width: geometry.size.width)
-                }
-                .frame(height: 2)
-                Text(runLine(status)).font(.lumenSecondary).foregroundStyle(Theme.textSecondary).monospacedDigit()
                 Text(L("warmup.invisible")).font(.caption).foregroundStyle(Theme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -231,6 +236,24 @@ private struct WarmUpQueuePanel: View {
                 Text(L("warmupQueue.idle.detail")).font(.caption).foregroundStyle(Theme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    private func runBlock(_ entry: WarmUpQueue.Entry, prominent: Bool) -> some View {
+        let status = manager.warmUpStatus(of: entry.profileID)
+        let position = queue.position(of: entry.id)
+        return VStack(alignment: .leading, spacing: prominent ? 10 : 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(String(format: L("warmupQueue.position"), position?.number ?? 0, position?.count ?? 0, name(of: entry.profileID)))
+                    .font(prominent ? .lumenSheetTitle : .lumenLabel).foregroundStyle(Theme.textPrimary).lineLimit(1)
+                Spacer()
+                ProgressView().controlSize(.small)
+            }
+            GeometryReader { geometry in
+                LumenProgressBar(fraction: status?.isRunning == true ? (status?.fraction ?? 0) : 0, width: geometry.size.width)
+            }
+            .frame(height: 2)
+            Text(runLine(status)).font(.lumenSecondary).foregroundStyle(Theme.textSecondary).monospacedDigit()
         }
     }
 

@@ -194,6 +194,15 @@ final class LicenseModel: ObservableObject {
         return entitlement.allowsCamera
     }
 
+    /// Virtual machines (docs/VM.md): the team plan's (or the plan's `virtual_machines` feature), in
+    /// a mode that works. Licensing off (a development build): allowed, as every profile opens.
+    var allowsVirtualMachines: Bool {
+        guard isConfigured else { return true }
+        recompute()
+        guard let state, state.mode.allowsWork, let entitlement = state.entitlement else { return false }
+        return entitlement.allowsVirtualMachines
+    }
+
     /// A profile of this Mac may open fully: a working mode, and among the first by creation time
     /// when there are more than the plan allows here (§8.4). Licensing off: every profile.
     func refusalToOpen(_ id: UUID) -> LicenseRefusal? {

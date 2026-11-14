@@ -286,7 +286,7 @@ same for every SDK once it had moved (CI run 448, macOS 26 and 27).
 | Egress IP and DNS | `proxyConfigurations` (SOCKS5 remote DNS, fail-closed) | native, verified |
 | User-Agent string (HTTP header + `navigator.userAgent`) | `customUserAgent` | native; changes the string only |
 | Time zone | JS shim (`Intl`, `Date` getters, offsets) | approximation; blob workers covered, URL-loaded and service workers not |
-| Geolocation | JS shim (deny / fixed coordinates) | approximation |
+| Geolocation | In a profile's own process (the released build): the engine itself (`NativeGeolocation` — WebKit's geolocation provider and its permission question), no script in the page. Elsewhere: JS shim (deny / fixed coordinates) | engine-level in Safari's window; approximation in the app's own windows |
 | WebRTC exposure | off in the engine (private `WKPreferences` property, as Lockdown Mode) or a JS shim (relay-only) | native when off; approximation for relay-only |
 
 Keep the declared attributes consistent with each other: a Safari UA, plus a time zone and
@@ -657,6 +657,9 @@ storage and network (§1, §4).
 | Imported cookies for a stopped profile | encrypted (`cookies-import.bin`) until its next launch puts them into the website data | — | in WebKit's cookie store (as the profile's other cookies) |
 | Warm-up plan (addresses, search, times) | encrypted (`warmup.bin`, this Mac only, not synced) | decrypted when the sheet opens | — |
 | Warm-up schedule (every N hours, last run) | encrypted (`warmup-schedule.bin`, this Mac only, not synced, not in a profile export) | decrypted at unlock (the timer needs it) | — |
+| Last warm-up (when, pages, cookies) | encrypted (`warmup-last.bin`, this Mac only, not synced, not in a profile export) | decrypted when the inspector shows the profile | — |
+| Restore points (copies of the profile's site data, cookies, history, open tabs) | the copied files as they were, still encrypted (`restore-points/<id>/`, with `point.bin`; this Mac only, not synced, not in a profile export) | listed when the sheet opens | — |
+| The profile's history of events (`journal.bin`) | encrypted (this Mac only, not synced, not in a profile export) | decrypted when the inspector shows the profile | — |
 | Synced cookies (persistent cookies, with cookie sync on) | encrypted (`cookies.bin`; its local baseline `cookies-baseline.bin`) | encrypted | encrypted; written at launch and stop |
 | History | encrypted (`history.bin`); ephemeral profiles: never written | encrypted | in memory, saved encrypted (debounced, ≤ 3 s) |
 | Bookmarks | encrypted (`bookmarks.bin`) | encrypted | in memory, saved encrypted on every change |
@@ -1210,6 +1213,7 @@ cannot be inspected from the page anyway.
 |---|---|---|---|
 | User agent | `WKWebView.customUserAgent`, with presets in the editor | yes (string only) | `navigator.platform`, vendor, feature set and TLS fingerprint still identify WebKit on macOS (§2). Use the *Safari on macOS* preset; iPhone/iPad presets are UA-only and inconsistent |
 | Time zone | JS: `Intl.DateTimeFormat` default `timeZone`; `Date` local getters and setters, `getTimezoneOffset` (with the sub-minute offsets of historical dates), the local constructor forms `new Date(y, m, d, …)`, `Date.parse` and `new Date(string)` for strings without an offset, `toString`, `toDateString`, `toTimeString`, `toLocale*String`, `getYear`/`setYear`. A worker made from a blob of the page (how fingerprinting scripts make theirs) starts with the same shim: the blob is handed to the engine as [shim, page's blob], so the worker keeps its blob: location, relative URLs, CSP, strict mode and line numbers | no | Workers loaded from a URL and service workers use the host zone (rewriting them would change their location); under a CSP without `'unsafe-eval'` a blob worker does too. JavaScriptCore lists the replacement `Date`'s and `Intl.DateTimeFormat`'s `length`/`name` before their statics (`Object.getOwnPropertyNames(Date)`), which no script function can avoid. `Intl.DateTimeFormat().format()` without an explicit zone follows the shim; other `Intl` constructors carry no zone |
+| Geolocation, engine-level | In a profile's own process WebKit is given the profile's place the way Safari gives it its own: on macOS the engine has no location source and takes positions from the app that hosts it (`WKGeolocationManagerSetProvider`; WebGeolocationManagerProxy has a built-in CoreLocation provider on iOS only). `NativeGeolocation` hands it a provider on every web view's engine (a `WKProcessPool` is the C API's `WKContextRef` in Cocoa's WebKit) and answers the engine's permission question on whatever UI delegate Safari's code gives a web view (`_webView:requestGeolocationPermissionForOrigin:…`, and the older form): a fixed place allowed, Deny denied — as Safari answers a site its settings allow or deny. The page script is told `mode: 'native'` and leaves `navigator.geolocation` alone, so positions, errors and permission states are the engine's own, in every frame. The functions are looked up at run time; where one is missing the script answers as before. Checked in CI by `--geolocation-safari-check` (scripts/geolocation_safari_check.sh): a page in Safari's window must get the profile's place, 'prompt' before it asks and 'granted' after. The editor picks the place on a map (`LocationPicker`: Apple Maps' search and tiles, asked from the app's own process, not through the profile's proxy). |
 | Geolocation | JS: `navigator.geolocation` answers as WebKit does for a user who said no ("User denied Geolocation") or who allowed the fixed coordinates; positions and errors are instances of the real interfaces with no own properties (values from the prototype getters and `toJSON`); `permissions.query({name:'geolocation'})` returns the engine's own `PermissionStatus`, 'prompt' until the page asks (WebKit's `hasBeenRequested`), then 'denied'/'granted' | no | The IP address (proxy) is what most sites actually use. The app has no `NSLocationUsageDescription` and no location entitlement, so CoreLocation can't be reached even if the shim is bypassed |
 | Time zone from the proxy | At launch, a geolocation service (ipinfo.io, then geojs.io, ipwho.is, ipapi.co — one waited for alone at most 3 s, after which the next is asked as well, at once when one fails: a proxy that blocks or holds one leaves time for the others, and a slow one that answers is not cut off) is asked *through the profile's proxy* where it exits; the profile runs in that zone. The last answer per proxy is used on later launches when the new lookup takes over 1 s (and when a lookup fails), that lookup finishing in the background; with nothing remembered the launch waits for it at most 3 s (§4); a profile in a process of its own is not asked again by that process when the launch just found its location | — | A third-party request per launch (HTTPS, via the proxy only, no cookies). Editor → Location and Language → **Time zone and language**: *From the connection* (this), *Manual* (a time zone and a language of the profile's own; "this Mac's languages" is a choice) or *Random* (a place's own pair — a country's time zone and language, `LocalePlaces` — picked once and kept until another is picked). A time zone of the profile's own that is not where its proxy was last seen to come out is warned about: a page that compares the time zone with the IP's location sees they differ. Without any answer the host zone is used, and that is said where the user looks — a message, a mark in the profile's row and a line in the editor's location card, until the next launch — not only logged; a time zone that changed applies from the next launch |
 | Language | Process-wide: set before WebKit's first process from the first launched profile's language of its own, else its proxy country's (`ProfileConfiguration.webLanguage(for:)`, `WebContentLanguage`) | partly | WKWebView has no per-view `Accept-Language` / `navigator.languages` API; later profiles of the same run share the first one's language — a profile in its own process (Settings → Behavior) has its own. The editor says so |
@@ -1414,8 +1418,8 @@ persistent cookies sync between Macs, encrypted with the profile's key inside th
 
 **⋯ → Warm Up…** visits a list of pages in one profile, one after the other, to give it a
 browsing past (cookies, history, site preferences) before it is used: a search first if one is
-given (with the profile's search engine, as from its address bar — DuckDuckGo unless the profile's
-editor names another), then the addresses in their order (http and https
+given (with the profile's search engine — DuckDuckGo unless the profile's editor names another;
+see **Searches typed** below), then the addresses in their order (http and https
 only, at most 50; other lines are listed with the reason and skipped). For each page it:
 - loads it in **its own tab of the profile** — the profile's data store, proxy (fail-closed as
   always), User-Agent, shims and AutoFill, exactly as when the user browses; the visits go into
@@ -1431,7 +1435,7 @@ only, at most 50; other lines are listed with the reason and skipped). For each 
   nor one hidden (by its own or an ancestor's opacity or visibility) or covered by something
   else; each link is judged by itself, `<base target>` included; it stays on that page half as long.
 
-Nothing is typed or submitted, and nothing is downloaded: while a run drives its tab, a response
+Nothing is typed or submitted but a search's words in the engine's own search box, and nothing is downloaded: while a run drives its tab, a response
 the browser would save as a file fails as a load instead. A page that does not load is reported and skipped; one still
 loading after 30 s is left as it is. A page counts as come once its own load has committed (or
 ended, or — an address that only jumps within the page shown — the tab shows that page) and
@@ -1457,6 +1461,34 @@ but synthesized pointer events did not, through any of the three ways tried (Qua
 AppKit events to the view, AppKit events to the window): there every followed link was clicked
 with `click()`.
 
+**Searches typed.** Seven searches in ten are typed as a person does: the robot opens the
+engine's own page (`SearchEngine.homeURL`), accepts its consent page if one stands in the way,
+takes the pointer to its search box on a curved path and clicks in it (only once a trusted
+pointer move is seen to reach the box), types the words key by key on this Mac's keyboard
+layout — 80–240 ms between letters, longer after a space, now and then a hesitation — checks the
+box holds exactly what was typed, and presses Return. The others, and every search that cannot be
+typed that way (a character no key of the layout types, as `ü` on a US layout; the engine's page
+not loading; no search box in view; the click not reaching it or not focusing it; nothing loading
+after Return), open the results by their address, as Safari's address bar does with words typed
+into it. Never a script's click, focus or value: the box gets the same trusted key events a
+keyboard gives (docs/PAGE_INPUT.md).
+
+**Cookie banners.** A page's cookie banner is accepted when it is one of the well-known consent
+tools — OneTrust, Didomi, Quantcast, Cookiebot, Usercentrics, TrustArc, Google's Funding Choices
+and Google's own consent page — by that tool's own "accept" button, one to two seconds into the
+stay on the page (part of the plan's time on it, not added to it), as most people answer it. Nothing else on a page is pressed. The press is the
+button's `click()` from the robot's world (untrusted); the consent it records is the same.
+
+**Sparing a proxy's traffic.** **Proxy traffic** on the warm-up screen — load everything (the
+default), no video, or no video or images — is one setting for every warm-up, put into each run's
+plan as it starts (screen, queue, schedule). The robot's tab then gets a content controller of its
+own: everything of the profile (its scripts, its rule lists, AutoFill) and a rule list blocking
+WebKit's `media` (and `image`) loads. The person's tabs of the profile keep the shared controller and
+load everything. A page sees those loads fail as a content blocker makes them fail. The lists are
+compiled at the profile's launch; one that did not compile leaves the run loading everything, and
+the log says so. The traffic itself is not counted: WebKit connects to the proxy on its own, and
+counting it would take a relay of the app's in the path of every load.
+
 **User activation.** WebKit runs every script an app sends into a page as if the user had just
 interacted (`callAsyncJavaScript` forces a user gesture), in any content world. The robot's reads
 (scroll position, links) therefore mark the page as activated: `navigator.userActivation` reports
@@ -1481,14 +1513,25 @@ domain and path was there at the start; one a page set again with a new value is
 cookie that expired during the run is simply no longer listed. A run stopped part-way gets its
 list a moment after it stops. At most 100 sites are listed, those the run added to first.
 
-**Several profiles.** **More → Warm Up Several Profiles…** warms the ticked profiles one after the
-other with one plan (a list composed for the proxy's country is put together for each profile's
-own country). A stopped profile is started without a window, warmed up, then stopped and sealed
-again — and only then does the next one start, so at most one profile is ever decrypted for the
-queue. A profile the user already has open is warmed up where it runs and stays open. The sheet
+**Several profiles.** **More → Warm Up Several Profiles…** warms the ticked profiles with one plan
+(a list composed for the proxy's country is put together for each profile's own country), up to
+**Profiles at once** of them together — 1, 2 (the default) or 3, set on the queue's sheet; each
+runs in its own profile process. A stopped profile is started without a window, warmed up, then
+stopped and sealed again, and only then does the next waiting one start, so no more profiles than
+that are ever decrypted for the queue. A profile the user already has open is warmed up where it runs and stays open. The sheet
 says which profile is on ("profile 2 of 5") and what each run came to; the rest of the queue can
 be cancelled, or the run going on stopped as well. A run started from a profile's own warm-up
-sheet runs on its own, and the queue waits for it rather than run beside it.
+sheet runs on its own and counts as one of those at once: the queue waits for a place rather than
+run more beside it.
+
+**Why a run stopped.** A run that did not finish says why at the foot of the sheet: the profile
+was stopped, the robot's tab was closed, or a page asks for the user (a dialog); a run waiting for
+its tab to be shown again says so while it waits. Stopped by the user it says nothing more.
+
+**Last run.** When a run ends having visited at least one page — whoever started it — how it went
+is kept for the profile (`warmup-last.bin`: when, pages that loaded, of how many, cookies gained,
+finished or not), and the inspector says it beside **Warm Up…**: "2 days ago, pages: 14", or "not
+yet" for a profile never warmed on this Mac.
 
 **Repeating.** "Repeat on a schedule" in a profile's warm-up sheet runs the plan the sheet shows
 every 1–168 hours, while the app is unlocked — never while it is locked, since nothing can be
@@ -1500,7 +1543,7 @@ is turned on (Start is there for a run now); after that, one interval after the 
 whoever started it. A run that could not start (the launch failed, the plan has no page) counts
 as one, so a profile whose proxy is down is not relaunched every minute. A Mac that slept through
 several intervals runs the profile once when it wakes, not once per interval missed. The schedule
-and its last run (`warmup-schedule.bin`) stay on this Mac: they are not synced, and a profile
+and its last run (`warmup-schedule.bin`, with `warmup-last.bin`) stay on this Mac: they are not synced, and a profile
 export does not carry them, since another Mac should not start a profile in the background
 because this one was told to. The plan a scheduled run uses is the profile's saved one; a
 ready-made or composed choice is cut and shuffled anew for each run, for the country the proxy
@@ -1508,13 +1551,68 @@ exits in at that time.
 
 **Limits.** No browsing intelligence: the order is the list's, the links are chosen at random
 among the allowed ones in view, the timing is random within fixed ranges. Rhythm and paths are
-still a robot's, and sites that profile behaviour (or ask for a CAPTCHA) can tell; a CAPTCHA or a
-consent banner is neither answered nor clicked away. It does not sign in, fill forms, play media
-or open new windows. Only one run per profile at a time, and the queue runs one profile at a
-time; the plan (`warmup.bin`) and the schedule (`warmup-schedule.bin`) stay on this Mac. A
+still a robot's, and sites that profile behaviour (or ask for a CAPTCHA) can tell; a CAPTCHA is not
+answered, and a cookie banner of a tool not listed above is left as it is. It does not sign in,
+fill forms (but a search box), play media or open new windows. Only one run per profile at a
+time, and the queue runs at most three profiles at once; the plan (`warmup.bin`), the schedule
+(`warmup-schedule.bin`) and the last run (`warmup-last.bin`) stay on this Mac. A
 schedule only runs while the app is open and unlocked: it is a timer in the app, not a system
-job. The ready-made lists (general, by interest, and 26 countries) are part of the app; nothing is
+job. The ready-made lists (general, by interest, and 43 countries) are part of the app; nothing is
 fetched to build one.
+
+## 8c′. Restore points and a profile's history
+
+**⋯ → Restore Points and History…** (and **Restore Points** in the inspector) keeps a stopped
+profile as it is — its website data (`webdata.pbsa`), Safari's own state (`safarihome.pbsa`), its
+history, its synced cookies and their baseline, its open tabs — to put back later: before a
+sign-up, a warm-up or a cookie import, and back again if it went wrong. Not its settings,
+passwords, codes or bookmarks: a restore never takes away what the person set up. The files are
+copied as they are on disk, still encrypted under the profile's key (on APFS a copy is a clone), into
+`restore-points/<id>/` in the profile's folder, with a description sealed under the profile's key
+(`point.bin`). At most 20 per profile. A restore keeps the state it replaces as a point first
+("Before a restore"), so it can be undone, then puts each file back atomically; a file the point
+did not have (say no open tabs then) is removed — its copy is in the point just made.
+
+Points are made and restored only while the profile is stopped and its data sealed: a profile
+whose last session did not end properly (data still unsealed on disk) is to be launched and
+stopped once first, and the sheet says so. A profile whose cookies sync: the next sync can bring
+back cookies another Mac has — the point is this Mac's, the server's copy is not rolled back.
+
+**History** (`journal.bin`): what happened to the profile, newest first — launched, warmed up (pages),
+cookies imported (how many), its proxy changed (the proxy's name), a new IP (the IP), a point made,
+restored. Nothing of a page — no address, no title. At most 300 events. The inspector shows the
+latest four; the sheet, the rest.
+
+Both stay on this Mac: not synced, not in a profile export; the profile's deletion takes them with
+its folder.
+
+**Duplicate.** **⋯ → Duplicate…** makes up to 50 new profiles set up as one is (`ProfileClone`):
+its settings, and nothing of its own — no data (a new profile has none), not where its proxy came
+out at its launches, not the person's notes, not its glyph's colour. Each copy gets the original's
+proxy, none, or one of the list in turn: those no profile uses yet first (a mobile proxy is meant
+for one profile), then those that answered at their last check, of one country when asked. A
+profile whose time zone and language are set by hand keeps them in its copies, whatever country
+their proxies are in; the sheet says so.
+
+## 8c″. Virtual machines
+
+A build with `VM=1` has a second kind of profile: a whole Mac in a virtual machine (docs/VM.md).
+What that changes for isolation, and what it does not:
+
+- **Between a machine and every other profile**: nothing of the operating system is shared — its
+  own disk, keychain, caches, DNS cache, serial number and network card. This is isolation by
+  construction, not by a rule the app keeps.
+- **The network**: a machine with a proxy has no network card on this Mac's network at all. Its
+  card is a socket to `VMNetCore`, which reaches the outside only through the proxy; with the proxy
+  down the machine reaches nothing. UDP does not leave it. Names are resolved by the proxy.
+- **At rest**: a machine's disk is **not** encrypted by the vault — FileVault on this Mac is what
+  encrypts it. The profile's settings (name, proxy and its password) are in the vault.
+- **What sites see**: a real Safari on a real macOS, with nothing injected; the system's time zone
+  and language are the profile's. The guest's graphics are Apple's paravirtual GPU: what a site that
+  studies the device can tell from that is **not measured** yet. A guest has no camera.
+- **Not covered by this document's automatic checks**: no test runs a machine (CI's Macs are
+  virtual machines themselves). The model and the network are unit-tested; the rest is first run on
+  a person's Mac (docs/VM.md, "First run on a Mac").
 
 ## 8d. Paste as Typed
 

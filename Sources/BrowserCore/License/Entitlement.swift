@@ -104,6 +104,16 @@ public struct Entitlement: Equatable, Sendable {
         status == .active && (Self.cameraPlans.contains(plan) || features.contains(Self.cameraFeature))
     }
 
+    /// Virtual machines (docs/VM.md): the team plan's, only while the license is active (the owner,
+    /// 13 November). The server may also open them to another plan by naming the `virtual_machines`
+    /// feature (as automation works). Below it — professional, personal, trial, none — the section
+    /// says which plan has them, and no machine starts.
+    public static let virtualMachinesFeature = "virtual_machines"
+    public static let virtualMachinesPlans: Set<String> = ["team"]
+    public var allowsVirtualMachines: Bool {
+        status == .active && (Self.virtualMachinesPlans.contains(plan) || features.contains(Self.virtualMachinesFeature))
+    }
+
     public init(documentID: String = "", accountID: String = "", licenseID: String = "", deviceID: String, machineID: String,
                 role: String, plan: String, status: Status, exportReason: String?, limits: Limits, profilesOnOtherDevices: Int,
                 periodEndsAt: Date?, issuedAt: Date, refreshAfter: Date, expiresAt: Date, graceEndsAt: Date,

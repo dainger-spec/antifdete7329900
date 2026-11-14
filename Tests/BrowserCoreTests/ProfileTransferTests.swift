@@ -163,6 +163,50 @@ final class ProfileTransferTests: XCTestCase {
         XCTAssertThrowsError(try ProfileTransfer.manifest(of: file, password: "pw"))
     }
 
+    /// A file is read only with a key derivation this app writes: Argon2id within its bounds, or
+    /// PBKDF2 up to the iterations the app ever used; anything else is refused as the file is
+    /// opened, before a key is derived (APP2-1).
+    func testAFileIsReadOnlyWithAKeyDerivationLumenWrites() throws {
+        XCTAssertNoThrow(try ProfileTransfer.checkReadable(.recommended()))
+        XCTAssertNoThrow(try ProfileTransfer.checkReadable(fastKDF))
+        XCTAssertNoThrow(try ProfileTransfer.checkReadable(.generate()))
+        let salt = Data(repeating: 3, count: 16)
+        for refused in [KDFParameters(algorithm: KDFParameters.pbkdf2SHA256, iterations: KDFParameters.recommendedIterations + 1, salt: salt),
+                        KDFParameters(algorithm: KDFParameters.pbkdf2SHA256, iterations: Int.max, salt: salt),
+                        KDFParameters(algorithm: KDFParameters.pbkdf2SHA256, iterations: 0, salt: salt),
+                        KDFParameters(algorithm: KDFParameters.pbkdf2SHA256, iterations: 1_000, salt: Data(count: 8)),
+                        KDFParameters(algorithm: "scrypt", iterations: 1, salt: salt),
+                        KDFParameters.argon2idParameters(memoryKiB: 4 * 1024 * 1024, passes: 1, lanes: 1),
+                        KDFParameters.argon2idParameters(memoryKiB: 64, passes: 11, lanes: 1)] {
+            XCTAssertThrowsError(try ProfileTransfer.checkReadable(refused), "\(refused.algorithm) \(refused.iterations)")
+        }
+
+        // A file whose header asks for 50 million PBKDF2 iterations: refused at once, nothing made.
+        var header = ProfileTransfer.Header(format: 2, kdf: KDFParameters(algorithm: KDFParameters.pbkdf2SHA256,
+                                                                          iterations: 50_000_000, salt: salt), manifest: Data())
+        func write(_ header: ProfileTransfer.Header, to file: URL) throws {
+            let json = try JSONCoding.encoder.encode(header)
+            var bytes = ProfileTransfer.magic
+            withUnsafeBytes(of: UInt32(json.count).bigEndian) { bytes.append(contentsOf: $0) }
+            bytes.append(json)
+            bytes.append(contentsOf: [0, 0, 0, 0])
+            try bytes.write(to: file)
+        }
+        let file = root.appendingPathComponent("costly.\(ProfileTransfer.fileExtension)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try write(header, to: file)
+        XCTAssertThrowsError(try ProfileTransfer.manifest(of: file, password: "pw")) { error in
+            XCTAssertEqual(error as? CoreError, .invalidConfiguration("the file's key derivation is not one Lumen writes"))
+        }
+        XCTAssertThrowsError(try ProfileTransfer.importProfile(from: file, password: "pw", into: target))
+        XCTAssertTrue(target.list().isEmpty)
+        header.kdf = KDFParameters(algorithm: "scrypt", iterations: 1, salt: salt)
+        try write(header, to: file)
+        XCTAssertThrowsError(try ProfileTransfer.manifest(of: file, password: "pw")) { error in
+            guard case .unsupportedFormat(_)? = error as? CoreError else { return XCTFail("\(error)") }
+        }
+    }
+
     func testAProfileWithoutWebsiteDataExportsToo() throws {
         let id = try source.create(name: "Fresh", configuration: ProfileConfiguration()).id
         let file = root.appendingPathComponent("fresh.\(ProfileTransfer.fileExtension)")

@@ -424,7 +424,9 @@ extension BrowserTab: WKNavigationDelegate {
             completionHandler(.performDefaultHandling, nil)
             return
         }
-        if challenge.previousFailureCount == 0, let entry = context.passwordVault.entries(for: url).first {
+        // A saved login is sent by itself only over https and only with a password
+        // (`httpAuthenticationEntry`); otherwise the person is asked.
+        if challenge.previousFailureCount == 0, let entry = context.passwordVault.httpAuthenticationEntry(for: url) {
             completionHandler(.useCredential, URLCredential(user: entry.username, password: entry.password, persistence: .forSession))
             return
         }

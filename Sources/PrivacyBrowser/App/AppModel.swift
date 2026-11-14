@@ -143,6 +143,9 @@ final class AppModel: ObservableObject {
     private(set) var warmUps: WarmUpCoordinator?
     /// The proxy list of the unlocked vault (`ProxyListModel`); nil while locked.
     private(set) var proxyList: ProxyListModel?
+    /// The virtual machines of the unlocked vault (`VMCenter`, docs/VM.md); nil while locked, and
+    /// in a build that carries none.
+    private(set) var virtualMachines: VMCenter?
     private var managerObservation: AnyCancellable?
     private var lockTask: Task<Void, Never>?
     /// The app's updater; nil in a build without an update feed (`AppUpdater.Configuration.main`),
@@ -260,9 +263,12 @@ final class AppModel: ObservableObject {
     /// §10.1: a new master password that is the account's password (typed in this session) or the
     /// license's key (typed in this session, or kept in the vault) — the refusal's text; nil when it
     /// is neither. Compared in memory only; nothing is derived from either, nothing is tried with them.
+    /// And one too short or too weak (`MasterPasswordStrength`, APP-06), which the screens already
+    /// keep from being sent: held here too, for a new password only — unlocking takes any.
     func refusalOfMasterPassword(_ password: String) -> String? {
         if license.isAccountPassword(password) { return L("contract.master_password.same_as_account") }
         if license.isLicenseKey(password) { return L("contract.master_password.same_as_key") }
+        if !MasterPasswordStrength.isAcceptable(password) { return L("setup.refusal.weak") }
         return nil
     }
 
@@ -460,6 +466,13 @@ final class AppModel: ObservableObject {
             await self?.startWarmUp(plan, for: id) ?? false
         }
         warmUps.forwardChanges(to: self)
+        // The profile's journal says it was warmed, and the inspector of a profile it has shown
+        // reads its last warm-up again.
+        warmUps.onRecorded = { [weak self] id in
+            guard let self else { return }
+            let pages = (try? repository.warmUpRecord(for: id))?.pages
+            self.recordInJournal(.warmedUp, detail: pages.map(String.init) ?? "", for: id)
+        }
         self.warmUps = warmUps
         warmUps.begin()
         // Scenarios and warm-ups by the clock, while the vault is open.
@@ -488,7 +501,8 @@ final class AppModel: ObservableObject {
                 guard let self else { return true }
                 return self.isBusy(id) || self.scenarioRun(of: id)?.isRunning == true || self.recordingProfile == id
             },
-            runScenario: { [weak self] scenario, id in await self?.runScenario(scenario, on: id) ?? false },
+            // A schedule's run: in front, but without the keyboard or the app's activation.
+            runScenario: { [weak self] scenario, id in await self?.runScenario(scenario, on: id, inBackground: true) ?? false },
             warmUp: { [weak self] id in
                 guard let self, let warmUps = self.warmUps else { return false }
                 warmUps.enqueue([id]) { self.warmUpPlan(for: $0).plan }
@@ -503,7 +517,23 @@ final class AppModel: ObservableObject {
         // The proxies typed into profiles before there was a list are in it from now on (once).
         proxyList.takeIn(profileProxies: repository.profileProxies())
         proxyList.onEntryChanged = { [weak self] entry, previous in self?.followProxyEntry(entry, previous: previous) }
+        proxyList.onIPChanged = { [weak self] entry, report in
+            guard let self else { return }
+            let identity = ProxyList.identity(of: entry.proxy)
+            for profile in self.profiles where self.details[profile.id]?.proxyIdentity == identity {
+                self.recordInJournal(.ipChanged, detail: report.after ?? "", for: profile.id)
+            }
+        }
         self.proxyList = proxyList
+        if VMCenter.isOffered {
+            let machines = VMCenter(vault: vault, library: VMLibrary(vaultDirectory: root)) { [weak self] message in
+                self?.showError(message)
+            }
+            // The team plan's: without it nothing is set up and no machine starts (the model
+            // refuses, not only the section's buttons).
+            machines.isAllowed = { [weak self] in self?.license.allowsVirtualMachines ?? false }
+            virtualMachines = machines
+        }
         manager.onProxyProblem = { [weak self] id, proxy, diagnosis in
             self?.reportProxyProblem(of: id, proxy: proxy, diagnosis: diagnosis)
         }
@@ -592,7 +622,9 @@ final class AppModel: ObservableObject {
     }
 
     /// Lock or Quit must wait: a lock is under way, or a profile is running, launching or sealing.
-    var hasActivity: Bool { lockTask != nil || (manager?.hasActivity ?? false) }
+    var hasActivity: Bool {
+        lockTask != nil || (manager?.hasActivity ?? false) || (virtualMachines?.hasRunning ?? false)
+    }
 
     private func performLock() async {
         license.vaultLocked()
@@ -609,6 +641,10 @@ final class AppModel: ObservableObject {
         recordingProfile = nil
         recorded = ScenarioRecording()
         await manager?.shutDown()
+        // The machines' macOS is shut down, as a Mac's is, before the vault that holds their
+        // profiles — and their proxies' passwords — is locked.
+        await virtualMachines?.stopAll()
+        virtualMachines = nil
         proxyList?.stopChecking()
         proxyList = nil
         proxyProblems = []
@@ -721,6 +757,55 @@ final class AppModel: ObservableObject {
         return summary.id
     }
 
+    /// Where the copies of a profile get their proxies (`duplicateProfile`).
+    enum CopyProxies: Hashable {
+        /// The original's.
+        case same
+        /// The list's, one each in turn (`ProfileClone.proxies`), of a country when one is given.
+        case fromList(country: String?)
+        /// None: direct.
+        case none
+    }
+
+    /// Makes `count` copies of profile `id` (`ProfileClone`): its settings, nothing of its data,
+    /// each with its proxy as `proxies` says. Returns the profiles made and, when it stopped
+    /// before the last (the plan's limit, a write that failed), why.
+    func duplicateProfile(_ id: UUID, count: Int, proxies: CopyProxies) -> (made: [UUID], problem: String?) {
+        guard let repository else { return ([], nil) }
+        var made: [UUID] = []
+        defer { if !made.isEmpty { refresh() } }
+        do {
+            try refuseWhileTheIndexIsUnreadable(repository)
+            let original = try repository.loadConfiguration(id)
+            let originalName = try repository.summary(for: id).name
+            let count = min(max(count, 1), ProfileClone.maximumCopies)
+            let names = ProfileClone.names(for: originalName, count: count, taken: profiles.map(\.name))
+            let chosen: [ProxySettings?]
+            switch proxies {
+            case .same:
+                chosen = Array(repeating: original.proxy, count: count)
+            case .none:
+                chosen = Array(repeating: nil, count: count)
+            case .fromList(let country):
+                let used = Set(details.values.compactMap(\.proxyIdentity))
+                let picked = ProfileClone.proxies(from: proxyList?.entries ?? [], count: count, country: country, used: used)
+                guard !picked.isEmpty else { return ([], L("duplicate.error.noProxies")) }
+                chosen = picked.map(\.proxy)
+            }
+            for (name, proxy) in zip(names, chosen) {
+                // The plan's limit counts the profiles made so far.
+                if !made.isEmpty { refresh() }
+                if let refusal = license.refusalToCreate() { return (made, refusal.text) }
+                let summary = try repository.create(name: name, configuration: ProfileClone.configuration(from: original, proxy: proxy))
+                made.append(summary.id)
+                recordInJournal(.copied, detail: originalName, for: summary.id)
+            }
+            return (made, nil)
+        } catch {
+            return (made, errorText(error))
+        }
+    }
+
     func configuration(for id: UUID) throws -> ProfileConfiguration {
         guard let repository else { throw CoreError.vaultNotFound }
         return try repository.loadConfiguration(id)
@@ -810,6 +895,10 @@ final class AppModel: ObservableObject {
         let stored = try repository.loadConfiguration(id)
         let saved = configuration.savingEdit(over: stored)
         try repository.saveConfiguration(saved, for: id)
+        if saved.proxy != stored.proxy {
+            let entry = saved.proxy.flatMap { proxyList?.list.entry(for: $0) }
+            recordInJournal(.proxyChanged, detail: entry?.displayName ?? saved.proxy?.displayAddress ?? L("journal.proxy.none"), for: id)
+        }
         // Cookie sync off: the synced cookies go, here and (at the next sync) on the other devices.
         if !saved.syncsCookies { try repository.clearSyncedCookies(for: id) }
         if try repository.summary(for: id).name != name {
@@ -866,8 +955,102 @@ final class AppModel: ObservableObject {
     func launch(_ id: UUID, openingWindow: Bool = true) async {
         // A launch reads the files sync replaces (settings, synced cookies): after the sync.
         while isSyncing { try? await Task.sleep(nanoseconds: 100_000_000) }
+        await changeIPBeforeLaunch(id)
+        let wasRunning = isRunning(id)
         await perform { try await self.manager?.launch(id, openingWindow: openingWindow) }
+        if !wasRunning, isRunning(id) { recordInJournal(.launched, for: id) }
         refresh()
+    }
+
+    // MARK: The profile's journal and restore points
+
+    /// Adds an event to the profile's journal (`ProfileJournal`); the inspector of a profile it has
+    /// shown reads it again. A journal that cannot be written is only logged: it tells, it holds
+    /// nothing the profile needs.
+    func recordInJournal(_ kind: ProfileJournal.Kind, detail: String = "", for id: UUID) {
+        guard let repository else { return }
+        do {
+            try repository.record(kind, detail: detail, for: id)
+        } catch {
+            Logger(subsystem: "PrivacyBrowser", category: "Journal").error("Could not add to the journal of \(id.uuidString, privacy: .public): \(error.logKind, privacy: .public)")
+        }
+        if inspectorCounts[id] != nil { loadInspectorCounts(for: id) }
+    }
+
+    func journal(for id: UUID) -> ProfileJournal {
+        (try? repository?.journal(for: id)) ?? ProfileJournal()
+    }
+
+    func restorePoints(for id: UUID) -> [RestorePoint] {
+        repository?.restorePoints(for: id) ?? []
+    }
+
+    /// Makes a restore point of a stopped profile. Nil when made, otherwise what to tell the person.
+    func createRestorePoint(_ id: UUID, name: String) async -> String? {
+        guard let manager else { return L("restorePoints.error.locked") }
+        do {
+            let point = try await manager.createRestorePoint(id, name: name)
+            recordInJournal(.restorePointMade, detail: point.name, for: id)
+            return nil
+        } catch {
+            return restorePointProblem(error)
+        }
+    }
+
+    /// Puts a stopped profile back as the point holds it. Nil when done, otherwise what to tell the person.
+    func restore(_ id: UUID, to point: RestorePoint) async -> String? {
+        guard let manager else { return L("restorePoints.error.locked") }
+        do {
+            try await manager.restore(id, to: point.id)
+            recordInJournal(.restored, detail: point.name.isEmpty ? point.createdAt.shown(date: .abbreviated, time: .shortened) : point.name, for: id)
+            refresh()
+            return nil
+        } catch {
+            return restorePointProblem(error)
+        }
+    }
+
+    /// Removes a point, as its confirmation asks. Nil when done.
+    func removeRestorePoint(_ point: RestorePoint, of id: UUID) -> String? {
+        guard let repository else { return L("restorePoints.error.locked") }
+        do {
+            try repository.removeRestorePoint(point.id, for: id)
+            if inspectorCounts[id] != nil { loadInspectorCounts(for: id) }
+            return nil
+        } catch {
+            return restorePointProblem(error)
+        }
+    }
+
+    private func restorePointProblem(_ error: Error) -> String {
+        switch error {
+        case ProfileManager.RestorePointRefusal.inUse: return L("restorePoints.error.inUse")
+        case ProfileManager.RestorePointRefusal.unsealed: return L("restorePoints.error.unsealed")
+        case RestorePointProblem.full(let count): return String(format: L("restorePoints.error.full"), count)
+        case RestorePointProblem.notFound: return L("restorePoints.error.notFound")
+        case RestorePointProblem.damaged: return L("restorePoints.error.damaged")
+        default: return errorText(error)
+        }
+    }
+
+    /// Profiles whose proxy is getting a new IP before they start (the row says so).
+    @Published private(set) var changingIPBeforeLaunch: Set<UUID> = []
+
+    /// A profile on a proxy that changes its IP at each launch (`ProxyListEntry.changesIPOnLaunch`)
+    /// gets a new one first — unless another running profile is on that proxy, whose pages would
+    /// lose their IP mid-session (`ProxyIPChange.mayChange`). A change the provider refused is
+    /// said; the profile starts all the same, with the IP the proxy has.
+    private func changeIPBeforeLaunch(_ id: UUID) async {
+        guard let proxyList, let manager, !manager.isRunning(id), !manager.busyProfileIDs.contains(id),
+              let identity = details[id]?.proxyIdentity,
+              let entry = proxyList.list.entries.first(where: { ProxyList.identity(of: $0.proxy) == identity }) else { return }
+        let running = manager.runningProfileIDs.compactMap { details[$0]?.proxyIdentity }
+        guard ProxyIPChange.mayChange(entry, runningProxies: running) else { return }
+        changingIPBeforeLaunch.insert(id)
+        defer { changingIPBeforeLaunch.remove(id) }
+        guard let report = await proxyList.changeIP(entry.id), !report.accepted else { return }
+        let name = profiles.first { $0.id == id }?.name ?? ""
+        showError(String(format: L("proxies.ipChange.launchFailed"), name, report.reason.isEmpty ? L("proxies.ipChange.noReason") : report.reason))
     }
 
     func stop(_ id: UUID) async {
@@ -898,7 +1081,12 @@ final class AppModel: ObservableObject {
     /// Imports cookies into a profile: now if it runs, else at its next launch.
     func importCookies(_ cookies: [ImportedCookie], into id: UUID) async throws -> ProfileManager.CookieImportOutcome {
         guard let manager else { throw CoreError.vaultNotFound }
-        return try await manager.importCookies(cookies, into: id)
+        let outcome = try await manager.importCookies(cookies, into: id)
+        switch outcome {
+        case .applied(let stored, _): recordInJournal(.cookiesImported, detail: String(stored), for: id)
+        case .queued: recordInJournal(.cookiesImported, detail: String(cookies.count), for: id)
+        }
+        return outcome
     }
 
     /// Every cookie of a profile, for an export (`ProfileManager.exportCookies`).
@@ -926,6 +1114,9 @@ final class AppModel: ObservableObject {
     /// stopped. False when it did not start (the launch failed, and said why).
     func startWarmUp(_ plan: WarmUpPlan, for id: UUID) async -> Bool {
         guard let repository, let manager else { return false }
+        // The person's traffic setting, whoever started the run.
+        var plan = plan
+        plan.trafficSaving = WarmUpCoordinator.trafficSaving?.rawValue
         do {
             try repository.saveWarmUpPlan(plan, for: id)
         } catch {
@@ -1122,13 +1313,15 @@ final class AppModel: ObservableObject {
 
     /// Runs `scenario` on profile `id`, starting the profile first when it is not running. False
     /// when the plan has no automation, the profile did not start, or a run of it is going.
-    func runScenario(_ scenario: Scenario, on id: UUID) async -> Bool {
+    /// `inBackground`: a schedule's run, which must not take the keyboard from what the person is
+    /// doing (`SafariChromeHost.openScenarioPage`).
+    func runScenario(_ scenario: Scenario, on id: UUID, inBackground: Bool = false) async -> Bool {
         guard license.allowsAutomation, manager != nil else { return false }
         // A stopped profile is started without a window of its own: the run opens the one it acts
         // in. With the profile's as well there were two, one of them empty (the owner, 10 November).
         if !isRunning(id) { await launch(id, openingWindow: false) }
         guard let manager, isRunning(id) else { return false }
-        return manager.runScenario(id, name: scenario.name, source: scenario.source)
+        return manager.runScenario(id, name: scenario.name, source: scenario.source, inBackground: inBackground)
     }
 
     func stopScenario(on id: UUID) {
@@ -1294,7 +1487,7 @@ final class AppModel: ObservableObject {
         switch automationState {
         case let .listening(port):
             guard let token = automationSettings?.token else { return .apiOff }
-            return .address(WebDriverRoute.address(port: port, token: token, profile: id))
+            return .address(WebDriverRoute.address(port: port, masterToken: token, profile: id))
         // On, but it does not listen (its port is taken, say): not "turn the API on".
         case .failed: return .apiFailed
         case .stopped: return .apiOff
@@ -1344,6 +1537,9 @@ final class AppModel: ObservableObject {
         }
         handler.onChange = { [weak self] in self?.refresh() }
         handler.allowsAutomation = { [weak self] in self?.license.allowsAutomation ?? false }
+        handler.createProfile = { [weak self] name, configuration in
+            try self?.createProfile(name: name, configuration: configuration)
+        }
         handler.savedScenario = { [weak self] name in
             let matching = self?.scenarios.scenarios.filter { $0.name == name } ?? []
             return matching.count == 1 ? matching[0] : nil
@@ -1535,8 +1731,11 @@ struct ProfileDetails: Equatable {
     var window: String
     var syncsCookies: Bool
     var historyPolicy: HistoryStore.Policy
+    /// Its time zone and language follow where its proxy comes out (`matchProxyLocation`).
+    var followsProxyLocation: Bool
 
     init(_ configuration: ProfileConfiguration) {
+        followsProxyLocation = configuration.matchProxyLocation
         proxyEndpoint = configuration.proxy.map { "\($0.host):\($0.port)" }
         proxyIdentity = configuration.proxy.map(ProxyList.identity(of:))
         exitCountryCode = configuration.rememberedProxyLocation?.countryCode
