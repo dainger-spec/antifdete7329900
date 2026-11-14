@@ -178,6 +178,23 @@ final class ProfileRepositoryTests: XCTestCase {
         XCTAssertThrowsError(try repo.create(name: "   ", configuration: ProfileConfiguration()))
     }
 
+    /// The editor's location fields: finite numbers only ("nan" stopped the app when the picker
+    /// drew it), the accuracy held to what the picker shows.
+    func testTheLocationFieldsAsTheEditorReadsThem() {
+        XCTAssertEqual(GeolocationSetting.number(fromField: " 55,75 "), 55.75)
+        XCTAssertEqual(GeolocationSetting.number(fromField: "-33.9"), -33.9)
+        for text in ["nan", "NaN", "-nan", "inf", "-infinity", "1e999", "", "abc"] {
+            XCTAssertNil(GeolocationSetting.number(fromField: text), text)
+            XCTAssertNil(GeolocationSetting.accuracy(fromField: text), text)
+        }
+        XCTAssertEqual(GeolocationSetting.accuracy(fromField: "50"), 50)
+        XCTAssertEqual(GeolocationSetting.accuracy(fromField: "12,5"), 12.5)
+        XCTAssertEqual(GeolocationSetting.accuracy(fromField: "1000"), 500, "saved as the picker shows it")
+        XCTAssertEqual(GeolocationSetting.accuracy(fromField: "1"), 5)
+        XCTAssertEqual(GeolocationSetting.accuracy(fromField: "-20"), 5)
+        XCTAssertEqual(GeolocationSetting.accuracyRange, 5...500)
+    }
+
     func testPasswordVault() throws {
         let profile = try repo.create(name: "P", configuration: ProfileConfiguration())
         let vault = try repo.passwordVault(for: profile.id)

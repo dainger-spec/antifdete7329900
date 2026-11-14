@@ -83,4 +83,32 @@ final class ScenarioLibraryTests: XCTestCase {
         XCTAssertThrowsError(try ScenarioLibrary().save(to: vault))
         XCTAssertEqual(try Data(contentsOf: file), newer)
     }
+
+    /// A script's wait as the clock takes it: Infinity, NaN or a number past what the system's sleep
+    /// holds stopped the profile's process (audit 3).
+    func testAScriptsWaitIsOneTheClockCanTake() {
+        XCTAssertEqual(ScenarioWait.nanoseconds(milliseconds: 1500), 1_500_000_000)
+        XCTAssertEqual(ScenarioWait.nanoseconds(milliseconds: 0), 0)
+        XCTAssertEqual(ScenarioWait.nanoseconds(milliseconds: -5), 0)
+        XCTAssertEqual(ScenarioWait.nanoseconds(milliseconds: -.infinity), 0)
+        XCTAssertEqual(ScenarioWait.nanoseconds(milliseconds: .nan), 0)
+        XCTAssertEqual(ScenarioWait.nanoseconds(milliseconds: 3_600_000), 3_600_000_000_000, "an hour, as asked")
+        // Until Stop: for ever, and anything longer than a year (1e14 ms is past the sleep's range).
+        for forEver in [Double.infinity, 1e14, 1e300, Double.greatestFiniteMagnitude, ScenarioWait.longest * 1000 + 1] {
+            XCTAssertNil(ScenarioWait.nanoseconds(milliseconds: forEver), "\(forEver)")
+        }
+        XCTAssertNotNil(ScenarioWait.nanoseconds(milliseconds: ScenarioWait.longest * 1000))
+
+        XCTAssertEqual(ScenarioWait.keyDelay(milliseconds: nil), 0.06...0.18)
+        XCTAssertEqual(ScenarioWait.keyDelay(milliseconds: .nan), 0.06...0.18)
+        XCTAssertEqual(ScenarioWait.keyDelay(milliseconds: 500), 0.3...0.7, "give or take 40 %")
+        XCTAssertEqual(ScenarioWait.keyDelay(milliseconds: -100), 0...0.01)
+        for huge in [Double.infinity, 1e300] {
+            let range = ScenarioWait.keyDelay(milliseconds: huge)
+            XCTAssertTrue(range.lowerBound.isFinite && range.upperBound.isFinite, "\(huge)")
+            XCTAssertEqual(range.upperBound, ScenarioWait.longest * 1.4)
+            // What the driver then does with it: a random pause in the range, in nanoseconds.
+            XCTAssertLessThan(range.upperBound * 1_000_000_000, Double(UInt64.max))
+        }
+    }
 }

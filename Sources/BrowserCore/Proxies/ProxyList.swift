@@ -329,6 +329,17 @@ public struct ProxyList: Codable, Equatable, Sendable {
         return entries[index].proxy != before ? before : nil
     }
 
+    /// `record(_:for:)` of a check made of `checked` — entry `id` as it was when its check began —
+    /// while the entry still connects that way (`sameConnection`). An entry edited meanwhile
+    /// (another host, port, login, password, type or TLS) is left as the edit left it: the result is
+    /// about the proxy it was, and would put that proxy's verdict, exit and even type on the new
+    /// one, which the profiles on it would then take. `kept` false then: the caller checks it again.
+    public mutating func record(_ result: ProxyCheckResult, for id: UUID,
+                                checked: ProxySettings) -> (kept: Bool, previous: ProxySettings?) {
+        guard let entry = entry(id), Self.sameConnection(entry.proxy, checked) else { return (false, nil) }
+        return (true, record(result, for: id))
+    }
+
     /// The profiles' own proxies — typed into profiles before the list existed — taken into the
     /// list, once (`profilesTakenIn`): each one the list does not have yet (`identity(of:)`)
     /// becomes an entry, with its type, shown by its address. Nothing of a profile changes. Returns

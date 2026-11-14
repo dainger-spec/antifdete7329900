@@ -120,6 +120,19 @@ public enum WebDriverRoute {
         return url
     }
 
+    /// One timeout of a "timeouts" body (`implicit`, `pageLoad`, `script`), in seconds; nil when the
+    /// body has none (or `null`). The protocol's numbers are whole milliseconds from 0 to 2^53 − 1:
+    /// anything else is refused as an invalid argument — a larger one could not be said back in
+    /// whole milliseconds and stopped the profile's process when it was.
+    public static func timeoutSeconds(_ body: [String: Any], _ key: String) throws -> TimeInterval? {
+        guard let value = body[key], !(value is NSNull) else { return nil }
+        let number = (value as? Double) ?? (value as? Int).map(Double.init) ?? (value as? NSNumber)?.doubleValue
+        guard let number, number.isFinite, number >= 0, number <= 9_007_199_254_740_991 else {
+            throw WebDriverError.invalidArgument("the \(key) timeout is a whole number of milliseconds from 0 to 2^53 − 1")
+        }
+        return number / 1000
+    }
+
     public static func parse(method: String, path: String) -> Result<WebDriverRequest, WebDriverError> {
         guard handles(path) else { return .failure(.unknownCommand("not a WebDriver address")) }
         let parts = path.dropFirst(prefix.count).split(separator: "/", omittingEmptySubsequences: true)

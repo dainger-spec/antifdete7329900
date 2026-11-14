@@ -1,3 +1,4 @@
+import BrowserCore
 import MapKit
 import SwiftUI
 
@@ -22,20 +23,18 @@ struct LocationPicker: View {
     @State private var notFound = false
     @State private var resolving = false
 
-    static let accuracyRange: ClosedRange<Double> = 5...500
+    static let accuracyRange = GeolocationSetting.accuracyRange
 
     private var coordinate: CLLocationCoordinate2D? {
-        func number(_ text: String) -> Double? {
-            Double(text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: "."))
-        }
-        guard let lat = number(latitude), let lon = number(longitude),
+        guard let lat = GeolocationSetting.number(fromField: latitude), let lon = GeolocationSetting.number(fromField: longitude),
               (-90...90).contains(lat), (-180...180).contains(lon) else { return nil }
         return CLLocationCoordinate2D(latitude: lat, longitude: lon)
     }
 
+    /// What the field says, as the profile saves it (`GeolocationSetting.accuracy(fromField:)`):
+    /// "nan" — which `Double` reads — once stopped the app here, turned into a whole number.
     private var accuracyMeters: Double {
-        let value = Double(accuracy.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")) ?? 50
-        return min(max(value, Self.accuracyRange.lowerBound), Self.accuracyRange.upperBound)
+        GeolocationSetting.accuracy(fromField: accuracy) ?? 50
     }
 
     var body: some View {

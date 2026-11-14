@@ -326,7 +326,10 @@ The design's "Аккаунт" boards (`docs/DESIGN.md`), in `UI/AccountViews.swi
 - **Settings › Account**: the plan and until when, how long without the server, for a key's
   account without an email its reminders, this Mac's code, sign out (`signout.consequences`), for a
   key's account linking an email and replacing the key, the license's Macs with this one marked and
-  the others unlinkable (`unlink.consequences`; the key asked for when not kept), the site.
+  the others unlinkable (`unlink.consequences`; the key asked for when not kept), its iPhones apart
+  under their own count (`platform: "ios"`, `phonesUsed` of `phoneLimit`; CONTRACT §4.3) — "iPhone
+  K7Q2", their own confirmation (no pause for the Macs), and their Unlink open during the Macs'
+  pause, which an iPhone's unlink neither waits for nor starts — the site.
 - **Banners** above the profiles in §8.5's order, the period's end warned a week and a day before;
   **the sidebar's line** about the rights; a profile that may only be exported says so in its row
   and does not open — the rule, said as a rule.

@@ -667,9 +667,12 @@ struct ChangePasswordView: View {
         guard canChange else { return }
         changing = true
         Task {
-            await model.changePassword(current: current, new: new)
+            let changed = await model.changePassword(current: current, new: new)
             changing = false
-            if model.errorMessage == nil, model.masterPasswordRefusal == nil { dismiss() }
+            // Changed: the sheet closes, whatever else is said — that the sync location could not
+            // be told now, or a message raised elsewhere meanwhile. Left open with the old password
+            // in it, it invited a second Change that the vault refuses as a wrong password.
+            if changed { dismiss() }
         }
     }
 }

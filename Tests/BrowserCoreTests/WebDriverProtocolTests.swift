@@ -75,6 +75,24 @@ final class WebDriverProtocolTests: XCTestCase {
         }
     }
 
+    /// "timeouts": whole milliseconds from 0 to 2^53 − 1, as the protocol has them; a larger one
+    /// could not be said back and stopped the profile's process.
+    func testTimeoutsAreTheProtocolsNumbers() throws {
+        XCTAssertEqual(try WebDriverRoute.timeoutSeconds(["implicit": 5000], "implicit"), 5)
+        XCTAssertEqual(try WebDriverRoute.timeoutSeconds(["script": 0], "script"), 0)
+        XCTAssertEqual(try WebDriverRoute.timeoutSeconds(["pageLoad": 9_007_199_254_740_991.0], "pageLoad"), 9_007_199_254_740.991)
+        XCTAssertNil(try WebDriverRoute.timeoutSeconds(["script": NSNull()], "script"), "null: as it was")
+        XCTAssertNil(try WebDriverRoute.timeoutSeconds([:], "implicit"))
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data("{\"implicit\": 250, \"script\": 1e300}".utf8)) as? [String: Any])
+        XCTAssertEqual(try WebDriverRoute.timeoutSeconds(json, "implicit"), 0.25)
+        for wrong in [1e300, Double.infinity, Double.nan, -1, 9_007_199_254_740_993.0, "5000"] as [Any] {
+            XCTAssertThrowsError(try WebDriverRoute.timeoutSeconds(["script": wrong], "script"), "\(wrong)") { error in
+                XCTAssertEqual((error as? WebDriverError)?.code, "invalid argument")
+            }
+        }
+        XCTAssertThrowsError(try WebDriverRoute.timeoutSeconds(json, "script"), "1e300 as JSON reads it")
+    }
+
     func testTheCommandsSeleniumSends() {
         let expected: [(String, String, String)] = [
             ("POST", "/session/s/url", "navigate"), ("GET", "/session/s/url", "currentURL"), ("GET", "/session/s/title", "title"),

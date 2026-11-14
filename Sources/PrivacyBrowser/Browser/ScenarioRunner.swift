@@ -1,3 +1,4 @@
+import BrowserCore
 import Foundation
 import JavaScriptCore
 import os
@@ -181,13 +182,16 @@ final class ScenarioRunner {
         case "dblclick": try await driver.click(try string(0), clickCount: 2, timeout: timeout(1)); return nil
         case "hover": try await driver.hover(try string(0), timeout: timeout(1)); return nil
         case "type":
-            let delay = (options(2)["delay"] as? NSNumber).map { $0.doubleValue / 1000 }
-            try await driver.type(try string(0), try string(1), delay: delay.map { max(0, $0 * 0.6)...max(0.01, $0 * 1.4) } ?? 0.06...0.18)
+            let delay = (options(2)["delay"] as? NSNumber)?.doubleValue
+            try await driver.type(try string(0), try string(1), delay: ScenarioWait.keyDelay(milliseconds: delay))
             return nil
         case "press": try await driver.press(try string(0)); return nil
         case "scroll":
-            guard let delta = (arguments.first as? NSNumber)?.doubleValue else { throw PageDriver.Failure.script("scroll takes a number of points") }
-            try await driver.scroll(by: delta)
+            guard let delta = (arguments.first as? NSNumber)?.doubleValue, delta.isFinite else {
+                throw PageDriver.Failure.script("scroll takes a number of points")
+            }
+            // Far past any page; within what a whole number holds (its log line counts the points).
+            try await driver.scroll(by: min(max(delta, -1_000_000_000), 1_000_000_000))
             return nil
         case "textContent": return try await driver.textContent(try string(0))
         case "innerText": return try await driver.innerText(try string(0))
@@ -205,8 +209,11 @@ final class ScenarioRunner {
             let selector = arguments.first as? String
             return try await driver.screenshot(selector).base64EncodedString()
         case "pause":
-            let milliseconds = (arguments.first as? NSNumber)?.doubleValue ?? 0
-            try await Task.sleep(nanoseconds: UInt64(max(0, milliseconds) * 1_000_000))
+            // `sleep(Infinity)`, or longer than a year: until Stop, which cancels the wait.
+            let nanoseconds = ScenarioWait.nanoseconds(milliseconds: (arguments.first as? NSNumber)?.doubleValue ?? 0)
+            repeat {
+                try await Task.sleep(nanoseconds: nanoseconds ?? 3_600_000_000_000)
+            } while nanoseconds == nil
             return nil
         default:
             throw PageDriver.Failure.script("no command \(name)")

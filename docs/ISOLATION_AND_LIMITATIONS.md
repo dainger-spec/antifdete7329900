@@ -1730,7 +1730,7 @@ dictionary, no Services and no XPC service. The one way in from another program 
 automation API ([docs/AUTOMATION_API.md](AUTOMATION_API.md)), and only once it is turned on (it is
 off by default, and in the unsandboxed build only): HTTP on the loopback address, while the vault
 is unlocked, answering only requests that carry its token and name `127.0.0.1` in `Host`, and none
-from a web page (`Origin`, `Sec-Fetch-*`). Whoever has the token can start and stop the profiles,
+from a web page (`Origin`, `Sec-Fetch-Site`). Whoever has the token can start and stop the profiles,
 open pages in them and read and write their cookies — not the passwords, the proxy credentials or
 the vault. A program running as this user that can read the app's memory or watch the user type
 is out of scope either way (above).

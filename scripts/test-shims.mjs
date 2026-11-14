@@ -1165,6 +1165,123 @@ test('recorder: autocomplete passwords, one-time codes and card fields are secre
   assert.equal(note, 'select #exp: •••');
 });
 
+// A web component's own elements (an open shadow root): the recorder names them through their
+// host (`host >>> inner`), and the driver's find (PageDriver.findAll) looks there — not at a
+// look-alike in the page itself. A stub DOM with shadow roots and the few selectors these use.
+const driverSwift = readFileSync(new URL('../Sources/PrivacyBrowser/Browser/PageDriver.swift', import.meta.url), 'utf8');
+const driverFindAll = driverSwift.split('private static let findAll = """')[1].split('"""')[0].replace(/\\\\/g, '\\');
+
+async function shadowWindow() {
+  const context = vm.createContext({});
+  vm.runInContext(`
+    var window = globalThis;
+    window.top = window;
+    var posted = [];
+    const listeners = {};
+    var addEventListener = (type, fn) => { (listeners[type] = listeners[type] || []).push(fn); };
+    // An event as a window's capture listener sees it: retargeted to the outermost host, its
+    // composed path from the element itself out.
+    var fire = (type, path, extra) => {
+      const event = Object.assign({ type, target: path.find((n) => n.getRootNode && n.getRootNode() === document) || path[0],
+                                    isTrusted: true, isComposing: false, detail: 1, composedPath: () => path }, extra || {});
+      for (const fn of listeners[type] || []) fn(event);
+    };
+    var pathOf = (el) => { const path = []; for (let n = el; n; n = n.parentNode || n.host) path.push(n); return path.concat([window]); };
+    class Node {
+      constructor() { this.parentNode = null; this.children = []; }
+      append(...kids) { for (const k of kids) { k.parentNode = this; this.children.push(k); } return this; }
+      getRootNode() { let n = this; while (n.parentNode) n = n.parentNode; return n; }
+      contains(other) { for (let n = other; n; n = n.parentNode) { if (n === this) return true; } return false; }
+      querySelectorAll(selector) {
+        const out = [];
+        const walk = (n) => { for (const c of n.children) { if (matches(c, selector)) out.push(c); walk(c); } };
+        walk(this);
+        return out;
+      }
+      elementFromPoint() { return this.hit || null; }
+    }
+    class Element extends Node {
+      constructor(tag, attrs, text) { super(); this.tagName = tag.toUpperCase(); this.attrs = Object.assign({}, attrs); this.ownText = text || ''; this.isConnected = true; this.nodeType = 1; this.shadowRoot = null; }
+      get parentElement() { return this.parentNode instanceof Element ? this.parentNode : null; }
+      getAttribute(name) { return name in this.attrs ? String(this.attrs[name]) : null; }
+      get id() { return this.attrs.id || ''; }
+      get innerText() { return [this.ownText, ...this.children.map((c) => c.innerText)].filter(Boolean).join(' '); }
+      closest() { return null; }
+      attachShadow() { this.shadowRoot = new ShadowRoot(this); return this.shadowRoot; }
+    }
+    class ShadowRoot extends Node { constructor(host) { super(); this.host = host; this.nodeType = 11; this.activeElement = null; } }
+    class HTMLInputElement extends Element { constructor(attrs) { super('input', attrs); this.type = this.attrs.type || 'text'; this.value = ''; } }
+    class HTMLTextAreaElement extends Element {}
+    class HTMLSelectElement extends Element {}
+    class HTMLLabelElement extends Element {}
+    Object.assign(globalThis, { Node, Element, ShadowRoot, HTMLInputElement, HTMLTextAreaElement, HTMLSelectElement, HTMLLabelElement });
+    // "*", "body *", and compounds (tag, #id, [name="value"], :nth-of-type(n)) joined by " > ".
+    var matches = (el, selector) => {
+      if (selector === '*') return true;
+      if (selector === 'body *') return el !== document.body && document.body.contains(el);
+      const compounds = selector.split(' > ');
+      let node = el;
+      for (let i = compounds.length - 1; i >= 0; i--) {
+        if (!node || !(node instanceof Element)) return false;
+        const m = /^([a-z-]+)?(?:#([\\w-]+))?(?:\\[([\\w-]+)="([^"]*)"\\])?(?::nth-of-type\\((\\d+)\\))?$/.exec(compounds[i]);
+        if (!m) throw new SyntaxError('stub: ' + compounds[i]);
+        if (m[1] && node.tagName.toLowerCase() !== m[1]) return false;
+        if (m[2] && node.id !== m[2]) return false;
+        if (m[3] && node.getAttribute(m[3]) !== m[4]) return false;
+        if (m[5]) {
+          const same = node.parentNode.children.filter((c) => c.tagName === node.tagName);
+          if (same.indexOf(node) + 1 !== Number(m[5])) return false;
+        }
+        node = node.parentNode;
+      }
+      return true;
+    };
+    var document = new Node();
+    document.nodeType = 9;
+    document.documentElement = new Element('html');
+    document.body = new Element('body');
+    document.append(document.documentElement);
+    document.documentElement.append(document.body);
+    var CSS = { escape: (text) => text };
+    var location = { href: 'https://example.com/login' };
+    var performance = { now: () => 0 };
+    window.webkit = { messageHandlers: { rec: { postMessage: (message) => { posted.push(message); return { recording: true }; } } } };
+
+    // A newsletter form in the page itself, and a login box whose form is its own (open shadow root).
+    var footerEmail = new HTMLInputElement({ name: 'email' });
+    var subscribe = new Element('button', {}, 'Subscribe');
+    document.body.append(new Element('form').append(footerEmail, new Element('div').append(subscribe)));
+    var loginBox = new Element('login-box');
+    document.body.append(loginBox);
+    var email = new HTMLInputElement({ name: 'email' });
+    var proceed = new Element('button', {}, 'Continue');
+    loginBox.attachShadow().append(new Element('form').append(email, new Element('div').append(proceed)));
+  `, context);
+  vm.runInContext('const HANDLER = "rec";\n' + recorderBody, context);
+  vm.runInContext('globalThis.driver = (() => {\n' + driverFindAll + '\nreturn { find, at, holds, focused };\n})();', context);
+  await new Promise((resolve) => setImmediate(resolve));   // the hello's reply: recording
+  return context;
+}
+
+test('recorder and driver: a field and a button in an open shadow root are named through their host and found there', async () => {
+  const w = await shadowWindow();
+  run(w, `fire('focusin', pathOf(email)); email.value = 'me@example.com'; fire('input', pathOf(email)); fire('focusout', pathOf(email));
+          fire('click', pathOf(proceed));`);
+  const steps = JSON.parse(run(w, 'JSON.stringify(posted.filter((m) => m.type !== "hello"))'));
+  assert.deepEqual(steps.map((m) => [m.type, m.selector]),
+                   [['fill', 'body > login-box >>> input[name="email"]'], ['click', 'body > login-box >>> text=Continue']]);
+  // The replay finds the component's own elements, not the newsletter's of the same shape.
+  assert.equal(run(w, `driver.find(${JSON.stringify(steps[0].selector)})[0] === email`), true);
+  assert.equal(run(w, `driver.find(${JSON.stringify(steps[1].selector)})[0] === proceed`), true);
+  assert.equal(run(w, `driver.find('input[name="email"]').length === 1 && driver.find('input[name="email"]')[0] === footerEmail`), true,
+               'a selector of the page itself still finds only the page\'s own');
+  assert.equal(run(w, `driver.find('text=Continue').length`), 0, 'nor does a text of the page itself look into components');
+  // Where the pointer lands: the button inside the box, not the box that hides it from the page.
+  assert.equal(run(w, `document.hit = loginBox; loginBox.shadowRoot.hit = proceed; driver.at(5, 5) === proceed`), true);
+  assert.equal(run(w, `driver.holds(proceed, driver.at(5, 5)) && driver.holds(loginBox, proceed) && !driver.holds(subscribe, proceed)`), true);
+  assert.equal(run(w, `document.activeElement = loginBox; loginBox.shadowRoot.activeElement = email; driver.focused() === email`), true);
+});
+
 process.on('beforeExit', () => {
   if (failures) { console.log(`${failures} failure(s)`); process.exitCode = 1; }
   else console.log(`all shim tests passed (${JSC ? 'JavaScriptCore, Bun ' + Bun.version : 'V8, Node ' + process.version})`);

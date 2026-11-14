@@ -42,7 +42,12 @@ enum ScenarioRecorderScript {
   };
 
   const attr = (value) => String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  const count = (selector) => { try { return document.querySelectorAll(selector).length; } catch (e) { return 0; } };
+  // Where an element is looked for: the document, or the open shadow root it is in (a web
+  // component's own elements, which no selector of the document reaches). A selector is unique,
+  // and a text is found, in that scope alone; a replay looks there through the host's selector
+  // (`host >>> inner`).
+  let scope = document;
+  const count = (selector) => { try { return scope.querySelectorAll(selector).length; } catch (e) { return 0; } };
   // An id a framework made for this load only (":r1:", "ember123", a long run of digits or hex)
   // finds nothing tomorrow.
   const stable = (id) => id.length <= 48 && !/[:.\s]/.test(id) && !/\d{4,}/.test(id) && !/^[0-9a-f]{12,}$/i.test(id)
@@ -50,7 +55,7 @@ enum ScenarioRecorderScript {
 
   // As the driver finds `text=`: the smallest elements whose text holds it.
   const textMatches = (wanted) => {
-    const all = Array.from(document.querySelectorAll('body *')).filter((e) =>
+    const all = Array.from(scope.querySelectorAll(scope === document ? 'body *' : '*')).filter((e) =>
       (e.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase().includes(wanted));
     return all.filter((e) => !all.some((other) => other !== e && e.contains(other)));
   };
@@ -84,18 +89,21 @@ enum ScenarioRecorderScript {
       const named = node === el ? null : byAttributes(node);
       if (named) { return named + ' > ' + parts.join(' > '); }
       const tag = node.tagName.toLowerCase();
-      const same = node.parentElement ? Array.from(node.parentElement.children).filter((c) => c.tagName === node.tagName) : [node];
+      // At the top of a shadow root its siblings are the root's children.
+      const parent = node.parentElement || (node.parentNode && node.parentNode.nodeType === 11 ? node.parentNode : null);
+      const same = parent ? Array.from(parent.children).filter((c) => c.tagName === node.tagName) : [node];
       parts.unshift(same.length > 1 ? `${tag}:nth-of-type(${same.indexOf(node) + 1})` : tag);
       node = node.parentElement;
     }
     return (node === document.body ? 'body > ' : '') + parts.join(' > ');
   }
 
-  function selectorOf(el) {
+  // `el`'s selector in the scope it is in; a host's never by its text, which a `>>>` would cut.
+  function selectorIn(el, isHost) {
     const named = byAttributes(el);
     if (named) { return named; }
     const tag = el.tagName.toLowerCase();
-    if (tag === 'a' || tag === 'button' || el.getAttribute('role') === 'button' || tag === 'summary' || tag === 'label') {
+    if (!isHost && (tag === 'a' || tag === 'button' || el.getAttribute('role') === 'button' || tag === 'summary' || tag === 'label')) {
       const text = (el.innerText || '').replace(/\s+/g, ' ').trim();
       if (text && text.length <= 40 && !/["\n]/.test(text)) {
         const found = textMatches(text.toLowerCase());
@@ -103,6 +111,16 @@ enum ScenarioRecorderScript {
       }
     }
     return byPath(el);
+  }
+
+  // Inside an open shadow root: the host's selector, `>>>`, then `el`'s in that root — the way the
+  // driver's find goes (PageDriver.findAll), one root after another for components in components.
+  function selectorOf(el, isHost) {
+    const root = typeof el.getRootNode === 'function' ? el.getRootNode() : document;
+    const inShadow = typeof ShadowRoot !== 'undefined' && root instanceof ShadowRoot && !!root.host;
+    const outer = inShadow ? selectorOf(root.host, true) + ' >>> ' : '';
+    scope = inShadow ? root : document;
+    try { return outer + selectorIn(el, isHost); } finally { scope = document; }
   }
 
   const isField = (el) => (el instanceof HTMLInputElement

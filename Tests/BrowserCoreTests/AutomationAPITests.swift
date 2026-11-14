@@ -73,9 +73,61 @@ final class AutomationAPITests: XCTestCase {
         XCTAssertEqual(try refusal(["Origin": "null"]), 403)
         XCTAssertEqual(try refusal(["Origin": "http://127.0.0.1:50777"]), 403)
         XCTAssertEqual(try refusal(["Sec-Fetch-Site": "cross-site"]), 403)
+        XCTAssertEqual(try refusal(["Sec-Fetch-Dest": "empty"]), 403)
+        // What Safari sends for a page's fetch to 127.0.0.1: the whole fetch-metadata set.
+        let browser = ["Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty",
+                       "Origin": "https://attacker.example", "User-Agent": "Mozilla/5.0 (Macintosh) Safari/605.1.15"]
+        XCTAssertEqual(try refusal(browser), 403)
+        XCTAssertEqual(try refusal(browser.filter { $0.key != "Origin" }), 403, "a page's GET with no Origin")
+        // What Node's built-in fetch (undici, so WebdriverIO too) sends: Sec-Fetch-Mode and nothing else of the set.
+        let node = ["Sec-Fetch-Mode": "cors", "Accept": "*/*", "Accept-Language": "*", "User-Agent": "node",
+                    "Accept-Encoding": "gzip, deflate"]
+        XCTAssertNil(try refusal(node), "Node's fetch is not a web page")
+        XCTAssertEqual(try refusal(node.merging(["Authorization": "Bearer wrong"]) { $1 }), 401, "and still needs the token")
         // An empty token opens nothing.
         let empty = try request("GET", "/v1/profiles", extra: ["Authorization": "Bearer "])
         XCTAssertEqual(AutomationGate.refusal(of: empty, token: "", port: port)?.status, 401)
+    }
+
+    func testAWebDriverClientIsAnsweredAndAWebPageIsNot() throws {
+        func refusal(_ extra: [String: String]) throws -> Int? {
+            var headers = ["Host": "127.0.0.1:\(port)", "Content-Type": "application/json; charset=utf-8"]
+            headers.merge(extra) { $1 }
+            guard case .request(let request) = AutomationHTTP.parse(raw("POST", "/wd/abc/Shop/session", headers: headers, body: "{}")) else {
+                throw XCTSkip("did not parse")
+            }
+            return AutomationGate.webDriverRefusal(of: request, port: port)?.status
+        }
+        // Selenium (node:http, urllib3, Java's client): no fetch metadata at all.
+        XCTAssertNil(try refusal(["User-Agent": "selenium/4.27.1 (python mac)", "Accept": "application/json"]))
+        // WebdriverIO through Node's fetch: Sec-Fetch-Mode alone.
+        XCTAssertNil(try refusal(["Sec-Fetch-Mode": "cors", "Accept": "application/json", "User-Agent": "webdriver/9.33.1"]))
+        // A page in a browser, with or without Origin.
+        XCTAssertEqual(try refusal(["Origin": "https://attacker.example", "Sec-Fetch-Site": "cross-site",
+                                    "Sec-Fetch-Mode": "no-cors", "Sec-Fetch-Dest": "empty"]), 403)
+        XCTAssertEqual(try refusal(["Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate",
+                                    "Sec-Fetch-Dest": "document", "Sec-Fetch-User": "?1"]), 403)
+        XCTAssertEqual(try refusal(["Origin": "null"]), 403)
+        XCTAssertEqual(try refusal(["Host": "attacker.example:50777"]), 403)
+    }
+
+    /// A connection past the listener's room is answered, in the protocol its request line names.
+    func testABusyAnswerSpeaksTheProtocolOfTheRequest() throws {
+        let webDriver = AutomationHTTP.busy(firstBytes: raw("POST", "/wd/abc/Shop/session", headers: ["Host": "127.0.0.1:50777"], body: "{}"))
+        XCTAssertEqual(webDriver.status, 500, "the protocol's \"unknown error\": every client raises it")
+        let value = try XCTUnwrap((try JSONSerialization.jsonObject(with: webDriver.body) as? [String: Any])?["value"] as? [String: Any])
+        XCTAssertEqual(value["error"] as? String, "unknown error")
+        XCTAssertTrue((value["message"] as? String)?.contains("not acted on") == true)
+
+        for first in [raw("GET", "/v1/profiles", headers: ["Host": "127.0.0.1:50777"]), Data("POST /v1/profiles/a/st".utf8), Data("\r\n".utf8)] {
+            let api = AutomationHTTP.busy(firstBytes: first)
+            XCTAssertEqual(api.status, 503)
+            let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: api.body) as? [String: Any])
+            XCTAssertEqual(body["error"] as? String, "busy")
+            XCTAssertTrue(String(decoding: api.serialized(), as: UTF8.self).hasPrefix("HTTP/1.1 503 Service Unavailable\r\n"))
+        }
+        // Only the start of a WebDriver request has come: the path is enough.
+        XCTAssertEqual(AutomationHTTP.busy(firstBytes: Data("GET /wd/abc/Shop/session/1/url HT".utf8)).status, 500)
     }
 
     func testNoAnswerCarriesACORSHeaderOrIsCached() {

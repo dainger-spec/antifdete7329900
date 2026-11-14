@@ -2089,14 +2089,14 @@
 "help.scenarios.schedule" = "Расписание";
 "help.scenarios.schedule.text" = "В окне сценариев слева внизу — «Расписание», а рядом с «Запустить» — «По расписанию…» для открытого сценария. Сценарий или прогрев профиля можно запускать каждый день в заданное время или раз в несколько часов, со случайным разбросом, чтобы запуски не приходились на одну и ту же минуту.";
 "help.scenarios.schedule.running" = "Расписание работает, пока Lumen открыт и хранилище разблокировано: Mac оно не будит и приложение не запускает. Запуск, пропущенный больше чем на 6 часов, не выполняется — ждёт следующего раза. Если профиль в этот момент занят, запуск переносится на 10 минут.";
-"help.commands.intro" = "Команды — у объекта page. selector — это CSS (#login, .buy, input[name=q]) или text=… — самый маленький видимый элемент с таким текстом. Необязательные настройки передаются последним аргументом в фигурных скобках, например {timeout: 30000} — в миллисекундах.";
+"help.commands.intro" = "Команды — у объекта page. selector — это CSS (#login, .buy, input[name=q]) или text=… — самый маленький видимый элемент с таким текстом; login-box >>> input[name=email] ищет внутри компонента страницы (в его открытом shadow root). Необязательные настройки передаются последним аргументом в фигурных скобках, например {timeout: 30000} — в миллисекундах.";
 "help.commands.navigation" = "Переходы";
 "help.commands.goto" = "Открыть адрес http или https, как из адресной строки, и дождаться загрузки. {waitUntil: 'domcontentloaded'} — не ждать картинок и стилей.";
 "help.commands.history" = "Назад, вперёд, перезагрузить — как кнопки панели; ждут страницу.";
 "help.commands.loadState" = "Дождаться состояния страницы: 'load' или 'domcontentloaded'.";
 "help.commands.waiting" = "Ожидание";
 "help.commands.waitFor" = "Дождаться элемента. {state: 'visible'} по умолчанию; ещё 'hidden', 'attached', 'detached'. Не дождались за timeout — ошибка.";
-"help.commands.sleep" = "Пауза в миллисекундах.";
+"help.commands.sleep" = "Пауза в миллисекундах. sleep(Infinity) ждёт, пока запуск не остановят.";
 "help.commands.acting" = "Действия";
 "help.commands.click" = "Дождаться элемента, прокрутить к нему колесом, навести указатель и нажать. Если элемент закрыт другим — ошибка с названием того, что его закрывает.";
 "help.commands.dblclick" = "Двойной щелчок. То же, что page.click(selector, {clickCount: 2}).";
@@ -2147,7 +2147,7 @@
 "help.api.webdriver.step.copy" = "Выберите профиль и скопируйте «Адрес WebDriver» в панели профиля справа — или выберите «Скопировать адрес WebDriver» в меню ⋯ профиля.";
 "help.api.webdriver.step.script" = "Передайте адрес в скрипт как command_executor.";
 "help.api.webdriver.code" = "from selenium import webdriver\nfrom selenium.webdriver.common.by import By\n\n# Адрес — из панели профиля: «Адрес WebDriver» → «Скопировать»\ndriver = webdriver.Remote(\n    command_executor='http://127.0.0.1:50777/wd/<токен>/<профиль>',\n    options=webdriver.SafariOptions())\n\ndriver.get('https://example.com/')\ndriver.find_element(By.CSS_SELECTOR, 'input[name=q]').send_keys('lumen')\ndriver.find_element(By.XPATH, '//button[@type=\"submit\"]').click()\nprint(driver.title)\ndriver.quit()  # закрывает окно; профиль, запущенный сессией, останавливается";
-"help.api.webdriver.session" = "Новая сессия запускает профиль, если он остановлен, и открывает окно Safari, в котором действуют команды. quit закрывает окно и останавливает профиль, если его запустила сессия. У профиля одна сессия одновременно.";
+"help.api.webdriver.session" = "Новая сессия запускает профиль, если он остановлен, и открывает для своих команд отдельное окно Safari: сценарии в нём не выполняются. quit закрывает окно и останавливает профиль, только если его запустила сессия; профиль, который уже работал (и скрытно тоже), продолжает работать. У профиля одна сессия одновременно, и пока она идёт, сценарий профиля по расписанию ждёт.";
 "help.api.webdriver.human" = "Нажатия и ввод — те же, что у сценариев: указатель доходит до элемента, клавиши нажимаются по одной. Страница получает их как действия человека, а navigator.webdriver остаётся false.";
 "help.api.webdriver.scripts" = "execute_script выполняется в отдельном мире страницы: DOM, элементы-аргументы и возврат элементов работают; собственные переменные страницы (window.app и подобные) из него не видны.";
 "help.api.webdriver.limits" = "Есть: переходы, поиск по CSS и XPath, click, send_keys, clear, текст и атрибуты, execute_script, cookies, снимок экрана, размер окна, ожидания. Нет: фреймы, диалоги alert, несколько вкладок, ActionChains, загрузка файлов.";
@@ -2509,7 +2509,12 @@
 "license.account.thisMacBadge" = "Этот Mac";
 "license.account.device.seen" = "На связи %1$@ · %2$@";
 "license.account.device.title" = "Mac %@";
+"license.account.device.phone" = "iPhone %@";
 "license.account.unlink.confirm" = "Отвязать Mac %@?";
+"license.account.unlink.confirm.phone" = "Отвязать iPhone %@?";
+"license.account.unlink.phone.consequences" = "iPhone потеряет доступ к лицензии и синхронизации при следующей связи с сервером. Профили на нём останутся. Пауза для отвязки Mac от этого не начнётся.";
+"license.account.caption.phones" = "iPhone · %1$ld из %2$ld";
+"license.account.phones.hint" = "iPhone не занимает места Mac. Отвязать его можно в любой момент, и пауза для Mac после этого не начинается.";
 "license.account.signIn" = "Войти";
 "license.account.devicesOnSite" = "Устройства на сайте";
 "license.account.cabinet" = "Кабинет";

@@ -33,6 +33,22 @@ extension ProfileConfiguration {
         }
         return saved
     }
+
+    /// This configuration as the profile editor saves it over `stored` (`savingEdit(over:)`), with
+    /// the proxy's location as `assigning` has it: when the proxy is another one than `stored`'s,
+    /// the location remembered for the old proxy goes, and in its place goes the one this edit
+    /// carries if it is the new proxy's — what the editor's check found through it ("From the
+    /// list", or Check under "New") — or none; its exit IP only while the profile asks to be warned
+    /// when it changes. The same proxy: what is stored stays (a launch's lookup may be newer than
+    /// the editor's copy). Without this, the old proxy's location was kept and the check's thrown
+    /// away, and the first launch through the new proxy had no location to fall back on.
+    public func savingEditorEdit(over stored: ProfileConfiguration?, at time: Date = Date()) -> ProfileConfiguration {
+        var saved = savingEdit(over: stored, at: time)
+        guard let stored, ProxyLocation.exitEndpoint(of: stored.proxy) != ProxyLocation.exitEndpoint(of: proxy) else { return saved }
+        saved.lastProxyLocation = rememberedProxyLocation
+        if proxy != nil, !saved.warnOnProxyIPChange { saved.lastProxyLocation?.exitIP = nil }
+        return saved
+    }
 }
 
 /// What giving proxies to profiles did.

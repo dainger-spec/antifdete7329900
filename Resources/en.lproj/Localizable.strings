@@ -2089,14 +2089,14 @@
 "help.scenarios.schedule" = "Schedule";
 "help.scenarios.schedule.text" = "Schedule is at the bottom left of the Scenarios window, and On a Schedule…, beside Run, schedules the scenario that is open. A scenario or a profile's warm-up can start every day at a set time or every few hours, with a random shift, so that runs do not fall on the same minute.";
 "help.scenarios.schedule.running" = "A schedule runs while Lumen is open and the vault is unlocked: it does not wake the Mac or start the app. A run missed by more than 6 hours is not made; it waits for the next time. If the profile is busy then, the run moves on by 10 minutes.";
-"help.commands.intro" = "The commands belong to page. A selector is CSS (#login, .buy, input[name=q]) or text=…, the smallest visible element holding that text. Options go last, in braces, such as {timeout: 30000}, in milliseconds.";
+"help.commands.intro" = "The commands belong to page. A selector is CSS (#login, .buy, input[name=q]) or text=…, the smallest visible element holding that text; login-box >>> input[name=email] looks inside a page component (its open shadow root). Options go last, in braces, such as {timeout: 30000}, in milliseconds.";
 "help.commands.navigation" = "Going to pages";
 "help.commands.goto" = "Goes to an http or https address, as the address bar does, and waits for the page. {waitUntil: 'domcontentloaded'} does not wait for pictures and styles.";
 "help.commands.history" = "Back, forward, reload, as the toolbar’s buttons; they wait for the page.";
 "help.commands.loadState" = "Waits for the page’s state: 'load' or 'domcontentloaded'.";
 "help.commands.waiting" = "Waiting";
 "help.commands.waitFor" = "Waits for an element. {state: 'visible'} by default; also 'hidden', 'attached', 'detached'. Not there within the timeout is an error.";
-"help.commands.sleep" = "A pause, in milliseconds.";
+"help.commands.sleep" = "A pause, in milliseconds. sleep(Infinity) waits until the run is stopped.";
 "help.commands.acting" = "Acting";
 "help.commands.click" = "Waits for the element, scrolls it into view with the wheel, moves the pointer onto it and clicks. An element covered by another is an error naming what covers it.";
 "help.commands.dblclick" = "A double click. The same as page.click(selector, {clickCount: 2}).";
@@ -2147,7 +2147,7 @@
 "help.api.webdriver.step.copy" = "Select the profile and copy WebDriver Address in the profile panel on the right — or choose Copy WebDriver Address in the profile's ⋯ menu.";
 "help.api.webdriver.step.script" = "Give the address to the script as command_executor.";
 "help.api.webdriver.code" = "from selenium import webdriver\nfrom selenium.webdriver.common.by import By\n\n# The address is in the profile panel: WebDriver Address → Copy\ndriver = webdriver.Remote(\n    command_executor='http://127.0.0.1:50777/wd/<token>/<profile>',\n    options=webdriver.SafariOptions())\n\ndriver.get('https://example.com/')\ndriver.find_element(By.CSS_SELECTOR, 'input[name=q]').send_keys('lumen')\ndriver.find_element(By.XPATH, '//button[@type=\"submit\"]').click()\nprint(driver.title)\ndriver.quit()  # closes the window; a profile the session started is stopped";
-"help.api.webdriver.session" = "A new session starts the profile if it is stopped and opens the Safari window its commands act in. quit closes the window, and stops the profile if the session started it. A profile has one session at a time.";
+"help.api.webdriver.session" = "A new session starts the profile if it is stopped and opens a Safari window of its own for its commands: a scenario never runs in it. quit closes the window, and stops the profile only if the session started it; a profile that was running, out of sight too, stays. A profile has one session at a time, and while it lasts a scheduled scenario of the profile waits.";
 "help.api.webdriver.human" = "Clicks and typing are the scenarios': the pointer travels to the element, the keys are pressed one by one. The page takes them for a person's, and navigator.webdriver stays false.";
 "help.api.webdriver.scripts" = "execute_script runs in a world of its own in the page: the DOM, elements as arguments and elements returned work; the page's own variables (window.app and the like) are not seen from it.";
 "help.api.webdriver.limits" = "There is: navigation, finding by CSS and XPath, click, send_keys, clear, text and attributes, execute_script, cookies, a screenshot, the window's size, waits. There is not: frames, alert dialogs, several tabs, ActionChains, file uploads.";
@@ -2509,7 +2509,12 @@
 "license.account.thisMacBadge" = "This Mac";
 "license.account.device.seen" = "Seen %1$@ · %2$@";
 "license.account.device.title" = "Mac %@";
+"license.account.device.phone" = "iPhone %@";
 "license.account.unlink.confirm" = "Unlink Mac %@?";
+"license.account.unlink.confirm.phone" = "Unlink iPhone %@?";
+"license.account.unlink.phone.consequences" = "The iPhone loses access to the license and sync the next time it reaches the server. Its profiles stay on it. This starts no pause for unlinking a Mac.";
+"license.account.caption.phones" = "iPhone · %1$ld of %2$ld";
+"license.account.phones.hint" = "An iPhone takes no Mac’s place. You can unlink it at any time, and that starts no pause for Macs.";
 "license.account.signIn" = "Sign In";
 "license.account.devicesOnSite" = "Devices on the Website";
 "license.account.cabinet" = "Your account";

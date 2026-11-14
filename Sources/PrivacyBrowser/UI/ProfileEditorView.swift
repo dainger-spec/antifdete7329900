@@ -455,11 +455,10 @@ struct ProfileDraft {
         }
         configuration.proxy = try makeProxy()
         if geoMode == .fixed {
-            // "55,75": a decimal comma, as it is written in Russian, reads as a point.
-            func number(_ text: String) -> Double? {
-                Double(text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: "."))
-            }
-            guard let lat = number(latitude), let lon = number(longitude), let acc = number(accuracy) else {
+            // "55,75": a decimal comma, as it is written in Russian, reads as a point. Finite numbers
+            // only; the accuracy held to what the picker shows (5–500 m), so the map and the page agree.
+            guard let lat = GeolocationSetting.number(fromField: latitude), let lon = GeolocationSetting.number(fromField: longitude),
+                  let acc = GeolocationSetting.accuracy(fromField: accuracy) else {
                 throw CoreError.invalidConfiguration(L("editor.error.coords"))
             }
             configuration.geolocation = .fixed(latitude: lat, longitude: lon, accuracyMeters: acc)

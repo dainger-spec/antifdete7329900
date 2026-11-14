@@ -87,3 +87,30 @@ extension ScenarioLibrary {
         try Self.file(for: vault).save(self)
     }
 }
+
+/// A scenario's waits as the clock takes them. A script's number can be anything JavaScript has —
+/// `Infinity`, `NaN`, `1e300` — and the system's sleep takes whole nanoseconds below 2^64 (some
+/// 584 years): a number past that stopped the profile's process. A script that waits longer than
+/// `longest` (or for ever) waits until it is stopped, which is what `sleep(Infinity)` means.
+public enum ScenarioWait {
+    /// A year: no run waits longer on purpose.
+    public static let longest: TimeInterval = 365 * 24 * 3600
+
+    /// What `sleep(ms)` and `page.pause(ms)` wait, in nanoseconds: none for zero, a negative number
+    /// or NaN; nil — until the run is stopped — for `Infinity` or anything longer than `longest`.
+    public static func nanoseconds(milliseconds: Double) -> UInt64? {
+        guard !milliseconds.isNaN, milliseconds > 0 else { return 0 }
+        let seconds = milliseconds / 1000
+        guard seconds <= longest else { return nil }
+        return UInt64(seconds * 1_000_000_000)
+    }
+
+    /// The seconds a key's pause is drawn from for `page.type(…, {delay: ms})`: the delay asked,
+    /// give or take 40 %, at most `longest` (`Infinity` too: in effect until Stop); a person's
+    /// 0.06…0.18 s when none, or NaN, is asked.
+    public static func keyDelay(milliseconds: Double?) -> ClosedRange<Double> {
+        guard let milliseconds, !milliseconds.isNaN else { return 0.06...0.18 }
+        let seconds = min(max(0, milliseconds / 1000), longest)
+        return (seconds * 0.6)...max(0.01, seconds * 1.4)
+    }
+}
