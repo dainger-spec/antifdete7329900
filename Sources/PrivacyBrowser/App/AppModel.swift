@@ -640,6 +640,7 @@ final class AppModel: ObservableObject {
         scheduleCoordinator = nil
         scenarioSchedules = ScenarioSchedules()
         recordingProfile = nil
+        recordingScenario = nil
         recorded = ScenarioRecording()
         await manager?.shutDown()
         // The machines' macOS is shut down, as a Mac's is, before the vault that holds their
@@ -1334,11 +1335,14 @@ final class AppModel: ObservableObject {
     /// The profile a scenario is being recorded in, and what has been recorded so far.
     @Published private(set) var recordingProfile: UUID?
     @Published private(set) var recorded = ScenarioRecording()
+    /// The scenario the recording is for: its steps go there when it ends, whichever scenario the
+    /// editor shows by then — its window may have been closed and opened again meanwhile.
+    @Published private(set) var recordingScenario: UUID?
 
-    /// Begins recording what the person does in profile `id`'s window, starting the profile first
-    /// when it is not running. False when the plan has no automation, a recording is going
-    /// already, or the profile did not start.
-    func startRecording(on id: UUID) async -> Bool {
+    /// Begins recording what the person does in profile `id`'s window, for `scenario`, starting
+    /// the profile first when it is not running. False when the plan has no automation, a
+    /// recording is going already, or the profile did not start.
+    func startRecording(on id: UUID, for scenario: UUID? = nil) async -> Bool {
         guard license.allowsAutomation, manager != nil, recordingProfile == nil else { return false }
         if !isRunning(id) { await launch(id) }
         guard let manager, isRunning(id) else { return false }
@@ -1353,18 +1357,22 @@ final class AppModel: ObservableObject {
         // Set before the recording begins: a profile run in this process says its first page —
         // the one in front — as it begins, and what is said of another profile is dropped above.
         recordingProfile = id
+        recordingScenario = scenario
         guard manager.startRecording(id) else {
             recordingProfile = nil
+            recordingScenario = nil
             return false
         }
         return true
     }
 
-    /// Ends the recording; its steps are the caller's to put into a scenario.
+    /// Ends the recording; its steps are the caller's to put into the scenario it was for
+    /// (`recordingScenario`, read before this).
     @discardableResult
     func stopRecording() -> [RecordedStep] {
         if let id = recordingProfile { manager?.stopRecording(id) }
         recordingProfile = nil
+        recordingScenario = nil
         return recorded.steps
     }
 

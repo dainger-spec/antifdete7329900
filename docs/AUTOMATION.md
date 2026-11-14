@@ -120,9 +120,15 @@ Record ── AppModel.startRecording(on:) ── the profile started with a win
    ScenarioRecorder ── Event.loaded(address) | .acted(step) ── ProfileEvent.recorded ── the app
    AppModel.recorded: ScenarioRecording ── which loads are steps (the first page and an address
                opened: goto; a page that follows a click or Enter within 5 s: waitForLoadState, once)
-   Stop Recording ── ScenarioRecording.line(for:) per step, added to the scenario's end — or put in
-               place of the example a new scenario begins with, while that example is untouched
+   Stop Recording ── ScenarioRecording.line(for:) per step, added to the end of the scenario the
+               recording was for (AppModel.recordingScenario) — or put in place of the example a
+               new scenario begins with, while that example is untouched
 ```
+
+- **The scenario it is for.** A recording belongs to the scenario on screen when Record was
+  pressed. The list keeps to it until the recording ends; the editor's window closed and opened
+  again shows that scenario, not the list's first; and the steps go to it whatever is on screen
+  when the recording ends (a scenario deleted meanwhile: a new one gets them).
 
 - **Selectors**, in this order: an `id` that is unique and not made for this load only (`:r1:`,
   `ember123`, long runs of digits); `data-testid`, `data-test-id`, `data-test`, `data-qa`,
