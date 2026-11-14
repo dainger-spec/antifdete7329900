@@ -45,7 +45,7 @@ final class VMGuestScriptTests: XCTestCase {
     private static let recorded = ["defaults", "scutil", "systemsetup", "osascript", "open", "killall", "shutdown", "chown", "ln",
                                    "mount", "mount_virtiofs", "sysadminctl", "pmset", "mdutil", "softwareupdate"]
     private static let answered = ["sh", "sleep", "launchctl", "sudo", "stat", "id", "pgrep", "sw_vers", "logger",
-                                   "sysctl", "fdesetup", "stty"]
+                                   "sysctl", "fdesetup", "stty", "readlink"]
 
     private func writeStubs() throws {
         let bin = root.appendingPathComponent("bin")
@@ -74,6 +74,10 @@ final class VMGuestScriptTests: XCTestCase {
                 "com.apple.dock orientation") [ -z "$DOCK_ORIENTATION" ] && exit 1; echo "$DOCK_ORIENTATION" ;;
                 "com.apple.dock autohide") [ -z "$DOCK_AUTOHIDE" ] && exit 1; echo "$DOCK_AUTOHIDE" ;;
                 "com.apple.dock tilesize") [ -z "$DOCK_TILESIZE" ] && exit 1; echo "$DOCK_TILESIZE" ;;
+                "-g AppleLocale") [ -z "$APPLE_LOCALE" ] && exit 1; echo "$APPLE_LOCALE" ;;
+                "-g AppleLanguages") [ -z "$APPLE_LANGUAGES" ] && exit 1; printf '(\n    "%s",\n    "ru-RU"\n)\n' "$APPLE_LANGUAGES" ;;
+                "io.lumenbrowser.guest keyboard") [ -z "$KEYBOARD_NOTED" ] && exit 1; echo "$KEYBOARD_NOTED" ;;
+                "io.lumenbrowser.guest locale") [ -z "$LOCALE_NOTED" ] && exit 1; echo "$LOCALE_NOTED" ;;
                 *) exit 1 ;;
               esac
             fi
@@ -112,6 +116,8 @@ final class VMGuestScriptTests: XCTestCase {
         try stub("sysctl", "[ \"$2\" = hw.model ] && echo \"${HW_MODEL-VirtualMac2,1}\"")
         try stub("fdesetup", "[ \"$1\" = isactive ] && echo \"${FILEVAULT-false}\"")
         try stub("stty", "exit 0")
+        // Where /etc/localtime points: the time zone the system has.
+        try stub("readlink", "[ -n \"$LOCALTIME\" ] && echo \"$LOCALTIME\"")
         try stub("pgrep", "exit 1")
         try stub("sw_vers", "case \"$1\" in -productVersion) echo 27.2.1 ;; -buildVersion) echo 26B131 ;; esac")
         try stub("logger", "exit 0")
@@ -254,7 +260,7 @@ final class VMGuestScriptTests: XCTestCase {
         XCTAssertEqual(run.status, 0)
         for untouched in ["AppleInterfaceStyle", "AppleAccentColor", "AppleICUForce", "AppleFirstWeekday", "AppleShowScrollBars",
                           "com.apple.dock orientation -string", "com.apple.dock autohide -bool", "com.apple.dock tilesize -int",
-                          "AppleLanguages", "AppleLocale", "settimezone", "osascript"] {
+                          "write -g AppleLanguages", "write -g AppleLocale", "settimezone", "osascript"] {
             XCTAssertFalse(run.calls.contains { $0.contains(untouched) }, "\(untouched): \(run.calls)")
         }
         XCTAssertFalse(run.has("root killall Dock"))
@@ -368,7 +374,7 @@ final class VMGuestScriptTests: XCTestCase {
         let run = try boot(settings: hostile)
         XCTAssertEqual(run.status, 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: marker), "a value was run as a command")
-        for refused in ["AppleLanguages", "AppleLocale", "settimezone", "AppleInterfaceStyle", "AppleAccentColor", "AppleICUForce",
+        for refused in ["write -g AppleLanguages", "write -g AppleLocale", "settimezone", "AppleInterfaceStyle", "AppleAccentColor", "AppleICUForce",
                         "AppleFirstWeekday", "AppleShowScrollBars", "com.apple.dock orientation -string", "com.apple.dock autohide -bool",
                         "com.apple.dock tilesize -int", "scutil", "osascript", "example", "touch", "passwd"] {
             XCTAssertFalse(run.calls.contains { $0.contains(refused) }, "\(refused): \(run.calls)")
@@ -477,7 +483,7 @@ final class VMGuestScriptTests: XCTestCase {
     func testAMachineWithoutSettingsKeepsWhatItHas() throws {
         let run = try boot(settings: nil)
         XCTAssertEqual(run.status, 0)
-        XCTAssertFalse(run.calls.contains { $0.contains("scutil") || $0.contains(" open ") || $0.contains("AppleLanguages") }, "\(run.calls)")
+        XCTAssertFalse(run.calls.contains { $0.contains("scutil") || $0.contains(" open ") || $0.contains("write -g AppleLanguages") }, "\(run.calls)")
         XCTAssertEqual(status().toolsVersion, VMGuestTools.version)
         XCTAssertEqual(run.calls.last, "root shutdown -h now")
     }
@@ -626,5 +632,108 @@ final class VMGuestScriptTests: XCTestCase {
         let second = try boot(settings: settings)
         XCTAssertEqual(second.count("tester osascript "), 0, "\(second.calls)")
         XCTAssertEqual(status().wallpaperState, "kept")
+    }
+
+    // MARK: - The keyboard, the region's leftovers, and what the system has
+
+    private static func layout(_ id: Int, _ name: String) -> String {
+        "<dict><key>InputSourceKind</key><string>Keyboard Layout</string><key>KeyboardLayout ID</key><integer>\(id)</integer>"
+            + "<key>KeyboardLayout Name</key><string>\(name)</string></dict>"
+    }
+
+    /// The layouts that go with the machine's language are written once, the first the one in
+    /// use; macOS takes them at the next sign-in, and the status says so.
+    func testTheKeyboardsLayoutsAreWrittenOnceAndAreInUseFromTheNextStart() throws {
+        let american = VMGuestSettings(profile: VMProfile(name: "A", language: "en-US", localeFollowsProxy: false, lumenWallpaper: false,
+                                                          keyboard: VMKeyboardLayout.automatic))
+        XCTAssertTrue(american.text.contains("LUMEN_KEYBOARD=us\n"), american.text)
+        let first = try boot(settings: american.text)
+        let us = Self.layout(0, "U.S.")
+        XCTAssertTrue(first.has("tester defaults write com.apple.HIToolbox AppleEnabledInputSources -array \(us)"), "\(first.calls)")
+        XCTAssertTrue(first.has("tester defaults write com.apple.HIToolbox AppleSelectedInputSources -array \(us)"))
+        XCTAssertTrue(first.has("tester defaults write com.apple.HIToolbox AppleCurrentKeyboardLayoutInputSourceID -string com.apple.keylayout.US"))
+        XCTAssertTrue(first.has("tester defaults write io.lumenbrowser.guest keyboard -string us"))
+        XCTAssertEqual(status().keyboardState, "next")
+        XCTAssertTrue(status().keyboardFromNextStart)
+
+        // The same choice at the next start: nothing is written again — what the person added
+        // in the machine since stays.
+        let second = try boot(settings: american.text, environment: ["KEYBOARD_NOTED": "us"])
+        XCTAssertFalse(second.calls.contains { $0.contains("defaults write com.apple.HIToolbox") }, "\(second.calls)")
+        XCTAssertEqual(status().keyboardState, "set")
+
+        // A layout that types no Latin letters comes with the plain Latin one, and is the one in use.
+        let russian = VMGuestSettings(profile: VMProfile(name: "A", lumenWallpaper: false, keyboard: "russian"))
+        XCTAssertTrue(russian.text.contains("LUMEN_KEYBOARD=russian,abc\n"), russian.text)
+        let third = try boot(settings: russian.text, environment: ["KEYBOARD_NOTED": "us"])
+        XCTAssertTrue(third.has("tester defaults write com.apple.HIToolbox AppleEnabledInputSources -array "
+                                + "\(Self.layout(19456, "Russian")) \(Self.layout(252, "ABC"))"), "\(third.calls)")
+        XCTAssertTrue(third.has("tester defaults write com.apple.HIToolbox AppleCurrentKeyboardLayoutInputSourceID -string com.apple.keylayout.Russian"))
+
+        // No choice: the base's layouts are left, and nothing is said of them.
+        let plain = try boot(settings: VMGuestSettings(profile: VMProfile(name: "A", language: "en-US", localeFollowsProxy: false,
+                                                                          lumenWallpaper: false)).text)
+        XCTAssertFalse(plain.calls.contains { $0.contains("HIToolbox") || $0.contains("guest keyboard") }, "\(plain.calls)")
+        XCTAssertNil(status().keyboardState)
+
+        // And what is no layout of Lumen's reaches no command, whole or in part.
+        for hostile in ["us;reboot", "us,klingon", "$(reboot)", "US"] {
+            let run = try boot(settings: "LUMEN_REVISION=1\nLUMEN_HOSTNAME=Mac\nLUMEN_KEYBOARD=\(hostile)\n")
+            XCTAssertFalse(run.calls.contains { $0.contains("HIToolbox") }, "\(hostile): \(run.calls)")
+        }
+    }
+
+    /// A machine given another region than it had loses what macOS wrote down for the old one —
+    /// once: what the person changes in the machine afterwards is kept.
+    func testAMachineThatComesToAnotherRegionLosesWhatTheOldOneLeftBehind() throws {
+        let settings = VMGuestSettings(profile: VMProfile(name: "A", language: "en-US", localeFollowsProxy: false, lumenWallpaper: false,
+                                                          hourCycle: "24")).text
+        let first = try boot(settings: settings, environment: ["LOCALE_NOTED": "ru_RU"])
+        for key in ["AppleMeasurementUnits", "AppleMetricUnits", "AppleTemperatureUnit", "AppleICUDateFormatStrings",
+                    "AppleICUNumberSymbols", "AppleFirstWeekday", "AppleICUForce12HourTime"] {
+            XCTAssertTrue(first.has("tester defaults delete -g \(key)"), "\(key): \(first.calls)")
+        }
+        XCTAssertTrue(first.has("tester defaults write io.lumenbrowser.guest locale -string en_US"))
+        // What the profile sets of them is written after, and stands.
+        let removed = try XCTUnwrap(first.calls.firstIndex(of: "tester defaults delete -g AppleICUForce24HourTime"))
+        let written = try XCTUnwrap(first.calls.firstIndex(of: "tester defaults write -g AppleICUForce24HourTime -bool true"))
+        XCTAssertLessThan(removed, written)
+
+        let second = try boot(settings: settings, environment: ["LOCALE_NOTED": "en_US"])
+        XCTAssertTrue(second.has("tester defaults write -g AppleLocale -string en_US"))
+        XCTAssertFalse(second.calls.contains { $0.contains("AppleMeasurementUnits") || $0.contains("AppleTemperatureUnit")
+            || $0.contains("defaults delete -g AppleICUForce24HourTime") || $0.contains("guest locale -string") }, "\(second.calls)")
+    }
+
+    /// The script reads the time zone, the language and the locale back from the system, and
+    /// Lumen compares them with what it asked for.
+    func testWhatTheSystemHasIsReadBackAndComparedWithWhatWasAsked() throws {
+        let settings = VMGuestSettings(profile: VMProfile(name: "A", timeZoneIdentifier: "Europe/Berlin", language: "de-DE",
+                                                          localeFollowsProxy: false, lumenWallpaper: false, regionCode: "AT"))
+        let zones = root.appendingPathComponent("zoneinfo").path
+        try boot(settings: settings.text, environment: ["LOCALTIME": zones + "/Europe/Berlin", "APPLE_LANGUAGES": "de-DE",
+                                                        "APPLE_LOCALE": "de_AT"])
+        var said = status()
+        XCTAssertEqual(said.timeZoneNow, "Europe/Berlin")
+        XCTAssertEqual(said.languageNow, "de-DE")
+        XCTAssertEqual(said.localeNow, "de_AT")
+        XCTAssertEqual(said.differences(from: settings), [])
+
+        // A system that took none of it: each is named, with what was asked and what there is.
+        try boot(settings: settings.text, environment: ["LOCALTIME": zones + "/Europe/Moscow", "APPLE_LANGUAGES": "ru-RU",
+                                                        "APPLE_LOCALE": "ru_RU@calendar=gregorian"])
+        said = status()
+        XCTAssertEqual(said.differences(from: settings), [
+            VMGuestStatus.Difference(what: .timeZone, asked: "Europe/Berlin", has: "Europe/Moscow"),
+            VMGuestStatus.Difference(what: .language, asked: "de-DE", has: "ru-RU"),
+            VMGuestStatus.Difference(what: .locale, asked: "de_AT", has: "ru_RU"),
+        ])
+
+        // What the system says that is no time zone or language is not passed on.
+        try boot(settings: settings.text, environment: ["LOCALTIME": "/etc/../x y", "APPLE_LANGUAGES": "de DE;", "APPLE_LOCALE": "$(x)"])
+        said = status()
+        XCTAssertNil(said.timeZoneNow)
+        XCTAssertNil(said.localeNow)
+        XCTAssertEqual(said.differences(from: settings).map(\.what), said.languageNow == nil ? [] : [.language])
     }
 }

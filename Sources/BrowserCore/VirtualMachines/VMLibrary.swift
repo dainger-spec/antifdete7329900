@@ -241,8 +241,12 @@ public enum VMSetupState: Equatable, Sendable {
 ///
 /// 9: the installer stops on a base signed in to an Apple ID, or with FileVault on, and says what
 /// to do (both would be in, or keep from signing in, every machine made from it).
+///
+/// 10: the keyboard's layouts; what the base's region left behind (units, formats) removed when a
+/// machine comes to another; and the time zone, language and locale read back from the system
+/// into the status file, for Lumen to compare with what it asked for.
 public enum VMGuestTools {
-    public static let version = 9
+    public static let version = 10
     /// From this version on an installed boot script takes a newer copy of itself at a machine's
     /// start: a base with tools this new needs nothing done to it for a later version's settings.
     public static let updatesItselfFrom = 2

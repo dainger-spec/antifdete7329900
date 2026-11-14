@@ -279,13 +279,14 @@ most, off the main thread; anything else is ignored and logged by its kind.
 | Accent colour | macOS's nine; a new machine gets one at random, as Macs differ in theirs |
 | Computer's name | as Sharing shows it |
 | Scroll bars | while scrolling, always, or by the pointing device. Left to the system a machine's always show — its pointer is a mouse to macOS — and take a strip of every page's width, which a page can measure and no MacBook has; a new machine with a MacBook's screen gets "while scrolling" |
+| Keyboard layout | the base's, as chosen in its setup and the same in every machine; by the machine's language (`VMKeyboardLayout`: U.S., British, German, French, Spanish and Russian where the country's own is known for certain, the plain Latin "ABC" for other Latin-letter languages and countries, the base's left for the rest); or one of them by name. A new machine gets "by the language" |
 | Dock | bottom, left or right; always shown or hiding; small, medium or large. What it leaves of the screen is what a page is told is free (`screen.availWidth`, `availHeight`) |
 | Wallpaper | Lumen's eclipse, drawn by the app for the machine's screen pixel for pixel (`VMWallpaper`; no picture is carried in the app); or the picture left as it is in the machine |
 | At start | Safari opened or not; its start page, and up to five more, each in a tab; the window full screen |
 
 Those of the guest's own system are applied in it by the boot script and need **tools 2** (the
 wallpaper: tools 3; the region's clock and week, the scroll bars, the Dock and the pages after
-the first: tools 5, `VMGuestTools.version`); a base set up with tools 1 says so in the list and in the
+the first: tools 5; the keyboard: tools 10, `VMGuestTools.version`); a base set up with tools 1 says so in the list and in the
 editor, and running Install Lumen Tools in the base again updates it. From tools 2 on, the boot
 script takes a newer copy of itself from the shared folder at a machine's start (the app puts its
 own there), so later versions — tools 3 among them — need no visit to the base
@@ -303,6 +304,37 @@ is said back in the status file (`LUMEN_WALLPAPER_STATE`, and `LUMEN_WALLPAPER_N
 system's words for a failure), which the app reads while the machine runs: a picture that was
 not set is said in the machine's row, and so is a machine made with the first tools, whose boot
 script takes no newer one.
+
+### What the base's region leaves behind, and what the system has (tools 10)
+
+A machine whose language follows its proxy is given the language and the locale. Three things of
+the base's region stayed behind that, found by reading the script against what macOS keeps (not
+on a machine: none could be run here):
+
+- **The keyboard's layouts** (`com.apple.HIToolbox`) are the person's, chosen in macOS's setup: a
+  base set up in Russian gave every machine a Russian layout, whatever its language. The setting
+  above writes them (`AppleEnabledInputSources`, `AppleSelectedInputSources`,
+  `AppleInputSourceHistory`, `AppleCurrentKeyboardLayoutInputSourceID`) — once per choice, noted in
+  the person's `io.lumenbrowser.guest` — and macOS takes them at sign-in: in use from the
+  machine's **next** start, which the status says (`LUMEN_KEYBOARD_STATE=next`) and the row repeats.
+- **What macOS wrote down for the old region**: its units and temperature scale
+  (`AppleMeasurementUnits`, `AppleMetricUnits`, `AppleTemperatureUnit`), its own formats of dates
+  and numbers (`AppleICU…`), its clock and week. With only `AppleLocale` changed they stood: a
+  machine in the United States with centimetres and Celsius. They are removed once for each locale
+  a machine is given (noted the same way), as System Settings does when the region is changed;
+  the profile's own clock and week are written after, and what the person changes in the machine
+  afterwards is kept.
+- **Whether macOS took it at all** was assumed. The script now reads the time zone
+  (`/etc/localtime`), the person's first language and their locale back from the system into the
+  status file (`LUMEN_TIMEZONE_NOW`, `LUMEN_LANGUAGE_NOW`, `LUMEN_LOCALE_NOW`), and the app
+  compares them with what it asked for (`VMGuestStatus.differences(from:)` — only once the script
+  says it applied these very settings): a difference is said in the machine's row.
+
+What was looked at and needs nothing: the network (no DNS query, UDP or IPv6 leaves, by
+`docs/VM_NETWORK.md`), where the time zone and language come from (the proxy's exit, looked up
+anew at every start, not the last check in the list), the clock (the host's; automatic time zone
+is switched off). The layouts' numbers and names are macOS's own, as known; that a machine takes
+them, and the units, is to be seen on a Mac.
 
 ## What machines have in common
 

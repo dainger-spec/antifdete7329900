@@ -39,11 +39,14 @@ public struct VMGuestSettings: Equatable, Sendable {
     public var scrollBars: VMScrollBars?
     /// More pages for Safari at start, after `startURL`. (Tools 5.)
     public var moreStartURLs: [String]
+    /// The keyboard's layouts, the first the one in use; empty leaves the machine's own. (Tools 10.)
+    public var keyboard: [VMKeyboardLayout]
 
     public init(timeZone: String?, language: String?, hostName: String, startURL: String?, computerName: String? = nil,
                 appearance: VMAppearance? = nil, accent: VMAccent? = nil, opensSafari: Bool = true, wallpaper: Bool = false,
                 region: String? = nil, hourCycle: VMHourCycle? = nil, firstWeekday: Int? = nil, dockPosition: VMDockPosition? = nil,
-                dockAutohide: Bool? = nil, dockSize: VMDockSize? = nil, scrollBars: VMScrollBars? = nil, moreStartURLs: [String] = []) {
+                dockAutohide: Bool? = nil, dockSize: VMDockSize? = nil, scrollBars: VMScrollBars? = nil, moreStartURLs: [String] = [],
+                keyboard: [VMKeyboardLayout] = []) {
         self.timeZone = timeZone.flatMap { Self.isTimeZone($0) ? $0 : nil }
         self.language = language.flatMap { LocalePlaces.isLanguageTag($0) ? $0 : nil }
         self.computerName = computerName.flatMap(Self.computerName)
@@ -65,6 +68,7 @@ public struct VMGuestSettings: Equatable, Sendable {
         self.scrollBars = scrollBars
         // After a first page only: pages without one would be Safari's own start, and these.
         self.moreStartURLs = self.startURL == nil ? [] : Array(moreStartURLs.compactMap(Self.startURL).prefix(VMProfile.moreStartURLsLimit))
+        self.keyboard = keyboard
         revision = ""
         revision = Self.revision(of: lines(withRevision: false))
     }
@@ -85,7 +89,8 @@ public struct VMGuestSettings: Equatable, Sendable {
                   hourCycle: profile.hourCycle.flatMap(VMHourCycle.init(rawValue:)), firstWeekday: profile.firstWeekday,
                   dockPosition: profile.dockPosition.flatMap(VMDockPosition.init(rawValue:)), dockAutohide: profile.dockAutohide,
                   dockSize: profile.dockSize.flatMap(VMDockSize.init(rawValue:)),
-                  scrollBars: profile.scrollBars.flatMap(VMScrollBars.init(rawValue:)), moreStartURLs: profile.moreStartURLs)
+                  scrollBars: profile.scrollBars.flatMap(VMScrollBars.init(rawValue:)), moreStartURLs: profile.moreStartURLs,
+                  keyboard: VMKeyboardLayout.layouts(setting: profile.keyboard, language: profile.language))
     }
 
     public static let fileName = "lumen-settings.env"
@@ -126,6 +131,7 @@ public struct VMGuestSettings: Equatable, Sendable {
         if let scrollBars { lines.append("LUMEN_SCROLLBARS=\(scrollBars.systemName)") }
         if let startURL { lines.append("LUMEN_START_URL=\(startURL)") }
         for (index, url) in moreStartURLs.enumerated() { lines.append("LUMEN_START_URL_\(index + 2)=\(url)") }
+        if !keyboard.isEmpty { lines.append("LUMEN_KEYBOARD=\(keyboard.map(\.rawValue).joined(separator: ","))") }
         return lines
     }
 
@@ -209,9 +215,49 @@ public struct VMGuestStatus: Equatable, Sendable {
     public var wallpaperNote: String?
     /// The one-time setup inside the guest has finished (the installer's last line).
     public var setupDone: Bool
+    /// What the guest's system has, as the script read it back after applying the settings (tools
+    /// 10): the time zone, the signed-in person's first language and their locale.
+    public var timeZoneNow: String?
+    public var languageNow: String?
+    public var localeNow: String?
+    /// What came of the keyboard's layouts (tools 10): "set" — in place since an earlier start —
+    /// or "next": written at this start, which macOS takes at the next sign-in.
+    public var keyboardState: String?
 
     /// The guest could not put Lumen's picture on its desktop.
     public var wallpaperFailed: Bool { wallpaperState == "failed" }
+    /// The keyboard's layouts were written at this start and are in use from the next one.
+    public var keyboardFromNextStart: Bool { keyboardState == "next" }
+
+    /// One thing the guest's system has that is not what its settings asked for.
+    public struct Difference: Equatable, Sendable {
+        public enum What: String, Sendable { case timeZone, language, locale }
+        public var what: What
+        public var asked: String
+        public var has: String
+    }
+
+    /// Where the guest's system is not what `settings` asked for — the script's own look at the
+    /// system after it applied them, so a setting macOS did not take is seen and not assumed.
+    /// Empty when the script has not applied these settings (yet), or is too old to look.
+    public func differences(from settings: VMGuestSettings) -> [Difference] {
+        guard let toolsVersion, toolsVersion >= 10, appliedRevision == settings.revision else { return [] }
+        var found: [Difference] = []
+        if let asked = settings.timeZone, let has = timeZoneNow, asked != has {
+            found.append(Difference(what: .timeZone, asked: asked, has: has))
+        }
+        if let asked = settings.language {
+            if let has = languageNow, asked.lowercased() != has.lowercased() {
+                found.append(Difference(what: .language, asked: asked, has: has))
+            }
+            let locale = VMGuestSettings.locale(for: asked, region: settings.region)
+            // A locale may carry the person's own additions after "@" (a calendar, a currency).
+            if let has = localeNow?.split(separator: "@").first.map(String.init), locale != has {
+                found.append(Difference(what: .locale, asked: locale, has: has))
+            }
+        }
+        return found
+    }
 
     public init(text: String) {
         var values: [String: String] = [:]
@@ -230,6 +276,10 @@ public struct VMGuestStatus: Equatable, Sendable {
         appliedRevision = values["LUMEN_APPLIED_REVISION"]
         wallpaperState = values["LUMEN_WALLPAPER_STATE"]
         wallpaperNote = values["LUMEN_WALLPAPER_NOTE"]
+        timeZoneNow = values["LUMEN_TIMEZONE_NOW"]
+        languageNow = values["LUMEN_LANGUAGE_NOW"]
+        localeNow = values["LUMEN_LOCALE_NOW"]
+        keyboardState = values["LUMEN_KEYBOARD_STATE"]
         setupDone = values["LUMEN_SETUP_DONE"] == "1"
     }
 }

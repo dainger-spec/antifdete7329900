@@ -22,7 +22,7 @@
 # link left in its place is replaced, not followed. What it keeps for itself is in a folder of
 # root's (/Library/Application Support/Lumen), not in /Users/Shared.
 
-TOOLS_VERSION=9
+TOOLS_VERSION=10
 SHARE="/Volumes/My Shared Files"
 OWN_MOUNT=/var/run/lumen-share
 TAG=com.apple.virtio-fs.automount
@@ -155,7 +155,7 @@ fi
 
 revision="" timezone="" language="" locale="" hostname="" start_url="" computer="" appearance="" accent="" open_safari=1
 wallpaper=0 hours="" first_weekday="" dock_position="" dock_autohide="" dock_size="" scrollbars=""
-start_url_2="" start_url_3="" start_url_4="" start_url_5="" start_url_6=""
+start_url_2="" start_url_3="" start_url_4="" start_url_5="" start_url_6="" keyboard=""
 settings="$share/lumen-settings.env"
 if [ -n "$share" ] && [ -f "$settings" ] && [ ! -L "$settings" ]; then
   revision="$(value LUMEN_REVISION "$settings")"
@@ -180,6 +180,7 @@ if [ -n "$share" ] && [ -f "$settings" ] && [ ! -L "$settings" ]; then
   start_url_4="$(value LUMEN_START_URL_4 "$settings")"
   start_url_5="$(value LUMEN_START_URL_5 "$settings")"
   start_url_6="$(value LUMEN_START_URL_6 "$settings")"
+  keyboard="$(value LUMEN_KEYBOARD "$settings")"
 fi
 only 'A-Za-z0-9' "$revision" || revision=""
 only 'A-Za-z0-9_+/-' "$timezone" || timezone=""
@@ -210,6 +211,22 @@ case "$dock_position" in bottom|left|right) ;; *) dock_position="" ;; esac
 case "$dock_autohide" in 0|1) ;; *) dock_autohide="" ;; esac
 case "$dock_size" in 16|[2-9][0-9]|1[01][0-9]|12[0-8]) ;; *) dock_size="" ;; esac
 case "$scrollbars" in Automatic|WhenScrolling|Always) ;; *) scrollbars="" ;; esac
+only 'a-z,' "$keyboard" || keyboard=""
+
+# layout NAME: macOS's own number, name and identifier of a keyboard layout Lumen names, into
+# layout_id, layout_name and layout_source; false for a name that is none of them.
+layout() {
+  case "$1" in
+    us) layout_id=0 layout_name="U.S." layout_source=com.apple.keylayout.US ;;
+    british) layout_id=2 layout_name="British" layout_source=com.apple.keylayout.British ;;
+    german) layout_id=3 layout_name="German" layout_source=com.apple.keylayout.German ;;
+    french) layout_id=1 layout_name="French" layout_source=com.apple.keylayout.French ;;
+    spanish) layout_id=87 layout_name="Spanish - ISO" layout_source=com.apple.keylayout.Spanish-ISO ;;
+    russian) layout_id=19456 layout_name="Russian" layout_source=com.apple.keylayout.Russian ;;
+    abc) layout_id=252 layout_name="ABC" layout_source=com.apple.keylayout.ABC ;;
+    *) return 1 ;;
+  esac
+}
 
 # The colour of selected text that goes with an accent colour, as System Settings sets the two.
 highlight() {
@@ -269,6 +286,17 @@ write_status() {
     [ -z "$1" ] || printf 'LUMEN_APPLIED_REVISION=%s\n' "$1"
     [ -z "$wallpaper_state" ] || printf 'LUMEN_WALLPAPER_STATE=%s\n' "$wallpaper_state"
     [ -z "$wallpaper_note" ] || printf 'LUMEN_WALLPAPER_NOTE=%s\n' "$wallpaper_note"
+    [ -z "$keyboard_state" ] || printf 'LUMEN_KEYBOARD_STATE=%s\n' "$keyboard_state"
+    # What the system has now, read back from it: Lumen compares it with what it asked for.
+    zone_now="$(/usr/bin/readlink /etc/localtime 2>/dev/null)"
+    zone_now="${zone_now#/var/db/timezone/zoneinfo/}"
+    ! only 'A-Za-z0-9_+/-' "$zone_now" || printf 'LUMEN_TIMEZONE_NOW=%s\n' "$zone_now"
+    if [ -n "$user" ]; then
+      language_now="$(as_user /usr/bin/defaults read -g AppleLanguages 2>/dev/null | /usr/bin/tr -d ' ",()' | /usr/bin/sed -n '/./{p;q;}')"
+      ! only 'A-Za-z0-9-' "$language_now" || printf 'LUMEN_LANGUAGE_NOW=%s\n' "$language_now"
+      locale_now="$(as_user /usr/bin/defaults read -g AppleLocale 2>/dev/null | /usr/bin/head -n 1)"
+      ! only 'A-Za-z0-9_@=;-' "$locale_now" || printf 'LUMEN_LOCALE_NOW=%s\n' "$locale_now"
+    fi
     printf 'LUMEN_SETUP_DONE=1\n'
   } > "$said_file" 2>/dev/null
   /bin/chmod 644 "$said_file" 2>/dev/null
@@ -363,6 +391,37 @@ set_wallpaper() {
   esac
 }
 
+# The keyboard's layouts, the first the one in use: macOS keeps them per person and takes them at
+# sign-in, so what is written here — after it — is in use from the machine's next start. Written
+# once per choice (the choice is noted beside the person's settings): layouts the person adds in
+# the machine afterwards stay until the profile's choice changes.
+keyboard_state=""
+set_keyboard() {
+  [ -n "$keyboard" ] || return 0
+  if [ "$(as_user /usr/bin/defaults read io.lumenbrowser.guest keyboard 2>/dev/null)" = "$keyboard" ]; then
+    keyboard_state=set
+    return 0
+  fi
+  set --
+  first_source=""
+  old_ifs="$IFS"
+  IFS=,
+  for name in $keyboard; do
+    IFS="$old_ifs"
+    layout "$name" || return 0
+    [ -n "$first_source" ] || first_source="$layout_source"
+    set -- "$@" "<dict><key>InputSourceKind</key><string>Keyboard Layout</string><key>KeyboardLayout ID</key><integer>$layout_id</integer><key>KeyboardLayout Name</key><string>$layout_name</string></dict>"
+  done
+  IFS="$old_ifs"
+  [ "$#" -gt 0 ] || return 0
+  as_user /usr/bin/defaults write com.apple.HIToolbox AppleEnabledInputSources -array "$@" 2>/dev/null || return 0
+  as_user /usr/bin/defaults write com.apple.HIToolbox AppleSelectedInputSources -array "$1" 2>/dev/null
+  as_user /usr/bin/defaults write com.apple.HIToolbox AppleInputSourceHistory -array "$1" 2>/dev/null
+  as_user /usr/bin/defaults write com.apple.HIToolbox AppleCurrentKeyboardLayoutInputSourceID -string "$first_source" 2>/dev/null
+  as_user /usr/bin/defaults write io.lumenbrowser.guest keyboard -string "$keyboard" 2>/dev/null
+  keyboard_state=next
+}
+
 # The person's side — the language Safari tells sites, and Safari itself — once someone is signed
 # in (automatic sign-in: at once; otherwise when the person has typed the password).
 user_done=0
@@ -375,8 +434,26 @@ apply_for_user() {
   [ -n "$uid" ] || { user=""; return 1; }
   if [ -n "$language" ]; then
     as_user /usr/bin/defaults write -g AppleLanguages -array "$language"
-    [ -z "$locale" ] || as_user /usr/bin/defaults write -g AppleLocale -string "$locale"
+    if [ -n "$locale" ]; then
+      # A machine that comes to another region — the base's person chose theirs in macOS's setup,
+      # and this machine's language follows its proxy to another — leaves behind what macOS wrote
+      # down for the old one: its units, its temperature scale, its own formats of dates and
+      # numbers, its clock and week. They are removed once for each region the machine is given
+      # (which one was last is noted beside the person's settings) — System Settings does the same
+      # as the region changes —, so that the new region's own stand; what the profile sets of them
+      # is written below, and what the person changes in the machine afterwards is kept.
+      as_user /usr/bin/defaults write -g AppleLocale -string "$locale"
+      if [ "$(as_user /usr/bin/defaults read io.lumenbrowser.guest locale 2>/dev/null)" != "$locale" ]; then
+        for key in AppleMeasurementUnits AppleMetricUnits AppleTemperatureUnit AppleICUDateFormatStrings \
+            AppleICUTimeFormatStrings AppleICUNumberFormatStrings AppleICUNumberSymbols AppleICUForce12HourTime \
+            AppleICUForce24HourTime AppleFirstWeekday; do
+          as_user /usr/bin/defaults delete -g "$key" 2>/dev/null
+        done
+        as_user /usr/bin/defaults write io.lumenbrowser.guest locale -string "$locale" 2>/dev/null
+      fi
+    fi
   fi
+  set_keyboard
   # The system's look, which a page can read: set before Safari is opened, which takes it then.
   case "$appearance" in
     dark)

@@ -305,7 +305,8 @@ private struct VirtualMachinesScreen: View {
         let memory = VMRequirements.recommendedMemoryGB(hostMemory: Int64(clamping: ProcessInfo.processInfo.physicalMemory))
         // And scroll bars as the Mac its screen is has them: a MacBook's show only while scrolling.
         editing = VMEditorView.Draft(profile: VMProfile(name: name, memoryGB: memory, accent: VMAccent.random().rawValue,
-                                                        scrollBars: VMScrollBars.standard(for: .standard)?.rawValue), isNew: true)
+                                                        scrollBars: VMScrollBars.standard(for: .standard)?.rawValue,
+                                                        keyboard: VMKeyboardLayout.automatic), isNew: true)
     }
 
     /// The person's Delete, confirmed: the one caller of the machines' one deletion path.
@@ -453,6 +454,26 @@ private struct VMRow: View {
                         .foregroundStyle(Theme.warning)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+                if let guest, state?.phase == .running {
+                    // What the machine's macOS has, read back by its script, where it is not what
+                    // was asked for: said, not assumed.
+                    let differences = guest.differences(from: VMGuestSettings(profile: profile))
+                    if !differences.isEmpty {
+                        Text(String(format: L("vm.row.differs"), differences.map { difference in
+                            String(format: L("vm.row.differs.\(difference.what.rawValue)"), difference.has, difference.asked)
+                        }.joined(separator: "; ")))
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.warning)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if profile.keyboard != nil, guest.keyboardFromNextStart {
+                        Text(L("vm.row.keyboard.next"))
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 if let trouble = state?.trouble, state?.phase == .running {
                     // A machine without a proxy that reaches nothing: why, in the person's words.
@@ -649,6 +670,7 @@ struct VMEditorView: View {
     @State private var hourCycle: String
     @State private var firstWeekday: Int
     @State private var scrollBars: String
+    @State private var keyboard: String
     @State private var dockPosition: String
     /// "", "show" or "hide": as the base has it, always shown, hiding itself.
     @State private var dockHiding: String
@@ -696,6 +718,7 @@ struct VMEditorView: View {
         _hourCycle = State(initialValue: profile.hourCycle ?? "")
         _firstWeekday = State(initialValue: profile.firstWeekday ?? 0)
         _scrollBars = State(initialValue: profile.scrollBars ?? "")
+        _keyboard = State(initialValue: profile.keyboard ?? "")
         _dockPosition = State(initialValue: profile.dockPosition ?? "")
         _dockHiding = State(initialValue: profile.dockAutohide.map { $0 ? "hide" : "show" } ?? "")
         _dockSize = State(initialValue: profile.dockSize ?? "")
@@ -929,6 +952,19 @@ struct VMEditorView: View {
             ])
             note(L("vm.editor.weekday.note"))
         }
+        EditorField(L("vm.editor.keyboard")) {
+            Picker(L("vm.editor.keyboard"), selection: $keyboard) {
+                Text(L("vm.editor.asBase")).tag("")
+                Text(L("vm.editor.keyboard.auto")).tag(VMKeyboardLayout.automatic)
+                Divider()
+                ForEach(VMKeyboardLayout.allCases, id: \.rawValue) { layout in
+                    Text(L("vm.editor.keyboard.\(layout.rawValue)")).tag(layout.rawValue)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+            note(L("vm.editor.keyboard.note"))
+        }
     }
 
     // MARK: The Mac it is
@@ -1089,6 +1125,7 @@ struct VMEditorView: View {
         profile.hourCycle = hourCycle.isEmpty ? nil : hourCycle
         profile.firstWeekday = firstWeekday == 0 ? nil : firstWeekday
         profile.scrollBars = scrollBars.isEmpty ? nil : scrollBars
+        profile.keyboard = keyboard.isEmpty ? nil : keyboard
         profile.dockPosition = dockPosition.isEmpty ? nil : dockPosition
         profile.dockAutohide = dockHiding.isEmpty ? nil : dockHiding == "hide"
         profile.dockSize = dockSize.isEmpty ? nil : dockSize

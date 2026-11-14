@@ -250,6 +250,76 @@ final class VMGuestSettingsTests: XCTestCase {
         XCTAssertEqual(failed.wallpaperNote, "execution error: (-2700)")
         XCTAssertFalse(VMGuestStatus(text: "LUMEN_WALLPAPER_STATE=set\n").wallpaperFailed)
     }
+
+    func testTheKeyboardGoesWithTheLanguageWhereItIsKnownForCertain() throws {
+        func auto(_ language: String?) -> [VMKeyboardLayout] {
+            VMKeyboardLayout.layouts(setting: VMKeyboardLayout.automatic, language: language)
+        }
+        XCTAssertEqual(auto("en-US"), [.us])
+        XCTAssertEqual(auto("en-CA"), [.us])
+        XCTAssertEqual(auto("en-GB"), [.british])
+        XCTAssertEqual(auto("de-DE"), [.german])
+        XCTAssertEqual(auto("de-AT"), [.german])
+        XCTAssertEqual(auto("fr-FR"), [.french])
+        XCTAssertEqual(auto("es-ES"), [.spanish])
+        XCTAssertEqual(auto("ru-RU"), [.russian, .abc])
+        // A country whose own layout is not known here for certain: the plain Latin one.
+        XCTAssertEqual(auto("de-CH"), [.abc])
+        XCTAssertEqual(auto("fr-CA"), [.abc])
+        XCTAssertEqual(auto("es-MX"), [.abc])
+        XCTAssertEqual(auto("pt-BR"), [.abc])
+        XCTAssertEqual(auto("it-IT"), [.abc])
+        // Another script, or no language: the machine's own are left.
+        XCTAssertEqual(auto("ja-JP"), [])
+        XCTAssertEqual(auto("zh-Hant-TW"), [])
+        XCTAssertEqual(auto(nil), [])
+        // The person's own choice, whatever the language; none at all leaves the base's.
+        XCTAssertEqual(VMKeyboardLayout.layouts(setting: "german", language: "en-US"), [.german])
+        XCTAssertEqual(VMKeyboardLayout.layouts(setting: "russian", language: "en-US"), [.russian, .abc])
+        XCTAssertEqual(VMKeyboardLayout.layouts(setting: nil, language: "en-US"), [])
+        XCTAssertEqual(VMKeyboardLayout.layouts(setting: "klingon", language: "en-US"), [])
+
+        XCTAssertNoThrow(try VMProfile(name: "A", keyboard: "auto").validate())
+        XCTAssertNoThrow(try VMProfile(name: "A", keyboard: "british").validate())
+        XCTAssertThrowsError(try VMProfile(name: "A", keyboard: "klingon").validate())
+        // A list from before this setting: the base's layouts, as a machine had them.
+        let old = try JSONEncoder().encode(VMProfile(name: "A"))
+        XCTAssertNil(try JSONDecoder().decode(VMProfile.self, from: old).keyboard)
+        let kept = try JSONDecoder().decode(VMProfile.self, from: JSONEncoder().encode(VMProfile(name: "A", keyboard: "auto")))
+        XCTAssertEqual(kept.keyboard, "auto")
+        // The language a proxy brings is the one the layout goes with.
+        let followed = VMGuestSettings(profile: VMProfile(name: "A", language: "en-US", keyboard: "auto"))
+        XCTAssertEqual(followed.keyboard, [.us])
+        XCTAssertNotEqual(followed.revision, VMGuestSettings(profile: VMProfile(name: "A", language: "en-US")).revision)
+    }
+
+    func testWhatTheSystemHasIsComparedOnlyOnceTheseSettingsAreApplied() {
+        let settings = VMGuestSettings(timeZone: "America/New_York", language: "en-US", hostName: "Mac", startURL: nil)
+        func status(tools: Int = 10, revision: String? = nil, zone: String = "America/New_York", language: String = "en-US",
+                    locale: String = "en_US") -> VMGuestStatus {
+            VMGuestStatus(text: """
+                LUMEN_TOOLS_VERSION=\(tools)
+                LUMEN_APPLIED_REVISION=\(revision ?? settings.revision)
+                LUMEN_TIMEZONE_NOW=\(zone)
+                LUMEN_LANGUAGE_NOW=\(language)
+                LUMEN_LOCALE_NOW=\(locale)
+                """)
+        }
+        XCTAssertEqual(status().differences(from: settings), [])
+        XCTAssertEqual(status(language: "EN-us", locale: "en_US@currency=USD").differences(from: settings), [])
+        XCTAssertEqual(status(zone: "Europe/Moscow").differences(from: settings),
+                       [VMGuestStatus.Difference(what: .timeZone, asked: "America/New_York", has: "Europe/Moscow")])
+        XCTAssertEqual(status(language: "ru-RU", locale: "ru_RU").differences(from: settings).map(\.what), [.language, .locale])
+        // Settings the script has not applied yet, or a script that does not look: nothing is said.
+        XCTAssertEqual(status(revision: "other", zone: "Europe/Moscow").differences(from: settings), [])
+        XCTAssertEqual(status(tools: 9, zone: "Europe/Moscow").differences(from: settings), [])
+        // What a profile does not set is not compared.
+        let plain = VMGuestSettings(timeZone: nil, language: nil, hostName: "Mac", startURL: nil)
+        XCTAssertEqual(VMGuestStatus(text: "LUMEN_TOOLS_VERSION=10\nLUMEN_APPLIED_REVISION=\(plain.revision)\nLUMEN_TIMEZONE_NOW=Europe/Moscow\n")
+            .differences(from: plain), [])
+        XCTAssertTrue(VMGuestStatus(text: "LUMEN_KEYBOARD_STATE=next\n").keyboardFromNextStart)
+        XCTAssertFalse(VMGuestStatus(text: "LUMEN_KEYBOARD_STATE=set\n").keyboardFromNextStart)
+    }
 }
 
 final class VMLibraryTests: XCTestCase {
