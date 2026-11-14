@@ -201,7 +201,14 @@ on a Mac that runs a VPN or a proxy tool they went nowhere.
   route for it is a tunnel: `goesIntoATunnel` "connects" a datagram socket to it — which sends
   nothing and makes the system choose the address it would send from — and takes it only if
   every interface with that source address is point-to-point, up and not loopback (a VPN's
-  `utun`), and the source is not the destination (the Mac itself). Never taken, whatever the
+  `utun`), and the source is not the destination (the Mac itself). Before any socket is opened
+  the interfaces' own addresses and masks are read: an address that is this Mac's own, or of a
+  network the Mac is on by an interface that is not a tunnel's, is refused there. On a Mac, so
+  much as "connecting" a socket to such an address is a use of the local network, which macOS
+  asks the person about in a window of its own — the full pipeline, 14 November: a test that
+  connected to the runner's own address brought that window up over the disk image's window a
+  later step takes a picture of, and in front of Safari's Print sheet in the menu walk. The
+  tests make no such connection on a Mac. Never taken, whatever the
   routes: loopback, link-local, multicast, 0.0.0.0/8, the broadcast address — and a private
   address the guest wrote itself rather than a name (the network refuses those before the
   connector hears of them). What this lets through that the rule did not: a name that resolves

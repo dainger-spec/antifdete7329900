@@ -671,6 +671,9 @@ public final class VMNetDirectConnector: @unchecked Sendable {
     /// the address, which sends nothing and makes the system choose the address it would send
     /// from; the interface that has that address is the route's.
     static func goesIntoATunnel(_ address: Address) -> Bool {
+        // This machine itself, or a network it is on: not a tunnel's far side — and said without
+        // a socket (below).
+        guard !isOnOwnNetwork(address) else { return false }
         let probe = socket(address.family, Sys.datagramType, 0)
         guard probe >= 0 else { return false }
         defer { Sys.close(probe) }
@@ -716,6 +719,49 @@ public final class VMNetDirectConnector: @unchecked Sendable {
             found = true
         }
         return found
+    }
+
+    /// Whether the address is this machine's own, or of a network the machine is on by an
+    /// interface that is not a tunnel's — read from the interfaces' own addresses and masks, with
+    /// no socket. On a Mac, so much as "connecting" a socket to an address of the network the Mac
+    /// is on is a use of the local network, which macOS asks the person about in a window of its
+    /// own (seen on CI, 14 November: the window stood over what a later check took a picture
+    /// of). Such an address is refused anyway, so it is refused here, before anything is opened.
+    static func isOnOwnNetwork(_ address: Address) -> Bool {
+        var storage = address.storage
+        let target = withUnsafeMutablePointer(to: &storage) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { addressBytes($0, family: address.family) }
+        }
+        guard !target.isEmpty else { return false }
+        var list: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&list) == 0 else { return false }
+        defer { freeifaddrs(list) }
+        var next = list
+        while let entry = next {
+            next = entry.pointee.ifa_next
+            guard let own = entry.pointee.ifa_addr, Int32(own.pointee.sa_family) == address.family else { continue }
+            let flags = Int(entry.pointee.ifa_flags)
+            guard flags & Int(IFF_UP) != 0 else { continue }
+            let mine = addressBytes(own, family: address.family)
+            if mine == target { return true }
+            // A tunnel's far side is not a network the machine is on: it is what is asked about.
+            guard flags & Int(IFF_POINTOPOINT) == 0, flags & Int(IFF_LOOPBACK) == 0, let netmask = entry.pointee.ifa_netmask else { continue }
+            let mask = addressBytes(netmask, family: address.family)
+            guard mask.count == target.count, mine.count == target.count, mask.contains(where: { $0 != 0 }) else { continue }
+            var same = true
+            for index in 0..<target.count where mine[index] & mask[index] != target[index] & mask[index] {
+                same = false
+                break
+            }
+            if same { return true }
+        }
+        return false
+    }
+
+    /// The same two questions of an address as it is written ("100.64.0.2"): for the tests.
+    static func isOnOwnNetwork(numeric text: String) -> Bool {
+        guard let address = addresses(of: text, port: 9).found.first else { return false }
+        return isOnOwnNetwork(address)
     }
 
     /// The same, of an address as it is written ("100.64.0.2"): for the tests.

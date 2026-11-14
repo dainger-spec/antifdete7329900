@@ -28,7 +28,10 @@ final class DirectConnectorTests: XCTestCase {
     /// A connector that may reach this machine (the tests' servers are on loopback), and knows
     /// `names` without asking a resolver.
     private func connector(local: Bool = true, names: [String: [String]] = [:]) throws -> VMNetDirectConnector {
-        let connector = VMNetDirectConnector(allowsLocalDestinations: local) { names[$0] }
+        // A private address's route is not asked of the system here (no address of the tests' is
+        // sent into a tunnel): the system's own answer has a test of its own, and on a Mac the
+        // question, asked of an address near enough, is a use of the local network.
+        let connector = VMNetDirectConnector(allowsLocalDestinations: local, routesIntoTunnel: { _ in false }) { names[$0] }
         connectors.append(connector)
         XCTAssertGreaterThan(try connector.start(), 0)
         return connector
@@ -212,7 +215,16 @@ final class DirectConnectorTests: XCTestCase {
     /// the connection in their tunnel. Such an address is taken; a local network's, this machine
     /// itself and an address the guest wrote are not.
     func testAPrivateAddressIsTakenOnlyWhereItGoesIntoATunnel() throws {
+        // The connection that is made (below) goes to an address of the network this machine is
+        // on, standing in for a VPN's. On a Mac that is a use of the local network, which macOS
+        // asks the person about in a window of its own — on a CI Mac, over whatever a later check
+        // takes a picture of (the full pipeline, 14 November). So it is made on Linux only; the
+        // rule itself is the same code on both.
+        #if os(Linux)
         let own = ownPrivateAddress()
+        #else
+        let own: String? = nil
+        #endif
         let asked = Locked<[String]>([])
         let names = ["lan.example": ["192.168.1.10"], "self.example": ["127.0.0.1"], "link.example": ["169.254.169.254"],
                      "vpn.example": [own ?? "100.64.0.7"]]
@@ -278,11 +290,18 @@ final class DirectConnectorTests: XCTestCase {
         XCTAssertFalse(VMNetDirectConnector.goesIntoATunnel(numeric: "::1"))
         XCTAssertFalse(VMNetDirectConnector.goesIntoATunnel(numeric: "not an address"))
         if let own = ownPrivateAddress() {
+            // Its own address, and the network it is on: known from the interfaces, with no socket.
+            XCTAssertTrue(VMNetDirectConnector.isOnOwnNetwork(numeric: own))
             XCTAssertFalse(VMNetDirectConnector.goesIntoATunnel(numeric: own), "this machine's own address is not a tunnel's far end")
         }
+        XCTAssertTrue(VMNetDirectConnector.isOnOwnNetwork(numeric: "127.0.0.1"))
+        XCTAssertFalse(VMNetDirectConnector.isOnOwnNetwork(numeric: "203.0.113.7"), "a public address is on no network of this machine's")
+        XCTAssertFalse(VMNetDirectConnector.isOnOwnNetwork(numeric: "not an address"))
         guard let peer = ProcessInfo.processInfo.environment["VMNET_TUNNEL_PEER"], !peer.isEmpty else { return }
         XCTAssertTrue(VMNetDirectConnector.goesIntoATunnel(numeric: peer), "\(peer) is not sent into a tunnel")
+        XCTAssertFalse(VMNetDirectConnector.isOnOwnNetwork(numeric: peer), "a tunnel's far end is not a network this machine is on")
         if let local = ProcessInfo.processInfo.environment["VMNET_TUNNEL_LOCAL"], !local.isEmpty {
+            XCTAssertTrue(VMNetDirectConnector.isOnOwnNetwork(numeric: local))
             XCTAssertFalse(VMNetDirectConnector.goesIntoATunnel(numeric: local), "the tunnel's near end is this machine")
         }
     }
