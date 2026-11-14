@@ -201,6 +201,59 @@ final class SocketTableTests: XCTestCase {
         XCTAssertNil(GuardAttribution.holder(appPID: 1741, socket: nil, isHeld: { $0 == 1738 }), "no record read")
     }
 
+    // MARK: Whose socket a client of a profile's WebRTC relay sends from
+
+    /// A UDP socket of the table, as the relay's check reads it.
+    private func udp(_ port: UInt16, local: String? = "127.0.0.1", remote: String? = nil, remotePort: UInt16 = 0,
+                     last: Int32, effective: Int32 = 0, delegated: Bool = false, userSpace: Bool = false) -> KernelSocket {
+        KernelSocket(transport: .udp, localAddress: local, localPort: port, remoteAddress: remote, remotePort: remotePort,
+                     lastPID: last, effectivePID: effective, delegated: delegated, userSpaceStack: userSpace)
+    }
+
+    /// The relay on 127.0.0.1:53211, a client on 127.0.0.1:61234.
+    private func relayVerdict(_ sockets: [KernelSocket], profile: Int32 = 1738) -> RelayClients.Verdict {
+        RelayClients.verdict(clientAddress: "127.0.0.1", clientPort: 61234, relayAddress: "127.0.0.1", relayPort: 53211,
+                             profilePID: profile, in: sockets)
+    }
+
+    /// A page of the profile: WebKit's network process (1741) opened the socket on behalf of the
+    /// profile's process (1738) — a flow of the user-space stack connected to the relay, or a
+    /// delegated socket of the kernel's that sends to it unconnected.
+    func testARelayClientCountedForTheProfilesProcessIsTheProfiles() {
+        let relaySocket = udp(53211, last: 900)
+        XCTAssertEqual(relayVerdict([relaySocket, udp(61234, remote: "127.0.0.1", remotePort: 53211, last: 1741, effective: 1738,
+                                                      userSpace: true)]), .profile)
+        XCTAssertEqual(relayVerdict([relaySocket, udp(61234, local: nil, last: 1741, effective: 1738, delegated: true)]), .profile)
+    }
+
+    /// Another browser, or a process of another profile, with the credentials: its socket is counted
+    /// for itself. So is the network process's own socket that is not delegated.
+    func testARelayClientCountedForAnotherProcessIsNotTheProfiles() {
+        XCTAssertEqual(relayVerdict([udp(61234, remote: "127.0.0.1", remotePort: 53211, last: 2001, effective: 2000,
+                                         userSpace: true)]), .other(2000))
+        XCTAssertEqual(relayVerdict([udp(61234, last: 1741, effective: 1738)]), .other(1741))
+        // Two sockets on the port that can both send to the relay (SO_REUSEPORT): one of another
+        // process is enough.
+        XCTAssertEqual(relayVerdict([udp(61234, local: nil, last: 1741, effective: 1738, delegated: true),
+                                     udp(61234, local: nil, last: 3000)]), .other(3000))
+    }
+
+    /// Only the sockets a datagram from the client's address and port can have come from count: one
+    /// bound to another address or connected elsewhere cannot have sent it.
+    func testOnlyTheSocketsTheClientsDatagramCanHaveComeFromCount() {
+        let elsewhere = [udp(61234, local: "192.168.1.5", last: 3000), udp(61234, remote: "203.0.113.1", remotePort: 3478, last: 3001)]
+        XCTAssertEqual(relayVerdict(elsewhere + [udp(61234, remote: "127.0.0.1", remotePort: 53211, last: 1741, effective: 1738,
+                                                     userSpace: true)]), .profile)
+        XCTAssertEqual(relayVerdict(elsewhere), .notListed)
+        // Not in the table read at all (macOS 27 lists to a process that is not root only its own).
+        XCTAssertEqual(relayVerdict([udp(53211, last: 900)]), .notListed)
+        XCTAssertEqual(relayVerdict([]), .notListed)
+        // A TCP socket on the port is no UDP client.
+        var tcp = udp(61234, last: 1741, effective: 1738, delegated: true)
+        tcp.transport = .tcp
+        XCTAssertEqual(relayVerdict([tcp]), .notListed)
+    }
+
     #if canImport(Darwin)
     // MARK: This Mac's kernel
 
@@ -240,6 +293,41 @@ final class SocketTableTests: XCTestCase {
         XCTAssertEqual(mine.lastPID, getpid())
         XCTAssertFalse(mine.delegated)
         XCTAssertEqual(mine.countedFor, getpid())
+    }
+
+    /// A UDP socket of this process on 127.0.0.1, connected to a port of 127.0.0.1 as a relay's client
+    /// would be (nothing is sent): the kernel's table counts it for this process, so the relay's check
+    /// takes it as this process's and as no other's.
+    func testThisMacsKernelTableSaysWhoseARelayClientIs() {
+        let descriptor = Darwin.socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+        XCTAssertGreaterThanOrEqual(descriptor, 0)
+        defer { close(descriptor) }
+        var remote = sockaddr_in()
+        remote.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        remote.sin_family = sa_family_t(AF_INET)
+        remote.sin_port = in_port_t(9).bigEndian
+        inet_pton(AF_INET, "127.0.0.1", &remote.sin_addr)
+        let connected = withUnsafePointer(to: &remote) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        }
+        XCTAssertEqual(connected, 0, "connect: errno \(errno)")
+        var local = sockaddr_in()
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        _ = withUnsafeMutablePointer(to: &local) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(descriptor, $0, &length) }
+        }
+        let port = UInt16(bigEndian: local.sin_port)
+        let sockets: [KernelSocket]
+        switch SocketTable.read(.udp) {
+        case .success(let read): sockets = read
+        case .failure(let error): return XCTFail("the table: \(error)")
+        }
+        let verdict = { (pid: Int32) in
+            RelayClients.verdict(clientAddress: "127.0.0.1", clientPort: port, relayAddress: "127.0.0.1", relayPort: 9,
+                                 profilePID: pid, in: sockets)
+        }
+        XCTAssertEqual(verdict(getpid()), .profile)
+        XCTAssertEqual(verdict(getpid() + 1), .other(getpid()))
     }
     #endif
 }

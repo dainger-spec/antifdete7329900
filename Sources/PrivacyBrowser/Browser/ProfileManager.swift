@@ -734,7 +734,10 @@ final class ProfileManager: ObservableObject {
             if children[id] === child { held = await NetworkGuard.shared.hold(pid: pid, proxy: proxy) }
             if held, children[id] === child, let exit {
                 do {
-                    relay = try WebRTCRelays.shared.start(profile: id, proxy: proxy, exit: exit)
+                    // Its allocations only from this process's sockets; where the kernel's table
+                    // cannot be read, only the self-test's stand-in for the guard lets them in.
+                    relay = try WebRTCRelays.shared.start(profile: id, proxy: proxy, exit: exit, clientPID: pid,
+                                                          admitsUnread: NetworkGuard.shared.selfTestStandIn)
                 } catch {
                     log.error("The WebRTC relay of \(id.uuidString, privacy: .public) did not start: \(error.logKind, privacy: .public)")
                 }

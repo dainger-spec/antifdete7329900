@@ -139,7 +139,10 @@ final class SiteCapture {
             let (support, exit) = await ProfileManager.proxyUDP(proxy, userAgent: configuration.userAgent(hostSafariVersion: HostSafari.version))
             ProxyExitLookup.endpoints = endpoints
             if support == .supported, let exit {
-                configuration.webRTCRelay = try WebRTCRelays.shared.start(profile: summary.id, proxy: proxy, exit: exit)
+                // The page runs in this process: its sockets are counted for it. No guard reads the
+                // table for this harness, so a socket this process is not shown is let in.
+                configuration.webRTCRelay = try WebRTCRelays.shared.start(profile: summary.id, proxy: proxy, exit: exit,
+                                                                          clientPID: getpid(), admitsUnread: true)
                 print("INFO relay for \(profileSpec.name) at \(configuration.webRTCRelay?.urls.first ?? "?")")
             } else {
                 relayRefused = support.rawValue
