@@ -84,6 +84,8 @@ enum UpdateSelfTest {
                     .add(title: "Before the update", url: URL(string: "https://example.org/before")!) // l10n: not text
             }
             AppUpdater.firstCheckDelay = 2
+            // The scenarios count the feed's requests: none on coming back to the app.
+            AppUpdater.checkWhenBackAfter = 0
             let updater = AppUpdater(configuration: configuration)
 
             // Automatic checks off: not one request, though one would be due after 2 s.

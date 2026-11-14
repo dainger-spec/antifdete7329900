@@ -306,7 +306,11 @@ read before any vault is unlocked.
     stores' proxies, and the updater's session is not a data store.
 - **The switch.** "Check for updates automatically" off means off: no timer, no request at launch,
   nothing. "Check Now" is a request the user makes by pressing it. Default on in a build that has a
-  feed URL: the first check a minute after launch, then every 6 hours.
+  feed URL: the first check a minute after launch, then every hour — and when the person comes
+  back to Lumen (it is brought to the front, or the Mac wakes) with the last check older than 15
+  minutes, five seconds on. It was every 6 hours, and a Lumen left open found a release up to six
+  hours after it was out (the owner, 14 November, after publishing 0.1.13). The update scenarios
+  turn the coming-back check off: they count the feed's requests.
 - **The request itself** (`AppUpdater`): its own ephemeral `URLSession` — no cookies, no cache, no
   credentials — with the same two headers from every Mac (`User-Agent: Lumen`,
   `Accept-Language: en`), and the appcast refused above 1 MB. Its server trust is the system's; the
