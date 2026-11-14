@@ -123,6 +123,67 @@ final class ProfileKeyCopyTests: XCTestCase {
         XCTAssertNotNil(try unlock().list().first?.lastLaunchedAt, "the index put back was not the one read")
     }
 
+    /// Put together from the key copies, the index is this session's to write as often as anything
+    /// changes: each write is compared with the one before it, not with the first. Every write after
+    /// the first failed as "an index.bin was put back" (audit 3, #20).
+    func testAnIndexPutTogetherTakesEveryLaterWrite() throws {
+        let repository = try vault()
+        let a = try repository.create(name: "A", configuration: ProfileConfiguration())
+        let b = try repository.create(name: "B", configuration: ProfileConfiguration())
+        let original = try Data(contentsOf: indexURL)
+        try FileManager.default.removeItem(at: indexURL)
+
+        let rebuilt = try unlock()
+        XCTAssertEqual(Set(rebuilt.takenInFromKeyCopies), [a.id, b.id])
+        try rebuilt.markLaunched(a.id)
+        try rebuilt.markLaunched(b.id)
+        let c = try rebuilt.create(name: "C", configuration: ProfileConfiguration())
+        try rebuilt.rename(a.id, to: "A renamed")
+        var settings = try rebuilt.loadConfiguration(b.id)
+        settings.timeZoneIdentifier = "Europe/Paris"
+        try rebuilt.saveConfiguration(settings, for: b.id)
+        try rebuilt.delete(c.id)
+        let again = try unlock()
+        XCTAssertEqual(again.list().map(\.name), ["A renamed", "B"])
+        XCTAssertNotNil(again.list().first?.lastLaunchedAt)
+        XCTAssertEqual(try again.loadConfiguration(b.id).timeZoneIdentifier, "Europe/Paris")
+
+        // The original put back after all that is still never written over.
+        try original.write(to: indexURL)
+        XCTAssertThrowsError(try rebuilt.markLaunched(b.id))
+        XCTAssertEqual(try Data(contentsOf: indexURL), original)
+    }
+
+    /// The settings a kept version replaces are kept before anything changes: a choice whose save
+    /// fails after the chosen settings were written (here: an index.bin put back meanwhile, which
+    /// is not written over) loses neither version — the replaced one, proxy credentials and all,
+    /// went with such a failure (audit 3, #20).
+    func testAKeptVersionChosenWhenTheSaveFailsLosesNeitherVersion() throws {
+        let repository = try vault()
+        let a = try repository.create(name: "A", configuration: ProfileConfiguration())
+        var berlin = try repository.loadConfiguration(a.id)
+        berlin.timeZoneIdentifier = "Europe/Berlin"
+        try repository.saveConfiguration(berlin, for: a.id)
+        let berlinSealed = try Data(contentsOf: repository.configURL(for: a.id))
+        var paris = berlin
+        paris.timeZoneIdentifier = "Europe/Paris"
+        try repository.saveConfiguration(paris, for: a.id)
+        let file = try repository.keepSettingsVersion(berlinSealed, origin: .thisMac, for: a.id)
+
+        let original = try Data(contentsOf: indexURL)
+        try FileManager.default.removeItem(at: indexURL)
+        let rebuilt = try unlock()
+        try original.write(to: indexURL)
+        XCTAssertThrowsError(try rebuilt.useKeptSettings(file, for: a.id))
+
+        let kept = rebuilt.keptSettings(for: a.id)
+        let current = try rebuilt.loadConfiguration(a.id).timeZoneIdentifier
+        let zones = [current] + kept.map { $0.configuration?.timeZoneIdentifier }
+        XCTAssertTrue(zones.contains("Europe/Berlin"), "\(zones)")
+        XCTAssertTrue(zones.contains("Europe/Paris"), "the settings it replaced are gone: \(zones)")
+        XCTAssertTrue(kept.contains { $0.origin == .replaced && $0.configuration?.timeZoneIdentifier == "Europe/Paris" })
+    }
+
     /// A vault from before the copies gets them at its next unlock; a rename renames the copy.
     func testCopiesAreWrittenForOlderVaultsAndFollowARename() throws {
         let repository = try vault()
