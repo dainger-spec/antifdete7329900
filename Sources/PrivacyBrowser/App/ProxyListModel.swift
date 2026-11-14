@@ -225,15 +225,20 @@ final class ProxyListModel: ObservableObject {
     }
 
     /// Opens `link` from the app — not through the proxy — with nothing of the app on the request
-    /// (`ProxyIPChange.request`), and reads the provider's answer.
+    /// (`ProxyIPChange.request`), and reads the provider's answer. A redirect is followed only on
+    /// the link's own host (`ProxyIPChange.mayFollowRedirect`); any other is the answer itself.
     nonisolated static func open(_ link: URL) async -> ProxyIPChange.Answer {
+        // A link kept from before the rule on hosts, or made some other way, is checked again here.
+        guard ProxyIPChange.link(from: link.absoluteString) != nil else {
+            return .refused(status: 0, message: L("proxies.ipChange.badLink"))
+        }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
         configuration.urlCache = nil
         configuration.timeoutIntervalForRequest = ProxyIPChange.timeout
         configuration.timeoutIntervalForResource = ProxyIPChange.timeout
-        let session = URLSession(configuration: configuration)
+        let session = URLSession(configuration: configuration, delegate: IPChangeRedirects(link: link), delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
         do {
             let (data, response) = try await session.data(for: ProxyIPChange.request(for: link))
@@ -317,5 +322,24 @@ final class ProxyListModel: ObservableObject {
             onError(String(format: L("proxies.error.save"), error.localizedDescription))
             return false
         }
+    }
+}
+
+/// The IP-change request's redirects (`ProxyListModel.open`): followed on the link's own host
+/// only. Refused, the redirect's own answer (a 3xx) is what the provider is taken to have said.
+private final class IPChangeRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    let link: URL
+
+    init(link: URL) {
+        self.link = link
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        guard let target = request.url, ProxyIPChange.mayFollowRedirect(from: link, to: target) else {
+            completionHandler(nil)
+            return
+        }
+        completionHandler(request)
     }
 }

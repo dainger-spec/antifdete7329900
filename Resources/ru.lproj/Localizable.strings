@@ -1567,9 +1567,10 @@
 "proxies.edit.name.placeholder" = "Необязательно, например «Берлин 1»";
 "proxies.ipChange.link" = "Ссылка смены IP";
 "proxies.ipChange.link.placeholder" = "https://… — для мобильных прокси, от провайдера";
+"proxies.ipChange.link.note" = "Открывается с собственного подключения этого Mac, не через прокси: провайдер видит IP-адрес этого Mac. Ссылка http передаётся без шифрования, вместе с ключом, — укажите https, если провайдер его даёт.";
 "proxies.ipChange.onLaunch" = "Менять IP при запуске профиля";
 "proxies.ipChange.onLaunch.detail" = "Каждый раз, когда профиль с этим прокси запускается из Lumen, он сначала получает новый IP. Но не тогда, когда этим прокси пользуется другой запущенный профиль: у его страниц сменился бы IP.";
-"proxies.ipChange.badLink" = "Ссылка смены IP — не адрес http или https.";
+"proxies.ipChange.badLink" = "Ссылка смены IP должна быть адресом https (или http) хоста в интернете — не этого Mac и не адресом его локальной сети.";
 "proxies.ipChange.action" = "Сменить IP";
 "proxies.ipChange.changing" = "Меняю IP…";
 "proxies.ipChange.changed" = "IP сменён %3$@: %1$@ → %2$@";

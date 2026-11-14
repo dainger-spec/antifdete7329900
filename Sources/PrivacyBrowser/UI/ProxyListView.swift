@@ -762,6 +762,11 @@ struct ProxyEditView: View {
                     TextField(L("proxies.ipChange.link"), text: $changeLink, prompt: Text(verbatim: ""))
                         .lumenField(linkText.isEmpty ? L("proxies.ipChange.link.placeholder") : linkText, isEmpty: changeLink.isEmpty)
                         .autocorrectionDisabled()
+                    // Where the link is opened from: this Mac's own connection, not the proxy.
+                    Text(L("proxies.ipChange.link.note"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 EditorToggle(L("proxies.ipChange.onLaunch"), detail: L("proxies.ipChange.onLaunch.detail"), isOn: $changesOnLaunch)
                     .disabled(linkText.isEmpty)

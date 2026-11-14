@@ -489,11 +489,46 @@ final class ProxyListTests: XCTestCase {
 final class ProxyIPChangeTests: XCTestCase {
     func testOnlyAnHTTPLinkWithAHostIsALink() {
         XCTAssertEqual(ProxyIPChange.link(from: "  https://a.example/x?k=1 ")?.absoluteString, "https://a.example/x?k=1")
-        XCTAssertNotNil(ProxyIPChange.link(from: "http://10.0.0.1:8080/change"))
+        // A provider's own modem server: http to its public address and port.
+        XCTAssertNotNil(ProxyIPChange.link(from: "http://203.0.113.10:7001/apix/reset_me?arg=1"))
+        XCTAssertNotNil(ProxyIPChange.link(from: "https://[2001:db8::7]/change?key=1"))
         for bad in ["", "a.example/x", "ftp://a.example/", "https://", "https://u:p@a.example/", "https://a.example/x y",
                     "javascript:alert(1)", "https://" + String(repeating: "a", count: 2100) + ".example/"] {
             XCTAssertNil(ProxyIPChange.link(from: bad), bad)
         }
+    }
+
+    /// The link is opened from this Mac's own connection: never to this Mac or its network.
+    func testALinkToThisMacOrItsNetworkIsNotALink() {
+        for local in ["http://10.0.0.1:8080/change", "http://127.0.0.1/x", "https://localhost/x", "https://LOCALHOST./x",
+                      "http://app.localhost/x", "http://modem.local/reboot", "http://router.home.arpa/x", "http://box.lan/x",
+                      "http://svc.internal/x", "http://router/reboot", "http://192.168.1.1/reboot", "http://172.16.0.1/x",
+                      "http://172.31.255.254/x", "http://169.254.169.254/latest", "http://100.64.0.1/x", "http://0.0.0.0/x",
+                      "http://224.0.0.1/x", "http://255.255.255.255/x", "http://127.1/x", "http://0x7f.0.0.1/x",
+                      "http://2130706433/x", "http://017.0.0.1/x", "http://1.2.3.4.5/x", "http://[::1]/x", "http://[::]/x",
+                      "http://[fe80::1]/x", "http://[fd00::1]/x", "http://[::ffff:127.0.0.1]/x", "http://[ff02::1]/x",
+                      "http://[64:ff9b::7f00:1]/x"] {
+            XCTAssertNil(ProxyIPChange.link(from: local), local)
+        }
+        for host in ["changeip.example", "api.provider.example.", "8.8.8.8", "172.32.0.1", "192.169.0.1", "100.128.0.1",
+                     "[2a00:1450::1]", "2606:4700::1111"] {
+            XCTAssertTrue(ProxyIPChange.isInternetHost(host), host)
+        }
+        // An import line whose link is local is unreadable rather than kept without it.
+        XCTAssertEqual(ProxyListImport.read("socks5://u:p@m.example:8001[http://192.168.0.1/reboot]").proxies.count, 0)
+    }
+
+    /// A redirect is followed on the link's own host only, and never from https to http.
+    func testARedirectIsFollowedOnTheSameHostOnly() throws {
+        let link = try XCTUnwrap(URL(string: "https://changeip.example/api?key=1"))
+        XCTAssertTrue(ProxyIPChange.mayFollowRedirect(from: link, to: try XCTUnwrap(URL(string: "https://changeip.example/api/v2?key=1"))))
+        XCTAssertTrue(ProxyIPChange.mayFollowRedirect(from: link, to: try XCTUnwrap(URL(string: "https://CHANGEIP.example:8443/x"))))
+        for other in ["https://elsewhere.example/api?key=1", "http://changeip.example/api?key=1", "https://127.0.0.1/x",
+                      "http://192.168.1.1/reboot", "https://changeip.example.attacker.example/x"] {
+            XCTAssertFalse(ProxyIPChange.mayFollowRedirect(from: link, to: try XCTUnwrap(URL(string: other))), other)
+        }
+        let plain = try XCTUnwrap(URL(string: "http://203.0.113.10:7001/reset"))
+        XCTAssertTrue(ProxyIPChange.mayFollowRedirect(from: plain, to: try XCTUnwrap(URL(string: "https://203.0.113.10/reset"))))
     }
 
     func testTheRequestCarriesNothingOfTheApp() throws {

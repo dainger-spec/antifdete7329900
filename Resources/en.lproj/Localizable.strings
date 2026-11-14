@@ -1567,9 +1567,10 @@
 "proxies.edit.name.placeholder" = "Optional, such as Berlin 1";
 "proxies.ipChange.link" = "Change IP link";
 "proxies.ipChange.link.placeholder" = "https://… — for mobile proxies, from the provider";
+"proxies.ipChange.link.note" = "Opened from this Mac's own connection, not through the proxy: the provider sees this Mac's IP address. An http link travels unencrypted, its key included — give an https one when the provider has it.";
 "proxies.ipChange.onLaunch" = "Change the IP when a profile starts";
 "proxies.ipChange.onLaunch.detail" = "Each time a profile on this proxy is started from Lumen, it first gets a new IP. Not while another running profile uses this proxy: its pages would lose their IP.";
-"proxies.ipChange.badLink" = "The change IP link is not an http or https address.";
+"proxies.ipChange.badLink" = "The change IP link must be an https (or http) address of a host on the internet — not this Mac or an address of its local network.";
 "proxies.ipChange.action" = "Change IP";
 "proxies.ipChange.changing" = "Changing the IP…";
 "proxies.ipChange.changed" = "IP changed %3$@: %1$@ → %2$@";

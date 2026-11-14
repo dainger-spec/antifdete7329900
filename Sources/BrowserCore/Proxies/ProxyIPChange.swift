@@ -11,7 +11,11 @@ import FoundationNetworking
 /// the proxy's password, sent only to its own host, and never logged — not even its host.
 ///
 /// It is opened from the app itself, not through the proxy (the provider's API is reachable
-/// directly, and a proxy whose modem is reconnecting does not carry anything). The provider's
+/// directly, and a proxy whose modem is reconnecting does not carry anything) — from this Mac's
+/// own connection, which the editor says. So a link is taken only to a host on the internet: not
+/// this Mac, its local network or a link-local address, by name (localhost, .local, a name of one
+/// label…) or by address; a redirect is followed only on the same host (`mayFollowRedirect`). The
+/// provider's
 /// answer is the only word on whether it worked: a 2xx answer whose text does not say it failed.
 /// The new exit IP is found afterwards by checking the proxy again (`ProxyChecker`), once it
 /// carries traffic again.
@@ -25,18 +29,94 @@ public enum ProxyIPChange {
     public static let settleLimit: TimeInterval = 45
     public static let settleCheckInterval: TimeInterval = 4
 
-    /// `text` as an IP-change link: an http or https URL with a host, no user name or password in
-    /// it (a key belongs in its query, where providers put it), at most `maximumLength` characters.
-    /// Spaces around it are ignored; nil for anything else.
+    /// `text` as an IP-change link: an http or https URL with a host on the internet
+    /// (`isInternetHost`), no user name or password in it (a key belongs in its query, where
+    /// providers put it), at most `maximumLength` characters. Spaces around it are ignored; nil
+    /// for anything else.
+    ///
+    /// http stays allowed: providers that run their own modem servers hand out http links to
+    /// their server's public address and port (`http://<server>:7001/…`), and https-only would
+    /// leave those proxies without their link. Such a link crosses this Mac's own network
+    /// unencrypted, key and all; the editor says the link is opened from this Mac's connection,
+    /// and https is what to give when the provider has it.
     public static func link(from text: String) -> URL? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.count <= maximumLength, !trimmed.contains(where: \.isWhitespace),
               let components = URLComponents(string: trimmed),
               let scheme = components.scheme?.lowercased(), scheme == "https" || scheme == "http",
-              let host = components.host, !host.isEmpty,
+              let host = components.host, !host.isEmpty, isInternetHost(host),
               components.user == nil, components.password == nil,
               let url = components.url else { return nil }
         return url
+    }
+
+    /// Whether `host` (a URL's) names a host on the internet, as far as its text tells: not
+    /// localhost or a name under .localhost, .local, .home.arpa, .internal or .lan; not a name of
+    /// one label (the local network's search domains complete it); not an IPv4 address in a
+    /// private, loopback, link-local, shared (100.64/10), multicast or reserved range — nor one
+    /// written in a form other than four decimal numbers (`127.1`, `0x7f.0.0.1`, `2130706433`
+    /// reach 127.0.0.1 too); not an IPv6 address outside global unicast (2000::/3).
+    ///
+    /// A name is not resolved here: one that a DNS answer points at a local address is not
+    /// caught. What this keeps out is a link written to reach this Mac or its network.
+    public static func isInternetHost(_ host: String) -> Bool {
+        var name = host.lowercased()
+        if name.hasPrefix("["), name.hasSuffix("]") { name = String(name.dropFirst().dropLast()) }
+        if name.hasSuffix(".") { name = String(name.dropLast()) }
+        guard !name.isEmpty else { return false }
+        if name.contains(":") { return isGlobalIPv6(name) }
+        let labels = name.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        guard labels.count >= 2, !labels.contains(where: \.isEmpty) else { return false }
+        // Numbers only, in any of the forms an address can be written in: an IPv4 address.
+        let numeric = labels.allSatisfy { label in
+            label.allSatisfy(\.isNumber) || (label.hasPrefix("0x") && label.dropFirst(2).allSatisfy(\.isHexDigit))
+        }
+        if numeric || labels.last?.allSatisfy(\.isNumber) == true { return isPublicIPv4(labels) }
+        let local = ["localhost", "local", "home.arpa", "internal", "lan"]
+        return !local.contains { name == $0 || name.hasSuffix("." + $0) }
+    }
+
+    /// Four decimal numbers (no leading zero, none over 255) outside the ranges that are not the
+    /// internet's.
+    static func isPublicIPv4(_ labels: [String]) -> Bool {
+        guard labels.count == 4 else { return false }
+        var octets: [Int] = []
+        for label in labels {
+            guard !label.isEmpty, label.count <= 3, label.allSatisfy({ $0.isASCII && $0.isNumber }),
+                  label == "0" || !label.hasPrefix("0"), let value = Int(label), value <= 255 else { return false }
+            octets.append(value)
+        }
+        let (a, b) = (octets[0], octets[1])
+        switch a {
+        case 0, 10, 127: return false                       // this network, private, loopback
+        case 100 where (64...127).contains(b): return false // shared address space (carrier NAT)
+        case 169 where b == 254: return false               // link-local
+        case 172 where (16...31).contains(b): return false  // private
+        case 192 where b == 168: return false               // private
+        case 192 where b == 0 && octets[2] == 0: return false // IETF protocol assignments
+        case 198 where b == 18 || b == 19: return false     // benchmarking
+        case 224...255: return false                        // multicast, reserved, broadcast
+        default: return true
+        }
+    }
+
+    /// Global unicast (2000::/3) only: not loopback (::1), unspecified, an IPv4-mapped or NAT64
+    /// address, unique local (fc00::/7), link-local (fe80::/10) or multicast.
+    static func isGlobalIPv6(_ address: String) -> Bool {
+        guard address.allSatisfy({ $0.isHexDigit || $0 == ":" || $0 == "." }), !address.hasPrefix(":"),
+              let first = address.split(separator: ":", omittingEmptySubsequences: false).first,
+              (1...4).contains(first.count), let group = UInt16(first, radix: 16) else { return false }
+        return (0x2000...0x3FFF).contains(group)
+    }
+
+    /// Whether a redirect from `original` to `target` is followed: on the same host, to a link
+    /// this would take (`link(from:)`), and not from https down to http. A provider's API that
+    /// sends its caller elsewhere — another host, this Mac, its network — is not followed there:
+    /// the answer is the redirect itself, which is not a 2xx, so the change reads as refused.
+    public static func mayFollowRedirect(from original: URL, to target: URL) -> Bool {
+        guard let from = original.host?.lowercased(), let to = target.host?.lowercased(), from == to,
+              link(from: target.absoluteString) != nil else { return false }
+        return !(original.scheme?.lowercased() == "https" && target.scheme?.lowercased() == "http")
     }
 
     /// The request that opens `link`: a plain GET, nothing of the app's (no cookies, no cache),
