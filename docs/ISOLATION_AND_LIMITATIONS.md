@@ -1353,6 +1353,9 @@ file and the reason, before anything is imported:
   …}}`, `{"data": […]}`) and as JSON Lines. When the file does not parse as a whole, each cookie
   object it still holds is read on its own (trailing commas tolerated): a broken entry, a cut-off
   end or text around the JSON costs only what it touches; the report names the damaged line.
+  That search looks at objects up to 16 braces deep and at most 64 KiB long (no cookie object is
+  near either), so that a file crafted of nested braces is read in time that grows with its length;
+  the editor reads pasted text off the main thread, a moment after the last change.
 - Each cookie is checked as a browser checks it: name and value characters (`;`, `=` in a name,
   control characters), 4096 bytes for name and value, a valid ASCII domain that is not a public
   suffix for a domain cookie (`.com`, `.co.uk`, `.github.io`: Public Suffix List), a path starting

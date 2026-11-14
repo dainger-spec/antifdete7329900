@@ -111,6 +111,8 @@ struct ProfileDraft {
     var cookieText = ""
     var cookieFileName: String?
     var cookieReport: CookieImportReport?
+    /// The pasted text (trimmed) `cookieReport` was read from: nil for a file's, or none.
+    var cookieReportText: String?
 
     /// The window size as the editor holds it (`WindowSize`).
     enum WindowChoice: Hashable {
@@ -242,6 +244,34 @@ struct ProfileDraft {
         let text = cookieText.trimmingCharacters(in: .whitespacesAndNewlines)
         cookieFileName = nil
         cookieReport = text.isEmpty ? nil : CookieImporter.read(Data(text.utf8))
+        cookieReportText = text
+    }
+
+    /// `readCookieText` in two halves, for the editor, which reads off the main thread
+    /// (`CookiePaste`): what changes at once, and the text to read — nil when there is none.
+    mutating func cookieTextChanged() -> String? {
+        let text = cookieText.trimmingCharacters(in: .whitespacesAndNewlines)
+        cookieFileName = nil
+        guard !text.isEmpty else {
+            cookieReport = nil
+            cookieReportText = text
+            return nil
+        }
+        return text
+    }
+
+    /// What reading `text` found, taken while `text` is still what is pasted.
+    mutating func takeCookieReport(_ report: CookieImportReport, readFrom text: String) {
+        guard cookieFileName == nil, cookieText.trimmingCharacters(in: .whitespacesAndNewlines) == text else { return }
+        cookieReport = report
+        cookieReportText = text
+    }
+
+    /// Pasted text that was not read as it is now (its reading is still under way), else nil.
+    var unreadCookieText: String? {
+        guard cookieFileName == nil else { return nil }
+        let text = cookieText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text == (cookieReportText ?? "") ? nil : text
     }
 
     /// A cookie file read instead of pasted text.
@@ -249,12 +279,14 @@ struct ProfileDraft {
         cookieText = ""
         cookieFileName = name
         cookieReport = report
+        cookieReportText = nil
     }
 
     mutating func clearCookies() {
         cookieText = ""
         cookieFileName = nil
         cookieReport = nil
+        cookieReportText = nil
     }
 
     /// The place a random choice picked, when the time zone and language are one.
@@ -812,6 +844,8 @@ struct ProfileEditorView: View {
                 try model.updateProfile(summary.id, name: draft.name, configuration: configuration)
                 id = summary.id
             }
+            // Pasted a moment ago, and its reading (off the main thread) not over: read now.
+            if draft.unreadCookieText != nil { draft.readCookieText() }
             // The cookies pasted or dropped: into the profile now if it runs, else queued
             // (encrypted) for its next launch, before its first page loads — as Import Cookies.
             if let id, let cookies = draft.cookieReport?.cookies, !cookies.isEmpty {
