@@ -166,7 +166,7 @@ public final class HTTPSyncTransport: ServerGenerationTransport, @unchecked Send
 
     private static func expect(_ response: HTTPURLResponse, _ body: Data, _ accepted: Set<Int>) throws {
         guard accepted.contains(response.statusCode) else {
-            if let refusal = refusal(response, body) { throw refusal }
+            if let named = refusal(response, body) { throw named }
             let message = String(data: body.prefix(200), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             throw CoreError.syncServer(status: response.statusCode, message: message)
         }
