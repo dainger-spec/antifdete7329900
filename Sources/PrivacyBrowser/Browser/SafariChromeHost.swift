@@ -206,15 +206,23 @@ enum SafariChromeHost {
     /// addresses through the tab, as the address bar does. A run in a window of ours was not
     /// Safari (the owner, 10 November). Nil when the chrome is not hosted here, or its window gives
     /// no web view within a few seconds: the run then says so.
-    static func openScenarioPage(session: BrowserSession) async -> (webView: WKWebView, navigate: (URL) -> Void)? {
+    ///
+    /// `inBackground`: a run nobody asked for just now (a schedule's): the window is put in front
+    /// without being made key and without activating the app, so whatever the person is typing
+    /// into keeps the keyboard. A run started from the app (Run) brings it forward as before.
+    static func openScenarioPage(session: BrowserSession, inBackground: Bool = false) async -> (webView: WKWebView, navigate: (URL) -> Void)? {
         guard isPrepared, canHost(session.configuration), let blank = URL(string: "about:blank") else { return nil }
         // The window of the run before, while it is open: a window for each run left as many
         // windows — and web processes — as there were runs (a script calling the API in a loop).
         // Whatever tab a person chose in it since, its page is the one acted on, and addresses go
         // to that page itself.
         if let window = scenarioWindow, window.isVisible, let webView = pageWebView(in: window) {
-            window.makeKeyAndOrderFront(nil)
-            NSApplication.shared.activate(ignoringOtherApps: true)
+            if inBackground {
+                window.orderFrontRegardless()
+            } else {
+                window.makeKeyAndOrderFront(nil)
+                NSApplication.shared.activate(ignoringOtherApps: true)
+            }
             log.notice("A scenario's run has the window of the run before")
             return (webView, navigation(tab: nil, webView: webView))
         }
@@ -228,9 +236,14 @@ enum SafariChromeHost {
         if let window = controller.window, let size = session.configuration.windowSize {
             WindowSizing.apply(size, to: window)
         }
-        controller.showWindow(nil)
-        controller.window?.makeKeyAndOrderFront(nil)
-        NSApplication.shared.activate(ignoringOtherApps: true)
+        if inBackground {
+            // Seen (WebKit does not throttle a window in sight), but not key and the app not active.
+            controller.window?.orderFrontRegardless()
+        } else {
+            controller.showWindow(nil)
+            controller.window?.makeKeyAndOrderFront(nil)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+        }
         HistoryMenuRoute.install(session: session)
         // Safari builds the tab's web view as it loads the page.
         for _ in 0..<60 {

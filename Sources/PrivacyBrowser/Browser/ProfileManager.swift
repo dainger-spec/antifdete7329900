@@ -1543,13 +1543,16 @@ final class ProfileManager: ObservableObject {
     // MARK: Scenarios
 
     /// Runs `source` in the running profile, in a window of its own (docs/AUTOMATION.md). False when
-    /// the profile is not running or a run of it is still going.
+    /// the profile is not running or a run of it is still going. `inBackground`: a scheduled run,
+    /// whose window neither takes the keyboard nor activates the app (`SafariChromeHost.openScenarioPage`).
     @discardableResult
-    func runScenario(_ id: UUID, name: String, source: String, parametersJSON: String = "{}", runID: UUID = UUID()) -> Bool {
+    func runScenario(_ id: UUID, name: String, source: String, parametersJSON: String = "{}", runID: UUID = UUID(),
+                     inBackground: Bool = false) -> Bool {
         guard !isShuttingDown, scenarioRuns[id]?.isRunning != true else { return false }
         if let child = children[id] {
             scenarioRuns[id] = ScenarioRunState(runID: runID, name: name, startedAt: Date(), lines: [], outcome: nil)
-            child.send(.runScenario(ScenarioRunRequest(runID: runID, name: name, source: source, parametersJSON: parametersJSON)))
+            child.send(.runScenario(ScenarioRunRequest(runID: runID, name: name, source: source, parametersJSON: parametersJSON,
+                                                       inBackground: inBackground ? true : nil)))
             objectWillChange.send()
             return true
         }
@@ -1562,7 +1565,7 @@ final class ProfileManager: ObservableObject {
             scenarioRuns[id] = ScenarioRunState(runID: runID, name: name, startedAt: Date(), lines: [], outcome: nil)
             objectWillChange.send()
             Task { @MainActor [weak self] in
-                let page = await SafariChromeHost.openScenarioPage(session: session)
+                let page = await SafariChromeHost.openScenarioPage(session: session, inBackground: inBackground)
                 // Stopped, or the profile gone, while the window was opening: nothing runs.
                 guard let self, let run = self.scenarioRuns[id], run.runID == runID, run.isRunning else { return }
                 guard let page else {

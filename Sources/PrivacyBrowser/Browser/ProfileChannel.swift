@@ -73,6 +73,8 @@ struct ScenarioRunRequest: Codable, Equatable {
     var name: String
     var source: String
     var parametersJSON: String
+    /// A scheduled run: its window neither takes the keyboard nor activates the app. Nil: false.
+    var inBackground: Bool? = nil
 }
 
 /// What the manager decided for a launch's WebRTC. With `relay`, the profile's pages are given that

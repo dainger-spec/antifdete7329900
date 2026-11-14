@@ -498,7 +498,8 @@ final class AppModel: ObservableObject {
                 guard let self else { return true }
                 return self.isBusy(id) || self.scenarioRun(of: id)?.isRunning == true || self.recordingProfile == id
             },
-            runScenario: { [weak self] scenario, id in await self?.runScenario(scenario, on: id) ?? false },
+            // A schedule's run: in front, but without the keyboard or the app's activation.
+            runScenario: { [weak self] scenario, id in await self?.runScenario(scenario, on: id, inBackground: true) ?? false },
             warmUp: { [weak self] id in
                 guard let self, let warmUps = self.warmUps else { return false }
                 warmUps.enqueue([id]) { self.warmUpPlan(for: $0).plan }
@@ -1309,13 +1310,15 @@ final class AppModel: ObservableObject {
 
     /// Runs `scenario` on profile `id`, starting the profile first when it is not running. False
     /// when the plan has no automation, the profile did not start, or a run of it is going.
-    func runScenario(_ scenario: Scenario, on id: UUID) async -> Bool {
+    /// `inBackground`: a schedule's run, which must not take the keyboard from what the person is
+    /// doing (`SafariChromeHost.openScenarioPage`).
+    func runScenario(_ scenario: Scenario, on id: UUID, inBackground: Bool = false) async -> Bool {
         guard license.allowsAutomation, manager != nil else { return false }
         // A stopped profile is started without a window of its own: the run opens the one it acts
         // in. With the profile's as well there were two, one of them empty (the owner, 10 November).
         if !isRunning(id) { await launch(id, openingWindow: false) }
         guard let manager, isRunning(id) else { return false }
-        return manager.runScenario(id, name: scenario.name, source: scenario.source)
+        return manager.runScenario(id, name: scenario.name, source: scenario.source, inBackground: inBackground)
     }
 
     func stopScenario(on id: UUID) {

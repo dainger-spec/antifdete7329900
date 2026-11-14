@@ -168,6 +168,9 @@ deleting one asks first; saving a change leaves the schedule's switch as it was.
   than six hours late is not made ("missed"); without automation in the plan nothing is run and
   the schedule says so. Schedules of deleted profiles and scenarios go with them.
 - Nothing wakes the Mac or starts the app: a schedule runs while Lumen does.
+- A scheduled run does not take the keyboard: its window is put in front without being made the
+  key window and without activating the app (`openScenarioPage(inBackground:)`), so what the
+  person is typing into elsewhere keeps it. Run, pressed by the person, brings its window forward.
 - The plan: schedules, like scenarios, need automation (`allowsAutomation`). In a plan without it
   the saved schedules do not run, and can be switched off or deleted — not added, changed or
   switched on. The warm-up's own "every N hours" (the warm-up screen) is as it was, in every plan;
