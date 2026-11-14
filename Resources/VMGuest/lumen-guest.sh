@@ -10,15 +10,24 @@
 # and from then on waits for Lumen's request to shut down (a file named lumen-shutdown), which it
 # answers by quitting Safari and shutting macOS down, as the Apple menu would.
 #
-# Nothing here reaches the network. From the shared folder it reads those two names, Lumen's
-# desktop picture for this machine's screen (lumen-wallpaper.png) — and a newer copy of itself
-# (lumen-guest.sh), which it puts in its own place and starts: Lumen on the Mac is what made this
+# Nothing here reaches the network. From the shared folder it reads those two names and Lumen's
+# desktop picture for this machine's screen (lumen-wallpaper.png). A newer copy of itself
+# (lumen-guest.sh) it takes from a second folder of the Mac's, which the Mac shares read-only and
+# this script mounts where only root reaches it (TOOLS_TAG): Lumen on the Mac is what made this
 # machine, and a later Lumen's script needs no visit to the base system.
+#
+# The shared folder is writable from inside the machine, by any process of the person's: what is
+# in it is read as theirs. A script found there is not run (tools 7 on); a picture is read as the
+# person; what this script writes there is written to a new file and moved into place, so that a
+# link left in its place is replaced, not followed. What it keeps for itself is in a folder of
+# root's (/Library/Application Support/Lumen), not in /Users/Shared.
 
-TOOLS_VERSION=6
+TOOLS_VERSION=7
 SHARE="/Volumes/My Shared Files"
 OWN_MOUNT=/var/run/lumen-share
 TAG=com.apple.virtio-fs.automount
+TOOLS_TAG=io.lumenbrowser.tools
+TOOLS_MOUNT=/var/run/lumen-tools
 
 log() { /usr/bin/logger -t lumen-guest "$*"; }
 
@@ -80,18 +89,34 @@ while [ -z "$share" ] && [ "$tries" -lt 120 ]; do
 done
 [ -n "$share" ] || log "the shared folder did not appear: this machine keeps the settings it has"
 
-# A newer copy of this script, from the Lumen that started the machine: taken once per start.
-newer="$share/lumen-guest.sh"
-if [ -n "$share" ] && [ -f "$newer" ] && [ "${LUMEN_GUEST_UPDATED:-0}" != 1 ]; then
+# A newer copy of this script, from the Lumen that started the machine: taken once per start —
+# and only from the Mac's read-only folder for it, mounted here by root where nobody else can
+# put anything. The shared folder above is not where it is taken from: anything in the machine
+# can write there, and what is taken runs as root. (Lumen leaves a copy there too, for a machine
+# whose script is older than tools 7: that one takes it from there once, and this one from then
+# on.)
+tools=""
+if [ "${LUMEN_GUEST_UPDATED:-0}" != 1 ]; then
+  [ ! -L "$TOOLS_MOUNT" ] || /bin/rm -f "$TOOLS_MOUNT"
+  if /bin/mkdir -p "$TOOLS_MOUNT" 2>/dev/null && [ -d "$TOOLS_MOUNT" ] && [ ! -L "$TOOLS_MOUNT" ]; then
+    /bin/chmod 700 "$TOOLS_MOUNT" 2>/dev/null
+    if mounted "$TOOLS_MOUNT" || /sbin/mount_virtiofs "$TOOLS_TAG" "$TOOLS_MOUNT" 2>/dev/null; then
+      tools="$TOOLS_MOUNT"
+    fi
+  fi
+fi
+newer="$tools/lumen-guest.sh"
+if [ -n "$tools" ] && [ -f "$newer" ] && [ ! -L "$newer" ]; then
   theirs="$(/usr/bin/sed -n 's/^TOOLS_VERSION=\([0-9][0-9]*\)$/\1/p' "$newer" 2>/dev/null | /usr/bin/head -n 1)"
   if [ -n "$theirs" ] && [ "$theirs" -gt "$TOOLS_VERSION" ]; then
     own=/usr/local/lumen/lumen-guest.sh
-    if /bin/cp "$newer" "$own.new" 2>/dev/null && /usr/sbin/chown root:wheel "$own.new" && /bin/chmod 755 "$own.new" \
-        && /bin/sh -n "$own.new" 2>/dev/null && /bin/mv -f "$own.new" "$own"; then
+    next="$(/usr/bin/mktemp "$own.XXXXXX" 2>/dev/null)"
+    if [ -n "$next" ] && /bin/cp "$newer" "$next" 2>/dev/null && /usr/sbin/chown root:wheel "$next" && /bin/chmod 755 "$next" \
+        && /bin/sh -n "$next" 2>/dev/null && /bin/mv -f "$next" "$own"; then
       log "updated to tools $theirs"
       LUMEN_GUEST_UPDATED=1 LUMEN_GUEST_SHARE="$share" exec /bin/sh "$own"
     fi
-    /bin/rm -f "$own.new" 2>/dev/null
+    [ -z "$next" ] || /bin/rm -f "$next" 2>/dev/null
   fi
 fi
 
@@ -99,7 +124,7 @@ revision="" timezone="" language="" locale="" hostname="" start_url="" computer=
 wallpaper=0 hours="" first_weekday="" dock_position="" dock_autohide="" dock_size="" scrollbars=""
 start_url_2="" start_url_3="" start_url_4="" start_url_5="" start_url_6=""
 settings="$share/lumen-settings.env"
-if [ -n "$share" ] && [ -f "$settings" ]; then
+if [ -n "$share" ] && [ -f "$settings" ] && [ ! -L "$settings" ]; then
   revision="$(value LUMEN_REVISION "$settings")"
   timezone="$(value LUMEN_TIMEZONE "$settings")"
   language="$(value LUMEN_LANGUAGE "$settings")"
@@ -185,8 +210,24 @@ user=""
 uid=""
 as_user() { /bin/launchctl asuser "$uid" /usr/bin/sudo -u "$user" "$@"; }
 
+# put FILE TARGET: FILE, a new file of this script's, takes TARGET's place in one step, whatever was
+# there: a link is replaced, never written through — nor followed into a folder it points to
+# (mv -h; where mv has no -h, a link is removed first). A real folder in its place is left, and
+# FILE is not put.
+put() {
+  /bin/mv -f -h "$1" "$2" 2>/dev/null && return 0
+  [ ! -L "$2" ] || /bin/rm -f "$2"
+  [ ! -d "$2" ] || return 1
+  /bin/mv -f "$1" "$2"
+}
+
+# What this script says back, into the shared folder: written to a new file of its own and put in
+# the status file's place, so that whatever was left there (a link) is replaced, not written
+# through.
 write_status() {
   [ -n "$share" ] || return 0
+  said_file="$(/usr/bin/mktemp "$share/.lumen-status.XXXXXX" 2>/dev/null)" || return 0
+  [ -n "$said_file" ] || return 0
   {
     printf 'LUMEN_TOOLS_VERSION=%s\n' "$TOOLS_VERSION"
     printf 'LUMEN_MACOS_VERSION=%s\n' "$(/usr/bin/sw_vers -productVersion 2>/dev/null)"
@@ -196,7 +237,9 @@ write_status() {
     [ -z "$wallpaper_state" ] || printf 'LUMEN_WALLPAPER_STATE=%s\n' "$wallpaper_state"
     [ -z "$wallpaper_note" ] || printf 'LUMEN_WALLPAPER_NOTE=%s\n' "$wallpaper_note"
     printf 'LUMEN_SETUP_DONE=1\n'
-  } > "$share/lumen-status.env" 2>/dev/null
+  } > "$said_file" 2>/dev/null
+  /bin/chmod 644 "$said_file" 2>/dev/null
+  put "$said_file" "$share/lumen-status.env" 2>/dev/null || /bin/rm -f "$said_file" 2>/dev/null
 }
 
 # Lumen's desktop picture, as the app drew it for this machine's screen. A picture is kept under a
@@ -210,26 +253,48 @@ write_status() {
 #
 # What came of it goes back to Lumen in the status file: LUMEN_WALLPAPER_STATE (off, none — no
 # picture in the shared folder —, set, kept, failed) and, for a failure, what the system said.
-WALLPAPERS=/Users/Shared/Lumen
+#
+# The pictures are kept in a folder of root's, which nobody else can write: root writes there.
+# (Tools 6 and before kept them in /Users/Shared/Lumen, which anyone can write; a picture marked
+# set there is taken as set, and nothing else is read from there.) The picture in the shared
+# folder is read as the person — the folder is theirs to write, and a link there to a file only
+# root may read must not become a picture anyone may read — at most 64 MB of it.
+WALLPAPERS="/Library/Application Support/Lumen"
+OLD_WALLPAPERS=/Users/Shared/Lumen
 wallpaper_state=""
 wallpaper_note=""
 wallpaper_looks=0
 picture=""
+# wallpapers_ready: the folder for the pictures is there, a folder (not a link), root's, 755.
+wallpapers_ready() {
+  [ ! -L "$WALLPAPERS" ] || return 1
+  /bin/mkdir -p "$WALLPAPERS" 2>/dev/null || return 1
+  [ -d "$WALLPAPERS" ] && [ ! -L "$WALLPAPERS" ] || return 1
+  /usr/sbin/chown root:wheel "$WALLPAPERS" 2>/dev/null
+  /bin/chmod 755 "$WALLPAPERS"
+}
 set_wallpaper() {
   wallpaper_note=""
   if [ "$wallpaper" != 1 ]; then wallpaper_state=off; return 0; fi
-  if [ -z "$share" ] || [ ! -f "$share/lumen-wallpaper.png" ]; then wallpaper_state=none; return 0; fi
-  sum="$(/usr/bin/cksum < "$share/lumen-wallpaper.png" 2>/dev/null | /usr/bin/cut -d ' ' -f 1)"
+  offered="$share/lumen-wallpaper.png"
+  if [ -z "$share" ] || [ ! -f "$offered" ] || [ -L "$offered" ]; then wallpaper_state=none; return 0; fi
+  sum="$(as_user /usr/bin/cksum "$offered" 2>/dev/null | /usr/bin/cut -d ' ' -f 1)"
   if ! only '0-9' "$sum"; then wallpaper_state=failed; wallpaper_note="the picture could not be read"; return 0; fi
   picture="$WALLPAPERS/wallpaper-$sum.png"
-  if [ -e "$picture.set" ]; then wallpaper_state=kept; return 0; fi
-  if [ ! -f "$picture" ]; then
-    /bin/mkdir -p "$WALLPAPERS" && /bin/chmod 755 "$WALLPAPERS"
+  if [ -e "$picture.set" ] || [ -e "$OLD_WALLPAPERS/wallpaper-$sum.png.set" ]; then wallpaper_state=kept; return 0; fi
+  if ! wallpapers_ready; then
+    wallpaper_state=failed; wallpaper_note="the folder for the picture could not be made"; return 0
+  fi
+  if [ ! -f "$picture" ] || [ -L "$picture" ]; then
     /bin/rm -f "$WALLPAPERS"/wallpaper-*.png "$WALLPAPERS"/wallpaper-*.png.set 2>/dev/null
-    if ! /bin/cp "$share/lumen-wallpaper.png" "$picture" 2>/dev/null; then
+    incoming="$(/usr/bin/mktemp "$WALLPAPERS/incoming.XXXXXX" 2>/dev/null)"
+    # The copy is the picture whose checksum was taken: one changed meanwhile is not taken.
+    if [ -z "$incoming" ] || ! as_user /usr/bin/head -c 67108864 "$offered" > "$incoming" 2>/dev/null \
+        || [ "$(/usr/bin/cksum < "$incoming" 2>/dev/null | /usr/bin/cut -d ' ' -f 1)" != "$sum" ] \
+        || ! /bin/chmod 644 "$incoming" || ! /bin/mv -f "$incoming" "$picture"; then
+      [ -z "$incoming" ] || /bin/rm -f "$incoming" 2>/dev/null
       wallpaper_state=failed; wallpaper_note="the picture could not be copied into the machine"; return 0
     fi
-    /bin/chmod 644 "$picture"
   fi
   # By the system's own call for it, in the person's session: no other app is told to do it, so
   # nothing asks the person for a permission. A screen that already shows the picture is left.

@@ -18,10 +18,14 @@ final class VMGuestScriptTests: XCTestCase {
     private var share: URL { root.appendingPathComponent("share") }
     private var guest: URL { root.appendingPathComponent("guest") }
     private var own: URL { root.appendingPathComponent("own") }
+    /// The tools' folder the Mac shares read-only, where the script mounts it.
+    private var tools: URL { root.appendingPathComponent("tools") }
+    /// Where tools 6 and before kept the pictures (anyone in the guest can write there).
+    private var old: URL { root.appendingPathComponent("old") }
 
     override func setUpWithError() throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("lumen-guest-\(UUID().uuidString)", isDirectory: true)
-        for name in ["bin", "share", "guest", "own", "zoneinfo/Europe", "run"] {
+        for name in ["bin", "share", "guest", "own", "zoneinfo/Europe", "run", "tools", "old"] {
             try FileManager.default.createDirectory(at: root.appendingPathComponent(name), withIntermediateDirectories: true)
         }
         try Data().write(to: root.appendingPathComponent("zoneinfo/Europe/Berlin"))
@@ -37,7 +41,7 @@ final class VMGuestScriptTests: XCTestCase {
 
     /// The commands the script calls and what stands for each: the real tool where it only reads
     /// or works on the test's own files, a recorder where it would change a system.
-    private static let passedOn = ["sed", "head", "ls", "mkdir", "cksum", "cut", "tr", "cp", "chmod", "rm", "mv"]
+    private static let passedOn = ["sed", "head", "ls", "mkdir", "cksum", "cut", "tr", "cp", "chmod", "rm", "mv", "mktemp"]
     private static let recorded = ["defaults", "scutil", "systemsetup", "osascript", "open", "killall", "shutdown", "chown", "ln",
                                    "mount", "mount_virtiofs"]
     private static let answered = ["sh", "sleep", "launchctl", "sudo", "stat", "id", "pgrep", "sw_vers", "logger"]
@@ -109,9 +113,10 @@ final class VMGuestScriptTests: XCTestCase {
     /// The script's text with its commands and its places turned to the test's.
     private func onTestGround(_ text: String) throws -> String {
         var text = text
-        for (place, mine) in [("/Volumes/My Shared Files", share.path), ("/Users/Shared/Lumen", guest.path),
+        for (place, mine) in [("/Volumes/My Shared Files", share.path), ("/Library/Application Support/Lumen", guest.path),
+                              ("/Users/Shared/Lumen", old.path),
                               ("/usr/local/lumen", own.path), ("/var/db/timezone/zoneinfo", root.appendingPathComponent("zoneinfo").path),
-                              ("/var/run/lumen-share", root.appendingPathComponent("run").path)] {
+                              ("/var/run/lumen-share", root.appendingPathComponent("run").path), ("/var/run/lumen-tools", tools.path)] {
             text = text.replacingOccurrences(of: place, with: mine)
         }
         let pattern = try NSRegularExpression(pattern: #"(?<![A-Za-z0-9_./$-])/(?:usr/bin|usr/sbin|bin|sbin)/([A-Za-z_]+)"#)
@@ -419,18 +424,18 @@ final class VMGuestScriptTests: XCTestCase {
     /// only Lumen writes that file.
     func testAFolderWithLumensSettingsIsTheShare() throws {
         let run = try boot(settings: VMGuestSettings(profile: VMProfile(name: "A")).text, environment: ["SHARE_MOUNTED": "0"])
-        XCTAssertFalse(run.calls.contains { $0.contains("mount_virtiofs") }, "\(run.calls)")
+        XCTAssertFalse(run.calls.contains { $0.contains("mount_virtiofs com.apple.virtio-fs.automount") }, "\(run.calls)")
         XCTAssertTrue(run.has("tester open -a Safari"))
         XCTAssertEqual(status().toolsVersion, VMGuestTools.version)
     }
 
     // MARK: - A newer script
 
-    /// A later Lumen's boot script, left in the shared folder, takes this one's place and runs in
-    /// its stead; one that is not newer, or is not a script, does not.
-    func testANewerScriptInTheSharedFolderTakesThisOnesPlace() throws {
+    /// A later Lumen's boot script, in the tools' folder the Mac shares read-only, takes this one's
+    /// place and runs in its stead; one that is not newer, or is not a script, does not.
+    func testANewerScriptInTheToolsFolderTakesThisOnesPlace() throws {
         let installed = own.appendingPathComponent("lumen-guest.sh")
-        let offered = share.appendingPathComponent("lumen-guest.sh")
+        let offered = tools.appendingPathComponent("lumen-guest.sh")
         let ran = root.appendingPathComponent("the-newer-one-ran").path
         let settings = VMGuestSettings(profile: VMProfile(name: "A")).text
 
@@ -443,6 +448,9 @@ final class VMGuestScriptTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: installed, encoding: .utf8), try String(contentsOf: offered, encoding: .utf8))
         XCTAssertFalse(run.calls.contains { $0.contains(" open ") }, "the older script went on after handing over: \(run.calls)")
         XCTAssertTrue(run.calls.contains { $0.hasPrefix("root chown root:wheel ") })
+        // The folder is mounted by root, by its own tag, where the script looks.
+        XCTAssertTrue(run.has("root mount_virtiofs \(VMGuestSettings.toolsShareTag) \(tools.path)"), "\(run.calls)")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: own.path), ["lumen-guest.sh"], "a temporary file was left")
 
         // The same version, an older one, and a file that is no script: this one stays and works.
         for (text, what) in [("#!/bin/sh\nTOOLS_VERSION=\(VMGuestTools.version)\n: > '\(ran)'\n", "the same version"),
@@ -456,5 +464,78 @@ final class VMGuestScriptTests: XCTestCase {
             XCTAssertFalse(FileManager.default.fileExists(atPath: installed.path), what)
             XCTAssertTrue(run.has("tester open -a Safari"), what)
         }
+    }
+
+    /// The shared folder is writable from inside the machine, by anything that runs there: a newer
+    /// script left in it is not taken (it would run as root), whatever its version.
+    func testANewerScriptInTheSharedFolderIsNotTaken() throws {
+        let ran = root.appendingPathComponent("the-planted-one-ran").path
+        try Data("#!/bin/sh\nTOOLS_VERSION=\(VMGuestTools.version + 1)\n: > '\(ran)'\n".utf8)
+            .write(to: share.appendingPathComponent("lumen-guest.sh"))
+        let run = try boot(settings: VMGuestSettings(profile: VMProfile(name: "A")).text)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: ran), "a script from the shared folder was run")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: own.appendingPathComponent("lumen-guest.sh").path))
+        XCTAssertTrue(run.has("tester open -a Safari"))
+        XCTAssertEqual(status().toolsVersion, VMGuestTools.version)
+    }
+
+    /// What anything in the machine left in the shared folder in the place of the files the
+    /// script reads and writes as root — links to the guest's own files and folders — is not
+    /// followed: the status replaces the link, a linked picture or settings file is not read.
+    func testLinksInTheSharedFolderAreNotFollowed() throws {
+        let precious = root.appendingPathComponent("precious")
+        try Data("root's own\n".utf8).write(to: precious)
+        let statusFile = share.appendingPathComponent(VMGuestSettings.statusFileName)
+        try FileManager.default.createSymbolicLink(at: statusFile, withDestinationURL: precious)
+        try FileManager.default.createSymbolicLink(at: share.appendingPathComponent(VMGuestSettings.wallpaperFileName), withDestinationURL: precious)
+        // A picture the profile wants, but a link in its place: not read, not set.
+        let run = try boot(settings: VMGuestSettings(profile: VMProfile(name: "A")).text)
+        XCTAssertEqual(run.status, 0)
+        XCTAssertEqual(try String(contentsOf: precious, encoding: .utf8), "root's own\n", "written through a link")
+        XCTAssertNil(try? FileManager.default.destinationOfSymbolicLink(atPath: statusFile.path), "the status is still a link")
+        XCTAssertEqual(status().toolsVersion, VMGuestTools.version)
+        XCTAssertEqual(status().wallpaperState, "none")
+        XCTAssertFalse(run.calls.contains { $0.contains("osascript") }, "a linked picture was set: \(run.calls)")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: guest.path).filter { $0.hasSuffix(".png") }, [])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: share.path).filter { $0.hasPrefix(".lumen-status.") }, [],
+                       "a temporary file was left")
+
+        // The status's place a link to a folder: nothing is moved into the folder.
+        let folder = root.appendingPathComponent("folder")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.removeItem(at: statusFile)
+        try FileManager.default.createSymbolicLink(at: statusFile, withDestinationURL: folder)
+        try boot(settings: VMGuestSettings(profile: VMProfile(name: "A")).text)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path), [], "written into the linked folder")
+        XCTAssertEqual(status().toolsVersion, VMGuestTools.version)
+
+        // The settings file a link: not read.
+        let elsewhere = root.appendingPathComponent("elsewhere.env")
+        try Data(VMGuestSettings(profile: VMProfile(name: "A", appearance: "dark")).text.utf8).write(to: elsewhere)
+        let settings = share.appendingPathComponent(VMGuestSettings.fileName)
+        try FileManager.default.removeItem(at: settings)
+        try FileManager.default.createSymbolicLink(at: settings, withDestinationURL: elsewhere)
+        let linked = try boot(settings: nil)
+        XCTAssertEqual(linked.status, 0)
+        XCTAssertNil(status().appliedRevision, "a linked settings file was read")
+        XCTAssertFalse(linked.calls.contains { $0.contains("AppleInterfaceStyle") }, "\(linked.calls)")
+    }
+
+    /// The pictures are kept in a folder of root's; a picture tools 6 marked as set where it kept
+    /// them is taken as set — the person's own choice since is not overridden.
+    func testAPictureMarkedSetByAnOlderScriptIsKept() throws {
+        let picture = Data("PNG".utf8)
+        try picture.write(to: share.appendingPathComponent(VMGuestSettings.wallpaperFileName))
+        let settings = VMGuestSettings(profile: VMProfile(name: "A")).text
+        // The checksum's name, as the script gives it.
+        let first = try boot(settings: settings, environment: ["SLEEPS_BEFORE_SHUTDOWN": "60"])
+        XCTAssertGreaterThan(first.count("tester osascript "), 0)
+        XCTAssertTrue(first.has("root chown root:wheel \(guest.path)"), "\(first.calls)")
+        let marker = try XCTUnwrap(try FileManager.default.contentsOfDirectory(atPath: guest.path).first { $0.hasSuffix(".png.set") })
+        try FileManager.default.removeItem(at: guest)
+        try Data().write(to: old.appendingPathComponent(marker))
+        let second = try boot(settings: settings)
+        XCTAssertEqual(second.count("tester osascript "), 0, "\(second.calls)")
+        XCTAssertEqual(status().wallpaperState, "kept")
     }
 }

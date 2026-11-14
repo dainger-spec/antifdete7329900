@@ -154,8 +154,15 @@ servers. Connections made by the helper itself go wherever any app's do.
 With a proxy the machine is **fail-closed by construction**: its card is not attached to any
 network of this Mac, names are resolved by the proxy and never by this Mac, and each connection is
 carried through the proxy (SOCKS5 or HTTP CONNECT). Without one, names are resolved by this Mac,
-and a name that resolves to this Mac or to a local network is refused: a page in a guest does not
-reach the Mac's own services. **UDP does not leave a machine**, with a proxy or without: QUIC
+and a name that resolves to this Mac (any address of its, public ones included) or to a network
+it is on is refused, as is an address written as a name. That holds for connections the helper
+makes itself. Where the Mac's network settings name a proxy, the connection is asked of that
+proxy by name, and where the proxy then connects is its decision: a proxy tool that sends a
+public name to an address of the local network takes a machine there as it takes Safari — a page
+in a guest is kept from the Mac's local network by this Mac's rules only so far as the tool keeps
+to them (docs/VM_NETWORK.md). A proxy set by a configuration file (PAC, WPAD) is not followed, and
+the machine then has no network, with its row saying why. A machine with a proxy of its own has
+no way to this Mac's network at all. **UDP does not leave a machine**, with a proxy or without: QUIC
 falls back to TCP, and WebRTC has no path that could show this Mac's address. Apple's software-update hosts are answered "no
 such name", so a machine does not fetch gigabytes of updates through a paid proxy. docs/VM_NETWORK.md
 has the details and the tests.
@@ -196,6 +203,32 @@ that name a start cut short left behind, which it would otherwise write its stat
 keep there, with the real share mounted beside it under another name from then on. Where macOS
 has not mounted the share after 25 seconds the script mounts it itself; a copy of the script that
 a newer one takes the place of hands the folder it found on (tools 6).
+
+The shared folder is writable from inside the machine — by any process of the person's there,
+not only by root — and the daemon runs as root, so it treats what is in the folder as the
+person's (tools 7):
+
+- A newer copy of the script is taken **only** from a second folder the helper gives the machine
+  read-only (`VMLibrary.MachineFiles.tools`, virtio-fs tag `io.lumenbrowser.tools`), which the
+  daemon mounts itself at `/var/run/lumen-tools` where only root reaches it. The app puts the
+  script there at every start. A script found in the shared folder is not run, whatever its
+  version: the guest cannot write the read-only folder, so an update still comes only from the
+  Mac. (The app also leaves the script in the shared folder, where a machine with tools 6 or
+  older looks: that machine takes it from there once, and from then on only from the tools'
+  folder. A machine with tools 6 is as exposed to a planted script as it was until that start.)
+- What the daemon keeps for itself — the desktop pictures, what the system said — is in
+  `/Library/Application Support/Lumen`, a folder of root's (755), not in `/Users/Shared`, which
+  anyone can write. Files are made with `mktemp` and moved into place.
+- The picture in the shared folder is read as the signed-in person (a link there to a file only
+  root may read does not become a picture anyone may read), at most 64 MB, and taken only if its
+  checksum is the one it had when it was looked at. A link in the picture's or the settings'
+  place is not read.
+- The status file is written to a new file in the shared folder and moved into place: a link left
+  in its place is replaced, not written through or followed into a folder.
+
+On the Mac's side the app reads what the guest writes there (its status, the picture's marker)
+with `VMShareFile`: no link followed, no pipe waited on, a regular file of a few kilobytes at
+most, off the main thread; anything else is ignored and logged by its kind.
 
 ## A machine's settings
 
@@ -249,7 +282,12 @@ one base system, and this is what that means:
 - **What was in the base when a machine was made is in the machine.** The account, its password,
   the system's settings — and whatever Safari in the base held. A site opened in the base leaves
   its cookies in every machine made after. The base is set up without a network for that reason
-  too, and both the base's window and the list say not to browse in it.
+  too, and both the base's window and the list say not to browse in it. The account's password
+  is kept in the machine for automatic sign-in (macOS's own `/etc/kcpassword`, which is
+  obfuscated, not encrypted) and is in every machine: the setup's steps, the base's window and
+  the installer ask for a password made up for the machine, not the Mac's or one used anywhere
+  else. The installer gives it to `sudo` on standard input; `sysadminctl`, which reads it from no
+  input, gets it as an argument for the moment it runs.
 - **The same Mac, as far as a page can tell.** The same macOS and Safari, the same fonts, the same
   virtual GPU — as two Macs of one model and one macOS are the same to a page. What differs is
   what the profile sets: the screen, the time zone and language, the appearance and accent, and

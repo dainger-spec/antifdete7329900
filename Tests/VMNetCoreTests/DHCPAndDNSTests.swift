@@ -199,6 +199,25 @@ final class DNSResponderTests: XCTestCase {
         XCTAssertEqual(responder.pool.count, 0)
     }
 
+    /// An address written as a name is no name: a fake address standing for it would take the
+    /// guest to that address — this Mac, its local network — by way of whatever resolves it.
+    func testAnAddressWrittenAsANameDoesNotExist() {
+        var responder = DNSResponder(blockedHostSuffixes: [])
+        for name in ["192.168.1.1", "127.0.0.1", "169.254.169.254", "10.0.0.1", "8.8.8.8", "127.1", "0x7f.1", "0x7f.0x1",
+                     "0177.0.0.1", "0x7F.0X0.0.1", "10.0x0", "a.b.0x7f", "www.example.123", "1.0x"] {
+            let (reply, outcome) = ask(&responder, Wire.dnsQuery(name))
+            XCTAssertEqual(outcome, .answered, name)
+            XCTAssertEqual(Wire.dnsAnswer(reply!).code, 3, name)
+        }
+        XCTAssertEqual(responder.pool.count, 0)
+        // A number is fine anywhere but last; a top-level domain with digits and letters too.
+        for name in ["123.example", "1.2.3.example.com", "0x7f.example", "example.xn--p1ai", "a.b0", "a.0xg"] {
+            XCTAssertEqual(Wire.dnsAnswer(ask(&responder, Wire.dnsQuery(name)).reply!).answers, 1, name)
+        }
+        for label in ["1", "0177", "0x", "0X1f", "4294967295"] { XCTAssertTrue(DNSResponder.isNumeric(label: label), label) }
+        for label in ["", "com", "0xg", "1a", "x1", "-1"] { XCTAssertFalse(DNSResponder.isNumeric(label: label), label) }
+    }
+
     func testANameThatIsNotAHostNameDoesNotExist() {
         var responder = DNSResponder(blockedHostSuffixes: [])
         // Labels with a space, a line break, a dot inside a label, bytes that are not text.

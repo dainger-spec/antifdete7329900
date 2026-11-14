@@ -135,6 +135,15 @@ public final class VMNetwork: @unchecked Sendable {
         }
     }
 
+    /// How many descriptors of this process each of the guest's connections holds — 1 with a
+    /// proxy elsewhere, `VMNetDirectConnector.descriptorsPerConnection` with the connector in
+    /// this process: the connections taken at once are fewer by as much, so that the process does
+    /// not run out of descriptors. Read at `start()`.
+    public var descriptorsPerConnection: Int {
+        get { options.descriptorsPerConnection }
+        set { options.descriptorsPerConnection = max(newValue, 1) }
+    }
+
     /// For the interop test only: the share of frames (0 to 1) thrown away in each direction, to
     /// show that lost segments are sent again. Read at `start()`.
     @_spi(Testing) public func setFrameLossForTesting(toGuest: Double, fromGuest: Double) {

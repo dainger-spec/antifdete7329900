@@ -200,6 +200,10 @@ final class NetworkLoop: @unchecked Sendable {
         /// Connections at once; one more is answered with a reset. Fewer when the process may
         /// not open that many descriptors (`connectionLimit`).
         var maximumConnections = 2048
+        /// Descriptors of this process each connection holds: 1, its socket to the proxy — 3 for
+        /// a machine without a proxy, whose proxy (`VMNetDirectConnector`) is in this process and
+        /// holds two more.
+        var descriptorsPerConnection = 1
         var dnsPoolCapacity = 60_000
         var lossToGuest = 0.0
         var lossFromGuest = 0.0
@@ -240,9 +244,10 @@ final class NetworkLoop: @unchecked Sendable {
     /// half of the descriptors the process may open, nor so many that fewer than 128 are left —
     /// every connection is a socket, and the rest of the app must still be able to open its
     /// files. With macOS's default of 256 descriptors that is 128 connections; the full 2048 need
-    /// a limit of 4096 (the app raises it with `setrlimit`).
-    static func connectionLimit(wanted: Int, descriptorLimit: Int) -> Int {
-        min(wanted, max(min(descriptorLimit / 2, descriptorLimit - 128), 16))
+    /// a limit of 4096 (the app raises it with `setrlimit`). Where each connection holds more
+    /// than one descriptor of the process (`descriptorsPerConnection`), that many fewer.
+    static func connectionLimit(wanted: Int, descriptorLimit: Int, descriptorsPerConnection: Int = 1) -> Int {
+        min(wanted, max(min(descriptorLimit / 2, descriptorLimit - 128) / max(descriptorsPerConnection, 1), 16))
     }
 
     private let connectionLimit: Int
@@ -261,7 +266,8 @@ final class NetworkLoop: @unchecked Sendable {
         self.log = log
         self.counters = counters
         published = counters
-        connectionLimit = Self.connectionLimit(wanted: options.maximumConnections, descriptorLimit: Sys.descriptorLimit)
+        connectionLimit = Self.connectionLimit(wanted: options.maximumConnections, descriptorLimit: Sys.descriptorLimit,
+                                               descriptorsPerConnection: options.descriptorsPerConnection)
         responder = LinkResponder(configuration: configuration, dnsPoolCapacity: options.dnsPoolCapacity)
         channel = FrameChannel(descriptor: frameDescriptor)
         channel.lossToGuest = options.lossToGuest

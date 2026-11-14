@@ -48,6 +48,11 @@ it does for a browser profile. The guest's own resolver choice changes nothing: 
 - `localhost`, names without a dot and names under `.local` do not exist: they are this machine's
   and the local network's, and are never handed to a proxy. Neither is a name that is not letters,
   digits, hyphens and underscores — it would go into the proxy's request as text.
+- An address written as a name does not exist either: a name whose last label is a number
+  (digits, or `0x` and hex digits) — `192.168.1.1`, `127.1`, `0x7f.1`, `169.254.169.254`. Whatever
+  resolves it (a proxy, this Mac's resolver, `inet_aton`, which also reads octal, hex and fewer
+  than four parts) reads it as that address, and a fake address standing for it would carry the
+  guest to the Mac or its local network by a name. No top-level domain is a number.
 
 ### TCP: ended here, carried on by the proxy
 
@@ -187,11 +192,21 @@ ordinary socket. The guest's traffic then goes wherever any app's on this Mac go
 VPN, by its routes. Behind Apple's NAT a guest's packets go by a network of the system's own, and
 on a Mac that runs a VPN or a proxy tool they went nowhere.
 
-- CONNECT only, no sign-in; names are resolved here (the system's resolver), IPv4 addresses tried
-  first.
+- CONNECT only, and only with a sign-in (RFC 1929): a user name and password of 16 random bytes
+  each, made up for each connector and given to the machine's network alone (`upstream`). Any
+  process on this Mac can reach a port on loopback; without the sign-in any of them could have its
+  connections made by the helper. A client that offers no sign-in (method 0) is told no method is
+  acceptable, one with another sign-in is refused, and the connection is closed. Names are resolved
+  here (the system's resolver), IPv4 addresses tried first.
 - Public addresses only, as the network itself has it: a name that resolves to this machine or to
   a local network is refused, so a page in a guest cannot reach the Mac's own services by naming
-  them.
+  them. **Every** address a connection would be made to is first compared with the Mac's own
+  interfaces, public or private: the Mac's own addresses (a public IPv4 of its, its global IPv6)
+  and the networks it is on by an interface that is not a tunnel's (a public prefix on its link
+  included) are refused. Site-local IPv6 (fec0::/10) counts as local; an address under NAT64's
+  prefix (64:ff9b::/96) or IPv4-mapped is judged by the IPv4 address inside it. A name that is
+  local by the way it is written — one label, `localhost`, `.local`, an address written as a name
+  — is refused before anything is asked: not looked up here, not asked of a proxy.
 - **Except a VPN's own addresses.** Many VPN tools answer every name with an address of their own
   making from a private range (100.64.0.0/10, 10.0.0.0/8, 240.0.0.0/4, fc00::/7 …) and take the
   connection to it in their tunnel, where they put the real destination back. To the rule above
@@ -225,17 +240,33 @@ on a Mac that runs a VPN or a proxy tool they went nowhere.
   (`VMNetSystemProxy`, from `CFNetworkCopySystemProxySettings`, re-read at most every three
   seconds — a tool switched on or off while a machine runs is followed): a SOCKS proxy first (it
   carries a connection to any port), else the HTTPS one, by CONNECT. The proxy is asked for the
-  name itself, as apps ask it. The settings' exceptions go without it. A proxy configuration
-  file (PAC) is not followed. The name is **not looked up on this Mac first**: that told the
+  name itself, as apps ask it. The settings' exceptions go without it — names and patterns
+  (`*.example.com`, `.example.com`), and address ranges as macOS writes them (`192.168.0.0/16`,
+  `169.254/16`, `10.*`, `127.0.0.1`) — and so by the rules above, which refuse a local address.
+  An address that is not public is not asked of the proxy at all. **A proxy configuration file
+  (PAC) or discovery on the network (WPAD) is not followed — and the machine then makes no
+  connection at all**, as with a proxy that is down: the system takes such a file first, so the
+  Mac's own apps go wherever it says, and a machine going out without the proxy instead would go
+  out where they do not. The helper's log says so at start, and the machine's row says the Mac's
+  proxy is set by a configuration file a machine cannot follow, and to choose a proxy for the
+  machine (`Trouble.proxyConfigurationFile`). The name is **not looked up on this Mac first**: that told the
   Mac's resolver every name a guest opened — on a network where a proxy tool is used, often the
   very party the tool is there for, and something the Mac's own Safari does not do — and a
   resolver that answers a blocked name with a local address had the name refused that the proxy
   opens (found in review, 13 November). Only a name that is local by the way it is written — one
-  label, `localhost`, anything under `.local` — is not asked. Where a name asked of the proxy
-  ends up is the proxy's decision, as it is for the Mac's own apps.
+  label, `localhost`, anything under `.local`, an address written as a name — is not asked.
+  Where a name asked of the proxy ends up is the proxy's decision, as it is for the Mac's own
+  apps. **The limit of this**: a public name that the proxy tool itself sends straight to an
+  address of the Mac's local network — a rule of the tool's ("direct" for some domains), or a
+  resolver of its that answers a name with a local address — takes the machine's connection
+  there, as it takes Safari's on the Mac. Nothing on this side can see that: the proxy resolves
+  the name and makes the connection. Where that matters, give the machine a proxy of its own
+  (with a proxy a machine has no way to this Mac's network at all), or keep such rules out of the
+  tool.
 - **Why a connection was not made** is kept as a kind and a count — `Trouble`: no address for the
   name, addresses that are not public, addresses that did not take the connection, the Mac's
-  proxy not answering or refusing — never a name or an address. The helper writes the counts to
+  proxy not answering or refusing, the Mac's proxy set by a configuration file — never a name or
+  an address. The helper writes the counts to
   its standard error every two seconds (the app passes its own lines on to the terminal it was
   started from and to the system's log), and when `VMNetworkTrouble.failuresBeforeSaying`
   connections have failed one after another with none made since, its `traffic` event carries
@@ -245,7 +276,12 @@ on a Mac that runs a VPN or a proxy tool they went nowhere.
   Mac asks for when it joins a network; by the same way as a guest's, at most once in half a
   minute, not counted in the report): a page's blocked trackers fail one after another on a Mac
   with a filtering resolver, and that is not a machine without internet.
-- A thread per direction of a connection, blocking; at most `maximumConnections` at once.
+- A thread per direction of a connection, blocking; at most `maximumConnections` at once. Each
+  connection holds three of the helper's descriptors (the network's socket to the connector, the
+  one the connector accepted, the one to the destination), and both the network and the connector
+  count them so (`descriptorsPerConnection`): with a raised limit of 8192, 1024 connections. When
+  `accept` fails for want of descriptors or memory, the connector leaves its listener for a
+  quarter of a second instead of asking again at once in a loop.
 - `DirectConnectorTests`: a connection both ways with megabytes and a half-close, a name resolved
   on this side, what is refused, a destination that is not there, stop and start; a private
   address taken only where it goes into a tunnel, which ranges are private, and the system's own
@@ -253,7 +289,10 @@ on a Mac that runs a VPN or a proxy tool they went nowhere.
   that is up, checked against a real one — run so on Linux with a `tun` device); each kind of
   failure and that its note names nothing; a SOCKS and an HTTP proxy of the Mac's settings asked
   for the name, bytes right behind a proxy's answer, a proxy that refuses or is not there, the
-  settings' exceptions, a local name not asked of the proxy, the settings' dictionary read — and
-  the whole way with the network: a guest gets its address, resolves a name, and loads a page
+  settings' exceptions (address ranges among them), a local name, an address written as a name
+  and a local address not asked of the proxy, a configuration file keeping the machine closed,
+  the settings' dictionary read; the sign-in (none, a wrong one, another connector's), the
+  descriptors counted three to a connection, the Mac's own addresses (mapped and NAT64 ones too)
+  refused, site-local and NAT64 addresses judged — and the whole way with the network: a guest gets its address, resolves a name, and loads a page
   through the connector byte for byte.
 

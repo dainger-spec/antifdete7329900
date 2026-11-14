@@ -11,7 +11,7 @@
 #   - says in the shared folder that the base is ready, and shuts the machine down.
 set -u
 
-TOOLS_VERSION=6
+TOOLS_VERSION=7
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DEST=/usr/local/lumen
 PLIST=/Library/LaunchDaemons/io.lumenbrowser.guest.plist
@@ -42,12 +42,16 @@ say "  - sleep, the screen lock and automatic macOS updates are turned off;"
 say "  - Lumen's start-up helper is installed (time zone, language, Safari's start page);"
 say "  - the machine shuts down when this is done."
 say ""
-printf 'Password of "%s": ' "$USER_NAME"
+say "The password is kept in this machine to sign in by itself, and every machine made from it"
+say "has it: it should be one made up for this machine, not your Mac's or any other you use."
+say ""
+printf 'Password of "%s" (the one you made for this machine): ' "$USER_NAME"
 stty -echo 2>/dev/null
 IFS= read -r PASSWORD
 stty echo 2>/dev/null
 say ""
 [ -n "$PASSWORD" ] || fail "an empty password. The account needs one for automatic sign-in."
+# To sudo on its standard input (printf is the shell's own: no command line carries it).
 printf '%s\n' "$PASSWORD" | /usr/bin/sudo -S -p '' -v 2>/dev/null || fail "that password was not accepted."
 
 # The start-up helper.
@@ -65,6 +69,10 @@ AUTOLOGIN=0
 if /usr/bin/fdesetup isactive 2>/dev/null | /usr/bin/grep -q true; then
   say "FileVault is on in this machine: it cannot sign in by itself."
 else
+  # sysadminctl takes the password as an argument or asks for it at the terminal ("-"); it does not
+  # read it from its standard input. So it is an argument, for the moment the command runs, in
+  # this new machine where nothing but the person's own setup runs yet — and it is a password made
+  # up for the machine (above), which automatic sign-in keeps in the machine anyway.
   /usr/bin/sudo /usr/sbin/sysadminctl -autologin set -userName "$USER_NAME" -password "$PASSWORD" >/dev/null 2>&1
   if [ "$(/usr/bin/sudo /usr/bin/defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser 2>/dev/null)" = "$USER_NAME" ]; then
     AUTOLOGIN=1

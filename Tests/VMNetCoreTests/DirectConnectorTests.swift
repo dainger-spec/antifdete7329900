@@ -13,6 +13,8 @@ import XCTest
 final class DirectConnectorTests: XCTestCase {
     private var connectors: [VMNetDirectConnector] = []
     private var descriptors: [Int32] = []
+    /// The connector's port each connection of the test's was made to: whose sign-in it gives.
+    private var dialed: [Int32: Int] = [:]
     private var network: VMNetwork?
 
     override func tearDown() {
@@ -22,6 +24,7 @@ final class DirectConnectorTests: XCTestCase {
         connectors = []
         for descriptor in descriptors { Sys.close(descriptor) }
         descriptors = []
+        dialed = [:]
         super.tearDown()
     }
 
@@ -63,13 +66,26 @@ final class DirectConnectorTests: XCTestCase {
         let status = Glibc.connect(descriptor, entry.pointee.ai_addr, entry.pointee.ai_addrlen)
         #endif
         XCTAssertEqual(status, 0, "no connection to port \(port)")
+        dialed[descriptor] = port
         return descriptor
     }
 
-    /// SOCKS5's greeting and a CONNECT, as the machine's network sends them; the reply's code.
+    /// SOCKS5's greeting and sign-in with the user name and password the connector gives the
+    /// machine's network (`upstream`), as that network sends them: whether they were taken.
+    private func signIn(_ client: Int32) -> Bool {
+        guard let connector = connectors.first(where: { $0.port == dialed[client] }),
+              case .socks5(_, _, let username?, let password?) = connector.upstream else { return false }
+        TestSocket.write(client, [5, 2, 0, 2])
+        guard TestSocket.read(client, exactly: 2) == [5, 2] else { return false }
+        let user = Array(username.utf8), secret = Array(password.utf8)
+        TestSocket.write(client, [1, UInt8(user.count)] + user + [UInt8(secret.count)] + secret)
+        return TestSocket.read(client, exactly: 2) == [1, 0]
+    }
+
+    /// SOCKS5's greeting, the sign-in and a CONNECT, as the machine's network sends them; the
+    /// reply's code.
     private func ask(_ client: Int32, address: [UInt8]? = nil, name: String? = nil, port: Int, timeout: Double = 5) -> UInt8? {
-        TestSocket.write(client, [5, 1, 0])
-        guard TestSocket.read(client, exactly: 2) == [5, 0] else { return nil }
+        guard signIn(client) else { return nil }
         var request: [UInt8] = [5, 1, 0]
         if let address {
             request += [1] + address
@@ -165,16 +181,73 @@ final class DirectConnectorTests: XCTestCase {
         let stranger = try dial(connector.port)
         TestSocket.write(stranger, Array("GET / HTTP/1.1\r\n\r\n".utf8))
         XCTAssertEqual(TestSocket.readToEnd(stranger, timeout: 3), [])
-        // A sign-in is not offered: a client that has only that is told so.
-        let signer = try dial(connector.port)
-        TestSocket.write(signer, [5, 1, 2])
-        XCTAssertEqual(TestSocket.read(signer, exactly: 2), [5, 0xFF])
         // BIND (2) is not CONNECT.
         let binder = try dial(connector.port)
-        TestSocket.write(binder, [5, 1, 0])
-        XCTAssertEqual(TestSocket.read(binder, exactly: 2), [5, 0])
+        XCTAssertTrue(signIn(binder))
         TestSocket.write(binder, [5, 2, 0, 1, 127, 0, 0, 1, 0, 80])
         XCTAssertEqual(TestSocket.read(binder, exactly: 10)?[1], 7)
+    }
+
+    /// Any process on this Mac reaches a port on loopback: the connector takes a connection only
+    /// from whoever has its sign-in — made up for this run and given to the machine's network
+    /// alone. Without one (method 0), or with another, nothing is connected.
+    func testOnlyTheMachinesNetworkWithItsSignInIsTaken() throws {
+        let origin = listener()
+        let connector = try connector()
+        guard case .socks5(let host, let port, let username?, let password?) = connector.upstream else {
+            return XCTFail("the connector gives no sign-in: \(connector.upstream)")
+        }
+        XCTAssertEqual(host, "127.0.0.1")
+        XCTAssertEqual(port, connector.port)
+        XCTAssertEqual(username.count, 32)
+        XCTAssertEqual(password.count, 32)
+        XCTAssertNotEqual(username, password)
+        // Another connector, another sign-in.
+        let other = try self.connector()
+        XCTAssertNotEqual(other.upstream, connector.upstream)
+
+        // No sign-in offered: refused, as RFC 1928 has it.
+        let anonymous = try dial(connector.port)
+        TestSocket.write(anonymous, [5, 1, 0])
+        XCTAssertEqual(TestSocket.read(anonymous, exactly: 2), [5, 0xFF])
+        XCTAssertEqual(TestSocket.readToEnd(anonymous, timeout: 3), [])
+        // A sign-in that is not this connector's: refused (RFC 1929), and closed.
+        for (user, secret) in [(username, "wrong"), ("wrong", password), (username, ""), (password, username),
+                               (username + "x", password)] {
+            let guesser = try dial(connector.port)
+            TestSocket.write(guesser, [5, 2, 0, 2])
+            XCTAssertEqual(TestSocket.read(guesser, exactly: 2), [5, 2])
+            let userBytes = Array(user.utf8), secretBytes = Array(secret.utf8)
+            TestSocket.write(guesser, [1, UInt8(userBytes.count)] + userBytes + [UInt8(secretBytes.count)] + secretBytes)
+            XCTAssertEqual(TestSocket.read(guesser, exactly: 2), [1, 1], user)
+            TestSocket.write(guesser, [5, 1, 0, 1, 127, 0, 0, 1, UInt8(origin.port >> 8), UInt8(origin.port & 0xFF)])
+            XCTAssertEqual(TestSocket.readToEnd(guesser, timeout: 3), [], user)
+        }
+        XCTAssertEqual(TestSocket.accept(origin.descriptor, timeout: 0.3), -1, "a connection without the sign-in was made")
+        // Another connector's sign-in is not this one's.
+        let stranger = try dial(connector.port)
+        dialed[stranger] = other.port
+        XCTAssertFalse(signIn(stranger))
+        // With it: connected.
+        XCTAssertEqual(ask(try dial(connector.port), address: [127, 0, 0, 1], port: origin.port), 0)
+        XCTAssertGreaterThanOrEqual(TestSocket.accept(origin.descriptor, timeout: 3), 0)
+    }
+
+    /// A connection holds three descriptors of the helper without a proxy: the connector takes
+    /// as many at once as the descriptors allow, counted so.
+    func testConnectionsAreCountedByTheirThreeDescriptors() {
+        XCTAssertEqual(VMNetDirectConnector.descriptorsPerConnection, 3)
+        XCTAssertEqual(VMNetDirectConnector.connectionsAllowed(descriptorLimit: 8192), VMNetDirectConnector.maximumConnections)
+        XCTAssertEqual(VMNetDirectConnector.connectionsAllowed(descriptorLimit: 1024), 170)
+        XCTAssertEqual(VMNetDirectConnector.connectionsAllowed(descriptorLimit: 256), 42)
+        XCTAssertEqual(VMNetDirectConnector.connectionsAllowed(descriptorLimit: 64), 16)
+        for limit in [256, 1024, 4096, 8192] {
+            // The network's connections and the connector's sockets for them, together: what
+            // the process may open, with room left for the rest of it.
+            let connections = NetworkLoop.connectionLimit(wanted: 2048, descriptorLimit: limit,
+                                                          descriptorsPerConnection: VMNetDirectConnector.descriptorsPerConnection)
+            XCTAssertLessThanOrEqual(connections + 2 * VMNetDirectConnector.connectionsAllowed(descriptorLimit: limit), limit / 2 + 16, "\(limit)")
+        }
     }
 
     func testWhichIPv6AddressesArePublic() {
@@ -187,9 +260,14 @@ final class DirectConnectorTests: XCTestCase {
             XCTAssertTrue(VMNetDirectConnector.isPublicIPv6(address(text)), text)
         }
         for text in ["::", "::1", "fe80::1", "febf::1", "fc00::1", "fd12:3456::1", "ff02::1", "::ffff:127.0.0.1",
-                     "::ffff:192.168.1.1", "::ffff:10.0.0.1", "::8.8.8.8"] {
+                     "::ffff:192.168.1.1", "::ffff:10.0.0.1", "::8.8.8.8",
+                     // Site-local (deprecated, and local all the same).
+                     "fec0::1", "feff:ffff::1",
+                     // NAT64's well-known prefix: the IPv4 address inside is what is reached.
+                     "64:ff9b::7f00:1", "64:ff9b::c0a8:101", "64:ff9b::a9fe:a9fe", "64:ff9b::a00:1"] {
             XCTAssertFalse(VMNetDirectConnector.isPublicIPv6(address(text)), text)
         }
+        XCTAssertTrue(VMNetDirectConnector.isPublicIPv6(address("64:ff9b::808:808")))
         XCTAssertFalse(VMNetDirectConnector.isPublicIPv6([1, 2, 3]))
     }
 
@@ -209,6 +287,35 @@ final class DirectConnectorTests: XCTestCase {
             if VMNetDirectConnector.isPrivateIPv4(VMNetIPv4(value)) { return VMNetIPv4(value).string }
         }
         return nil
+    }
+
+    /// Every address this machine's interfaces that are up have, as text (IPv6 link-local ones,
+    /// which need their interface to mean anything, left out).
+    private func ownAddresses() -> [String] {
+        var list: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&list) == 0 else { return [] }
+        defer { freeifaddrs(list) }
+        var found: [String] = []
+        var next = list
+        while let entry = next {
+            next = entry.pointee.ifa_next
+            guard let address = entry.pointee.ifa_addr, Int(entry.pointee.ifa_flags) & Int(IFF_UP) != 0 else { continue }
+            let family = Int32(address.pointee.sa_family)
+            var buffer = [CChar](repeating: 0, count: 64)
+            if family == AF_INET {
+                var inner = address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr }
+                guard inet_ntop(AF_INET, &inner, &buffer, socklen_t(buffer.count)) != nil else { continue }
+            } else if family == AF_INET6 {
+                var inner = address.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { $0.pointee.sin6_addr }
+                let first = withUnsafeBytes(of: inner) { Array($0.prefix(2)) }
+                if first[0] == 0xFE && first[1] & 0xC0 == 0x80 { continue }
+                guard inet_ntop(AF_INET6, &inner, &buffer, socklen_t(buffer.count)) != nil else { continue }
+            } else {
+                continue
+            }
+            found.append(String(cString: buffer))
+        }
+        return found
     }
 
     /// Many VPN tools answer every name with an address of their own from a private range and take
@@ -295,7 +402,16 @@ final class DirectConnectorTests: XCTestCase {
             XCTAssertFalse(VMNetDirectConnector.goesIntoATunnel(numeric: own), "this machine's own address is not a tunnel's far end")
         }
         XCTAssertTrue(VMNetDirectConnector.isOnOwnNetwork(numeric: "127.0.0.1"))
+        // The same address inside an IPv6 one — mapped, or behind NAT64's prefix — is the same.
+        XCTAssertTrue(VMNetDirectConnector.isOnOwnNetwork(numeric: "::ffff:127.0.0.1"))
+        XCTAssertTrue(VMNetDirectConnector.isOnOwnNetwork(numeric: "64:ff9b::7f00:1"))
         XCTAssertFalse(VMNetDirectConnector.isOnOwnNetwork(numeric: "203.0.113.7"), "a public address is on no network of this machine's")
+        XCTAssertFalse(VMNetDirectConnector.isOnOwnNetwork(numeric: "64:ff9b::cb00:7107"))
+        // Every address this machine has, public ones (a public IPv4, a global IPv6) among them,
+        // is its own — and a connection to it is refused like one to a private address.
+        for own in ownAddresses() {
+            XCTAssertTrue(VMNetDirectConnector.isOnOwnNetwork(numeric: own), own)
+        }
         XCTAssertFalse(VMNetDirectConnector.isOnOwnNetwork(numeric: "not an address"))
         guard let peer = ProcessInfo.processInfo.environment["VMNET_TUNNEL_PEER"], !peer.isEmpty else { return }
         XCTAssertTrue(VMNetDirectConnector.goesIntoATunnel(numeric: peer), "\(peer) is not sent into a tunnel")
@@ -500,11 +616,10 @@ final class DirectConnectorTests: XCTestCase {
         XCTAssertEqual(https?.upstream, .httpConnect(host: "proxy.example", port: 8443, username: nil, password: nil))
         XCTAssertEqual(https?.exceptions, [])
 
-        // Nothing switched on, a proxy for plain HTTP alone, a configuration file, and settings
-        // that do not read: no proxy.
+        // Nothing switched on, a proxy for plain HTTP alone, and settings that do not read: no proxy.
         for settings: [String: Any] in [[:], ["SOCKSEnable": 0, "SOCKSProxy": "127.0.0.1", "SOCKSPort": 7890],
                                         ["HTTPEnable": 1, "HTTPProxy": "127.0.0.1", "HTTPPort": 8080],
-                                        ["ProxyAutoConfigEnable": 1, "ProxyAutoConfigURLString": "http://example.com/proxy.pac"],
+                                        ["ProxyAutoConfigEnable": 0, "ProxyAutoDiscoveryEnable": 0],
                                         ["SOCKSEnable": 1, "SOCKSProxy": "127.0.0.1", "SOCKSPort": 0],
                                         ["SOCKSEnable": 1, "SOCKSProxy": "", "SOCKSPort": 7890],
                                         ["SOCKSEnable": 1, "SOCKSProxy": "a b", "SOCKSPort": 7890],
@@ -516,6 +631,89 @@ final class DirectConnectorTests: XCTestCase {
         XCTAssertFalse(dotted.applies(to: "a.corp.example"))
         XCTAssertFalse(dotted.applies(to: "corp.example"))
         XCTAssertTrue(dotted.applies(to: "notcorp.example"))
+
+        // A configuration file (PAC) or discovery on the network (WPAD) is the proxy, as the
+        // system takes it — first, whatever else is set beside it — and is not followed.
+        for settings: [String: Any] in [["ProxyAutoConfigEnable": 1, "ProxyAutoConfigURLString": "http://example.com/proxy.pac"],
+                                        ["ProxyAutoDiscoveryEnable": 1],
+                                        ["ProxyAutoConfigEnable": "1", "SOCKSEnable": 1, "SOCKSProxy": "127.0.0.1", "SOCKSPort": 7890]] {
+            let proxy = VMNetSystemProxy(settings: settings)
+            XCTAssertEqual(proxy?.usesConfigurationFile, true, "\(settings)")
+            XCTAssertEqual(proxy?.upstream, VMNetUpstream.none, "\(settings)")
+        }
+        XCTAssertEqual(both?.usesConfigurationFile, false)
+    }
+
+    /// The settings' exceptions as macOS writes them for addresses — a range with its prefix
+    /// length, leading parts alone, an address — go without the proxy (and so by this Mac's own
+    /// rules, which refuse a local address); a name is never taken for one.
+    func testTheSettingsExceptAddressesByTheirRanges() {
+        let proxy = VMNetSystemProxy(upstream: .none, exceptions: ["192.168.0.0/16", "10.0.0.0/8", "169.254/16", "127.0.0.1",
+                                                                   "172.16.*", "100.64.0.0/10", "*.local", "bad/99", "1.2.3.4.5"])
+        for host in ["192.168.1.1", "192.168.255.254", "10.1.2.3", "169.254.169.254", "127.0.0.1", "172.16.9.9", "100.100.0.1"] {
+            XCTAssertFalse(proxy.applies(to: host), host)
+        }
+        for host in ["192.169.0.1", "11.0.0.1", "169.253.0.1", "127.0.0.2", "172.17.0.1", "100.128.0.1", "8.8.8.8",
+                     "example.com", "192.168.example"] {
+            XCTAssertTrue(proxy.applies(to: host), host)
+        }
+        XCTAssertEqual(VMNetSystemProxy.range("169.254/16")?.network, 0xA9FE_0000)
+        XCTAssertEqual(VMNetSystemProxy.range("169.254/16")?.prefixLength, 16)
+        XCTAssertEqual(VMNetSystemProxy.range("10")?.prefixLength, 8)
+        XCTAssertEqual(VMNetSystemProxy.range("192.168.*.*")?.prefixLength, 16)
+        XCTAssertEqual(VMNetSystemProxy.range("8.8.8.8")?.prefixLength, 32)
+        for entry in ["", "*", "*.local", "localhost", "1.2.3.4.5", "256.0.0.0/8", "10.0.0.0/33", "10.*.0.0", "10.*/8", "a.b.c.d", "10.0.0.0/"] {
+            XCTAssertNil(VMNetSystemProxy.range(entry), entry)
+        }
+    }
+
+    /// Where this Mac's proxy is set by a configuration file, a machine's network stays closed —
+    /// as for a proxy that is down — and says why: not a connection without the proxy, which
+    /// would go out where the Mac's own apps do not.
+    func testAProxyConfigurationFileKeepsTheMachineClosed() throws {
+        let origin = listener()
+        let settings = VMNetSystemProxy(upstream: .none, usesConfigurationFile: true)
+        let connector = VMNetDirectConnector(allowsLocalDestinations: true, systemProxy: { settings }) { name in
+            name == "site.example" ? ["127.0.0.1"] : nil
+        }
+        connectors.append(connector)
+        try connector.start()
+        XCTAssertEqual(ask(try dial(connector.port), name: "site.example", port: origin.port), 5)
+        XCTAssertEqual(ask(try dial(connector.port), address: [127, 0, 0, 1], port: origin.port), 5)
+        XCTAssertEqual(TestSocket.accept(origin.descriptor, timeout: 0.3), -1, "a connection went out without the proxy")
+        let report = connector.report()
+        XCTAssertEqual(report.trouble, .proxyConfigurationFile)
+        XCTAssertEqual(report.failed, 2)
+        XCTAssertTrue(try XCTUnwrap(report.detail).contains("configuration file"))
+        XCTAssertFalse(connector.canConnect(to: "site.example", port: UInt16(origin.port)))
+    }
+
+    /// With this Mac's proxy, an address written as a name, a local name, and an address of this
+    /// Mac or a local network are not asked of the proxy — and an exception for an address range
+    /// does not open the way to it either.
+    func testWithTheMacsProxyLocalAddressesAndNumericNamesAreRefused() throws {
+        let proxy = FakeProxy(kind: .socks5)
+        defer { proxy.stop() }
+        let looked = Locked<[String]>([])
+        let settings = VMNetSystemProxy(upstream: proxy.upstream(), exceptions: ["192.168.0.0/16", "127.0.0.1", "*.local", "169.254/16"])
+        let connector = VMNetDirectConnector(allowsLocalDestinations: false, systemProxy: { settings }) { name in
+            looked.update { $0.append(name) }
+            return ["192.168.1.10"]
+        }
+        connectors.append(connector)
+        try connector.start()
+        for name in ["192.168.1.1", "127.0.0.1", "0x7f.1", "127.1", "169.254.169.254", "printer.local", "nas", "localhost"] {
+            XCTAssertEqual(ask(try dial(connector.port), name: name, port: 80), 5, name)
+            XCTAssertEqual(connector.report().trouble, .notPublic, name)
+        }
+        for address: [UInt8] in [[192, 168, 1, 1], [127, 0, 0, 1], [10, 0, 0, 1], [169, 254, 169, 254]] {
+            XCTAssertEqual(ask(try dial(connector.port), address: address, port: 80), 5, "\(address)")
+            XCTAssertEqual(connector.report().trouble, .notPublic, "\(address)")
+        }
+        XCTAssertEqual(proxy.accepted.value, 0, "the proxy was asked")
+        XCTAssertEqual(looked.value, [], "a name was looked up on this side")
+        XCTAssertTrue(VMNetDirectConnector.isLocalName("0x7f.1"))
+        XCTAssertTrue(VMNetDirectConnector.isLocalName("192.168.1.1."))
     }
 
     // MARK: - Its life

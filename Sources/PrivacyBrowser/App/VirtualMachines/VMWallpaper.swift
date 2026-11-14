@@ -83,15 +83,20 @@ enum VMWallpaper {
 
     /// Puts the picture for `display` into `share`, as the guest's boot script looks for it — once:
     /// a picture already there for that screen is left. Returns whether one is there.
+    ///
+    /// The share is written by the guest too: the marker is read as a file of the guest's
+    /// (`VMShareFile`: no link followed, no pipe waited on, a few bytes at most), and a picture or
+    /// a marker that is not a plain file is removed (a link itself, not what it points to) and
+    /// written anew. Not for the main thread.
     @discardableResult
     static func place(for display: VMDisplay, in share: URL) -> Bool {
         let picture = share.appendingPathComponent(VMGuestSettings.wallpaperFileName)
         let marker = share.appendingPathComponent(".lumen-wallpaper-size")
         let wanted = "\(display.pixelsWide)x\(display.pixelsHigh)"
-        if FileManager.default.fileExists(atPath: picture.path),
-           (try? String(contentsOf: marker, encoding: .utf8)) == wanted {
+        if VMShareFile.isRegularFile(picture), (try? VMShareFile.read(marker, maximumBytes: 64).get()) == wanted {
             return true
         }
+        for file in [picture, marker] where !VMShareFile.isRegularFile(file) { try? FileManager.default.removeItem(at: file) }
         guard let data = png(pixelsWide: display.pixelsWide, pixelsHigh: display.pixelsHigh),
               (try? data.write(to: picture, options: .atomic)) != nil else { return false }
         try? Data(wanted.utf8).write(to: marker, options: .atomic)
