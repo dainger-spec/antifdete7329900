@@ -9,6 +9,8 @@ struct RootView: View {
     /// on at once, and under Reduce Motion (or with the animations off) it is not shown at all
     /// (the owner, 1 November: a second twenty times a day is a price too).
     @State private var showsProfiles = false
+    /// The launch screen is opening: the window's screens come in over it (WelcomeSplash).
+    @State private var welcomeOpening = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static let minimumHeight: CGFloat = 560
@@ -18,14 +20,18 @@ struct RootView: View {
     var body: some View {
         ZStack {
             if let welcome = model.welcome, !model.welcomeFinished {
-                // The launch screen, before the first screen or the lock screen (WelcomeSplash).
-                WelcomeSplash(greeting: welcome.greeting, firstLaunch: welcome.firstLaunch, open: { openFromWelcome() })
-                    .transition(welcomeLeaving)
-                    .zIndex(1)
+                // The launch screen, before the first screen or the lock screen (WelcomeSplash). It
+                // opens by itself; when that is over it goes.
+                WelcomeSplash(greeting: welcome.greeting, firstLaunch: welcome.firstLaunch,
+                              opening: { openFromWelcome() }, finished: { model.welcomeFinished = true })
                     // Its window closed meanwhile: a window opened again starts at the first screen.
                     .onDisappear { model.welcomeFinished = true }
-            } else {
-                screens.transition(welcomeArriving)
+            }
+            if model.welcome == nil || model.welcomeFinished || welcomeOpening {
+                // Over the launch screen while it opens, as the prototype has it.
+                screens
+                    .transition(welcomeArriving)
+                    .zIndex(1)
             }
         }
         .onAppear { showsProfiles = model.phase == .unlocked }
@@ -99,29 +105,20 @@ struct RootView: View {
         .animation(.easeOut(duration: 0.25), value: showsProfiles)
     }
 
-    /// The opening (the owner's "then it opens smoothly"): the launch screen eases up and fades
-    /// while the window's first screen scales in from 98 % and fades in, 0.6 s; under Reduce Motion
-    /// a cross-fade.
+    /// The opening (the owner's "then it opens smoothly"): the launch screen eases up and fades by
+    /// itself while the window's first screen scales in from 98 % and fades in over it, 0.6 s on the
+    /// design's entry curve; under Reduce Motion a cross-fade.
     private func openFromWelcome() {
         let animation: Animation = Motion.isReduced(reduceMotion)
-            ? .easeOut(duration: WelcomeTiming.reducedOpening) : .easeInOut(duration: WelcomeTiming.opening)
+            ? .easeOut(duration: WelcomeTiming.reducedOpening) : Motion.entry(duration: WelcomeTiming.opening)
         withAnimation(animation) {
-            model.welcomeFinished = true
+            welcomeOpening = true
         }
-    }
-
-    private var welcomeLeaving: AnyTransition {
-        if Motion.isReduced(reduceMotion) { return .opacity }
-        return .asymmetric(insertion: .identity,
-                           removal: AnyTransition.opacity.combined(with: .offset(y: -30))
-                               .animation(.easeInOut(duration: WelcomeTiming.opening)))
     }
 
     private var welcomeArriving: AnyTransition {
         if Motion.isReduced(reduceMotion) { return .opacity }
-        return .asymmetric(insertion: AnyTransition.scale(scale: 0.98).combined(with: .opacity)
-                               .animation(Motion.entry(duration: WelcomeTiming.opening)),
-                           removal: .identity)
+        return .asymmetric(insertion: AnyTransition.scale(scale: 0.98).combined(with: .opacity), removal: .identity)
     }
 }
 

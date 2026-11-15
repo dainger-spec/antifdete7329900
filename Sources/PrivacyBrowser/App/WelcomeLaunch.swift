@@ -48,6 +48,8 @@ enum WelcomeLaunch {
                                                      interfaceLanguage: Localization.languageCode)
         guard all.indices.contains(index) else { return nil }
         defaults.set(index, forKey: Keys.lastGreeting)
+        // The glass's shader compiles in the background while the window comes up.
+        WelcomeGlassRenderer.prepare()
         return Decision(firstLaunch: mode == .firstLaunch, greeting: all[index])
     }
 

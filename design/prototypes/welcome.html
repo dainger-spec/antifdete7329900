@@ -227,7 +227,7 @@ function drawHorizon(ctx, L, haze = true) {
   ctx.fillRect(0, 0, W, H);
 }
 
-// MARK: The glass — WelcomeGlass.metal's maths, in WebGL
+// MARK: The glass — the same maths as the app's Metal shader (WelcomeGlass.swift), in WebGL
 
 const layers = {};
 function layer(name, w, h) {
@@ -410,7 +410,7 @@ function drawGlass(L, scale, revealed, trailPath, glintPath, alpha, lift, full) 
   [mask, soft, sharp, glow, trailSoft, glintSoft].forEach((c, unit) => upload(unit, c));
   if (horizonUploaded !== layers.horizon) {
     upload(6, layers.horizon);
-    // What the glass bends, a little softened (the app blurs its copy once per size too).
+    // What the glass bends, a little softened (the app blurs its copy once per size too: WelcomeGlassCanvas).
     const [softened, sg] = layer('horizonSoft', layers.horizon.width, layers.horizon.height);
     sg.filter = `blur(${(sw * 0.07).toFixed(2)}px)`;
     sg.drawImage(layers.horizon, 0, 0);
@@ -477,7 +477,7 @@ function render(t) {
   lock.style.opacity = content.toFixed(4);
   lock.style.transform = reduced ? 'none' : `scale(${(0.98 + 0.02 * content).toFixed(5)})`;
 
-  // The horizon, drawn once per size (the app keeps its picture: WelcomeHorizonPicture).
+  // The horizon, drawn once per size (the app keeps its picture: WelcomeSplashCache).
   let horizon = layers.horizon;
   if (!horizon || horizon.width !== canvas.width || horizon.height !== canvas.height) {
     const [made, hg] = layer('horizon', canvas.width, canvas.height);
