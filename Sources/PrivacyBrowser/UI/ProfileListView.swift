@@ -153,13 +153,12 @@ struct ProfileListView: View {
     @State private var editing: ProfileEditorView.Target?
     @State private var passwordsFor: ProfileSummary?
     @State private var importingCookiesFor: ProfileSummary?
-    @State private var warmingUp: ProfileSummary?
+    /// "New warm-up" asked for from the list (a profile's menu, the selection's bar): the Warm-up
+    /// section opens with these profiles ticked.
+    @State private var warmUpRequest: WarmUpNewRequest?
     @State private var restoringFor: ProfileSummary?
     @State private var duplicating: ProfileSummary?
     @State private var whatSitesSeeFor: ProfileSummary?
-    @State private var warmingUpSeveral = false
-    /// The profiles the warm-up queue opens with ticked (the selection's bar).
-    @State private var queuePreselection: Set<UUID> = []
     @State private var exporting: ProfileSummary?
     @State private var exportingCookies: ProfileSummary?
     @State private var importingProfile = false
@@ -197,7 +196,6 @@ struct ProfileListView: View {
             .sheet(item: $editing) { target in ProfileEditorView(target: target).environment(\.tagColors, model.tagColors) }
             .sheet(item: $passwordsFor) { profile in PasswordListView(profile: profile) }
             .sheet(item: $importingCookiesFor) { profile in CookieImportView(profile: profile) }
-            .sheet(item: $warmingUp) { profile in WarmUpView(profile: profile) }
             // What it changes reaches the inspector through the journal (`AppModel.recordInJournal`).
             .sheet(item: $restoringFor) { profile in RestorePointsView(profile: profile) }
             .sheet(item: $duplicating) { profile in DuplicateProfileView(profile: profile) }
@@ -215,7 +213,6 @@ struct ProfileListView: View {
                                      showProxies(selecting: entry.map { [$0.id] } ?? [])
                                  })
             }
-            .sheet(isPresented: $warmingUpSeveral) { WarmUpQueueView(preselected: queuePreselection) }
             .sheet(item: $exporting) { profile in ProfileExportView(profile: profile) }
             .sheet(item: $exportingCookies) { profile in CookieExportView(profile: profile) }
             .sheet(isPresented: $importingProfile) { ProfileImportView() }
@@ -387,6 +384,7 @@ struct ProfileListView: View {
                        section: $section, proxyCount: proxyCount,
                        proxies: AnyView(ProxyListView(selection: $proxySelection)),
                        virtualMachines: VMCenter.isOffered ? AnyView(VirtualMachinesView(openAccount: actions.openAccount)) : nil,
+                       warmUp: AnyView(WarmUpSectionView(request: $warmUpRequest, openProxies: { showProxies(selecting: []) })),
                        indexNotice: model.indexNotice, revealVault: { model.revealVaultFolder() },
                        keptDeleted: model.keptDeletedProfiles,
                        bringBack: { id in Task { await model.bringBackDeletedProfile(id) } },
@@ -463,8 +461,8 @@ struct ProfileListView: View {
 
     /// Warm-up of several profiles (the selection's bar): the warm-up queue, with them ticked.
     private func warmUpSeveral(_ ids: [UUID]) {
-        queuePreselection = Set(ids)
-        warmingUpSeveral = true
+        warmUpRequest = WarmUpNewRequest(profiles: ids)
+        withAnimation(Theme.appearAnimation) { section = .warmUp }
     }
 
     /// "Northwind, Harbor, Atlas and 2 more".
@@ -518,6 +516,7 @@ struct ProfileListView: View {
             let activity: ProfileRowItem.Activity = changingIP ? .starting
                 : busy ? (running ? .starting : .sealing) : (running ? .running : .stopped)
             let warmUp = model.manager?.warmUpStatus(of: profile.id)
+            let warmth = model.warmUps?.warmth(of: profile.id)
             let problem = model.proxyProblems.first { $0.profileID == profile.id }
             // No details: its settings could not be read (`AppModel.refresh`) — not "Direct" (R1).
             var exit = ProfileExit.unreadable
@@ -549,6 +548,8 @@ struct ProfileListView: View {
                 lastUsed: profile.lastLaunchedAt,
                 warmUp: warmUp.flatMap { $0.isRunning ? $0 : nil },
                 warmUpQueued: model.warmUps?.isWaiting(profile.id) ?? false,
+                warmedAt: warmth.flatMap { $0.isWarmed ? $0.date : nil },
+                neverWarmed: warmth == .never,
                 exitUnconfirmed: lookupFailed,
                 exitNote: exitNote,
                 tags: details?.tags ?? [], notes: details?.notes ?? "", avatar: details?.avatar,
@@ -603,7 +604,7 @@ struct ProfileListView: View {
             passwords: { id in passwordsFor = summary(id) },
             importCookies: { id in importingCookiesFor = summary(id) },
             exportCookies: { id in exportingCookies = summary(id) },
-            warmUp: { id in warmingUp = summary(id) },
+            warmUp: { id in warmUpSeveral([id]) },
             restorePoints: { id in restoringFor = summary(id) },
             duplicate: { id in duplicating = summary(id) },
             whatSitesSee: { id in whatSitesSeeFor = summary(id) },
@@ -622,7 +623,7 @@ struct ProfileListView: View {
                 openSettings()
             },
             changePassword: { changingPassword = true },
-            warmUpQueue: { queuePreselection = []; warmingUpSeveral = true },
+            warmUpQueue: { withAnimation(Theme.appearAnimation) { section = .warmUp } },
             openProxies: { showProxies(selecting: []) },
             showProxy: { id in
                 // Looked up, never added: the list is only read here.
@@ -659,6 +660,8 @@ enum ProfilesSection: Equatable {
     case profiles
     case proxies
     case virtualMachines
+    /// The warm-ups: the profiles by where they stand with them, the templates, the history.
+    case warmUp
 }
 
 // MARK: - What the screen shows
@@ -680,6 +683,10 @@ struct ProfileRowItem: Identifiable {
     var warmUp: WarmUpStatus?
     /// Waiting in the warm-up queue for its turn (`WarmUpCoordinator`).
     var warmUpQueued = false
+    /// When its last warm-up went through; nil: never warmed up, or not wholly (`WarmUpWarmth`).
+    var warmedAt: Date?
+    /// Never warmed up on this Mac: the sidebar's "Not warmed up" gathers such profiles.
+    var neverWarmed = false
     /// At its last launch no geolocation service answered through its proxy: where it exits is
     /// not confirmed (`ProfileManager.proxyLocationUnknown`).
     var exitUnconfirmed = false
@@ -800,6 +807,8 @@ enum ProfileFilter: Hashable {
     /// The profiles whose proxy did not answer (`ProfileRowItem.proxyFailed`): what to give
     /// another proxy to.
     case proxyFailing
+    /// The profiles never warmed up (`ProfileRowItem.neverWarmed`).
+    case notWarmed
     /// The profiles with this tag, whatever its case.
     case tag(String)
 
@@ -811,6 +820,7 @@ enum ProfileFilter: Hashable {
         case .direct: return L("profiles.filter.direct")
         case .ephemeral: return L("profiles.filter.ephemeral")
         case .proxyFailing: return L("profiles.filter.proxyFailing")
+        case .notWarmed: return L("profiles.filter.notWarmed")
         case .tag(let tag): return tag
         }
     }
@@ -823,6 +833,7 @@ enum ProfileFilter: Hashable {
         case .direct: return "arrow.right"
         case .ephemeral: return "hourglass"
         case .proxyFailing: return "exclamationmark.triangle"
+        case .notWarmed: return "flame"
         case .tag: return "number"
         }
     }
@@ -835,6 +846,7 @@ enum ProfileFilter: Hashable {
         case .direct: return row.connectsDirectly
         case .ephemeral: return row.ephemeral
         case .proxyFailing: return row.proxyFailed
+        case .notWarmed: return row.neverWarmed
         case .tag(let tag): return ProfileTags.contains(row.tags, tag)
         }
     }
@@ -938,6 +950,8 @@ struct ProfilesScreen: View {
     /// The virtual machines as a section of the window (`VirtualMachinesView`); nil: this build
     /// carries no machines (`VMCenter.isOffered`), and the sidebar has no such item.
     var virtualMachines: AnyView?
+    /// The warm-ups as a section of the window (`WarmUpSectionView`); nil: no such item.
+    var warmUp: AnyView?
     /// The vault's profile index missing or unreadable, or profile folders it does not list
     /// (AppModel.indexNotice): said above the list, with the vault's folder in the Finder.
     var indexNotice: AppModel.IndexNotice?
@@ -1031,7 +1045,7 @@ struct ProfilesScreen: View {
             HStack(spacing: 0) {
                 ProfilesSidebar(rows: rows, sync: sync, filter: $filter, section: section, proxyCount: proxyCount,
                                 proxyAlerts: proxyAlerts, showsVirtualMachines: virtualMachines != nil,
-                                actions: actions, rights: rights)
+                                showsWarmUp: warmUp != nil, actions: actions, rights: rights)
                     .frame(width: Self.sidebarWidth)
                     .lumenFrost()
                     .overlay(alignment: .trailing) { Rectangle().fill(Theme.divider).frame(width: 1) }
@@ -1077,6 +1091,8 @@ struct ProfilesScreen: View {
                 proxies
             } else if section.wrappedValue == .virtualMachines, let virtualMachines {
                 virtualMachines
+            } else if section.wrappedValue == .warmUp, let warmUp {
+                warmUp
             } else {
                 VStack(spacing: 0) {
                     header
@@ -1564,6 +1580,8 @@ private struct ProfilesSidebar: View {
     var proxyAlerts = 0
     /// The window has the Virtual machines section (the build carries them).
     var showsVirtualMachines = false
+    /// The window has the Warm-up section.
+    var showsWarmUp = false
     let actions: ProfileActions
     var rights: RightsLine?
 
@@ -1579,6 +1597,11 @@ private struct ProfilesSidebar: View {
             item(.all, title: L("profiles.title"))
             if let proxyCount { proxiesItem(proxyCount) }
             if showsVirtualMachines { virtualMachinesItem }
+            if showsWarmUp {
+                SidebarItem(symbol: "flame", title: L("warm.title"), count: nil, selected: section == .warmUp) {
+                    withAnimation(Theme.appearAnimation) { section = .warmUp }
+                }
+            }
             // What was behind a menu, in the interface (the owner, 10 November): the scenario
             // editor, the automation API's settings, the app's help.
             toolItem(symbol: "play.rectangle", title: L("scenarios.title"), action: actions.openScenarios)
@@ -1607,6 +1630,10 @@ private struct ProfilesSidebar: View {
                     }
                     item(.direct)
                     item(.ephemeral)
+                    // Only while there are such profiles, or it is the list shown.
+                    if showsWarmUp, rows.contains(where: \.neverWarmed) || (section == .profiles && filter == .notWarmed) {
+                        item(.notWarmed)
+                    }
                     let tags = ProfileFilter.tags(of: rows)
                     if !tags.isEmpty {
                         caption(L("profiles.tags"))
@@ -1983,6 +2010,13 @@ private struct ProfileRow: View {
                         .font(.system(size: 10))
                         .foregroundStyle(Theme.textTertiary)
                         .accessibilityLabel(L("profiles.row.hasNotes"))
+                }
+                if let warmedAt = row.warmedAt {
+                    Image(systemName: "flame")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.textTertiary)
+                        .help(String(format: L("profiles.row.warmed"), warmedAt.shownRelative))
+                        .accessibilityLabel(String(format: L("profiles.row.warmed"), warmedAt.shownRelative))
                 }
                 if !row.tags.isEmpty || row.ephemeral {
                     TagLine.text(row.tags + (row.ephemeral ? [L("profiles.row.ephemeralTag")] : []), colors: tagColors)

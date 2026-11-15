@@ -556,7 +556,7 @@ final class WarmUpRobot: ObservableObject {
         guard liveTab(run) != nil else { return nil }
         guard let data = value?.data(using: .utf8), let signals = try? JSONDecoder().decode(WarmUpPageSignals.self, from: data) else { return .read }
         if let kind = WarmUpBlockPage.kind(signals) {
-            log.notice("A page asked whether the visitor is a robot, or refused them (\(kind, privacy: .public)): left")
+            log.notice("A page asked whether the visitor is a robot, or refused them (\(kind, privacy: .private)): left")
             return .blocked(kind)
         }
         if WarmUpSensitivePage.isSensitive(signals) {
@@ -874,7 +874,7 @@ final class WarmUpRobot: ObservableObject {
             guard pressed == true else { return false }
         }
         guard liveTab(run) != nil else { return false }
-        log.notice("A cookie banner was answered (\(button.tool, privacy: .public), \(rejecting ? "only necessary" : "accept", privacy: .public))")
+        log.notice("A cookie banner was answered (\(button.tool, privacy: .private))")
         step = "read"
         // The banner goes, and the page may reload part of itself.
         return await wait(Double.random(in: 0.8...1.6, using: &generator), run: run)

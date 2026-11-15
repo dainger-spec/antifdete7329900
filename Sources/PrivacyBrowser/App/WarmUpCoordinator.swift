@@ -96,6 +96,9 @@ final class WarmUpCoordinator: ObservableObject {
     /// Each profile's warm-ups, the newest first, read once and kept up as runs end: what the
     /// Warm-up section lists (`WarmUpHistory`).
     @Published private(set) var histories: [UUID: WarmUpHistory] = [:]
+    /// The short record an older version kept of a profile's last warm-up, for the profiles whose
+    /// history is still empty (read once: the lists ask for every profile's state at every change).
+    private var records: [UUID: WarmUpRecord] = [:]
     /// When the queue last started a profile (`stagger`).
     private var lastStart: Date?
     /// When each run seen running was first seen, for a robot that does not say when it began.
@@ -123,7 +126,11 @@ final class WarmUpCoordinator: ObservableObject {
         scheduler = WarmUpScheduler(schedules: schedules)
         var read: [UUID: WarmUpHistory] = [:]
         for profile in repository.list() {
-            if let history = try? repository.warmUpHistory(for: profile.id), !history.runs.isEmpty { read[profile.id] = history }
+            if let history = try? repository.warmUpHistory(for: profile.id), !history.runs.isEmpty {
+                read[profile.id] = history
+            } else if let record = try? repository.warmUpRecord(for: profile.id) {
+                records[profile.id] = record
+            }
         }
         histories = read
         // Every run that ends counts for the schedule — one from the warm-up screen too: a profile
@@ -218,7 +225,13 @@ final class WarmUpCoordinator: ObservableObject {
         if let runs = histories[id]?.runs, let last = runs.first {
             return WarmUpWarmth(last: last, previous: runs.dropFirst().first)
         }
-        return WarmUpWarmth(record: try? repository.warmUpRecord(for: id))
+        return WarmUpWarmth(record: records[id])
+    }
+
+    /// The person changed how many are warmed at once: said to the screens, and acted on.
+    func settingsChanged() {
+        objectWillChange.send()
+        pump()
     }
 
     /// The profile's last run, when its history has one.
@@ -394,6 +407,7 @@ final class WarmUpCoordinator: ObservableObject {
         if let record = WarmUpRecord(status, at: ended) {
             do {
                 try repository.saveWarmUpRecord(record, for: id)
+                records[id] = record
             } catch {
                 log.error("Could not store the last warm-up of \(id.uuidString, privacy: .public): \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
             }
@@ -406,8 +420,11 @@ final class WarmUpCoordinator: ObservableObject {
 
     /// Queues the profiles whose turn ended without a warm-up (not started, the proxy silent)
     /// again, each with the plan `plan(id)` gives.
-    func retryFailed(plan: (UUID) -> WarmUpPlan) {
-        enqueue(queue.failedProfiles, plan: plan)
+    func retryFailed() {
+        let failed = queue.failedProfiles
+        guard !failed.isEmpty else { return }
+        // Each with the plan its profile was last given, put together anew.
+        enqueue(failed) { savedPlan(for: $0) ?? WarmUpPlan() }
     }
 
     /// Adds a run to the profile's history, in the vault and here.
