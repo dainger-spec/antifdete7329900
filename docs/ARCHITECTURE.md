@@ -629,9 +629,20 @@ SettingsView (Settings scene: ⌘, — and ⋯ → Settings…) ── AppSettin
    │  each SettingsSection (AppModel.settingsSection → SettingsView's section); Copy Short Report
    │  CommandPaletteView.offered → AppPalette.completed (the app's model from the environment,
    │  \.appModelForCommands): the keys of the commands that have them (AppCommand), Lock through
-   │  AppCommands.lock (asks while profiles run), and Check for Updates
+   │  AppCommands.lock (asks while profiles run), Check for Updates, and every single setting
+   │  (SettingsSearch.paletteCommands: listed only once typed, found only by words really in its
+   │  name — Command.foundBy; AppModel.settingsReveal → the row marked on its page)
    └  CommandPaletteView.rank → CommandSearch.score (BrowserCore): each word of the query the start
       of a word, inside a word, or its letters in order; best first, ties in the list's order
+
+The Settings search (SettingsView's field) ── SettingsSearch.hits: per page, its name (×100), its
+   │  settings' titles (×10), then title and description together (word starts only) — the keys
+   │  of the texts the pages themselves show (SettingsSearch.entries; the self-test checks every
+   │  key in both languages and that "zoom", «масштаб» and the like find their page)
+   │  TextSearch.score (BrowserCore): every word typed the start of a word; in a name also inside
+   │  one (4+ letters); a word of 7+ letters also by all but its last two
+   └  the sidebar lists the pages that answer, each with the setting found; Return: the best one;
+      the page marks that row (FoundSettingMark, \.settingsFound) and scrolls to it
 
 The app's keys ── AppCommand (one table): the menus' keyboardShortcut, the palette's key caps,
       Settings › Keyboard Shortcuts' first group and Help › Keyboard Shortcuts' first list

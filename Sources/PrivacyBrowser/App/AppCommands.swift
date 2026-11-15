@@ -110,7 +110,8 @@ enum AppCommands {
 }
 
 /// The command palette's (⌘K) share of the app's own commands, added to what the Profiles window
-/// gives it: the keys of the commands that have them, and Check for Updates.
+/// gives it: the keys of the commands that have them, Check for Updates, and every single setting
+/// by its name ("Settings: Page zoom").
 @MainActor
 enum AppPalette {
     static func completed(_ commands: [CommandPaletteView.Command], model: AppModel,
@@ -128,7 +129,11 @@ enum AppPalette {
         commands.insert(Command(id: "updates", title: L("menu.checkForUpdates"), symbol: "arrow.down.to.line",
                                 run: { AppCommands.checkForUpdates(model, openSettings: openSettings) }),
                         at: firstSetting)
-        return commands
+        return commands + SettingsSearch.paletteCommands { section, title in
+            model.settingsReveal = title
+            model.settingsSection = section
+            openSettings()
+        }
     }
 
     /// The palette's commands that the menus give keys to, by the palette's ids.

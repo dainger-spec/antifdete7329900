@@ -16,6 +16,10 @@ struct CommandPaletteView: View {
         var group: Group = .actions
         /// Its keys, at the row's end ("⌘N").
         var shortcut: String?
+        /// A command that is not listed before anything is typed, and is found only when the words
+        /// typed are really in this text — a single setting (`SettingsSearch.paletteCommands`):
+        /// fifty of them would bury the list, and letters in order are found in any of their names.
+        var foundBy: String?
         var run: () -> Void
     }
 
@@ -36,7 +40,8 @@ struct CommandPaletteView: View {
         _query = State(initialValue: query)
     }
 
-    /// What it was given, and the app's own commands with it: their keys, Check for Updates.
+    /// What it was given, and the app's own commands with it: their keys, Check for Updates, every
+    /// single setting.
     private var offered: [Command] {
         guard let appModel else { return commands }
         let open = openSettings
@@ -50,11 +55,13 @@ struct CommandPaletteView: View {
         let text = query.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else {
             return commands.enumerated()
+                .filter { $0.element.foundBy == nil }
                 .sorted { ($0.element.group.rawValue, $0.offset) < ($1.element.group.rawValue, $1.offset) }
                 .map(\.element)
         }
         return commands.enumerated()
             .compactMap { index, command -> (Int, Int, Command)? in
+                if let words = command.foundBy, !TextSearch.finds(text, in: words) { return nil }
                 guard let score = CommandSearch.score(text, command.title + " " + (command.detail ?? "")) else { return nil }
                 return (score, index, command)
             }

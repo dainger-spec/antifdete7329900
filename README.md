@@ -368,6 +368,12 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    - **Updates**, **Keyboard Shortcuts** (the app's own, as its menus define them: ⌘K and ⌃⌘V
      among them) and **About** (version, macOS, this Mac's Safari and WebKit, the build; links when
      the release sets `WEBSITE_URL` / `SUPPORT_URL`).
+   - **The search** above the sections looks through the settings themselves — their names, then
+     the sentences under them — not only the sections' names: "zoom", "Dock" or "quit" lists the
+     page that holds the setting and says which one it found, Return opens the best answer, and
+     the page marks that row and scrolls to it. Each word typed is the start of a word (in a name,
+     also four letters or more inside one; a word of seven letters or more also by another of its
+     forms). The window opens on the page it was last left on.
    - **The menus** carry the app's own commands, each with its key where it has one, from one
      table (`AppCommand`) that Settings › Keyboard Shortcuts and Help list as well: the app menu
      has **Check for Updates…**, **Account…** and **Lock Vault** (⇧⌘L); **File** has New Profile
@@ -380,9 +386,12 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    if it was closed) with a search field over what the app can do — each profile's own commands
    (launch, or new window and stop while it runs; edit; warm up), found by its name, its tags or
    the country it exits in; the proxies; warming up several profiles; Sync Now; Lock; Check for
-   Updates; each section of Settings; Copy Short Report. Each word typed matches the start of a
-   word, then the inside of one, then letters in order. ↑/↓ choose, Return runs, Esc closes. In a
-   page that uses ⌘K itself, the page gets the key first, as in Safari.
+   Updates; each section of Settings; Copy Short Report — and, once something is typed, every
+   single setting by its name ("Settings: Page zoom", with its page under it), which opens
+   Settings on that page with the row marked. Each word typed matches the start of a word, then
+   the inside of one, then letters in order (a single setting only when the words typed are really
+   in its name). ↑/↓ choose, Return runs, Esc closes. In a page that uses ⌘K itself, the page gets
+   the key first, as in Safari.
 15. **Paste as Typed** (⌃⌘V, **Edit** menu — in a profile shown in Safari's own window, in Safari's
    Edit menu): the clipboard's text is typed into the page's focused field as a person types it,
    for a field that refuses pasting or watches typing. Each character is a key down and a key up

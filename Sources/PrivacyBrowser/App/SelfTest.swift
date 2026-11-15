@@ -348,7 +348,8 @@ final class SelfTest {
         await group("earlier versions' Safari keys") { earlierVersionsSafariKeys() }
         await group("update gate") { try updateGate(repository) }
         await group("settings") { try await appSettings(repository) }
-        // How things are found: the one table of the app's keys (UsabilityChecks).
+        // How things are found: the Settings search over the settings themselves, the palette's
+        // single settings, the one table of the app's keys (UsabilityChecks).
         await group("finding settings, help and commands") {
             for result in UsabilityChecks.run() { check(result.name, result.passed, result.detail) }
         }

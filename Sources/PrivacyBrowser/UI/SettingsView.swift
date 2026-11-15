@@ -11,12 +11,18 @@ import WebKit
 /// window's ⋯ show the same.
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
-    @State var section: SettingsSection = .startup
+    /// The page shown: the one the window was last left on (it opened on Startup every time),
+    /// unless whoever opens it names one.
+    @State var section: SettingsSection = SettingsView.lastSection
     /// The screenshots' updater, in place of the app's (`--render-ui-snapshots`).
     var previewUpdater: AppUpdater?
     /// The account page's license, for the UI snapshots; the app's own otherwise.
     var previewLicense: LicenseModel?
-    @State private var search = ""
+    /// What is typed into the search field (`SettingsSearch`); the screenshots give one.
+    @State var search = ""
+    /// A setting asked for from elsewhere (the command palette), by its row's title: marked on its
+    /// page until another page is chosen or something is typed into the search.
+    @State private var revealed: String? = nil
 
     static let size = CGSize(width: 1000, height: 700)
     static let sidebarWidth: CGFloat = 248
@@ -29,12 +35,18 @@ struct SettingsView: View {
             // that reaches under the title bar gets macOS 26's edge effect there, which a window's
             // picture does not draw — the whole page came out empty in CI run 557, as the
             // inspector had in 555 (ProfilesScreen.inspectorTop).
-            ScrollView {
-                pane
-                    .frame(maxWidth: 640, alignment: .leading)
-                    .padding(.horizontal, 56)
-                    .padding(.bottom, 40)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            ScrollViewReader { scroller in
+                ScrollView {
+                    pane
+                        .environment(\.settingsFound, found)
+                        .frame(maxWidth: 640, alignment: .leading)
+                        .padding(.horizontal, 56)
+                        .padding(.bottom, 40)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                // The setting that was looked for comes into view, on a page longer than the window.
+                .onAppear { reveal(found, with: scroller) }
+                .onChange(of: found) { _, title in reveal(title, with: scroller) }
             }
             .padding(.top, ProfilesScreen.inspectorTop)
             .id(section)
@@ -48,23 +60,63 @@ struct SettingsView: View {
         .ignoresSafeArea(.container, edges: .top)
         .environment(\.colorScheme, .dark)
         .tint(Theme.accentFill)
-        // A section asked for from elsewhere (the command palette).
+        // A section asked for from elsewhere (the command palette), and a setting on it.
         .onReceive(model.$settingsSection.compactMap { $0 }) { requested in
             section = requested
+            search = ""
+            revealed = model.settingsReveal
             model.settingsSection = nil
+            model.settingsReveal = nil
         }
+        .onChange(of: section) { _, shown in Self.lastSection = shown }
+        .onChange(of: search) { _, _ in revealed = nil }
+    }
+
+    /// Where the page last shown is kept: this Mac's preferences, as the app's other settings.
+    static let lastSectionKey = "PBSettingsLastSection"
+
+    static var lastSection: SettingsSection {
+        get { UserDefaults.standard.string(forKey: lastSectionKey).flatMap(SettingsSection.init(rawValue:)) ?? .startup }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: lastSectionKey) }
+    }
+
+    /// The pages the sidebar lists: all of them, or those that answer the search, each with the
+    /// setting found on it.
+    private var hits: [SettingsSearch.Hit] { SettingsSearch.hits(search) }
+
+    private var isSearching: Bool { !TextSearch.words(search).isEmpty }
+
+    /// The setting to mark on the page shown: the one the search found there, or the one asked for.
+    private var found: String? {
+        isSearching ? hits.first { $0.section == section }?.setting : revealed
+    }
+
+    private func reveal(_ title: String?, with scroller: ScrollViewProxy) {
+        guard title != nil else { return }
+        // After the page has laid out its rows.
+        DispatchQueue.main.async { scroller.scrollTo(FoundSettingMark.anchor, anchor: .center) }
+    }
+
+    private func choose(_ item: SettingsSection) {
+        revealed = nil
+        section = item
     }
 
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        let shown = hits
+        return VStack(alignment: .leading, spacing: 2) {
             // The window's traffic lights sit in this band.
             Color.clear.frame(height: 40)
             LumenSearchField(text: $search, prompt: L("settings.search"))
                 .padding(.bottom, 8)
+                // Return: the page that answers best.
+                .onSubmit {
+                    if isSearching, let best = SettingsSearch.best(shown) { section = best.section }
+                }
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(SettingsSection.Group.allCases, id: \.self) { group in
-                        let items = group.sections.filter(matches)
+                        let items = shown.filter { $0.section.group == group }
                         if !items.isEmpty {
                             Text(group.title)
                                 .lumenCaps()
@@ -72,12 +124,13 @@ struct SettingsView: View {
                                 .padding(.top, 18)
                                 .padding(.bottom, 6)
                                 .accessibilityAddTraits(.isHeader)
-                            ForEach(items) { item in
-                                SettingsSidebarItem(section: item, selected: section == item) { section = item }
+                            ForEach(items, id: \.section) { item in
+                                SettingsSidebarItem(section: item.section, selected: section == item.section,
+                                                    found: item.setting) { choose(item.section) }
                             }
                         }
                     }
-                    if SettingsSection.allCases.allSatisfy({ !matches($0) }) {
+                    if shown.isEmpty {
                         Text(L("settings.search.none"))
                             .font(.lumenSecondary)
                             .foregroundStyle(Theme.textTertiary)
@@ -90,12 +143,6 @@ struct SettingsView: View {
         .padding(.horizontal, 12)
         .frame(width: Self.sidebarWidth)
         .background(Theme.sidebar)
-    }
-
-    /// A section the search finds: by its title.
-    private func matches(_ section: SettingsSection) -> Bool {
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        return query.isEmpty || L(section.titleKey).localizedCaseInsensitiveContains(query)
     }
 
     @ViewBuilder
@@ -123,9 +170,11 @@ struct SettingsView: View {
 
 /// One of the settings window's sections (the design's `nav`): its symbol and title, `t2`, white
 /// when chosen (on 6.5 % white), a tone of white under the pointer; "new" beside a new section.
+/// While the search is used: under the title, the setting it found on that page.
 private struct SettingsSidebarItem: View {
     let section: SettingsSection
     let selected: Bool
+    var found: String?
     let choose: () -> Void
     @State private var hovered = false
 
@@ -136,15 +185,24 @@ private struct SettingsSidebarItem: View {
                     .font(.system(size: 13))
                     .frame(width: 18)
                     .accessibilityHidden(true)
-                Text(L(section.titleKey))
-                    .font(.lumenBody)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(L(section.titleKey))
+                        .font(.lumenBody)
+                        .lineLimit(1)
+                    if let found {
+                        Text(found)
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.textTertiary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
                 Spacer(minLength: 4)
                 if section.isNew { NewBadge() }
             }
             .foregroundStyle(selected || hovered ? Theme.textPrimary : Theme.textSecondary)
             .padding(.horizontal, 10)
-            .frame(height: 32)
+            .frame(height: found == nil ? 32 : 46)
             .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(selected ? Theme.rowSelected : (hovered ? Theme.rowHover : Color.clear)))
             .contentShape(Rectangle())
@@ -380,6 +438,7 @@ struct SettingRow<Control: View>: View {
         .padding(.vertical, 18)
         .overlay(alignment: .top) { Rectangle().fill(Theme.divider).frame(height: 1) }
         .accessibilityElement(children: .contain)
+        .modifier(FoundSettingMark(title: title))
     }
 }
 
@@ -420,6 +479,7 @@ struct SettingCustomRow<Detail: View, Control: View>: View {
         .padding(.vertical, 18)
         .overlay(alignment: .top) { Rectangle().fill(Theme.divider).frame(height: 1) }
         .accessibilityElement(children: .contain)
+        .modifier(FoundSettingMark(title: title))
     }
 }
 

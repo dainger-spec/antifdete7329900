@@ -92,6 +92,9 @@ final class AppModel: ObservableObject {
     @Published var helpTopic: HelpTopic = .start
     /// A section of Settings to show when it next appears (the command palette).
     @Published var settingsSection: SettingsSection?
+    /// With `settingsSection`, set before it: a setting on that page to mark, by its row's title
+    /// (the palette's "Settings: Page zoom").
+    var settingsReveal: String?
     /// The network guard's notice at the foot of the profiles was closed: not again until the app
     /// starts again (kept nowhere but here).
     @Published var guardNoticeHidden = false
