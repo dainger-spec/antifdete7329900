@@ -62,3 +62,52 @@ public struct OpenTabs: Codable, Equatable, Sendable {
         format = try c.decodeIfPresent(Int.self, forKey: .format) ?? 1
     }
 }
+
+/// One tab as a browser window's chrome names it — which window it is in, the page it shows and
+/// whether it is the one in front — for `OpenTabs.windows(of:)`. Safari's window, hosted in a
+/// profile's process, hands its tabs out as one list for every window; our own windows know theirs.
+public struct ObservedTab: Equatable, Sendable {
+    /// The window the tab is in: any number that the tabs of one window share.
+    public var window: Int
+    /// The tab's page; nil for a tab without one (the start page, an empty tab).
+    public var url: URL?
+    public var isSelected: Bool
+
+    public init(window: Int, url: URL?, isSelected: Bool = false) {
+        self.window = window
+        self.url = url
+        self.isSelected = isSelected
+    }
+}
+
+extension OpenTabs {
+    /// What stands for a tab without a page while a window is put together: never kept (`init`).
+    static let noPage = URL(string: "about:blank")!
+
+    /// `tabs` window by window: the windows in the order their first tab comes, each with its tabs
+    /// in the order given and the one shown. A tab without a page keeps its place until the pages
+    /// are filtered (`init(windows:)`), so the tab shown stays the right one.
+    public static func windows(of tabs: [ObservedTab]) -> [Window] {
+        var order: [Int] = []
+        var byWindow: [Int: Window] = [:]
+        for tab in tabs {
+            var window = byWindow[tab.window] ?? Window(tabs: [])
+            if byWindow[tab.window] == nil { order.append(tab.window) }
+            if tab.isSelected { window.selected = window.tabs.count }
+            window.tabs.append(tab.url ?? noPage)
+            byWindow[tab.window] = window
+        }
+        return order.compactMap { byWindow[$0] }
+    }
+
+    /// How a window whose tab `current` is shown gets to tab `wanted` with the two commands every
+    /// browser has — next tab and previous tab, which go round — in the fewest presses: how many,
+    /// and whether they are "next". Nothing to press for one tab, the tab already shown, or an
+    /// index the window does not have.
+    public static func selectionSteps(from current: Int, to wanted: Int, count: Int) -> (presses: Int, forward: Bool) {
+        guard count > 1, (0..<count).contains(current), (0..<count).contains(wanted), current != wanted else { return (0, true) }
+        let forward = (wanted - current + count) % count
+        let backward = count - forward
+        return forward <= backward ? (forward, true) : (backward, false)
+    }
+}
