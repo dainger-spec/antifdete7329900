@@ -1951,6 +1951,23 @@
 "scenarios.log.empty" = "Здесь появится журнал запуска.";
 "scenarios.log.result" = "Результат: %@";
 "scenarios.log.copy" = "Скопировать журнал";
+"scenarios.values.open" = "Значения этого профиля для сценариев…";
+"scenarios.values.title" = "Значения профиля «%@» для сценариев";
+"scenarios.values.subtitle" = "То, что сценарий читает как params.имя, когда работает на этом профиле: логин, пароль, город. Тот же сценарий на другом профиле читает значения того профиля.";
+"scenarios.values.name" = "имя";
+"scenarios.values.value" = "значение";
+"scenarios.values.add" = "Добавить значение";
+"scenarios.values.remove" = "Убрать это значение";
+"scenarios.values.show" = "Показать значение";
+"scenarios.values.hide" = "Скрыть значение";
+"scenarios.values.kept" = "Хранятся в хранилище на этом Mac, зашифрованными. В синхронизацию не входят.";
+"scenarios.values.problem.unnamed" = "У значения нет имени. Назовите его или сотрите.";
+"scenarios.values.problem.name" = "«%@» не может быть именем: латинские буквы, цифры и _, не с цифры. Сценарий читает его как params.имя.";
+"scenarios.values.problem.twice" = "Два значения названы «%@».";
+"scenarios.values.missing" = "У этого профиля нет значения для: %@";
+"scenarios.values.fill" = "Заполнить…";
+"scenarios.values.unreadable" = "Значения профилей для сценариев не удалось прочитать. Их файл оставлен как есть и будет отложен в сторону при следующем сохранении значений.";
+"scenarios.values.newer" = "Значения профилей для сценариев записаны более новой версией Lumen. Обновите Lumen, чтобы их менять.";
 "scenarios.template" = "// Что сделал бы человек, шаг за шагом. Каждая команда ждёт страницу.\n// page.goto, page.click, page.type, page.press, page.waitFor, page.textContent, page.scroll…\nawait page.goto('https://example.com/');\nawait page.waitFor('h1');\nlog('Заголовок:', await page.textContent('h1'));\n";
 /* Help in the app (HelpView), and what opens it: the sidebar's rows, the scenario editor, the automation settings */
 "window.help.title" = "Справка";
@@ -2016,7 +2033,7 @@
 "scenarios.record.stop" = "Остановить запись";
 "scenarios.record.going" = "Идёт запись · шагов: %d";
 "scenarios.record.empty" = "Перейдите в окно профиля и делайте то, что должен повторять сценарий: открывайте страницы, нажимайте, печатайте. Каждое действие появится здесь строкой. Пароли не записываются. «Остановить запись» добавит строки в сценарий; в новом сценарии они займут место примера.";
-"scenarios.record.password" = "пароль не записывается: передайте его параметром password или впишите вместо params.password";
+"scenarios.record.password" = "пароль не записывается: задайте профилю значение с именем password (окно «Сценарии», значения профиля) или впишите пароль вместо params.password";
 "scenarios.starting" = "Запускается профиль…";
 "scenarios.start.failed" = "Не получилось начать: профиль не запустился.";
 "scenarios.schedule.this" = "По расписанию…";

@@ -1951,6 +1951,23 @@
 "scenarios.log.empty" = "The run’s log appears here.";
 "scenarios.log.result" = "Result: %@";
 "scenarios.log.copy" = "Copy the Log";
+"scenarios.values.open" = "This profile’s values for scenarios…";
+"scenarios.values.title" = "Values of “%@” for scenarios";
+"scenarios.values.subtitle" = "What a scenario reads as params.name when it runs on this profile: a login, a password, a city. The same scenario on another profile reads that profile’s own.";
+"scenarios.values.name" = "name";
+"scenarios.values.value" = "value";
+"scenarios.values.add" = "Add a Value";
+"scenarios.values.remove" = "Remove this value";
+"scenarios.values.show" = "Show the value";
+"scenarios.values.hide" = "Hide the value";
+"scenarios.values.kept" = "Kept in the vault on this Mac, encrypted. Not synced.";
+"scenarios.values.problem.unnamed" = "A value has no name. Name it, or clear it.";
+"scenarios.values.problem.name" = "“%@” cannot be a name: Latin letters, digits and _, not beginning with a digit. A scenario reads it as params.name.";
+"scenarios.values.problem.twice" = "Two values are named “%@”.";
+"scenarios.values.missing" = "This profile has no value for: %@";
+"scenarios.values.fill" = "Fill In…";
+"scenarios.values.unreadable" = "The profiles’ values for scenarios could not be read. Their file is kept as it is, and moved aside when values are next saved.";
+"scenarios.values.newer" = "The profiles’ values for scenarios were written by a newer version of Lumen. Update Lumen to change them.";
 "scenarios.template" = "// What a person would do, step by step. Every command waits for the page.\n// page.goto, page.click, page.type, page.press, page.waitFor, page.textContent, page.scroll…\nawait page.goto('https://example.com/');\nawait page.waitFor('h1');\nlog('Heading:', await page.textContent('h1'));\n";
 /* Help in the app (HelpView), and what opens it: the sidebar's rows, the scenario editor, the automation settings */
 "window.help.title" = "Help";
@@ -2016,7 +2033,7 @@
 "scenarios.record.stop" = "Stop Recording";
 "scenarios.record.going" = "Recording · steps: %d";
 "scenarios.record.empty" = "Go to the profile's window and do what the scenario should repeat: open pages, click, type. Each action appears here as a line. Passwords are not recorded. Stop Recording adds the lines to the scenario; in a new scenario they take the example's place.";
-"scenarios.record.password" = "the password is not recorded: pass it as the parameter password, or write it in place of params.password";
+"scenarios.record.password" = "the password is not recorded: give the profile a value named password (Scenarios window, the profile’s values), or write it in place of params.password";
 "scenarios.starting" = "Starting the profile…";
 "scenarios.start.failed" = "It could not start: the profile did not launch.";
 "scenarios.schedule.this" = "On a Schedule…";

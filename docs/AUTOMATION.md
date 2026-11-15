@@ -76,7 +76,8 @@ the page's own record.
 - `page`: the core commands above, each returning a promise (`await page.click('#login')`);
   `page.evaluate(fn, arg, {world: 'page'})` takes a function or a function body;
   `page.url()` and `page.title()` are promises too (in Playwright they are not);
-- `log(...)` for the run's log, `sleep(ms)`, `params` (the run's parameters, read-only).
+- `log(...)` for the run's log, `sleep(ms)`, `params` (the run's parameters, read-only: the
+  profile's own values — "A profile's values" below — under what an API request gave).
   `sleep(Infinity)` — or any wait longer than a year — waits until Stop; a negative number or
   `NaN` does not wait. A `type` delay is held to a year a key the same way (`ScenarioWait`:
   a number past what the system's sleep holds stopped the profile's process).
@@ -122,6 +123,30 @@ runs no other, and the log says why.
 
 The scenarios are kept in `scenarios.bin` at the vault's root under its own key; this Mac's only
 (not synced in this version).
+
+### A profile's values
+
+One scenario for fifty profiles needs each profile's own login and password. The recorder writes
+`params.password` for every password it does not record — and a run started from the editor or by
+the clock had nothing there: only an API request could give `params`, so a recorded sign-in typed
+an empty password.
+
+- **`ScenarioValues`** (BrowserCore): for each profile, names and their text — `login`, `password`,
+  anything. A name is what can follow `params.`: a Latin letter or `_`, then letters, digits, `_`
+  (64 at most); a value up to 4,096 characters, 64 values a profile. `scenario-values.bin` at the
+  vault's root, sealed under the scenarios' key — a file of its own, as the schedules' is. This
+  Mac's; not synced, not part of a profile's export or copy.
+- **A run's `params`** (`ScenarioValues.parametersJSON`): the profile's values, each as text —
+  from the editor's Run, from a schedule, and from an API request that names a **saved** scenario,
+  where what the request gave in `params` wins name by name. A text sent with the request
+  (`{"source": …}`) gets the request's own `params` and no more: what is kept for a profile is
+  read by the scenarios the person wrote, not by whatever holds the API's token.
+- **In the editor**: the values of the chosen profile open from the button beside the profile's
+  name; the names the scenario on screen reads (`ScenarioValues.namesRead`: `params.name`,
+  `params['name']`) are offered to fill in, and those the profile has no text for are named under
+  the run's bar before the run ("This profile has no value for: password").
+- A profile the person deletes takes its values with it (`AppModel.deleteProfile`). The run's log
+  never holds a value: typing is logged by its length.
 
 Where a person finds it (the owner, 10 November: behind File › Scenarios alone it was hidden, and what
 a scenario may say was in this file only): the Profiles window's sidebar has Scenarios, Automation

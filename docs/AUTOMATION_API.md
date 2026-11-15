@@ -111,7 +111,7 @@ pointer, wheel and keyboard, which pages cannot tell from a person's.
 | Request | Does |
 |---|---|
 | `POST /v1/profiles/{profile}/scenario` `{"source": "…JavaScript…", "params": {…}}` | Runs that text on the running profile, in a window of its own — Safari's where the profile's process hosts Safari's chrome, the app's elsewhere (docs/AUTOMATION.md); **202** `{"runID": …}`. `params` is optional (the script's `params`) |
-| `POST /v1/profiles/{profile}/scenario` `{"scenario": "Sign in"}` | Runs the saved scenario of that exact name (**404** `no_scenario` when there is not one) |
+| `POST /v1/profiles/{profile}/scenario` `{"scenario": "Sign in"}` | Runs the saved scenario of that exact name (**404** `no_scenario` when there is not one). Its `params` are the profile's own values for scenarios (docs/AUTOMATION.md, "A profile's values") with the request's `params` over them, name by name: `{"scenario": "Sign in"}` sent to fifty profiles signs each in with its own password. A text sent as `source` gets the request's `params` alone |
 | `GET /v1/profiles/{profile}/scenario` | The profile's last run: `running`, `outcome` (`finished`, `failed`, `stopped`), `reason` (a failure's names the scenario's line: "… (line 12)"), `result` — what the scenario returned (`return {…}`), any JSON value, absent when it returned nothing or did not finish — and its `lines` (`at`, `kind`, `text`) |
 | `POST /v1/profiles/{profile}/scenario/stop` | Stops it: a wait under way ends, a pressed button or key is let go first |
 
@@ -156,5 +156,6 @@ refused (401, before the plan); every route — the old ones too — refused wit
 the plan (403 `automation_not_in_plan`; red on the code before the gate, claude/measure-api-gate-red);
 the list without the proxy's credentials; a profile started out of sight, a cookie
 imported into it and read back out, a `file:` address refused, the profile stopped; nothing
-answering once the API is off; a scenario run with its parameters and its log read back, an unknown saved scenario not found, a
-run stopped. The sandboxed build: does not listen, and says why.
+answering once the API is off; a scenario run with its parameters and its log read back; what a scenario returns given as
+`result`, a saved scenario with the profile's own values under the request's and a sent text
+with the request's alone; an unknown saved scenario not found, a run stopped. The sandboxed build: does not listen, and says why.

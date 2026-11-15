@@ -674,6 +674,13 @@ enum UISnapshots {
         var hourly = ScenarioSchedule(action: .warmUp, profileID: rows[0].id, when: .every(hours: 6), jitterMinutes: 30)
         hourly.nextRunAt = Date(timeIntervalSince1970: 1_793_015_000)
         hourly.lastResult = .missed
+        // A profile's own values for scenarios: the plain form, with a name the scenario reads offered empty.
+        problems += await Shot(name: "scenarios-values", size: CGSize(width: 560, height: 380), titled: false) {
+            ScenarioValuesSheet(profileID: rows[1].id, profileName: "Northwind", namesRead: ["login", "password", "city"],
+                                sample: [ScenarioValues.Value(name: "login", value: "alice@northwind.example"),
+                                         ScenarioValues.Value(name: "password", value: "correct horse battery")])
+                .environmentObject(model)
+        }.capture(into: folder)
         problems += await Shot(name: "scenarios-schedule", size: CGSize(width: 860, height: 760)) {
             ScenarioSchedulesPane(sample: .init(schedules: [daily, hourly], scenarios: [scenario], profiles: clockProfiles, editing: nil))
                 .background(Theme.surface)
