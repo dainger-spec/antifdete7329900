@@ -2047,6 +2047,77 @@ test('scenario: what the script returns is the run\'s result, as JSON; nothing r
   assert.equal((await scenario('return 10n;')).message, '"10"');
 });
 
+// The warm-up robot's page scripts (WarmUpPageScripts.swift): each is the body of an async function
+// with named arguments, as callAsyncJavaScript runs it. Here on a stub DOM: that they are
+// JavaScript, and that the cookie banner's script presses only what it may.
+{
+  const source = readFileSync(new URL('../Sources/PrivacyBrowser/Browser/WarmUpPageScripts.swift', import.meta.url), 'utf8');
+  const AsyncFunction = (async () => {}).constructor;
+  const scriptOf = (name) => {
+    const body = source.split(`static let ${name} = #"""`)[1];
+    assert.ok(body, `WarmUpPageScripts.${name} is there`);
+    return body.split('"""#')[0];
+  };
+  const coreRules = readFileSync(new URL('../Sources/BrowserCore/WarmUp/WarmUpPageRules.swift', import.meta.url), 'utf8');
+  const words = [...coreRules.split('static let acceptWords: Set<String> = [')[1].split(']')[0].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  const containers = ['cookie', 'consent', 'gdpr', 'privacy-banner', 'cmp'];
+  const tools = [{ name: 'onetrust', accept: ['#onetrust-accept-btn-handler'], reject: ['#onetrust-reject-all-handler'] }];
+
+  // An element: where it is, what it says, what it is inside of.
+  const el = (o = {}) => ({ id: '', className: '', innerText: '', position: 'static', rect: { left: 10, top: 10, width: 120, height: 32 }, parentElement: null, form: null, ...o,
+    getBoundingClientRect() { const r = this.rect; return { ...r, right: r.left + r.width, bottom: r.top + r.height }; },
+    closest(selector) { return selector === 'form' ? this.form : null; } });
+  // A page: elements by the selectors that find them, and its buttons.
+  function run(name, args, page) {
+    const body = el({});
+    const document = { body, documentElement: el({}), title: page.title || '',
+      querySelector: (selector) => (page.bySelector || {})[selector] || null,
+      querySelectorAll: (selector) => (selector.startsWith('button') ? page.buttons || [] : (page.all || {})[selector] || []) };
+    for (const b of page.buttons || []) for (let e = b; e; e = e.parentElement) if (!e.parentElement && e !== body) { e.parentElement = body; break; }
+    const window = { innerWidth: 1200, innerHeight: 800 };
+    const globals = { document, window, location: { href: page.url || 'https://site.example/' }, getComputedStyle: (e) => ({ position: e.position }), globalThis: {} };
+    const fn = new AsyncFunction(...Object.keys(globals), ...Object.keys(args), scriptOf(name));
+    return fn(...Object.values(globals), ...Object.values(args)).then((value) => ({ value, pressed: globals.globalThis.warmUpConsent }));
+  }
+
+  test('warm-up page scripts are JavaScript, each an async function\'s body', () => {
+    for (const name of ['measure', 'signals', 'links', 'consent']) assert.doesNotThrow(() => new AsyncFunction(scriptOf(name)), name);
+    assert.ok(words.includes('accept all') && words.includes('alle akzeptieren'), 'the accept words are read from the core');
+  });
+
+  test('warm-up consent: a known tool\'s button by its own name; of another banner only a fixed box about cookies whose button says exactly "accept"', async () => {
+    const consent = (page, want = 'accept') => run('consent', { tools, want, words, containers }, page);
+    const known = el({ id: 'onetrust-accept-btn-handler', innerText: 'Accept All Cookies' });
+    const found = await consent({ bySelector: { '#onetrust-accept-btn-handler': known } });
+    assert.equal(JSON.parse(found.value).tool, 'onetrust');
+    assert.equal(found.pressed, known);
+    assert.equal((await consent({ bySelector: { '#onetrust-accept-btn-handler': known } }, 'reject')).value, null, 'no "only necessary" in view: nothing');
+    assert.equal((await consent({ bySelector: { '#onetrust-accept-btn-handler': el({ rect: { left: 0, top: 0, width: 0, height: 0 } }) } })).value, null, 'not shown');
+
+    const box = (o) => el({ id: 'cookie-banner', position: 'fixed', ...o });
+    const button = (text, parent, o = {}) => el({ innerText: text, parentElement: parent, ...o });
+    assert.equal(JSON.parse((await consent({ buttons: [button('  Alle\n akzeptieren ', box())] })).value).tool, 'generic');
+    assert.equal((await consent({ buttons: [button('Buy now — accept', box())] })).value, null, 'only the whole text');
+    assert.equal((await consent({ buttons: [button('Accept', box({ id: 'order-summary' }))] })).value, null, 'not a box about cookies');
+    assert.equal((await consent({ buttons: [button('Accept', box({ position: 'static' }))] })).value, null, 'not fixed on the page');
+    const form = { querySelector: () => ({}) };
+    assert.equal((await consent({ buttons: [button('Accept', box(), { form })] })).value, null, 'a form with fields around it');
+    assert.equal((await consent({ buttons: [button('Accept', box())] }, 'reject')).value, null, 'the generic rule never rejects');
+  });
+
+  test('warm-up signals: the marks of a check, a password field in view', async () => {
+    const marks = [{ name: 'cloudflare', selector: '#challenge-form' }, { name: 'bad', selector: '::::' }];
+    const page = { title: 'Just a moment...', bySelector: { '#challenge-form': el() }, all: { 'input[type="password"]': [el()] } };
+    const signals = JSON.parse((await run('signals', { marks }, page)).value);
+    assert.deepEqual(signals.marks, ['cloudflare']);
+    assert.equal(signals.hasPasswordField, true);
+    assert.equal(signals.hasCardField, false);
+    assert.equal(signals.title, 'Just a moment...');
+    const plain = JSON.parse((await run('signals', { marks }, { all: { 'input[type="password"]': [el({ rect: { left: 0, top: 0, width: 0, height: 0 } })] } })).value);
+    assert.equal(plain.hasPasswordField, false, 'a hidden password field is not one in view');
+  });
+}
+
 process.on('beforeExit', () => {
   if (failures) { console.log(`${failures} failure(s)`); process.exitCode = 1; }
   else console.log(`all shim tests passed (${JSC ? 'JavaScriptCore, Bun ' + Bun.version : 'V8, Node ' + process.version})`);

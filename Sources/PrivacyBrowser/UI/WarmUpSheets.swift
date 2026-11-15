@@ -174,8 +174,7 @@ struct WarmUpNewSheet: View {
             return countries.contains { $0.code == country } || countries.isEmpty
         }.map { (id: $0.presetID, name: $0.name, note: String(format: L("warm.templates.ownSites"), $0.addresses.count)) }
         let ready = WarmUpInterest.allCases.map { interest in
-            (id: interest.rawValue, name: L("warm.template." + interest.rawValue),
-             note: WarmUpCatalog.selection(interest, countryCode: previewCountry).sites.prefix(3).joined(separator: ", "))
+            (id: interest.rawValue, name: L("warm.template." + interest.rawValue), note: "")
         }
         return own + ready
     }
@@ -193,12 +192,8 @@ struct WarmUpNewSheet: View {
                                          set: { on in
                                              if on { if !chosen.contains(entry.id) { chosen.append(entry.id) } } else { chosen.removeAll { $0 == entry.id } }
                                          })) {
-                        HStack(spacing: 10) {
-                            Text(entry.name).font(.lumenBody).foregroundStyle(Theme.textPrimary).lineLimit(1)
-                                .frame(width: 150, alignment: .leading)
-                            Text(verbatim: entry.note).font(.lumenSecondary).foregroundStyle(Theme.textTertiary).lineLimit(1)
-                            Spacer(minLength: 0)
-                        }
+                        Text(entry.name).font(.lumenBody).foregroundStyle(Theme.textPrimary).lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .toggleStyle(.lumenCheckbox)
                     .frame(height: 28)

@@ -150,7 +150,7 @@ final class WarmUpRobot: ObservableObject {
     private var pagesRead = 0
     private var searchesTyped = 0
     private var consentsAnswered = 0
-    private var siteLog: [WarmUpSiteVisit] = []
+    private(set) var siteLog: [WarmUpSiteVisit] = []
     /// The search engine showed a check, or did not load: sites are opened by address from then on.
     private var searchUnusable = false
 
