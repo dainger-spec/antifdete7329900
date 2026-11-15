@@ -27,9 +27,6 @@ final class AppearancePreferences: ObservableObject {
     @Published var animations: Bool { didSet { defaults.set(animations, forKey: Keys.animations) } }
     /// Each profile's exit country as a flag fading behind its row in the list (`CountryBackdrop`).
     @Published var countryBackdrop: Bool { didSet { defaults.set(countryBackdrop, forKey: Keys.countryBackdrop) } }
-    /// The launch screen's greeting at the first launch and after a full quit (WelcomeSplash);
-    /// read as the app starts (`WelcomeLaunch`).
-    @Published var welcome: Bool { didSet { defaults.set(welcome, forKey: Keys.welcome) } }
 
     private let defaults: UserDefaults
 
@@ -38,7 +35,6 @@ final class AppearancePreferences: ObservableObject {
         static let density = "appearance.density"
         static let animations = "appearance.animations"
         static let countryBackdrop = "appearance.countryBackdrop"
-        static let welcome = "appearance.welcome"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -47,7 +43,6 @@ final class AppearancePreferences: ObservableObject {
         density = defaults.string(forKey: Keys.density).flatMap(Density.init(rawValue:)) ?? .comfortable
         animations = defaults.object(forKey: Keys.animations) as? Bool ?? true
         countryBackdrop = defaults.object(forKey: Keys.countryBackdrop) as? Bool ?? false
-        welcome = defaults.object(forKey: Keys.welcome) as? Bool ?? true
     }
 
     /// The animations setting as stored, from any thread.

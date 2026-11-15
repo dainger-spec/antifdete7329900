@@ -1,44 +1,30 @@
 @testable import BrowserCore
 import XCTest
 
-/// The launch screen (the owner, 15 November): at the first launch and after a full quit, never for
-/// the executable's other runs or the app's own restarts; its greeting in the interface's language
-/// first, then a different language each start.
+/// The launch screen (the owner, 15 November): only at the first launch of the app, once — never
+/// for the executable's other runs, nor on a Mac that has a vault or has shown it already; its
+/// greeting in the interface's language.
 final class WelcomeSplashPolicyTests: XCTestCase {
-    private let now = Date(timeIntervalSince1970: 1_800_000_000)
-
-    func testOnlyAPersonsStartShowsIt() {
-        XCTAssertEqual(WelcomeSplashPolicy.mode(start: .interactive, enabled: true, vaultExists: false,
-                                                seamlessRelaunchAt: nil, now: now), .firstLaunch)
-        XCTAssertEqual(WelcomeSplashPolicy.mode(start: .interactive, enabled: true, vaultExists: true,
-                                                seamlessRelaunchAt: nil, now: now), .returning)
+    func testOnlyThePersonsFirstLaunchShowsIt() {
+        XCTAssertEqual(WelcomeSplashPolicy.mode(start: .interactive, vaultExists: false, shownBefore: false), .firstLaunch)
+        // A Mac that has a vault — a start after a full quit, an update's first start: none.
+        XCTAssertEqual(WelcomeSplashPolicy.mode(start: .interactive, vaultExists: true, shownBefore: false), .none)
+        XCTAssertEqual(WelcomeSplashPolicy.mode(start: .interactive, vaultExists: true, shownBefore: true), .none)
         // A profile's process, the self-test, the snapshots, a CI check: never.
-        XCTAssertEqual(WelcomeSplashPolicy.mode(start: .other, enabled: true, vaultExists: true,
-                                                seamlessRelaunchAt: nil, now: now), .none)
-        XCTAssertEqual(WelcomeSplashPolicy.mode(start: .other, enabled: true, vaultExists: false,
-                                                seamlessRelaunchAt: nil, now: now), .none)
+        XCTAssertEqual(WelcomeSplashPolicy.mode(start: .other, vaultExists: false, shownBefore: false), .none)
+        XCTAssertEqual(WelcomeSplashPolicy.mode(start: .other, vaultExists: true, shownBefore: false), .none)
+        XCTAssertEqual(WelcomeSplashPolicy.mode(start: .other, vaultExists: false, shownBefore: false, asked: true), .none)
     }
 
-    func testTheSettingTurnsItOff() {
-        XCTAssertEqual(WelcomeSplashPolicy.mode(start: .interactive, enabled: false, vaultExists: true,
-                                                seamlessRelaunchAt: nil, now: now), .none)
-        XCTAssertEqual(WelcomeSplashPolicy.mode(start: .interactive, enabled: false, vaultExists: false,
-                                                seamlessRelaunchAt: nil, now: now), .none)
+    func testItIsShownOnce() {
+        // Met, then the app quit before a vault was made: the next start goes straight to the setup.
+        XCTAssertEqual(WelcomeSplashPolicy.mode(start: .interactive, vaultExists: false, shownBefore: true), .none)
     }
 
-    func testTheAppsOwnRestartIsSeamless() {
-        // Settings › Language's restart a few seconds ago, an update's installer some minutes ago.
-        for ago in [3.0, 9 * 60.0, WelcomeSplashPolicy.seamlessWindow] {
-            XCTAssertEqual(WelcomeSplashPolicy.mode(start: .interactive, enabled: true, vaultExists: true,
-                                                    seamlessRelaunchAt: now.addingTimeInterval(-ago), now: now), .none, "\(ago) s")
-        }
-        // A mark older than the window is an earlier restart's: the person opened the app since.
-        XCTAssertEqual(WelcomeSplashPolicy.mode(start: .interactive, enabled: true, vaultExists: true,
-                                                seamlessRelaunchAt: now.addingTimeInterval(-WelcomeSplashPolicy.seamlessWindow - 1),
-                                                now: now), .returning)
-        // A mark well in the future (the clock set back since) is not believed.
-        XCTAssertEqual(WelcomeSplashPolicy.mode(start: .interactive, enabled: true, vaultExists: true,
-                                                seamlessRelaunchAt: now.addingTimeInterval(3_600), now: now), .returning)
+    func testAskedForItIsShownOnAnyMac() {
+        // `--welcome`, to look at it: with a vault it leads to the lock screen by itself.
+        XCTAssertEqual(WelcomeSplashPolicy.mode(start: .interactive, vaultExists: true, shownBefore: true, asked: true), .returning)
+        XCTAssertEqual(WelcomeSplashPolicy.mode(start: .interactive, vaultExists: false, shownBefore: true, asked: true), .firstLaunch)
     }
 
     func testTheFirstGreetingIsInTheInterfacesLanguage() {
@@ -51,7 +37,7 @@ final class WelcomeSplashPolicyTests: XCTestCase {
         XCTAssertEqual(WelcomeSplashPolicy.nextGreeting(languages: [], last: nil, interfaceLanguage: "ru"), -1)
     }
 
-    func testEachLaterStartTakesTheNextLanguageRoundTheList() {
+    func testAskedForAgainItTakesTheNextLanguageRoundTheList() {
         let languages = ["ru", "en", "de"]
         var last: Int? = nil
         var seen: [String] = []

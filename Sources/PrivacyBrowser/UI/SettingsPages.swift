@@ -16,9 +16,6 @@ struct AppearanceSettings: View {
             SettingRow(L("settings.appearance.light"), detail: L("settings.appearance.light.detail"), effect: .now) {
                 SettingSwitch(isOn: $appearance.entryLight, label: L("settings.appearance.light"))
             }
-            SettingRow(L("settings.appearance.welcome"), detail: L("settings.appearance.welcome.detail"), effect: .appStart) {
-                SettingSwitch(isOn: $appearance.welcome, label: L("settings.appearance.welcome"))
-            }
             SettingsCaption(L("settings.appearance.listAndMotion"))
             SettingRow(L("settings.appearance.density"), detail: L("settings.appearance.density.detail"), effect: .now) {
                 LumenSegmented(selection: $appearance.density,

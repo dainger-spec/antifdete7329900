@@ -1887,8 +1887,6 @@
 "settings.appearance.entry" = "Экран входа";
 "settings.appearance.light" = "Свет Lumen при входе";
 "settings.appearance.light.detail" = "Два затмения в углах экрана входа и окна профилей. Появляются один раз, когда открываете приложение, и остаются приглушённым фоном.";
-"settings.appearance.welcome" = "Приветствие при запуске";
-"settings.appearance.welcome.detail" = "Когда Lumen открывается после полного выхода и при первом запуске: приветствие, написанное от руки, каждый раз на другом языке, а затем открывается окно. Пара секунд; любая клавиша или щелчок — сразу дальше.";
 "settings.appearance.listAndMotion" = "Список и движение";
 "settings.appearance.density" = "Плотность списка профилей";
 "settings.appearance.density.detail" = "Компактно — строки ниже, на экране больше профилей.";

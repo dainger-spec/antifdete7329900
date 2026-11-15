@@ -195,8 +195,6 @@ enum SystemOpen {
                                 Bundle.main.bundleURL.path]
             do {
                 try waiter.run()
-                // The reopening is the restart the person asked for: no launch screen before it.
-                WelcomeLaunch.markSeamlessRelaunch()
             } catch {
                 SystemOpen.log.notice("The app could not be set to open again after it quits: \(error.logKind, privacy: .public)")
             }
@@ -215,8 +213,6 @@ enum SystemOpen {
         open.addsToRecentItems = false
         _ = try await NSWorkspace.shared.openApplication(at: helper, configuration: open)
         installerStarted = true
-        // The installer opens the new build itself, as the end of this quit: no launch screen then.
-        WelcomeLaunch.markSeamlessRelaunch()
     }
 
     /// The update's installer was started: it opens the app itself once it is done, and an app

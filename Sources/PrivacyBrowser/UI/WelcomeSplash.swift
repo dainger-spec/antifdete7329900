@@ -256,7 +256,8 @@ struct WelcomeLayout {
 /// quit, a greeting like the one a new MacBook writes while you set it up — in different languages,
 /// drawn beautifully as with a pen, a couple of seconds, then the app opens smoothly"; the mock: a
 /// handwritten greeting in liquid glass over the eclipse's horizon, "L U M E N" under it, a small
-/// button; the look and timing the owner approved in design/prototypes/welcome.html).
+/// button; the look and timing the owner approved in design/prototypes/welcome.html). Shown once,
+/// at the first launch only (the owner, the same day; `WelcomeSplashPolicy`).
 ///
 /// The greeting is Pacifico's own outline, revealed by a pen moving along its letters
 /// (WelcomeLettering), in clear glass lit by the horizon (WelcomeGlass: Metal, compiled as the app
