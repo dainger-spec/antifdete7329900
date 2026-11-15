@@ -2815,7 +2815,7 @@
 "help.vm.step.download" = "Lumen asks Apple which macOS this Mac can run and downloads it from Apple's servers — about 25 GB, over six connections at once. It can be paused; it goes on from where it stopped, also after a quit.";
 "help.vm.step.setup" = "macOS is installed (10–20 minutes) and the new Mac opens in a window. Go through its own setup: the country, an account with a password; choose Set Up Later for Apple Account and leave FileVault off.";
 "help.vm.step.tools" = "In the machine's Finder open My Shared Files (Go → Computer) and open Install Lumen Tools; type the account's password. The machine shuts down by itself: the base system is ready.";
-"help.vm.step.create" = "Press New Machine, give it a name and a proxy. Each machine is made from the base system in seconds at its first start.";
+"help.vm.step.create" = "Press New Machine, give it a name and a proxy. Each machine is made from the base system in seconds at its first start. For another machine like one you have, ⋯ → New Machine with These Settings… opens the same settings under a new name: a new Mac, with nothing of the first one's data.";
 "help.vm.what" = "What a machine has of its own";
 "help.vm.what.system" = "Its own macOS and Safari: cookies, history, the keychain, caches, the DNS cache — everything a Mac keeps, on a disk of its own.";
 "help.vm.what.proxy" = "With a proxy, everything the machine sends goes through it — the whole macOS, not only Safari — and nothing any other way. The proxy is checked before each start; if it does not answer, the machine is not started.";

@@ -77,6 +77,8 @@ Sources/BrowserCore/VirtualMachines/   the model, platform-independent, unit-tes
   VMImageFetch.swift     the download: several connections, chunk by chunk (tested on Linux)
   VMGuestSettings.swift  what the guest is told, what it says back
   VMStartCover.swift     when a start's cover goes (the steps, the guest's word, the limits)
+  VMFailure.swift        the kind of a failure, from the system's error; the room a start needs
+  VMWindowPlacement.swift where a machine's window was left, and whether to go back there
   VMHelperProtocol.swift the app's conversation with the helper
 Sources/VMNetCore/                     the machine's network through a proxy (docs/VM_NETWORK.md)
 Sources/LumenVM/                       the helper: Apple's Virtualization.framework
@@ -108,7 +110,7 @@ The helper answers in JSON lines on its standard output and ends when the machin
 |---|---|---|
 | `catalog` | asks Apple which macOS this Mac can run as a guest | `catalog` (address, version, build) |
 | `install` | installs the restore image into the base's folder | `progress`…, `installed` |
-| `run` | runs a machine in a window until its macOS has shut down | `started`, `traffic`…, `stopped` |
+| `run` | runs a machine in a window until its macOS has shut down | `started`, `traffic`…, (`notKept`,) `stopped` |
 
 A helper that cannot do what it was asked says `failed`, with the system's own words for why
 (`message`) and, where the reason is one the app has words for, its kind (`failure`, "When
