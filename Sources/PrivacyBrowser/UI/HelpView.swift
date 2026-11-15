@@ -102,6 +102,7 @@ enum HelpContent {
                 .heading("commands.waiting"),
                 .commands([
                     ("await page.waitFor(selector)", "commands.waitFor"),
+                    ("await page.waitForURL('**/account')", "commands.waitForURL"),
                     ("await sleep(1500)", "commands.sleep"),
                 ]),
                 .heading("commands.acting"),
@@ -109,6 +110,7 @@ enum HelpContent {
                     ("await page.click(selector)", "commands.click"),
                     ("await page.dblclick(selector)", "commands.dblclick"),
                     ("await page.hover(selector)", "commands.hover"),
+                    ("await page.selectOption(selector, 'DE')", "commands.selectOption"),
                     ("await page.type(selector, text)", "commands.type"),
                     ("await page.press('Enter')", "commands.press"),
                     ("await page.scroll(600)", "commands.scroll"),
@@ -128,6 +130,7 @@ enum HelpContent {
                 .commands([
                     ("log('…', value)", "commands.log"),
                     ("params", "commands.params"),
+                    ("return { orders: 3 }", "commands.result"),
                 ]),
             ]
         case .api:
