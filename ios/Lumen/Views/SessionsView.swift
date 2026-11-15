@@ -6,6 +6,8 @@ struct SessionsView: View {
     @EnvironmentObject var model: AppModel
     @State private var query = ""
     @State private var editor: EditorTarget?
+    /// The session a swipe or a card's menu asked to delete: asked first, as the editor does.
+    @State private var deleting: UUID?
 
     enum EditorTarget: Identifiable {
         case new
@@ -69,10 +71,13 @@ struct SessionsView: View {
                     .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
                     .contextMenu {
                         Button(L("Изменить"), systemImage: "pencil") { editor = .edit(session.id) }
-                        Button(L("Удалить"), systemImage: "trash", role: .destructive) { model.deleteSession(session.id) }
+                        Button(L("Удалить"), systemImage: "trash", role: .destructive) { deleting = session.id }
                     }
-                    .swipeActions {
-                        Button(L("Удалить"), systemImage: "trash", role: .destructive) { model.deleteSession(session.id) }
+                    // Deleting takes the session's cookies and logins for good: no full swipe does it,
+                    // and the button asks first (`deleting`). Not the destructive role, which takes the
+                    // row off the list before the answer.
+                    .swipeActions(allowsFullSwipe: false) {
+                        Button(L("Удалить"), systemImage: "trash") { deleting = session.id }.tint(.red)
                         Button(L("Изменить"), systemImage: "pencil") { editor = .edit(session.id) }.tint(.gray)
                     }
                 }
@@ -107,6 +112,17 @@ struct SessionsView: View {
                 case let .edit(id): SessionEditor(sessionID: id)
                 case let .plans(because): PlansView(because: because)
                 }
+            }
+            // The editor's question, with what its footer says goes.
+            .confirmationDialog(L("Удалить сессию со всеми её данными?"),
+                                isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                                titleVisibility: .visible, presenting: deleting) { id in
+                Button(L("Удалить"), role: .destructive) { model.deleteSession(id) }
+                    .accessibilityIdentifier("confirmDelete")
+            } message: { id in
+                Text(model.session(id)?.syncedProfileID == nil
+                     ? L("Удаляются куки, хранилище, кэш, вкладки и история этой сессии.")
+                     : L("Удаляются куки, хранилище, кэш, вкладки и история этой сессии на iPhone. Профиль на Mac остаётся, но сюда больше не приходит; вернуть его можно на экране синхронизации."))
             }
         }
     }
