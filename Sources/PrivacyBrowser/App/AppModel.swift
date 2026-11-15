@@ -13,6 +13,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var profiles: [ProfileSummary] = []
     /// What the Profiles list shows about each profile beyond its summary (see `ProfileDetails`).
     @Published private(set) var details: [UUID: ProfileDetails] = [:]
+    /// Each profile's details, kept while its stored settings are the same file
+    /// (`profileDetails(of:)`); emptied at Lock.
+    private let profileDetailsCache = ProfileSettingsCache<ProfileDetails>()
     @Published private(set) var isWorking = false
     /// A sync is running: launches wait for it (it replaces the profiles' files on disk).
     private var isSyncing = false
@@ -183,6 +186,8 @@ final class AppModel: ObservableObject {
         AppEnvironment.removeStandaloneSafariHome(in: root)
         // Partial plaintext an unseal that did not finish left (R8): no profile runs yet.
         AppEnvironment.removeUnsealLeftovers(vault: root)
+        // A camera's video an earlier run left in plaintext for its preview (`CameraPreview`).
+        CameraPreview.removeLeftovers()
         let firstPhase: Phase = MasterVault.exists(in: root) ? .locked : .setup
         phase = firstPhase
         license = LicenseModel(root: root)
@@ -660,9 +665,14 @@ final class AppModel: ObservableObject {
         repository = nil
         profiles = []
         details = [:]
+        profileDetailsCache.removeAll()
         deviceSettings = DeviceSettings()
         deviceSettingsUnreadable = false
         phase = MasterVault.exists(in: root) ? .locked : .setup
+        // The camera preview's window, its copy of a video in plaintext and its decoded image go
+        // with the vault (the editor went with the profiles).
+        CameraPreviewWindowController.closeIfOpen()
+        CameraPreview.discardAll()
     }
 
     /// Changes the master password: the vault's key is wrapped anew under it, and nothing else
@@ -743,15 +753,25 @@ final class AppModel: ObservableObject {
         updateIndexNotice()
         let kept = repository?.keptDeletedProfiles() ?? []
         if kept != keptDeletedProfiles { keptDeletedProfiles = kept }
+        details = profileDetails(of: profiles)
+    }
+
+    /// The details of `profiles` (`ProfileDetails`), each profile's settings read only when they
+    /// changed since they were last read (`ProfileSettingsCache`: the same `config.bin` file is not
+    /// decrypted and decoded again). `refresh` runs on the main thread after every launch, stop,
+    /// edit and save, and read every profile's settings each time — a camera's image or video
+    /// inside them included. Settings that do not read give no details, as before. `profiles`: the
+    /// whole list (the details of a profile not in it are let go).
+    func profileDetails(of profiles: [ProfileSummary]) -> [UUID: ProfileDetails] {
+        guard let repository else { return [:] }
         var details: [UUID: ProfileDetails] = [:]
-        if let repository {
-            for profile in profiles {
-                if let configuration = try? repository.loadConfiguration(profile.id) {
-                    details[profile.id] = ProfileDetails(configuration)
-                }
+        for profile in profiles {
+            if let found = try? profileDetailsCache.value(of: profile.id, in: repository, { ProfileDetails($0) }) {
+                details[profile.id] = found
             }
         }
-        self.details = details
+        profileDetailsCache.keep(only: Set(profiles.map(\.id)))
+        return details
     }
 
     /// The new profile's id.
@@ -781,6 +801,8 @@ final class AppModel: ObservableObject {
     func duplicateProfile(_ id: UUID, count: Int, proxies: CopyProxies) -> (made: [UUID], problem: String?) {
         guard let repository else { return ([], nil) }
         var made: [UUID] = []
+        // The list is read again once, at the end: it was before each copy, and every profile's
+        // settings with it, in one call on the main thread.
         defer { if !made.isEmpty { refresh() } }
         do {
             try refuseWhileTheIndexIsUnreadable(repository)
@@ -801,9 +823,8 @@ final class AppModel: ObservableObject {
                 chosen = picked.map(\.proxy)
             }
             for (name, proxy) in zip(names, chosen) {
-                // The plan's limit counts the profiles made so far.
-                if !made.isEmpty { refresh() }
-                if let refusal = license.refusalToCreate() { return (made, refusal.text) }
+                // The plan's limit counts the profiles made so far: those listed, and the copies.
+                if let refusal = license.refusalToCreate(adding: made.count) { return (made, refusal.text) }
                 let summary = try repository.create(name: name, configuration: ProfileClone.configuration(from: original, proxy: proxy))
                 made.append(summary.id)
                 recordInJournal(.copied, detail: originalName, for: summary.id)

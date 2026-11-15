@@ -171,6 +171,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Closing a profile window (or any window) must never quit the app — only ⌘Q or Lock do.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    /// The camera preview's copy of a video, in plaintext while a preview showed it, goes at quit
+    /// too: a quit with no profile running does not lock first (`QuitCoordinator`).
+    func applicationWillTerminate(_ notification: Notification) {
+        CameraPreview.discardAll()
+    }
+
     /// Clicking the dock icon with no visible window brings the Profiles window back.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { model?.activateProfilesWindow() }

@@ -33,9 +33,18 @@ extension AppModel {
     /// The profiles that used the list's entry as it was (`previous`) take it as it is now — an
     /// edit in the Proxies section, or a check that found its type (`ProfileRepository.follow`).
     /// Says which profiles could not be changed (they keep their proxy as it was).
+    ///
+    /// Only the profiles whose settings use that proxy are read and written: which they are, their
+    /// details say (`profileDetails(of:)`, read again only for settings that changed). Every
+    /// profile's settings were read for each proxy a check run found the type of, on the main
+    /// thread. A profile whose settings do not read is given too: it fails, and is said, as before.
     func followProxyEntry(_ entry: ProxyListEntry, previous: ProxySettings) {
         guard let repository else { return }
-        let outcome = repository.follow(entry, previous: previous)
+        let identity = ProxyList.identity(of: previous)
+        let listed = repository.list()
+        let known = profileDetails(of: listed)
+        let candidates = listed.map(\.id).filter { id in known[id].map { $0.proxyIdentity == identity } ?? true }
+        let outcome = repository.follow(entry, previous: previous, among: candidates)
         for (id, reason) in outcome.failed {
             let name = profiles.first { $0.id == id }?.name ?? id.uuidString
             showError(String(format: L("proxies.follow.failed"), name, reason))

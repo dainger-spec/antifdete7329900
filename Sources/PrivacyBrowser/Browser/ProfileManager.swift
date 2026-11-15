@@ -152,9 +152,15 @@ final class ProfileManager: ObservableObject {
     private var lookupsInFlight: Set<UUID> = []
     /// The session warm-up robot of each profile that used one since unlock.
     private var warmUpRobots: [UUID: WarmUpRobot] = [:]
-    /// A cookie import sent to a profile's own process, waiting for its answer.
-    private var pendingCookieExports: [UUID: CheckedContinuation<[ImportedCookie], Error>] = [:]
-    private var pendingCookieImports: [UUID: CheckedContinuation<CookieImportOutcome, Error>] = [:]
+    /// Cookie imports and exports sent to profiles' own processes, waiting for their answers — by
+    /// the request's id, which the process sends back with its answer — each with the timer that
+    /// stops waiting for it. They were kept by the profile's id, and a timer was never cancelled:
+    /// an earlier request's timer ended a later one as "busy", and its answer could then end a
+    /// retry with the earlier request's counts.
+    private var pendingCookieImports: [UUID: (profile: UUID, continuation: CheckedContinuation<CookieImportOutcome, Error>,
+                                              timeout: Task<Void, Never>)] = [:]
+    private var pendingCookieExports: [UUID: (profile: UUID, continuation: CheckedContinuation<[ImportedCookie], Error>,
+                                              timeout: Task<Void, Never>)] = [:]
     /// WebDriver calls sent to profiles' own processes, waiting for their answers (by the call's id).
     private var pendingWebDriver: [UUID: (profile: UUID, continuation: CheckedContinuation<WebDriverAnswer, Never>)] = [:]
     /// The WebDriver's page of each profile run in this process that has a session (`webDriver`).
@@ -640,12 +646,18 @@ final class ProfileManager: ObservableObject {
                 self.scenarioLine(id, runID, line)
             case .scenarioEnded(let runID, let outcome):
                 self.scenarioEnded(id, runID, outcome)
-            case .cookiesImported(let outcome):
-                let pending = self.pendingCookieImports.removeValue(forKey: id)
-                if let outcome { pending?.resume(returning: outcome) } else { pending?.resume(throwing: CookieImportError.busy) }
-            case .cookiesExported(let cookies):
-                let pending = self.pendingCookieExports.removeValue(forKey: id)
-                if let cookies { pending?.resume(returning: cookies) } else { pending?.resume(throwing: CookieImportError.busy) }
+            case .cookiesImported(let outcome, let request):
+                if let outcome {
+                    self.endCookieImport(request, of: id, with: .success(outcome))
+                } else {
+                    self.endCookieImport(request, of: id, with: .failure(CookieImportError.busy))
+                }
+            case .cookiesExported(let cookies, let request):
+                if let cookies {
+                    self.endCookieExport(request, of: id, with: .success(cookies))
+                } else {
+                    self.endCookieExport(request, of: id, with: .failure(CookieImportError.busy))
+                }
             case .networkReport(let report):
                 for waiting in self.pendingNetworkReports.removeValue(forKey: id) ?? [] { waiting.resume(returning: report) }
                 self.onNetworkReport?(id, report)
@@ -686,8 +698,7 @@ final class ProfileManager: ObservableObject {
                 self.log.notice("Profile \(id.uuidString, privacy: .public)'s process \(child.processIdentifier, privacy: .public) ended with status \(status, privacy: .public) after the manager had let it go")
                 return
             }
-            self.pendingCookieImports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
-            self.pendingCookieExports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
+            self.endCookieRequests(of: id)
             self.children[id] = nil
             self.endWebDriver(of: id)
             self.releaseWebRTC(of: id, pid: child.processIdentifier)
@@ -1354,8 +1365,11 @@ final class ProfileManager: ObservableObject {
         }
         if let child = children.removeValue(forKey: id) {
             // Its exit is not heard from here on (`onExit` is taken away below): the WebDriver
-            // calls still waiting for this process get their answer now.
+            // calls and the cookie imports and exports still waiting for this process get their
+            // answer now (the cookies' waited for their timer, and held the profile "busy" for a
+            // launch after this stop).
             endWebDriver(of: id)
+            endCookieRequests(of: id)
             runningProfileIDs.remove(id)
             releaseWebRTC(of: id, pid: child.processIdentifier)
             windowsUp.remove(id)
@@ -1701,7 +1715,41 @@ final class ProfileManager: ObservableObject {
 
     enum CookieImportError: LocalizedError {
         case busy
-        var errorDescription: String? { L("cookies.error.busy") }
+        /// The profile stopped, or its process ended, before it answered.
+        case profileStopped
+        var errorDescription: String? {
+            switch self {
+            case .busy: return L("cookies.error.busy")
+            case .profileStopped: return L("cookies.error.stopped")
+            }
+        }
+    }
+
+    /// The import `request` sent to profile `profile`'s process ends with `result` — its answer, or
+    /// a failure — and its timer is let go. An answer for a request no longer waited for (it timed
+    /// out) is dropped.
+    private func endCookieImport(_ request: UUID, of profile: UUID, with result: Result<CookieImportOutcome, Error>) {
+        guard pendingCookieImports[request]?.profile == profile, let pending = pendingCookieImports.removeValue(forKey: request) else { return }
+        pending.timeout.cancel()
+        pending.continuation.resume(with: result)
+    }
+
+    /// `endCookieImport`, for an export.
+    private func endCookieExport(_ request: UUID, of profile: UUID, with result: Result<[ImportedCookie], Error>) {
+        guard pendingCookieExports[request]?.profile == profile, let pending = pendingCookieExports.removeValue(forKey: request) else { return }
+        pending.timeout.cancel()
+        pending.continuation.resume(with: result)
+    }
+
+    /// The profile's process stopped or exited: every import and export it was asked for and has
+    /// not answered fails now, saying so.
+    private func endCookieRequests(of profile: UUID) {
+        for (request, pending) in pendingCookieImports where pending.profile == profile {
+            endCookieImport(request, of: profile, with: .failure(CookieImportError.profileStopped))
+        }
+        for (request, pending) in pendingCookieExports where pending.profile == profile {
+            endCookieExport(request, of: profile, with: .failure(CookieImportError.profileStopped))
+        }
     }
 
     /// Imports `cookies` into a profile: at once when it runs, else at its next launch, before
@@ -1709,15 +1757,18 @@ final class ProfileManager: ObservableObject {
     func importCookies(_ cookies: [ImportedCookie], into id: UUID) async throws -> CookieImportOutcome {
         // A profile in its own process imports into its own store, and says how it went.
         if let child = children[id] {
-            guard pendingCookieImports[id] == nil else { throw CookieImportError.busy }
+            // One import into a profile at a time, as before.
+            guard !pendingCookieImports.values.contains(where: { $0.profile == id }) else { throw CookieImportError.busy }
+            let request = UUID()
             return try await withCheckedThrowingContinuation { continuation in
-                pendingCookieImports[id] = continuation
-                child.send(.importCookies(cookies))
                 // A process that does not answer (it is sealing on its way out) is not waited on.
-                Task { @MainActor [weak self] in
+                let timeout = Task { @MainActor [weak self] in
                     try? await Task.sleep(nanoseconds: 30_000_000_000)
-                    self?.pendingCookieImports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
+                    guard !Task.isCancelled else { return }
+                    self?.endCookieImport(request, of: id, with: .failure(CookieImportError.busy))
                 }
+                pendingCookieImports[request] = (id, continuation, timeout)
+                child.send(.importCookies(cookies, request: request))
             }
         }
         if let store = sessions[id]?.dataStore {
@@ -1751,15 +1802,17 @@ final class ProfileManager: ObservableObject {
 
     private func cookiesOf(_ id: UUID) async throws -> [ImportedCookie] {
         if let child = children[id] {
-            guard pendingCookieExports[id] == nil else { throw CookieImportError.busy }
+            guard !pendingCookieExports.values.contains(where: { $0.profile == id }) else { throw CookieImportError.busy }
+            let request = UUID()
             return try await withCheckedThrowingContinuation { continuation in
-                pendingCookieExports[id] = continuation
-                // Sent at once: a process that is still starting acts on it once the profile is up.
-                child.send(.exportCookies)
-                Task { @MainActor [weak self] in
+                let timeout = Task { @MainActor [weak self] in
                     try? await Task.sleep(nanoseconds: 60_000_000_000)
-                    self?.pendingCookieExports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
+                    guard !Task.isCancelled else { return }
+                    self?.endCookieExport(request, of: id, with: .failure(CookieImportError.busy))
                 }
+                pendingCookieExports[request] = (id, continuation, timeout)
+                // Sent at once: a process that is still starting acts on it once the profile is up.
+                child.send(.exportCookies(request: request))
             }
         }
         guard let store = sessions[id]?.dataStore?.httpCookieStore else { throw CookieImportError.busy }

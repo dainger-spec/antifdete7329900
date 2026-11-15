@@ -352,6 +352,21 @@ in two places, so a stored camera on a plan that does not open it never reaches 
 
 The same shape as scenario automation (`allowsAutomation`, docs/AUTOMATION.md).
 
+## The editor's preview — `CameraPreview`
+
+The editor's Camera part and its preview window draw what a page would get with the same pipeline.
+An image is decoded once for the size the preview needs (an ImageIO thumbnail of the part the crop
+shows) and kept while it is the chosen one; an image or a colour is drawn again only when a setting
+changes, and only the test pattern and a video are redrawn 15 times a second. (Until 0.1.15 every
+preview redrew 15 times a second and decoded the whole image each time, on the main thread.)
+
+AVFoundation plays a file, so a video is written for its preview into an owner-only folder of this
+run (`$TMPDIR/Lumen-camera-preview-<pid>`, 0700, the file 0600): the profile's video in plaintext,
+which is otherwise kept encrypted. It is removed, and its player let go, when the last preview
+closes (the editor and the preview window), at Lock and at quit; a folder left by a run that did not
+end cleanly is removed at the next launch. Until 0.1.15 the copy was `$TMPDIR/pb-cam-live.mov`, never
+removed; the first launch of a later version removes it.
+
 ## Limitations
 
 - In the JavaScript-shim path, the frames are drawn, not from a sensor. A check that watches for

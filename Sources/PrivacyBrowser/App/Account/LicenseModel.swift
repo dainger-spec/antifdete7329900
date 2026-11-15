@@ -219,12 +219,13 @@ final class LicenseModel: ObservableObject {
         return nil
     }
 
-    /// A new profile may be made here: a working mode and room under the limit (§8.4).
-    func refusalToCreate() -> LicenseRefusal? {
+    /// A new profile may be made here: a working mode and room under the limit (§8.4). `adding`:
+    /// profiles made since the list was last read, counted with it (copies made in one go).
+    func refusalToCreate(adding: Int = 0) -> LicenseRefusal? {
         recompute()
         guard let state else { return nil }
         guard state.mode.allowsWork else { return LicenseRefusal(text: Self.exportOnlyRefusal(state)) }
-        let here = profilesHere().count
+        let here = profilesHere().count + adding
         guard let p = state.entitlement else { return LicenseRefusal(text: L("license.refusal.notChecked")) }
         guard here < state.allowedProfilesHere else { return LicenseRefusal(text: LicenseText.limitProfiles(p)) }
         return nil

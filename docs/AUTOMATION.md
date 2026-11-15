@@ -79,13 +79,23 @@ the page's own record.
 A script's commands act one at a time, in the order they were asked for, whatever the script awaits
 (two at once — a forgotten `await`, `Promise.all` — moved one pointer two ways). Lines logged faster
 than the app shows them are counted, not queued: past 500 waiting, the log says how many it left out
-(a script logging in a loop used to hold up the profile's windows, and Stop behind them).
+(a script logging in a loop used to hold up the profile's windows, and Stop behind them). Commands
+asked for and not answered yet are held to 1,000 (`ScriptGate`): past that, the call throws
+"1000 page commands are waiting to run: write await before each one", which ends the run unless the
+script catches it (a loop that called `page.scroll(…)` or `sleep(…)` without `await` queued them
+without end, and its process's memory with them).
 
 A command that fails rejects its promise with the reason (the script may `try`/`catch` it); one left
 uncaught ends the run with it. Stop ends the run at once: a command that is waiting — `sleep`,
 `waitFor`, a page still loading — stops waiting (it used to run to its end: a script sleeping an hour
-kept its run going for the hour), and a pressed button or key is let go first. A script that loops without ever awaiting keeps its thread busy after
-Stop until the profile stops — the app and the page are not held up.
+kept its run going for the hour), and a pressed button or key is let go first. From Stop on — and once
+the run has ended in any way — every page command, `sleep` and `log` the script still calls throws
+"stopped" at once, on the script's own thread, without reaching the page: a loop that calls any of
+them ends with the run, awaited or not (it used to run on after Stop, each call one more hop to the
+main thread). A loop that calls none of them — `while (true) {}`, or one that catches "stopped" and
+goes on — cannot be interrupted: its thread stays busy after Stop until the profile's process ends,
+when the profile stops (with every profile in Lumen's own process — the sandboxed build,
+`PBProfileProcess` off — until Lumen quits). The app and the page are not held up meanwhile.
 
 The plan's `features` must name `automation` (docs: the document of rights, format 1; absent —
 off): the trial, Professional and Team have it, Personal does not (the owner and the lead,
@@ -251,7 +261,8 @@ a client (Selenium) ── http://127.0.0.1:<port>/wd/<profile's token>/<profile
                                            message = "webdriver:" + the profile's UUID, upper case)
   ```
 
-  (`WebDriverRoute.token`; `scripts/pbctl webdriver <profile>` prints the address). Under `/wd/`
+  (`WebDriverRoute.token`; `scripts/pbctl webdriver <profile>`, a developer script of this source
+  repository that the app does not ship, prints the address). Under `/wd/`
   only that profile's token is taken, for that profile alone — not the API's token, not another
   profile's; under `/v1/` only the API's. So an address given to a script, or left in its logs,
   drives that one profile and nothing else of the API. Renewing the API's token changes every

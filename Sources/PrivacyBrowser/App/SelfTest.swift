@@ -352,6 +352,7 @@ final class SelfTest {
         await group("window sizes") { try await windowSizes(repository) }
         await group("named Safari version") { try await namedSafariVersion(repository) }
         await group("two engines: said once for each pair") { enginesWarningOnce() }
+        await group("camera preview") { cameraPreview() }
         await group("local requests") { try await localRequests(repository) }
         await group("cookies at creation") { try await cookiesAtCreation(repository) }
         await group("diagnostics") { try await diagnosticsBundle(repository) }
@@ -2424,6 +2425,64 @@ final class SelfTest {
     /// the window size it was saved under — the profile's size again once that was changed in the
     /// editor — and never larger than the screen, or hanging outside it. On a defaults suite of its
     /// own; the window itself moved and reopened is not shown here.
+    /// The editor's camera preview (`CameraPreview`): an image is decoded once for the size it is
+    /// shown at, not at every frame; a video's copy for the player is in an owner-only folder of this
+    /// run, and goes with `discardAll` (the last preview closed, Lock, quit); at launch an earlier
+    /// version's copy and the folder of a run that is gone are removed, another process's is not.
+    private func cameraPreview() {
+        CameraPreview.discardAll()
+        let picture = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 3000, pixelsHigh: 2000, bitsPerSample: 8,
+                                       samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                       bytesPerRow: 0, bitsPerPixel: 0)
+        guard let png = picture?.representation(using: .png, properties: [:]) else {
+            check("camera preview: a picture to preview", false)
+            return
+        }
+        var camera = CameraSubstitution.off
+        camera.source = .image
+        camera.imageData = png
+        let before = CameraPreview.imageDecodes
+        for _ in 0..<15 { _ = CameraPreview.frame(for: camera, width: 427, height: 240, sequence: 0) }
+        // The crop moved, as a drag in the preview window moves it: the same decoded picture.
+        camera.crop = CameraSubstitution.Crop(enabled: true, x: 0.1, y: 0.1, width: 0.5, height: 0.5)
+        for step in 0..<15 {
+            camera.crop.x = 0.1 + Double(step) / 100
+            _ = CameraPreview.frame(for: camera, width: 427, height: 240, sequence: 0)
+        }
+        let decodes = CameraPreview.imageDecodes - before
+        check("camera preview: an image is decoded once for the size it is shown at, not at every frame",
+              (1...2).contains(decodes), "\(decodes) decodes for 30 frames")
+
+        let manager = FileManager.default
+        let folder = CameraPreview.videoFolder
+        camera.source = .video
+        camera.videoData = Data(repeating: 7, count: 4096)
+        _ = CameraPreview.frame(for: camera, width: 427, height: 240, sequence: 0)
+        let folderMode = (try? manager.attributesOfItem(atPath: folder.path))?[.posixPermissions] as? Int
+        let copyMode = (try? manager.attributesOfItem(atPath: folder.appendingPathComponent("live.mov").path))?[.posixPermissions] as? Int
+        CameraPreview.discardAll()
+        check("camera preview: a video's copy for its player is readable by this user alone, and goes with the previews",
+              folderMode == 0o700 && copyMode == 0o600 && !manager.fileExists(atPath: folder.path),
+              "folder \(folderMode.map { String($0, radix: 8) } ?? "none"), copy \(copyMode.map { String($0, radix: 8) } ?? "none"), left \(manager.fileExists(atPath: folder.path))")
+
+        // Leftovers: an earlier version's copy, the folder of a run whose process is gone, and the
+        // folder of a process that runs (launchd's, pid 1: not this user's, and never gone).
+        let temporary = manager.temporaryDirectory
+        let earlier = temporary.appendingPathComponent("pb-cam-live.mov")
+        var gone: pid_t = 99_998
+        while gone > 1000, kill(gone, 0) == 0 || errno != ESRCH { gone -= 1 }
+        let dead = temporary.appendingPathComponent("Lumen-camera-preview-\(gone)", isDirectory: true)
+        let running = temporary.appendingPathComponent("Lumen-camera-preview-1", isDirectory: true)
+        defer { try? manager.removeItem(at: running) }
+        manager.createFile(atPath: earlier.path, contents: Data("video".utf8))
+        try? manager.createDirectory(at: dead, withIntermediateDirectories: true)
+        try? manager.createDirectory(at: running, withIntermediateDirectories: true)
+        CameraPreview.removeLeftovers()
+        check("camera preview: at launch an earlier version's copy and a gone run's folder are removed, a running process's is not",
+              !manager.fileExists(atPath: earlier.path) && !manager.fileExists(atPath: dead.path) && manager.fileExists(atPath: running.path),
+              "earlier \(manager.fileExists(atPath: earlier.path)), gone \(manager.fileExists(atPath: dead.path)), running \(manager.fileExists(atPath: running.path))")
+    }
+
     /// Safari newer than the profiles' engine (`EngineWarning`): the profiles window says it until
     /// OK, not again for the same pair of versions, and again for a newer Safari. This Mac's own
     /// state is said, not checked: it is the runner image's.
@@ -7152,8 +7211,9 @@ final class SelfTest {
 
     /// A scenario's JavaScript run through `ScenarioRunner` on a profile's page: it does what it
     /// says and logs it; an error ends the run with its reason; Stop ends a waiting script and one
-    /// that loops without end (the app answering meanwhile); a plan that loses automation lets the
-    /// step under way finish and runs no other.
+    /// that loops without end (the app answering meanwhile); commands asked for without await are
+    /// held to a limit, and a loop that logs ends with its run after Stop; a plan that loses
+    /// automation lets the step under way finish and runs no other.
     private func scenarioRuns(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
             skip("scenario runs: a scenario runs, fails, stops as it should", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the pages)")
@@ -7238,6 +7298,25 @@ final class SelfTest {
         check("scenario runs: Stop ends a waiting script and one that loops without end, and the app answers meanwhile",
               waiting == .stopped(.byUser) && waitingTime < 4 && looping == .stopped(.byUser) && loopingTime < 4 && ticks >= 4,
               "waiting \(String(describing: waiting)) in \(String(format: "%.1f", waitingTime)) s; looping \(String(describing: looping)) in \(String(format: "%.1f", loopingTime)) s; main-thread ticks \(ticks)")
+
+        // A loop that asks for commands without awaiting them: past the limit the call throws, and
+        // the run fails saying to await them (they queued without end). One that logs without end:
+        // Stop makes its `log` throw, so the loop, and the script's thread, end with the run (it ran
+        // on after Stop until the profile stopped).
+        let (flooded, _, floodedTime) = await run("for (;;) { page.scroll(1); }", timeout: 20)
+        let logging = ScenarioRunner(driver: PageDriver(webView: tab.webView) { url in _ = tab.load(url) })
+        logging.start("for (;;) { log('tick'); }")
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        logging.stop()
+        let loggingEnded = await waitUntil(timeout: 5) { !logging.scriptThreadIsAlive }
+        if case .failed(let message)? = flooded {
+            check("scenario runs: commands asked for without await are held to a limit, past which the run fails saying to await them; after Stop a loop's log throws and the loop ends",
+                  message.contains("write await before each one") && floodedTime < 10 && logging.outcome == .stopped(.byUser) && loggingEnded,
+                  "\(message) in \(String(format: "%.1f", floodedTime)) s; logging \(String(describing: logging.outcome)), its thread ended \(loggingEnded)")
+        } else {
+            check("scenario runs: commands asked for without await are held to a limit, past which the run fails saying to await them; after Stop a loop's log throws and the loop ends",
+                  false, "\(String(describing: flooded)) in \(String(format: "%.1f", floodedTime)) s")
+        }
 
         // The plan loses automation after two commands: the third never runs.
         var commands = 0

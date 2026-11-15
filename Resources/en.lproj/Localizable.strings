@@ -11,7 +11,7 @@
 "automation.error.save" = "The automation settings could not be saved: %@";
 "automation.example" = "Try it";
 "automation.example.copy" = "Copy Command";
-"automation.note" = "Start and stop profiles, open pages in them, and read or write their cookies from a script on this Mac — curl, Python or scripts/pbctl. Only this Mac can connect (127.0.0.1), only with the token, and never a web page. Anyone who has the token can start your profiles and read their cookies: keep it like a password.";
+"automation.note" = "Start and stop profiles, open pages in them, and read or write their cookies from a script on this Mac — curl, Python or any HTTP client, with the token below. Only this Mac can connect (127.0.0.1), only with the token, and never a web page. Anyone who has the token can start your profiles and read their cookies: keep it like a password.";
 "automation.notInPlan" = "The automation API is part of the Professional and Team plans. Your plan does not include it: while it is on, it answers every request with a refusal and the reason.";
 "automation.port" = "Port";
 "automation.port.detail" = "Scripts connect to 127.0.0.1 on this port.";
@@ -55,6 +55,7 @@
 "cookies.done.refused" = "WebKit did not keep %1$ld of them: %2$@";
 "cookies.empty" = "Choose an export: what can be imported, and what cannot and why, is shown here before anything is imported.";
 "cookies.error.busy" = "The profile is starting or being encrypted; try again in a moment.";
+"cookies.error.stopped" = "The profile stopped before it answered; try again.";
 "cookies.explanation" = "A JSON export (EditThisCookie, Cookie-Editor, Puppeteer, Playwright, Selenium, Chrome or Firefox databases) or a Netscape cookies.txt. The file is checked first: what cannot be imported is listed with its line and the reason. A running profile gets the cookies at once; a stopped one when it next starts, before its first page loads.";
 "cookies.format.json" = "JSON";
 "cookies.format.netscape" = "Netscape cookies.txt";
@@ -2353,7 +2354,7 @@
 "contract.account.checked" = "Rights checked %@. Renew early — the new period starts where the current one ends, no days are lost.";
 "contract.account.checked.member" = "Rights checked %1$@. The team owner manages the plan — %2$@.";
 "contract.account.checked.member.noEmail" = "Rights checked %@. The team owner manages the plan.";
-"contract.account.trial" = "Everything in Lumen. When the period ends, profiles open for export only — nothing is deleted.";
+"contract.account.trial" = "Everything in Lumen except sync, camera substitution and virtual machines. When the period ends, profiles open for export only — nothing is deleted.";
 "contract.account.period_ended" = "Nothing is deleted: after renewing, everything opens again on this Mac.";
 "contract.account.profiles" = "%1$@ here, %2$@ on other Macs. The limit is shared by all Macs; the server knows only how many profiles each Mac has.";
 "contract.account.profiles.left" = "%@ more possible";
