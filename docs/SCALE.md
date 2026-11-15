@@ -14,8 +14,11 @@ own files change, every Monday, and by hand). Everything runs as the app runs it
 1. **Making profiles** — 200, one by one, through `ProfileRepository.create`, two thirds with an
    HTTP proxy, each with tags and notes; each creation timed, and the vault measured on disk
    before and after.
-2. **The Profiles window** — what it does on every refresh, timed five times over all of them:
-   the index read and every profile's settings decrypted (`AppModel.refresh`), the rows built.
+2. **The Profiles window** — what it does on its first refresh, timed five times over all of
+   them: the index read and every profile's settings decrypted (`AppModel.refresh`), the rows
+   built. A later refresh decrypts only the settings whose `config.bin` changed since it last read
+   them (`ProfileSettingsCache`, by the file's number, size and time): it decrypted all of them every
+   time, after every launch, stop and save, and a camera's image or video with them.
    Then its search (by name, tag and notes) and its filters (all, with a proxy, ephemeral, a tag)
    run over all the rows, timed, and checked against the counts they must give; and the window
    itself drawn with 20 rows and with all of them (`profiles-20.png`, `profiles-200.png` in the
