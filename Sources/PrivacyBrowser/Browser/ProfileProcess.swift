@@ -195,6 +195,7 @@ final class ProfileProcess {
     static let inheritedEnvironment: Set<String> = [
         "USER", "LOGNAME", "SHELL", "__CF_USER_TEXT_ENCODING", "COMMAND_MODE",
         "APP_SANDBOX_CONTAINER_ID", "PRIVACYBROWSER_LANG", "PB_SAFARI_CHROME", "PB_GEO_SERVICES_OFF",
+        SafariProfileMarker.environmentVariable,
     ]
 
     /// Every name a profile's process can find in its environment (the self-test checks it).

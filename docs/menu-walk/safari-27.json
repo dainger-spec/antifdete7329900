@@ -685,9 +685,9 @@
   ],
   "xpc": []
  },
- "View › Show Downloads | showDownloads: | ⌥⌘L": {
+ "View › Show Downloads | showProfileDownloads: | ⌥⌘L": {
   "behaviour": [
-   "disabled"
+   "alert"
   ],
   "xpc": []
  },

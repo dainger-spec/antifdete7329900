@@ -24,6 +24,7 @@ the row says what would show it.
 |---|---|---|
 | Window, tabs, toolbar, address bar (`BrowserWindowController`, `BrowserTabViewItem`, `UnifiedField…`, `UnifiedTabBar`, `ToolbarController`) | window and UI state: the profile's defaults domain (`Library/PrivacyBrowser/SafariDefaults.plist`) | self-test "Safari chrome" (65 checks), menu walk |
 | Navigation and page delegates (`BrowserNavigationDelegate`, `BrowserUIDelegate`, `BrowserInputDelegate`) | — | self-test "Safari chrome" |
+| Ours, in Safari's window: whose window it is — the profile's chip at the toolbar's trailing end (a titlebar accessory) and its name before the window's title (`SafariProfileMarker`, 15 November) | — | self-test "Safari's window, every day": a page measures the same with it and without (first CI run pending) |
 | Menu bar (Safari's `MainMenu.nib`) | — | menu walk (fails on change) |
 | Search providers and the address bar's local completion (`SearchProvidersController`, `Safari::UnifiedFieldCompletionController`, `CompletionListCollectionViewController`) | the profile's defaults | self-test (Safari's services set as the profile needs them) |
 | Favicons, touch icons, template icons (`FaviconProvider`, `WBSFaviconProviderDatabaseController`, `TemplateIconCache`) | `Library/Safari/Favicon Cache`, `Template Icons` | capture's coverage (a SKIP on runners: Safari fetched no touch icon there) |
@@ -34,6 +35,8 @@ the row says what would show it.
 | Highlights (`HighlightManager`, `WBSBlockedHighlightsBannerSQLiteStore`) | `Library/Safari/BlockedBannerHighlights.db` | — |
 | Tab snapshots, previews (`TabSnapshotCacheWithPersistence`, `TabPreviewController`) | the profile's caches | — |
 | Reader, find, media and autoplay state, pinned and closed tabs | — | — |
+| The tabs a profile leaves open (Settings → Startup → Restore tabs) | the profile's own `tabs.bin`, encrypted with its key: Safari's saved window state has no place in a profile, so the tabs are read from Safari's windows as they stand and opened again by Safari's own New Tab at End and `loadURL:` (`SafariTabs`, 15 November; before, the setting did nothing in Safari's window) | self-test "Safari's window, every day" (first CI run pending) |
+| Downloads | where Settings → Downloads says, outside the profile's encrypted storage: taken at WebKit's own download interface (`HostedDownloads`, 15 November), not by Safari's `DownloadsManager`, whose services a profile is refused; View › Show Downloads (⌥⌘L) lists the run's files | self-test "Safari's window, every day" (first CI run pending) |
 
 ## Needed, and not working in the profile
 
@@ -41,7 +44,7 @@ the row says what would show it.
 |---|---|---|
 | Bookmarks (`BookmarksController`, `WebBookmarkGroup`, WebBookmarks) | the database opens "at (null)" (SQLite 11); no `Bookmarks.plist` is in the profile's home after a run | open (O4) |
 | History (`History`, `HistoryController`, `WBSHistoryServiceStore`) | Safari's History service is an XPC service of Safari's, refused to the process: Safari's History view showed nothing (the owner's Mac, 0.1.2). Visits go to the profile's own encrypted history — the one source of a profile's history — and Show All History (⌘Y) and Clear History… open it (`HistoryMenuRoute`); the recent pages in the History menu stay empty | partly (H1 for the menu's recent pages) |
-| Downloads (`DownloadsManager`) | a download does nothing and says nothing (its location view is a refused remote view) | open (O6) |
+| Downloads by Safari's own `DownloadsManager` | did nothing and said nothing (its location view is a refused remote view): O6. Not used any more — a profile's downloads are taken before it (`HostedDownloads`, above); Safari's own downloads button and list stay empty | replaced (15 November) |
 | Tab groups' collection (`WBTabGroupManager`, `WBTabCollection`) | "Failed to instantiate tab collection" at first launch | open (O4) |
 
 ## Not needed: closed

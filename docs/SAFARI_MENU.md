@@ -183,6 +183,14 @@ runs as named). Since the items whose work is done outside the profile were take
   sheet: no bookmark is added that way. So in every walk since run 468: CI's on both macOS (run 520)
   and the owner's (1 November). Each walk makes an empty tab group before these items; in a profile
   without tab groups it is not measured. Not fixed in the owner's week: no change to the product.
+  **Changed 15 November, not walked yet:** AppKit refuses a menu item made without a title by
+  throwing, which is what a folder with no title gives that menu; such an item is now made with one
+  ("Untitled", `SafariChrome.tolerateUntitledMenuItems`), where AppKit would have thrown and
+  nowhere else. Whether that is the throw, the next walk says: if it is, both items bring Safari's
+  sheet, the walk reads them as changed, and their records are to be written again
+  (`--write-record`). The self-test measures the case no walk has — a profile without a tab group:
+  "Safari's window, every day" chooses Add Bookmark…, presses the sheet's Add and reads the
+  Bookmarks menu, and says how many items were made without a title.
 - **Safari's browsing assistant worker** (`com.apple.parsec.SafariBrowsingAssistantWorker`, outside
   the profile) started in three of the eight walks on macOS 26 read — runs 457, 461 and 468, each
   time during another item (Hide Safari, View › Zoom Out, History › Show All History) — and in none
@@ -330,7 +338,7 @@ differ from walk to walk (the record leaves them out).
 | View › Show Reading List Sidebar | ⌃⌘2 | nothing seen | nothing seen | **keep** |
 | View › Show Reader | ⇧⌘R | nothing seen | nothing seen | **keep** |
 | View › Show Tab Overview | ⇧⌘\ | changes the window | changes the window | **keep** |
-| View › Show Downloads | ⌥⌘L | disabled | disabled | **keep** |
+| View › Show Downloads | ⌥⌘L | disabled | disabled | **ours** since 15 November (the columns are run 520's; recorded as our alert, not walked yet): was disabled — Safari's downloads go through services a profile is refused, and a download did nothing; the item lists the profile's own downloads, where each file went and how it ended (`HostedDownloads`) |
 | View › Stop | ⌘. | disabled | disabled | **keep** |
 | View › Reload Page | ⌘R | disabled | disabled | **keep** |
 | View › Reload Page From Origin | ⌥⌘R | disabled | disabled | **keep** |
@@ -349,7 +357,7 @@ differ from walk to walk (the record leaves them out).
 | History › Home | ⇧⌘H | nothing seen | nothing seen | **fixed**: (the owner's decision) the profile's start page, Safari's own home page setting in the process's argument domain; Safari's default (apple.com/startpage) for a profile without one |
 | History › Return to Search Results | ⌥⌘S | disabled | disabled | **keep** |
 | History › Reopen Last Closed Window or Tab | ⇧⌘T | nothing seen | nothing seen | **keep** |
-| History › Reopen All Windows from Last Session | - | disabled | disabled | **keep** |
+| History › Reopen All Windows from Last Session | - | disabled | disabled | **keep**: Safari's saved session has no place in a profile; what a profile left open comes back by its own Restore tabs (`SafariTabs`, Settings → Startup) |
 | Bookmarks › Show Start Page | - | changes the window | changes the window | **keep** |
 | Bookmarks › Show Bookmarks | - | nothing seen | changes the window | **keep** |
 | Bookmarks › Edit Bookmarks | ⌥⌘B | changes the window | changes the window | **keep** |

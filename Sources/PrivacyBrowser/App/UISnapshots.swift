@@ -400,6 +400,11 @@ enum UISnapshots {
         problems += await Shot(name: "simplified-mode-sandboxed", size: CGSize(width: 360, height: 260), titled: false) {
             SimplifiedModeExplanation(reason: .sandboxed)
         }.capture(into: folder)
+        // Whose window it is, in Safari's own window: the profile's chip as the end of Safari's
+        // toolbar carries it, on a light toolbar and on a dark one (SafariProfileMarker).
+        problems += await Shot(name: "safari-profile-marker", size: CGSize(width: 760, height: 104), titled: false) {
+            SafariProfileMarkerPreview()
+        }.capture(into: folder)
         // What sites see: before a snapshot, its differences, every signal, and Safari silent.
         func seen(comparedWithSafari: Bool = true) -> WhatSitesSee {
             let snapshot = WhatSitesSee(profileID: UUID(), manager: { nil }, launch: { _ in })
@@ -1726,6 +1731,43 @@ enum UISnapshots {
 /// adds. A Settings window with a grey band at its top passed here (the owner, 2 November); the real
 /// one is checked by `SettingsWindowCheck`.
 @MainActor
+/// The profile's chip of Safari's window on the two grounds Safari's toolbar has — light and dark,
+/// with the Mac — for four profiles: a colour chosen and one from the id, a glyph chosen, a proxy
+/// whose exit is known, one whose exit is not, and a direct connection; a name too long is cut.
+private struct SafariProfileMarkerPreview: View {
+    @MainActor private var samples: [BrowserChromeModel] { [
+        BrowserChromeModel(profileName: "Northwind US", profileID: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+                           exit: .proxy(endpoint: "us-nyc.proxy.example:1080", countryCode: "US"), avatar: ProfileAvatarStyle(color: 0)),
+        BrowserChromeModel(profileName: "Магазин 3", profileID: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
+                           exit: .proxy(endpoint: "de-ber.proxy.example:1080", countryCode: "DE"), avatar: ProfileAvatarStyle(color: 6, letters: "М3")),
+        BrowserChromeModel(profileName: "Ads — Brand", profileID: UUID(uuidString: "00000000-0000-0000-0000-000000000003")!,
+                           exit: .proxy(endpoint: "proxy.example:8080", countryCode: nil), avatar: ProfileAvatarStyle(color: 1)),
+        BrowserChromeModel(profileName: "A profile whose name is far too long for a toolbar", profileID: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
+                           exit: .direct, avatar: ProfileAvatarStyle(color: 3)),
+    ] }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            row(ground: Color(hex: 0xECECEE))
+            row(ground: Color(hex: 0x29292B))
+        }
+    }
+
+    /// A strip the height of Safari's toolbar, the chips where its trailing end has them.
+    @MainActor private func row(ground: Color) -> some View {
+        HStack(spacing: 14) {
+            Spacer(minLength: 0)
+            ForEach(samples, id: \.profileID) { model in
+                SafariProfileMarkerView(model: model)
+            }
+        }
+        .padding(.trailing, 12)
+        .frame(maxWidth: .infinity)
+        .frame(height: 52)
+        .background(ground)
+    }
+}
+
 private struct Shot {
     let name: String
     let size: CGSize

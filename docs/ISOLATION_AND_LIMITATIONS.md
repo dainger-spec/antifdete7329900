@@ -132,7 +132,7 @@ Background tabs keep running. WebKit may throttle timers in views that aren't in
 |---|---|---|
 | WebKit networking process | WebKit runs one network process per app, with one session per data store inside it | Isolation is per session (logical), not per OS process |
 | Device fingerprint | see §2 | Profiles can be linked by fingerprinting |
-| Downloads folder | Downloads go to `~/Downloads` in plaintext — or the folder Settings → Downloads names, or where the save panel is told (asking each time: also for a download of a background tab or a minimised window, whose tab and window are brought up for the panel; until the third audit, 14 November 2026, those went to the folder unasked) | Outside the encrypted storage |
+| Downloads folder | Downloads go to `~/Downloads` in plaintext — or the folder Settings → Downloads names, or where the save panel is told (asking each time: also for a download of a background tab or a minimised window, whose tab and window are brought up for the panel; until the third audit, 14 November 2026, those went to the folder unasked). In Safari's window the same, since 15 November (`HostedDownloads`; before, a download there did nothing): taken at WebKit's own download interface, never by Safari's download code, whose services a profile is refused. What is a download is decided as Safari decides it — a response the engine cannot show, one sent as an attachment, a link with `download` — but Safari's once-per-site question whether a site may download is not asked, as it never was in a window of ours. View › Show Downloads (⌥⌘L) lists the run's files with where each went and how it ended, and the profile's Dock icon counts those ended since the list was looked at; no file is opened or shown in the Finder from a profile's process | Outside the encrypted storage |
 
 ## 2. Fingerprinting and "Apple device" consistency
 
@@ -1845,13 +1845,25 @@ is out of scope either way (above).
   addresses a profile left open (`tabs.bin`, encrypted with the profile's key, never synced or
   exported) and opens them at its next start: never for an ephemeral profile or one that keeps no
   history, and turning it off forgets them at the profile's next stop. What a file holds is
-  filtered again when read: only web addresses are ever opened from it.
+  filtered again when read: only web addresses are ever opened from it. In Safari's window too,
+  since 15 November (`SafariTabs`; before, the setting did nothing there and every Mac profile
+  started on its start page): Safari's own way back to a session is its saved window state, which
+  a profile's window does not have, so the tabs are read from Safari's windows as they stand —
+  every few seconds while the person is in them, as a window closes and as the profile stops —
+  and opened again by Safari's own File › New Tab at End and the tab's `loadURL:`, the tab that
+  was shown brought in front with Window › Show Next/Previous Tab. Kept there: the pages of the
+  person's windows, in order, and the tab shown. Not kept: a pinned tab's pin, tab groups other
+  than the one shown, a window opened for a scenario's run or a WebDriver session, and a tab left
+  on an address that became a download. Windows that held no page at the end leave nothing open.
+  Should this Safari's tabs not tell their pages (the names are private), each window is kept as
+  the one page in front of it; should it make no tab our way, what was kept stays as it was.
 - **Settings** are this Mac's, in the app's defaults (per key; nothing secret in them — a chosen
   download folder is its path, and in the App Sandbox a bookmark to it). A profile in its own
   process gets the browsing ones over its channel when it starts and whenever they change
   (`ProfileCommand.preferences`), the download folder written out as a path, since that
-  process's home is the profile's own. In Safari's own window, tabs, zoom and downloads follow
-  Safari's settings instead.
+  process's home is the profile's own. In Safari's own window, where a new tab opens and the
+  page zoom are Safari's own; the download folder, asking each time and Restore tabs apply there
+  as in a window of ours.
 
 **Crash fix.** Earlier builds released a browser window's controller from inside
 `windowWillClose`. That could free the `NSWindow` while AppKit was still closing it (a
@@ -1873,6 +1885,32 @@ reports dark. Web content is not restyled; pages render as their sites define th
 mark, a title and the form. While the key is derived (Argon2id), the form gives way to a
 progress line, and the Profiles window fades in once the vault is open. Lock fades back to
 the same screen. Under Reduce Motion the screen and the start page appear without motion.
+
+**Whose window it is, in Safari's window** (the owner, 15 November; `SafariProfileMarker`).
+Until then nothing in Safari's window said which profile it was — only the Dock icon's letters
+did — and with several profiles open, acting in the wrong one is the mistake to prevent. Two
+things say it now, neither of which a page can measure:
+- **A chip at the trailing end of Safari's toolbar**: the profile's glyph, its name and the flag
+  of where it exits, on the profile's own colour (its glyph's in the Profiles window, chosen in
+  the editor or given by its id), the name in that colour's light tone — the same chip a window
+  of ours has, on a ground of its own, since Safari's toolbar is light or dark with the Mac. A
+  name too long is cut at 200 pt. It is a titlebar accessory, laid by AppKit beside the toolbar's
+  items in the room the toolbar has: the toolbar's height, the window's frame and the page's area
+  stay as they are. That is checked each time, not assumed: the window's frame, its content's area
+  and the page's own frame are read before the chip goes in and after, and a chip that changed
+  any of them is taken out at once and stays out for the run (the profile's process reports it).
+- **The window's title begins with the profile's name** — "[Name] page", as a window of ours is
+  titled — wherever the system lists windows by title: the Window menu, the Dock icon's menu,
+  Mission Control. Safari's toolbar shows no title.
+Nothing of it reaches a page: no script, no style, nothing of the web view is changed.
+**Checked by the self-test** ("Safari's window, every day"): everything the page in front
+measures of its window and screen — outer and inner sizes, the chrome's height, the window's
+place, the screen, the viewport — is read with the marker, with it taken out and with it back,
+and must be the same; the title must name the profile and the chip must be there. Not measured
+here (no Mac): that a trailing accessory keeps Safari's toolbar as it is on macOS 26 and 27 —
+the first CI run says. `PB_PROFILE_MARKER=0` in the app's environment leaves Safari's window as
+Safari draws it. **Not covered:** a window's title is readable by other apps on this Mac that
+have the Accessibility or Screen Recording permission, as a window of ours has always been.
 
 **Browser window.** The toolbar is flat: the window's dark colour under a transparent title
 bar, with no glass behind its items (macOS 26 would add it). It holds the Lumen mark, the

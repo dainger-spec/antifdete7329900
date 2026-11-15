@@ -306,10 +306,11 @@ final class ProfileManager: ObservableObject {
         if sessions[id] == nil, children[id] == nil { proxyLocationUnknown.remove(id) }
         if let session = sessions[id] {
             // A profile that is only being warmed up has no window yet: a launch now gives it one.
-            if !session.hasVisibleWindow, openingWindow,
-               !SafariChromeHost.open(session: session, url: session.configuration.startURL) {
-                session.openFirstWindows(restoring: restorableTabs(of: id, session.configuration),
-                                         startURL: session.configuration.startURL)
+            if !session.hasVisibleWindow, openingWindow {
+                let tabs = restorableTabs(of: id, session.configuration)
+                if !SafariChromeHost.open(session: session, url: session.configuration.startURL, restoring: tabs) {
+                    session.openFirstWindows(restoring: tabs, startURL: session.configuration.startURL)
+                }
             }
             session.bringToFront()
             return
@@ -540,8 +541,12 @@ final class ProfileManager: ObservableObject {
         // view is its content (SafariChromeHost); everywhere else, and on a macOS where that is
         // not available, our own window as before. A launch for a warm-up opens none: the robot
         // browses in a window of its own that the user never sees.
-        if openingWindow, !SafariChromeHost.open(session: session, url: configuration.startURL) {
-            session.openFirstWindows(restoring: restorableTabs(of: id, configuration), startURL: configuration.startURL)
+        if openingWindow {
+            // The tabs it left open come back in either window (Settings → Startup → Restore tabs).
+            let tabs = restorableTabs(of: id, configuration)
+            if !SafariChromeHost.open(session: session, url: configuration.startURL, restoring: tabs) {
+                session.openFirstWindows(restoring: tabs, startURL: configuration.startURL)
+            }
         }
         try? repository.markLaunched(id)
         if lookup == nil, let lookupTask {
@@ -958,12 +963,19 @@ final class ProfileManager: ObservableObject {
     /// What a stopping profile leaves open is kept for its next start; with the setting off, or a
     /// profile that keeps none, what was kept is forgotten. A run without a window of the user's (a
     /// warm-up) leaves what was kept as it was.
-    private func rememberOpenTabs(of id: UUID, _ tabs: OpenTabs?, configuration: ProfileConfiguration) {
+    ///
+    /// `emptyForgets`: in Safari's window, where the person's windows are read as they stand
+    /// (`SafariTabs`), windows that held no page at the end — start pages alone — leave nothing
+    /// open: the tabs of the run before, closed since, are forgotten rather than opened again.
+    private func rememberOpenTabs(of id: UUID, _ tabs: OpenTabs?, configuration: ProfileConfiguration,
+                                  emptyForgets: Bool = false) {
         do {
             if !keepsOpenTabs(configuration) {
                 try repository.removeOpenTabs(for: id)
             } else if let tabs, !tabs.windows.isEmpty {
                 try repository.saveOpenTabs(tabs, for: id)
+            } else if tabs != nil, emptyForgets {
+                try repository.removeOpenTabs(for: id)
             }
         } catch {
             log.error("The open tabs of \(id.uuidString, privacy: .public) could not be kept: \(error.logKind, privacy: .public)")
@@ -1417,7 +1429,8 @@ final class ProfileManager: ObservableObject {
             }
         }
         session.shutDown()
-        rememberOpenTabs(of: id, session.lastOpenTabs, configuration: session.configuration)
+        rememberOpenTabs(of: id, session.lastOpenTabs, configuration: session.configuration,
+                         emptyForgets: SafariChromeHost.isHosting && SafariChromeHost.canHost(session.configuration))
         // `session` is now the last reference; it is released when this scope ends, but its
         // data store reference was already dropped in shutDown().
         if !ephemeral, let key {
