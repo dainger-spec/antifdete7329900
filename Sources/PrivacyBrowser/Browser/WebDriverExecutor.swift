@@ -117,19 +117,7 @@ final class WebDriverExecutor {
             // page, as a person's do.
             await driver.input.takeFirstResponder()
             _ = try await script(WebDriverScripts.focus, ["id": try need(element)])
-            for stroke in try WebDriverKeys.strokes(text) {
-                switch stroke {
-                case let .press(combination): try await driver.press(combination)
-                case let .type(run):
-                    do {
-                        try await driver.type(nil, run)
-                    } catch PageDriver.Failure.untypeable {
-                        // No key of this keyboard's layout makes it (another alphabet, an emoji):
-                        // put in as text is, at the caret.
-                        _ = try await script(WebDriverScripts.insertText, ["text": run])
-                    }
-                }
-            }
+            for stroke in try WebDriverKeys.strokes(text) { try await perform(stroke) }
             return "null"
 
         case "elementText": return try await read("text", element)
@@ -215,9 +203,14 @@ final class WebDriverExecutor {
         case "switchWindow":
             guard body["handle"] as? String == Self.windowHandle else { throw WebDriverError.noSuchWindow("a session has one window") }
             return "null"
+        case "performActions":
+            // What cannot be made as a person's — a drag, another button, a click with a modifier
+            // held — is refused here, before any of the request is done (`WebDriverActions`).
+            try await perform(try WebDriverActions.steps(body))
+            return "null"
+        // No request ends with a button or a key held (`WebDriverActions`): nothing is left to let go.
         case "releaseActions": return "null"
         case "alert": throw WebDriverError.noSuchAlert("the driver does not see the page's dialogs")
-        case "performActions": throw WebDriverError.unsupported("Actions are not part of this driver: use click and send keys")
         case "frame": throw WebDriverError.unsupported("frames are not part of this driver: commands act on the page itself")
         case "newWindow", "windowState", "print": throw WebDriverError.unsupported("\(command) is not part of this driver")
         default: throw WebDriverError.unknownCommand(command)
@@ -225,6 +218,93 @@ final class WebDriverExecutor {
     }
 
     static let windowHandle = "lumen-window"
+
+    // MARK: Keys and actions
+
+    /// A stroke given to the page: a key or a combination pressed, or characters typed.
+    private func perform(_ stroke: WebDriverKeys.Stroke) async throws {
+        switch stroke {
+        case let .press(combination): try await driver.press(combination)
+        case let .type(run):
+            do {
+                try await driver.type(nil, run)
+            } catch PageDriver.Failure.untypeable {
+                // No key of this keyboard's layout makes it (another alphabet, an emoji):
+                // put in as text is, at the caret.
+                _ = try await script(WebDriverScripts.insertText, ["text": run])
+            }
+        }
+    }
+
+    /// The steps of "perform actions", one after another, with the page's driver: the pointer
+    /// travels as a hand moves it, the button is held as long as a finger holds it however fast
+    /// the client's actions come, keys are pressed as send keys presses them. A button this
+    /// pressed is let go if a later step fails.
+    private func perform(_ steps: [WebDriverActions.Step]) async throws {
+        var pressedAt: Date?
+        do {
+            for step in steps {
+                switch step {
+                case let .move(origin, x, y):
+                    try await driver.movePointer(to: try await point(origin, x, y))
+                case .press:
+                    guard driver.input.pointerViewportPoint() != nil else {
+                        throw WebDriverError.invalidArgument("the pointer is nowhere yet: move it onto an element before a press")
+                    }
+                    driver.input.holdFocus()
+                    await driver.input.takeFirstResponder()
+                    driver.input.press()
+                    pressedAt = Date()
+                case .release:
+                    let held = pressedAt.map { Date().timeIntervalSince($0) } ?? 1
+                    if held < 0.05 { try await driver.pause((0.05 - held)...(0.1 - held)) }
+                    driver.input.release()
+                    pressedAt = nil
+                    // The next press of a double click comes a moment later, as a finger's does.
+                    try await driver.pause(0.06...0.12)
+                case let .key(stroke):
+                    try await perform(stroke)
+                case let .scroll(origin, x, y, deltaY):
+                    // From the viewport's corner with no offset (Selenium's scroll_by_amount): the
+                    // wheel where the pointer is, not the pointer sent to the corner.
+                    if origin != .viewport || x != 0 || y != 0 { try await driver.movePointer(to: try await point(origin, x, y)) }
+                    try await driver.scroll(by: min(max(deltaY, -100_000), 100_000))
+                case let .pause(seconds):
+                    try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                }
+            }
+        } catch {
+            if pressedAt != nil { driver.input.release() }
+            throw error
+        }
+    }
+
+    /// The viewport point an action names: `x`, `y` from the viewport's corner, from where the
+    /// pointer is, or from the middle of an element (brought into view). One outside the viewport
+    /// is the protocol's "move target out of bounds".
+    private func point(_ origin: WebDriverActions.Origin, _ x: Double, _ y: Double) async throws -> CGPoint {
+        var element = ""
+        if case let .element(id) = origin { element = id }
+        let place = try await script(WebDriverScripts.pointerOrigin, ["id": element])
+        guard let answer = (try? JSONSerialization.jsonObject(with: Data(place.utf8))) as? [String: Any],
+              let fromX = (answer["x"] as? NSNumber)?.doubleValue, let fromY = (answer["y"] as? NSNumber)?.doubleValue,
+              let width = (answer["width"] as? NSNumber)?.doubleValue, let height = (answer["height"] as? NSNumber)?.doubleValue else {
+            throw WebDriverError.unknown("the page gave no place to move to")
+        }
+        var point = CGPoint(x: fromX + x, y: fromY + y)
+        if origin == .pointer {
+            guard let pointer = driver.input.pointerViewportPoint() else {
+                throw WebDriverError.invalidArgument("the pointer is nowhere yet: its first move is to an element, or from the viewport")
+            }
+            point = CGPoint(x: pointer.x + x, y: pointer.y + y)
+        }
+        guard point.x >= 0, point.y >= 0, point.x <= width, point.y <= height else {
+            // Not through Int: a client's number can be past what one holds.
+            throw WebDriverError.moveOutOfBounds(String(format: "the move ends at %.0f, %.0f, outside the %.0f × %.0f of the page in view",
+                                                        point.x, point.y, width, height))
+        }
+        return point
+    }
 
     // MARK: The page
 

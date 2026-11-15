@@ -423,6 +423,13 @@ final class PageDriver {
         }
     }
 
+    /// Moves the pointer to the viewport point `point`, as a hand moves it, and leaves it there
+    /// (WebDriver's actions: a hover, the way to a press).
+    func movePointer(to point: CGPoint) async throws {
+        onLog?("move to \(Int(point.x)),\(Int(point.y))")
+        try await moveTo(point)
+    }
+
     /// Clicks the viewport point `point` (CSS pixels from the viewport's top left).
     func click(at point: CGPoint) async throws {
         onLog?("click at \(Int(point.x)),\(Int(point.y))")

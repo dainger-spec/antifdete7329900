@@ -10,8 +10,9 @@ the self-test proxy's automation form (`/pb-automation/form`).
 With Selenium installed it is Selenium that speaks (webdriver.Remote, as in docs/AUTOMATION.md);
 without it, the same commands of the W3C protocol sent by hand — and the last line says which.
 The basic scenario: open the page, find the field, type into it, click the button, read the text —
-then a script with an element for its argument, a cookie, a screenshot, the window's size, and
-the session's end. Prints `WEBDRIVER PASS …` and exits 0, or `WEBDRIVER FAIL …` and exits 1.
+then the same by actions (ActionChains: the pointer moved onto the button, pressed and let go;
+keys typed; a drag refused), a script with an element for its argument, a cookie, a screenshot,
+the window's size, and the session's end. Prints `WEBDRIVER PASS …` and exits 0, or `WEBDRIVER FAIL …` and exits 1.
 """
 import base64
 import json
@@ -48,6 +49,28 @@ class Raw:
     def find(self, using, value): return self.s("POST", "/element", {"using": using, "value": value})[ELEMENT]
     def send_keys(self, element, text): self.s("POST", f"/element/{element}/value", {"text": text})
     def click(self, element): self.s("POST", f"/element/{element}/click", {})
+
+    def actions(self, pointer=(), keys=()):
+        """The protocol's "perform actions": a pointer's and a keyboard's, as given."""
+        sources = []
+        if pointer:
+            sources.append({"type": "pointer", "id": "mouse", "parameters": {"pointerType": "mouse"}, "actions": list(pointer)})
+        if keys:
+            sources.append({"type": "key", "id": "keys", "actions": list(keys)})
+        self.s("POST", "/actions", {"actions": sources})
+
+    def action_click(self, element):
+        self.actions(pointer=[{"type": "pointerMove", "duration": 250, "x": 0, "y": 0, "origin": {ELEMENT: element}},
+                              {"type": "pointerDown", "button": 0}, {"type": "pointerUp", "button": 0}])
+
+    def action_keys(self, text):
+        self.actions(keys=[step for key in text for step in ({"type": "keyDown", "value": key}, {"type": "keyUp", "value": key})])
+
+    def action_drag(self, element, other):
+        self.actions(pointer=[{"type": "pointerMove", "duration": 250, "x": 0, "y": 0, "origin": {ELEMENT: element}},
+                              {"type": "pointerDown", "button": 0},
+                              {"type": "pointerMove", "duration": 250, "x": 0, "y": 0, "origin": {ELEMENT: other}},
+                              {"type": "pointerUp", "button": 0}])
     def text(self, element): return self.s("GET", f"/element/{element}/text")
     def execute(self, script, *elements): return self.s("POST", "/execute/sync", {"script": script, "args": [{ELEMENT: e} for e in elements]})
     def title(self): return self.s("GET", "/title")
@@ -73,6 +96,19 @@ class WithSelenium:
     def find(self, using, value): return self.driver.find_element(self.By.XPATH if using == "xpath" else self.By.CSS_SELECTOR, value)
     def send_keys(self, element, text): element.send_keys(text)
     def click(self, element): element.click()
+
+    def action_click(self, element):
+        from selenium.webdriver.common.action_chains import ActionChains
+        ActionChains(self.driver).move_to_element(element).click().perform()
+
+    def action_keys(self, text):
+        from selenium.webdriver.common.action_chains import ActionChains
+        ActionChains(self.driver).send_keys(text).perform()
+
+    def action_drag(self, element, other):
+        from selenium.webdriver.common.action_chains import ActionChains
+        ActionChains(self.driver).drag_and_drop(element, other).perform()
+
     def text(self, element): return element.text
     def execute(self, script, *elements): return self.driver.execute_script(script, *elements)
     def title(self): return self.driver.title
@@ -113,6 +149,25 @@ def main():
         typed = driver.execute("return arguments[0].value;", field)
         if typed != "Hello":
             problems.append(f"the field holds {typed!r}")
+        # Actions: the pointer moved onto the button, pressed and let go; keys typed into the
+        # field that has the keyboard; and a drag, which this driver refuses whole.
+        driver.action_click(button)
+        clicked = driver.text(driver.find("css selector", "#clicked"))
+        if clicked != "clicked 2":
+            problems.append(f"after a click by actions the button's count says {clicked!r}")
+        driver.send_keys(field, "")      # the keyboard to the field, the caret at its text's end
+        driver.action_keys("!?")
+        typed = driver.execute("return arguments[0].value;", field)
+        if typed != "Hello!?":
+            problems.append(f"after keys by actions the field holds {typed!r}")
+        try:
+            driver.action_drag(button, field)
+            problems.append("a drag by actions was not refused")
+        except Exception as error:  # noqa: BLE001 — the refusal is what is looked for
+            if "drag" not in str(error):
+                problems.append(f"a drag by actions was refused without saying so: {str(error)[:200]}")
+        if driver.text(driver.find("css selector", "#clicked")) != "clicked 2":
+            problems.append("the drag that was refused pressed the button all the same")
         title = driver.execute("return document.title;")
         if not title or title != driver.title():
             problems.append(f"the title by script is {title!r}, by the command {driver.title()!r}")
@@ -140,8 +195,8 @@ def main():
         print(f"WEBDRIVER FAIL with {by}: " + "; ".join(problems))
         return 1
     print(f"WEBDRIVER PASS with {by}: a session started the profile; the page opened, the field found by CSS and typed into, "
-          "the button found by XPath and clicked, its text read; a script with an element, a cookie, a screenshot and the "
-          "window's size; the session ended")
+          "the button found by XPath and clicked, its text read; a click and keys by actions, a drag refused; a script with "
+          "an element, a cookie, a screenshot and the window's size; the session ended")
     return 0
 
 

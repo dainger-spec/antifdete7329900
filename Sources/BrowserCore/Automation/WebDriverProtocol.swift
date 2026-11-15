@@ -31,6 +31,7 @@ public struct WebDriverError: Error, Equatable, Sendable, Codable {
     public static func unknownCommand(_ message: String) -> WebDriverError { .init("unknown command", 404, message) }
     public static func unknownMethod(_ message: String) -> WebDriverError { .init("unknown method", 405, message) }
     public static func unsupported(_ message: String) -> WebDriverError { .init("unsupported operation", 500, message) }
+    public static func moveOutOfBounds(_ message: String) -> WebDriverError { .init("move target out of bounds", 500, message) }
     public static func javascript(_ message: String) -> WebDriverError { .init("javascript error", 500, message) }
     public static func timeout(_ message: String) -> WebDriverError { .init("timeout", 500, message) }
     public static func scriptTimeout(_ message: String) -> WebDriverError { .init("script timeout", 500, message) }
@@ -234,6 +235,30 @@ public enum WebDriverKeys {
         0xE020: "6", 0xE021: "7", 0xE022: "8", 0xE023: "9", 0xE024: "*", 0xE025: "+", 0xE026: ",", 0xE027: "-",
         0xE028: ".", 0xE029: "/",
     ]
+
+    /// What one key of the protocol is: "perform actions" gives its keys one at a time, each
+    /// pressed and let go by itself (`WebDriverActions`).
+    public enum Key: Equatable, Sendable {
+        /// Shift, Control, Alt or Meta, of either side.
+        case modifier(String)
+        /// A key the driver presses by its name ("Enter", "PageDown").
+        case named(String)
+        /// A character to type — a number pad's digit or sign as its character.
+        case character(Character)
+        /// The protocol's NULL: every modifier is let go.
+        case null
+    }
+
+    /// What `given` is; a key this cannot press is refused by its code point, as in `strokes`.
+    public static func key(_ given: Character) throws -> Key {
+        let only = given.unicodeScalars.count == 1 ? given.unicodeScalars.first?.value : nil
+        guard let code = only, (0xE000...0xE05D).contains(code) else { return .character(given) }
+        if let character = characters[code] { return .character(character) }
+        if code == 0xE000 { return .null }
+        if let modifier = modifiers[code] { return .modifier(modifier) }
+        if let name = named[code] { return .named(name) }
+        throw WebDriverError.unsupported(String(format: "the key U+%04X is not one this can press", code))
+    }
 
     /// The strokes `text` asks for. A modifier holds until the protocol's NULL (U+E000) or the
     /// text's end; a key this cannot press is refused by its code point.

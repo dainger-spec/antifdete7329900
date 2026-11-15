@@ -319,6 +319,10 @@ a client (Selenium) ── http://127.0.0.1:<port>/wd/<profile's token>/<profile
                 Shift/Control/Alt/Meta of either side held until NULL; the number pad's digits
                 and signs as their characters) through WebDriverKeys; text the keyboard's
                 layout has no key for is put in as text
+       actions ── WebDriverActions (BrowserCore): the client's input sources tick by tick as
+                steps of the driver's own pointer, keys and wheel — a move onto an element or
+                to a point (a hover), the left button pressed and let go (a click, a double
+                click), keys and combinations, the wheel, pauses
        text, tag, attribute, property, CSS value, rect, enabled, selected, displayed, clear
        execute/sync and /async ── the client's script in the driver's own world
        cookies of the page ── the profile's store (WKHTTPCookieStore)
@@ -362,9 +366,18 @@ a client (Selenium) ── http://127.0.0.1:<port>/wd/<profile's token>/<profile
 - **Scripts run in the driver's world**, not the page's: the DOM is the same, an element can be
   an argument and a result, but the page's own JavaScript variables are not seen. That is what
   lets an element cross to the script without marking it in the page.
+- **Actions** (Selenium's ActionChains, WebdriverIO's `action`): `move_to_element` — a hover,
+  what opens a menu —, `click`, `double_click`, `send_keys`, `key_down`/`key_up` around keys,
+  `scroll_to_element`, `scroll_by_amount`, `pause`. The pointer travels to its place as a hand
+  moves it whatever duration the client asks, and the button is held as long as a finger holds
+  it. **Not among them**, each refused with "unsupported operation" saying which, before
+  anything of the request is done: a move with the button held (`drag_and_drop`,
+  `click_and_hold`), the right button (`context_click`), a touch or a pen, a click with a
+  modifier key held, the wheel sideways. A drag needs events of a kind this input has not been
+  measured against a person's (docs/PAGE_INPUT.md), and is left out rather than guessed.
 - **Not there:** frames, the page's dialogs (alert, confirm), several windows or tabs in one
-  session, the Actions API (ActionChains), file uploads, printing. Each answers with the
-  protocol's own error ("unsupported operation", "no such alert").
+  session, file uploads, printing. Each answers with the protocol's own error ("unsupported
+  operation", "no such alert").
 - **The plan:** part of automation (`allowsAutomation`), refused without it with the reason.
 - **Clients:** Selenium in any language, WebdriverIO, or anything else that speaks the protocol.
   A web page's request is refused (it carries `Origin` or `Sec-Fetch-Site`); Node's built-in
@@ -417,10 +430,13 @@ docs/AUTOMATION_API.md).
 ### Checked
 
 `WebDriverProtocolTests` (the commands by method and path as Selenium sends them, the errors, the
-keys as strokes — the keys beside the arrows and the number pad's among them). The page's scripts against a real browser while they were written (finding by
+keys as strokes — the keys beside the arrows and the number pad's among them);
+`WebDriverActionsTests` (what ActionChains sends for a hover, a click with keys after it, a
+double click, the wheel — as the driver's steps — and each thing refused). The page's scripts against a real browser while they were written (finding by
 CSS and XPath, an invalid selector, a covered element, an option, clear, a script with elements in
 and out, a stale reference). In the full pipeline, `scripts/webdriver_check.sh`: `Lumen
 --webdriver-serve` over a temporary vault, and `scripts/webdriver_check.py` with Selenium's own
 client — a session starts the profile in a process of its own with Safari's window, opens the
 self-test proxy's form, finds the field by CSS, types, finds the button by XPath, clicks, reads
-the text; then a script with an element, a cookie, a screenshot, the window's size, and quit.
+the text; a click made by actions (the pointer moved onto the button, pressed, let go) and keys
+typed by actions; then a script with an element, a cookie, a screenshot, the window's size, and quit.
