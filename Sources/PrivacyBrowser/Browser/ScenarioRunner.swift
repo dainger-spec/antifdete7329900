@@ -373,35 +373,69 @@ final class ScenarioRunner {
 }
 
 /// A thread with a run loop, for one scenario's JavaScript: work is handed to it in order.
+///
+/// Work comes through a run-loop source of its own (version 0), signalled for each block: a source
+/// handled makes `RunLoop.run(mode:before:)` return, and the loop then sees a cancellation. Blocks
+/// given with `CFRunLoopPerformBlock` did not: run, they are no source handled, so `run` went on
+/// waiting and the thread never looked at `isCancelled` again — every run's thread, and its
+/// JavaScript context, stayed until the profile's process ended, a finished run's too (the
+/// self-test's "after Stop … its thread ends" found it).
 private final class ScriptThread: Thread, @unchecked Sendable {
     private var runLoop: CFRunLoop?
+    private var source: CFRunLoopSource?
+    /// The blocks given and not run yet, in order.
+    private var work: [() -> Void] = []
     private let ready = DispatchSemaphore(value: 0)
     private let lock = NSLock()
     /// The run's JavaScript; let go when the thread ends.
     var context: JSContext?
 
     override func main() {
+        var sourceContext = CFRunLoopSourceContext()
+        sourceContext.info = Unmanaged.passUnretained(self).toOpaque()
+        sourceContext.perform = { info in
+            guard let info else { return }
+            Unmanaged<ScriptThread>.fromOpaque(info).takeUnretainedValue().runWork()
+        }
+        let source = CFRunLoopSourceCreate(kCFAllocatorDefault, 0, &sourceContext)
+        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, CFRunLoopMode.defaultMode)
         lock.lock()
         runLoop = CFRunLoopGetCurrent()
+        self.source = source
         lock.unlock()
-        // A source keeps the run loop waiting for work.
-        let port = Port()
-        RunLoop.current.add(port, forMode: .default)
         ready.signal()
         while !isCancelled {
             _ = RunLoop.current.run(mode: .default, before: .distantFuture)
         }
+        lock.lock()
+        self.source = nil
+        runLoop = nil
+        work.removeAll()
+        lock.unlock()
+        if let source { CFRunLoopSourceInvalidate(source) }
         context = nil
     }
 
     func waitUntilReady() { ready.wait() }
 
+    /// The blocks given so far, in order; one given while they run is the next signal's.
+    private func runWork() {
+        lock.lock()
+        let blocks = work
+        work.removeAll()
+        lock.unlock()
+        for block in blocks { block() }
+    }
+
     func perform(_ block: @escaping () -> Void) {
         lock.lock()
-        let loop = runLoop
+        guard let loop = runLoop, let source else {
+            lock.unlock()
+            return
+        }
+        work.append(block)
         lock.unlock()
-        guard let loop else { return }
-        CFRunLoopPerformBlock(loop, CFRunLoopMode.defaultMode.rawValue, block)
+        CFRunLoopSourceSignal(source)
         CFRunLoopWakeUp(loop)
     }
 }
