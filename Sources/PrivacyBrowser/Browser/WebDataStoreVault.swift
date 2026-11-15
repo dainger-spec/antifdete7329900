@@ -58,6 +58,10 @@ final class WebDataStoreVault {
         var attempts = 0
         /// Sealed by `forceSeal`: WebKit kept the store in use until the end.
         var forced = false
+        /// How many times the data was archived, and how many times it was not because it was
+        /// still what the last archive read (`archiveIfChanged`).
+        var archivePasses = 0
+        var archivePassesSkipped = 0
     }
 
     /// Written by `forceSeal`, and by every seal before it deletes what it sealed (removed once all
@@ -263,6 +267,8 @@ final class WebDataStoreVault {
         // Recovered-from-disk data needs neither: archive once and delete the files.
         let delays: [UInt64] = activeStore ? retryDelays : [0]
         var lastError: Error?
+        // What this seal's last archive read (`archiveIfChanged`): none yet.
+        var archived: DirectoryStamp?
         for seconds in delays {
             result.attempts += 1
             if seconds > 0 { try? await Task.sleep(nanoseconds: seconds * 1_000_000_000) }
@@ -271,9 +277,14 @@ final class WebDataStoreVault {
             result.directories = directories
             do {
                 let roots = Dictionary(uniqueKeysWithValues: try directories.map { (try layout.label(for: $0), $0) })
-                result.stats = try await Task.detached(priority: .userInitiated) {
-                    try EncryptedDirectoryArchive.seal(roots: roots, to: archive, key: key)
-                }.value
+                let stats = try await archiveIfChanged(roots, to: archive, key: key, since: archived)
+                if let stats {
+                    result.stats = stats
+                    result.archivePasses += 1
+                    archived = Self.settled(stats.stamp)
+                } else {
+                    result.archivePassesSkipped += 1
+                }
                 if activeStore {
                     try await Self.removeStore(for: profileID)
                 }
@@ -308,12 +319,12 @@ final class WebDataStoreVault {
             }
             // All of it gone: the archive is current, and nothing found later is residue.
             if swept { try? FileManager.default.removeItem(at: marker) }
-            log.info("Sealed profile \(profileID.uuidString, privacy: .public): \(result.stats.files) files, \(result.stats.bytes) bytes (activeStore=\(activeStore))")
+            log.info("Sealed profile \(profileID.uuidString, privacy: .public): \(result.stats.files) files, \(result.stats.bytes) bytes (activeStore=\(activeStore)), archived \(result.archivePasses) time(s), unchanged at \(result.archivePassesSkipped) more attempt(s)")
             return result
         }
         if activeStore && forceSealWhenStoreStaysInUse {
             log.error("WebKit kept the data store of \(profileID.uuidString, privacy: .public) in use through \(result.attempts) attempts (\(lastError.map { $0.logKind } ?? "no error", privacy: .public) \(String(describing: lastError), privacy: .private)); forcing the seal before quitting")
-            return try await forceSeal(profileID: profileID, key: key, result: result)
+            return try await forceSeal(profileID: profileID, key: key, result: result, archived: archived)
         }
         log.error("Giving up sealing \(profileID.uuidString, privacy: .public): \(lastError.map { $0.logKind } ?? "no error", privacy: .public) \(String(describing: lastError), privacy: .private)")
         throw VaultError.storeStillInUse(profileID)
@@ -324,11 +335,15 @@ final class WebDataStoreVault {
     /// Nothing in this process uses the store again. Whatever WebKit writes between this and the
     /// exit is residue: the marker, written before the deletion, makes the next launch or unlock
     /// discard it instead of preferring it over this archive as it would crash leftovers.
-    private func forceSeal(profileID: UUID, key: SymmetricKey, result: SealResult) async throws -> SealResult {
+    ///
+    /// `archived`: what the last archive of this seal read. Data that is still that is not
+    /// archived once more (`archiveIfChanged`): the archive there holds it.
+    private func forceSeal(profileID: UUID, key: SymmetricKey, result: SealResult, archived: DirectoryStamp?) async throws -> SealResult {
         let archive = repository.webDataArchiveURL(for: profileID)
         let marker = forcedSealMarkerURL(for: profileID)
         let layout = Self.layout
         var result = result
+        var archived = archived
         // Two tries: a file WebKit replaces while it is being read fails one archive pass.
         for _ in 0..<2 {
             result.attempts += 1
@@ -337,9 +352,14 @@ final class WebDataStoreVault {
             result.directories = directories
             do {
                 let roots = Dictionary(uniqueKeysWithValues: try directories.map { (try layout.label(for: $0), $0) })
-                result.stats = try await Task.detached(priority: .userInitiated) {
-                    try EncryptedDirectoryArchive.seal(roots: roots, to: archive, key: key)
-                }.value
+                let stats = try await archiveIfChanged(roots, to: archive, key: key, since: archived)
+                if let stats {
+                    result.stats = stats
+                    result.archivePasses += 1
+                    archived = Self.settled(stats.stamp)
+                } else {
+                    result.archivePassesSkipped += 1
+                }
                 // Without the marker, residue would later be taken for newer data: never delete first.
                 try Data().write(to: marker, options: .atomic)
                 for directory in directories {
@@ -351,13 +371,52 @@ final class WebDataStoreVault {
                     }
                 }
                 result.forced = true
-                log.error("Force-sealed profile \(profileID.uuidString, privacy: .public): \(result.stats.files) files, \(result.stats.bytes) bytes")
+                log.error("Force-sealed profile \(profileID.uuidString, privacy: .public): \(result.stats.files) files, \(result.stats.bytes) bytes, archived \(result.archivePasses) time(s), unchanged at \(result.archivePassesSkipped) more attempt(s)")
                 return result
             } catch {
                 log.error("Forced seal attempt for \(profileID.uuidString, privacy: .public) failed: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
             }
         }
         throw VaultError.storeStillInUse(profileID)
+    }
+
+    /// Archives `roots` into `archive` — unless they are still what the last archive of this seal
+    /// read (`last`, its `Stats.stamp`): then the archive there holds them as they are, and nil is
+    /// returned. Each attempt archived the data whole — every file read, encrypted and written, the
+    /// network cache with them — before it asked WebKit to remove the store: where WebKit keeps the
+    /// store until the process ends (a profile in Safari's window: every stop CI has measured),
+    /// that was four archives of the same data for one stop.
+    ///
+    /// "Still what it read": every directory and file beneath them has the place, kind,
+    /// permissions, number, size and times it had when the archive looked at it, which it did
+    /// before it read anything of it (`DirectoryStamp`). Anything else — a write since, a file
+    /// more or less, a stamp that could not be taken — is archived again, as before.
+    ///
+    /// And only an archive of settled data stands for a later one (`settled`).
+    private func archiveIfChanged(_ roots: [String: URL], to archive: URL, key: SymmetricKey,
+                                  since last: DirectoryStamp?) async throws -> EncryptedDirectoryArchive.Stats? {
+        if let last {
+            let now = await Task.detached(priority: .userInitiated) { DirectoryStamp.of(roots: roots) }.value
+            if now == last { return nil }
+        }
+        return try await Task.detached(priority: .userInitiated) {
+            try EncryptedDirectoryArchive.seal(roots: roots, to: archive, key: key)
+        }.value
+    }
+
+    /// How long every entry must have been unchanged when an archive looked at it for that archive
+    /// to stand for a later one (`settled`).
+    static let settledAfter: TimeInterval = 0.5
+
+    /// `stamp`, an archive's, when the archive may stand for a later one of the same data: nothing
+    /// it read had changed within `settledAfter` before it began. WebKit writes some files through
+    /// a memory mapping — the file gets its size and its times as it is made, its bytes a moment
+    /// later — and one read in between would be archived unfinished and look unchanged afterwards.
+    /// An archive that met anything so new is followed by another at the next attempt, as every
+    /// archive was before.
+    static func settled(_ stamp: DirectoryStamp?) -> DirectoryStamp? {
+        guard let stamp, stamp.quietSeconds >= settledAfter else { return nil }
+        return stamp
     }
 
     /// WebKit data of the profile is on disk unsealed — a run that did not get to seal (a crash),

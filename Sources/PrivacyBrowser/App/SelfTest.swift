@@ -595,7 +595,7 @@ final class SelfTest {
             check("layout round-trips \(label)", roundTrip?.standardizedFileURL.path == directory.standardizedFileURL.path,
                   roundTrip?.path ?? "nil")
         }
-        info("sealed \(sealed.stats.files) files, \(sealed.stats.bytes) bytes in \(sealed.attempts) attempt(s)")
+        info("sealed \(sealed.stats.files) files, \(sealed.stats.bytes) bytes in \(sealed.attempts) attempt(s), archived \(sealed.archivePasses) time(s)")
         check("plaintext removed after seal", layout.discoverDirectories(for: a).isEmpty)
         let archive = (try? Data(contentsOf: repository.webDataArchiveURL(for: a))) ?? Data()
         check("archive written", archive.count > 64, "\(archive.count) bytes")
@@ -1898,7 +1898,9 @@ final class SelfTest {
               stopSeconds < 15 && sealReport != nil, "\(Int(stopSeconds)) s, \(String(describing: sealReport))")
         info("Safari chrome: the stop sealed the profile's data "
              + (sealReport.map { $0.forced ? "by force (WebKit kept the store in use)" : "without force (WebKit let the store go)" } ?? "(no report)")
-             + ", attempts \(sealReport?.attempts ?? 0), pages closed first \(sealReport?.pagesClosed ?? 0), seal \(Int(sealReport?.seconds ?? 0)) s, stop \(Int(stopSeconds)) s")
+             + ", attempts \(sealReport?.attempts ?? 0), pages closed first \(sealReport?.pagesClosed ?? 0), seal \(Int(sealReport?.seconds ?? 0)) s, stop \(Int(stopSeconds)) s"
+             + "; its data archived \(sealReport?.archivePasses ?? -1) time(s), and not again at \(sealReport?.archivePassesSkipped ?? -1) "
+             + "attempt(s) that found it as the last archive read it (it was archived at every attempt: four times)")
         // Nothing is written in the home once it is sealed: a file written there late (cfprefsd
         // writes a domain's file a moment after a change) would make a plaintext home, which the
         // next launch takes for one a crash left and uses instead of the archive.
@@ -8308,6 +8310,14 @@ final class SelfTest {
         let sealed = try await vault.seal(profileID: profile.id, key: key)
         check("forced seal: used when WebKit keeps the store through every attempt", sealed.forced,
               "attempts=\(sealed.attempts)")
+        // The data is archived at an attempt only when it is not what the last archive read
+        // (`WebDataStoreVault.archiveIfChanged`): at least once, and never more than once an attempt.
+        // That the archive kept holds the data is what "the archive restores" below reads back.
+        check("forced seal: the data was archived, and at no attempt more than once",
+              sealed.archivePasses >= 1 && sealed.archivePasses + sealed.archivePassesSkipped <= sealed.attempts,
+              "archived \(sealed.archivePasses), unchanged at \(sealed.archivePassesSkipped), attempts \(sealed.attempts)")
+        info("forced seal: \(sealed.attempts) attempts, the data archived \(sealed.archivePasses) time(s) and found as the last archive "
+             + "read it \(sealed.archivePassesSkipped) time(s) (it was archived at every attempt)")
         check("forced seal: plaintext deleted, marker written",
               layout.discoverDirectories(for: profile.id).isEmpty && FileManager.default.fileExists(atPath: marker.path))
         let archive = (try? Data(contentsOf: repository.webDataArchiveURL(for: profile.id))) ?? Data()
