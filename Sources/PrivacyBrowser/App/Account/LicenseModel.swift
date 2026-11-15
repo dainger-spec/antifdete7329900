@@ -496,6 +496,22 @@ final class LicenseModel: ObservableObject {
         return renewedForSync
     }
 
+    /// The vaults this Mac's account keeps on the Lumen server (CONTRACT §16.1), asked with the
+    /// device's token: what a Mac without a vault asks before it brings one back (`RestoreModel`).
+    /// After a renewal of this run, as a sync (`renewForSync`): a token the server no longer knows is
+    /// gone by then. Nothing is changed by asking.
+    func syncVaults() async -> AccountVaults.State {
+        guard !isPreview, let client else { return .unreachable }
+        guard await renewForSync(), let token = record.deviceToken, !token.isEmpty else {
+            return record.isSignedIn ? .unreachable : .signedOut
+        }
+        let state = AccountVaults.state(of: await client.syncVaults(deviceToken: token))
+        // The server does not know the token: the renewal says why, and signs this Mac out when it
+        // was unlinked (§9.4) — as after a sync the server refused with `401`.
+        if state == .signedOut { _ = await renewForSync(again: true) }
+        return state
+    }
+
     // MARK: Signing in
 
     /// What the password gave.

@@ -321,12 +321,50 @@ struct SetupView: View {
     /// 1 November) — a pause, and a choice made knowingly. Unticked again when the password changes:
     /// what was written down is then another password.
     @State private var writtenDown = false
+    /// "I already have a vault": the vault is brought from where a Mac synced it, not made anew
+    /// (`RestoreFlow`). Offered here only — where this Mac has no vault, or its own was moved aside.
+    @State private var restoring: Bool
+    @StateObject private var restore: RestoreModel
+
+    /// `restoring`: the snapshots' only — the flow as `sample` has it; the app starts at the form.
+    init(restoring sample: RestoreModel? = nil) {
+        _restoring = State(initialValue: sample != nil)
+        _restore = StateObject(wrappedValue: sample ?? RestoreModel())
+    }
 
     private var longEnough: Bool { MasterPasswordStrength.isLongEnough(password) }
     private var strongEnough: Bool { MasterPasswordStrength.isStrongEnough(password) }
     private var matches: Bool { !confirmation.isEmpty && password == confirmation }
 
     var body: some View {
+        Group {
+            if restoring {
+                RestoreFlow(restore: restore, onBack: { restoring = false })
+                    .transition(.opacity)
+            } else {
+                form
+                    .transition(.opacity)
+            }
+        }
+        .animation(Theme.appearAnimation, value: restoring)
+        .onChange(of: password) { _, _ in
+            writtenDown = false
+            model.masterPasswordRefusal = nil
+        }
+        .overlay(alignment: .topTrailing) {
+            // The interface's language, when this is the run's first screen (the owner: on the
+            // first screen, before the vault exists). Not after "forgot password": a restart would
+            // lose the line that says where the previous vault was moved. Not while a vault is
+            // being brought: a restart would stop it.
+            if model.setupIsFirstScreen && model.movedAsideVaultPath == nil && (!restoring || restore.step == .source) {
+                FirstLaunchLanguagePicker()
+                    .padding(.top, ProfilesScreen.inspectorTop)
+                    .padding(.trailing, 20)
+            }
+        }
+    }
+
+    private var form: some View {
         LockScreen(title: L("setup.title"), subtitle: L("setup.subtitle"), footer: L("setup.footer")) {
             VStack(alignment: .leading, spacing: 0) {
                 MasterPasswordFacts()
@@ -363,25 +401,20 @@ struct SetupView: View {
                 }
                 .toggleStyle(.lumenCheckbox)
                 .padding(.top, 22)
-                LockActionButton(title: L("setup.action.create"), working: model.isWorking,
-                                 workingTitle: L("setup.working"), enabled: longEnough && strongEnough && matches && writtenDown,
-                                 action: create)
-                    .keyboardShortcut(.defaultAction)
-                    .padding(.top, 22)
-            }
-        }
-        .onChange(of: password) { _, _ in
-            writtenDown = false
-            model.masterPasswordRefusal = nil
-        }
-        .overlay(alignment: .topTrailing) {
-            // The interface's language, when this is the run's first screen (the owner: on the
-            // first screen, before the vault exists). Not after "forgot password": a restart would
-            // lose the line that says where the previous vault was moved.
-            if model.setupIsFirstScreen && model.movedAsideVaultPath == nil {
-                FirstLaunchLanguagePicker()
-                    .padding(.top, ProfilesScreen.inspectorTop)
-                    .padding(.trailing, 20)
+                VStack(spacing: 14) {
+                    LockActionButton(title: L("setup.action.create"), working: model.isWorking,
+                                     workingTitle: L("setup.working"), enabled: longEnough && strongEnough && matches && writtenDown,
+                                     action: create)
+                        .keyboardShortcut(.defaultAction)
+                    // The other way in: a vault a Mac synced is brought here, with its own master
+                    // password, instead of a new one being made.
+                    LockLink(title: L("restore.link")) {
+                        model.masterPasswordRefusal = nil
+                        restoring = true
+                    }
+                    .disabled(model.isWorking)
+                }
+                .padding(.top, 22)
             }
         }
     }
