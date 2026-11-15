@@ -258,6 +258,14 @@ enum UISnapshots {
         problems += await Shot(name: "profiles-proxied", size: CGSize(width: 1180, height: 560), edges: true) {
             ProfilesPreview(rows: rows, filter: .proxied, sync: .failed)
         }.capture(into: folder)
+        // The list by name (the Name column's title says so, with its arrow), and the sidebar's
+        // "Proxy not working": the profiles whose proxy did not answer.
+        problems += await Shot(name: "profiles-by-name", size: CGSize(width: 1180, height: 620), edges: true) {
+            ProfilesPreview(rows: rows, order: .name)
+        }.capture(into: folder)
+        problems += await Shot(name: "profiles-proxy-failing", size: CGSize(width: 1180, height: 560), edges: true) {
+            ProfilesPreview(rows: rows, filter: .proxyFailing)
+        }.capture(into: folder)
         // Tags for a selection (the bar's "Tags…"): one to add, one of theirs marked to be removed.
         let tagged = [rows[1], rows[3], rows[6], rows[8]].map { ProfileTagsPanel.Profile(name: $0.name, tags: $0.tags) }
         problems += await Shot(name: "sheet-profile-tags", size: CGSize(width: 520, height: 400), titled: false) {
@@ -1543,7 +1551,7 @@ enum UISnapshots {
             ProfileRowItem(id: id(9), name: "Marketplace US", activity: .stopped,
                            exit: .proxy(endpoint: "us-dal.proxy.example:1080", countryCode: "US"), ephemeral: false,
                            appearsAs: mac, lastUsed: now.addingTimeInterval(-2 * 3_600), tags: ["clients"],
-                           problem: "us-dal.proxy.example:1080"), // l10n: not text
+                           problem: "us-dal.proxy.example:1080", proxyFailed: true), // l10n: not text
         ]
     }
 }
@@ -1739,11 +1747,13 @@ private struct ProfilesPreview: View {
     var engineWarning: EngineWarning.Facts?
     var updatedTo: String?
     var updateOffer: UpdateOffer?
+    var order: ProfileListOrder = .created
 
     var body: some View {
         ProfilesScreen(rows: rows, isWorking: isWorking, sync: sync, filter: $filter, search: $search, actions: actions,
                        section: .constant(section), proxyCount: proxyCount, proxies: proxies, indexNotice: indexNotice,
-                       keptDeleted: keptDeleted, showsInspector: .constant(showsInspector), inspectorInfo: inspectorInfo,
+                       keptDeleted: keptDeleted, showsInspector: .constant(showsInspector), order: .constant(order),
+                       inspectorInfo: inspectorInfo,
                        guardReady: true, initialSelection: selected, initialBannersExpanded: bannersExpanded,
                        proxyProblem: proxyProblem, guardNotice: guardNotice, engineWarning: engineWarning,
                        updateOffer: updateOffer, updatedTo: updatedTo)

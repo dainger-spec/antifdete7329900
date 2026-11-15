@@ -4495,6 +4495,25 @@ final class SelfTest {
         let sidebarTags: [String] = ProfileFilter.tags(of: [row, other])
         check("profiles: a tag in the sidebar shows the profiles with it, whatever its case; the search finds a profile by a tag or its notes",
               byTag && bySearch && sidebarTags == ["ads", "mobile", "US"], "sidebar tags \(sidebarTags)")
+
+        // Where a profile exits is searched too: "which profile is on this proxy", "the ones in Germany".
+        let german = ProfileRowItem(id: UUID(), name: "Shop 10", activity: .stopped,
+                                    exit: .proxy(endpoint: "de-fra.proxy.example:1080", countryCode: "DE"), ephemeral: false,
+                                    appearsAs: "", lastUsed: Date(timeIntervalSince1970: 1_800_000_000), proxyFailed: true)
+        let byProxy: Bool = ProfilesScreen.matches(german, "de-fra.proxy") && ProfilesScreen.matches(german, "1080")
+            && !ProfilesScreen.matches(row, "de-fra")
+        let byCountry: Bool = ProfilesScreen.matches(german, CountryNames.name(for: "DE")) && ProfilesScreen.matches(german, "de")
+            && !ProfilesScreen.matches(row, CountryNames.name(for: "DE"))
+        let byDirect: Bool = ProfilesScreen.matches(row, L("profiles.exit.direct")) && !ProfilesScreen.matches(german, L("profiles.exit.direct"))
+        check("profiles: the search finds a profile by its proxy's address, by the country it exits in, and the ones that connect directly",
+              byProxy && byCountry && byDirect, "proxy \(byProxy), country \(byCountry), direct \(byDirect)")
+        // The sidebar's "Proxy not working", and the list's order.
+        let failingShown: Bool = ProfileFilter.proxyFailing.includes(german) && !ProfileFilter.proxyFailing.includes(row)
+        let byName: [String] = ProfileListOrder.name.sorted([german, row, other], name: { $0.name }, lastUsed: { $0.lastUsed }).map { $0.name }
+        let byLaunch: [String] = ProfileListOrder.lastUsed.sorted([row, other, german], name: { $0.name }, lastUsed: { $0.lastUsed }).map { $0.name }
+        check("profiles: “Proxy not working” gathers the profiles whose proxy did not answer; the list is ordered by name, or by the last launch with the never launched last",
+              failingShown && byName == ["Northwind", "Research", "Shop 10"] && byLaunch == ["Shop 10", "Northwind", "Research"],
+              "by name \(byName), by launch \(byLaunch)")
         // An error about one profile names it, once.
         let named: String = AppModel.profileErrorText("It does not open.", naming: "Shop 10")
         let alreadyNamed: String = AppModel.profileErrorText("The settings of “Shop 10” could not be read.", naming: "Shop 10")

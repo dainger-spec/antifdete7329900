@@ -1126,6 +1126,16 @@
 "profiles.tags.failed" = "The tags of %1$@ were not changed: %2$@";
 "profiles.tags.full" = "%1$ld profiles already have %2$ld tags, the most a profile holds: the tags that did not fit were not added.";
 "profiles.error.named" = "“%1$@”: %2$@";
+"profiles.sort" = "Sort By";
+"profiles.sort.created" = "Date Created";
+"profiles.sort.name" = "Name";
+"profiles.sort.lastUsed" = "Last Launch";
+"profiles.sort.name.help" = "Sort by name";
+"profiles.sort.name.on" = "Sorted by name. Click to go back to the order the profiles were created in.";
+"profiles.sort.lastUsed.help" = "Sort by last launch, the latest first";
+"profiles.sort.lastUsed.on" = "Sorted by last launch, the latest first. Click to go back to the order the profiles were created in.";
+"profiles.filter.proxyFailing" = "Proxy Not Working";
+"profiles.filter.proxyFailing.help" = "Profiles whose proxy did not answer at its last check or at their last launch. Select them and choose Assign Proxy to give them working ones.";
 "proxies.title.closed" = "The proxy closes the connection without a word";
 "proxies.title.connectTimeout" = "The connection to the proxy gets no answer";
 "proxies.title.credentialsNeeded" = "The proxy asks for a user name and password";
