@@ -701,6 +701,11 @@ public final class ProfileRepository: @unchecked Sendable {
         try warmUpHistoryFile(for: id).save(history)
     }
 
+    /// Writes the profile's history as it is given (a run's late report amends its newest entry).
+    public func replaceWarmUpHistory(_ history: WarmUpHistory, for id: UUID) throws {
+        try warmUpHistoryFile(for: id).save(history)
+    }
+
     // MARK: Open tabs (this Mac only)
 
     func openTabsURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("tabs.bin") }

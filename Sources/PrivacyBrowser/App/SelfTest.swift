@@ -8584,9 +8584,14 @@ final class SelfTest {
         defer { coordinator.shutDown() }
         // One at a time (the person's setting, 2 by default): the check is that the next waits for
         // the one before to be stopped and sealed.
-        let concurrency = WarmUpCoordinator.concurrency
+        let concurrency = WarmUpCoordinator.concurrencySetting
         WarmUpCoordinator.concurrency = 1
-        defer { WarmUpCoordinator.concurrency = concurrency }
+        let stagger = WarmUpCoordinator.stagger
+        WarmUpCoordinator.stagger = nil
+        defer {
+            WarmUpCoordinator.concurrencySetting = concurrency
+            WarmUpCoordinator.stagger = stagger
+        }
         let policy = NSApp.activationPolicy()
         NSApp.setActivationPolicy(.accessory)
         defer { NSApp.setActivationPolicy(policy) }

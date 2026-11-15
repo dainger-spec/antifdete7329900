@@ -189,6 +189,12 @@ public struct WarmUpTiming: Sendable {
         public var at: TimeInterval
         public var deltas: [Double]
         public var interval: TimeInterval
+
+        public init(at: TimeInterval, deltas: [Double], interval: TimeInterval) {
+            self.at = at
+            self.deltas = deltas
+            self.interval = interval
+        }
     }
 
     /// How the stays on pages are spread between the plan's two times: most short, a few long —

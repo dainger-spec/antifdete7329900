@@ -39,17 +39,35 @@ final class WarmUpCoordinator: ObservableObject {
     static var sealWait: TimeInterval = 60
     /// How often the schedule is looked at.
     static var tickInterval: TimeInterval = 60
-    /// How many profiles the queue warms at once (1–3; the person's setting, 2 when not set): each
-    /// in its own profile process, so they do not slow one another much on a modern Mac.
+    /// How many profiles the queue warms at once: the person's number (1–8), or — not set, the
+    /// default — what this Mac's memory and processors allow (`WarmUpConcurrency.automatic`). Each
+    /// runs in its own profile process.
     static let concurrencyKey = "warmup.concurrency"
-    static let concurrencyRange: ClosedRange<Int> = 1...3
-    static var concurrency: Int {
+    static let concurrencyRange: ClosedRange<Int> = WarmUpConcurrency.range
+    /// The person's own number; nil: automatic.
+    static var concurrencySetting: Int? {
         get {
-            let stored = UserDefaults.standard.object(forKey: concurrencyKey) as? Int ?? 2
+            guard let stored = UserDefaults.standard.object(forKey: concurrencyKey) as? Int, stored > 0 else { return nil }
             return min(max(stored, concurrencyRange.lowerBound), concurrencyRange.upperBound)
         }
-        set { UserDefaults.standard.set(min(max(newValue, concurrencyRange.lowerBound), concurrencyRange.upperBound), forKey: concurrencyKey) }
+        set {
+            if let newValue {
+                UserDefaults.standard.set(min(max(newValue, concurrencyRange.lowerBound), concurrencyRange.upperBound), forKey: concurrencyKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: concurrencyKey)
+            }
+        }
     }
+    static var automaticConcurrency: Int {
+        WarmUpConcurrency.automatic(memoryBytes: ProcessInfo.processInfo.physicalMemory, processors: ProcessInfo.processInfo.activeProcessorCount)
+    }
+    static var concurrency: Int {
+        get { concurrencySetting ?? automaticConcurrency }
+        set { concurrencySetting = newValue }
+    }
+    /// Profiles of one queue do not all begin in the same second: each starts this long after the
+    /// one before (seconds, drawn anew). Nil: at once (the self-test).
+    static var stagger: ClosedRange<TimeInterval>? = 4...15
 
     /// What every warm-up's tab leaves out to spare the proxies' traffic (the person's setting on
     /// the warm-up screen; nil: nothing). Put into each plan as it starts (`AppModel.startWarmUp`),
@@ -73,6 +91,17 @@ final class WarmUpCoordinator: ObservableObject {
     private var forwarding: AnyCancellable?
     /// A run ended and its record was stored (`WarmUpRecord`): the inspector reads it again.
     var onRecorded: ((UUID) -> Void)?
+    /// The person's own lists, for a plan built from one (`AppModel` reads the vault's).
+    var userTemplates: () -> [WarmUpTemplate] = { [] }
+    /// Each profile's warm-ups, the newest first, read once and kept up as runs end: what the
+    /// Warm-up section lists (`WarmUpHistory`).
+    @Published private(set) var histories: [UUID: WarmUpHistory] = [:]
+    /// When the queue last started a profile (`stagger`).
+    private var lastStart: Date?
+    /// When each run seen running was first seen, for a robot that does not say when it began.
+    private var firstSeen: [UUID: Date] = [:]
+    /// Profiles whose running warm-up the schedule started.
+    private var scheduledRuns: Set<UUID> = []
     private let log = Logger(subsystem: "PrivacyBrowser", category: "WarmUpQueue")
 
     init(manager: ProfileManager, repository: ProfileRepository, start: @escaping Start) {
@@ -92,6 +121,11 @@ final class WarmUpCoordinator: ObservableObject {
         }
         unreadableSchedules = unreadable
         scheduler = WarmUpScheduler(schedules: schedules)
+        var read: [UUID: WarmUpHistory] = [:]
+        for profile in repository.list() {
+            if let history = try? repository.warmUpHistory(for: profile.id), !history.runs.isEmpty { read[profile.id] = history }
+        }
+        histories = read
         // Every run that ends counts for the schedule — one from the warm-up screen too: a profile
         // warmed an hour ago by hand is not due again because its timer says so.
         let previous = manager.onWarmUpProgress
@@ -160,6 +194,36 @@ final class WarmUpCoordinator: ObservableObject {
         }
     }
 
+    /// Holds the queue: the runs going on finish, nothing waiting starts; or lets it go on.
+    func setPaused(_ paused: Bool) {
+        queue.isPaused = paused
+        if !paused { pump() }
+    }
+
+    /// Takes one waiting profile off the queue.
+    func cancel(_ profileID: UUID) {
+        guard let entry = queue.waiting.first(where: { $0.profileID == profileID }), let taken = queue.cancel(entry.id) else { return }
+        if taken.source == .schedule, let schedule = scheduler.recordAttempt(profileID, at: Date()) { save(schedule, for: profileID) }
+    }
+
+    /// Makes a waiting profile the next to start.
+    func startNext(_ profileID: UUID) {
+        guard let entry = queue.waiting.first(where: { $0.profileID == profileID }) else { return }
+        queue.moveToFront(entry.id)
+    }
+
+    /// The profile's warm-up state, from its history — or, without one yet, from the short record
+    /// an older version kept.
+    func warmth(of id: UUID) -> WarmUpWarmth {
+        if let runs = histories[id]?.runs, let last = runs.first {
+            return WarmUpWarmth(last: last, previous: runs.dropFirst().first)
+        }
+        return WarmUpWarmth(record: try? repository.warmUpRecord(for: id))
+    }
+
+    /// The profile's last run, when its history has one.
+    func lastRun(of id: UUID) -> WarmUpRun? { histories[id]?.last }
+
     /// Takes the rest off the queue and stops the run going on (its profile, started for it alone,
     /// then stops and seals as after any run).
     func stopAll() {
@@ -202,9 +266,24 @@ final class WarmUpCoordinator: ObservableObject {
         }
         if scheduled, let schedule = scheduler.recordAttempt(id, at: Date()) { save(schedule, for: id) }
         guard let plan = entry.plan ?? savedPlan(for: id), !plan.pages().pages.isEmpty else { return .skipped(.noPlan) }
+        // Not in the same second as the profile before it.
+        if let stagger = Self.stagger, let lastStart {
+            let wait = lastStart.addingTimeInterval(Double.random(in: stagger)).timeIntervalSinceNow
+            if wait > 0 { guard await pause(wait) else { return .cancelled } }
+        }
+        lastStart = Date()
+        if scheduled { scheduledRuns.insert(id) }
+        let begun = Date()
         let started = await start(plan, id)
         guard !Task.isCancelled, !isShutDown else { return .cancelled }
-        guard started else { return .skipped(.notStarted) }
+        guard started else {
+            // Said in the profile's history, where it is seen among the others — not in an alert each.
+            scheduledRuns.remove(id)
+            keep(WarmUpRun(startedAt: begun, endedAt: Date(), result: .notStarted, scheduled: scheduled, templates: plan.choice?.templateIDs ?? [],
+                           templateNames: names(of: plan), intensity: plan.choice?.source == .templates ? plan.choice?.intensity : nil,
+                           countryCode: countryCode(of: id)), for: id)
+            return .skipped(.notStarted)
+        }
         var last = manager.warmUpStatus(of: id)
         while let status = manager.warmUpStatus(of: id), status.isRunning {
             last = status
@@ -241,7 +320,7 @@ final class WarmUpCoordinator: ObservableObject {
         guard let saved = try? repository.warmUpPlan(for: id) else { return nil }
         if let choice = saved.choice, choice.source != .manual {
             let country = (try? repository.loadConfiguration(id))?.rememberedProxyLocation?.countryCode
-            if let rebuilt = choice.plan(countryCode: country, composedName: L("warmup.source.composed")) { return rebuilt }
+            if let rebuilt = choice.plan(countryCode: country, composedName: L("warmup.source.composed"), templates: userTemplates()) { return rebuilt }
         }
         return saved
     }
@@ -295,8 +374,24 @@ final class WarmUpCoordinator: ObservableObject {
     private func warmUpProgressed(_ id: UUID) {
         guard let status = manager.warmUpStatus(of: id) else { return }
         if status.isRunning {
-            seenRunning.insert(id)
-        } else if seenRunning.remove(id) != nil, let record = WarmUpRecord(status, at: Date()) {
+            if seenRunning.insert(id).inserted { firstSeen[id] = Date() }
+            return
+        }
+        guard seenRunning.remove(id) != nil else {
+            // The report of a run stopped part-way comes a moment after its end: the run kept then
+            // gets its sites and cookies.
+            amendLastRun(with: status, for: id)
+            return
+        }
+        let ended = Date()
+        let plan = try? repository.warmUpPlan(for: id)
+        if let run = WarmUpRun(status, plan: plan, startedAt: firstSeen[id] ?? ended, endedAt: ended, scheduled: scheduledRuns.contains(id),
+                               countryCode: countryCode(of: id), templateNames: plan.map(names(of:)) ?? [:]) {
+            keep(run, for: id)
+        }
+        firstSeen[id] = nil
+        scheduledRuns.remove(id)
+        if let record = WarmUpRecord(status, at: ended) {
             do {
                 try repository.saveWarmUpRecord(record, for: id)
             } catch {
@@ -307,6 +402,56 @@ final class WarmUpCoordinator: ObservableObject {
             }
             onRecorded?(id)
         }
+    }
+
+    /// Queues the profiles whose turn ended without a warm-up (not started, the proxy silent)
+    /// again, each with the plan `plan(id)` gives.
+    func retryFailed(plan: (UUID) -> WarmUpPlan) {
+        enqueue(queue.failedProfiles, plan: plan)
+    }
+
+    /// Adds a run to the profile's history, in the vault and here.
+    private func keep(_ run: WarmUpRun, for id: UUID) {
+        do {
+            try repository.addWarmUpRun(run, for: id)
+        } catch {
+            log.error("Could not store a warm-up of \(id.uuidString, privacy: .public) in its history: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
+        }
+        var history = histories[id] ?? WarmUpHistory()
+        history.add(run)
+        histories[id] = history
+    }
+
+    /// A run's last report came after the run was kept (stopped part-way: its cookies are counted a
+    /// moment later): the kept run takes its rows and counts.
+    private func amendLastRun(with status: WarmUpStatus, for id: UUID) {
+        guard var history = histories[id], let last = history.runs.first, Date().timeIntervalSince(last.endedAt) < 30,
+              status.sites != nil, last.sites.allSatisfy({ $0.cookies == 0 }),
+              let plan = try? repository.warmUpPlan(for: id),
+              var amended = WarmUpRun(status, plan: plan, startedAt: last.startedAt, endedAt: last.endedAt, scheduled: last.scheduled,
+                                      countryCode: last.countryCode, templateNames: last.templateNames),
+              amended.cookies > 0 else { return }
+        amended.id = last.id
+        history.runs[0] = amended
+        histories[id] = history
+        if var stored = try? repository.warmUpHistory(for: id), stored.runs.first?.id == last.id {
+            stored.runs[0] = amended
+            try? repository.replaceWarmUpHistory(stored, for: id)
+        }
+    }
+
+    /// The country the profile's proxy last exited in.
+    private func countryCode(of id: UUID) -> String? {
+        (try? repository.loadConfiguration(id))?.rememberedProxyLocation?.countryCode
+    }
+
+    /// The names of the person's lists a plan was made of, as they are now.
+    private func names(of plan: WarmUpPlan) -> [String: String] {
+        let ids = plan.choice?.templateIDs.filter { $0.hasPrefix("user:") } ?? []
+        guard !ids.isEmpty else { return [:] }
+        var names: [String: String] = [:]
+        for template in userTemplates() where ids.contains(template.presetID) { names[template.presetID] = template.name }
+        return names
     }
 
     private func save(_ schedule: WarmUpSchedule, for id: UUID) {
