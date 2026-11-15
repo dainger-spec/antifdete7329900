@@ -1949,6 +1949,8 @@
 "scenarios.run" = "Run";
 "scenarios.code" = "Scenario code";
 "scenarios.log.empty" = "The run’s log appears here.";
+"scenarios.log.result" = "Result: %@";
+"scenarios.log.copy" = "Copy the Log";
 "scenarios.template" = "// What a person would do, step by step. Every command waits for the page.\n// page.goto, page.click, page.type, page.press, page.waitFor, page.textContent, page.scroll…\nawait page.goto('https://example.com/');\nawait page.waitFor('h1');\nlog('Heading:', await page.textContent('h1'));\n";
 /* Help in the app (HelpView), and what opens it: the sidebar's rows, the scenario editor, the automation settings */
 "window.help.title" = "Help";

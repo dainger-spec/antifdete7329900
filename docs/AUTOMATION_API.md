@@ -112,7 +112,7 @@ pointer, wheel and keyboard, which pages cannot tell from a person's.
 |---|---|
 | `POST /v1/profiles/{profile}/scenario` `{"source": "…JavaScript…", "params": {…}}` | Runs that text on the running profile, in a window of its own — Safari's where the profile's process hosts Safari's chrome, the app's elsewhere (docs/AUTOMATION.md); **202** `{"runID": …}`. `params` is optional (the script's `params`) |
 | `POST /v1/profiles/{profile}/scenario` `{"scenario": "Sign in"}` | Runs the saved scenario of that exact name (**404** `no_scenario` when there is not one) |
-| `GET /v1/profiles/{profile}/scenario` | The profile's last run: `running`, `outcome` (`finished`, `failed`, `stopped`), `reason`, and its `lines` (`at`, `kind`, `text`) |
+| `GET /v1/profiles/{profile}/scenario` | The profile's last run: `running`, `outcome` (`finished`, `failed`, `stopped`), `reason` (a failure's names the scenario's line: "… (line 12)"), `result` — what the scenario returned (`return {…}`), any JSON value, absent when it returned nothing or did not finish — and its `lines` (`at`, `kind`, `text`) |
 | `POST /v1/profiles/{profile}/scenario/stop` | Stops it: a wait under way ends, a pressed button or key is let go first |
 
 A profile not running answers **409** `not_running`; a run already going, or a WebDriver session
@@ -121,8 +121,20 @@ never holds what was typed — only how many characters.
 
 ```sh
 curl -s -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:50777/v1/profiles/Shop%20DE/scenario \
-  -d '{"source": "await page.goto(params.url); log(await page.title());", "params": {"url": "https://example.com/"}}'
+  -d '{"source": "await page.goto(params.url); return {title: await page.title()};", "params": {"url": "https://example.com/"}}'
 curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:50777/v1/profiles/Shop%20DE/scenario
+```
+
+```json
+{
+  "lines" : [ { "at" : "2026-11-15T10:07:42Z", "kind" : "command", "text" : "goto https://example.com/" }, … ],
+  "name" : "API",
+  "outcome" : "finished",
+  "result" : { "title" : "Example Domain" },
+  "runID" : "0E6B…",
+  "running" : false,
+  "startedAt" : "2026-11-15T10:07:41Z"
+}
 ```
 
 ## What it does not do

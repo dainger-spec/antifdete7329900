@@ -48,6 +48,11 @@ its own; it never acts on the page from a script. Clicks, typing and scrolling a
   user activation); the run changes nothing of the fingerprint surface (`fingerprint_probe.js`,
   `navigator.webdriver` false) or the page's globals; `evaluate` in the driver's world is not seen
   by the page, while the same in the page's world — the control — is.
+- **"scenario runs"**: a scenario's commands in order with its log; an error ends the run with
+  its reason **and the scenario's line** — a command's, and the script's own mistake; what the
+  script returns is the run's result; Stop; commands without `await` held to their limit; a plan
+  that loses automation. `scripts/test-shims.mjs` runs the line and result code itself
+  (`ScenarioRunner.lineSupport`) in V8 and in JavaScriptCore.
 
 ## Scenarios (`ScenarioRunner`)
 
@@ -86,7 +91,20 @@ script catches it (a loop that called `page.scroll(…)` or `sleep(…)` without
 without end, and its process's memory with them).
 
 A command that fails rejects its promise with the reason (the script may `try`/`catch` it); one left
-uncaught ends the run with it. Stop ends the run at once: a command that is waiting — `sleep`,
+uncaught ends the run with it. **The error names the scenario's line**: "no element matches #next
+(line 12)", and `scenarioLine` on the error for a script that catches it. A command's failure is
+made by the app outside any call of the script, so its own stack knows no line: the line is read
+where the command is called (`ScenarioRunner.lineSupport`, the first frame of `scenario.js` in a
+stack made there) and added once. The script's own mistakes and thrown errors get theirs the same
+way from their own stack, and a script that does not parse the line the reading stopped at.
+"stopped" stays as it is.
+
+**What the script returns is the run's result** (`return {orders: 3}`): JSON, kept as the log's
+`result` line (`ScenarioRunState.result`), shown in the editor's log and given as `result` by the
+API — data out of a run without reading log lines. Up to 512 KB; a larger one is left out, and the
+log says so. Nothing returned is no result.
+
+Stop ends the run at once: a command that is waiting — `sleep`,
 `waitFor`, a page still loading — stops waiting (it used to run to its end: a script sleeping an hour
 kept its run going for the hour), and a pressed button or key is let go first. From Stop on — and once
 the run has ended in any way — every page command, `sleep` and `log` the script still calls throws

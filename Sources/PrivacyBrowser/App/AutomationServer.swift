@@ -487,6 +487,9 @@ final class AutomationHandler {
         var outcome: String?
         /// Why it failed or stopped.
         var reason: String?
+        /// What the script returned (`return …`), as it is — any JSON value. Absent while the
+        /// run is going, when it did not finish, and when the script returned nothing.
+        var result: JSONValue?
         var lines: [Line]
 
         init(_ run: ProfileManager.ScenarioRunState) {
@@ -500,7 +503,43 @@ final class AutomationHandler {
             case .failed(let message)?: outcome = "failed"; reason = message
             case .stopped(let why)?: outcome = "stopped"; reason = why.rawValue
             }
-            lines = run.lines.map { Line(at: $0.at, kind: $0.kind.rawValue, text: $0.text) }
+            result = run.result.flatMap { JSONValue(text: $0) }
+            // The result is given once, as a value: not again as a line of text.
+            lines = run.lines.filter { $0.kind != .result }.map { Line(at: $0.at, kind: $0.kind.rawValue, text: $0.text) }
+        }
+    }
+
+    /// Any JSON value, given back as it came (a run's result).
+    private struct JSONValue: Encodable {
+        let value: Any
+
+        init?(text: String) {
+            guard let value = try? JSONSerialization.jsonObject(with: Data(text.utf8), options: [.fragmentsAllowed]) else { return nil }
+            self.value = value
+        }
+
+        private init(_ value: Any) { self.value = value }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.singleValueContainer()
+            switch value {
+            case let text as String:
+                try container.encode(text)
+            case let number as NSNumber:
+                if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                    try container.encode(number.boolValue)
+                } else if !CFNumberIsFloatType(number as CFNumber), let whole = Int64(exactly: number) {
+                    try container.encode(whole)
+                } else {
+                    try container.encode(number.doubleValue)
+                }
+            case let list as [Any]:
+                try container.encode(list.map { JSONValue($0) })
+            case let object as [String: Any]:
+                try container.encode(object.mapValues { JSONValue($0) })
+            default:
+                try container.encodeNil()
+            }
         }
     }
 

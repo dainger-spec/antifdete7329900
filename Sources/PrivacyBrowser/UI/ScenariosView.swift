@@ -575,7 +575,7 @@ private struct RunLog: View {
                             HStack(alignment: .firstTextBaseline, spacing: 10) {
                                 Text(line.at.formatted(.dateTime.hour().minute().second().locale(Localization.locale)))
                                     .foregroundStyle(Theme.textTertiary)
-                                Text(line.text)
+                                Text(line.kind == .result ? String(format: L("scenarios.log.result"), String(line.text.prefix(4000))) : line.text)
                                     .foregroundStyle(color(line.kind))
                                     .textSelection(.enabled)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -594,6 +594,20 @@ private struct RunLog: View {
             }
             .background(Theme.card)
             .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius))
+            // The whole log as text (`ScenarioRunState.transcript`): each line a Text of its own
+            // cannot be selected across, and a run that failed is what gets sent to someone.
+            .overlay(alignment: .topTrailing) {
+                if let run, !run.lines.isEmpty {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(run.transcript, forType: .string)
+                    } label: { Image(systemName: "doc.on.doc") }
+                        .buttonStyle(LumenIconButtonStyle(size: 26))
+                        .help(L("scenarios.log.copy"))
+                        .accessibilityLabel(L("scenarios.log.copy"))
+                        .padding(6)
+                }
+            }
             .onChange(of: run?.lines.count ?? 0) { _, count in
                 if count > 0 { reader.scrollTo(count - 1, anchor: .bottom) }
             }
@@ -603,7 +617,7 @@ private struct RunLog: View {
     private func color(_ kind: ScenarioRunner.Line.Kind) -> Color {
         switch kind {
         case .command: return Theme.textSecondary
-        case .script: return Theme.textPrimary
+        case .script, .result: return Theme.textPrimary
         case .error: return Theme.danger
         case .outcome: return run?.outcome == .finished ? Theme.running : Theme.warning
         }

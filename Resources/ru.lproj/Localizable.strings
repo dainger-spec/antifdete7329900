@@ -1949,6 +1949,8 @@
 "scenarios.run" = "Запустить";
 "scenarios.code" = "Код сценария";
 "scenarios.log.empty" = "Здесь появится журнал запуска.";
+"scenarios.log.result" = "Результат: %@";
+"scenarios.log.copy" = "Скопировать журнал";
 "scenarios.template" = "// Что сделал бы человек, шаг за шагом. Каждая команда ждёт страницу.\n// page.goto, page.click, page.type, page.press, page.waitFor, page.textContent, page.scroll…\nawait page.goto('https://example.com/');\nawait page.waitFor('h1');\nlog('Заголовок:', await page.textContent('h1'));\n";
 /* Help in the app (HelpView), and what opens it: the sidebar's rows, the scenario editor, the automation settings */
 "window.help.title" = "Справка";

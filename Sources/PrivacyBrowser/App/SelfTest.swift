@@ -7287,6 +7287,31 @@ final class SelfTest {
                   "\(String(describing: failed)) / \(String(describing: broken))")
         }
 
+        // An error names the line of the scenario it came from — the command's, whose failure is
+        // made outside the script, and the script's own mistake; what the script returns is the
+        // run's result, in its log.
+        let (lineOfCommand, _, _) = await run("""
+            await page.goto(params.base + 'form');
+
+            await page.click('#nothing-like-it', {timeout: 1000});
+            """)
+        let (lineOfMistake, _, _) = await run("""
+            const nothing = undefined;
+            await page.goto(params.base + 'form');
+            nothing.field;
+            """)
+        let (returned, returnedLines, _) = await run("""
+            await page.goto(params.base + 'form');
+            return {title: await page.title(), items: await page.count('.item')};
+            """)
+        let result = returnedLines.last(where: { $0.kind == .result })?.text
+        var mistakeLine = false
+        if case .failed(let message)? = lineOfMistake { mistakeLine = message.hasSuffix("(line 3)") }
+        check("scenario runs: an error names the line of the scenario, a command's and the script's own; what the script returns is the run's result",
+              lineOfCommand == .failed("Error: no element matches #nothing-like-it (line 3)") && mistakeLine
+                  && returned == .finished && result == "{\"title\":\"PB automation form\",\"items\":5}",
+              "\(String(describing: lineOfCommand)) / \(String(describing: lineOfMistake)) / \(String(describing: returned)) \(result ?? "nil")")
+
         // Stop: a script waiting between commands, and one that loops without end.
         let (waiting, _, waitingTime) = await run("while (true) { await page.pause(200); }", stopAfter: 1.0, timeout: 10)
         // A main thread held up by the script would tick 0–1 times in the second (a 50 ms timer ticks

@@ -1437,6 +1437,76 @@ test('recorder and driver: a field and a button in an open shadow root are named
   assert.equal(run(w, `document.activeElement = loginBox; loginBox.shadowRoot.activeElement = email; driver.focused() === email`), true);
 });
 
+// A scenario's errors name its line, and what it returns is its result (ScenarioRunner.lineSupport,
+// the prelude's own text): a command's failure is made by the app outside any call of the script,
+// so only the place the command was called from knows the line. Under Bun this is JavaScriptCore,
+// the engine scenarios run in.
+const runnerSwift = readFileSync(new URL('../Sources/PrivacyBrowser/Browser/ScenarioRunner.swift', import.meta.url), 'utf8');
+const lineSupport = runnerSwift.split('static let lineSupport = #"""')[1].split('"""#')[0];
+
+function scenarioContext() {
+  const context = vm.createContext({ later: (fn) => setTimeout(fn, 1) });
+  vm.runInContext(`
+    var ended = null;
+    var __ended = (ok, message) => { ended = { ok, message }; };
+    // As the app answers a command: later, from outside the script — or at once, by throwing.
+    var __command = (name, args) => {
+      if (name === 'flood') { throw new Error('1000 page commands are waiting to run'); }
+      if (name === 'gone') { throw new Error('stopped'); }
+      return new Promise((resolve, reject) => later(() => name === 'click' ? reject(new Error('no element matches ' + args[0])) : resolve(args[0])));
+    };
+  `, context);
+  vm.runInContext(lineSupport + `
+    const page = {};
+    for (const name of ['goto', 'click', 'flood', 'gone']) page[name] = (...args) => __at(__line(), () => __command(name, args));
+  `, context);
+  return context;
+}
+
+async function scenario(source) {
+  const context = scenarioContext();
+  // As ScenarioRunner.run wraps a scenario: its first line is line 1 of scenario.js.
+  vm.runInContext('(async () => {' + source + '\n})().then((value) => __ended(true, __result(value)), (e) => __ended(false, __failure(e)));',
+                  context, { filename: 'scenario.js' });
+  for (let i = 0; i < 200 && run(context, 'ended === null'); i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  const ended = JSON.parse(run(context, 'JSON.stringify(ended)'));
+  return { ok: ended.ok, first: ended.message.split('\n')[0], message: ended.message };
+}
+
+test('scenario: a command that fails, and a mistake of the script, name the line of the scenario', async () => {
+  assert.equal((await scenario("await page.goto('a');\nawait page.goto('b');\nawait page.click('#next');\n")).first,
+               'Error: no element matches #next (line 3)');
+  // Called in a function of the script: the line of the call that failed, not of the function's use.
+  assert.equal((await scenario("await page.goto('a');\n\nconst open = async () => {\n  await page.click('#in-function');\n};\nawait open();")).first,
+               'Error: no element matches #in-function (line 4)');
+  // Caught and thrown again: named once.
+  assert.equal((await scenario("try {\n  await page.click('#a');\n} catch (e) {\n  throw e;\n}")).first, 'Error: no element matches #a (line 2)');
+  // The script's own mistake.
+  const mistake = await scenario("await page.goto('a');\nconst nothing = undefined;\nnothing.field;\n");
+  assert.equal(mistake.ok, false);
+  assert.match(mistake.first, /^TypeError: .* \(line 3\)$/);
+  assert.equal((await scenario("await page.goto('a');\nthrow new Error('not signed in');")).first, 'Error: not signed in (line 2)');
+  // Thrown at once by the call (too many commands waiting): the line too. "stopped" stays as it is.
+  assert.equal((await scenario("await page.goto('a');\npage.flood();")).first, 'Error: 1000 page commands are waiting to run (line 2)');
+  assert.equal((await scenario("await page.goto('a');\npage.gone();")).first, 'Error: stopped');
+  // What is not an error has no line to name.
+  assert.equal((await scenario("throw 'only text';")).first, 'only text');
+  // The script that catches reads the line from the error.
+  const caught = await scenario("let e;\ntry { await page.click('#a'); } catch (x) { e = x; }\nreturn [e.message, e.scenarioLine];");
+  assert.deepEqual(JSON.parse(caught.message), ['no element matches #a (line 2)', 2]);
+});
+
+test('scenario: what the script returns is the run\'s result, as JSON; nothing returned is no result', async () => {
+  assert.deepEqual(await scenario("await page.goto('a');\nreturn { title: 'Orders', items: [1, 2], none: null };"),
+                   { ok: true, first: '{"title":"Orders","items":[1,2],"none":null}', message: '{"title":"Orders","items":[1,2],"none":null}' });
+  assert.equal((await scenario("await page.goto('a');")).message, '');
+  assert.equal((await scenario('return "text";')).message, '"text"');
+  assert.equal((await scenario('return 0;')).message, '0');
+  // What JSON cannot say: a function is nothing, a BigInt its digits.
+  assert.equal((await scenario('return () => 1;')).message, '');
+  assert.equal((await scenario('return 10n;')).message, '"10"');
+});
+
 process.on('beforeExit', () => {
   if (failures) { console.log(`${failures} failure(s)`); process.exitCode = 1; }
   else console.log(`all shim tests passed (${JSC ? 'JavaScriptCore, Bun ' + Bun.version : 'V8, Node ' + process.version})`);
