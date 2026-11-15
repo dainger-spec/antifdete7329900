@@ -22,7 +22,10 @@ own files change, every Monday, and by hand). Everything runs as the app runs it
    Then its search (by name, tag and notes) and its filters (all, with a proxy, ephemeral, a tag)
    run over all the rows, timed, and checked against the counts they must give; and the window
    itself drawn with 20 rows and with all of them (`profiles-20.png`, `profiles-200.png` in the
-   run's artifact).
+   run's artifact). Since 15 November also (see "Measured from the next run on"): the refresh
+   through that cache, again and after one profile's settings were saved; what each drawing finds
+   for the rows beyond their settings, found once for all rows and once per row; and an archive of
+   5,000 small files sealed and unsealed.
 3. **Running at once** — groups of 1, 5, 10, 20 and 30 profiles launched as the list's Launch does
    for a selection (all at once, each in a process of its own with Safari's window, its start page
    loading through the self-test proxy). For each group: the time until each window is up (waited
@@ -132,6 +135,43 @@ profile's cookie was there at its next launch, ten of ten in every run.
 **On disk**, after 67 of the 200 had run once on a page or two each, the vault took 210 to 226 MB:
 about 3.2 MB a profile that has run (its sealed web data and Safari's home), and a profile's data
 grows from there with what it browses.
+
+## Measured from the next run on
+
+Three costs of our own code that grow with what a person keeps were found by reading it, not by a
+run (15 November); each is changed, and the check prints what it was and what it is, so the next
+run's report holds the figures. None is in "What it measured" above: nothing here has been run yet.
+
+- **What a drawing of the Profiles window finds for its rows** (`rows` in the report). The rows are
+  made again at every change of the model, the manager and the license, and at every result while
+  the proxy list is checked. For each row the license was asked whether the profile opens only
+  for export, which sorted all the profiles each time; and the proxy list — up to 10,000 entries —
+  was gone through for the profile's proxy, an identity string made for each entry passed. Both
+  are found once per drawing now (`LicenseModel.exportOnlyTest`, `ProxyList.entriesByIdentity`).
+  The check times both ways with 200 profiles and a list of 1,000 proxies, the profiles' own in its
+  middle, and wants the same answers from both. Expected: the per-row figures in milliseconds to
+  tens of milliseconds for each drawing (about 130 profiles x 500 entries passed), the others well
+  under a millisecond; the per-row figures grow with profiles x proxies, the others with their sum.
+- **The refresh after the first** (`list-again`): the figure "What it measured" gives for a refresh
+  is the first one's; every later one reads only the settings whose file changed. Expected: about
+  a millisecond for 200 profiles (their files looked at, none read), against 16 to 57 ms.
+- **A profile's website data at a stop and a start** (`archive`, and the quit's "archived … times").
+  The data is one archive, the network cache with it: thousands of small files once a profile has
+  browsed. *At a start* the archive's reader copied all that was left of its 1 MiB chunk for each
+  field of each file's record, about 3 MiB moved per file whatever its size; it reads from where
+  it stands now. The check seals and unseals 5,000 files of 4 KiB and times the reader's buffer
+  work for those records both ways. Expected: several hundred milliseconds of copying gone for
+  5,000 files (modelled on Linux: 0.66 s per 5,000, 2.5 s per 20,000); the unseal that is left is
+  the files' own creation and decryption. *At a stop* in Safari's window the data was archived at
+  each of the three attempts and once more for the forced seal — four archives of the same data,
+  every stop (above: "every seal was forced"). An attempt now archives again only what changed
+  since the last archive read it (`DirectoryStamp`: each entry's size, times and number, looked at
+  before it is read; an archive that met anything changed in its last half second is not relied
+  on). Expected: two archives for a stop whose data WebKit leaves alone after the first second,
+  one when it was left alone before; the quit's line says how many were made and how many
+  attempts found the data unchanged. The waits between the attempts are as they were (1 + 1 + 2 s):
+  a stop still takes at least those four seconds, and what is saved is what each archive costs,
+  which grows with the profile's data — on the check's nearly empty profiles, next to nothing.
 
 ## What the product holds today, and what gives out first
 

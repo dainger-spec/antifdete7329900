@@ -1,5 +1,6 @@
 import AppKit
 import BrowserCore
+import CryptoKit
 import Darwin
 import Foundation
 import SwiftUI
@@ -13,7 +14,15 @@ import SwiftUI
 ///   2. The list: what the Profiles window does to show them — the index read, each profile's
 ///      settings decrypted (`AppModel.refresh`), the rows built — and its search and filters run
 ///      over all of them (`ProfilesScreen.matches`, `ProfileFilter`), timed and checked against
-///      what they must find; the window itself drawn with every row (`profiles-<N>.png`).
+///      what they must find; the window itself drawn with every row (`profiles-<N>.png`). The
+///      refresh again, as every one after the first is made (`ProfileSettingsCache`: only the
+///      settings whose file changed are read), and after one profile's settings were saved. What
+///      each drawing finds for the rows beyond their settings — the profiles the license opens
+///      only for export, each profile's proxy in a list of 1,000 — found once for all rows, as the
+///      window finds them, and once per row, as it found them before; both must find the same.
+///      An archive of 5,000 small files (what WebKit's network cache is in a profile that has
+///      browsed) sealed and unsealed as a stop and a start do, and what the archive's reader does
+///      with its buffer for those records now and as it did before.
 ///   3. Running: groups of profiles launched as the list's Launch does for a selection (one after
 ///      the other, each in a process of its own with Safari's window, its start page loading
 ///      through the self-test proxy), the time until each window is up, then what they take — the
@@ -139,6 +148,33 @@ enum ScaleCheck {
             refreshTimes.append(milliseconds(since: started))
         }
         report("list", ["rows": rows.count, "refreshMedianMs": median(refreshTimes), "refreshMs": refreshTimes])
+        // The refresh as the window makes every one after its first: each profile's details are
+        // kept while its settings are the same file (`AppModel.profileDetails`), so only the
+        // settings saved since are decrypted again.
+        let cache = ProfileSettingsCache<ProfileDetails>()
+        var keptDetails: [UUID: ProfileDetails] = [:]
+        func refreshThroughTheCache() -> Double {
+            let started = Date()
+            let profiles = repository.list()
+            var details: [UUID: ProfileDetails] = [:]
+            for profile in profiles {
+                if let found = try? cache.value(of: profile.id, in: repository, { ProfileDetails($0) }) { details[profile.id] = found }
+            }
+            cache.keep(only: Set(profiles.map(\.id)))
+            keptDetails = details
+            return milliseconds(since: started)
+        }
+        let firstThroughCache = refreshThroughTheCache()
+        var againTimes: [Double] = []
+        for _ in 0..<5 { againTimes.append(refreshThroughTheCache()) }
+        // One profile's settings saved, as an edit saves them (the same settings: a new file).
+        var afterOneSave = -1.0
+        if let saved = ids.first, let configuration = try? repository.loadConfiguration(saved),
+           (try? repository.saveConfiguration(configuration, for: saved)) != nil {
+            afterOneSave = refreshThroughTheCache()
+        }
+        report("list-again", ["rows": keptDetails.count, "firstMs": firstThroughCache, "againMedianMs": median(againTimes),
+                              "againMs": againTimes, "afterOneSaveMs": afterOneSave, "kept": cache.count])
         let expectedProxied = (0..<count).filter { $0 % 3 != 2 }.count
         let expectedTag = (0..<count).filter { $0 % 7 == 3 }.count
         let expectedAds = (0..<count).filter { $0 % 4 == 0 }.count
@@ -165,6 +201,63 @@ enum ScaleCheck {
         let tagsStarted = Date()
         let tags = ProfileFilter.tags(of: rows)
         report("filter", ["filters": filters, "tags": tags.count, "tagsExpected": 8, "tagsMs": milliseconds(since: tagsStarted)])
+        // What each drawing of the window finds for its rows beyond their settings
+        // (`ProfileListView.rows`): the profiles the license opens only for export, and each
+        // profile's proxy among the proxy list's entries, for its last check. Each is found once
+        // for all rows (`LicenseModel.exportOnlyTest`, `ProxyList.entriesByIdentity`); before, the
+        // profiles were sorted and the list gone through once per row. Both ways, timed: they must
+        // find the same. The license's limit is put a tenth below the profiles there are; the
+        // list holds 1,000 proxies, the profiles' own in its middle.
+        let summaries = repository.list()
+        let allowed = count - count / 10
+        var marksPerRow: [Bool] = []
+        let marksPerRowStarted = Date()
+        for _ in 0..<3 {
+            marksPerRow = summaries.map { profile -> Bool in
+                let all = summaries.map { (id: $0.id, createdAt: $0.createdAt) }
+                return !LicenseDecision.fullyOpen(all, allowed: allowed).contains(profile.id)
+            }
+        }
+        let marksPerRowMs = milliseconds(since: marksPerRowStarted) / 3
+        var marksOnce: [Bool] = []
+        let marksOnceStarted = Date()
+        for _ in 0..<20 {
+            let open = LicenseDecision.fullyOpen(summaries.map { (id: $0.id, createdAt: $0.createdAt) }, allowed: allowed)
+            marksOnce = summaries.map { !open.contains($0.id) }
+        }
+        let marksOnceMs = milliseconds(since: marksOnceStarted) / 20
+        var entries: [ProxyListEntry] = (0..<1_000).map { index -> ProxyListEntry in
+            ProxyListEntry(proxy: ProxySettings(kind: .socks5, host: "gate-\(index).scale.invalid", port: 1080, username: "user\(index)"),
+                           lastCheck: ProxyCheckResult.alive(location: nil, latency: 0.1))
+        }
+        entries[entries.count / 2] = ProxyListEntry(proxy: proxy, lastCheck: ProxyCheckResult.alive(location: nil, latency: 0.2))
+        let identities: [String?] = summaries.map { keptDetails[$0.id]?.proxyIdentity }
+        var scanned: [UUID?] = []
+        let scanStarted = Date()
+        for _ in 0..<3 {
+            scanned = identities.map { identity -> UUID? in
+                guard let identity else { return nil }
+                return entries.first { ProxyList.identity(of: $0.proxy) == identity }?.id
+            }
+        }
+        let scanMs = milliseconds(since: scanStarted) / 3
+        var indexed: [UUID?] = []
+        let indexedStarted = Date()
+        for _ in 0..<20 {
+            let listed = ProxyList.entriesByIdentity(entries)
+            indexed = identities.map { identity -> UUID? in
+                guard let identity else { return nil }
+                return listed[identity]?.id
+            }
+        }
+        let indexedMs = milliseconds(since: indexedStarted) / 20
+        report("rows", ["profiles": summaries.count, "proxies": entries.count,
+                        "exportOnlyPerRowMs": marksPerRowMs, "exportOnlyOnceMs": marksOnceMs,
+                        "exportOnly": marksOnce.filter { $0 }.count, "exportOnlyExpected": count / 10,
+                        "proxyPerRowMs": scanMs, "proxyOnceMs": indexedMs,
+                        "withProxy": indexed.compactMap { $0 }.count, "withProxyExpected": expectedProxied,
+                        "same": marksPerRow == marksOnce && scanned == indexed])
+        report("archive", archiveMeasurement(files: 5_000, size: 4_096))
         // The window drawn with 20 rows and with all of them: what the number of rows costs.
         let fewStarted = Date()
         let fewDrawn = await draw(Array(rows.prefix(20)), into: out.appendingPathComponent("profiles-20.png"))
@@ -287,9 +380,15 @@ enum ScaleCheck {
         let quitMs = milliseconds(since: quitStart)
         try? await Task.sleep(nanoseconds: 2_000_000_000)
         let sealSeconds = quitGroup.compactMap { seals[$0]?.seconds }
+        // How often the profiles' data was archived for these seals, and at how many attempts it
+        // was not, being still what the last archive read (it was archived at every attempt).
         report("quit", ["profiles": quitGroup.count, "runningAtQuit": upBeforeQuit, "quitMs": quitMs,
                         "sealsReported": seals.count, "sealMedianS": median(sealSeconds), "sealMaxS": sealSeconds.max() ?? 0,
-                        "forced": seals.values.filter(\.forced).count, "errors": errors])
+                        "forced": seals.values.filter(\.forced).count,
+                        "attempts": seals.values.reduce(0) { $0 + $1.attempts },
+                        "archivePasses": seals.values.reduce(0) { $0 + ($1.archivePasses ?? 0) },
+                        "archivePassesSkipped": seals.values.reduce(0) { $0 + ($1.archivePassesSkipped ?? 0) },
+                        "errors": errors])
 
         // Each launched again on a page that sets nothing; its cookie must still be there.
         let checker = ProfileManager(repository: repository)
@@ -330,6 +429,84 @@ enum ScaleCheck {
         report("disk", ["vaultBytes": size(of: root), "profiles": count, "launched": launched])
         print("SCALE-DONE")
         return 0
+    }
+
+    // MARK: The archive
+
+    /// `files` files of `size` bytes in fifty folders — what WebKit's network cache is in a profile
+    /// that has browsed — sealed and unsealed as a stop and a start do (`EncryptedDirectoryArchive`),
+    /// each timed; and what the archive's reader does with its buffer for that many records, now
+    /// and as it did before (`readerBufferMs`).
+    private static func archiveMeasurement(files: Int, size: Int) -> [String: Any] {
+        let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("pb-scale-archive-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let store = scratch.appendingPathComponent("store", isDirectory: true)
+        let payload = Data((0..<size).map { UInt8(truncatingIfNeeded: $0 &* 31) })
+        var written = 0
+        for index in 0..<files {
+            let folder = store.appendingPathComponent("Records/\(index % 50)", isDirectory: true)
+            if index < 50 { try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
+            if (try? payload.write(to: folder.appendingPathComponent("\(index)-resource"))) != nil { written += 1 }
+        }
+        var fields: [String: Any] = ["files": files, "fileBytes": size, "written": written,
+                                     "readerBufferMs": readerBufferMs(files: files, size: size, asBefore: false),
+                                     "readerBufferBeforeMs": readerBufferMs(files: files, size: size, asBefore: true)]
+        let key = SymmetricKey(size: .bits256)
+        let archive = scratch.appendingPathComponent("store.pbsa")
+        do {
+            let sealStarted = Date()
+            let sealed = try EncryptedDirectoryArchive.seal(roots: ["cache": store], to: archive, key: key)
+            fields["sealMs"] = milliseconds(since: sealStarted)
+            let unsealStarted = Date()
+            let restored = try EncryptedDirectoryArchive.unseal(from: archive, key: key,
+                                                                destinations: ["cache": scratch.appendingPathComponent("restored", isDirectory: true)])
+            fields["unsealMs"] = milliseconds(since: unsealStarted)
+            fields["sealedFiles"] = sealed.files
+            fields["restoredFiles"] = restored.files
+            fields["bytes"] = Int(restored.bytes)
+            fields["whole"] = sealed.files == files && restored.files == files && restored.bytes == UInt64(files * size)
+        } catch {
+            fields["error"] = String(describing: error)
+            fields["whole"] = false
+        }
+        return fields
+    }
+
+    /// What an archive's reader does with its buffer to hand out the fields of `files` file records
+    /// of `size` bytes each — kind, path length, path, mode, size, bytes — from 1 MiB chunks, without
+    /// the decryption and the files. `asBefore`: all that is left of the buffer is copied at every
+    /// read, as `EncryptedChunkReader.read` did; otherwise each read is handed out from where the
+    /// reader stands, as it does now. Milliseconds; -1 when the bytes did not add up.
+    private static func readerBufferMs(files: Int, size: Int, asBefore: Bool) -> Double {
+        let chunk = Data(count: EncryptedDirectoryArchive.defaultChunkSize)
+        let total = files * (73 + size)
+        var left = total
+        var buffer = Data()
+        var position = 0
+        var handedOut = 0
+        let started = Date()
+        for _ in 0..<files {
+            for count in [1, 2, 60, 2, 8, size] {
+                while buffer.count - position < count {
+                    let take = min(chunk.count, left)
+                    guard take > 0 else { return -1 }
+                    if position > 0 {
+                        buffer.removeSubrange(0..<position)
+                        position = 0
+                    }
+                    buffer.append(chunk.prefix(take))
+                    left -= take
+                }
+                if asBefore {
+                    handedOut += Data(buffer.prefix(count)).count
+                    buffer = Data(buffer.dropFirst(count))
+                } else {
+                    handedOut += buffer.subdata(in: position..<(position + count)).count
+                    position += count
+                }
+            }
+        }
+        return handedOut == total ? milliseconds(since: started) : -1
     }
 
     // MARK: Measuring

@@ -686,8 +686,10 @@ restore it on launch. `WebDataStoreVault` does this.
 2. *No flush/close API.* WebKit tears a session down asynchronously after the last
    reference to its store is released. The vault waits, archives, then calls
    `WKWebsiteDataStore.remove(forIdentifier:)`, which fails while the store is still in
-   use, and retries with backoff (1+2+3+5+8 s). A write that lands between the archive
-   and the successful removal is lost. It is not leaked. If WebKit never releases the
+   use, and retries with backoff (1+2+3+5+8 s). An attempt archives again only when the data
+   is not what the last archive read: every file's size, times and number are looked at before
+   it is read, and compared at the next attempt (`DirectoryStamp`). A write that lands between
+   the archive and the successful removal is lost. It is not leaked. If WebKit never releases the
    store, the app reports an error and the data stays in plaintext until the next stop
    or unlock.
 3. *Crashes.* If the app crashes or is force-quit while a profile runs, the plaintext

@@ -69,6 +69,27 @@ def report(steps):
     if listing:
         lines.append(f"**The list:** reading the index and decrypting every profile's settings, as the Profiles window does "
                      f"on each refresh: median {listing['refreshMedianMs']} ms for {listing['rows']} rows ({listing['refreshMs']}).\n")
+    again = steps.get("list-again", [{}])[0]
+    if again:
+        lines.append(f"**The list again:** the same refresh as the window makes every one after its first (settings kept while "
+                     f"their file is the same): median {again['againMedianMs']} ms ({again['againMs']}); the first through the "
+                     f"cache {again['firstMs']} ms; after one profile's settings were saved {again['afterOneSaveMs']} ms "
+                     f"({again['kept']} of {again['rows']} kept).\n")
+    found = steps.get("rows", [{}])[0]
+    if found:
+        lines.append(f"**What each drawing finds for the rows** ({found['profiles']} profiles, {found['proxies']} proxies in the list): "
+                     f"the profiles the license opens only for export, once for all rows {found['exportOnlyOnceMs']} ms, once per row "
+                     f"as before {found['exportOnlyPerRowMs']} ms ({found['exportOnly']} marked, {found['exportOnlyExpected']} expected); "
+                     f"each profile's proxy in the list, once for all rows {found['proxyOnceMs']} ms, once per row as before "
+                     f"{found['proxyPerRowMs']} ms ({found['withProxy']} found, {found['withProxyExpected']} expected); "
+                     f"both ways find {'the same' if found['same'] else 'DIFFERENT ANSWERS'}.\n")
+    archive = steps.get("archive", [{}])[0]
+    if archive:
+        per_file = round(archive.get("unsealMs", 0) * 1000 / max(archive.get("files", 1), 1))
+        lines.append(f"**An archive of {archive['files']} files of {archive['fileBytes']} bytes** (a browsed profile's cache): sealed in "
+                     f"{archive.get('sealMs', '?')} ms, unsealed in {archive.get('unsealMs', '?')} ms ({per_file} µs a file; "
+                     f"{'whole' if archive.get('whole') else 'NOT WHOLE: ' + str(archive.get('error', ''))}). The reader's buffer for "
+                     f"those records: {archive['readerBufferMs']} ms, as it was read before {archive['readerBufferBeforeMs']} ms.\n")
     for search in steps.get("search", [{}])[0].get("queries", []):
         lines.append(f"- search '{search['query']}': {search['found']} found, {search['expected']} expected "
                      f"({'right' if search['right'] else 'WRONG'}), {round(search['ms'], 3)} ms")
@@ -112,7 +133,10 @@ def report(steps):
         lines.append(f"**Quitting with {quit_step['profiles']} running** ({quit_step['runningAtQuit']} windows up): "
                      f"{round(quit_step['quitMs'] / 1000, 1)} s until every one was sealed; {quit_step['sealsReported']} seals "
                      f"reported, median {quit_step['sealMedianS']} s, slowest {quit_step['sealMaxS']} s, "
-                     f"{quit_step['forced']} forced.")
+                     f"{quit_step['forced']} forced."
+                     + (f" Their data was archived {quit_step['archivePasses']} times in {quit_step['attempts']} attempts, and not "
+                        f"again at {quit_step['archivePassesSkipped']} attempts that found it as the last archive read it "
+                        f"(it was archived at every attempt)." if "archivePasses" in quit_step else ""))
     kept = steps.get("kept", [{}])[0]
     if kept:
         lines.append(f"**Nothing lost:** {kept['cookieKept']} of {kept['profiles']} profiles had their page's cookie after "
