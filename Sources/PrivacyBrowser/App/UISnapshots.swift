@@ -23,9 +23,10 @@ enum UISnapshots {
         Localization.applyProcessLanguage()
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
-        // A run took 115 s in CI run 556, before the edge checks and the list's steps.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 240) {
-            print("SNAPSHOTS TIMEOUT after 240 s")
+        // A run took 115 s in CI run 556, before the edge checks and the list's steps; with the
+        // scenarios', warm-up's and restore's screens 240 s ended it at some 200 of 285 pictures.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 600) {
+            print("SNAPSHOTS TIMEOUT after 600 s")
             exit(3)
         }
         Task { @MainActor in
