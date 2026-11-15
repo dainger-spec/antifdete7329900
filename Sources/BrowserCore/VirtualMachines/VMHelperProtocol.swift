@@ -185,6 +185,9 @@ public struct VMHelperEvent: Codable, Equatable, Sendable {
         /// Where the machine connects (`hosts`): said every few seconds while the app asks for
         /// it (`hosts on`).
         case hosts
+        /// A machine with instant wake was asked to close and its state could not be saved: it
+        /// is being shut down instead (`failure` and `message` say why), and `stopped` follows.
+        case notKept
     }
 
     /// One host a machine's macOS talks to (`VMNetHost`, which the app does not link).
@@ -231,8 +234,12 @@ public struct VMHelperEvent: Codable, Equatable, Sendable {
     /// `traffic`, a machine without a proxy: its connections go through the proxy this Mac's own
     /// network settings name.
     public var viaSystemProxy: Bool?
-    /// `failed`: why, in the system's own words (shown to the person as given).
+    /// `failed`, `notKept`: why, in the system's own words (shown to the person as given — as
+    /// the whole reason, or as a technical detail under the app's own words for `failure`).
     public var message: String?
+    /// `failed`, `notKept`: the kind of reason, where it is one the app has words for in the
+    /// person's language — `VMFailureKind`'s raw value.
+    public var failure: String?
     /// `started`: the machine was woken from a saved state — it is as it was closed.
     public var woke: Bool?
     /// `started`: a saved state was there and was not used — `VMWakeRefusal`'s raw value.
@@ -245,7 +252,7 @@ public struct VMHelperEvent: Codable, Equatable, Sendable {
     public init(kind: Kind, image: VMRestoreImage? = nil, fraction: Double? = nil, bytesUp: UInt64? = nil,
                 bytesDown: UInt64? = nil, connections: Int? = nil, trouble: String? = nil, troubleDetail: String? = nil,
                 viaSystemProxy: Bool? = nil, message: String? = nil, woke: Bool? = nil, notWoken: String? = nil,
-                asleep: Bool? = nil, hosts: [Host]? = nil) {
+                asleep: Bool? = nil, hosts: [Host]? = nil, failure: String? = nil) {
         self.kind = kind
         self.image = image
         self.fraction = fraction
@@ -260,7 +267,11 @@ public struct VMHelperEvent: Codable, Equatable, Sendable {
         self.notWoken = notWoken
         self.asleep = asleep
         self.hosts = hosts
+        self.failure = failure
     }
+
+    /// The kind of a `failed` or `notKept` event's reason; nil when it names none the app knows.
+    public var failureKind: VMFailureKind? { failure.flatMap(VMFailureKind.init(rawValue:)) }
 
     public func line() -> String {
         (try? JSONCoding.encoder.encode(self)).map { String(decoding: $0, as: UTF8.self) } ?? #"{"kind":"failed"}"#

@@ -207,6 +207,22 @@ final class VMCenter: ObservableObject {
         return values?.volumeAvailableCapacityForImportantUsage ?? 0
     }
 
+    /// The room on the library's volume as a machine's start goes by it (`VMStartRoom`), and
+    /// whether that volume clones files (APFS does). The room is the larger of the system's two
+    /// figures: the one "for important usage" counts what macOS can free at need, and is zero on
+    /// volumes that have no such thing (an external disk that is not APFS), where the plain one
+    /// is the answer. Nil where the system says neither: nothing is refused on a guess.
+    private var startRoom: (free: Int64?, clones: Bool?) {
+        var url = library.root
+        while !FileManager.default.fileExists(atPath: url.path), url.path != "/" { url.deleteLastPathComponent() }
+        guard let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey,
+                                                              .volumeAvailableCapacityKey, .volumeSupportsFileCloningKey]) else {
+            return (nil, nil)
+        }
+        let figures: [Int64?] = [values.volumeAvailableCapacityForImportantUsage, values.volumeAvailableCapacity.map { Int64($0) }]
+        return (figures.compactMap { $0 }.max(), values.volumeSupportsFileCloning)
+    }
+
     // MARK: The setup
 
     /// Starts the setup, or goes on with it from where it stopped: what Apple offers is asked and
@@ -330,12 +346,17 @@ final class VMCenter: ObservableObject {
         let run = beginRun()
         activity = .asking
         var image: VMRestoreImage?
+        var known = false
         let helper = VMHelperProcess(onEvent: { event in
             if event.kind == .catalog { image = event.image }
+            if event.kind == .failed { known = event.failureKind != nil }
         }, onEnd: { [weak self] failure in
             guard let self, self.setupRun == run else { return }
             self.setupHelper = nil
             guard let image, failure == nil else {
+                // A reason the app has words for is a whole sentence, with what to do; the
+                // system's own words are said as what is wrong with the file.
+                if known, let failure { return self.setupFailed(failure) }
                 return self.setupFailed(String(format: L("vm.import.error.notAnImage"), failure ?? L("vm.error.unknown")))
             }
             self.offeredImage = image
@@ -710,6 +731,17 @@ final class VMCenter: ObservableObject {
             problems[id] = L("vm.error.baseOpen")
             return
         }
+        // Not onto a disk that is nearly full — a machine's macOS writes all the time, and writes
+        // that fail are a failing disk to it — and not a copy of the base's whole disk where
+        // there is no room for one: said now, with the numbers, not after minutes of copying.
+        let room = startRoom
+        let isMade = library.machine(for: id).isComplete
+        // What a whole copy would take is counted only where one would be made.
+        let baseDiskBytes = !isMade && room.clones == false ? VMLibrary.allocatedSize(of: library.baseDirectory) : 0
+        if let problem = VMStartRoom.problem(free: room.free, isMade: isMade, volumeClones: room.clones, baseDiskBytes: baseDiskBytes) {
+            problems[id] = Self.roomText(of: problem)
+            return
+        }
         problems[id] = nil
         wakeNotes[id] = nil
         guard let proxy = profile.proxy else {
@@ -754,12 +786,12 @@ final class VMCenter: ObservableObject {
         }
         running[id] = Running(phase: .checkingProxy)
         Task { [weak self] in
-            let check = await ProxyChecker.check(proxy)
+            let check = await VMCenter.checkProxy(proxy)
             guard let self, self.running[id]?.phase == .checkingProxy, var profile = self.list.profile(id) else { return }
             self.exits[id] = check
             guard check.isAlive else {
                 self.running[id] = nil
-                self.problems[id] = L("vm.error.proxyDown")
+                self.problems[id] = VMCenter.proxyProblem(proxy, check: check)
                 return
             }
             let followed = profile.followingProxy(check: check)
@@ -783,6 +815,25 @@ final class VMCenter: ObservableObject {
             self.running[id]?.phase = .starting
             self.launch(profile)
         }
+    }
+
+    /// The check of a machine's proxy before its start: does it work, where does it come out, and
+    /// its time zone — and nothing a machine does not use. The Proxies section's check also sets
+    /// up two more tunnels for a steady latency, which the machines' list does not show, and waits
+    /// for a SOCKS5 proxy's UDP (up to nine seconds where the proxy takes the association and
+    /// carries nothing, then a request for where it leaves from) — and UDP never leaves a machine
+    /// (docs/VM.md). A start, and a wake above all, is shorter by those.
+    static func checkProxy(_ proxy: ProxySettings) async -> ProxyCheckResult {
+        await ProxyChecker.check(proxy, latencySamples: 1, triesUDP: false)
+    }
+
+    /// Why a machine whose proxy did not pass its check was not started: what the check found, in
+    /// the words the Proxies section has for it (`ProxyReport`) — a login the proxy rejects is not
+    /// a proxy that is down, and asks something else of the person — and what to do about it.
+    static func proxyProblem(_ proxy: ProxySettings, check: ProxyCheckResult) -> String {
+        let report = ProxyReport(proxy: proxy, check: check)
+        guard let explanation = report.explanation else { return L("vm.error.proxyDown") }
+        return ([L("vm.error.proxyFailed"), explanation] + [report.advice].compactMap { $0 }).joined(separator: " ")
     }
 
     private func launch(_ profile: VMProfile) {
@@ -865,6 +916,12 @@ final class VMCenter: ObservableObject {
         case .hosts:
             // Only while the panel asks: an answer that comes after it was closed is dropped.
             if hosts[id] != nil { hosts[id] = event.hosts ?? [] }
+        case .notKept:
+            // Instant wake could not keep the machine as it was — its state was not saved: its
+            // macOS is shut down instead, which the row says from now on ("shutting down…", not
+            // "saving…"), and why stays in the row until the machine's next start.
+            running[id]?.shuttingDown = true
+            problems[id] = Self.notKeptText(kind: event.failureKind, message: event.message)
         default:
             break
         }
@@ -1052,6 +1109,37 @@ final class VMCenter: ObservableObject {
         } else if !hold, let token = awake {
             ProcessInfo.processInfo.endActivity(token)
             awake = nil
+        }
+    }
+
+    /// What a failure the helper reports is said as. For a kind the app has words for
+    /// (`VMFailureKind`): those words — in the person's language, with what to do — and under
+    /// them the system's own, as a technical detail. For any other: the system's words alone, as
+    /// they always were.
+    static func failureText(kind: VMFailureKind?, message: String?) -> String {
+        let detail = message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard let kind else { return detail.isEmpty ? L("vm.error.unknown") : detail }
+        let words = L("vm.failure.\(kind.rawValue)")
+        return detail.isEmpty ? words : words + "\n" + String(format: L("vm.row.trouble.detail"), detail)
+    }
+
+    /// What the row says of a machine with instant wake that was shut down instead of kept as it
+    /// was, because its state could not be saved: a full disk by name, anything else with the
+    /// system's words for it.
+    static func notKeptText(kind: VMFailureKind?, message: String?) -> String {
+        if kind == .noRoom { return L("vm.row.notKept.noRoom") }
+        let detail = message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return detail.isEmpty ? L("vm.row.notKept") : L("vm.row.notKept") + "\n" + String(format: L("vm.row.trouble.detail"), detail)
+    }
+
+    /// Why a machine is not started onto a disk that is nearly full (`VMStartRoom`), with the
+    /// numbers.
+    static func roomText(of problem: VMStartRoom.Problem) -> String {
+        switch problem {
+        case .full(let needed, let free):
+            return String(format: L("vm.error.diskFull"), VMText.bytes(free), VMText.bytes(needed))
+        case .copy(let needed, let free):
+            return String(format: L("vm.error.diskCopy"), VMText.bytes(needed), VMText.bytes(free))
         }
     }
 

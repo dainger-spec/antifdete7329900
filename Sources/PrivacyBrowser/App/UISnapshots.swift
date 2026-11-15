@@ -693,6 +693,7 @@ enum UISnapshots {
         }.capture(into: folder)
         problems += await proxyList(into: folder)
         problems += await machineCover(into: folder)
+        problems += await machinesList(into: folder)
         // A real browser window of a running profile (WebKit, toolbar, tab strip, start page).
         problems += await browserWindows(into: folder)
         // The launch screen (the Profiles window before unlocking), also while the vault opens.
@@ -925,6 +926,52 @@ enum UISnapshots {
             }.capture(into: folder)
         }
         return problems
+    }
+
+    // MARK: The machines' list
+
+    /// The virtual machines' rows as they say what happened (no vault, no machine): one running;
+    /// one asleep; one whose proxy rejected its login at the start, said as the check found it;
+    /// one not started onto a disk that is nearly full; one macOS refused for Apple's limit, in
+    /// the interface's words with the system's under them; one shut down instead of kept as it
+    /// was, for want of room for its state.
+    private static func machinesList(into folder: URL) async -> Int {
+        let guest = VMGuestStatus(text: "LUMEN_TOOLS_VERSION=13\nLUMEN_MACOS_VERSION=26.1\nLUMEN_SAFARI_VERSION=26.1\n")
+        func proxy(_ host: String) -> ProxySettings {
+            ProxySettings(kind: .socks5, host: host, port: 1080, username: "lumen", password: "preview")
+        }
+        func machine(_ name: String, _ host: String, _ country: String, display: String = "macbook-air-13", memory: Int = 6,
+                     instantWake: Bool = false) -> VMProfile {
+            VMProfile(name: name, proxy: proxy(host), timeZoneIdentifier: "Europe/Berlin", countryCode: country, displayID: display,
+                      memoryGB: memory, instantWake: instantWake)
+        }
+        let rejectedProxy = proxy("fr.proxy.example")
+        let rejected = sampleFailed(ProxyDiagnosis(verdict: .credentialsRejected, kinds: [.socks5], authentication: .rejected,
+                                                   connectedAddress: "203.0.113.41"))
+        let gigabyte = VMRequirements.gibibyte
+        let samples: [VMListPreview.Sample] = [
+            .init(profile: machine("Shop DE", "de.proxy.example", "DE"), // l10n: not text
+                  state: VMCenter.Running(phase: .running, bytesUp: 48_300_000, bytesDown: 912_000_000, connections: 14),
+                  exit: sampleWorks(.socks5, "203.0.113.30", "DE", "Europe/Berlin", "Frankfurt", [61]), guest: guest,
+                  disk: 6 * gigabyte + gigabyte / 5),
+            .init(profile: machine("Ads US", "us.proxy.example", "US", display: "macbook-pro-14", memory: 8, instantWake: true), // l10n: not text
+                  exit: sampleWorks(.socks5, "198.51.100.7", "US", "America/New_York", "New York", [140]), guest: guest,
+                  disk: 4 * gigabyte, asleep: true),
+            .init(profile: machine("Mail FR", "fr.proxy.example", "FR"), // l10n: not text
+                  problem: VMCenter.proxyProblem(rejectedProxy, check: rejected), exit: rejected, guest: guest, disk: 5 * gigabyte),
+            .init(profile: machine("Bank UK", "uk.proxy.example", "GB", display: "imac-24"), // l10n: not text
+                  problem: VMCenter.roomText(of: VMStartRoom.Problem.full(needed: VMStartRoom.floorBytes, free: gigabyte + gigabyte / 4)),
+                  guest: guest, disk: 7 * gigabyte),
+            .init(profile: machine("Forum PL", "pl.proxy.example", "PL"), // l10n: not text
+                  problem: VMCenter.failureText(kind: .limit,
+                                                message: "The maximum supported number of active virtual machines has been reached."), // l10n: not text
+                  guest: guest, disk: 3 * gigabyte),
+            .init(profile: machine("Travel ES", "es.proxy.example", "ES", memory: 8, instantWake: true), // l10n: not text
+                  problem: VMCenter.notKeptText(kind: .noRoom, message: nil), guest: guest, disk: 9 * gigabyte),
+        ]
+        return await Shot(name: "vm-list-states", size: CGSize(width: 1040, height: 760), titled: false) {
+            VMListPreview(samples: samples)
+        }.capture(into: folder)
     }
 
     private static func proxyList(into folder: URL) async -> Int {

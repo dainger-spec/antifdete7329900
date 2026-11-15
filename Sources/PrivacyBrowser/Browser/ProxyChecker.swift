@@ -47,14 +47,20 @@ enum ProxyChecker {
     }
 
     /// What checking `proxy` finds.
-    static func check(_ proxy: ProxySettings) async -> ProxyCheckResult {
+    ///
+    /// `latencySamples` and `triesUDP` are what the Proxies section's check measures beside "does
+    /// it work, and where does it come out": three tunnels for a latency that is steady, and a
+    /// SOCKS5 proxy's UDP. A caller that shows neither asks for one tunnel and no UDP, and does
+    /// not wait for them — a virtual machine's start (`VMCenter.checkProxy`): UDP never leaves a
+    /// machine, and its list shows no latency.
+    static func check(_ proxy: ProxySettings, latencySamples: Int = 3, triesUDP: Bool = true) async -> ProxyCheckResult {
         let time = Date()
         // Settings that cannot be applied: nothing is sent at all (there would be nothing to send
         // the lookup through but the direct connection).
         guard (try? proxy.validate()) != nil, let configurations = try? ProxyConfigurationFactory.make(proxy), !configurations.isEmpty else {
             return .dead(.invalidSettings, at: time)
         }
-        let diagnosis = await probe().run(proxy)
+        let diagnosis = await probe(latencySamples: latencySamples).run(proxy)
         guard diagnosis.isWorking else {
             var result = ProxyCheckResult.dead(diagnosis.verdict == .credentialsNeeded ? .needsCredentials : .noAnswer, at: time)
             result.diagnosis = diagnosis
@@ -67,8 +73,8 @@ enum ProxyChecker {
             if kind == .socks5 { found.tlsToProxy = false }
         }
         // A SOCKS5 proxy's UDP, tried for real while the lookup runs: what WebRTC through it would get.
-        let triesUDP = found.kind == .socks5
-        async let udp: ProxyUDPSupport? = triesUDP ? await self.udp(found) : nil
+        let asksUDP = triesUDP && found.kind == .socks5
+        async let udp: ProxyUDPSupport? = asksUDP ? await self.udp(found) : nil
         var result = self.result(of: await lookUp(found), at: time)
         result.diagnosis = diagnosis
         if let median = diagnosis.medianLatency { result.latencyMilliseconds = median }

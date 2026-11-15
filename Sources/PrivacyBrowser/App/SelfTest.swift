@@ -3552,7 +3552,9 @@ final class SelfTest {
             defer { ProxyExitLookup.endpoints = endpoints }
             let withUDP = ProxySettings(kind: .socks5, host: loopback, port: udpPort)
             ProxyExitLookup.endpoints = [URL(string: "http://exit.selftest.invalid/cdn-cgi/trace")!]
+            let wholeStarted = Date()
             let carries = await ProxyChecker.check(withUDP)
+            let wholeSeconds = Date().timeIntervalSince(wholeStarted)
             check("proxy checker, UDP: a SOCKS5 proxy that relays UDP from its pages' address — UDP works",
                   carries.isAlive && carries.udp == .supported && carries.udpLabel == .supported, String(describing: carries))
             let plain = await ProxyChecker.check(ProxySettings(kind: .socks5, host: loopback, port: socksPort))
@@ -3569,6 +3571,33 @@ final class SelfTest {
             let http = await ProxyChecker.check(ProxySettings(kind: .httpConnect, host: loopback, port: httpPort))
             check("proxy checker, UDP: an HTTP proxy is not tried and nothing is said of its UDP",
                   http.isAlive && http.udp == nil && http.udpLabel == nil, String(describing: http))
+            // A virtual machine's start asks only what a machine uses (`VMCenter.checkProxy`): UDP
+            // never leaves a machine, and its list shows no latency. The same proxy — which
+            // relays UDP — comes back alive with its exit, one tunnel, and nothing asked of its UDP.
+            let machineStarted = Date()
+            let forMachine = await VMCenter.checkProxy(withUDP)
+            let machineSeconds = Date().timeIntervalSince(machineStarted)
+            // On loopback, where nothing is far away: what is saved on a real proxy is its own
+            // round trips — two tunnels, the UDP association, the STUN answer or the wait for one.
+            info(String(format: "virtual machines: the check before a start took %.0f ms on the loopback proxy; the Proxies section's whole check of the same proxy, %.0f ms",
+                        machineSeconds * 1000, wholeSeconds * 1000))
+            check("virtual machines: the check before a machine's start sets up one tunnel and asks nothing of the proxy's UDP — alive, with the exit IP and time zone",
+                  forMachine.isAlive && forMachine.udp == nil && forMachine.exitIP == "203.0.113.21"
+                      && forMachine.timeZoneIdentifier == "Europe/Berlin" && forMachine.diagnosis?.latencies.count == 1,
+                  String(describing: forMachine))
+        }
+        // And a proxy that did not pass it: the machine's row says what the check found, in the
+        // Proxies section's words, with what to do — not "does not answer" whatever it was.
+        if let socksAuthPort = port("PB_SELFTEST_SOCKS_AUTH_PROXY_PORT") {
+            let secret = "pb-not-the-password-7c1"
+            let refusedLogin = ProxySettings(kind: .socks5, host: loopback, port: socksAuthPort, username: "pb-user2", password: secret)
+            let rejected = await VMCenter.checkProxy(refusedLogin)
+            let said = VMCenter.proxyProblem(refusedLogin, check: rejected)
+            check("virtual machines: a machine whose proxy rejects its login is told that, and what to do — never the password",
+                  !rejected.isAlive && rejected.diagnosis?.verdict == .credentialsRejected
+                      && said.contains(String(format: L("proxies.explain.credentialsRejected"), "SOCKS5"))
+                      && said.contains(L("proxies.advice.credentialsRejected")) && !said.contains(secret),
+                  said)
         }
         if let silentPort {
             let silent = await ProxyChecker.check(ProxySettings(kind: .socks5, host: loopback, port: silentPort))
@@ -4346,6 +4375,19 @@ final class SelfTest {
               wrong.isEmpty, wrong.joined(separator: " | "))
         check("errors in the person's language: the sync messages are the interface's",
               !L("sync.error.failed").hasPrefix("sync.") && !L("sync.error.profilesRunning").hasPrefix("sync."))
+        // A virtual machine's failures (`VMFailureKind`): each kind has words of the interface's,
+        // with the system's own kept under them as a technical detail; a failure of no kind the
+        // app knows is the system's words alone; a state that was not kept names a full disk.
+        let wordless = VMFailureKind.allCases.map(\.rawValue).filter { L("vm.failure.\($0)").hasPrefix("vm.") }
+        let full = VMCenter.failureText(kind: .noRoom, message: " No space left on device\n")
+        check("errors in the person's language: every kind of a virtual machine's failure has words (\(VMFailureKind.allCases.count)), with the system's own under them",
+              wordless.isEmpty && full == L("vm.failure.noRoom") + "\n" + String(format: L("vm.row.trouble.detail"), "No space left on device")
+                  && VMCenter.failureText(kind: .limit, message: nil) == L("vm.failure.limit")
+                  && VMCenter.failureText(kind: nil, message: "x") == "x" && VMCenter.failureText(kind: nil, message: nil) == L("vm.error.unknown")
+                  && VMCenter.notKeptText(kind: .noRoom, message: "x") == L("vm.row.notKept.noRoom")
+                  && VMCenter.notKeptText(kind: nil, message: nil) == L("vm.row.notKept")
+                  && VMCenter.roomText(of: VMStartRoom.Problem.full(needed: 2 << 30, free: 1 << 30)).contains(VMText.bytes(Int64(1) << 30)),
+              wordless.isEmpty ? full : wordless.joined(separator: ", "))
     }
 
     /// Dates the app's own windows show are in the interface's language (`Localization.locale`,
