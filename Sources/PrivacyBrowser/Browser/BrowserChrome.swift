@@ -171,7 +171,7 @@ struct StartPageView: View {
                 let width = Self.contentWidth(columns: columns)
                 ScrollView {
                     VStack(spacing: 0) {
-                        LumenLockup.large
+                        LumenBrandLockup.large
                             .padding(.top, proxy.size.height > 560 ? 96 : 48)
                             .padding(.bottom, 28)
                         searchField

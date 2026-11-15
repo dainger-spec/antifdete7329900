@@ -1455,7 +1455,7 @@ private struct ProfilesSidebar: View {
         VStack(alignment: .leading, spacing: 2) {
             // The window's traffic lights sit in this band.
             Color.clear.frame(height: 44)
-            LumenLockup.sidebar
+            LumenBrandLockup.sidebar
                 .padding(.leading, 8)
                 .padding(.bottom, 16)
             paletteButton

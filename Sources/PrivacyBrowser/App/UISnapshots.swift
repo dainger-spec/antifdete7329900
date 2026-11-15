@@ -1861,9 +1861,13 @@ private struct BrandSheet: View {
                 }
             }
             HStack(alignment: .center, spacing: 28) {
+                LumenBrandLockup.large
+                LumenBrandLockup.sidebar
+                ForEach([40, 24, 16] as [CGFloat], id: \.self) { size in LumenGlyph(size: size) }
+            }
+            HStack(alignment: .center, spacing: 28) {
                 LumenLockup.large
                 LumenLockup.sidebar
-                ForEach([40, 24, 16] as [CGFloat], id: \.self) { size in LumenGlyph(size: size) }
             }
             VStack(alignment: .leading, spacing: 12) {
                 LumenWordmark(height: 40)
