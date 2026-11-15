@@ -56,7 +56,7 @@
 "cookies.empty" = "Choose an export: what can be imported, and what cannot and why, is shown here before anything is imported.";
 "cookies.error.busy" = "The profile is starting or being encrypted; try again in a moment.";
 "cookies.error.stopped" = "The profile stopped before it answered; try again.";
-"cookies.explanation" = "A JSON export (EditThisCookie, Cookie-Editor, Puppeteer, Playwright, Selenium, Chrome or Firefox databases) or a Netscape cookies.txt. The file is checked first: what cannot be imported is listed with its line and the reason. A running profile gets the cookies at once; a stopped one when it next starts, before its first page loads.";
+"cookies.explanation" = "A JSON export (EditThisCookie, Cookie-Editor, Puppeteer, Playwright, Selenium, Chrome or Firefox databases) or a Netscape cookies.txt — either of them also wrapped in Base64. The file is checked first: what cannot be imported is listed with its line and the reason. A running profile gets the cookies at once; a stopped one when it next starts, before its first page loads.";
 "cookies.format.json" = "JSON";
 "cookies.format.netscape" = "Netscape cookies.txt";
 "cookies.formatLine" = "Format: %1$@, read as %2$@";
