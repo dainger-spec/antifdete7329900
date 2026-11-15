@@ -68,6 +68,49 @@ final class AccountSyncTests: XCTestCase {
                       "a Mac's sync goes on after the paid period: the data is the person's to take")
         XCTAssertFalse(AccountSync.isOffered(signedIn: true, entitlement: entitlement(.exportOnly, "account_disabled")))
     }
+
+    // MARK: The account's vaults, asked by a Mac that has none
+
+    /// `GET /v1/device/sync/vaults` (CONTRACT §16.1), which a Mac without a vault asks before it brings
+    /// one back (`VaultRestore`): the request, the list as it is read, and each refusal as the state
+    /// the setup screen says.
+    func testTheAccountsVaultsAreReadAndItsRefusalsAreStates() throws {
+        func answer(_ status: Int, _ json: String, retryAfter: String? = nil) -> AccountResponse {
+            AccountResponse(status: status, body: Data(json.utf8), retryAfter: retryAfter)
+        }
+        let request = AccountAPI.syncVaults(deviceToken: ServerToken("lmd_device"))
+        XCTAssertEqual(request.method, .get)
+        XCTAssertEqual(request.path, "/v1/device/sync/vaults")
+        XCTAssertEqual(request.bearer, ServerToken("lmd_device"))
+        XCTAssertNil(request.body)
+
+        let two = AccountAPI.syncVaults(from: answer(200, """
+            {"vaults": [{"vaultID": "6f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f1", "changedAt": "2026-10-01T08:00:00Z"},
+                        {"vaultID": "not an id", "changedAt": "2026-11-12T08:00:00Z"},
+                        {"vaultID": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", "changedAt": "2026-11-11T09:30:00Z"},
+                        {"vaultID": "11111111-2222-4333-8444-555555555555"}]}
+            """))
+        let vaults = try two.get()
+        XCTAssertEqual(vaults.map(\.vaultID.uuidString), ["0A1B2C3D-4E5F-4A6B-8C7D-9E0F1A2B3C4D", "6F1E2D3C-4B5A-4978-8695-A4B3C2D1E0F1",
+                                                          "11111111-2222-4333-8444-555555555555"], "the last changed first, one without a time last")
+        XCTAssertEqual(vaults.first?.changedAt, ISO8601DateFormatter().date(from: "2026-11-11T09:30:00Z"))
+        XCTAssertEqual(AccountVaults.state(of: two), .vaults(vaults))
+
+        XCTAssertEqual(AccountVaults.state(of: AccountAPI.syncVaults(from: answer(200, #"{"vaults": []}"#))), .noVaults)
+        XCTAssertEqual(AccountVaults.state(of: AccountAPI.syncVaults(from: answer(403, #"{"error": {"code": "sync_not_in_plan", "message": "x"}}"#))), .notInPlan)
+        XCTAssertEqual(AccountVaults.state(of: AccountAPI.syncVaults(from: answer(403, #"{"error": {"code": "sync_on_hold", "availableAt": "2026-11-20T10:00:00Z"}}"#))),
+                       .onHold(until: ISO8601DateFormatter().date(from: "2026-11-20T10:00:00Z")))
+        XCTAssertEqual(AccountVaults.state(of: AccountAPI.syncVaults(from: answer(403, #"{"error": {"code": "sync_on_hold"}}"#))), .onHold(until: nil))
+        XCTAssertEqual(AccountVaults.state(of: AccountAPI.syncVaults(from: answer(403, #"{"error": {"code": "account_disabled"}}"#))), .accountDisabled)
+        XCTAssertEqual(AccountVaults.state(of: AccountAPI.syncVaults(from: answer(401, #"{"error": {"code": "device_revoked"}}"#))), .signedOut)
+        XCTAssertEqual(AccountVaults.state(of: AccountAPI.syncVaults(from: answer(429, #"{"error": {"code": "rate_limited"}}"#, retryAfter: "20"))),
+                       .rateLimited(retryAfter: 20))
+        XCTAssertEqual(AccountVaults.state(of: AccountAPI.syncVaults(from: answer(500, "oops"))), .unreachable)
+        XCTAssertEqual(AccountVaults.state(of: AccountAPI.syncVaults(from: answer(200, "<html>a captive portal</html>"))), .unreachable)
+        XCTAssertEqual(AccountVaults.state(of: AccountAPI.syncVaults(from: answer(404, #"{"error": {"code": "not_found"}}"#))),
+                       .refused(status: 404, code: "not_found"), "a server from before the list")
+    }
+
     // MARK: The sync target as stored
 
     func testTheAccountTargetIsStoredAndTheOtherTargetsReadAsBefore() throws {
