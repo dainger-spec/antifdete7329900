@@ -55,6 +55,7 @@
 "cookies.done.refused" = "WebKit не сохранил из них %1$ld: %2$@";
 "cookies.empty" = "Выберите файл экспорта: здесь появится, что можно импортировать, а что нельзя и почему, — до самого импорта.";
 "cookies.error.busy" = "Профиль запускается или шифруется; повторите через несколько секунд.";
+"cookies.error.stopped" = "Профиль остановился, не успев ответить; повторите ещё раз.";
 "cookies.explanation" = "Экспорт в JSON (EditThisCookie, Cookie-Editor, Puppeteer, Playwright, Selenium, базы Chrome или Firefox) или Netscape cookies.txt. Сначала файл проверяется: то, что импортировать нельзя, показано со строкой и причиной. Запущенный профиль получает cookies сразу, остановленный — при следующем запуске, до загрузки первой страницы.";
 "cookies.format.json" = "JSON";
 "cookies.format.netscape" = "Netscape cookies.txt";

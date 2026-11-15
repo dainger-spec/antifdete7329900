@@ -25,9 +25,12 @@ enum ProfileCommand: Codable {
     case openURL(URL)
     case showLibrary(section: String)
     case showPasswords
-    case importCookies([ImportedCookie])
-    /// Every cookie of the profile's store, for an export (`CookieExport`).
-    case exportCookies
+    /// Cookies to import into the profile's store; answered by `cookiesImported` with the same
+    /// `request`, by which the manager knows which import the answer is for.
+    case importCookies([ImportedCookie], request: UUID)
+    /// Every cookie of the profile's store, for an export (`CookieExport`); answered by
+    /// `cookiesExported` with the same `request`.
+    case exportCookies(request: UUID)
     case startWarmUp(WarmUpPlan)
     case stopWarmUp
     /// Run a scenario (`ScenarioRunner`) in a window of its own of this profile.
@@ -113,12 +116,12 @@ enum ProfileEvent: Codable {
     case recorded(ScenarioRecorder.Event)
     /// The answer to `webDriver`, by the call's id.
     case webDriverAnswer(WebDriverAnswer)
-    /// The answer to `importCookies`: what the profile's store did with them, or nil when the
-    /// profile could not take them (it was starting or stopping).
-    case cookiesImported(ProfileManager.CookieImportOutcome?)
-    /// The answer to `exportCookies`; nil when the profile could not give them (starting or
-    /// stopping).
-    case cookiesExported([ImportedCookie]?)
+    /// The answer to `importCookies`, with its `request`: what the profile's store did with them, or
+    /// nil when the profile could not take them (it was starting or stopping).
+    case cookiesImported(ProfileManager.CookieImportOutcome?, request: UUID)
+    /// The answer to `exportCookies`, with its `request`; nil when the profile could not give them
+    /// (starting or stopping).
+    case cookiesExported([ImportedCookie]?, request: UUID)
     /// The answer to `checkNetwork`.
     case networkReport(ProfileNetworkReport)
     /// The profile's settings were saved in its process (a proxy location remembered, a site
