@@ -272,7 +272,11 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 7. **Cookies:** **⋯ → Import Cookies…** reads a JSON or Netscape `cookies.txt` export, shows
    what can be imported and why the rest cannot (with line numbers), then imports into that
    profile: at once when it runs, otherwise when it next starts.
-8. **Warm-up:** **⋯ → Warm Up…** takes a ready-made list (general, by interest, or by
+8. **Warm-up:** the sidebar's **Warm-up** section lists every profile by its warm-up state, the
+   templates (kinds of browsing resolved for the proxy's country, and lists of your own) and the
+   history of runs; **New warm-up** warms one profile or a selection (docs/ISOLATION_AND_LIMITATIONS.md
+   §8c, the paragraph "Since November 2026"). What follows describes the robot itself.
+   **⋯ → Warm Up…** takes a ready-made list (general, by interest, or by
    country: 43 countries), one put together for the proxy's country, or web addresses of your
    own; starts the profile without a window if it is stopped, and visits the pages one after
    the other in a hidden window of it: a random time on each page, scrolling, and if asked
