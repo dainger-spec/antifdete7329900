@@ -1,6 +1,7 @@
 import Foundation
 import LumenCore
 import UIKit
+import UniformTypeIdentifiers
 import WebKit
 
 /// One tab: a WKWebView of its session's configuration, and what the bar above it shows.
@@ -33,6 +34,11 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
+        // A long press on a link or an image shows the app's own menu, never WebKit's (`menu(for:)`).
+        // Link previews stay allowed, unlike the Mac's: on iOS they are what gives a web view a
+        // context menu at all — turned off, WebKit asks this delegate for no menu, and a long press
+        // on a link opens it as a tap does.
+        webView.allowsLinkPreview = true
         #if DEBUG
         webView.isInspectable = true
         #endif
@@ -114,5 +120,64 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         runtime?.adoptTab(configuration: configuration)
+    }
+
+    // MARK: The long-press menu
+
+    /// A long press on a link, or on an image: the app's own menu (`menu(for:)`), always — never
+    /// WebKit's, which it shows when this answers nil. WebKit's preview opens the link in Safari's
+    /// view, and its Share… and Add to Reading List hand the address to the system, which fetches
+    /// it — the page and its icon for the share sheet, the page for Safari's list — from the
+    /// iPhone's own address: outside the session's data store, so outside its proxy (the Mac
+    /// measured the same frameworks, HandOffs.swift there).
+    @objc(webView:contextMenuConfigurationForElement:completionHandler:)
+    func webView(_ webView: WKWebView, contextMenuConfigurationForElement elementInfo: WKContextMenuElementInfo,
+                 completionHandler: @escaping (UIContextMenuConfiguration?) -> Void) {
+        completionHandler(menu(for: elementInfo.linkURL))
+    }
+
+    /// The lifted link itself touched: it opens in this tab, as a tap on it does.
+    @objc(webView:contextMenuForElement:willCommitWithAnimator:)
+    func webView(_ webView: WKWebView, contextMenuForElement elementInfo: WKContextMenuElementInfo,
+                 willCommitWithAnimator animator: UIContextMenuInteractionCommitAnimating) {
+        guard let url = elementInfo.linkURL, Self.opensHere(url) else { return }
+        animator.addCompletion { [weak self] in
+            Task { @MainActor in self?.load(url) }
+        }
+    }
+
+    /// The menu of a link: Open, Open in New Tab (a tab of this session) and Copy Link — the first two
+    /// for a web address only — and no preview: everything stays in this session's data store. An
+    /// element without a link (an image) gets a menu with nothing in it.
+    func menu(for url: URL?) -> UIContextMenuConfiguration {
+        var actions: [UIMenuElement] = []
+        if let url {
+            if Self.opensHere(url) {
+                actions.append(UIAction(title: L("Открыть"), image: UIImage(systemName: "arrow.up.forward.square")) { [weak self] _ in
+                    self?.load(url)
+                })
+                actions.append(UIAction(title: L("Открыть в новой вкладке"), image: UIImage(systemName: "plus.square.on.square")) { [weak self] _ in
+                    self?.runtime?.newTab(opening: url)
+                })
+            }
+            actions.append(UIAction(title: L("Скопировать ссылку"), image: UIImage(systemName: "doc.on.doc")) { _ in
+                Self.copyLink(url)
+            })
+        }
+        let shown = UIMenu(title: url.map { String($0.absoluteString.prefix(300)) } ?? "", children: actions)
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in shown }
+    }
+
+    /// An address a tab of the session loads (the others are refused by `decidePolicyFor` anyway).
+    static func opensHere(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        return scheme == "http" || scheme == "https"
+    }
+
+    /// The address on this iPhone's pasteboard only — not on the person's other devices (Universal
+    /// Clipboard), as the Mac keeps what a profile copies on that Mac.
+    static func copyLink(_ url: URL) {
+        UIPasteboard.general.setItems([[UTType.url.identifier: url, UTType.plainText.identifier: url.absoluteString]],
+                                      options: [.localOnly: true])
     }
 }

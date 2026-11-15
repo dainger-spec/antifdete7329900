@@ -197,6 +197,11 @@
 /* A new tab: where a search goes. */
 "Поисковик: %@" = "Search engine: %@";
 
+/* A long press on a link: the app's own menu (BrowserTab). */
+"Открыть" = "Open";
+"Открыть в новой вкладке" = "Open in New Tab";
+"Скопировать ссылку" = "Copy Link";
+
 /* The sync with the Mac's vault (SyncView). */
 "Синхронизация" = "Sync";
 "Синхронизация с Mac — в платных тарифах. Профили на этом iPhone остаются как есть." = "Sync with your Mac comes with the paid plans. The profiles on this iPhone stay as they are.";

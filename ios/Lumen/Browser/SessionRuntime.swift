@@ -212,11 +212,13 @@ final class SessionRuntime: ObservableObject {
 
     // MARK: Tabs
 
-    func newTab() {
+    /// A new tab, shown; with `url`, loading it (a link's "Open in New Tab").
+    func newTab(opening url: URL? = nil) {
         guard !Faults.isActive(.newTabNotOpened) else { return }
         let tab = makeTab(TabRecord(), configuration: nil)
         tabs.append(tab)
         selectedID = tab.id
+        if let url { tab.load(url) }
         saveTabs()
     }
 
