@@ -81,9 +81,14 @@ struct ProfileBulkBar: View {
             bar(compact: true)
         }
         .padding(5)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.raised))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
-        .shadow(color: .black.opacity(0.55), radius: 24, y: 12)
+        // Glass: it floats over the rows, which show through it blurred. The tone over the material
+        // keeps the bar dark where a picture of the window draws no material (the snapshots).
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.raised.opacity(0.72)))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .strokeBorder(LinearGradient(colors: [Color.white.opacity(0.22), Color.white.opacity(0.10)],
+                                         startPoint: .top, endPoint: .bottom), lineWidth: 1))
+        .shadow(color: .black.opacity(0.6), radius: 24, y: 12)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(String(format: L("profiles.bulk.selected"), rows.count)))
     }

@@ -890,6 +890,7 @@
 "profiles.sync.notYet" = "Not synced yet";
 "profiles.sync.off" = "Sync is off";
 "profiles.sync.synced" = "Synced %@";
+"profiles.sync.synced.title" = "Synced";
 "profiles.sync.syncing" = "Syncing…";
 "profiles.title" = "Profiles";
 /* Proxy list (Profiles → ⋯ → Proxies…), import, checks, assignment; several profiles at once */
@@ -1502,6 +1503,8 @@
 "transfer.password" = "File password";
 "transfer.password.repeat" = "Repeat password";
 "transfer.password.note" = "At least 8 characters. The file cannot be opened without it, and it cannot be recovered.";
+"transfer.why.short" = "The file’s password takes at least 8 characters";
+"transfer.why.mismatch" = "The passwords do not match";
 "transfer.import.title" = "Import Profile";
 "transfer.import.explanation" = "Choose a .pbprofile file and enter its password. The profile is added as a new one, with data of its own, apart from the profiles already here.";
 "transfer.import.choose" = "Choose File…";
@@ -1957,7 +1960,7 @@
 "settings.appearance.subtitle" = "Dark monochrome, the light at entry and the list's density — for the app's own windows. Pages follow macOS, as in Safari.";
 "settings.appearance.entry" = "Entry screen";
 "settings.appearance.light" = "Lumen's light at entry";
-"settings.appearance.light.detail" = "Two eclipses in the corners of the entry screen and the profiles window. They come in once, as the app opens, and stay as a dimmed background.";
+"settings.appearance.light.detail" = "The eclipse’s horizon on the entry screen and the light in the corners of the profiles window. They come in once, as the app opens, and stay as a dimmed background.";
 "settings.appearance.listAndMotion" = "List and motion";
 "settings.appearance.density" = "Profile list density";
 "settings.appearance.density.detail" = "Compact: lower rows, more profiles on the screen.";

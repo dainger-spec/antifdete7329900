@@ -1026,8 +1026,12 @@ struct ProfilesScreen: View {
 
     var body: some View {
         GeometryReader { geometry in
-            // Beside the list only when the rows keep their columns.
-            let inspectorFits = geometry.size.width - Self.sidebarWidth - Self.inspectorWidth >= ProfileColumns.minimumContentWidth
+            // Beside the list, to the window's top, only when the rows keep their columns; with less
+            // room beside the list under the header, the list compact; with too little for that,
+            // over the list.
+            let room = geometry.size.width - Self.sidebarWidth - Self.inspectorWidth
+            let inspectorFits = room >= ProfileColumns.minimumContentWidth
+            let inspectorDocks = !inspectorFits && room >= ProfileColumns.minimumCompactWidth
             HStack(spacing: 0) {
                 ProfilesSidebar(rows: rows, sync: sync, filter: $filter, section: section, proxyCount: proxyCount,
                                 proxyAlerts: proxyAlerts, showsVirtualMachines: virtualMachines != nil,
@@ -1036,7 +1040,8 @@ struct ProfilesScreen: View {
                     .lumenFrost()
                     .overlay(alignment: .trailing) { Rectangle().fill(Theme.divider).frame(width: 1) }
                     .opacity(appeared ? 1 : 0)
-                main(inspectorOver: inspectorShown && !inspectorFits)
+                main(inspectorOver: inspectorShown && !inspectorFits && !inspectorDocks,
+                     inspectorDocked: inspectorShown && inspectorDocks)
                 if inspectorShown && inspectorFits {
                     inspector(top: Self.inspectorTop)
                         .opacity(appeared ? 1 : 0)
@@ -1068,10 +1073,12 @@ struct ProfilesScreen: View {
         }
     }
 
-    /// The list (or the proxies), under the header. `inspectorOver`: the window has no room for the
-    /// inspector beside the list, so it lies over the list's right side — the list's only: the
-    /// header and the banners above it, with their buttons, stay within reach.
-    private func main(inspectorOver: Bool) -> some View {
+    /// The list (or the proxies), under the header. `inspectorDocked`: the window has no room for
+    /// the inspector beside the whole list, so it stands beside the list under the header, and the
+    /// list is compact (`ProfileColumns.compact`): nothing of a row is under it. `inspectorOver`:
+    /// not even that — it lies over the list's right side, opaque. Either way the header and the
+    /// banners above, with their buttons, stay within reach.
+    private func main(inspectorOver: Bool, inspectorDocked: Bool) -> some View {
         Group {
             if section.wrappedValue == .proxies, let proxies {
                 proxies
@@ -1081,14 +1088,8 @@ struct ProfilesScreen: View {
                 VStack(spacing: 0) {
                     header
                     bannerStack
-                    content
-                        .overlay(alignment: .trailing) {
-                            if inspectorOver {
-                                inspector(top: 8)
-                                    .shadow(color: .black.opacity(0.55), radius: 30, x: -6)
-                                    .transition(.move(edge: .trailing).combined(with: .opacity))
-                            }
-                        }
+                    HStack(spacing: 0) {
+                    content(compact: inspectorDocked)
                         .overlay(alignment: .bottom) {
                             // Floating over the list's foot, while several are selected.
                             if selectedRows.count >= 2 {
@@ -1100,6 +1101,18 @@ struct ProfilesScreen: View {
                                     .transition(.move(edge: .bottom).combined(with: .opacity))
                             }
                         }
+                        if inspectorDocked {
+                            inspector(top: 8, docked: true)
+                                .transition(.opacity)
+                        }
+                    }
+                    .overlay(alignment: .trailing) {
+                        if inspectorOver {
+                            inspector(top: 8, opaque: true)
+                                .shadow(color: .black.opacity(0.55), radius: 30, x: -6)
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
+                        }
+                    }
                     if let guardNotice {
                         GuardNoticeBar(notice: guardNotice, open: openGuardSettings, hide: hideGuardNotice)
                             .padding(.top, 10)
@@ -1227,7 +1240,23 @@ struct ProfilesScreen: View {
 
     /// `top`: where its content starts — under the title bar's band beside the list
     /// (`inspectorTop`), just under the header over it.
-    private func inspector(top: CGFloat) -> some View {
+    /// `docked`: beside the list under the header — its top-left corner rounded, a hairline along
+    /// its top and left. `opaque`: over the list, so no row shows through it.
+    private func inspector(top: CGFloat, docked: Bool = false, opaque: Bool = false) -> some View {
+        let shape = UnevenRoundedRectangle(topLeadingRadius: docked ? 14 : 0, style: .continuous)
+        return inspectorContent
+        .frame(width: Self.inspectorWidth)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .padding(.top, top)
+        .background(shape.fill(opaque ? Theme.sidebar : Theme.sidebar.opacity(docked ? 0.86 : 0.8)))
+        .overlay { if docked { shape.strokeBorder(Theme.hairline, lineWidth: 1) } }
+        .overlay(alignment: .leading) { if !docked { Rectangle().fill(Theme.divider).frame(width: 1) } }
+        .clipShape(shape)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(L("inspector.title"))
+    }
+
+    private var inspectorContent: some View {
         Group {
             if selectedRows.count == 1, let row = selectedRows.first {
                 ProfileInspectorView(row: row, info: inspectorInfo(row.id), actions: actions,
@@ -1239,13 +1268,6 @@ struct ProfilesScreen: View {
                 EmptyInspectorView()
             }
         }
-        .frame(width: Self.inspectorWidth)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .padding(.top, top)
-        .background(Theme.sidebar.opacity(0.8))
-        .overlay(alignment: .leading) { Rectangle().fill(Theme.divider).frame(width: 1) }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(L("inspector.title"))
     }
 
     /// The window comes in: the sidebar fades in, the list rises 10 pt (the design's 0.9 s); under
@@ -1379,8 +1401,9 @@ struct ProfilesScreen: View {
             : String(format: L("profiles.count"), rows.count)
     }
 
+    /// `compact`: the inspector stands beside the list (`main`).
     @ViewBuilder
-    private var content: some View {
+    private func content(compact: Bool) -> some View {
         if rows.isEmpty, let indexNotice, indexNotice.kind != .unlisted {
             // Not "no profiles yet": the index that lists them is missing or unreadable (the notice
             // above says so), and their folders are kept.
@@ -1397,15 +1420,21 @@ struct ProfilesScreen: View {
             }
         } else {
             GeometryReader { geometry in
-                let columns = ProfileColumns(contentWidth: geometry.size.width)
+                let columns = ProfileColumns(contentWidth: geometry.size.width, compact: compact)
+                // The column titles stay above the list as it scrolls: at 200 profiles they said which
+                // column is which only on the first screen.
+                VStack(spacing: 0) {
+                columnHeader(columns)
+                    .padding(.horizontal, columns.margin)
                 ScrollView {
                     listStack(columns)
-                        .padding(.horizontal, 20)
+                        .padding(.horizontal, columns.margin)
                         // The last row stays above the floating bar.
                         .padding(.bottom, selectedRows.count >= 2 ? 88 : 24)
                 }
                 .scrollIndicators(.automatic)
                 .animation(Motion.isReduced(reduceMotion) ? nil : Motion.reflow, value: displayOrder.map(\.id))
+                }
             }
             .transition(.opacity)
         }
@@ -1430,7 +1459,6 @@ struct ProfilesScreen: View {
 
     @ViewBuilder
     private func listItems(_ columns: ProfileColumns) -> some View {
-        columnHeader(columns)
         ForEach(groups) { group in
             // One group alone has no caption: "Ready to launch 50" under the column titles read as
             // a second header, and the count is the header's own ("Profiles: 50").
@@ -1447,7 +1475,7 @@ struct ProfilesScreen: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, ProfileColumns.nameInset)
-            Text(L("profiles.column.exit")).lumenCaps().frame(width: ProfileColumns.exit, alignment: .leading)
+            Text(L(columns.compact ? "inspector.exit" : "profiles.column.exit")).lumenCaps().frame(width: columns.exitWidth, alignment: .leading)
             if columns.showsAppearsAs {
                 Text(L("profiles.column.appearsAs")).lumenCaps().frame(width: ProfileColumns.appearsAs, alignment: .leading)
             }
@@ -1456,8 +1484,10 @@ struct ProfilesScreen: View {
                                 help: L(order.wrappedValue == .lastUsed ? "profiles.sort.lastUsed.on" : "profiles.sort.lastUsed.help")) {
                 order.wrappedValue = order.wrappedValue == .lastUsed ? .created : .lastUsed
             }
+            // Over the states' words, past their marks' slot.
+            .padding(.leading, ProfileColumns.stateMark + 7)
             .frame(width: columns.state, alignment: .leading)
-            Color.clear.frame(width: ProfileColumns.actions, height: 1)
+            if !columns.compact { Color.clear.frame(width: ProfileColumns.actions, height: 1) }
         }
         .lineLimit(1)
         .padding(.horizontal, ProfileColumns.rowPadding)
@@ -1532,9 +1562,18 @@ struct ProfileColumns {
     /// The narrowest it gets.
     static let minimumState: CGFloat = 132
     static let actions: CGFloat = 68
+    /// The slot of a state's mark, before its words.
+    static let stateMark: CGFloat = 14
     /// The name's slot (its letters' circle included).
     static let minimumName: CGFloat = 200
 
+    /// The list beside the inspector under the header: the name, the exit as its flag and code (or
+    /// its sign alone), the state — no "Appears as", no buttons, narrower page margins.
+    let compact: Bool
+    /// The exit column: wide enough for "Settings cannot be read", or for a flag and a code.
+    let exitWidth: CGFloat
+    /// The list's margin at each side.
+    let margin: CGFloat
     let showsAppearsAs: Bool
     /// The state column: full, or narrower in a narrow window rather than leaving the name a few
     /// letters ("Mar…", "N…" at the narrowest window: CI run 555's profiles-narrow).
@@ -1544,10 +1583,20 @@ struct ProfileColumns {
     /// page margins and the rows' own padding on both sides, the columns, the narrowest name.
     static let minimumContentWidth: CGFloat = 2 * 20 + 2 * Self.rowPadding + Self.exit + Self.fullState + Self.actions + 3 * Self.gap + Self.minimumName
 
-    init(contentWidth: CGFloat) {
-        showsAppearsAs = contentWidth >= Self.minimumContentWidth + Self.appearsAs + Self.gap
+    static let compactExit: CGFloat = 48
+    static let compactState: CGFloat = 162
+    static let compactMargin: CGFloat = 12
+    /// The narrowest compact list: its margins and padding, the checkbox, a name of 120 pt beside its
+    /// circle, the exit, the state.
+    static let minimumCompactWidth: CGFloat = 2 * Self.compactMargin + 2 * Self.rowPadding + Self.nameInset + 120 + Self.compactExit + Self.compactState + 2 * Self.gap
+
+    init(contentWidth: CGFloat, compact: Bool = false) {
+        self.compact = compact
+        exitWidth = compact ? Self.compactExit : Self.exit
+        margin = compact ? Self.compactMargin : 20
+        showsAppearsAs = !compact && contentWidth >= Self.minimumContentWidth + Self.appearsAs + Self.gap
         let short = max(0, Self.minimumContentWidth - contentWidth)
-        state = max(Self.minimumState, Self.fullState - short)
+        state = compact ? Self.compactState : max(Self.minimumState, Self.fullState - short)
     }
 }
 
@@ -1613,9 +1662,14 @@ private struct ProfilesSidebar: View {
                         ForEach(tags, id: \.self) { tag in tagItem(tag) }
                     }
                 }
+                // Room for the last row to come clear of the fade below.
+                .padding(.bottom, 20)
             }
             .scrollIndicators(.automatic)
             .frame(maxHeight: .infinity)
+            // The rows go out over the last 24 pt instead of being cut flat by the foot.
+            .mask(LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.9), .init(color: .clear, location: 1)],
+                                 startPoint: .top, endPoint: .bottom))
             .padding(.bottom, 12)
             SyncStatusButton(sync: sync, action: actions.openSync)
                 .padding(.bottom, rights == nil ? 8 : 2)
@@ -1663,6 +1717,8 @@ private struct ProfilesSidebar: View {
                     .font(.lumenBody)
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
+                    // "Commands and Search" was cut to "Commands and S…" beside its keys.
+                    .minimumScaleFactor(0.85)
                 Spacer(minLength: 4)
                 KeyCap(keys: "⌘K", small: true) // l10n: not text
             }
@@ -1822,11 +1878,28 @@ private struct SyncStatusButton: View {
                     .font(.system(size: 12))
                     .foregroundStyle(sync == .failed ? Theme.warning : Theme.textTertiary)
                     .frame(width: 18)
-                Text(text)
-                    .font(.lumenSecondary)
-                    .foregroundStyle(sync == .failed ? Theme.warning : Theme.textSecondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                if case .synced(let date) = sync {
+                    // Two even lines — what, and when — instead of one sentence broken where it
+                    // happens to break ("Синхронизировано 4 / минуты назад").
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(L("profiles.sync.synced.title"))
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.textSecondary)
+                        Text(date.shownRelative)
+                            .font(.lumenCaption)
+                            .foregroundStyle(Theme.textTertiary)
+                            .monospacedDigit()
+                    }
+                    .lineLimit(1)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(text)
+                } else {
+                    Text(text)
+                        .font(.lumenSecondary)
+                        .foregroundStyle(sync == .failed ? Theme.warning : Theme.textSecondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10)
@@ -1892,17 +1965,22 @@ private struct ProfileRow: View {
             nameCell
                 .shadow(color: backdropCountry == nil ? .clear : Color.black.opacity(0.6), radius: 2.5, y: 1)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            exitCell.frame(width: ProfileColumns.exit, alignment: .leading)
+            exitCell.frame(width: columns.exitWidth, alignment: .leading)
             if columns.showsAppearsAs {
                 seenCell.frame(width: ProfileColumns.appearsAs, alignment: .leading)
             }
             stateCell.frame(width: columns.state, alignment: .leading)
-            actionsCell.frame(width: ProfileColumns.actions, alignment: .trailing)
+            // Beside the inspector the row has no buttons of its own: the inspector has them, and
+            // the context menu.
+            if !columns.compact { actionsCell.frame(width: ProfileColumns.actions, alignment: .trailing) }
         }
         .padding(.horizontal, ProfileColumns.rowPadding)
         .frame(height: height)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
             .fill(isSelected ? Theme.rowSelected : (hovered ? Theme.rowHover : Color.clear)))
+        // A selected row is lit: a hairline round it, in the tone of a field's edge.
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .strokeBorder(isSelected ? Theme.hairline : Color.clear, lineWidth: 1))
         .background(alignment: .leading) {
             if let code = backdropCountry {
                 CountryBackdrop(code: code)
@@ -1925,7 +2003,6 @@ private struct ProfileRow: View {
         }
         .onHover { hovered = $0 }
         .animation(Motion.hover(hovered), value: hovered)
-        .opacity(row.activity == .sealing ? 0.6 : 1)
         .contextMenu {
             if selection.count >= 2 {
                 SelectionMenuItems(rows: selection, actions: actions)
@@ -1973,7 +2050,8 @@ private struct ProfileRow: View {
             ProfileAvatar(name: row.name, id: row.id, size: 30, style: row.avatar, running: row.isRunning)
             HStack(spacing: 8) {
                 Text(row.name)
-                    .font(.lumenLabel)
+                    // Semibold: the name is what a row is read by, among 200 of them.
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -1985,19 +2063,35 @@ private struct ProfileRow: View {
                         .accessibilityLabel(L("profiles.row.hasNotes"))
                 }
                 if !row.tags.isEmpty || row.ephemeral {
-                    TagLine.text(row.tags + (row.ephemeral ? [L("profiles.row.ephemeralTag")] : []), colors: tagColors)
-                        .font(.lumenSecondary)
-                        .foregroundStyle(Theme.textTertiary)
-                        .lineLimit(1)
+                    // Whole tags, as many as the column has room for, then "+N" — never a cut one
+                    // ("●clien…", a lone "…": CI run 555's profiles-narrow).
+                    let tags = row.tags + (row.ephemeral ? [L("profiles.row.ephemeralTag")] : [])
+                    ViewThatFits(in: .horizontal) {
+                        ForEach(Array(stride(from: tags.count, through: 0, by: -1)), id: \.self) { shown in
+                            tagLine(tags, shown: shown)
+                        }
+                    }
+                    .accessibilityLabel(tags.joined(separator: ", "))
                 }
             }
         }
         .help(row.notes)
     }
 
+    /// The first `shown` tags and how many more there are.
+    private func tagLine(_ tags: [String], shown: Int) -> some View {
+        let rest = tags.count - shown
+        let more = rest > 0 ? Text(verbatim: (shown > 0 ? "  +" : "+") + "\(rest)") : Text(verbatim: "")
+        return (TagLine.text(Array(tags.prefix(shown)), colors: tagColors) + more)
+            .font(.lumenSecondary)
+            .foregroundStyle(Theme.textTertiary)
+            .lineLimit(1)
+            .fixedSize()
+    }
+
     private var exitCell: some View {
         HStack(spacing: 6) {
-            ExitLabel(exit: row.exit, note: row.exitNote, directCountry: row.directCountry)
+            ExitLabel(exit: row.exit, note: row.exitNote, directCountry: row.directCountry, signOnly: columns.compact)
             if row.exitUnconfirmed {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 11))
@@ -2023,10 +2117,56 @@ private struct ProfileRow: View {
         }
     }
 
-    @ViewBuilder
+    /// The state: its mark in a slot of its own, then its words — so that the words of every row
+    /// start on one edge and a state is told by its mark's shape before it is read.
     private var stateCell: some View {
+        HStack(spacing: 7) {
+            stateMark.frame(width: ProfileColumns.stateMark)
+            stateWords
+        }
+    }
+
+    @ViewBuilder
+    private var stateMark: some View {
         if row.exportOnly, row.activity == .stopped {
-            Label(L("contract.profile.export_only.badge"), systemImage: "square.and.arrow.up")
+            Image(systemName: "square.and.arrow.up").font(.system(size: 11)).foregroundStyle(Theme.warning)
+                .accessibilityHidden(true)
+        } else if row.problem != nil, row.activity == .stopped {
+            Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 11)).foregroundStyle(Theme.danger)
+                .accessibilityHidden(true)
+        } else {
+            switch row.activity {
+            case .starting:
+                ProgressView().controlSize(.mini)
+            case .sealing:
+                Image(systemName: "lock").font(.system(size: 11)).foregroundStyle(Theme.textSecondary)
+                    .accessibilityHidden(true)
+            case .running:
+                if let warmUp = row.warmUp {
+                    // A ring that fills as the warm-up goes.
+                    ZStack {
+                        Circle().stroke(Color.white.opacity(0.16), lineWidth: 1.8)
+                        Circle().trim(from: 0, to: max(0.04, warmUp.fraction))
+                            .stroke(Theme.textPrimary, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                    }
+                    .frame(width: 10, height: 10)
+                    .accessibilityHidden(true)
+                } else if row.warmUpQueued {
+                    Color.clear
+                } else {
+                    RunningDot()
+                }
+            case .stopped:
+                Color.clear
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var stateWords: some View {
+        if row.exportOnly, row.activity == .stopped {
+            Text(L("contract.profile.export_only.badge"))
                 .font(.lumenBody)
                 .foregroundStyle(Theme.warning)
                 .lineLimit(1)
@@ -2050,7 +2190,6 @@ private struct ProfileRow: View {
                     secondaryLine(L("profiles.row.warmUpQueued"))
                 } else {
                     HStack(spacing: 8) {
-                        RunningDot()
                         Text(L("profiles.row.running")).font(.lumenBody).foregroundStyle(Theme.textPrimary)
                         if let since = row.lastUsed {
                             Text(Self.runningFor(since))
@@ -2091,10 +2230,7 @@ private struct ProfileRow: View {
     }
 
     private func busyLine(_ text: String) -> some View {
-        HStack(spacing: 7) {
-            ProgressView().controlSize(.mini)
-            secondaryLine(text)
-        }
+        secondaryLine(text)
     }
 
     private var lastUsed: String {
@@ -2260,6 +2396,10 @@ struct ExitLabel: View {
     var note: String?
     /// With no proxy: the country the profile's own connection exits in, when a launch found it.
     var directCountry: String?
+    /// The list beside the inspector: where there is no country to say in two letters — no proxy,
+    /// a proxy whose country is unknown, settings that cannot be read — the sign alone, with its
+    /// words on hover and for VoiceOver.
+    var signOnly = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -2284,11 +2424,15 @@ struct ExitLabel: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Theme.textTertiary)
                     .frame(width: flagSize)
+                    .help(signOnly ? L("profiles.exit.direct") : "")
+                    .accessibilityLabel(L("profiles.exit.direct"))
                 // No country yet: "Direct" and why on hover — never an empty cell, never a guess.
-                Text(L("profiles.exit.direct"))
-                    .font(.lumenBody)
-                    .foregroundStyle(Theme.textSecondary)
-                    .help(note ?? L("inspector.exit.directNotYet"))
+                if !signOnly {
+                    Text(L("profiles.exit.direct"))
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textSecondary)
+                        .help(note ?? L("inspector.exit.directNotYet"))
+                }
             case let .proxy(endpoint, code?):
                 // The flag to find it by eye, the words to say what it is — a flag alone tells the
                 // Netherlands from France poorly, and nothing to VoiceOver (the owner, 1 November).
@@ -2311,20 +2455,28 @@ struct ExitLabel: View {
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.textTertiary)
                     .frame(width: flagSize)
-                Text(endpoint)
-                    .font(.lumenBody)
-                    .foregroundStyle(Theme.textPrimary)
-                    .truncationMode(.middle)
-                    .help(note ?? L("profiles.exit.unknownCountry"))
+                    .help(signOnly ? endpoint : "")
+                    .accessibilityLabel(endpoint)
+                if !signOnly {
+                    Text(endpoint)
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textPrimary)
+                        .truncationMode(.middle)
+                        .help(note ?? L("profiles.exit.unknownCountry"))
+                }
             case .unreadable:
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.warning)
                     .frame(width: flagSize)
-                Text(L("profiles.exit.unreadable"))
-                    .font(.lumenBody)
-                    .foregroundStyle(Theme.textSecondary)
-                    .help(String(format: L("profiles.exit.unreadable.help"), L("profiles.menu.syncNow"), L("profiles.menu.more")))
+                    .help(signOnly ? L("profiles.exit.unreadable") : "")
+                    .accessibilityLabel(L("profiles.exit.unreadable"))
+                if !signOnly {
+                    Text(L("profiles.exit.unreadable"))
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textSecondary)
+                        .help(String(format: L("profiles.exit.unreadable.help"), L("profiles.menu.syncNow"), L("profiles.menu.more")))
+                }
             }
         }
         .lineLimit(1)
@@ -2854,40 +3006,28 @@ private struct EmptyProfilesView: View {
     var onProxies: (() -> Void)?
 
     var body: some View {
-        VStack(spacing: 0) {
-            LumenGlyph(size: 44, color: Theme.textTertiary.opacity(0.55))
-                .padding(.bottom, 20)
-            Text(L("profiles.empty.title"))
-                .font(.lumenSheetTitle)
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.bottom, 6)
-            Text(L("profiles.empty.subtitle"))
-                .font(.lumenBody)
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 320)
-                .padding(.bottom, 20)
-            Button(action: onNew) { Label(L("profiles.action.new"), systemImage: "plus") }
-                .buttonStyle(.lumenPrimary)
-            HStack(spacing: 4) {
-                Button(L("profiles.menu.import"), action: onImport)
-                    .buttonStyle(.lumenGhost)
-                if let onProxies {
-                    Button(L("profiles.empty.proxies"), action: onProxies)
+        LumenEmptyState(title: L("profiles.empty.title"), text: L("profiles.empty.subtitle")) {
+            VStack(spacing: 0) {
+                Button(action: onNew) { Label(L("profiles.action.new"), systemImage: "plus") }
+                    .buttonStyle(.lumenPrimary)
+                HStack(spacing: 4) {
+                    Button(L("profiles.menu.import"), action: onImport)
                         .buttonStyle(.lumenGhost)
+                    if let onProxies {
+                        Button(L("profiles.empty.proxies"), action: onProxies)
+                            .buttonStyle(.lumenGhost)
+                    }
                 }
+                .padding(.top, 10)
+                Text(L(onProxies == nil ? "profiles.empty.hint.import" : "profiles.empty.hint"))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textTertiary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 380)
+                    .padding(.top, 14)
             }
-            .padding(.top, 10)
-            Text(L(onProxies == nil ? "profiles.empty.hint.import" : "profiles.empty.hint"))
-                .font(.lumenSecondary)
-                .foregroundStyle(Theme.textTertiary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 380)
-                .padding(.top, 14)
         }
-        .padding(40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -2898,22 +3038,12 @@ private struct NoMatchesView: View {
     let onShowAll: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            Text(L("profiles.noMatches"))
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.bottom, 8)
-            Text(query.isEmpty ? L("profiles.noMatches.filter") : String(format: L("profiles.noMatches.query"), query))
-                .font(.lumenBody)
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 340)
-                .padding(.bottom, 18)
+        LumenEmptyState(title: L("profiles.noMatches"),
+                        text: query.isEmpty ? L("profiles.noMatches.filter") : String(format: L("profiles.noMatches.query"), query),
+                        small: true) {
             Button(L("profiles.showAll"), action: onShowAll)
                 .buttonStyle(.lumenSecondary)
         }
-        .padding(40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .contain)
     }
 }

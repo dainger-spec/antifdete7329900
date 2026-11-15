@@ -72,7 +72,7 @@ struct ProfileTagsPanel: View {
             .padding(.bottom, 18)
             SheetFooter {
                 Button(L("common.cancel"), action: onCancel)
-                    .buttonStyle(.lumenSecondary)
+                    .buttonStyle(LumenButtonStyle(kind: .ghost, height: Theme.buttonHeight))
                     .keyboardShortcut(.cancelAction)
                 Button(L("profiles.tags.apply")) { onApply(adding, removing) }
                     .buttonStyle(.lumenPrimary)

@@ -84,14 +84,21 @@ private struct AppearanceThumbnail: View {
         ZStack {
             Theme.backdrop
             if lit {
-                EclipseLight(place: .thumbnail)
-                    .transition(.opacity)
+                // The lock screen's horizon in small: its rim's top 92 pt down, under the title.
+                Canvas(opaque: false, rendersAsynchronously: false) { context, size in
+                    context.withCGContext { cg in
+                        LumenHorizon.draw(in: cg, width: size.width, height: size.height, haze: true,
+                                          placed: LumenHorizon.Geometry(width: size.width, top: 92, radius: 520), lift: false)
+                    }
+                }
+                .transition(.opacity)
             }
             VStack(spacing: 10) {
-                LumenMark(size: 30)
+                LumenGlyph(size: 22)
                 Text(L("unlock.title"))
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(Theme.textPrimary)
+                    .padding(.bottom, 24)
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(Theme.field)
                     .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Theme.strongBorder, lineWidth: 1))
@@ -214,7 +221,7 @@ struct TouchIDTurnOnView: View {
             .padding(.bottom, 20)
             SheetFooter {
                 Button(L("common.cancel")) { dismiss() }
-                    .buttonStyle(.lumenSecondary)
+                    .buttonStyle(LumenButtonStyle(kind: .ghost, height: Theme.buttonHeight))
                     .keyboardShortcut(.cancelAction)
                 Button(L("touchid.on.action"), action: turnOn)
                     .buttonStyle(.lumenPrimary)

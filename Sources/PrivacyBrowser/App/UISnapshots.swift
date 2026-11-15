@@ -375,6 +375,11 @@ enum UISnapshots {
         problems += await Shot(name: "profiles-inspector-over", size: CGSize(width: 1180, height: 740), edges: true) {
             ProfilesPreview(rows: rows, showsInspector: true, selected: [northwind], inspectorInfo: info)
         }.capture(into: folder)
+        // The narrowest window: no room for the compact list beside the inspector, which lies over
+        // the list, opaque.
+        problems += await Shot(name: "profiles-inspector-narrowest", size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: 620), edges: true) {
+            ProfilesPreview(rows: rows, showsInspector: true, selected: [northwind], inspectorInfo: info)
+        }.capture(into: folder)
         // The list after a profile's window closed (the owner, 1 November: blank until scrolled up).
         problems += await listAfterReturn(into: folder)
         // The command palette (⌘K), as it opens and with something typed.

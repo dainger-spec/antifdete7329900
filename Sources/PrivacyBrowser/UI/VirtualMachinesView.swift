@@ -922,7 +922,7 @@ struct VMEditorView: View {
             .frame(minHeight: 360, maxHeight: 620)
             SheetFooter {
                 Button(L("common.cancel")) { dismiss() }
-                    .buttonStyle(.lumenSecondary)
+                    .buttonStyle(LumenButtonStyle(kind: .ghost, height: Theme.buttonHeight))
                     .keyboardShortcut(.cancelAction)
                 Button(draft.isNew ? L("vm.editor.create") : L("common.save"), action: save)
                     .buttonStyle(.lumenPrimary)

@@ -567,7 +567,7 @@ struct VMSetupPanel: View {
             case .downloading?:
                 if center.importingFile {
                     Button(L("common.cancel")) { center.pauseDownload() }
-                        .buttonStyle(.lumenSecondary)
+                        .buttonStyle(LumenButtonStyle(kind: .ghost, height: Theme.buttonHeight))
                 } else {
                     Button(L("vm.setup.pause")) { center.pauseDownload() }
                         .buttonStyle(.lumenSecondary)
@@ -584,7 +584,7 @@ struct VMSetupPanel: View {
                 }
             case .installing?:
                 Button(L("common.cancel")) { center.cancelInstallation() }
-                    .buttonStyle(.lumenSecondary)
+                    .buttonStyle(LumenButtonStyle(kind: .ghost, height: Theme.buttonHeight))
             case .guestSetup?:
                 ProgressView().controlSize(.small)
                 Text(L("vm.setup.guest.open"))

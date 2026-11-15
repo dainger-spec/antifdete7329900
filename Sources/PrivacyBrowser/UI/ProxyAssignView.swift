@@ -127,7 +127,7 @@ private struct ProxyAssignPanel: View {
                     .fixedSize(horizontal: false, vertical: true)
             }, buttons: {
                 Button(L("common.cancel")) { dismiss() }
-                    .buttonStyle(.lumenSecondary)
+                    .buttonStyle(LumenButtonStyle(kind: .ghost, height: Theme.buttonHeight))
                     .keyboardShortcut(.cancelAction)
                 Button(String(format: L("proxies.assign.action"), plan.count), action: assign)
                     .buttonStyle(.lumenPrimary)

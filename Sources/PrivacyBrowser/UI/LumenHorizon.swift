@@ -17,6 +17,14 @@ enum LumenHorizon {
             top = height * 0.54
             centre = CGPoint(x: width * 0.5, y: top + radius)
         }
+
+        /// A disc of `radius` whose top stands at `top`, centred in a picture `width` wide: the
+        /// lock screen's, which places the rim under its heading (`LockHorizon`).
+        init(width: CGFloat, top: CGFloat, radius: CGFloat) {
+            self.radius = radius
+            self.top = top
+            centre = CGPoint(x: width * 0.5, y: top + radius)
+        }
     }
 
     /// The window's black, as Theme.backdrop.
@@ -24,10 +32,13 @@ enum LumenHorizon {
 
     /// Draws the horizon into `context`, whose y points down, over the whole `width` × `height`.
     /// `haze`: the launch screen's own, a wider glow over the rim (the owner's mock); the virtual
-    /// machine's picture has none.
+    /// machine's picture has none. `placed`: the disc elsewhere than the picture's own place for it;
+    /// `lift` off: the backdrop keeps its one tone away from the rim (a picture that is a part of a
+    /// larger black, where a lighter field would show its edges).
     @discardableResult
-    static func draw(in context: CGContext, width: CGFloat, height: CGFloat, haze: Bool = false) -> Geometry {
-        let geometry = Geometry(width: width, height: height)
+    static func draw(in context: CGContext, width: CGFloat, height: CGFloat, haze: Bool = false,
+                     placed: Geometry? = nil, lift: Bool = true) -> Geometry {
+        let geometry = placed ?? Geometry(width: width, height: height)
         guard let space = CGColorSpace(name: CGColorSpace.sRGB) else { return geometry }
         context.setFillColor(CGColor(srgbRed: backdrop[0], green: backdrop[1], blue: backdrop[2], alpha: 1))
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
@@ -42,7 +53,7 @@ enum LumenHorizon {
         }
 
         // The backdrop is a little lighter toward the light.
-        if let lift = gradient([(0, 0.045), (1, 0)]) {
+        if lift, let lift = gradient([(0, 0.045), (1, 0)]) {
             let centre = CGPoint(x: width * 0.5, y: height * 0.62)
             context.drawRadialGradient(lift, startCenter: centre, startRadius: 0, endCenter: centre, endRadius: width * 0.75, options: [])
         }

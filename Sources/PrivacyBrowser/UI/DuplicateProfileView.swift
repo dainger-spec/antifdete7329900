@@ -95,7 +95,7 @@ struct DuplicateProfileView: View {
             .padding(.bottom, 18)
             SheetFooter {
                 Button(L("common.cancel")) { dismiss() }
-                    .buttonStyle(.lumenSecondary)
+                    .buttonStyle(LumenButtonStyle(kind: .ghost, height: Theme.buttonHeight))
                     .keyboardShortcut(.cancelAction)
                 Button(L("duplicate.action"), action: duplicate)
                     .buttonStyle(.lumenPrimary)

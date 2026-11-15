@@ -40,12 +40,20 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
 
 ## Controls
 
-- Buttons: `LumenButtonStyle` — `.lumenPrimary` and `.lumenSecondary` are contours (the main action
-  is 32 pt), `.lumenGhost` is quiet, `.lumenDestructive` red. Icon buttons: `LumenIconButtonStyle`
+- Buttons: `LumenButtonStyle` — contours, and one of them leads: `.lumenPrimary` (32 pt, semibold) is lit
+  from above — a lighter face toward its top, its contour brighter along the top, a faint light under it;
+  `.lumenSecondary` is a quiet contour (16 %); `.lumenGhost` is quiet (Cancel in a sheet, at the main
+  button's height), `.lumenDestructive` red; `.lumenFieldButton` beside a 32 pt field. No filled button. Icon buttons: `LumenIconButtonStyle`
   (`isOn` keeps the selected tone, e.g. an inspector's toggle).
 - Switches and checkboxes: `.lumenSwitch`, `.lumenCheckbox` (a real Toggle underneath for
   VoiceOver). Segmented choices: `LumenSegmented` — give it an accessibility label when it has a
   title. No system segmented controls.
+- Empty states: `LumenEmptyState` — the horizon in small, the title and a sentence above its light, what
+  to do under it (the lock screen's order); `small` for a state that passes (nothing found).
+- Sheets (`SheetChrome.swift`): `SheetHeader` (17 semibold, a sentence in 13, the horizon's light along the
+  sheet's top edge), fields under their labels (`SheetField`) in the app's own look — no system form for
+  what is typed —, `SheetFooter` with why the main action is off at its left (`SheetWhy`), Cancel quiet and
+  the one lit main action. What must be known is said in short paragraphs, not in a wall; a sign only where it says a risk (`ChangePasswordNote`).
 - Fields: `lumenField(...)`; search: `LumenSearchField` (with its ⌘K key cap in the windows that
   have the palette). Keys: `KeyCap`.
 - A box that asks for the person: `LumenBanner(tone: .danger | .warning)` above a list (the proxy
@@ -58,15 +66,20 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
 
 ## Windows
 
-- Profiles window (`ProfileListView.swift`): sidebar (`ProfilesSidebar`), header (title, count line,
+- Profiles window (`ProfileListView.swift`): sidebar (`ProfilesSidebar`; its collections and tags fade out
+  above the foot, where sync says what and when on two lines), header (title, count line,
   search, inspector toggle, ⋯, New profile — `ProfilesScreen.headerTop/headerHeight/headerTrailing`,
   which the self-test's clicks use too), the list in three groups, the floating selection bar
-  (`ProfileBulkBar`), the inspector (`ProfileInspector.swift`, 320 pt; beside the list when the rows
-  keep their columns, over the list — never the header — when not). An inspector's content starts
+  (`ProfileBulkBar`, glass: the rows show through it blurred), the inspector (`ProfileInspector.swift`,
+  320 pt): to the window's top beside the list when the rows keep their columns; with less room, beside
+  the list under the header, its top-left corner rounded, the list compact (`ProfileColumns.compact`:
+  name, the exit as flag and code or its sign alone, state — the row's buttons are the inspector's);
+  in the narrowest window over the list, opaque. No row is ever read through it. An inspector's content starts
   under the title bar's band (`ProfilesScreen.inspectorTop`): a scroll view reaching under the title
   bar gets macOS 26's edge effect there, which a window's picture does not draw. In the narrowest
   window the state column narrows first, so that a name keeps its 200 pt.
-- Proxies section (`ProxyListView.swift`, `ProxyInspector.swift`): the same header, the design's
+- Proxies section (`ProxyListView.swift`, `ProxyInspector.swift`): the inspector docks as the profiles' does
+  (the table compact beside it: the proxy, the exit's country code, the state); the same header, the design's
   table (its selected row in the design's tone: the system's highlight is off), the proxy's
   inspector with its check step by step.
 - Settings (`SettingsView.swift`, `SettingsPages.swift`): sidebar with search and three groups;
@@ -94,7 +107,13 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
   and its pace for the app (`WelcomeLettering.swift`) and the prototype the owner approved
   (`design/prototypes/welcome.html`, the same shader in WebGL; `design/tools/record_welcome.mjs`
   records it).
-- Lock and first launch (`VaultViews.swift`): `LockBackdrop`, `LockScreen`, `LockPasswordField` (one
+- Lock and first launch (`VaultViews.swift`), on the launch screen's horizon (the owner, 15 November): the
+  Lumen disc without its tile, the title on one line where the window has room and the sentence stand in
+  the sky; the horizon's light (`LockHorizon`, `LumenHorizon` with the disc placed) runs 26 pt under the
+  sentence; the form is below it, on black. The horizon is a part of the screen's content, so it scrolls
+  with the form and never crosses a word; its disc is at least 820 pt in radius, so the rim stays nearly
+  level in the 560 pt sign-in sheet. One rule for the unlock, setup, restore and sign-in screens.
+  `LockBackdrop`, `LockScreen`, `LockPasswordField` (one
   field per screen takes the cursor: `takesFocus`), the master password's facts first and large,
   `PasswordRequirement`. Changing the master password uses the same fields and requirements.
 - Editor (`ProfileEditorForm.swift`): header with the context in capitals, one screen of parts with
@@ -102,8 +121,7 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
 
 ## Light and motion — `UI/EclipseLight.swift`, `UI/Appearance.swift`
 
-- The eclipse: five blurred circles per corner, geometry per place (`EclipseSpec`): lock screen at
-  full brightness, profiles window at 55 %, editor still, the miniature in Settings → Appearance.
+- The eclipse: five blurred circles per corner, geometry per place (`EclipseSpec`): the profiles window at 55 %, editor still, the miniature in Settings → Appearance.
   Decoration only: hidden from VoiceOver, never in the way of a click; off with Settings →
   Appearance → Lumen's light at entry.
 - Motion (`Motion`): hover at once on and 150 ms off, a press to 98 % in 80 ms, a switch in 180 ms,
@@ -111,6 +129,10 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
   (.16, 1, .3, 1). With Reduce Motion in macOS, or the animations off in Settings → Appearance, only
   colour and opacity change (`Motion.isReduced`).
 - Density (`AppearancePreferences.density`): rows of 52 or 40 pt.
+- A profile's row at 200 profiles: the name semibold; the state's mark in a 14 pt slot of its own (the
+  running dot, a ring that fills for a warm-up, the spinner, a lock while encrypting, a red triangle), so
+  every state's words start on one edge; tags whole, as many as fit, then "+N"; a row being encrypted is
+  not dimmed; a selected row has a hairline round it; the column titles stay above the list as it scrolls.
 - A virtual machine's start (`Sources/MachineCover`, shown by the machines' helper): the
   machine's own eclipse, a bead of light gliding along its horizon (6.4 s, then 1.6 s of rest)
   and the haze over it breathing (6 s), "Setting up the machine" in capitals (11 semibold), the

@@ -69,9 +69,14 @@ struct ProxyListPanel: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let inspectorFits = geometry.size.width - ProfilesScreen.inspectorWidth >= ProxyColumns.minimumContentWidth
+            let room = geometry.size.width - ProfilesScreen.inspectorWidth
+            let inspectorFits = room >= ProxyColumns.minimumContentWidth
+            // As the profiles' (`ProfilesScreen.main`): with less room, beside the table under the
+            // header, the table compact; with too little for that, over the table, opaque.
+            let inspectorDocks = !inspectorFits && room >= ProxyColumns.minimumCompactWidth
             HStack(spacing: 0) {
-                main(inspectorOver: inspectorShown && !inspectorFits)
+                main(inspectorOver: inspectorShown && !inspectorFits && !inspectorDocks,
+                     inspectorDocked: inspectorShown && inspectorDocks)
                 if inspectorShown && inspectorFits {
                     inspector(top: ProfilesScreen.inspectorTop)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -109,9 +114,11 @@ struct ProxyListPanel: View {
         }
     }
 
-    /// `inspectorOver`: no room beside the table — the inspector lies over the table only, and the
-    /// header's buttons (Import…, Check all) stay within reach.
-    private func main(inspectorOver: Bool) -> some View {
+    /// `inspectorDocked`: no room beside the whole section — the inspector stands beside the table
+    /// under the header, and the table is compact (name, exit, state), so its State column is never
+    /// under it. `inspectorOver`: not even that — it lies over the table, opaque. The header's
+    /// buttons (Import…, Check all) stay within reach.
+    private func main(inspectorOver: Bool, inspectorDocked: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             if !proxies.entries.isEmpty {
@@ -127,17 +134,23 @@ struct ProxyListPanel: View {
                     .padding(.horizontal, 28)
                     .padding(.bottom, 12)
             }
-            content
-                .padding(.horizontal, 20)
-                .padding(.bottom, 16)
-                .frame(maxHeight: .infinity)
-                .overlay(alignment: .trailing) {
-                    if inspectorOver {
-                        inspector(top: 8)
-                            .shadow(color: .black.opacity(0.55), radius: 30, x: -6)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
-                    }
+            HStack(spacing: 0) {
+                content(compact: inspectorDocked)
+                    .padding(.horizontal, inspectorDocked ? 12 : 20)
+                    .padding(.bottom, 16)
+                    .frame(maxHeight: .infinity)
+                if inspectorDocked {
+                    inspector(top: 8, docked: true)
+                        .transition(.opacity)
                 }
+            }
+            .overlay(alignment: .trailing) {
+                if inspectorOver {
+                    inspector(top: 8, opaque: true)
+                        .shadow(color: .black.opacity(0.55), radius: 30, x: -6)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
@@ -331,7 +344,7 @@ struct ProxyListPanel: View {
     // MARK: The list
 
     @ViewBuilder
-    private var content: some View {
+    private func content(compact: Bool) -> some View {
         if proxies.entries.isEmpty {
             VStack(spacing: 14) {
                 LumenEmptyHint(symbol: "network", text: L("proxies.empty"))
@@ -347,7 +360,7 @@ struct ProxyListPanel: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             GeometryReader { geometry in
-                let columns = ProxyColumns(contentWidth: geometry.size.width)
+                let columns = ProxyColumns(contentWidth: geometry.size.width, compact: compact)
                 VStack(alignment: .leading, spacing: 0) {
                     ProxyColumnHeader(columns: columns, order: $order)
                     ScrollViewReader { scroller in
@@ -423,8 +436,9 @@ struct ProxyListPanel: View {
     }
 
     /// `top`: where its content starts (`ProfilesScreen.inspector(top:)`).
-    private func inspector(top: CGFloat) -> some View {
-        Group {
+    private func inspector(top: CGFloat, docked: Bool = false, opaque: Bool = false) -> some View {
+        let shape = UnevenRoundedRectangle(topLeadingRadius: docked ? 14 : 0, style: .continuous)
+        return Group {
             if let entry = single {
                 ProxyInspectorView(entry: entry, checking: proxies.checking.contains(entry.id),
                                    profiles: profilesUsing[ProxyList.identity(of: entry.proxy)] ?? [],
@@ -449,8 +463,10 @@ struct ProxyListPanel: View {
         .frame(width: ProfilesScreen.inspectorWidth)
         .frame(maxHeight: .infinity, alignment: .top)
         .padding(.top, top)
-        .background(Theme.sidebar.opacity(0.8))
-        .overlay(alignment: .leading) { Rectangle().fill(Theme.divider).frame(width: 1) }
+        .background(shape.fill(opaque ? Theme.sidebar : Theme.sidebar.opacity(docked ? 0.86 : 0.8)))
+        .overlay { if docked { shape.strokeBorder(Theme.hairline, lineWidth: 1) } }
+        .overlay(alignment: .leading) { if !docked { Rectangle().fill(Theme.divider).frame(width: 1) } }
+        .clipShape(shape)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(L("inspector.proxy.title"))
     }
@@ -475,10 +491,20 @@ struct ProxyColumns {
     static let minimumContentWidth: CGFloat = 2 * 20 + 2 * Self.inset + Self.kind + Self.exit + Self.latency + Self.state
         + 4 * Self.gap + Self.minimumName
 
-    let showsIP: Bool
+    /// The table beside the inspector under the header: the proxy, where it exits as a country's
+    /// code, its state — the type and the latency are the inspector's.
+    static let compactExit: CGFloat = 40
+    static let compactState: CGFloat = 180
+    static let minimumCompactWidth: CGFloat = 2 * 12 + 2 * Self.inset + 2 * 8 + 150 + Self.compactExit + Self.compactState + 2 * Self.gap
 
-    init(contentWidth: CGFloat) {
-        showsIP = contentWidth + 2 * 20 >= Self.minimumContentWidth + Self.ip + Self.gap
+    let showsIP: Bool
+    let compact: Bool
+    var exitWidth: CGFloat { compact ? Self.compactExit : Self.exit }
+    var stateWidth: CGFloat { compact ? Self.compactState : Self.state }
+
+    init(contentWidth: CGFloat, compact: Bool = false) {
+        self.compact = compact
+        showsIP = !compact && contentWidth + 2 * 20 >= Self.minimumContentWidth + Self.ip + Self.gap
     }
 }
 
@@ -490,13 +516,17 @@ private struct ProxyColumnHeader: View {
     var body: some View {
         HStack(spacing: ProxyColumns.gap) {
             title(L("proxies.column.proxy"), .name, ascending: true).frame(maxWidth: .infinity, alignment: .leading)
-            Text(L("proxies.column.type")).lumenCaps().frame(width: ProxyColumns.kind, alignment: .leading)
-            title(L("proxies.column.exit"), .country, ascending: true).frame(width: ProxyColumns.exit, alignment: .leading)
+            if !columns.compact {
+                Text(L("proxies.column.type")).lumenCaps().frame(width: ProxyColumns.kind, alignment: .leading)
+            }
+            title(L("proxies.column.exit"), .country, ascending: true).frame(width: columns.exitWidth, alignment: .leading)
             if columns.showsIP {
                 Text(L("proxies.column.ip")).lumenCaps().frame(width: ProxyColumns.ip, alignment: .leading)
             }
-            title(L("proxies.column.latency"), .latency, ascending: true).frame(width: ProxyColumns.latency, alignment: .leading)
-            title(L("proxies.column.state"), .state, ascending: false).frame(width: ProxyColumns.state, alignment: .leading)
+            if !columns.compact {
+                title(L("proxies.column.latency"), .latency, ascending: true).frame(width: ProxyColumns.latency, alignment: .leading)
+            }
+            title(L("proxies.column.state"), .state, ascending: false).frame(width: columns.stateWidth, alignment: .leading)
         }
         .lineLimit(1)
         // The list's own row inset, so the titles stand over their columns.
@@ -556,18 +586,20 @@ private struct ProxyRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .help(String(format: L("proxies.profiles.help"), profiles))
-            Text(entry.kindKnown ? entry.kindName : "—") // l10n: not text
-                .font(.lumenBody)
-                .foregroundStyle(entry.kindKnown ? Theme.textSecondary : Theme.textTertiary)
-                .lineLimit(1)
-                .frame(width: ProxyColumns.kind, alignment: .leading)
-                .help(entry.kindKnown ? "" : L("proxies.type.unknown.help"))
-            Text(exitPlace)
+            if !columns.compact {
+                Text(entry.kindKnown ? entry.kindName : "—") // l10n: not text
+                    .font(.lumenBody)
+                    .foregroundStyle(entry.kindKnown ? Theme.textSecondary : Theme.textTertiary)
+                    .lineLimit(1)
+                    .frame(width: ProxyColumns.kind, alignment: .leading)
+                    .help(entry.kindKnown ? "" : L("proxies.type.unknown.help"))
+            }
+            Text(columns.compact ? compactExit : exitPlace)
                 .font(.lumenBody)
                 .foregroundStyle(entry.lastCheck?.countryCode == nil ? Theme.textTertiary : Theme.textPrimary)
                 .lineLimit(1)
-                .frame(width: ProxyColumns.exit, alignment: .leading)
-                .help(exitHelp)
+                .frame(width: columns.exitWidth, alignment: .leading)
+                .help(columns.compact && entry.lastCheck?.countryCode != nil ? exitPlace : exitHelp)
             if columns.showsIP {
                 Text(entry.lastCheck?.isAlive == true ? (entry.lastCheck?.exitIP ?? "—") : "—") // l10n: not text
                     .font(.lumenMono)
@@ -576,8 +608,10 @@ private struct ProxyRow: View {
                     .truncationMode(.middle)
                     .frame(width: ProxyColumns.ip, alignment: .leading)
             }
-            ProxyLatency(check: entry.lastCheck)
-                .frame(width: ProxyColumns.latency, alignment: .leading)
+            if !columns.compact {
+                ProxyLatency(check: entry.lastCheck)
+                    .frame(width: ProxyColumns.latency, alignment: .leading)
+            }
             HStack(spacing: 7) {
                 if checking {
                     ProgressView().controlSize(.mini)
@@ -589,7 +623,7 @@ private struct ProxyRow: View {
                     .foregroundStyle(state.isWorking ? Theme.textPrimary : (state == .unchecked ? Theme.textTertiary : state.color))
                     .lineLimit(1)
             }
-            .frame(width: ProxyColumns.state, alignment: .leading)
+            .frame(width: columns.stateWidth, alignment: .leading)
         }
         .padding(.horizontal, 8)
         .frame(minHeight: 44)
@@ -602,6 +636,11 @@ private struct ProxyRow: View {
         if !entry.label.isEmpty { parts.append(entry.address) }
         if let user = entry.proxy.username, !user.isEmpty { parts.append(user) }
         return parts.joined(separator: " · ") // l10n: not text
+    }
+
+    /// The same in the compact table: the country's code, "—" without one.
+    private var compactExit: String {
+        entry.lastCheck?.countryCode?.uppercased() ?? "—" // l10n: not text
     }
 
     /// Where its last check found it exits; "—" before one, or when it did not say.
@@ -863,7 +902,7 @@ struct ProxyEditView: View {
             .padding(.bottom, 18)
             SheetFooter {
                 Button(L("common.cancel")) { dismiss() }
-                    .buttonStyle(.lumenSecondary)
+                    .buttonStyle(LumenButtonStyle(kind: .ghost, height: Theme.buttonHeight))
                     .keyboardShortcut(.cancelAction)
                 Button(L(entry == nil ? "proxies.add.action" : "common.save"), action: save)
                     .buttonStyle(.lumenPrimary)

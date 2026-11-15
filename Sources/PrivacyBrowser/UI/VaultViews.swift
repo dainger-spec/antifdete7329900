@@ -2,30 +2,53 @@ import AppKit
 import BrowserCore
 import SwiftUI
 
-/// The lock screen's backdrop: the window's black and, with the light on (Settings → Appearance),
-/// the two eclipses. One for the setup, unlock and "open" states, so the eclipses close in while
-/// the password is checked and part when the vault opens without starting over (RootView).
+/// The lock screen's backdrop: the window's black. The light is the screen's own (`LockScreen`
+/// lays the horizon out under its heading); `phase` says what the vault is doing, for the callers
+/// that pass it (RootView) — the horizon itself is still.
 struct LockBackdrop<Content: View>: View {
     var phase: EclipseLight.Phase = .idle
     @ViewBuilder let content: () -> Content
-    @ObservedObject private var appearance = AppearancePreferences.shared
 
     var body: some View {
         ZStack {
             // To the window's edges, under the title bar too: the window's own background is not
             // to show there (CI run 557, the snapshots' edge check).
             Theme.backdrop.ignoresSafeArea()
-            if appearance.entryLight {
-                EclipseLight(place: .lock, phase: phase).ignoresSafeArea()
-            }
             content()
         }
     }
 }
 
-/// The lock screen (the design's "Lock and first launch"): the Lumen mark, a large title and the
-/// form in a 400 pt column, centred; a footer line at the foot. It rises in once when the window
-/// opens.
+/// The eclipse's horizon as the lock screens have it (the launch screen's, `LumenHorizon`): a
+/// picture `width` wide whose rim's top is at its middle, so that whoever places it puts that
+/// middle where the rim is to be. The disc is never narrower than 820 pt in radius: in a narrow
+/// window (the sign-in sheet, 560 pt) the rim stays nearly level across the form's column.
+/// Decoration only: hidden from VoiceOver, never in the way of a click.
+struct LockHorizon: View {
+    let width: CGFloat
+    /// The picture's height; the rim's top is at half of it.
+    static let height: CGFloat = 1400
+
+    var body: some View {
+        Canvas(opaque: false, rendersAsynchronously: false) { context, size in
+            context.withCGContext { cg in
+                LumenHorizon.draw(in: cg, width: size.width, height: size.height, haze: true,
+                                  placed: LumenHorizon.Geometry(width: size.width, top: size.height / 2,
+                                                                radius: max(size.width * 0.78, 820)),
+                                  lift: false)
+            }
+        }
+        .frame(width: max(width, 1), height: Self.height)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+/// The lock screen (the design's "Lock and first launch"), on the launch screen's horizon: the
+/// Lumen disc, a large title and a sentence stand in the sky; the horizon's light runs 26 pt under
+/// the sentence; the form is below it, on the disc's black, in a 400 pt column. The horizon is
+/// laid out with the heading, so it scrolls with the form and its light never crosses a word,
+/// whatever the window's size. A footer line at the foot. It rises in once when the window opens.
 struct LockScreen<Content: View>: View {
     let title: String
     let subtitle: String
@@ -33,8 +56,14 @@ struct LockScreen<Content: View>: View {
     var footer: String?
     @ViewBuilder let content: () -> Content
     @State private var appeared = false
+    @ObservedObject private var appearance = AppearancePreferences.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.lumenStillFrame) private var stillFrame
+
+    /// How far under the subtitle the rim's top stands, and how far under the subtitle the form
+    /// starts at the least: the rim drops 25 pt by the column's edges.
+    static var rimGap: CGFloat { 26 }
+    static var formGap: CGFloat { 34 }
 
     var body: some View {
         // Centred in the window; scrolls when the window is shorter than the screen's content. The
@@ -42,7 +71,7 @@ struct LockScreen<Content: View>: View {
         // macOS 26's edge effect there (ProfilesScreen.inspectorTop).
         GeometryReader { geometry in
             ScrollView {
-                screen.frame(minHeight: geometry.size.height)
+                screen(width: geometry.size.width).frame(minHeight: geometry.size.height)
             }
             .scrollBounceBehavior(.basedOnSize)
             .scrollIndicators(.automatic)
@@ -60,31 +89,26 @@ struct LockScreen<Content: View>: View {
         }
     }
 
-    private var screen: some View {
+    private func screen(width: CGFloat) -> some View {
         VStack(spacing: 0) {
             Spacer(minLength: 40)
             VStack(spacing: 0) {
-                LumenMark(size: 64)
-                Text(title)
-                    .lumenDisplayTitle()
-                    .foregroundStyle(Theme.textPrimary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 340)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 28)
-                Text(subtitle)
-                    .font(.system(size: 15))
-                    .lineSpacing(3)
-                    .foregroundStyle(Theme.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 10)
+                heading(width: width)
+                    .background(alignment: .bottom) {
+                        if appearance.entryLight {
+                            // The picture's middle — the rim's top — `rimGap` under the heading.
+                            LockHorizon(width: width)
+                                .offset(y: LockHorizon.height / 2 + Self.rimGap)
+                                .opacity(appeared ? 1 : 0)
+                        }
+                    }
                 content()
+                    .padding(.top, Self.formGap)
+                    .offset(y: appeared || Motion.isReduced(reduceMotion) ? 0 : 10)
             }
             .frame(maxWidth: 400)
             .padding(.horizontal, 24)
             .opacity(appeared ? 1 : 0)
-            .offset(y: appeared || Motion.isReduced(reduceMotion) ? 0 : 10)
             Spacer(minLength: 40)
             if let footer {
                 Text(footer)
@@ -97,6 +121,29 @@ struct LockScreen<Content: View>: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func heading(width: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            LumenGlyph(size: 40)
+                .shadow(color: Theme.rim.opacity(0.28), radius: 16)
+            Text(title)
+                .lumenDisplayTitle()
+                .foregroundStyle(Theme.textPrimary)
+                .multilineTextAlignment(.center)
+                // Wider than the form's column where the window has the room: "Хранилище
+                // заблокировано" stands on one line.
+                .frame(width: max(200, min(520, width - 48)))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 24)
+            Text(subtitle)
+                .font(.system(size: 15))
+                .lineSpacing(3)
+                .foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 8)
+        }
     }
 }
 
@@ -733,10 +780,7 @@ struct ChangePasswordView: View {
                         PasswordRequirement(text: L("setup.req.match"), met: matches, shown: !confirmation.isEmpty)
                     }
                     .padding(.top, 12)
-                    Text(L("changepw.note"))
-                        .font(.lumenSecondary)
-                        .foregroundStyle(Theme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    ChangePasswordNote()
                         .padding(.top, 18)
                 }
                 .padding(.horizontal, 24)
@@ -746,7 +790,7 @@ struct ChangePasswordView: View {
             .scrollBounceBehavior(.basedOnSize)
             SheetFooter {
                 Button(L("common.cancel")) { dismiss() }
-                    .buttonStyle(.lumenSecondary)
+                    .buttonStyle(LumenButtonStyle(kind: .ghost, height: Theme.buttonHeight))
                     .keyboardShortcut(.cancelAction)
                 Button(L("changepw.action.change"), action: change)
                     .buttonStyle(.lumenPrimary)
@@ -772,5 +816,38 @@ struct ChangePasswordView: View {
             // in it, it invited a second Change that the vault refuses as a wrong password.
             if changed { dismiss() }
         }
+    }
+}
+
+/// What changing the master password does and does not do (`changepw.note`), word for word, as
+/// three short paragraphs instead of one wall of fourteen lines: what is encrypted again, where the
+/// new password goes, and what it does not reach — that one with the warning's sign, the only one
+/// that says a risk. A text of fewer sentences is shown whole.
+private struct ChangePasswordNote: View {
+    var body: some View {
+        let sentences = L("changepw.note").components(separatedBy: ". ")
+        VStack(alignment: .leading, spacing: 8) {
+            if sentences.count >= 3 {
+                paragraph(sentences[0] + ".")
+                paragraph(sentences[1] + ".")
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.warning)
+                        .accessibilityHidden(true)
+                    paragraph(sentences[2...].joined(separator: ". "))
+                }
+            } else {
+                paragraph(L("changepw.note"))
+            }
+        }
+    }
+
+    private func paragraph(_ text: String) -> some View {
+        Text(text)
+            .font(.lumenSecondary)
+            .lineSpacing(2)
+            .foregroundStyle(Theme.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
