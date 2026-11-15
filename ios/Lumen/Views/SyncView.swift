@@ -4,7 +4,7 @@ import SwiftUI
 /// The sync's screen (step 2 of ios/SYNC_PLAN.md): this iPhone connected to the Mac's vault. The
 /// account's vaults come from the server (`GET /v1/device/sync/vaults`); the master password is asked
 /// once, turned into a key here, and only the key is kept — in the Keychain, behind Face ID or the
-/// passcode (`SyncKeychain`). Without a trial or a paid plan the server says so, and this screen says
+/// passcode (`SyncKeychain`). Without a paid plan running the server says so, and this screen says
 /// it as a state, not as an error (decision 8). Profiles come over in the next step.
 struct SyncView: View {
     @EnvironmentObject var model: AppModel
@@ -33,7 +33,7 @@ struct SyncView: View {
                     Section { ProgressView().accessibilityIdentifier("syncLoading") }.glassRow()
                 case .notInPlan:
                     Section {
-                        Text(L("Синхронизация с Mac — в пробном и платном тарифе. Профили на этом iPhone остаются как есть."))
+                        Text(L("Синхронизация с Mac — в платных тарифах. Профили на этом iPhone остаются как есть."))
                             .accessibilityIdentifier("syncNotInPlan")
                     }
                     .glassRow()

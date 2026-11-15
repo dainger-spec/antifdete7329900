@@ -29,7 +29,8 @@ docs/CONTRACT.md (§2–§7) and docs/IPHONE.md say an iPhone meets, until the s
     newkey                       its document is signed with a key the app does not carry
     novault                      a plan, and sync never turned on: no vault
   An account with a plan has one vault, its master password "vault-pass-1" (PBKDF2, few rounds: a
-  test's vault); free, ended and disabled accounts get 403 sync_not_in_plan for the sync (§16.1).
+  test's vault); free, ended, disabled and trial accounts get 403 sync_not_in_plan for the sync (§16.1;
+  sync only while a paid plan runs — the owner's decision of 15 November 2026).
   An activation that does not say platform "ios" is a Mac's (CONTRACT.md §6.1), and the stand-in's
   licenses have no Mac place left: 409 device_limit_reached — a Mac's refusal, which an iPhone does
   not take for its own. A platform that is neither is 400 invalid_request (field: platform). An
@@ -283,6 +284,8 @@ def handle(method, path, headers, body):
         if token not in DEVICES:
             return refuse(401, "unauthorized")
         acc = ACCOUNTS[DEVICES[token][0]]
+        if acc["plan"] in ("free", "ended", "disabled", "trial"):
+            return refuse(403, "sync_not_in_plan")
         vault = vault_of(acc)
         if not vault.get("standin") or m.group(1) != vault["id"]:
             return refuse(403, "forbidden")
@@ -306,7 +309,7 @@ def handle(method, path, headers, body):
             return refuse(401, "device_revoked" if path.startswith("/v1/device") else "unauthorized")
         email, _ = DEVICES[token]
         acc = ACCOUNTS[email]
-        if acc["plan"] in ("free", "ended", "disabled"):
+        if acc["plan"] in ("free", "ended", "disabled", "trial"):
             return refuse(403, "sync_not_in_plan")
         event("account", what="sync", email=email, path=path)
         if acc["kind"] == "novault":

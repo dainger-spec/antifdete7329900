@@ -10,7 +10,7 @@ import Foundation
 /// - the server's generation (§16.2): read from the list, sent on every write; `409
 ///   generation_changed` stops the run, nothing more written. Resetting the sync state when the
 ///   generation is not the one kept is `SyncGeneration`'s.
-/// - `403 sync_not_in_plan`: the iPhone without a trial or a paid plan — said as a state.
+/// - `403 sync_not_in_plan`: the iPhone without a paid plan running — said as a state.
 ///
 /// The requests go through `send`, the app's own (the device token, no profile's proxy: decision 1
 /// of the Mac's SYNC_FORMAT.md).
