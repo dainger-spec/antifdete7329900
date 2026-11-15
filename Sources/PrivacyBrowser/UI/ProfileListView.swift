@@ -1421,6 +1421,11 @@ struct ProfilesScreen: View {
         } else {
             GeometryReader { geometry in
                 let columns = ProfileColumns(contentWidth: geometry.size.width, compact: compact)
+                // The column titles stay above the list as it scrolls: at 200 profiles they said which
+                // column is which only on the first screen.
+                VStack(spacing: 0) {
+                columnHeader(columns)
+                    .padding(.horizontal, columns.margin)
                 ScrollView {
                     listStack(columns)
                         .padding(.horizontal, columns.margin)
@@ -1429,6 +1434,7 @@ struct ProfilesScreen: View {
                 }
                 .scrollIndicators(.automatic)
                 .animation(Motion.isReduced(reduceMotion) ? nil : Motion.reflow, value: displayOrder.map(\.id))
+                }
             }
             .transition(.opacity)
         }
@@ -1453,7 +1459,6 @@ struct ProfilesScreen: View {
 
     @ViewBuilder
     private func listItems(_ columns: ProfileColumns) -> some View {
-        columnHeader(columns)
         ForEach(groups) { group in
             // One group alone has no caption: "Ready to launch 50" under the column titles read as
             // a second header, and the count is the header's own ("Profiles: 50").
@@ -1479,6 +1484,8 @@ struct ProfilesScreen: View {
                                 help: L(order.wrappedValue == .lastUsed ? "profiles.sort.lastUsed.on" : "profiles.sort.lastUsed.help")) {
                 order.wrappedValue = order.wrappedValue == .lastUsed ? .created : .lastUsed
             }
+            // Over the states' words, past their marks' slot.
+            .padding(.leading, ProfileColumns.stateMark + 7)
             .frame(width: columns.state, alignment: .leading)
             if !columns.compact { Color.clear.frame(width: ProfileColumns.actions, height: 1) }
         }
@@ -1555,6 +1562,8 @@ struct ProfileColumns {
     /// The narrowest it gets.
     static let minimumState: CGFloat = 132
     static let actions: CGFloat = 68
+    /// The slot of a state's mark, before its words.
+    static let stateMark: CGFloat = 14
     /// The name's slot (its letters' circle included).
     static let minimumName: CGFloat = 200
 
@@ -1945,6 +1954,9 @@ private struct ProfileRow: View {
         .frame(height: height)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
             .fill(isSelected ? Theme.rowSelected : (hovered ? Theme.rowHover : Color.clear)))
+        // A selected row is lit: a hairline round it, in the tone of a field's edge.
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .strokeBorder(isSelected ? Theme.hairline : Color.clear, lineWidth: 1))
         .background(alignment: .leading) {
             if let code = backdropCountry {
                 CountryBackdrop(code: code)
@@ -1967,7 +1979,6 @@ private struct ProfileRow: View {
         }
         .onHover { hovered = $0 }
         .animation(Motion.hover(hovered), value: hovered)
-        .opacity(row.activity == .sealing ? 0.6 : 1)
         .contextMenu {
             if selection.count >= 2 {
                 SelectionMenuItems(rows: selection, actions: actions)
@@ -2015,7 +2026,8 @@ private struct ProfileRow: View {
             ProfileAvatar(name: row.name, id: row.id, size: 30, style: row.avatar, running: row.isRunning)
             HStack(spacing: 8) {
                 Text(row.name)
-                    .font(.lumenLabel)
+                    // Semibold: the name is what a row is read by, among 200 of them.
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -2027,14 +2039,30 @@ private struct ProfileRow: View {
                         .accessibilityLabel(L("profiles.row.hasNotes"))
                 }
                 if !row.tags.isEmpty || row.ephemeral {
-                    TagLine.text(row.tags + (row.ephemeral ? [L("profiles.row.ephemeralTag")] : []), colors: tagColors)
-                        .font(.lumenSecondary)
-                        .foregroundStyle(Theme.textTertiary)
-                        .lineLimit(1)
+                    // Whole tags, as many as the column has room for, then "+N" — never a cut one
+                    // ("●clien…", a lone "…": CI run 555's profiles-narrow).
+                    let tags = row.tags + (row.ephemeral ? [L("profiles.row.ephemeralTag")] : [])
+                    ViewThatFits(in: .horizontal) {
+                        ForEach(Array(stride(from: tags.count, through: 0, by: -1)), id: \.self) { shown in
+                            tagLine(tags, shown: shown)
+                        }
+                    }
+                    .accessibilityLabel(tags.joined(separator: ", "))
                 }
             }
         }
         .help(row.notes)
+    }
+
+    /// The first `shown` tags and how many more there are.
+    private func tagLine(_ tags: [String], shown: Int) -> some View {
+        let rest = tags.count - shown
+        let more = rest > 0 ? Text(verbatim: (shown > 0 ? "  +" : "+") + "\(rest)") : Text(verbatim: "")
+        return (TagLine.text(Array(tags.prefix(shown)), colors: tagColors) + more)
+            .font(.lumenSecondary)
+            .foregroundStyle(Theme.textTertiary)
+            .lineLimit(1)
+            .fixedSize()
     }
 
     private var exitCell: some View {
@@ -2065,10 +2093,56 @@ private struct ProfileRow: View {
         }
     }
 
-    @ViewBuilder
+    /// The state: its mark in a slot of its own, then its words — so that the words of every row
+    /// start on one edge and a state is told by its mark's shape before it is read.
     private var stateCell: some View {
+        HStack(spacing: 7) {
+            stateMark.frame(width: ProfileColumns.stateMark)
+            stateWords
+        }
+    }
+
+    @ViewBuilder
+    private var stateMark: some View {
         if row.exportOnly, row.activity == .stopped {
-            Label(L("contract.profile.export_only.badge"), systemImage: "square.and.arrow.up")
+            Image(systemName: "square.and.arrow.up").font(.system(size: 11)).foregroundStyle(Theme.warning)
+                .accessibilityHidden(true)
+        } else if row.problem != nil, row.activity == .stopped {
+            Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 11)).foregroundStyle(Theme.danger)
+                .accessibilityHidden(true)
+        } else {
+            switch row.activity {
+            case .starting:
+                ProgressView().controlSize(.mini)
+            case .sealing:
+                Image(systemName: "lock").font(.system(size: 11)).foregroundStyle(Theme.textSecondary)
+                    .accessibilityHidden(true)
+            case .running:
+                if let warmUp = row.warmUp {
+                    // A ring that fills as the warm-up goes.
+                    ZStack {
+                        Circle().stroke(Color.white.opacity(0.16), lineWidth: 1.8)
+                        Circle().trim(from: 0, to: max(0.04, warmUp.fraction))
+                            .stroke(Theme.textPrimary, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                    }
+                    .frame(width: 10, height: 10)
+                    .accessibilityHidden(true)
+                } else if row.warmUpQueued {
+                    Color.clear
+                } else {
+                    RunningDot()
+                }
+            case .stopped:
+                Color.clear
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var stateWords: some View {
+        if row.exportOnly, row.activity == .stopped {
+            Text(L("contract.profile.export_only.badge"))
                 .font(.lumenBody)
                 .foregroundStyle(Theme.warning)
                 .lineLimit(1)
@@ -2092,7 +2166,6 @@ private struct ProfileRow: View {
                     secondaryLine(L("profiles.row.warmUpQueued"))
                 } else {
                     HStack(spacing: 8) {
-                        RunningDot()
                         Text(L("profiles.row.running")).font(.lumenBody).foregroundStyle(Theme.textPrimary)
                         if let since = row.lastUsed {
                             Text(Self.runningFor(since))
@@ -2133,10 +2206,7 @@ private struct ProfileRow: View {
     }
 
     private func busyLine(_ text: String) -> some View {
-        HStack(spacing: 7) {
-            ProgressView().controlSize(.mini)
-            secondaryLine(text)
-        }
+        secondaryLine(text)
     }
 
     private var lastUsed: String {

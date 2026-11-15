@@ -119,6 +119,10 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
   (.16, 1, .3, 1). With Reduce Motion in macOS, or the animations off in Settings → Appearance, only
   colour and opacity change (`Motion.isReduced`).
 - Density (`AppearancePreferences.density`): rows of 52 or 40 pt.
+- A profile's row at 200 profiles: the name semibold; the state's mark in a 14 pt slot of its own (the
+  running dot, a ring that fills for a warm-up, the spinner, a lock while encrypting, a red triangle), so
+  every state's words start on one edge; tags whole, as many as fit, then "+N"; a row being encrypted is
+  not dimmed; a selected row has a hairline round it; the column titles stay above the list as it scrolls.
 - A virtual machine's start (`Sources/MachineCover`, shown by the machines' helper): the
   machine's own eclipse, a bead of light gliding along its horizon (6.4 s, then 1.6 s of rest)
   and the haze over it breathing (6 s), "Setting up the machine" in capitals (11 semibold), the
