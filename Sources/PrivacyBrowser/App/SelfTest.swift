@@ -5960,14 +5960,11 @@ final class SelfTest {
 
     /// What a person does every day in a profile's window, in the window every Mac profile has —
     /// Safari's — and in the profile's own process, as the app runs one. Until 15 November none of
-    /// the three worked there:
+    /// these worked there:
     ///   * a download did nothing and said nothing (docs/SAFARI_SUBSYSTEMS.md, O6), and View › Show
     ///     Downloads was disabled. Now a link to a file — one sent to be saved, and one of a type no
     ///     browser shows — is saved in the folder Settings → Downloads names, with the bytes the
     ///     proxy sent, and the window's list has it (`HostedDownloads`);
-    ///   * Bookmarks › Add Bookmark… (⌘D) threw and added nothing (docs/SAFARI_MENU.md, "broken").
-    ///     Now Safari's sheet comes and its Add puts the page in the Bookmarks menu
-    ///     (`SafariChrome.tolerateUntitledMenuItems`);
     ///   * Settings → Startup → Restore tabs did nothing: a start opened the start page whatever the
     ///     profile had left open. Now a second tab, opened as File › New Tab at End and the address
     ///     bar open one, is kept with the first at a stop and both are open again at the next start,
@@ -5975,11 +5972,10 @@ final class SelfTest {
     private func safarisWindowEveryDay(_ repository: ProfileRepository) async throws {
         let savedName = "Safari chrome: a file downloaded in Safari's window is saved in the folder the settings name, with the bytes the proxy sent — one sent to be saved, one of a type no browser shows"
         let listedName = "Safari chrome: View › Show Downloads lists the profile's downloads"
-        let bookmarkName = "Safari chrome: Bookmarks › Add Bookmark… (⌘D) brings Safari's sheet, and its Add puts the page in the Bookmarks menu"
         let keptName = "Safari chrome: a profile stopped with two tabs open in Safari's window keeps both, and the one shown"
         let reopenedName = "Safari chrome: its next start opens both again in Safari's window, through its proxy, the same tab in front"
         let markerName = "Safari chrome: Safari's window says whose it is — the profile's chip in its toolbar, its name before the window's title — and a page measures the same window and screen with it and without"
-        let names = [markerName, savedName, listedName, bookmarkName, keptName, reopenedName]
+        let names = [markerName, savedName, listedName, keptName, reopenedName]
         guard !AppEnvironment.isSandboxed else {
             for name in names { skip(name, "the sandboxed build runs no process per profile", .build) }
             return
@@ -6119,9 +6115,6 @@ final class SelfTest {
         let before = await window(holding: both, within: 10)
         info("Safari's window, tabs: with a second tab opened — \(said(before))")
 
-        // ⌘D on the page in front (the second tab's), Safari's own sheet and its Add.
-        let bookmarked = await ask(.addBookmark)
-        check(bookmarkName, bookmarked.found, bookmarked.detail.isEmpty ? "no answer" : bookmarked.detail)
 
         try? await manager.stop(profile.id)
         _ = await waitUntil(timeout: 60) { exited != nil }

@@ -183,14 +183,6 @@ runs as named). Since the items whose work is done outside the profile were take
   sheet: no bookmark is added that way. So in every walk since run 468: CI's on both macOS (run 520)
   and the owner's (1 November). Each walk makes an empty tab group before these items; in a profile
   without tab groups it is not measured. Not fixed in the owner's week: no change to the product.
-  **Changed 15 November, not walked yet:** AppKit refuses a menu item made without a title by
-  throwing, which is what a folder with no title gives that menu; such an item is now made with one
-  ("Untitled", `SafariChrome.tolerateUntitledMenuItems`), where AppKit would have thrown and
-  nowhere else. Whether that is the throw, the next walk says: if it is, both items bring Safari's
-  sheet, the walk reads them as changed, and their records are to be written again
-  (`--write-record`). The self-test measures the case no walk has — a profile without a tab group:
-  "Safari's window, every day" chooses Add Bookmark…, presses the sheet's Add and reads the
-  Bookmarks menu, and says how many items were made without a title.
 - **Safari's browsing assistant worker** (`com.apple.parsec.SafariBrowsingAssistantWorker`, outside
   the profile) started in three of the eight walks on macOS 26 read — runs 457, 461 and 468, each
   time during another item (Hide Safari, View › Zoom Out, History › Show All History) — and in none

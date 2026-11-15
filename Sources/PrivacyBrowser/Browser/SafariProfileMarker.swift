@@ -100,9 +100,13 @@ enum SafariProfileMarker {
     static func mark(_ window: NSWindow) {
         guard !isTurnedOff, !isSuspended, let model else { return }
         if !marked.contains(window) {
+            // The title as this window's own class sets and says it (Safari's has its own).
+            if let windowClass: AnyClass = object_getClass(window) { keepTitlesMarked(of: windowClass) }
             marked.add(window)
-            // Through the title's setter, which puts the name before it (`keepTitlesMarked`).
-            window.title = window.title
+            // Through the title's setter, which puts the name before it; and the Window menu's item.
+            let named = ProfileWindowTitle.marked(ProfileWindowTitle.unmarked(window.title, profile: model.profileName), profile: model.profileName)
+            window.title = named
+            if !window.isExcludedFromWindowsMenu { NSApp.changeWindowsItem(window, title: named, filename: false) }
         }
         guard !droppedForGeometry, accessory(of: window) == nil else { return }
         let before = geometry(of: window)
@@ -169,18 +173,44 @@ enum SafariProfileMarker {
     private static func keepTitlesMarked() {
         guard !titlesKept else { return }
         titlesKept = true
-        let selector = NSSelectorFromString("setTitle:")
-        guard let method = class_getInstanceMethod(NSWindow.self, selector) else { return }
-        typealias Setter = @convention(c) (AnyObject, Selector, NSString?) -> Void
-        let original = unsafeBitCast(method_getImplementation(method), to: Setter.self)
-        let replacement: @convention(block) (AnyObject, NSString?) -> Void = { receiver, title in
-            guard let window = receiver as? NSWindow, !isSuspended, marked.contains(window), let name = model?.profileName else {
-                original(receiver, selector, title)
-                return
+        keepTitlesMarked(of: NSWindow.self)
+    }
+
+    /// Methods whose implementation is already ours, by their address.
+    private static var hookedTitleMethods: Set<UInt> = []
+
+    /// The title's setter and getter as `windowClass` answers them. Safari's window has a title of
+    /// its own making: on macOS 26 the setter of NSWindow alone never saw it (CI, 15 November: the
+    /// chip in, the title the page's). So the methods the window's own class resolves to are
+    /// covered — a marked window is given, and says, a title that begins with the profile's name —
+    /// and the Window menu's item for it is told the same.
+    private static func keepTitlesMarked(of windowClass: AnyClass) {
+        let setter = NSSelectorFromString("setTitle:")
+        if let method = class_getInstanceMethod(windowClass, setter), hookedTitleMethods.insert(UInt(bitPattern: method)).inserted {
+            typealias Setter = @convention(c) (AnyObject, Selector, NSString?) -> Void
+            let original = unsafeBitCast(method_getImplementation(method), to: Setter.self)
+            let replacement: @convention(block) (AnyObject, NSString?) -> Void = { receiver, title in
+                guard let window = receiver as? NSWindow, !isSuspended, marked.contains(window), let name = model?.profileName else {
+                    original(receiver, setter, title)
+                    return
+                }
+                let named = ProfileWindowTitle.marked((title as String?) ?? "", profile: name)
+                original(receiver, setter, named as NSString)
+                if !window.isExcludedFromWindowsMenu { NSApp.changeWindowsItem(window, title: named, filename: false) }
             }
-            original(receiver, selector, ProfileWindowTitle.marked((title as String?) ?? "", profile: name) as NSString)
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
         }
-        method_setImplementation(method, imp_implementationWithBlock(replacement))
+        let getter = NSSelectorFromString("title")
+        if let method = class_getInstanceMethod(windowClass, getter), hookedTitleMethods.insert(UInt(bitPattern: method)).inserted {
+            typealias Getter = @convention(c) (AnyObject, Selector) -> Unmanaged<NSString>?
+            let original = unsafeBitCast(method_getImplementation(method), to: Getter.self)
+            let replacement: @convention(block) (AnyObject) -> NSString? = { receiver in
+                let title = original(receiver, getter)?.takeUnretainedValue()
+                guard let window = receiver as? NSWindow, !isSuspended, marked.contains(window), let name = model?.profileName else { return title }
+                return ProfileWindowTitle.marked((title as String?) ?? "", profile: name) as NSString
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        }
     }
 
     // MARK: The self-test's comparison
@@ -195,7 +225,9 @@ enum SafariProfileMarker {
             let name = model?.profileName ?? ""
             for window in marked.allObjects {
                 if let controller = accessory(of: window) { remove(controller, from: window) }
-                window.title = ProfileWindowTitle.unmarked(window.title, profile: name)
+                let plain = ProfileWindowTitle.unmarked(window.title, profile: name)
+                window.title = plain
+                if !window.isExcludedFromWindowsMenu { NSApp.changeWindowsItem(window, title: plain, filename: false) }
             }
             marked.removeAllObjects()
         } else {

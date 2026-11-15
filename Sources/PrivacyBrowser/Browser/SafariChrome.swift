@@ -328,7 +328,6 @@ enum SafariChrome {
         tolerateMissingSafariDirectories()
         tolerateNilDirectoryEnumeration()
         tolerateNilDirectoryListing()
-        tolerateUntitledMenuItems()
         bridgeNibLookups()
         bridgeNibInitializers()
         stubChromeFeatures()
@@ -646,36 +645,6 @@ enum SafariChrome {
                 return [] as NSArray
             }
             return original(manager, selector, url, keys, options, error)
-        }
-        method_setImplementation(method, imp_implementationWithBlock(replacement))
-    }
-
-    /// Menu items Safari's code made without a title, which got one (the network report has it).
-    private(set) static var untitledMenuItems = 0
-
-    /// Safari's Add Bookmark sheet lists the bookmark folders in a pop-up menu, an item for each
-    /// (`-[NSMenu(WebBookmarkNSMenuExtras) safari_addMenuItemForBookmarkFolder:]`, from
-    /// `-[BookmarkEditSheetController _populateLocationPopUp]`), titled with the folder's title —
-    /// and a folder of a profile's can have none: an empty tab group, say, which is a folder of
-    /// the same store. AppKit refuses a menu item made without a title by throwing, so the sheet
-    /// never came and Bookmarks › Add Bookmark… (⌘D) and Add Bookmarks for Open Tabs… added
-    /// nothing, our notice in the sheet's place (the menu walk, every run since 468, and the
-    /// owner's; docs/SAFARI_MENU.md, "broken"). An item made without a title is made with one —
-    /// "Untitled", as Safari itself calls a tab group nobody named — only where AppKit would have
-    /// thrown: nothing that worked before is changed. Counted, so that a check can tell the sheet
-    /// came because of this.
-    private static func tolerateUntitledMenuItems() {
-        let selector = NSSelectorFromString("initWithTitle:action:keyEquivalent:")
-        guard let method = class_getInstanceMethod(NSMenuItem.self, selector) else { return }
-        let untitled = L("safari.menu.untitled") as NSString
-        // An initializer hands over ownership of what it returns: passed on exactly as it came.
-        typealias Initializer = @convention(c) (AnyObject, Selector, NSString?, Selector?, NSString?) -> Unmanaged<AnyObject>?
-        let original = unsafeBitCast(method_getImplementation(method), to: Initializer.self)
-        let replacement: @convention(block) (AnyObject, NSString?, Selector?, NSString?) -> Unmanaged<AnyObject>? = { item, title, action, keys in
-            guard title == nil else { return original(item, selector, title, action, keys) }
-            untitledMenuItems += 1
-            Logger(subsystem: "PrivacyBrowser", category: "SafariChrome").notice("A menu item was made without a title: titled Untitled")
-            return original(item, selector, untitled, action, keys)
         }
         method_setImplementation(method, imp_implementationWithBlock(replacement))
     }

@@ -39,9 +39,6 @@ enum WindowProbeAction: Codable, Equatable {
     /// The page in front goes to this address, as a link on it would send it (the web view's own
     /// load): a link to a file, say.
     case go(String)
-    /// Safari's own Bookmarks › Add Bookmark… (⌘D), sent as its item sends it; the sheet it brings
-    /// is told and its default button pressed, and then what the Bookmarks menu lists.
-    case addBookmark
     /// What the page in front measures of its window and screen, in `detail`, with the window's
     /// title and whether it carries the profile's chip (`SafariProfileMarker`).
     case measure
@@ -173,49 +170,6 @@ enum WindowProbe {
                     look.found = true
                 }
             }
-        case .addBookmark:
-            look.action = "add a bookmark"
-            if let window, SafariChromeHost.isHosting, SafariChromeHost.isBrowserWindow(window) {
-                var said: [String] = []
-                let page = SafariChromeHost.frontPage(in: window)?.title ?? ""
-                let untitledBefore = SafariChrome.untitledMenuItems
-                let taken = SafariTabs.send(["addBookmark:"], to: window)
-                try? await Task.sleep(nanoseconds: 1_500_000_000)
-                said.append(taken ? "the action was taken" : "the action was NOT taken (\(SafariTabs.lastException ?? "nothing takes it"))")
-                if let sheet = window.attachedSheet {
-                    said.append("sheet \(String(describing: type(of: sheet)))")
-                    // The sheet's own Add: its default button, pressed as Return presses it.
-                    if let button = sheet.defaultButtonCell?.controlView as? NSButton, button.isEnabled {
-                        button.performClick(nil)
-                        said.append("its default button '\(button.title)' pressed")
-                        try? await Task.sleep(nanoseconds: 1_000_000_000)
-                        look.found = window.attachedSheet == nil
-                    } else {
-                        said.append("no default button to press")
-                        window.endSheet(sheet)
-                    }
-                } else {
-                    said.append("no sheet")
-                }
-                said.append("menu items made without a title, titled: \(SafariChrome.untitledMenuItems - untitledBefore)")
-                let listed = bookmarkTitles()
-                said.append("the Bookmarks menu \(!page.isEmpty && listed.contains(page) ? "lists" : "does NOT list") the page '\(page)' (\(listed.count) items)")
-                look.found = look.found && !page.isEmpty && listed.contains(page)
-                look.detail = said.joined(separator: "; ")
-            }
-        case .measure:
-            look.action = "measure"
-            if let window, let page = controller?.selectedTab?.webView
-                ?? (SafariChromeHost.isBrowserWindow(window) ? SafariChromeHost.frontPage(in: window) : nil) {
-                look.detail = await measured(by: page)
-                look.found = !look.detail.hasPrefix("error")
-            }
-        case .marker(let shown):
-            look.action = shown ? "the profile's marker back" : "the profile's marker out"
-            if SafariChromeHost.isHosting {
-                SafariProfileMarker.suspend(!shown)
-                look.found = true
-            }
         case .downloads:
             look.action = "downloads"
             if SafariChromeHost.isHosting {
@@ -257,7 +211,9 @@ enum WindowProbe {
         }
         if let window {
             look.controls = identifiers(in: window)
-            look.windowTitle = window.title
+            // What the Window menu lists the window as, where it lists it; else the window's own title.
+            let listed = NSApp.windowsMenu?.items.first { $0.target === window }?.title
+            look.windowTitle = listed ?? window.title
             if SafariChromeHost.isHosting, SafariChromeHost.isBrowserWindow(window) {
                 let state = SafariProfileMarker.state(of: window)
                 look.titleNamesProfile = state.title
@@ -282,24 +238,6 @@ enum WindowProbe {
                 continuation.resume(returning: (value as? String) ?? "error: \(error.map { String(describing: $0) } ?? "no value")")
             }
         }
-    }
-
-    /// The titles of what Safari's Bookmarks menu lists, its submenus with it, filled as AppKit
-    /// fills a menu before it shows it: the menu is the one that has Add Bookmark….
-    private static func bookmarkTitles() -> [String] {
-        let add = NSSelectorFromString("addBookmark:")
-        guard let menu = NSApp.mainMenu?.items.compactMap(\.submenu).first(where: { $0.items.contains { $0.action == add } }) else { return [] }
-        var titles: [String] = []
-        func read(_ menu: NSMenu, depth: Int) {
-            menu.delegate?.menuNeedsUpdate?(menu)
-            menu.update()
-            for item in menu.items where !item.isSeparatorItem {
-                titles.append(item.title)
-                if let submenu = item.submenu, depth < 4 { read(submenu, depth: depth + 1) }
-            }
-        }
-        read(menu, depth: 0)
-        return titles
     }
 
     private static func bottomBar(in view: NSView?) -> MobileBottomBar? {

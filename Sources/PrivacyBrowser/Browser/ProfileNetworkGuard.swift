@@ -1190,7 +1190,6 @@ enum ProfileNetworkGuard {
         report.pasteAsTypedInMenu = SafariChrome.pasteAsTypedInMenu
         report.downloads = HostedDownloads.counts.text
         report.downloadsInMenu = HostedDownloads.shared.isRouted
-        report.untitledMenuItems = SafariChrome.untitledMenuItems
         report.profileMarkerDropped = SafariProfileMarker.droppedForGeometry
         if let menu = NSApp?.mainMenu {
             let pdf = NSSelectorFromString("saveDocumentToPDF:")
@@ -1379,8 +1378,6 @@ struct ProfileNetworkReport: Codable, Equatable {
     /// Show Downloads lists the profile's.
     var downloads = ""
     var downloadsInMenu = false
-    /// Menu items Safari's code made without a title, which got one (`SafariChrome`).
-    var untitledMenuItems = 0
     /// The profile's chip changed what a page can measure of Safari's window and was taken out
     /// (`SafariProfileMarker`): false is right.
     var profileMarkerDropped = false

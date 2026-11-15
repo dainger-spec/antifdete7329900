@@ -397,11 +397,36 @@ enum SafariTabs {
         // Safari makes the tab as the action runs; a few turns of the run loop all the same.
         for _ in 0..<20 {
             if let tab = items().last(where: { !before.contains(ObjectIdentifier($0)) }) {
-                return SafariChrome.load(address, in: tab)
+                return await send(tab, to: address)
             }
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
         log.error("Safari's New Tab made no tab")
+        return false
+    }
+
+    /// Sends a tab just made to `address`, and sees that it went. A new tab is still putting up
+    /// its start page as it is made, and an address given at once was dropped for it (CI, 15
+    /// November, macOS 26: the tab stayed on favorites://). So the tab is asked where it is after
+    /// each try, and sent again — then, should `loadURL:` never take, through its web view.
+    private static func send(_ tab: NSObject, to address: URL) async -> Bool {
+        func isThere() -> Bool {
+            guard let now = statedAddress(of: tab) ?? webView(of: tab)?.url else { return false }
+            return now == address || (OpenTabs.isRestorable(now) && now.host == address.host)
+        }
+        for attempt in 0..<8 {
+            // The first try a moment after the tab is made, not in the same turn of the run loop.
+            try? await Task.sleep(nanoseconds: attempt == 0 ? 150_000_000 : 400_000_000)
+            if isThere() { return true }
+            if attempt < 6 {
+                _ = SafariChrome.load(address, in: tab)
+            } else if let page = webView(of: tab) {
+                _ = page.load(URLRequest(url: address))
+            }
+        }
+        try? await Task.sleep(nanoseconds: 400_000_000)
+        if isThere() { return true }
+        log.error("A new tab of Safari's did not take its address")
         return false
     }
 
