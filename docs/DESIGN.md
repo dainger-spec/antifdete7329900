@@ -94,7 +94,13 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
   and its pace for the app (`WelcomeLettering.swift`) and the prototype the owner approved
   (`design/prototypes/welcome.html`, the same shader in WebGL; `design/tools/record_welcome.mjs`
   records it).
-- Lock and first launch (`VaultViews.swift`): `LockBackdrop`, `LockScreen`, `LockPasswordField` (one
+- Lock and first launch (`VaultViews.swift`), on the launch screen's horizon (the owner, 15 November): the
+  Lumen disc without its tile, the title on one line where the window has room and the sentence stand in
+  the sky; the horizon's light (`LockHorizon`, `LumenHorizon` with the disc placed) runs 26 pt under the
+  sentence; the form is below it, on black. The horizon is a part of the screen's content, so it scrolls
+  with the form and never crosses a word; its disc is at least 820 pt in radius, so the rim stays nearly
+  level in the 560 pt sign-in sheet. One rule for the unlock, setup, restore and sign-in screens.
+  `LockBackdrop`, `LockScreen`, `LockPasswordField` (one
   field per screen takes the cursor: `takesFocus`), the master password's facts first and large,
   `PasswordRequirement`. Changing the master password uses the same fields and requirements.
 - Editor (`ProfileEditorForm.swift`): header with the context in capitals, one screen of parts with
@@ -102,8 +108,7 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
 
 ## Light and motion — `UI/EclipseLight.swift`, `UI/Appearance.swift`
 
-- The eclipse: five blurred circles per corner, geometry per place (`EclipseSpec`): lock screen at
-  full brightness, profiles window at 55 %, editor still, the miniature in Settings → Appearance.
+- The eclipse: five blurred circles per corner, geometry per place (`EclipseSpec`): the profiles window at 55 %, editor still, the miniature in Settings → Appearance.
   Decoration only: hidden from VoiceOver, never in the way of a click; off with Settings →
   Appearance → Lumen's light at entry.
 - Motion (`Motion`): hover at once on and 150 ms off, a press to 98 % in 80 ms, a switch in 180 ms,
