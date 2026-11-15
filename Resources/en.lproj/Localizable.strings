@@ -2716,6 +2716,8 @@
 "vm.row.forceStop" = "Force Shut Down";
 "vm.row.edit" = "Edit…";
 "vm.row.delete" = "Delete…";
+"vm.row.duplicate" = "New Machine with These Settings…";
+"vm.editor.duplicate.note" = "A new machine with the settings of “%@”: another Mac, with a disk of its own made from the base system, its own identifier and network card. Nothing of that machine is in it — no cookies, no logins. Change what should differ: with the same proxy, sites see both machines at one address.";
 "vm.row.checkingProxy" = "checking the proxy…";
 "vm.row.checkingConnection" = "checking the connection…";
 "vm.row.starting" = "starting…";

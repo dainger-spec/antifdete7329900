@@ -265,7 +265,9 @@ private struct VirtualMachinesScreen: View {
                               network: { networkOf = profile },
                               guestFullScreen: { center.toggleGuestFullScreen(profile.id) },
                               edit: { editing = VMEditorView.Draft(profile: profile, isNew: false) },
-                              delete: { deleting = profile })
+                              delete: { deleting = profile },
+                              canDuplicate: center.loadError == nil && allowed && center.isReady,
+                              duplicate: { newMachine(like: profile) })
                     }
                 }
             }
@@ -328,6 +330,15 @@ private struct VirtualMachinesScreen: View {
         editing = VMEditorView.Draft(profile: VMProfile(name: name, memoryGB: memory, accent: VMAccent.random().rawValue,
                                                         scrollBars: VMScrollBars.standard(for: .standard)?.rawValue,
                                                         keyboard: VMKeyboardLayout.automatic), isNew: true)
+    }
+
+    /// A new machine with another's settings: the editor opens with them under a name of its own,
+    /// for the person to change what differs — the proxy, as a rule. It is another Mac
+    /// (`VMProfile.duplicate`): nothing of the first machine's disk is in it.
+    private func newMachine(like profile: VMProfile) {
+        error = nil
+        let name = VMProfile.nameForDuplicate(of: profile.name, taken: Set(center.profiles.map(\.name)))
+        editing = VMEditorView.Draft(profile: profile.duplicate(named: name), isNew: true, likeName: profile.name)
     }
 
     /// The person's Delete, confirmed: the one caller of the machines' one deletion path.
@@ -430,6 +441,9 @@ private struct VMRow: View {
     var guestFullScreen: () -> Void = {}
     let edit: () -> Void
     let delete: () -> Void
+    /// A new machine can be made now (the base system is there, the plan has machines).
+    var canDuplicate = true
+    var duplicate: () -> Void = {}
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
@@ -643,6 +657,8 @@ private struct VMRow: View {
                 Divider()
             }
             Button(L("vm.row.edit"), action: edit)
+            Button(L("vm.row.duplicate"), action: duplicate)
+                .disabled(!canDuplicate)
             if state?.phase == .running, profile.instantWake {
                 Button(L("vm.row.shutDown"), action: shutDown)
             }
@@ -703,6 +719,8 @@ struct VMEditorView: View {
     struct Draft: Identifiable {
         var profile: VMProfile
         var isNew: Bool
+        /// The machine whose settings a new one starts from ("New Machine with These Settings…").
+        var likeName: String?
         var id: UUID { profile.id }
     }
 
@@ -844,6 +862,10 @@ struct VMEditorView: View {
                         subtitle: L("vm.editor.subtitle"))
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
+                    if let likeName = draft.likeName {
+                        // Made like another machine: what it is, and what it is not.
+                        note(String(format: L("vm.editor.duplicate.note"), likeName))
+                    }
                     section(L("vm.editor.section.machine")) { machineFields }
                     section(L("vm.editor.section.network")) { networkFields }
                     section(L("vm.editor.section.region")) { localeFields }

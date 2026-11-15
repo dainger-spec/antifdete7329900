@@ -49,6 +49,66 @@ final class VMProfileTests: XCTestCase {
         XCTAssertEqual(try VMProfile.validatedName("  Shop DE \nsecond line"), "Shop DE")
     }
 
+    func testAMachineMadeLikeAnotherIsAnotherMacWithTheSameSettings() throws {
+        var generator = SeededGenerator(state: 11)
+        let proxy = ProxySettings(kind: .socks5, host: "de.example", port: 1080, username: "u", password: "p")
+        var first = VMProfile(name: "Shop DE", proxy: proxy, timeZoneIdentifier: "Europe/Berlin", language: "de-DE", countryCode: "DE",
+                              displayID: "macbook-pro-14", memoryGB: 6, macAddress: "02:11:22:33:44:55", startURL: "https://example.com/",
+                              notes: "the shop", accent: VMAccent.multicolor.rawValue, computerName: "Anna's MacBook Pro",
+                              blockedHosts: ["ads.example.net"], keyboard: VMKeyboardLayout.automatic, instantWake: true)
+        first.lastLaunchedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let second = first.duplicate(named: "Shop DE 2", using: &generator)
+        // What is a machine's own is made anew: its id — and with it its folder, its disk and the
+        // identifier its macOS sees — and its network card's address; and it was never started.
+        XCTAssertNotEqual(second.id, first.id)
+        XCTAssertNotEqual(second.macAddress, first.macAddress)
+        XCTAssertTrue(VMProfile.isMACAddress(second.macAddress), second.macAddress)
+        XCTAssertNil(second.lastLaunchedAt)
+        XCTAssertEqual(second.name, "Shop DE 2")
+        let library = VMLibrary(root: URL(fileURLWithPath: "/tmp/lib"))
+        XCTAssertNotEqual(library.machineDirectory(for: second.id), library.machineDirectory(for: first.id))
+        // An accent colour is drawn again, as for any new machine — one of macOS's.
+        XCTAssertNotNil(second.accent.flatMap(VMAccent.init(rawValue:)))
+        XCTAssertNil(VMProfile(name: "A", accent: nil).duplicate(named: "A 2", using: &generator).accent, "left to the system stays so")
+        // What the person set stays, for them to change what differs.
+        var expected = first
+        expected.id = second.id
+        expected.name = second.name
+        expected.createdAt = second.createdAt
+        expected.lastLaunchedAt = nil
+        expected.macAddress = second.macAddress
+        expected.accent = second.accent
+        XCTAssertEqual(second, expected)
+        XCTAssertNoThrow(try second.validate())
+        // Two made from one differ from each other too.
+        let third = first.duplicate(named: "Shop DE 3", using: &generator)
+        XCTAssertNotEqual(third.id, second.id)
+        XCTAssertNotEqual(third.macAddress, second.macAddress)
+        // And both are kept beside the first.
+        var list = VMProfiles()
+        try list.save(first)
+        try list.save(second)
+        try list.save(third)
+        XCTAssertEqual(list.profiles.map(\.name), ["Shop DE", "Shop DE 2", "Shop DE 3"])
+    }
+
+    func testAMachineMadeLikeAnotherGetsTheNextNameNobodyHas() {
+        XCTAssertEqual(VMProfile.nameForDuplicate(of: "Shop DE", taken: ["Shop DE"]), "Shop DE 2")
+        XCTAssertEqual(VMProfile.nameForDuplicate(of: "Shop DE", taken: ["Shop DE", "Shop DE 2", "Shop DE 3"]), "Shop DE 4")
+        // A name that ends in a number goes on from it.
+        XCTAssertEqual(VMProfile.nameForDuplicate(of: "Shop DE 2", taken: ["Shop DE", "Shop DE 2"]), "Shop DE 3")
+        XCTAssertEqual(VMProfile.nameForDuplicate(of: "Machine 9", taken: ["Machine 9", "Machine 10"]), "Machine 11")
+        // A number that is the whole name, or no counter, is part of the name.
+        XCTAssertEqual(VMProfile.nameForDuplicate(of: "2024", taken: []), "2024 2")
+        XCTAssertEqual(VMProfile.nameForDuplicate(of: "Shop 0", taken: []), "Shop 0 2")
+        XCTAssertEqual(VMProfile.nameForDuplicate(of: "  Shop  ", taken: []), "Shop 2")
+        // Never longer than a name may be.
+        let long = String(repeating: "m", count: 64)
+        let made = VMProfile.nameForDuplicate(of: long, taken: [long])
+        XCTAssertEqual(made, String(repeating: "m", count: 62) + " 2")
+        XCTAssertEqual(try? VMProfile.validatedName(made), made)
+    }
+
     func testTheTimeZoneAndLanguageFollowWhereTheProxyComesOut() {
         let proxy = ProxySettings(kind: .socks5, host: "fr.example", port: 1080)
         let check = ProxyCheckResult(checkedAt: Date(), exitIP: "203.0.113.7", countryCode: "fr", timeZoneIdentifier: "Europe/Paris")

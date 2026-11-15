@@ -258,6 +258,47 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         return bytes.map { String(format: "%02x", $0) }.joined(separator: ":")
     }
 
+    /// A new machine with this one's settings: another Mac, with none of this one's data. What is
+    /// a machine's own is made anew — its id, and with it its disk and the identifier its macOS
+    /// sees, both made at its first start; its network card's address; and its accent colour,
+    /// drawn again as for any new machine (Macs differ in theirs). What the person set — the
+    /// proxy, the screen, the memory, the system's habits, what is blocked — stays, for them to
+    /// change what differs. It has never been started.
+    public func duplicate(named name: String) -> VMProfile {
+        var generator = SystemRandomNumberGenerator()
+        return duplicate(named: name, using: &generator)
+    }
+
+    public func duplicate<G: RandomNumberGenerator>(named name: String, using generator: inout G) -> VMProfile {
+        var copy = self
+        copy.id = UUID()
+        copy.name = name
+        copy.createdAt = Date()
+        copy.lastLaunchedAt = nil
+        copy.macAddress = VMProfile.randomMACAddress(using: &generator)
+        if accent != nil { copy.accent = VMAccent.random(using: &generator).rawValue }
+        return copy
+    }
+
+    /// The name a new machine made like the one named `name` gets: the same with the next number
+    /// no machine in `taken` has — "Shop DE" → "Shop DE 2", "Shop DE 2" → "Shop DE 3" — and never
+    /// longer than a name may be (64 characters).
+    public static func nameForDuplicate(of name: String, taken: Set<String>) -> String {
+        var stem = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        var number = 2
+        // A name that ends in a number goes on from it.
+        if let space = stem.lastIndex(of: " "), let last = Int(stem[stem.index(after: space)...]), (1..<10_000).contains(last) {
+            number = last + 1
+            stem = String(stem[..<space])
+        }
+        while true {
+            let suffix = " \(number)"
+            let candidate = String(stem.prefix(64 - suffix.count)) + suffix
+            if !taken.contains(candidate) { return candidate }
+            number += 1
+        }
+    }
+
     /// The name as kept: one line, 1–64 characters.
     public static func validatedName(_ name: String) throws -> String {
         let line = name.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""

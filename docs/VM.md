@@ -41,7 +41,12 @@ licensing, and has the machines.
    this Mac's connection the setup stood on a screen with its buttons off). "Open with Internet"
    is there for a setup that will not go on without one;
 5. from then on **New Machine** makes a profile. Its machine is a copy-on-write clone of the base,
-   made in seconds at its first start, with an identity of its own.
+   made in seconds at its first start, with an identity of its own. **New Machine with These
+   Settings…** in a machine's menu opens the editor with that machine's settings under the next
+   free name ("Shop DE 2"): another Mac made from the base — its own id, disk, identifier and
+   network card address, an accent colour drawn anew — with nothing of the first machine's disk
+   in it (`VMProfile.duplicate`). The editor says so, and that with the same proxy sites see both
+   at one address.
 
 A build has the section only when it was made with `VM=1` (below). On a Mac with an Intel processor
 the section says that macOS runs as a guest only on Apple silicon.
