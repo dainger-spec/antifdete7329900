@@ -227,6 +227,12 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     private var startedAt = Date()
     /// Told when this Mac wakes from sleep (`macWoke`).
     private var macWakeObserver: NSObjectProtocol?
+    /// Where the window was last kept (`VMWindowPlacement`), the write that is waiting for the
+    /// person to let go of the window, and whether the window is full screen or on its way there
+    /// or back (its frame is then this Mac's screen's, not one to go back to).
+    private var keptPlacement: VMWindowPlacement?
+    private var placementWrite: DispatchWorkItem?
+    private var fullScreenBusy = false
 
     init(request: VMHelperRequest) {
         self.request = request
@@ -409,6 +415,7 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         window.delegate = self
         window.isReleasedWhenClosed = false
         window.center()
+        restoreWindowPlacement(window)
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(view)
         self.window = window
@@ -427,6 +434,57 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     }
 
     static let guideWidth: CGFloat = 320
+
+    // MARK: Where the window was left
+
+    /// A profile's machine opens where its window was left (`VMWindowPlacement`, a note beside
+    /// its disk): on the display the person put it on, at the size they gave it — not in the
+    /// middle of the main screen at every start, over the other machine's window. Where the note
+    /// is none, the machine's screen has changed, or the place is no longer on a screen (a
+    /// display is gone), the window stays where a new one opens.
+    private func restoreWindowPlacement(_ window: NSWindow) {
+        guard screen != nil, let kept = VMWindowPlacement.read(from: files.window) else { return }
+        let screens = NSScreen.screens.map { display -> VMWindowPlacement.Rect in
+            let visible = display.visibleFrame
+            return VMWindowPlacement.Rect(x: Double(visible.origin.x), y: Double(visible.origin.y),
+                                          width: Double(visible.size.width), height: Double(visible.size.height))
+        }
+        guard let frame = kept.restored(onScreens: screens, pixelsWide: request.display.pixelsWide,
+                                        pixelsHigh: request.display.pixelsHigh) else { return }
+        keptPlacement = kept
+        window.setFrame(NSRect(x: frame.x, y: frame.y, width: frame.width, height: frame.height), display: false)
+    }
+
+    /// The window as it stands, kept for the machine's next start — not while it is full screen
+    /// or minimised, when its frame is not one to go back to.
+    private func keepWindowPlacement() {
+        placementWrite?.cancel()
+        placementWrite = nil
+        guard screen != nil, !fullScreenBusy, let window, !window.isMiniaturized, !window.styleMask.contains(.fullScreen) else { return }
+        let frame = window.frame
+        let placement = VMWindowPlacement(frame: VMWindowPlacement.Rect(x: Double(frame.origin.x), y: Double(frame.origin.y),
+                                                                        width: Double(frame.size.width), height: Double(frame.size.height)),
+                                          pixelsWide: request.display.pixelsWide, pixelsHigh: request.display.pixelsHigh)
+        guard placement != keptPlacement else { return }
+        keptPlacement = placement
+        try? placement.write(to: files.window)
+    }
+
+    /// The window was moved or resized: kept once the person has let go of it for a moment.
+    private func windowPlacementChanged() {
+        guard screen != nil, !finished else { return }
+        placementWrite?.cancel()
+        let write = DispatchWorkItem { [weak self] in self?.keepWindowPlacement() }
+        placementWrite = write
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: write)
+    }
+
+    func windowDidMove(_ notification: Notification) { windowPlacementChanged() }
+    func windowDidResize(_ notification: Notification) { windowPlacementChanged() }
+    func windowWillEnterFullScreen(_ notification: Notification) { fullScreenBusy = true }
+    func windowDidExitFullScreen(_ notification: Notification) { fullScreenBusy = false }
+    /// Full screen that did not come about: the window is a window again.
+    func windowDidFailToEnterFullScreen(_ window: NSWindow) { fullScreenBusy = false }
 
     // MARK: The start's cover
 
@@ -845,6 +903,7 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     /// it — this start's stamp, the disk as it was left, the names its network knew — and
     /// without that note the state is not kept.
     private func finishAsleep() -> Never {
+        keepWindowPlacement()
         finished = true
         trafficTimer?.invalidate()
         network?.stop()
@@ -992,6 +1051,7 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     }
 
     private func finish() -> Never {
+        keepWindowPlacement()
         finished = true
         trafficTimer?.invalidate()
         reportTraffic()

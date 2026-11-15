@@ -142,3 +142,68 @@ final class VMFailureTests: XCTestCase {
         XCTAssertNil(VMStartRoom.problem(free: 5 * gigabyte, isMade: false, volumeClones: nil, baseDiskBytes: 22 * gigabyte))
     }
 }
+
+/// Where a machine's window opens (`VMWindowPlacement`): where the person left it, while that
+/// place is still a place — and as a new window otherwise.
+final class VMWindowPlacementTests: XCTestCase {
+    private typealias Rect = VMWindowPlacement.Rect
+    /// A MacBook's screen under the menu bar, and a display to its right.
+    private let laptop = Rect(x: 0, y: 0, width: 1470, height: 923)
+    private let external = Rect(x: 1470, y: -100, width: 2560, height: 1415)
+
+    private func kept(_ frame: Rect, pixels: (Int, Int) = (2940, 1912)) -> VMWindowPlacement {
+        VMWindowPlacement(frame: frame, pixelsWide: pixels.0, pixelsHigh: pixels.1)
+    }
+
+    func testTheWindowOpensWhereItWasLeft() {
+        let onLaptop = Rect(x: 60, y: 80, width: 1100, height: 743)
+        XCTAssertEqual(kept(onLaptop).restored(onScreens: [laptop], pixelsWide: 2940, pixelsHigh: 1912), onLaptop)
+        // On the second display, as large as the person made it there.
+        let onExternal = Rect(x: 1600, y: -60, width: 1960, height: 1303)
+        XCTAssertEqual(kept(onExternal).restored(onScreens: [laptop, external], pixelsWide: 2940, pixelsHigh: 1912), onExternal)
+        // Its title bar above the display's top would be out of reach: not gone back to.
+        XCTAssertNil(kept(Rect(x: 1600, y: 40, width: 1960, height: 1303)).restored(onScreens: [laptop, external], pixelsWide: 2940, pixelsHigh: 1912))
+        // Partly off a screen's edge is still where it was left, while its title bar is in reach.
+        let overTheEdge = Rect(x: 1000, y: -300, width: 1100, height: 743)
+        XCTAssertEqual(kept(overTheEdge).restored(onScreens: [laptop], pixelsWide: 2940, pixelsHigh: 1912), overTheEdge)
+    }
+
+    func testAPlaceThatIsNoLongerOneIsNotGoneBackTo() {
+        let onExternal = Rect(x: 1600, y: -60, width: 1960, height: 1303)
+        // The display it was on is not connected: nothing of it is on the screen there is.
+        XCTAssertNil(kept(onExternal).restored(onScreens: [laptop], pixelsWide: 2940, pixelsHigh: 1912))
+        XCTAssertNil(kept(onExternal).restored(onScreens: [], pixelsWide: 2940, pixelsHigh: 1912))
+        // Larger than the screen it would be on (kept on a larger display, which now stands where the small one did).
+        let large = Rect(x: 0, y: 0, width: 1960, height: 1303)
+        XCTAssertNil(kept(large).restored(onScreens: [laptop], pixelsWide: 2940, pixelsHigh: 1912))
+        // Only a corner on a screen: its title bar could not be taken hold of.
+        let corner = Rect(x: 1400, y: 100, width: 1100, height: 743)
+        XCTAssertNil(kept(corner).restored(onScreens: [laptop], pixelsWide: 2940, pixelsHigh: 1912))
+        let below = Rect(x: 60, y: -735, width: 1100, height: 743)
+        XCTAssertNil(kept(below).restored(onScreens: [laptop], pixelsWide: 2940, pixelsHigh: 1912))
+        // The machine has another screen now: the window's proportions are no longer its own.
+        let onLaptop = Rect(x: 60, y: 80, width: 1100, height: 743)
+        XCTAssertNil(kept(onLaptop).restored(onScreens: [laptop], pixelsWide: 3024, pixelsHigh: 1964))
+        // What is no window's frame.
+        XCTAssertNil(kept(Rect(x: 60, y: 80, width: 120, height: 90)).restored(onScreens: [laptop], pixelsWide: 2940, pixelsHigh: 1912))
+        XCTAssertNil(kept(Rect(x: .nan, y: 80, width: 1100, height: 743)).restored(onScreens: [laptop], pixelsWide: 2940, pixelsHigh: 1912))
+        XCTAssertNil(kept(Rect(x: 60, y: 80, width: .infinity, height: 743)).restored(onScreens: [laptop], pixelsWide: 2940, pixelsHigh: 1912))
+    }
+
+    func testTheNoteIsTheMachinesOwnAndReadsBack() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-vmwindow-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let files = VMLibrary.MachineFiles(directory: root)
+        XCTAssertEqual(files.window.deletingLastPathComponent().path, files.disk.deletingLastPathComponent().path, "beside the machine's disk")
+        XCTAssertNil(VMWindowPlacement.read(from: files.window))
+        let placement = kept(Rect(x: 60.5, y: 80, width: 1100, height: 743))
+        try placement.write(to: files.window)
+        XCTAssertEqual(VMWindowPlacement.read(from: files.window), placement)
+        // What is not a note is none; nor is a file far larger than one.
+        try Data("not a note".utf8).write(to: files.window)
+        XCTAssertNil(VMWindowPlacement.read(from: files.window))
+        try Data(repeating: 0x20, count: 10_000).write(to: files.window)
+        XCTAssertNil(VMWindowPlacement.read(from: files.window))
+    }
+}

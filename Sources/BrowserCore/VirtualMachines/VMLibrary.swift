@@ -13,7 +13,8 @@ import Foundation
 ///     share/                  the folder the guest sees during setup: the tools' installer, its status
 ///   machines/<profile id>/    one per profile: disk.img (a copy-on-write clone), aux.img,
 ///                             hardware-model.bin, machine-id.bin, share/ (settings in, status out),
-///                             tools/ (the boot script, shared read-only)
+///                             tools/ (the boot script, shared read-only), window.json (where its
+///                             window was last put)
 ///   downloads/
 ///     restore.ipsw.partial    Apple's restore image while it is fetched; restore.ipsw when whole
 ///     restore.json            VMDownloadState: what is being fetched, and how to go on with it
@@ -71,6 +72,9 @@ public struct VMLibrary: Equatable, Sendable {
         /// between a close and the next start, which uses them once or removes them.
         public var state: URL { directory.appendingPathComponent("state.vzvmsave") }
         public var stateInfo: URL { directory.appendingPathComponent("state.json") }
+        /// Where the machine's window was last put (`VMWindowPlacement`): the machine's own note,
+        /// beside its disk and gone with it.
+        public var window: URL { directory.appendingPathComponent("window.json") }
         /// A saved state waits for the machine's next start.
         public var hasSavedState: Bool {
             FileManager.default.fileExists(atPath: state.path) && FileManager.default.fileExists(atPath: stateInfo.path)

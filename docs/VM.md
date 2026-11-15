@@ -135,6 +135,17 @@ What the helper does about the Mac and the app around it:
   (`lumen-woke`), and the boot script asks for the time at once (tools 11); the machine's network
   answers with this Mac's clock, and nothing leaves. A profile's machine only: the base's shared
   folder is the person's to look into, and gets no such file.
+- **Where the window was left.** A profile's machine opened in the middle of the main screen at
+  every start — on the wrong display for whoever keeps it on a second one, and exactly over the
+  other machine's window. Its window now opens where the person last put it, at the size they
+  gave it: the frame is kept in a note beside the machine's disk (`window.json`,
+  `VMWindowPlacement`) — the machine's own, not in the app's preferences, which every machine
+  would share — written when the window has been let go of for a moment and at the machine's
+  end, never while it is full screen or minimised. It is gone back to only while it is still a
+  place: the machine has the same screen (the window has its proportions), the frame fits the
+  display most of it is on, and enough of its title bar is on that display to take hold of;
+  otherwise — a display that is gone — the window opens as a new one does. The base's window is
+  not kept: its guide panel is part of it.
 - **Force Stop**: the helper is asked to end the machine; if it has not ended in eight seconds
   the app ends it with `SIGKILL` — the polite signal is one a running helper takes for another
   request to shut down, and a helper whose main thread is stuck took neither.
@@ -587,7 +598,8 @@ one base system, and this is what that means:
 <vault folder>/VirtualMachines/
   base.json               which macOS the base is, and how far its setup got
   base/                   disk.img, aux.img, hardware-model.bin, machine-id.bin, share/
-  machines/<profile id>/  the same, per profile: the disk a clone of the base's
+  machines/<profile id>/  the same, per profile: the disk a clone of the base's; window.json,
+                          where its window was last put
   downloads/              Apple's restore image while it is fetched (removed after the installation)
 ```
 
@@ -710,7 +722,8 @@ What is checked where:
 - `Tests/BrowserCoreTests/VMFailureTests.swift` (Linux and macOS): the kind of a failure for each
   of the system's errors the app has words for, a full disk found under another error, the
   helper's own failures, the events that carry them, and the room a start needs — on a volume
-  that clones and on one that cannot. The self-test checks that every kind has its words in the
+  that clones and on one that cannot; and where a machine's window opens (`VMWindowPlacement`):
+  where it was left, and not at a place that is no longer one. The self-test checks that every kind has its words in the
   interface's language, and the start's proxy check against its loopback proxies (one tunnel, no
   UDP asked; a rejected login said as that). The UI snapshots draw the list's rows saying each of
   these (`vm-list-states`: running, asleep, a rejected login, a full disk, Apple's limit with the
@@ -784,3 +797,7 @@ What is checked where:
 12. A machine left open while the Mac sleeps for ten minutes: seconds after the Mac wakes, the
     clock in the machine's menu bar is this Mac's (the helper's log: "clock: this Mac woke from
     sleep…"). Without it the clock would stay behind until macOS in the machine next asked.
+13. Move a machine's window to a second display and resize it; shut the machine down and start
+    it again: the window opens there, at that size. Disconnect the display and start it: the
+    window opens on the Mac's own screen as a new one does. Two machines moved apart once open
+    apart from then on.
