@@ -895,4 +895,41 @@ final class VMGuestScriptTests: XCTestCase {
         XCTAssertEqual(try boot(settings: settings).count(asked), 0)
         XCTAssertTrue(FileManager.default.fileExists(atPath: secret.path))
     }
+
+    /// The Mac slept with the machine open, and woke — twice: the helper leaves a word of its own
+    /// each time (`MachineRunner.macWoke`), while the script is long past the start and only
+    /// waits. Each is taken as it comes, and the time asked for once for each.
+    func testEachWordLeftWhileTheMachineRunsAsksForTheTimeOnce() throws {
+        let settings = VMGuestSettings(profile: VMProfile(name: "A", lumenWallpaper: false)).text
+        let woke = share.appendingPathComponent(VMGuestSettings.wokeFileName)
+        // The script's waits, counted: a word is left during the third and during the sixth, and
+        // Lumen asks for the shutdown at the ninth.
+        let sleeps = root.appendingPathComponent("sleeps").path
+        let waits = root.appendingPathComponent("bin/sleep")
+        try Data("""
+            #!/bin/sh
+            echo x >> '\(sleeps)'
+            waited=$(( $(/usr/bin/env wc -l < '\(sleeps)') ))
+            case "$waited" in
+              3) printf 'firstsleep01' > '\(woke.path)' ;;
+              6) printf 'secondsleep02' > '\(woke.path)' ;;
+            esac
+            if [ "$waited" -ge 9 ]; then
+              : > '\(share.path)/lumen-shutdown'
+            fi
+
+            """.utf8).write(to: waits)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: waits.path)
+        let asked = "root sntp -sS time.apple.com"
+        let run = try boot(settings: settings)
+        XCTAssertEqual(run.count(asked), 2, "\(run.calls)")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: woke.path), "each word is taken")
+        // Not at the start — nothing woke it then — and both before the shutdown.
+        let safari = try XCTUnwrap(run.calls.firstIndex(of: "tester open -a Safari"))
+        let first = try XCTUnwrap(run.calls.firstIndex(of: asked))
+        let last = try XCTUnwrap(run.calls.lastIndex(of: asked))
+        XCTAssertLessThan(safari, first)
+        XCTAssertLessThan(first, last)
+        XCTAssertLessThan(last, try XCTUnwrap(run.calls.firstIndex(of: "root shutdown -h now")))
+    }
 }

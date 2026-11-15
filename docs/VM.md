@@ -123,6 +123,13 @@ What the helper does about the Mac and the app around it:
   helper says goes to a pipe nobody reads then; those writes fail quietly (`SIGPIPE` is ignored
   and the writes are the throwing kind) instead of ending the helper in the middle of the
   shutdown it had just begun.
+- **The Mac slept** with a machine open: nothing in the machine ran meanwhile, and its clock is
+  that of the moment the Mac went to sleep until its macOS next asks for the time — a clock that
+  is behind is what sites and certificates see until then. When the Mac wakes
+  (`NSWorkspace.didWakeNotification`) the helper leaves the word a wake from a saved state leaves
+  (`lumen-woke`), and the boot script asks for the time at once (tools 11); the machine's network
+  answers with this Mac's clock, and nothing leaves. A profile's machine only: the base's shared
+  folder is the person's to look into, and gets no such file.
 - **Force Stop**: the helper is asked to end the machine; if it has not ended in eight seconds
   the app ends it with `SIGKILL` — the polite signal is one a running helper takes for another
   request to shut down, and a helper whose main thread is stuck took neither.
@@ -469,7 +476,9 @@ A sleeping machine takes about as much disk as it has memory. Lock, Quit and thi
 shutdown put such a machine to sleep too — faster than shutting it down.
 
 Not run on a Mac: that the framework takes this set of devices (it is the set other tools use
-for it), how long a save and a wake take, and that `sntp` sets the clock as written.
+for it), how long a save and a wake take, that `sntp` sets the clock as written, and how far a
+machine's clock falls behind while the Mac sleeps (reasoned from the machine standing still with
+it; the word left at the Mac's wake costs nothing where it does not).
 
 ## Browser mode
 
@@ -765,3 +774,6 @@ What is checked where:
     scroll or a key on the cover before that does nothing in the machine. The helper's log says
     after how many seconds ("cover: the guest says this start's settings are in, after … s"). A
     machine at its sign-in window (no automatic sign-in) offers "Show the screen" after a minute.
+12. A machine left open while the Mac sleeps for ten minutes: seconds after the Mac wakes, the
+    clock in the machine's menu bar is this Mac's (the helper's log: "clock: this Mac woke from
+    sleep…"). Without it the clock would stay behind until macOS in the machine next asked.

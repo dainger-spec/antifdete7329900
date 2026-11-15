@@ -225,6 +225,8 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     private var screen: MachineScreen?
     private var startCover: StartCover?
     private var startedAt = Date()
+    /// Told when this Mac wakes from sleep (`macWoke`).
+    private var macWakeObserver: NSObjectProtocol?
 
     init(request: VMHelperRequest) {
         self.request = request
@@ -303,9 +305,25 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
                 }
             }
             trafficTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.reportTraffic() }
+            macWakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification,
+                                                                               object: nil, queue: .main) { [weak self] _ in
+                self?.macWoke()
+            }
         } catch {
             fail(error)
         }
+    }
+
+    /// This Mac slept with the machine open, and has woken. The machine stood still for as long —
+    /// nothing in it ran — and its clock is that of the moment the Mac went to sleep until its
+    /// macOS next asks for the time, which it does now and then. It is told at once, the way a
+    /// machine woken from a saved state is: the word in the shared folder, on which the boot
+    /// script asks for the time (tools 11), answered by this Mac's clock (docs/VM_NETWORK.md).
+    /// A profile's machine only: the base's shared folder is the person's to look into.
+    private func macWoke() {
+        guard request.settingsRevision != nil, machine != nil, !finished, !stopping, !waking else { return }
+        HelperIO.log("clock: this Mac woke from sleep; the machine is told to ask for the time")
+        tellTheGuestItWoke()
     }
 
     // MARK: The machine's files
