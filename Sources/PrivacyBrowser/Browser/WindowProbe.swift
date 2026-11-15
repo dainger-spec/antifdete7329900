@@ -179,6 +179,19 @@ enum WindowProbe {
                 look.found = controller != nil
                 look.detail = BrowserTab.finishedDownloads.map(\.lastPathComponent).joined(separator: "\n")
             }
+        case .measure:
+            look.action = "measure"
+            if let window, let page = controller?.selectedTab?.webView
+                ?? (SafariChromeHost.isBrowserWindow(window) ? SafariChromeHost.frontPage(in: window) : nil) {
+                look.detail = await measured(by: page)
+                look.found = !look.detail.hasPrefix("error")
+            }
+        case .marker(let shown):
+            look.action = shown ? "the profile's marker back" : "the profile's marker out"
+            if SafariChromeHost.isHosting {
+                SafariProfileMarker.suspend(!shown)
+                look.found = true
+            }
         case .search(let text):
             look.action = "search"
             if let window, let field = addressField(in: window) {
