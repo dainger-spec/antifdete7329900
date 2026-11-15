@@ -175,12 +175,16 @@ final class FormatPolicyTests: XCTestCase {
             ("cookies-baseline.bin", try json(at: repository.cookieBaselineURL(for: id)) { try repository.cookieBaselineFile(for: id).open($0) }),
             ("cookies-import.bin", try json(at: repository.importedCookiesURL(for: id)) { try repository.importedCookiesFile(for: id).open($0) }),
             ("settings.bin", try json(at: vault.root.appendingPathComponent("settings.bin")) { try DeviceSettings.file(for: vault).open($0) }),
-            ("sync-state.bin", try json(at: engine.stateURL) { try AEAD.open($0, key: vault.syncEnvelopeKey, aad: engine.stateAAD) }),
         ]
         for (name, data) in unmarked {
             XCTAssertNil((try JSONSerialization.jsonObject(with: data) as? [String: Any])?["format"], "\(name) has a format now")
             XCTAssertEqual(DocumentFormat.declared(in: data), 1, name)
         }
+        // What sync last saw names the place its records are of (a folder here): format 3, which a
+        // version from before places refuses rather than take another place's copies for newer (R4).
+        let syncState = try json(at: engine.stateURL) { try AEAD.open($0, key: vault.syncEnvelopeKey, aad: engine.stateAAD) }
+        XCTAssertEqual(DocumentFormat.declared(in: syncState), 3, "sync-state.bin")
+        XCTAssertEqual(try engine.keptPlace(), "folder|" + root.appendingPathComponent("server").standardizedFileURL.path)
         // Saved passwords keep deletions and versions since the vault's generation 2.
         let passwords = try json(at: repository.passwordsURL(for: id)) { try PasswordVault.open($0, profileID: id, profileKey: key) }
         XCTAssertEqual((try JSONSerialization.jsonObject(with: passwords) as? [String: Any])?["format"] as? Int, 2, "passwords.bin")
@@ -490,14 +494,15 @@ final class FormatPolicyTests: XCTestCase {
     }
 
     /// What sync last saw, written by a newer version: the sync stops before it fetches or pushes
-    /// anything (starting over from nothing would push this device's files over newer ones). Format 2
-    /// is this version's own: the records with the server generation they are of (CONTRACT §16.2).
+    /// anything (starting over from nothing would push this device's files over newer ones). Formats 2
+    /// and 3 are this version's own: the records with the server generation they are of (CONTRACT
+    /// §16.2), and the records with the place they are of.
     func testSyncStateOfANewerVersion() async throws {
         let transport = LocalDirectorySyncTransport(directory: root.appendingPathComponent("server"))
         let engine = try SyncEngine(repository: repository, transport: transport)
-        try SecureFile.write(AEAD.seal(newerThan2, key: vault.syncEnvelopeKey, aad: engine.stateAAD), to: engine.stateURL)
+        try SecureFile.write(AEAD.seal(newerThan3, key: vault.syncEnvelopeKey, aad: engine.stateAAD), to: engine.stateURL)
         let state = try Data(contentsOf: engine.stateURL)
-        await assertRefused("sync-state.bin", supported: 2) { _ = try await engine.sync() }
+        await assertRefused("sync-state.bin", supported: 3) { _ = try await engine.sync() }
         let objects = try await transport.listObjects()
         XCTAssertTrue(objects.isEmpty)
         XCTAssertEqual(try Data(contentsOf: engine.stateURL), state)

@@ -105,10 +105,13 @@ shape. `HTTPSyncTransport` then throws `SyncServerRefusal` with the code (and `a
 |---|---|
 | `vault-header` | < 1 KB |
 | profile index | ~1 KB per profile |
-| config / passwords / bookmarks | a few KB each |
+| config | a few KB; with a camera image or video, up to about 15 MB (the media, ×2.48) |
+| passwords / bookmarks | a few KB each |
 | history | up to ~2 MB per profile (10 000 entries) |
 
-A server should accept blobs of at least 8 MB.
+A server should accept blobs of at least 8 MB; settings with a camera's image or video need up to
+16 MB (the Lumen server's limit). A blob refused as too large (`413`) waits on the device, and the
+app names the profile it is of.
 
 ## Rollback
 

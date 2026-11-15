@@ -1296,7 +1296,7 @@ final class AppModel: ObservableObject {
             if !report.deferredTooLarge.isEmpty {
                 Logger(subsystem: "PrivacyBrowser", category: "Sync")
                     .notice("Sync: \(report.deferredTooLarge.count, privacy: .public) object(s) larger than the server takes, deferred")
-                showError(L("sync.account.tooLarge"))
+                for text in Self.tooLargeTexts(report, name: name) { showError(text) }
             }
             status = DeviceSettings.SyncStatus(report: report)
         } catch {
@@ -1304,6 +1304,28 @@ final class AppModel: ObservableObject {
         }
         if let status { try? updateDeviceSettings { $0.lastSync = status } }
         refresh()
+    }
+
+    /// What is said of the objects the server refused for their size (`SyncReport.tooLargeByProfile`):
+    /// the profiles whose settings wait, by name, and why — the camera's image and video are kept in
+    /// them (the editor keeps the two under `CameraSubstitution.maxMediaBytes` now; a profile saved
+    /// before may hold more), and what to do; any other file of a profile, by its name; and anything
+    /// else (the index, the tags' colours) as before.
+    static func tooLargeTexts(_ report: SyncReport, name: (UUID) -> String) -> [String] {
+        let byProfile = report.tooLargeByProfile
+        var texts: [String] = []
+        let settings = byProfile.filter { $0.files.contains("config.bin") }.map { String(format: L("sync.tooLarge.name"), name($0.profileID)) }
+        if !settings.isEmpty {
+            var listed = settings.prefix(5).joined(separator: ", ")
+            if settings.count > 5 { listed += " " + String(format: L("sync.tooLarge.more"), settings.count - 5) }
+            texts.append(String(format: L("sync.tooLarge.settings"), listed, CameraSubstitution.maxMediaBytes / (1024 * 1024)))
+        }
+        for entry in byProfile {
+            let others = entry.files.filter { $0 != "config.bin" }
+            if !others.isEmpty { texts.append(String(format: L("sync.tooLarge.files"), others.joined(separator: ", "), name(entry.profileID))) }
+        }
+        if byProfile.reduce(0, { $0 + $1.files.count }) < report.deferredTooLarge.count { texts.append(L("sync.account.tooLarge")) }
+        return texts
     }
 
     /// A sync that failed: said, and its status to keep (nil: nothing to say or keep). Through the

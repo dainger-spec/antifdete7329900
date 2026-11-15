@@ -21,6 +21,10 @@ public actor LocalDirectorySyncTransport: SyncTransport {
         self.directory = directory
     }
 
+    /// The folder, as `SyncEngine` keeps it with its records (`SyncEngine.place(of:)`): they are of
+    /// this folder only, and another folder — or this one after the account — starts over.
+    nonisolated var place: String { directory.standardizedFileURL.path }
+
     public func listObjects() async throws -> [RemoteObjectInfo] {
         guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
         return try FileManager.default.contentsOfDirectory(atPath: directory.path)

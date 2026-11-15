@@ -45,11 +45,23 @@ not `.off`, so a profile that never used it is stored as before (`ProfileConfigu
 - **audio** — the real microphone, a silent track, or none, when a page asks for audio.
 - **alsoScreenShare** — substitute `getDisplayMedia` with the same stream, too.
 - **deviceSecret** — a random secret kept with the profile; the shim derives a stable, per-origin
-  `deviceId`/`groupId` from it (a real browser salts them per origin). The editor fills it when
-  substitution is first turned on.
+  `deviceId`/`groupId` from it (a real browser salts them per origin, in the profile's website
+  data). The editor fills it when substitution is first turned on, and each copy of a profile
+  (Duplicate, `ProfileClone`) gets one of its own: the same camera choices, another camera to a site.
+  Until the fourth audit (15 November 2026) copies kept the original's, and every site saw the
+  copies' cameras under one id.
 - **imageData / videoData** — the chosen media's bytes. The app reads the file (the editor's file
   picker) and keeps the bytes; the profile's pages never touch the disk, and no file path is stored
-  or logged. Capped (an image at 4 MB, a video at 12 MB) because they travel with the profile.
+  or logged. Both are kept in the profile's settings, whichever is the source, and synced with
+  them as one object, which the Lumen server takes up to 16 MiB; on the way the bytes are written
+  as base64 three times (×2.48). So the editor takes an image of up to 4 MB, and the image and the
+  video together of up to about 6 MB (`CameraSubstitution.maxMediaBytes`, `mediaFitsSync`: their
+  size in the settings' JSON, so an uncompressed image counts for up to twice its size); a larger
+  file is refused with the limits. Until the fourth audit (15 November 2026) a video of up to
+  12 MB was taken, and the profile's settings were then refused at every sync, under a message that
+  named no profile. Such a profile keeps working (12 MB stays what a stored profile is held to):
+  the editor says its settings do not sync, and Sync Now names it and says to choose a smaller
+  video.
 
 ## The shim — `PrivacyScripts.patchCamera`
 
@@ -82,8 +94,10 @@ same bar as the rest of the file:
   in both "Substitute" and "No camera". In the app's own window (`BrowserTab`) the engine is told
   no for every camera request while the drawing shim is on, whatever a page did; Safari's window
   asks with Safari's own prompt;
-- `enumerateDevices` lists our one camera with the label only after the page is granted it (as a
-  real browser hides labels until then), its `deviceId`/`groupId` salted per origin;
+- `enumerateDevices` lists our one camera as Safari lists a camera before the page is granted it —
+  an empty label, `deviceId` and `groupId`, and no capabilities — and once it is granted, with the
+  label and its `deviceId`/`groupId` salted per origin (until the fourth audit the ids were there
+  before the grant);
 - faint, moving sensor-like grain on every frame, so the picture is never frozen (the first thing a
   virtual-camera check looks for), and `bars` also carries a moving bar and a running clock.
 
@@ -192,7 +206,8 @@ grant. The gate handles both sides of it:
   it would read "no camera", and a page may then never ask). Nothing leaks: the placeholder is the
   same however many cameras there are.
 - The using profile's first `getUserMedia` on a site is let through with the page's own
-  constraints, so the engine asks for the permission. If what it opened is not the sentinel, that
+  constraints (but a `deviceId` that pins nothing, below), so the engine asks for the permission.
+  If what it opened is not the sentinel, that
   stream is stopped before the page ever holds it and the sentinel is opened instead; the page gets
   only the virtual camera. The cost: the Mac's real camera opens for a moment, so its light may
   blink once — at a site's first grant only. With the permission held, calls go straight to the
@@ -214,7 +229,23 @@ all when the virtual one is not there, the same as "No camera":
 - the request's members are read once, as WebIDL reads them (`video: null` asks for a camera, and
   gets the virtual one), and the engine is handed a copy: a getter that answers "no video" to the
   shim and "video" to the engine reached the Mac's default camera until the third audit
-  (14 November 2026).
+  (14 November 2026). The copy goes all the way down — each member of the video's constraints,
+  its `deviceId`, its `exact` read once, lists copied and handed on as sequences the shim iterates
+  — so a `deviceId` getter (or an `exact` getter, or a list's iterator) that pins a device for the
+  shim and nothing for the engine reaches nothing either;
+- only an **exact pin** is the engine's own: `deviceId: {exact: id}` (or a list of ids) names the
+  one device the page wants, and one that is not there is the engine's `OverconstrainedError`. A
+  bare `deviceId` — a string or a list, WebIDL's *ideal* — or `{ideal: …}`, or an `exact` that
+  names nothing, is routed to the virtual camera like a request that names no device: the engine
+  meets an ideal no device has with its default camera, the Mac's real one;
+- where a request goes is decided with the engine's own getters and methods, taken before the page
+  runs (a device's `kind`, `label` and `deviceId`; a stream's `getTracks`/`getVideoTracks`, a
+  track's `getSettings` and `stop`), and the engine's promises are followed with its own `then`
+  after their `constructor` is made their own: a `label` getter a page replaced to give the Mac's
+  camera the sentinel's name, a blank one that kept the Mac's camera (and its id) in the list, or
+  a `getTracks`, `then` or `Promise.prototype.constructor` handed the stream the engine opened at
+  the first grant, decides and receives nothing. Until the fourth audit (15 November 2026) a bare
+  `deviceId`, a `deviceId` getter, and each of these, got a page the Mac's real camera.
 
 Until 0.1.8 each of these handed the page the Mac's real camera — a substitution that silently did
 not happen. "No camera" itself now blocks whatever the delivery was last set to (the editor keeps
@@ -227,10 +258,12 @@ on but the device not there yet. (The owner saved one before the extension was o
 the real camera, and it read as broken — 11 November.) Below the plan nothing is refused: the
 camera is off at launch whatever it holds.
 
-`scripts/test-shims.mjs` covers all of it against a model of WebKit's media devices: the permission
-(per kind) and before it, the re-routing and that the real stream is stopped unseen, every
-fail-closed case above, a denial and pinned devices staying the engine's, the track's label, and a
-profile that does not use the device.
+`scripts/test-shims.mjs` covers all of it against a model of WebKit's media devices (a bare or
+`{ideal}` `deviceId` met with the default camera when no device has it, an unknown exact one an
+`OverconstrainedError`): the permission (per kind) and before it, the re-routing and that the real
+stream is stopped unseen, every fail-closed case above, a denial and exact pins staying the
+engine's, bare, listed and `{ideal}` ids and getters re-routed, a page's replaced getters, methods
+and `then`, the track's label, and a profile that does not use the device.
 
 ### The frames come from the app (0.1.8)
 
