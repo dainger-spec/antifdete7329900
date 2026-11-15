@@ -3552,7 +3552,9 @@ final class SelfTest {
             defer { ProxyExitLookup.endpoints = endpoints }
             let withUDP = ProxySettings(kind: .socks5, host: loopback, port: udpPort)
             ProxyExitLookup.endpoints = [URL(string: "http://exit.selftest.invalid/cdn-cgi/trace")!]
+            let wholeStarted = Date()
             let carries = await ProxyChecker.check(withUDP)
+            let wholeSeconds = Date().timeIntervalSince(wholeStarted)
             check("proxy checker, UDP: a SOCKS5 proxy that relays UDP from its pages' address — UDP works",
                   carries.isAlive && carries.udp == .supported && carries.udpLabel == .supported, String(describing: carries))
             let plain = await ProxyChecker.check(ProxySettings(kind: .socks5, host: loopback, port: socksPort))
@@ -3572,7 +3574,13 @@ final class SelfTest {
             // A virtual machine's start asks only what a machine uses (`VMCenter.checkProxy`): UDP
             // never leaves a machine, and its list shows no latency. The same proxy — which
             // relays UDP — comes back alive with its exit, one tunnel, and nothing asked of its UDP.
+            let machineStarted = Date()
             let forMachine = await VMCenter.checkProxy(withUDP)
+            let machineSeconds = Date().timeIntervalSince(machineStarted)
+            // On loopback, where nothing is far away: what is saved on a real proxy is its own
+            // round trips — two tunnels, the UDP association, the STUN answer or the wait for one.
+            info(String(format: "virtual machines: the check before a start took %.0f ms on the loopback proxy; the Proxies section's whole check of the same proxy, %.0f ms",
+                        machineSeconds * 1000, wholeSeconds * 1000))
             check("virtual machines: the check before a machine's start sets up one tunnel and asks nothing of the proxy's UDP — alive, with the exit IP and time zone",
                   forMachine.isAlive && forMachine.udp == nil && forMachine.exitIP == "203.0.113.21"
                       && forMachine.timeZoneIdentifier == "Europe/Berlin" && forMachine.diagnosis?.latencies.count == 1,
