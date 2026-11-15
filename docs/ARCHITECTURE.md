@@ -343,7 +343,12 @@ the web view, so the profile's data store stayed in use for as long as `terminat
 Only a logout, restart or shutdown still waits inside `terminate:` (cancelling it would cancel
 the logout). If WebKit still holds a store after every attempt, the quit forces the seal and
 leaves a `webdata.forced` marker so that whatever WebKit writes before the exit is discarded at
-the next launch or unlock instead of being taken for newer data.
+the next launch or unlock instead of being taken for newer data. Between attempts, and before a
+forced seal, the data is archived again only when it changed: an archive makes a stamp of what
+it reads — each entry's place, size, times and number, looked at before the entry is read
+(`DirectoryStamp`) — and data whose stamp is still that one is already in the archive. In a
+profile's own process WebKit keeps the store until the process ends, so every stop there used
+to archive the same data four times.
 
 Every seal does the same before it deletes what it sealed: once the archive holds the data, the
 marker (`webdata.forced` for the WebKit data, `home.sealed` for Safari's home) is written first and

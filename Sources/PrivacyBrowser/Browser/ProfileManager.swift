@@ -679,7 +679,7 @@ final class ProfileManager: ObservableObject {
             case .proxyLocationUnknown:
                 self.noteProxyLocationUnknown(id, name: summary.name, last: stored.rememberedProxyLocation)
             case .sealed(let report):
-                self.log.notice("Profile \(id.uuidString, privacy: .public) sealed its data in \(Int(report.seconds), privacy: .public) s, attempts \(report.attempts, privacy: .public), forced \(report.forced, privacy: .public), pages closed \(report.pagesClosed, privacy: .public)")
+                self.log.notice("Profile \(id.uuidString, privacy: .public) sealed its data in \(Int(report.seconds), privacy: .public) s, attempts \(report.attempts, privacy: .public), forced \(report.forced, privacy: .public), pages closed \(report.pagesClosed, privacy: .public), archived \(Int(report.archivePasses ?? -1), privacy: .public) time(s), unchanged at \(Int(report.archivePassesSkipped ?? -1), privacy: .public) more attempt(s)")
                 self.onChildSealed?(id, report)
             case .menuWalk(let line):
                 self.onMenuWalk?(id, line)
@@ -1424,7 +1424,8 @@ final class ProfileManager: ObservableObject {
             let started = Date()
             let result = try await webDataVault.seal(profileID: id, key: key)
             onSealed?(id, ProfileSealReport(forced: result.forced, attempts: result.attempts,
-                                            seconds: Date().timeIntervalSince(started), pagesClosed: pagesClosedForQuit))
+                                            seconds: Date().timeIntervalSince(started), pagesClosed: pagesClosedForQuit,
+                                            archivePasses: result.archivePasses, archivePassesSkipped: result.archivePassesSkipped))
         }
     }
 

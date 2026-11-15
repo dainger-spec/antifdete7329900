@@ -23,6 +23,9 @@ public enum EncryptedDirectoryArchive {
         public var files = 0
         public var bytes: UInt64 = 0
         public var skipped: [String] = []
+        /// From `seal`: the stamp of what the archive read, each entry as it was before it was
+        /// read (`DirectoryStamp`). Nil from anything else, and when an entry could not be looked at.
+        public var stamp: DirectoryStamp?
 
         public init() {}
     }
@@ -46,6 +49,7 @@ public enum EncryptedDirectoryArchive {
             throw CoreError.io("cannot create \(temp.path)")
         }
         var stats = Stats()
+        let stamp = DirectoryStampBuilder()
         do {
             let handle = try FileHandle(forWritingTo: temp)
             defer { try? handle.close() }
@@ -56,7 +60,8 @@ public enum EncryptedDirectoryArchive {
                 guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory), isDirectory.boolValue else {
                     continue
                 }
-                try walk(directory: root.path, archivePath: label, writer: writer, stats: &stats)
+                stamp.add(label, at: root.path)
+                try walk(directory: root.path, archivePath: label, writer: writer, stats: &stats, stamp: stamp)
             }
             try writer.write(Data([Kind.end.rawValue]))
             try writer.finish()
@@ -66,6 +71,7 @@ public enum EncryptedDirectoryArchive {
             throw error
         }
         try SecureFile.replace(archiveURL, with: temp)
+        stats.stamp = stamp.stamp
         return stats
     }
 
@@ -389,7 +395,10 @@ public enum EncryptedDirectoryArchive {
 
     // MARK: Private
 
-    private static func walk(directory: String, archivePath: String, writer: EncryptedChunkWriter, stats: inout Stats) throws {
+    /// `stamp` takes in every entry beneath `directory` (the caller gave it `directory` itself),
+    /// each before anything of it is read here: its attributes, its entries, its bytes.
+    private static func walk(directory: String, archivePath: String, writer: EncryptedChunkWriter, stats: inout Stats,
+                             stamp: DirectoryStampBuilder) throws {
         let fm = FileManager.default
         let attributes = try fm.attributesOfItem(atPath: directory)
         try writeHeader(kind: .directory, path: archivePath, mode: attributes[.posixPermissions] as? Int ?? 0o700, writer: writer)
@@ -399,13 +408,16 @@ public enum EncryptedDirectoryArchive {
             let fullPath = (directory as NSString).appendingPathComponent(name)
             let childPath = archivePath + "/" + name
             do { try validateComponent(name) } catch { stats.skipped.append(childPath); continue }
+            // For the stamp, first: a change made after this — before the size is read below,
+            // while the bytes are read, or later — shows in a stamp taken afterwards.
+            stamp.add(childPath, at: fullPath)
             // attributesOfItem uses lstat(2): symlinks are reported as links, not followed.
             let childAttributes = try fm.attributesOfItem(atPath: fullPath)
             let type = childAttributes[.type] as? FileAttributeType
             let mode = childAttributes[.posixPermissions] as? Int ?? 0o600
             switch type {
             case .typeDirectory?:
-                try walk(directory: fullPath, archivePath: childPath, writer: writer, stats: &stats)
+                try walk(directory: fullPath, archivePath: childPath, writer: writer, stats: &stats, stamp: stamp)
             case .typeRegular?:
                 let expectedSize = (childAttributes[.size] as? NSNumber)?.uint64Value ?? 0
                 try writeHeader(kind: .file, path: childPath, mode: mode, writer: writer)
@@ -461,7 +473,7 @@ public enum EncryptedDirectoryArchive {
         return target
     }
 
-    private static func validateComponent(_ component: String) throws {
+    static func validateComponent(_ component: String) throws {
         guard !component.isEmpty, component != ".", component != "..",
               !component.contains("/"), !component.contains("\0") else {
             throw CoreError.unsafeArchivePath(component)

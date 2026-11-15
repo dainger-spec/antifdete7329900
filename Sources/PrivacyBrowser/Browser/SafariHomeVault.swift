@@ -24,6 +24,24 @@ final class SafariHomeVault {
         self.repository = repository
     }
 
+    /// How many homes this process restored from their archives and sealed into them, and how
+    /// long that took in all and at the longest. Both run where they are called, on the main
+    /// thread of the app, at every start and every stop of a profile in its own process: the
+    /// scale check reads these to say what that costs (docs/SCALE.md).
+    struct Timing {
+        var count = 0
+        var seconds = 0.0
+        var longest = 0.0
+
+        mutating func add(_ duration: TimeInterval) {
+            count += 1
+            seconds += duration
+            longest = max(longest, duration)
+        }
+    }
+    private(set) static var restores = Timing()
+    private(set) static var seals = Timing()
+
     /// The home directory itself, handed to the child as `CFFIXED_USER_HOME`.
     ///
     /// Plaintext for as long as the profile runs, so it is kept out of what copies a disk behind
@@ -139,10 +157,12 @@ final class SafariHomeVault {
         // so an empty leftover (the child creates the directory before it runs, and a profile that
         // never wrote anything leaves it behind) is removed first.
         if contents != nil { try FileManager.default.removeItem(at: home) }
+        let started = Date()
         try EncryptedDirectoryArchive.unseal(from: archive, key: key) { label in
             guard label == Self.label else { throw CoreError.corruptData("unexpected label \(label) in Safari's home archive") }
             return home
         }
+        Self.restores.add(Date().timeIntervalSince(started))
         leavesHome = true
     }
 
@@ -170,7 +190,9 @@ final class SafariHomeVault {
             log.notice("Safari's home of \(profileID.uuidString, privacy: .public) held no file: removed, its archive kept")
             return
         }
+        let started = Date()
         let stats = try EncryptedDirectoryArchive.seal(roots: [Self.label: home], to: archive, key: key)
+        Self.seals.add(Date().timeIntervalSince(started))
         // The archive holds the state now: a deletion that stops part-way leaves part of it, which
         // the marker, written first, keeps from being sealed over the archive or used. Without the
         // marker nothing is deleted: the whole home is sealed again by the next stop or unlock.

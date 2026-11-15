@@ -159,6 +159,10 @@ struct ProfileSealReport: Codable, Equatable {
     var seconds = 0.0
     /// Pages of Safari's chrome closed before the seal (`ProfileNetworkGuard.closeEveryPage`).
     var pagesClosed = 0
+    /// How many times the data was archived for this seal, and at how many attempts it was not,
+    /// being still what the last archive read (`WebDataStoreVault.archiveIfChanged`).
+    var archivePasses: Int?
+    var archivePassesSkipped: Int?
 }
 
 /// One line of JSON per message, and a prefix on the way back so that Safari's own output on the
