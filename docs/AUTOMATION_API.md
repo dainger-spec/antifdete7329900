@@ -81,8 +81,15 @@ scripts/pbctl start "Shop DE" --hidden
 scripts/pbctl open "Shop DE" https://example.com/
 scripts/pbctl cookies "Shop DE" --format playwright > state-cookies.json
 scripts/pbctl import-cookies "Shop DE" cookies.txt
+scripts/pbctl run "Shop DE" --scenario "Sign in" --wait        # a saved scenario, followed to its end: its log, its result
+scripts/pbctl run "Shop DE" --file orders.js --param city=Rome --wait 120
+scripts/pbctl log "Shop DE"                                    # the last run again
+scripts/pbctl stop-run "Shop DE"
 scripts/pbctl stop "Shop DE"
 ```
+
+`run … --wait` exits 1 unless the run finished, with why it did not ("the run failed: … (line 7)"):
+a shell script or a cron job can stand on it.
 
 It reads the token from `PB_API_TOKEN` and the port from `PB_API_PORT` (default 50777).
 
