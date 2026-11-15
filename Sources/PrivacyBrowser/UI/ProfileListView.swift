@@ -281,6 +281,8 @@ struct ProfileListView: View {
                 model.proxiesRequest = false
                 showProxies(selecting: [])
             }
+            // File › Scenarios, from any window: this one's section.
+            .onChange(of: model.scenariosRequested) { _, _ in section = .scenarios }
             .sheet(item: $assigningProxies) { request in ProxyAssignView(request: request) }
             .sheet(item: $tagging) { request in ProfileTagsView(request: request).environment(\.tagColors, model.tagColors) }
             // ⌘K.
@@ -387,6 +389,7 @@ struct ProfileListView: View {
                        section: $section, proxyCount: proxyCount,
                        proxies: AnyView(ProxyListView(selection: $proxySelection)),
                        virtualMachines: VMCenter.isOffered ? AnyView(VirtualMachinesView(openAccount: actions.openAccount)) : nil,
+                       scenarios: AnyView(ScenariosSection()),
                        indexNotice: model.indexNotice, revealVault: { model.revealVaultFolder() },
                        keptDeleted: model.keptDeletedProfiles,
                        bringBack: { id in Task { await model.bringBackDeletedProfile(id) } },
@@ -640,7 +643,11 @@ struct ProfileListView: View {
             tagSeveral: { ids in tagging = ProfileTagsView.Request(profileIDs: ids) },
             setTagColor: { tag, color in model.setTagColor(color, for: tag) },
             openPalette: { model.showingPalette = true },
-            openScenarios: { openWindow(id: "scenarios") },
+            openScenarios: { section = .scenarios },
+            scenarioSeveral: { ids in
+                model.scenarioProfilesRequest = ids
+                section = .scenarios
+            },
             openHelp: { openWindow(id: "help") })
     }
 }
@@ -659,6 +666,8 @@ enum ProfilesSection: Equatable {
     case profiles
     case proxies
     case virtualMachines
+    /// The scenarios: the person's own, the templates, the runs, the schedules (`ScenariosSection`).
+    case scenarios
 }
 
 // MARK: - What the screen shows
@@ -913,6 +922,8 @@ struct ProfileActions {
     /// command palette (⌘K), the scenario editor's window, the app's help.
     var openPalette: () -> Void = {}
     var openScenarios: () -> Void = {}
+    /// A scenario for the selected profiles: the Scenarios section, with them chosen for its next run.
+    var scenarioSeveral: ([UUID]) -> Void = { _ in }
     var openHelp: () -> Void = {}
 }
 
@@ -938,6 +949,8 @@ struct ProfilesScreen: View {
     /// The virtual machines as a section of the window (`VirtualMachinesView`); nil: this build
     /// carries no machines (`VMCenter.isOffered`), and the sidebar has no such item.
     var virtualMachines: AnyView?
+    /// Nil: the window has no Scenarios section (the snapshots of the other sections).
+    var scenarios: AnyView?
     /// The vault's profile index missing or unreadable, or profile folders it does not list
     /// (AppModel.indexNotice): said above the list, with the vault's folder in the Finder.
     var indexNotice: AppModel.IndexNotice?
@@ -1035,6 +1048,7 @@ struct ProfilesScreen: View {
             HStack(spacing: 0) {
                 ProfilesSidebar(rows: rows, sync: sync, filter: $filter, section: section, proxyCount: proxyCount,
                                 proxyAlerts: proxyAlerts, showsVirtualMachines: virtualMachines != nil,
+                                showsScenarios: scenarios != nil,
                                 actions: actions, rights: rights)
                     .frame(width: Self.sidebarWidth)
                     .lumenFrost()
@@ -1084,6 +1098,8 @@ struct ProfilesScreen: View {
                 proxies
             } else if section.wrappedValue == .virtualMachines, let virtualMachines {
                 virtualMachines
+            } else if section.wrappedValue == .scenarios, let scenarios {
+                scenarios
             } else {
                 VStack(spacing: 0) {
                     header
@@ -1613,6 +1629,8 @@ private struct ProfilesSidebar: View {
     var proxyAlerts = 0
     /// The window has the Virtual machines section (the build carries them).
     var showsVirtualMachines = false
+    /// The window has the Scenarios section; without it the row opens what `actions` has.
+    var showsScenarios = false
     let actions: ProfileActions
     var rights: RightsLine?
 
@@ -1630,7 +1648,9 @@ private struct ProfilesSidebar: View {
             if showsVirtualMachines { virtualMachinesItem }
             // What was behind a menu, in the interface (the owner, 10 November): the scenario
             // editor, the automation API's settings, the app's help.
-            toolItem(symbol: "play.rectangle", title: L("scenarios.title"), action: actions.openScenarios)
+            SidebarItem(symbol: "play.rectangle", title: L("scenarios.title"), count: nil, selected: showsScenarios && section == .scenarios) {
+                if showsScenarios { withAnimation(Theme.appearAnimation) { section = .scenarios } } else { actions.openScenarios() }
+            }
             toolItem(symbol: "terminal", title: L("settings.section.automation"), action: actions.openAutomation)
             toolItem(symbol: "book", title: L("sidebar.help"), action: actions.openHelp)
             // The collections and the tags take what the window has left and scroll within it:

@@ -14,6 +14,8 @@ struct ScenarioSchedulesPane: View {
     var sample: Sample?
     /// A schedule to open the form with: "On a Schedule…" of the scenario editor.
     var proposed: ScenarioSchedule?
+    /// Under the Scenarios section's own header and tabs: without a title of its own.
+    var embedded = false
 
     struct Sample {
         var schedules: [ScenarioSchedule]
@@ -32,9 +34,16 @@ struct ScenarioSchedulesPane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(L("schedule.title"))
-                    .font(.lumenHeading)
-                    .foregroundStyle(Theme.textPrimary)
+                if embedded {
+                    Text(L("schedule.subtitle"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(L("schedule.title"))
+                        .font(.lumenHeading)
+                        .foregroundStyle(Theme.textPrimary)
+                }
                 Spacer()
                 Button {
                     draft = newSchedule()
@@ -42,15 +51,17 @@ struct ScenarioSchedulesPane: View {
                     .buttonStyle(.lumenPrimary)
                     .disabled(!allowed || refused || profiles.isEmpty || draft != nil)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 34)
-            .padding(.bottom, 6)
-            Text(L("schedule.subtitle"))
-                .font(.lumenSecondary)
-                .foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 14)
+            .padding(.horizontal, embedded ? 28 : 20)
+            .padding(.top, embedded ? 0 : 34)
+            .padding(.bottom, embedded ? 14 : 6)
+            if !embedded {
+                Text(L("schedule.subtitle"))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 14)
+            }
             if !allowed {
                 Text(L("schedule.notInPlan"))
                     .font(.lumenBody)

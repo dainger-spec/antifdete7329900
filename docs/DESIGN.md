@@ -82,6 +82,13 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
   (the table compact beside it: the proxy, the exit's country code, the state); the same header, the design's
   table (its selected row in the design's tone: the system's highlight is off), the proxy's
   inspector with its check step by step.
+- Scenarios section (`ScenariosSection.swift`, `ScenarioEditor.swift`, `ScenarioRunViews.swift`; docs/AUTOMATION.md): the same
+  header, then four tabs (`LumenSegmented`). Lists are rows on separators under column titles (`ScenarioColumns`,
+  `ScenarioRow`), groups under a plain caption — capitals only for column titles. Where a person chooses among things the
+  chosen one's content is beside the list (Templates: names on the left, the template's steps and questions on the
+  right); where a person watches many things (a run's profiles, the runs) it is a dense table, with the chosen row's
+  detail in an inspector of the Profiles window's width. No tiles, no icons that tell nothing apart, counts said in a line
+  of text (the owner, 15 November).
 - Settings (`SettingsView.swift`, `SettingsPages.swift`): sidebar with search and three groups;
   `SettingsPage` (title, sentence, `isNew`), `SettingsCaption`, `SettingRow` (title, what it does,
   when it takes effect, control at the right), `SettingCustomRow` (more than a sentence under the

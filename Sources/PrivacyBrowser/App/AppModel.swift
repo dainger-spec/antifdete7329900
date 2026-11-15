@@ -47,6 +47,12 @@ final class AppModel: ObservableObject {
     /// Each profile's own values for scenarios (`scenario-values.bin`): what `params` holds in a
     /// run on it that the editor or a schedule starts. This Mac's.
     @Published private(set) var scenarioValues = ScenarioValues()
+    /// Runs of a scenario on many profiles, and the runs kept (`ScenarioBatchCoordinator`).
+    private(set) lazy var scenarioBatches = ScenarioBatchCoordinator(model: self)
+    /// Counted up to show the Scenarios section of the Profiles window (File › Scenarios).
+    @Published var scenariosRequested = 0
+    /// The profiles selected in the list for a scenario: chosen already in the next run's chooser.
+    @Published var scenarioProfilesRequest: [UUID] = []
     /// `scenario-values.bin` is a newer version's, or does not open: shown as none, and nothing
     /// is written over it.
     @Published private(set) var scenarioValuesRefused = false
@@ -639,6 +645,7 @@ final class AppModel: ObservableObject {
         loadTagColors(from: vault)
         loadScenarios(from: vault)
         loadScenarioValues(from: vault)
+        scenarioBatches.load(from: vault)
         // How a run ended, for the schedule that started it (its row says so).
         manager.onScenarioEnded = { [weak self] _, run, outcome in self?.scheduleCoordinator?.runEnded(run, outcome) }
         manager.onProxyLaunchRefused = { [weak self] id, proxy, diagnosis in
@@ -757,6 +764,8 @@ final class AppModel: ObservableObject {
         scenariosUnread = false
         scenarioValues = ScenarioValues()
         scenarioValuesRefused = false
+        scenarioBatches.reset()
+        scenarioProfilesRequest = []
         managerObservation = nil
         manager = nil
         repository = nil

@@ -730,10 +730,63 @@ enum UISnapshots {
         problems += await Shot(name: "avatar-glyphs-faces", size: CGSize(width: 620, height: 440)) {
             AvatarGlyphPicker(draft: .constant(glyphDraft), avatarID: glyphOwner, sectionKey: "faces")
         }.capture(into: folder)
-        // The scenario editor: a scenario chosen, its code with the commands beside it.
+        // The Scenarios section (docs/AUTOMATION.md): the person's scenarios, the templates, a
+        // template's form, a scenario's steps beside its code, a recording, the profiles of a run,
+        // a run's table as it goes and once it has ended, the runs kept, and the first opening.
         let scenario = Scenario(name: L("scenarios.untitled"), source: L("scenarios.template"))
-        problems += await Shot(name: "scenarios", size: CGSize(width: 1100, height: 760)) {
-            ScenariosView(sample: scenario).environmentObject(model)
+        let signIn = Scenario(name: L("scenarios.template.signin.title"),
+                              source: ScenarioTemplate.template("signin")!.source(settings: ["LOGIN_URL": .text("https://shop.example/login"), "SIGNED_IN": .text("text=My orders")]) { L(ScenarioTemplate.wordKey($0)) },
+                              folder: "Shop", templateID: "signin")
+        let feed = Scenario(name: L("scenarios.template.feed.title"), source: ScenarioTemplate.template("feed")!.source(settings: ["PAGE_URL": .text("https://news.example/")]) { L(ScenarioTemplate.wordKey($0)) },
+                            templateID: "feed")
+        let scenarioProfiles = rows.prefix(8).enumerated().map { index, row in
+            ScenarioProfile(id: row.id, name: row.name, tags: row.tags, avatar: row.avatar, isRunning: row.isRunning, values: index == 3 ? ["login"] : ["login", "password"])
+        }
+        let runStart = Date(timeIntervalSince1970: 1_792_921_000)
+        var going = ScenarioBatch(scenarioID: signIn.id, scenarioName: signIn.name, entries: scenarioProfiles.map { ScenarioBatch.Entry(profileID: $0.id, name: $0.name) }, startedAt: runStart)
+        going.entries[3].state = .skipped(reason: String(format: L("scenarios.run.skipped.values"), "password"))
+        for index in 0..<3 { going.began(scenarioProfiles[index].id, at: runStart.addingTimeInterval(Double(index) * 9)) }
+        going.ended(scenarioProfiles[0].id, .finished, at: runStart.addingTimeInterval(38), result: "\"signed in\"")
+        going.began(scenarioProfiles[4].id, at: runStart.addingTimeInterval(40))
+        var ended = going
+        ended.ended(scenarioProfiles[1].id, .finished, at: runStart.addingTimeInterval(50), result: "\"signed in\"")
+        ended.ended(scenarioProfiles[2].id, .failed(reason: "timed out: text=My orders visible (line 17)", line: 17), at: runStart.addingTimeInterval(72),
+                    log: ["    0.0  window: Safari's", "    0.1  goto https://shop.example/login", "    2.3  type 17 characters into input[type=\"email\"]",
+                          "    4.4  type 14 characters into input[type=\"password\"]", "    7.0  press Enter", "    7.1  waitFor text=My orders visible",
+                          "   37.1  timed out: text=My orders visible (line 17)", "   37.1  Failed: timed out: text=My orders visible (line 17)"])
+        for index in 4..<scenarioProfiles.count {
+            ended.began(scenarioProfiles[index].id, at: runStart.addingTimeInterval(Double(index) * 20))
+            ended.ended(scenarioProfiles[index].id, .finished, at: runStart.addingTimeInterval(Double(index) * 20 + 41), result: "\"signed in\"")
+        }
+        var earlier = ScenarioBatch(scenarioID: feed.id, scenarioName: feed.name, entries: scenarioProfiles.prefix(4).map { ScenarioBatch.Entry(profileID: $0.id, name: $0.name) },
+                                    startedAt: runStart.addingTimeInterval(-90_000))
+        for profile in scenarioProfiles.prefix(4) {
+            earlier.began(profile.id, at: earlier.startedAt)
+            earlier.ended(profile.id, .finished, at: earlier.startedAt.addingTimeInterval(64), result: "5")
+        }
+        let scenarioSample = ScenariosSection.Sample(scenarios: [signIn, feed, scenario], profiles: scenarioProfiles, runs: [ended, earlier])
+        func scenarioShot(_ name: String, _ change: (inout ScenariosSection.Sample) -> Void) async -> Int {
+            var changed = scenarioSample
+            change(&changed)
+            let sample = changed
+            return await Shot(name: name, size: CGSize(width: 1168, height: 800), titled: false) {
+                ScenariosSection(sample: sample).background(Theme.surface).environmentObject(model)
+            }.capture(into: folder)
+        }
+        problems += await scenarioShot("scenarios") { _ in }
+        problems += await scenarioShot("scenarios-templates") { $0.tab = .templates }
+        problems += await scenarioShot("scenarios-first-open") { $0.scenarios = []; $0.runs = [] }
+        problems += await scenarioShot("scenarios-editor") { $0.place = .editor(signIn.id) }
+        problems += await scenarioShot("scenarios-editor-steps") { $0.place = .editor(feed.id); $0.editorMode = .steps }
+        problems += await scenarioShot("scenarios-run-going") { $0.runs = [going]; $0.place = .run(going.id) }
+        problems += await scenarioShot("scenarios-run-ended") { $0.place = .run(ended.id) }
+        problems += await scenarioShot("scenarios-run-log") { $0.place = .run(ended.id); $0.showsLog = true }
+        problems += await scenarioShot("scenarios-runs") { $0.tab = .runs }
+        problems += await Shot(name: "scenarios-template-form", size: CGSize(width: 900, height: 640), titled: false) {
+            ScenarioTemplateForm(template: ScenarioTemplate.template("signin")!, taken: []) { _ in }.environmentObject(model)
+        }.capture(into: folder)
+        problems += await Shot(name: "scenarios-run-choose", size: CGSize(width: 880, height: 660), titled: false) {
+            ScenarioRunChooser(scenario: signIn, profiles: scenarioProfiles) { _ in }.environmentObject(model)
         }.capture(into: folder)
         // A recording going on: its steps as they come, in place of the run's log.
         let recordedSteps = [
@@ -744,9 +797,7 @@ enum UISnapshots {
             RecordedStep(.load),
             RecordedStep(.click, selector: "[data-testid=\"orders\"]"),
         ]
-        problems += await Shot(name: "scenarios-recording", size: CGSize(width: 1100, height: 760)) {
-            ScenariosView(sample: scenario, sampleRecording: recordedSteps).environmentObject(model)
-        }.capture(into: folder)
+        problems += await scenarioShot("scenarios-recording") { $0.place = .editor(scenario.id); $0.recording = recordedSteps }
         // Runs by the clock: two schedules, none yet, and the form one is added in.
         let clockProfiles = [(id: rows[0].id, name: "Personal"), (id: rows[1].id, name: "Northwind")]
         var daily = ScenarioSchedule(action: .scenario(scenario.id), profileID: rows[1].id, when: .daily(hour: 10, minute: 0), jitterMinutes: 15)
