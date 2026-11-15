@@ -452,6 +452,16 @@ def leak_page(run: str) -> bytes:
     return page.replace("RUN", run).replace("CANARY", str(CANARY_PORT)).encode()
 
 
+# What tells the engine's own Date from a function put in its place: the order of its own
+# properties, and whose function is on top of the error thrown for a wrong receiver. The same
+# text in the secure page and in a worker loaded from a URL, which no page script reaches.
+DATE_SHAPE = r"""function dateShape() {
+  let top = 'no error';
+  try { Date.prototype.getHours.call({}); } catch (e) { top = String(e && e.stack || '').split('\n')[0].split('@')[0]; }
+  return [Object.getOwnPropertyNames(Date).join(), top].join('|');
+}"""
+
+
 def leak_secure_page(run: str, connect: bool = True) -> bytes:
     """The leak page's secure-context half (see the module docstring). `connect=0` in the query
     (a profile without a proxy, the self-test's control) only says what exists: it tries no
@@ -485,6 +495,16 @@ def leak_secure_page(run: str, connect: bool = True) -> bytes:
       worker.onmessage = (e) => resolve(e.data);
     });
   } catch (e) { result.workerTZ = 'error ' + e; }
+  // The page's Date beside such a worker's: the engine's own in both, where the engine is in the
+  // profile's zone itself.
+  DATE_SHAPE
+  try { result.date = dateShape(); } catch (e) { result.date = 'error ' + e; }
+  try {
+    result.workerDate = await fromWorker((resolve) => {
+      const worker = new Worker('/pb-leak/dateworker.js?run=RUN');
+      worker.onmessage = (e) => resolve(e.data);
+    });
+  } catch (e) { result.workerDate = 'error ' + e; }
   try {
     await navigator.serviceWorker.register('/pb-leak/sw.js?run=RUN&connect=' + (CONNECT ? '1' : '0'));
     result.sw = 'registered';
@@ -498,7 +518,7 @@ def leak_secure_page(run: str, connect: bool = True) -> bytes:
   await fetch('/pb-leak/report?run=RUN&data=' + encodeURIComponent(JSON.stringify(result)), { cache: 'no-store' });
 })();
 </script></body></html>"""
-    return page.replace("RUN", run).replace("CONNECT", "true" if connect else "false").encode()
+    return page.replace("DATE_SHAPE", DATE_SHAPE).replace("RUN", run).replace("CONNECT", "true" if connect else "false").encode()
 
 
 def leak_service_worker(run: str, connect: bool = True) -> bytes:
@@ -646,6 +666,8 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
         body, content_type = leak_service_worker(safe_run(query), parse_qs(query).get("connect", ["1"])[0] != "0"), "text/javascript"
     elif plain_path == "/pb-leak/tzworker.js":
         body, content_type = b"postMessage(Intl.DateTimeFormat().resolvedOptions().timeZone)", "text/javascript"
+    elif plain_path == "/pb-leak/dateworker.js":
+        body, content_type = (DATE_SHAPE + "\npostMessage(dateShape())").encode(), "text/javascript"
     elif plain_path == "/pb-leak/frame":
         body, content_type = leak_frame(safe_run(query)), "text/html; charset=utf-8"
     elif plain_path == "/pb-leak/usertop-go":
