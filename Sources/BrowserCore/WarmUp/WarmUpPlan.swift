@@ -31,6 +31,20 @@ public struct WarmUpPlan: Codable, Equatable, Sendable {
     /// later version's value does not cost the whole plan.
     public var trafficSaving: String?
 
+    /// The share (0…1) of the plan's sites the robot reaches through the profile's search engine —
+    /// the site's name typed, its result followed — rather than by address. Nil in plans from
+    /// before there was such a way: by address.
+    public var searchArrivalShare: Double?
+    /// What the robot does with a cookie banner (`WarmUpConsentChoice`'s raw value; nil, or one this
+    /// version does not know: accept).
+    public var consent: String?
+    /// The stay on a page follows the page (`WarmUpReading`): its text and its height, within the
+    /// plan's two times. Nil in plans from before: a random time between the two.
+    public var readsByPage: Bool?
+
+    /// `consent`, when it is one this version knows; accept otherwise.
+    public var consentChoice: WarmUpConsentChoice { consent.flatMap(WarmUpConsentChoice.init(rawValue:)) ?? .accept }
+
     /// `trafficSaving`, when it is one this version knows.
     public var savesTraffic: WarmUpTrafficSaving? { trafficSaving.flatMap(WarmUpTrafficSaving.init(rawValue:)) }
 

@@ -16,6 +16,11 @@ public struct WarmUpChoice: Codable, Equatable, Sendable {
         case composed
         /// Sites and searches written (or edited) by hand: `manualAddresses`, `manualSearches`.
         case manual
+        /// Kinds of browsing and the person's own lists, mixed (`interestIDs` holds their ids:
+        /// `WarmUpTemplateRef`), for the country the profile's proxy exits in, at an intensity
+        /// (`quality` holds it). A version from before reads no such choice and shows the plan as
+        /// one it cannot read.
+        case templates
     }
 
     public var source: Source
@@ -32,6 +37,10 @@ public struct WarmUpChoice: Codable, Equatable, Sendable {
     /// before hand-written lists ran under the two dials: such a plan runs as it was saved.
     public var manualAddresses: String?
     public var manualSearches: String?
+    /// For `.templates`: reach part of the sites through the search engine (nil: yes).
+    public var viaSearch: Bool?
+    /// For `.templates`: what is done with a cookie banner (`WarmUpConsentChoice`; nil: accept).
+    public var consent: String?
 
     public static let minuteRange: ClosedRange<Int> = 5...180
 
@@ -45,6 +54,39 @@ public struct WarmUpChoice: Codable, Equatable, Sendable {
         self.quality = quality
         self.manualAddresses = manualAddresses
         self.manualSearches = manualSearches
+    }
+
+    /// A choice of templates at an intensity: what the warm-up screen makes.
+    public static func templates(_ ids: [String], intensity: WarmUpIntensity, viaSearch: Bool = true,
+                                 consent: WarmUpConsentChoice = .accept) -> WarmUpChoice {
+        var choice = WarmUpChoice(source: .templates, presetID: "", interestIDs: ids, minutes: intensity.minutes, quality: intensity.quality)
+        choice.viaSearch = viaSearch
+        choice.consent = consent.rawValue
+        return choice
+    }
+
+    public var intensity: WarmUpIntensity { WarmUpIntensity(quality: quality) }
+    public var consentChoice: WarmUpConsentChoice { consent.flatMap(WarmUpConsentChoice.init(rawValue:)) ?? .accept }
+
+    /// The templates this choice comes to, whatever screen made it: its own for `.templates`; for a
+    /// choice of an older screen, the nearest — a country's list or the everyday one is the
+    /// everyday mix, an interest's list is that interest, a list of the person's is itself, and a
+    /// hand-written list is none (its plan runs as it was saved).
+    public var templateIDs: [String] {
+        switch source {
+        case .templates:
+            return interestIDs.filter { WarmUpTemplateRef(id: $0) != nil }
+        case .composed:
+            var ids = [WarmUpInterest.day.rawValue]
+            for id in interestIDs { if let interest = WarmUpInterest(presetID: id), !ids.contains(interest.rawValue) { ids.append(interest.rawValue) } }
+            return ids
+        case .preset:
+            if presetID.hasPrefix("user:") { return [presetID] }
+            if WarmUpPresets.country(presetID) != nil { return [WarmUpInterest.day.rawValue] }
+            return [(WarmUpInterest(presetID: presetID) ?? .day).rawValue]
+        case .manual:
+            return []
+        }
     }
 
     /// The list this choice stands for: the chosen preset (shipped, or one of `templates`), one
@@ -61,6 +103,9 @@ public struct WarmUpChoice: Codable, Equatable, Sendable {
         case .manual:
             guard let manualAddresses else { return nil }
             return WarmUpTemplate.typed(addresses: manualAddresses, searches: manualSearches ?? "")
+        case .templates:
+            var generator = SystemRandomNumberGenerator()
+            return WarmUpPlanner.preset(templates: templateIDs, countryCode: countryCode, userTemplates: templates, using: &generator)
         }
     }
 
@@ -70,6 +115,12 @@ public struct WarmUpChoice: Codable, Equatable, Sendable {
     /// is no list to build from.
     public func plan(countryCode: String?, composedName: String = "", templates: [WarmUpTemplate] = [],
                      using generator: inout some RandomNumberGenerator) -> WarmUpPlan? {
+        if source == .templates {
+            guard var plan = WarmUpPlanner.plan(templates: templateIDs, countryCode: countryCode, intensity: intensity, userTemplates: templates,
+                                                viaSearch: viaSearch ?? true, consent: consentChoice, using: &generator) else { return nil }
+            plan.choice = self
+            return plan
+        }
         guard let preset = preset(countryCode: countryCode, composedName: composedName, templates: templates) else { return nil }
         var plan = WarmUpPlan.from(preset: preset, minutes: minutes, quality: quality,
                                    keepingOrder: source != .preset, using: &generator)
