@@ -770,7 +770,8 @@ final class VMGuestToolsTests: XCTestCase {
             if name == "lumen-guest.sh" {
                 // What came of Lumen's desktop picture, and what the system said when nothing did;
                 // and what waits for the machine's next start.
-                for key in ["LUMEN_WALLPAPER_STATE", "LUMEN_WALLPAPER_NOTE", "LUMEN_KEYBOARD_STATE", "LUMEN_MENU_BAR_STATE"] {
+                for key in ["LUMEN_WALLPAPER_STATE", "LUMEN_WALLPAPER_NOTE", "LUMEN_KEYBOARD_STATE", "LUMEN_MENU_BAR_STATE",
+                            "LUMEN_STAGE", "LUMEN_READY_REVISION"] {
                     XCTAssertTrue(text.contains("'\(key)="), "\(name) does not write \(key)")
                 }
             }

@@ -215,6 +215,20 @@ language and region (for the signed-in account), the computer's name; opens Safa
 profile's start page, if it has one); writes back which macOS and Safari this is; then waits for a
 file named `lumen-shutdown`, which it answers by quitting Safari and shutting macOS down.
 
+As it goes it says which step it is at (tools 13), in the status file: `LUMEN_STAGE` is `signin`
+from its first word (it waits for the person's session), then `locale` (the language and region,
+the keyboard), `look` (the appearance and accent, the clock and week, the scroll bars, the Dock),
+`wallpaper` (Lumen's picture, when the profile has it), `safari` and `ready`. Once this start's
+settings are in — the language and region written for the signed-in person, the first picture set
+and the four seconds the desktop is given — it names them (`LUMEN_READY_REVISION`, this start's
+`LUMEN_REVISION`), **before** it opens Safari, which then starts in them; not after the picture's
+later looks. `LUMEN_APPLIED_REVISION` is written after Safari was opened, as before. The machine's
+window keeps its screen behind a cover until then ("The start's cover" below). A base with tools 7
+to 12 needs nothing done to it: the app puts this script into the tools' folder at every start,
+and the older script there takes it and runs it before it reads the settings — so the first start
+with this Lumen already says its steps. (Tools 2 to 6 take it from the shared folder, once; tools 1
+must be installed again.)
+
 Before all that — at the start, before the automatic sign-in — it marks macOS's panes for a new
 Mac as seen for the person who signs in by themselves (`com.apple.SetupAssistant`: `DidSee…`,
 `LastSeen…` with this macOS's version and build; tools 8). Every profile's machine is a Mac its
