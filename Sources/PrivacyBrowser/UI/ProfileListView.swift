@@ -644,6 +644,10 @@ struct ProfileListView: View {
             setTagColor: { tag, color in model.setTagColor(color, for: tag) },
             openPalette: { model.showingPalette = true },
             openScenarios: { section = .scenarios },
+            scenarioSeveral: { ids in
+                model.scenarioProfilesRequest = ids
+                section = .scenarios
+            },
             openHelp: { openWindow(id: "help") })
     }
 }
@@ -918,6 +922,8 @@ struct ProfileActions {
     /// command palette (⌘K), the scenario editor's window, the app's help.
     var openPalette: () -> Void = {}
     var openScenarios: () -> Void = {}
+    /// A scenario for the selected profiles: the Scenarios section, with them chosen for its next run.
+    var scenarioSeveral: ([UUID]) -> Void = { _ in }
     var openHelp: () -> Void = {}
 }
 

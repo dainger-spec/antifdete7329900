@@ -116,9 +116,10 @@ private struct ScenariosSectionBody: View {
             }
         }
         .sheet(item: $choosingFor) { scenario in
-            ScenarioRunChooser(scenario: scenario, profiles: profiles) { request in
+            ScenarioRunChooser(scenario: scenario, profiles: profiles, initial: Set(sample == nil ? model.scenarioProfilesRequest : [])) { request in
                 choosingFor = nil
                 guard sample == nil else { return }
+                model.scenarioProfilesRequest = []
                 let id = model.scenarioBatches.start(scenario, on: request.profiles, skipped: request.skipped, limit: request.limit,
                                                     pause: request.pause, stopsProfiles: request.stopsProfiles)
                 place = .run(id)
@@ -170,6 +171,18 @@ private struct ScenariosSectionBody: View {
                     LumenBanner(tone: .warning) {
                         Text(L("scenarios.notInPlan")).font(.lumenBody).foregroundStyle(Theme.textPrimary).fixedSize(horizontal: false, vertical: true)
                     }
+                    .padding(.bottom, 10)
+                }
+                // Profiles selected in the Profiles list for a scenario: said, until one is run on them.
+                if sample == nil, !model.scenarioProfilesRequest.isEmpty {
+                    HStack(spacing: 8) {
+                        Text(String(format: L("scenarios.forProfiles"), model.scenarioProfilesRequest.count))
+                            .font(.lumenBody)
+                            .foregroundStyle(Theme.textPrimary)
+                        Spacer()
+                        Button(L("common.cancel")) { model.scenarioProfilesRequest = [] }.buttonStyle(.lumenGhost)
+                    }
+                    .padding(.horizontal, 28)
                     .padding(.bottom, 10)
                 }
                 switch tab {

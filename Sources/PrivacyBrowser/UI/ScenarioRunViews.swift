@@ -19,6 +19,8 @@ struct ScenarioRunRequest {
 struct ScenarioRunChooser: View {
     let scenario: Scenario
     let profiles: [ScenarioProfile]
+    /// The profiles chosen as it opens (those selected in the Profiles list).
+    var initial: Set<UUID> = []
     let start: (ScenarioRunRequest) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tagColors) private var tagColors
@@ -70,6 +72,7 @@ struct ScenarioRunChooser: View {
         }
         .sheetFrame(width: 880, height: 660)
         .background(Theme.raised)
+        .onAppear { if chosen.isEmpty { chosen = initial.intersection(Set(profiles.map(\.id))) } }
     }
 
     private var summary: String {

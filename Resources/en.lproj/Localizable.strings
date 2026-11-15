@@ -3615,3 +3615,6 @@
 "scenarios.template.cookie.about" = "Looks for a consent button by its words and presses the first it finds. Says which, or that there was no banner.";
 "scenarios.template.collect.about" = "Reads from a page what you name — a balance, a status. Each name becomes a part of the result in the run's table.";
 "scenarios.template.list.about" = "Reads every element of a kind on a page — product names, prices — as a list.";
+"profiles.bulk.scenario" = "Scenario…";
+"profiles.bulk.scenario.help" = "Run a scenario on the selected profiles";
+"scenarios.forProfiles" = "Profiles selected: %d. Press Run… on a scenario — they are chosen already.";

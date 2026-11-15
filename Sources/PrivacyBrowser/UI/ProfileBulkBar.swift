@@ -117,6 +117,9 @@ struct ProfileBulkBar: View {
             Button { actions.warmUpSeveral(ids) } label: { label(L("profiles.bulk.warmUp"), "flame", compact) }
                 .buttonStyle(.lumenGhost)
                 .help(L("profiles.bulk.warmUp.help"))
+            Button { actions.scenarioSeveral(ids) } label: { label(L("profiles.bulk.scenario"), "play.rectangle", compact) }
+                .buttonStyle(.lumenGhost)
+                .help(L("profiles.bulk.scenario.help"))
             Button { actions.assignProxies(ids) } label: { label(L("profiles.bulk.assignProxy"), "network", compact) }
                 .buttonStyle(.lumenGhost)
                 .help(L("profiles.bulk.assignProxy.help"))

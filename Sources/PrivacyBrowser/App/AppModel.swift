@@ -51,6 +51,8 @@ final class AppModel: ObservableObject {
     private(set) lazy var scenarioBatches = ScenarioBatchCoordinator(model: self)
     /// Counted up to show the Scenarios section of the Profiles window (File › Scenarios).
     @Published var scenariosRequested = 0
+    /// The profiles selected in the list for a scenario: chosen already in the next run's chooser.
+    @Published var scenarioProfilesRequest: [UUID] = []
     /// `scenario-values.bin` is a newer version's, or does not open: shown as none, and nothing
     /// is written over it.
     @Published private(set) var scenarioValuesRefused = false
@@ -763,6 +765,7 @@ final class AppModel: ObservableObject {
         scenarioValues = ScenarioValues()
         scenarioValuesRefused = false
         scenarioBatches.reset()
+        scenarioProfilesRequest = []
         managerObservation = nil
         manager = nil
         repository = nil
