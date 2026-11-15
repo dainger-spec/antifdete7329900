@@ -186,11 +186,11 @@ final class StartCover {
         ])
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 8_000_000_000)
-            NSAnimationContext.runAnimationGroup { context in
+            // In an async context the compiler takes the async form, which returns when the fade ends.
+            await NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.4
                 noteHost.animator().alphaValue = 0
             }
-            try? await Task.sleep(nanoseconds: 500_000_000)
             noteHost.removeFromSuperview()
         }
     }
