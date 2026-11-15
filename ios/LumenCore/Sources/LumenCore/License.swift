@@ -211,12 +211,15 @@ public enum AccountWire {
         public var phones: Int?
         /// With `invalid_request`: the field the server refused.
         public var field: String?
+        /// With `sync_on_hold` (§16.1): when sync opens on this device.
+        public var availableAt: Date?
 
-        public init(code: String, retryAfter: Int? = nil, phones: Int? = nil, field: String? = nil) {
+        public init(code: String, retryAfter: Int? = nil, phones: Int? = nil, field: String? = nil, availableAt: Date? = nil) {
             self.code = code
             self.retryAfter = retryAfter
             self.phones = phones
             self.field = field
+            self.availableAt = availableAt
         }
     }
 
@@ -225,7 +228,8 @@ public enum AccountWire {
               let error = object["error"] as? [String: Any], let code = error["code"] as? String, !code.isEmpty else { return nil }
         let limits = error["limits"] as? [String: Any]
         let phones = limits?["phones"] as? Int
-        return Refusal(code: code, retryAfter: error["retryAfter"] as? Int, phones: phones, field: error["field"] as? String)
+        return Refusal(code: code, retryAfter: error["retryAfter"] as? Int, phones: phones, field: error["field"] as? String,
+                       availableAt: time(error["availableAt"] as? String))
     }
 
     /// Time as the server writes it (§2): RFC 3339, UTC, no fractions of a second.

@@ -229,6 +229,20 @@
 "«%@»: описание длиннее %@ символов, изменения не ушли на Mac." = "“%@”: the description is longer than %@ characters, so the changes were not sent to your Mac.";
 "«%@»: Mac не принял изменения имени, описания или меток." = "“%@”: your Mac did not accept the changed name, description or tags.";
 
+/* The sync server's refusals, each in its own words (SyncText, CONTRACT.md §16.1). */
+"Сервер Lumen не принял вход этого iPhone для синхронизации. Выйдите из аккаунта и войдите снова; сессии на этом iPhone остались как были." = "The Lumen server did not accept this iPhone’s sign-in for sync. Sign out of the account and sign in again; the sessions on this iPhone stay as they were.";
+"Это хранилище Mac синхронизируется другим аккаунтом Lumen: войдите в аккаунт, с которым синхронизируется Mac. Ничего не отправлено и не изменено." = "This Mac’s vault is synced by another Lumen account: sign in with the account your Mac syncs with. Nothing was sent or changed.";
+"У аккаунта уже наибольшее число хранилищ синхронизации. Лишние можно удалить в кабинете на сайте; сессии на этом iPhone остались как были." = "The account already has as many sync vaults as it may. Extra ones can be deleted on your account page; the sessions on this iPhone stay as they were.";
+"Слишком много запросов синхронизации к серверу Lumen: попробуйте позже." = "Too many sync requests to the Lumen server: try again later.";
+"Слишком много запросов синхронизации к серверу Lumen: попробуйте через %@." = "Too many sync requests to the Lumen server: try again in %@.";
+"Хранилища Mac на сервере нет: синхронизация на Mac выключена или её данные удалены в кабинете. Сессии на этом iPhone остались как были." = "Your Mac’s vault is not on the server: sync is off on the Mac, or its data was deleted on your account page. The sessions on this iPhone stay as they were.";
+"Сервер Lumen ответил ошибкой (%@) и синхронизацию не провёл. Попробуйте позже; сессии на этом iPhone остались как были." = "The Lumen server answered with an error (%@) and did not sync. Try again later; the sessions on this iPhone stay as they were.";
+"Синхронизация не прошла. Сессии на этом iPhone остались как были." = "The sync did not go through. The sessions on this iPhone stay as they were.";
+"Синхронизация на этом устройстве откроется позже: на почту аккаунта ушло письмо о новом устройстве." = "Sync opens on this device later: the account’s mailbox got a letter about the new device.";
+"Синхронизация на этом устройстве откроется %@: на почту аккаунта ушло письмо о новом устройстве." = "Sync opens on this device on %@: the account’s mailbox got a letter about the new device.";
+"Место для синхронизации по тарифу закончилось: изменения, которым нужно больше места, не синхронизируются. Сколько занято, видно в кабинете на сайте." = "The plan’s sync space is full: changes that need more space are not synced. How much is used is on your account page.";
+"Слишком большой объект для синхронизации: он ждёт, остальное синхронизировано." = "An object is too large to sync: it waits, and the rest was synced.";
+
 /* The account's notices of the release (AccountNotices, CONTRACT.md §17.4). */
 "Оплаченный период заканчивается %@." = "The paid period ends on %@.";
 "Часы iPhone расходятся со временем сервера на %@. Исправьте дату и время в Настройках." = "This iPhone’s clock is off from the server’s time by %@. Correct the date and time in Settings.";

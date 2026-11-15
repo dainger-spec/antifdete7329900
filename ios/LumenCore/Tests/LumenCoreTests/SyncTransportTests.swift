@@ -91,7 +91,9 @@ final class SyncTransportTests: XCTestCase {
         do {
             try await transport.store(objectID: objectA, revision: 3, data: Data("x".utf8), expectedRevision: 2)
             XCTFail("a write under another generation is refused")
-        } catch CoreError.syncServer(409, "generation_changed") {}
+        } catch let refusal as SyncServerRefusal {
+            XCTAssertTrue(refusal.isGenerationChanged, "\(refusal)")
+        }
     }
 
     func testARefusalForSpaceDefersOneObject() async throws {
@@ -110,6 +112,8 @@ final class SyncTransportTests: XCTestCase {
             }
         }
         XCTAssertEqual(transport.deferredForSpace, [objectB, objectB])
+        XCTAssertEqual(transport.deferredTooLarge, [objectB], "413: too large, said as such")
+        XCTAssertEqual(transport.deferredOverQuota, [objectB], "507: the plan's space, said as such")
         // The next object goes on.
         try await transport.store(objectID: objectA, revision: 1, data: Data("a".utf8), expectedRevision: nil)
     }
@@ -120,7 +124,52 @@ final class SyncTransportTests: XCTestCase {
         do {
             _ = try await transport(server).listObjects()
             XCTFail("refused")
-        } catch CoreError.syncServer(403, "sync_not_in_plan") {}
+        } catch let refusal as SyncServerRefusal {
+            XCTAssertEqual(refusal.status, 403)
+            XCTAssertEqual(refusal.code, "sync_not_in_plan")
+        }
+    }
+
+    /// CONTRACT.md §16.1: each refusal of the server is a state with words of its own — only no answer
+    /// at all is "the server does not answer" (audit 4). The run's first request answers each.
+    func testEachRefusalIsAStateOfItsOwn() async throws {
+        let onHoldUntil = try XCTUnwrap(AccountWire.time("2026-11-20T09:30:00Z"))
+        let cases: [(what: String, status: Int, body: String, headers: [String: String], failure: SyncRead.Failure)] = [
+            ("unlinked", 401, #"{"error":{"code":"unauthorized"}}"#, [:], .unauthorized),
+            ("another account's vault", 403, #"{"error":{"code":"forbidden"}}"#, [:], .anotherAccount),
+            ("too many vaults", 403, #"{"error":{"code":"too_many_vaults"}}"#, [:], .tooManyVaults),
+            ("a blocked account", 403, #"{"error":{"code":"account_disabled"}}"#, [:], .accountDisabled),
+            ("a new device held", 403, #"{"error":{"code":"sync_on_hold","availableAt":"2026-11-20T09:30:00Z"}}"#, [:],
+             .onHold(until: onHoldUntil)),
+            ("no plan", 403, #"{"error":{"code":"sync_not_in_plan"}}"#, [:], .notInPlan),
+            ("too many requests", 429, #"{"error":{"code":"rate_limited","retryAfter":90}}"#, [:], .rateLimited(retryAfter: 90)),
+            ("too many requests, the wait in the header", 429, #"{"error":{"code":"rate_limited"}}"#, ["retry-after": "30"],
+             .rateLimited(retryAfter: 30)),
+            ("the server's own error", 500, #"{"error":{"code":"internal"}}"#, [:], .serverError(500)),
+            ("a gateway's page while the server is down", 502, "<html>Bad Gateway</html>", [:], .unreachable),
+            ("no vault there", 404, "", [:], .noVault),
+        ]
+        for item in cases {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("lumen-refusal-\(UUID().uuidString)")
+            let transport = LumenSyncTransport(vaultID: UUID()) { _, _, _, _ in
+                .init(status: item.status, data: Data(item.body.utf8), headers: item.headers)
+            }
+            let result = await SyncRead.run(root: root, key: Data(count: 32), transport: transport, keptGeneration: nil)
+            guard case let .failure(failure) = result else { XCTFail("\(item.what): refused"); continue }
+            XCTAssertEqual(failure, item.failure, item.what)
+            let said = SyncText.failure(failure, dateText: { _ in "20 ноября" })
+            XCTAssertEqual(said == AccountText.unreachable, failure == .unreachable, "\(item.what): \(said)")
+        }
+        XCTAssertTrue(SyncText.failure(.onHold(until: onHoldUntil), dateText: { _ in "20 ноября" }).contains("20 ноября"),
+                      "the day sync opens is said")
+
+        // No answer at all: the one case that is.
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("lumen-refusal-\(UUID().uuidString)")
+        let offline = LumenSyncTransport(vaultID: UUID()) { _, _, _, _ in throw URLError(.notConnectedToInternet) }
+        let result = await SyncRead.run(root: root, key: Data(count: 32), transport: offline, keptGeneration: nil)
+        guard case let .failure(failure) = result else { return XCTFail("no answer") }
+        XCTAssertEqual(failure, .unreachable)
+        XCTAssertEqual(SyncText.failure(failure, dateText: { _ in "" }), AccountText.unreachable)
     }
 
     func testAnotherGenerationForgetsTheSyncState() throws {

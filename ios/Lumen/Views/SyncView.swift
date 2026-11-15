@@ -130,61 +130,104 @@ struct SyncView: View {
         guard let answer = await AccountClient.send("GET", "v1/device/sync/vaults", body: nil, token: record.deviceToken) else {
             return stage = .failed(AccountText.unreachable)
         }
-        if answer.status == 403, AccountWire.refusal(answer.data)?.code == "sync_not_in_plan" { return stage = .notInPlan }
         guard answer.status == 200, let vaults = SyncSetup.vaults(answer.data) else {
-            return stage = .failed(AccountWire.refusal(answer.data).map(AccountText.refusal) ?? AccountText.unreachable)
+            return await refused(answer.status == 200 ? .unreachable : failure(of: answer))
         }
         // The vault changed last: the Mac in use now (a person with several Macs has one vault each).
         stage = vaults.first.map { .askPassword($0.vaultID) } ?? .noVault
     }
 
+    /// An answer of the account's sync endpoints that is not what was asked, in the app's terms
+    /// (CONTRACT.md §16.1). A body that is not the server's own words is no answer from it (§9.3).
+    private func failure(of answer: (status: Int, data: Data)) -> SyncRead.Failure {
+        guard let refusal = AccountWire.refusal(answer.data) else { return .unreachable }
+        return SyncRead.failure(status: answer.status, code: refusal.code, availableAt: refusal.availableAt,
+                                retryAfter: refusal.retryAfter)
+    }
+
+    /// A refusal outside a run (the list of vaults, the vault's header): the screen's state. A `401`
+    /// first renews the document of rights (§16.1), whose answer says whether this iPhone was unlinked.
+    private func refused(_ failure: SyncRead.Failure) async {
+        switch failure {
+        case .notInPlan:
+            stage = .notInPlan
+        case .unauthorized:
+            await model.refreshAccount()
+            stage = .failed(AccountStore.record() == nil ? (model.accountNotice ?? AccountText.revoked)
+                                                         : SyncText.failure(failure, dateText: AppModel.dateText))
+        default:
+            stage = .failed(SyncText.failure(failure, dateText: AppModel.dateText))
+        }
+    }
+
     /// One run: the Mac's profiles read and made sessions here. The kept key is read behind Face ID or
     /// the passcode; a key that no longer opens the vault (the master password changed on the Mac) is
-    /// forgotten, and the password asked again.
+    /// forgotten, and the password asked again. A `401` renews the document of rights, whose answer
+    /// says why (§16.1): an unlinked iPhone is signed out; one still signed in runs once more.
     private func syncNow() {
-        guard let record = AccountStore.record() else { return }
+        guard AccountStore.record() != nil else { return }
         guard let kept = SyncKeychain.read(reason: L("Синхронизация с Mac")) else { return }
         syncing = true
         syncResult = nil
-        let token = record.deviceToken
         Task {
             defer { syncing = false }
-            let transport = LumenSyncTransport(vaultID: kept.vaultID) { method, path, body, headers in
-                try await AccountClient.sync(method, path, body, headers, token: token)
+            var result = await run(kept)
+            if case .failure(.unauthorized) = result {
+                await model.refreshAccount()
+                if AccountStore.record() != nil { result = await run(kept) }
             }
-            // The Mac's rule: a profile's cookies change while it does not run. The sessions made from
-            // the vault are closed first (left, if one is on the screen behind this one).
-            let synced = model.sessions.filter { $0.syncedProfileID != nil }
-            if model.path.contains(where: { id in synced.contains { $0.id == id } }) { model.path = [] }
-            synced.forEach { SessionRuntimes.shared.close($0.id) }
-            switch await SyncRead.run(root: SyncKeychain.vaultFolder, key: kept.unlockKey, transport: transport,
-                                      keptGeneration: SyncKeychain.generation, edits: model.catalog.localEdits(),
-                                      cookies: CookieBridge(sessions: synced), notHere: model.notSyncedHere) {
-            case let .success(outcome):
-                SyncKeychain.generation = outcome.generation
-                SyncKeychain.profileTokens = outcome.profileTokens
-                // An edit the vault refused stays on its session, to go when it can; the reason is said.
-                let made = model.applySynced(outcome.profiles, keepingEditsOf: Set(outcome.refusedEdits.map(\.profileID)))
-                var lines = [L("Профилей с Mac: %@, новых: %@", "\(outcome.profiles.count)", "\(made)")]
-                if outcome.cookiesSet + outcome.cookiesDeleted > 0 {
-                    lines.append(L("Куки обновлены: %@", "\(outcome.cookiesSet + outcome.cookiesDeleted)"))
-                }
-                lines += outcome.refusedEdits.map { refusalText($0) }
-                syncResult = lines.joined(separator: "\n")
-            case .failure(.notInPlan):
-                stage = .notInPlan
-            case .failure(.keyNoLongerOpens):
-                SyncKeychain.erase()
-                await load()
-                message = L("Мастер-пароль изменился на Mac. Введите новый.")
-            case .failure(.generationChanged):
-                syncResult = L("Данные синхронизации на сервере изменились. Синхронизируйте ещё раз.")
-            case .failure(.newerApp):
-                syncResult = AccountText.outdated
-            case let .failure(.other(text)):
-                NSLog("Lumen: the sync's run failed: %@", text)
-                syncResult = AccountText.unreachable
+            await show(result, kept: kept)
+        }
+    }
+
+    /// One run against the server, with this iPhone's token as it is now.
+    private func run(_ kept: SyncKeychain.Kept) async -> Result<SyncRead.Outcome, SyncRead.Failure> {
+        guard let token = AccountStore.record()?.deviceToken else { return .failure(.unauthorized) }
+        let transport = LumenSyncTransport(vaultID: kept.vaultID) { method, path, body, headers in
+            try await AccountClient.sync(method, path, body, headers, token: token)
+        }
+        // The Mac's rule: a profile's cookies change while it does not run. The sessions made from the
+        // vault are closed first (left, if one is on the screen behind this one).
+        let synced = model.sessions.filter { $0.syncedProfileID != nil }
+        if model.path.contains(where: { id in synced.contains { $0.id == id } }) { model.path = [] }
+        synced.forEach { SessionRuntimes.shared.close($0.id) }
+        return await SyncRead.run(root: SyncKeychain.vaultFolder, key: kept.unlockKey, transport: transport,
+                                  keptGeneration: SyncKeychain.generation, edits: model.catalog.localEdits(),
+                                  cookies: CookieBridge(sessions: synced), notHere: model.notSyncedHere)
+    }
+
+    /// What a run did, said; and what follows from it.
+    private func show(_ result: Result<SyncRead.Outcome, SyncRead.Failure>, kept: SyncKeychain.Kept) async {
+        switch result {
+        case let .success(outcome):
+            SyncKeychain.generation = outcome.generation
+            SyncKeychain.profileTokens = outcome.profileTokens
+            // An edit the vault refused stays on its session, to go when it can; the reason is said.
+            let made = model.applySynced(outcome.profiles, keepingEditsOf: Set(outcome.refusedEdits.map(\.profileID)))
+            var lines = [L("Профилей с Mac: %@, новых: %@", "\(outcome.profiles.count)", "\(made)")]
+            if outcome.cookiesSet + outcome.cookiesDeleted > 0 {
+                lines.append(L("Куки обновлены: %@", "\(outcome.cookiesSet + outcome.cookiesDeleted)"))
             }
+            // Objects the server refused for the plan's space or their size wait; the rest synced (§16.1).
+            if !outcome.deferredOverQuota.isEmpty { lines.append(SyncText.overQuota) }
+            if !outcome.deferredTooLarge.isEmpty {
+                NSLog("Lumen: %ld sync object(s) larger than the server takes, deferred", outcome.deferredTooLarge.count)
+                lines.append(SyncText.tooLarge)
+            }
+            lines += outcome.refusedEdits.map { refusalText($0) }
+            syncResult = lines.joined(separator: "\n")
+        case .failure(.notInPlan):
+            stage = .notInPlan
+        case .failure(.keyNoLongerOpens):
+            SyncKeychain.erase()
+            await load()
+            message = L("Мастер-пароль изменился на Mac. Введите новый.")
+        case .failure(.unauthorized) where AccountStore.record() == nil:
+            // The renewal said this iPhone is unlinked (§9.4): signed out, the vault forgotten with it.
+            stage = .failed(model.accountNotice ?? AccountText.revoked)
+        case let .failure(failure):
+            if case let .other(text) = failure { NSLog("Lumen: the sync's run failed: %@", text) }
+            syncResult = SyncText.failure(failure, dateText: AppModel.dateText)
         }
     }
 
@@ -211,8 +254,13 @@ struct SyncView: View {
         Task {
             defer { working = false }
             let path = "v1/vaults/\(vaultID.uuidString.lowercased())/objects/vault-header"
-            guard let answer = await AccountClient.send("GET", path, body: nil, token: record.deviceToken), answer.status == 200 else {
+            guard let answer = await AccountClient.send("GET", path, body: nil, token: record.deviceToken) else {
                 return message = AccountText.unreachable
+            }
+            guard answer.status == 200 else {
+                let said: SyncRead.Failure = answer.status == 404 ? .noVault : self.failure(of: answer)
+                if said == .notInPlan || said == .unauthorized { return await refused(said) }
+                return message = SyncText.failure(said, dateText: AppModel.dateText)
             }
             let outcome = await Task.detached { SyncSetup.unlockKey(password: typed, header: answer.data, vaultID: vaultID) }.value
             switch outcome {

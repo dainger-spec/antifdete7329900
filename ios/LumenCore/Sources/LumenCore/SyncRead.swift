@@ -82,6 +82,10 @@ public enum SyncRead {
         public var generation: String?
         /// Objects the server refused for their size or the plan's space (deferred).
         public var deferredForSpace: [String]
+        /// Of them, the ones too large for the server (`413`), and the ones the plan's space had no
+        /// room for (`507`): each said to the person (CONTRACT.md §16.1).
+        public var deferredTooLarge: [String] = []
+        public var deferredOverQuota: [String] = []
         /// Cookies set in and deleted from the sessions' stores by this run (step 4).
         public var cookiesSet = 0
         public var cookiesDeleted = 0
@@ -93,9 +97,11 @@ public enum SyncRead {
         public var refusedEdits: [SyncedEditRefusal] = []
     }
 
-    /// Why a run did not go through, in the app's terms (the app does not see the Mac's core).
+    /// Why a run did not go through, in the app's terms (the app does not see the Mac's core). Each
+    /// refusal of the server is a state with words of its own (CONTRACT.md §16.1, `SyncText`); only
+    /// no answer at all is "the server does not answer".
     public enum Failure: Error, Equatable {
-        /// No trial or paid plan: the sync is the plan's (a state, decision 8).
+        /// No paid plan running: the sync is the plan's (a state, decision 8).
         case notInPlan
         /// The kept key no longer opens the vault: the master password changed on the Mac.
         case keyNoLongerOpens
@@ -103,7 +109,46 @@ public enum SyncRead {
         case generationChanged
         /// The vault is a newer version's.
         case newerApp
+        /// `401`: the server no longer knows this iPhone's token — unlinked in the cabinet, or by a
+        /// change of the account's password. The app renews its document of rights, whose answer
+        /// says why (§16.1; `device_revoked` signs this iPhone out), and runs once more if it may.
+        case unauthorized
+        /// `403 forbidden`: the vault is synced by another Lumen account.
+        case anotherAccount
+        /// `403 too_many_vaults`: the account has as many vaults as it may.
+        case tooManyVaults
+        /// `403 account_disabled`.
+        case accountDisabled
+        /// `403 sync_on_hold`: a device new to the account; sync opens then (nil: not said).
+        case onHold(until: Date?)
+        /// `429`: too many requests; in how many seconds to ask again, when the server said it.
+        case rateLimited(retryAfter: Int?)
+        /// The server has no vault header, and the iPhone no copy: sync is off on the Mac, or its
+        /// data was deleted in the cabinet.
+        case noVault
+        /// The server answered with an error the contract names no state for (its status).
+        case serverError(Int)
+        /// No answer at all: no network, a timeout.
+        case unreachable
+        /// Anything else (the iPhone's copy of the vault, …): its words, for the log.
         case other(String)
+    }
+
+    /// A refusal of the sync server in the app's terms: its status and the code its body names (""
+    /// for none), with what comes with them (CONTRACT.md §16.1). Also for the list of the account's
+    /// vaults (`GET /v1/device/sync/vaults`), which refuses the same way.
+    public static func failure(status: Int, code: String, availableAt: Date? = nil, retryAfter: Int? = nil) -> Failure {
+        switch (status, code) {
+        case (401, _): return .unauthorized
+        case (403, "sync_not_in_plan"): return .notInPlan
+        case (403, "forbidden"): return .anotherAccount
+        case (403, "too_many_vaults"): return .tooManyVaults
+        case (403, "account_disabled"): return .accountDisabled
+        case (403, "sync_on_hold"): return .onHold(until: availableAt)
+        case (409, "generation_changed"): return .generationChanged
+        case (429, _): return .rateLimited(retryAfter: retryAfter)
+        default: return .serverError(status)
+        }
     }
 
     /// `pull`, its failures said in the app's terms.
@@ -113,14 +158,21 @@ public enum SyncRead {
         do {
             return .success(try await pull(root: root, key: key, transport: transport, keptGeneration: keptGeneration,
                                            edits: edits, cookies: cookies, notHere: notHere))
-        } catch CoreError.syncServer(403, "sync_not_in_plan") {
-            return .failure(.notInPlan)
+        } catch let refusal as SyncServerRefusal {
+            return .failure(failure(status: refusal.status, code: refusal.code, availableAt: refusal.availableAt,
+                                    retryAfter: refusal.retryAfter))
+        } catch CoreError.syncServer(let status, _) {
+            // An answer that is not the server's own words (a gateway's 502 while the server is down):
+            // no answer from the server (§9.3) — but for what its status says by itself.
+            return .failure(status == 401 || status == 429 ? failure(status: status, code: "") : .unreachable)
         } catch CoreError.wrongPassword {
             return .failure(.keyNoLongerOpens)
-        } catch CoreError.syncServer(409, "generation_changed") {
-            return .failure(.generationChanged)
         } catch CoreError.newerFormat, CoreError.unsupportedFormat {
             return .failure(.newerApp)
+        } catch CoreError.vaultNotFound {
+            return .failure(.noVault)
+        } catch is URLError {
+            return .failure(.unreachable)
         } catch {
             return .failure(.other("\(error)"))
         }
@@ -181,6 +233,8 @@ public enum SyncRead {
         // (CONTRACT.md §16.2, 6).
         var outcome = Outcome(profiles: profiles, generation: transport.generation ?? generation,
                               deferredForSpace: transport.deferredForSpace)
+        outcome.deferredTooLarge = transport.deferredTooLarge
+        outcome.deferredOverQuota = transport.deferredOverQuota
         // Only this iPhone's profiles: one deleted here takes no place of it.
         let gone = Set(notHere.compactMap { try? SyncProfileToken.token(for: $0, vault: repository.vault) })
         outcome.profileTokens = SyncProfileToken.tokens(in: repository).filter { !gone.contains($0) }
@@ -247,4 +301,47 @@ public enum SyncRead {
         return SyncedProfile(id: summary.id, name: summary.name, notes: configuration.notes, tags: configuration.tags,
                              proxy: proxy, proxyUnusable: unusable)
     }
+}
+
+/// What the person is told of the sync (CONTRACT.md §16.1): each refusal of the server in words of its
+/// own, saying that nothing on this iPhone changed by it — "the server does not answer" only when it
+/// did not. `dateText`: the app's way of writing a date.
+public enum SyncText {
+    /// A run, or the list of the account's vaults, that did not go through.
+    public static func failure(_ failure: SyncRead.Failure, dateText: (Date) -> String) -> String {
+        switch failure {
+        case .notInPlan: return L("Синхронизация с Mac — в платных тарифах. Профили на этом iPhone остаются как есть.")
+        case .keyNoLongerOpens: return L("Мастер-пароль изменился на Mac. Введите новый.")
+        case .generationChanged: return L("Данные синхронизации на сервере изменились. Синхронизируйте ещё раз.")
+        case .newerApp: return AccountText.outdated
+        case .unauthorized:
+            return L("Сервер Lumen не принял вход этого iPhone для синхронизации. Выйдите из аккаунта и войдите снова; сессии на этом iPhone остались как были.")
+        case .anotherAccount:
+            return L("Это хранилище Mac синхронизируется другим аккаунтом Lumen: войдите в аккаунт, с которым синхронизируется Mac. Ничего не отправлено и не изменено.")
+        case .tooManyVaults:
+            return L("У аккаунта уже наибольшее число хранилищ синхронизации. Лишние можно удалить в кабинете на сайте; сессии на этом iPhone остались как были.")
+        case .accountDisabled: return L("Аккаунт заблокирован, напишите в поддержку.")
+        case let .onHold(until): return onHold(until, dateText: dateText)
+        case let .rateLimited(retryAfter):
+            guard let retryAfter else { return L("Слишком много запросов синхронизации к серверу Lumen: попробуйте позже.") }
+            return L("Слишком много запросов синхронизации к серверу Lumen: попробуйте через %@.", AccountText.duration(retryAfter))
+        case .noVault:
+            return L("Хранилища Mac на сервере нет: синхронизация на Mac выключена или её данные удалены в кабинете. Сессии на этом iPhone остались как были.")
+        case let .serverError(status):
+            return L("Сервер Lumen ответил ошибкой (%@) и синхронизацию не провёл. Попробуйте позже; сессии на этом iPhone остались как были.", "\(status)")
+        case .unreachable: return AccountText.unreachable
+        case .other: return L("Синхронизация не прошла. Сессии на этом iPhone остались как были.")
+        }
+    }
+
+    /// `403 sync_on_hold`: when sync opens on this device, and why it waits (the contract's words).
+    public static func onHold(_ date: Date?, dateText: (Date) -> String) -> String {
+        guard let date else { return L("Синхронизация на этом устройстве откроется позже: на почту аккаунта ушло письмо о новом устройстве.") }
+        return L("Синхронизация на этом устройстве откроется %@: на почту аккаунта ушло письмо о новом устройстве.", dateText(date))
+    }
+
+    /// Objects of a run that went through, deferred for their size or the plan's space: they wait,
+    /// and the rest was synced.
+    public static let overQuota = L("Место для синхронизации по тарифу закончилось: изменения, которым нужно больше места, не синхронизируются. Сколько занято, видно в кабинете на сайте.")
+    public static let tooLarge = L("Слишком большой объект для синхронизации: он ждёт, остальное синхронизировано.")
 }
