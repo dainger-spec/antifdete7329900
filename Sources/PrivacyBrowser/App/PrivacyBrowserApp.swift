@@ -10,6 +10,8 @@ struct PrivacyBrowserApp: App {
         Window(L("window.profiles.title"), id: "profiles") {
             RootView()
                 .environmentObject(model)
+                // The command palette's own commands act on the app's model (AppPalette).
+                .environment(\.appModelForCommands, model)
                 // Lumen's chrome is always dark (Theme); web content follows the system (WebContentAppearance).
                 .preferredColorScheme(.dark)
                 .background(WindowReader { window in
@@ -26,6 +28,15 @@ struct PrivacyBrowserApp: App {
         .defaultSize(width: 1400, height: 840)
         .windowResizability(.contentMinSize)
         .commands {
+            // The app menu: Check for Updates… under About, where a Mac app has it; Account… and
+            // Lock under Settings…. They were in the Settings window and the Profiles window only.
+            CommandGroup(after: .appInfo) {
+                CheckForUpdatesMenuButton(model: model)
+            }
+            CommandGroup(after: .appSettings) {
+                AccountMenuButton(model: model)
+                LockMenuButton(model: model)
+            }
             CommandGroup(replacing: .newItem) {
                 NewProfileMenuButton(model: model)
                 Button(L("menu.newTab")) { keyBrowserWindow?.newTab() }
@@ -34,7 +45,10 @@ struct PrivacyBrowserApp: App {
                     .keyboardShortcut("t", modifiers: [.command, .shift])
                 Divider()
                 CommandPaletteButton(model: model)
+                ProxiesMenuButton(model: model)
                 ScenariosMenuButton(model: model)
+                Divider()
+                SyncNowMenuButton(model: model)
             }
             CommandGroup(after: .pasteboard) {
                 Button(L("menu.pasteAsTyped")) { HumanPaste.pasteIntoKeyWindow() }
@@ -218,8 +232,84 @@ private struct ScenariosMenuButton: View {
 
     var body: some View {
         Button(L("menu.scenarios")) { openWindow(id: "scenarios") }
-            .keyboardShortcut("e", modifiers: [.command, .shift])
+            .keyboardShortcut(AppCommand.scenarios.keyEquivalent, modifiers: AppCommand.scenarios.modifiers)
             .disabled(model.phase != .unlocked)
+    }
+}
+
+/// File › Proxies (⇧⌘P): the Profiles window's Proxies section, from any window of the app.
+private struct ProxiesMenuButton: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button(L("profiles.menu.proxies")) {
+            if model.profilesWindow == nil { openWindow(id: "profiles") }
+            model.showProxyList()
+        }
+        .keyboardShortcut(AppCommand.proxies.keyEquivalent, modifiers: AppCommand.proxies.modifiers)
+        .disabled(model.phase != .unlocked)
+    }
+}
+
+/// File › Sync Now — or, before a place to sync to is chosen, Set Up Sync…, which opens
+/// Settings › Sync: never an item that is grey without saying why. With profiles running Sync Now
+/// says that they are stopped first, as the Profiles window's does.
+private struct SyncNowMenuButton: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        if model.syncTarget == nil {
+            Button(L("menu.syncSetUp")) {
+                model.settingsSection = .sync
+                openSettings()
+            }
+            .disabled(model.phase != .unlocked)
+        } else {
+            Button(L("profiles.menu.syncNow")) { Task { await model.syncNow() } }
+                .disabled(model.phase != .unlocked || model.isSyncInProgress)
+        }
+    }
+}
+
+/// The app menu's Lock (⇧⌘L): every profile stopped and encrypted, the keys forgotten — asked
+/// first while profiles run (`AppCommands.lock`).
+private struct LockMenuButton: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        Button(L("menu.lock")) { AppCommands.lock(model) }
+            .keyboardShortcut(AppCommand.lock.keyEquivalent, modifiers: AppCommand.lock.modifiers)
+            .disabled(model.phase != .unlocked)
+    }
+}
+
+/// The app menu's Account…: Settings › Account — the plan, this Mac, the license's devices. Not in
+/// a build without an account server.
+private struct AccountMenuButton: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        if model.license.isConfigured {
+            Button(L("menu.account")) {
+                model.settingsSection = .account
+                openSettings()
+            }
+        }
+    }
+}
+
+/// The app menu's Check for Updates…: Settings › Updates, with a check started.
+private struct CheckForUpdatesMenuButton: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        Button(L("menu.checkForUpdates")) {
+            AppCommands.checkForUpdates(model, openSettings: { openSettings() })
+        }
     }
 }
 
@@ -235,7 +325,7 @@ private struct NewProfileMenuButton: View {
             model.activateProfilesWindow()
             model.newProfileRequest = true
         }
-        .keyboardShortcut("n")
+        .keyboardShortcut(AppCommand.newProfile.keyEquivalent, modifiers: AppCommand.newProfile.modifiers)
         .disabled(model.phase != .unlocked)
     }
 }
@@ -246,7 +336,7 @@ private struct HelpMenuButton: View {
 
     var body: some View {
         Button(L("menu.help")) { openWindow(id: "help") }
-            .keyboardShortcut("?", modifiers: .command)
+            .keyboardShortcut(AppCommand.help.keyEquivalent, modifiers: AppCommand.help.modifiers)
     }
 }
 
@@ -278,7 +368,7 @@ private struct CommandPaletteButton: View {
             model.activateProfilesWindow()
             model.showingPalette = true
         }
-        .keyboardShortcut("k")
+        .keyboardShortcut(AppCommand.commandPalette.keyEquivalent, modifiers: AppCommand.commandPalette.modifiers)
         .disabled(model.phase != .unlocked)
     }
 }

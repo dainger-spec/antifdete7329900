@@ -759,11 +759,9 @@ struct ShortcutSettings: View {
     }
 
     static let groups: [ShortcutGroup] = [
-        ShortcutGroup(titleKey: "settings.shortcuts.app", shortcuts: [
-            Shortcut(keys: "⌘K", titleKey: "menu.commandPalette"),
-            Shortcut(keys: "⌘,", titleKey: "settings.shortcuts.settings"),
-            Shortcut(keys: "⌘Q", titleKey: "settings.shortcuts.quit"),
-        ]),
+        // Every key the app's own commands have, from the table the menus take them from.
+        ShortcutGroup(titleKey: "settings.shortcuts.app",
+                      shortcuts: AppCommand.allCases.map { Shortcut(keys: $0.keys, titleKey: $0.titleKey) }),
         ShortcutGroup(titleKey: "settings.shortcuts.tabs", shortcuts: [
             Shortcut(keys: "⌘T", titleKey: "menu.newTab"),
             Shortcut(keys: "⇧⌘T", titleKey: "menu.reopenClosedTab"),

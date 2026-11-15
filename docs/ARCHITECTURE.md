@@ -627,8 +627,14 @@ SettingsView (Settings scene: ⌘, — and ⋯ → Settings…) ── AppSettin
    │  commands: ＋; per profile launch or new window and stop, edit, warm up (ProfileRowItem.paletteDetail:
    │  its exit country and tags, searched with the title); proxies; warm up several; Sync Now; Lock;
    │  each SettingsSection (AppModel.settingsSection → SettingsView's section); Copy Short Report
+   │  CommandPaletteView.offered → AppPalette.completed (the app's model from the environment,
+   │  \.appModelForCommands): the keys of the commands that have them (AppCommand), Lock through
+   │  AppCommands.lock (asks while profiles run), and Check for Updates
    └  CommandPaletteView.rank → CommandSearch.score (BrowserCore): each word of the query the start
       of a word, inside a word, or its letters in order; best first, ties in the list's order
+
+The app's keys ── AppCommand (one table): the menus' keyboardShortcut, the palette's key caps,
+      Settings › Keyboard Shortcuts' first group and Help › Keyboard Shortcuts' first list
 
 ⌃⌘V (Edit menu; in a profile's process Safari's Edit menu, SafariChrome.addPasteAsTyped)
    └  HumanPaste.pasteIntoKeyWindow ── the WKWebView at or above the key window's first responder

@@ -1628,7 +1628,7 @@
 "settings.startup.restoreTabs" = "Restore tabs";
 "settings.startup.restoreTabs.detail" = "A profile opens again with the pages it had open when it stopped, the tab that was shown in front. Never an ephemeral profile, nor one that keeps no history; kept encrypted, on this Mac only. In Safari's own window, Safari's setting applies.";
 "settings.startup.confirmQuit" = "Confirm quitting";
-"settings.startup.confirmQuit.detail" = "While profiles run, ⌘Q asks first and lists what it stops; their data is then encrypted.";
+"settings.startup.confirmQuit.detail" = "While profiles run, ⌘Q — and Lock from the menu, the keyboard (⇧⌘L) or the command palette — asks first and lists what it stops; their data is then encrypted.";
 "settings.newProfiles.subtitle" = "What a profile made with ＋ starts with. Each one changes it in its own editor.";
 "settings.newProfiles.matchConnection" = "Time zone and language from the connection";
 "settings.newProfiles.matchConnection.detail" = "A profile with a proxy takes the time zone and language of where the proxy comes out, looked up through the proxy at each launch.";
@@ -1686,6 +1686,8 @@
 "settings.shortcuts.library" = "Bookmarks and History";
 "settings.shortcuts.settings" = "Settings";
 "settings.shortcuts.quit" = "Quit, encrypting every profile";
+"settings.shortcuts.proxies" = "Proxies";
+"settings.shortcuts.lock" = "Lock: stop every profile and encrypt its data";
 "settings.shortcuts.closeTab" = "Close the tab (the last one: the window)";
 "settings.shortcuts.tabN" = "Show tab 1 to 8";
 "settings.shortcuts.backgroundTab" = "Open a link in a background tab";
@@ -1953,6 +1955,12 @@
 /* Help in the app (HelpView), and what opens it: the sidebar's rows, the scenario editor, the automation settings */
 "window.help.title" = "Help";
 "menu.help" = "Lumen Help";
+"menu.lock" = "Lock Vault";
+"menu.checkForUpdates" = "Check for Updates…";
+"menu.account" = "Account…";
+"menu.syncSetUp" = "Set Up Sync…";
+"lock.confirm.title" = "Lock the vault?";
+"lock.confirm.lock" = "Stop and Lock";
 "sidebar.help" = "Help";
 "sidebar.palette" = "Commands and Search";
 "sidebar.palette.help" = "The command palette: any profile, action or section of Settings, by its first letters (⌘K)";
@@ -2186,12 +2194,15 @@
 "help.api.webdriver.limits" = "There is: navigation, finding by CSS and XPath, click, send_keys, clear, text and attributes, execute_script, cookies, a screenshot, the window's size, waits. There is not: frames, alert dialogs, several tabs, ActionChains, file uploads.";
 "help.api.webdriver.playwright" = "Playwright cannot be connected: it drives only its own builds of browsers and does not speak WebDriver. Its script moves into a Lumen scenario almost word for word — page.goto, page.click, page.type have the same names.";
 "help.api.webdriver.see" = "Your Selenium scripts connect to a profile over WebDriver, on the same port, with a token of the profile's own made from the API's. How: the Selenium and WebDriver topic on the left.";
-"help.keys.app" = "In the Profiles window";
+"help.keys.app" = "In Lumen’s windows";
 "help.keys.palette" = "The command palette";
 "help.keys.newProfile" = "A new profile";
 "help.keys.scenarios" = "Scenarios";
 "help.keys.settings" = "Settings";
 "help.keys.help" = "Help";
+"help.keys.proxies" = "The proxies";
+"help.keys.lock" = "Lock: stops every profile, encrypts its data and forgets the keys. While profiles run it asks first.";
+"help.keys.quit" = "Quit, encrypting every profile";
 "help.keys.window" = "In a profile’s window";
 "help.keys.window.note" = "Safari’s window has Safari’s own shortcuts; these are for Lumen’s own window.";
 "help.keys.newTab" = "A new tab";
