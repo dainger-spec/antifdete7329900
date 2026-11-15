@@ -1502,6 +1502,8 @@
 "transfer.password" = "Пароль файла";
 "transfer.password.repeat" = "Повторите пароль";
 "transfer.password.note" = "Не меньше 8 символов. Без этого пароля файл не открыть, и восстановить его нельзя.";
+"transfer.why.short" = "Пароль файла — не меньше 8 символов";
+"transfer.why.mismatch" = "Пароли не совпадают";
 "transfer.import.title" = "Импорт профиля";
 "transfer.import.explanation" = "Выберите файл .pbprofile и введите его пароль. Профиль появится в списке как новый, со своими данными, отдельно от уже существующих.";
 "transfer.import.choose" = "Выбрать файл…";

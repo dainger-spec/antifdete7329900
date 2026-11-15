@@ -50,6 +50,10 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
   title. No system segmented controls.
 - Empty states: `LumenEmptyState` — the horizon in small, the title and a sentence above its light, what
   to do under it (the lock screen's order); `small` for a state that passes (nothing found).
+- Sheets (`SheetChrome.swift`): `SheetHeader` (17 semibold, a sentence in 13, the horizon's light along the
+  sheet's top edge), fields under their labels (`SheetField`) in the app's own look — no system form for
+  what is typed —, `SheetFooter` with why the main action is off at its left (`SheetWhy`), Cancel quiet and
+  the one lit main action. What must be known is said in lines with a sign, not in a wall (`ChangePasswordNote`).
 - Fields: `lumenField(...)`; search: `LumenSearchField` (with its ⌘K key cap in the windows that
   have the palette). Keys: `KeyCap`.
 - A box that asks for the person: `LumenBanner(tone: .danger | .warning)` above a list (the proxy

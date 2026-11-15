@@ -1502,6 +1502,8 @@
 "transfer.password" = "File password";
 "transfer.password.repeat" = "Repeat password";
 "transfer.password.note" = "At least 8 characters. The file cannot be opened without it, and it cannot be recovered.";
+"transfer.why.short" = "The file’s password takes at least 8 characters";
+"transfer.why.mismatch" = "The passwords do not match";
 "transfer.import.title" = "Import Profile";
 "transfer.import.explanation" = "Choose a .pbprofile file and enter its password. The profile is added as a new one, with data of its own, apart from the profiles already here.";
 "transfer.import.choose" = "Choose File…";

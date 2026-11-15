@@ -42,27 +42,51 @@ struct ProfileExportView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SheetHeader(title: String(format: L("transfer.export.title"), profile.name), subtitle: L("transfer.export.explanation"))
-            Form {
+            // The app's own fields, not the system's grouped form: there the two password fields had
+            // no box at all (CI run's sheet-profile-export).
+            VStack(alignment: .leading, spacing: 14) {
                 if isRunning && saved == nil {
                     Label(L("transfer.export.running"), systemImage: "exclamationmark.triangle")
+                        .font(.lumenSecondary)
                         .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                SecureField(L("transfer.password"), text: $password)
-                    .disabled(working || saved != nil)
-                SecureField(L("transfer.password.repeat"), text: $confirmation)
-                    .disabled(working || saved != nil)
-                Text(L("transfer.password.note")).font(.caption).foregroundStyle(.secondary)
+                SheetField(L("transfer.password")) {
+                    SecureField(L("transfer.password"), text: $password, prompt: Text(verbatim: ""))
+                        .lumenField()
+                        .disabled(working || saved != nil)
+                }
+                SheetField(L("transfer.password.repeat")) {
+                    SecureField(L("transfer.password.repeat"), text: $confirmation, prompt: Text(verbatim: ""))
+                        .lumenField()
+                        .onSubmit { if canExport { export() } }
+                        .disabled(working || saved != nil)
+                }
+                Label(L("transfer.password.note"), systemImage: "exclamationmark.triangle")
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let saved {
                     Label(String(format: L("transfer.export.done"), saved.lastPathComponent), systemImage: "checkmark.circle")
+                        .font(.lumenBody)
                         .foregroundStyle(Theme.textPrimary)
                 }
                 if let error {
                     Text(error).foregroundStyle(Theme.danger).font(.lumenSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .lumenForm()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 24)
+            .padding(.top, 4)
+            .padding(.bottom, 18)
             SheetFooter(leading: {
-                if working { ProgressView().controlSize(.small) }
+                if working {
+                    ProgressView().controlSize(.small)
+                } else if saved == nil, !canExport {
+                    // Why Export is off.
+                    SheetWhy(text: L(password.count < Self.minimumPasswordLength ? "transfer.why.short" : "transfer.why.mismatch"))
+                }
             }, buttons: {
                 Button(L(saved == nil ? "common.cancel" : "common.done")) { dismiss() }
                     .buttonStyle(.lumenSecondary)
@@ -129,13 +153,19 @@ struct ProfileImportView: View {
                     }
                 }
                 if file != nil, manifest == nil {
-                    SecureField(L("transfer.password"), text: $password)
-                        .onSubmit(open)
-                        .disabled(working)
+                    SheetField(L("transfer.password")) {
+                        SecureField(L("transfer.password"), text: $password, prompt: Text(verbatim: ""))
+                            .lumenField()
+                            .onSubmit(open)
+                            .disabled(working)
+                    }
                 }
                 if let manifest {
-                    TextField(L("transfer.import.name"), text: $name)
-                        .disabled(working || imported != nil)
+                    SheetField(L("transfer.import.name")) {
+                        TextField(L("transfer.import.name"), text: $name, prompt: Text(verbatim: ""))
+                            .lumenField()
+                            .disabled(working || imported != nil)
+                    }
                     summary(manifest)
                 }
                 if let imported {

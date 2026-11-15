@@ -8,20 +8,65 @@ struct SheetHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.lumenSheetTitle)
+                .font(.system(size: 17, weight: .semibold))
+                .tracking(-0.2)
                 .foregroundStyle(Theme.textPrimary)
                 .accessibilityAddTraits(.isHeader)
             if let subtitle {
                 Text(subtitle)
-                    .font(.lumenSecondary)
+                    .font(.lumenBody)
+                    .lineSpacing(2)
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 2)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 24)
-        .padding(.top, 22)
-        .padding(.bottom, 12)
+        .padding(.top, 24)
+        .padding(.bottom, 14)
+        // The horizon's light along the sheet's top edge: brightest at the middle, gone by the corners.
+        .overlay(alignment: .top) {
+            LinearGradient(stops: [.init(color: .clear, location: 0.04), .init(color: Theme.rim.opacity(0.34), location: 0.5),
+                                   .init(color: .clear, location: 0.96)], startPoint: .leading, endPoint: .trailing)
+                .frame(height: 1)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+/// A field of a sheet under its label (12 / medium, `t2`): the label is the field's name for
+/// VoiceOver too, so the field inside is given the same title.
+struct SheetField<Field: View>: View {
+    let label: String
+    @ViewBuilder let field: () -> Field
+
+    init(_ label: String, @ViewBuilder field: @escaping () -> Field) {
+        self.label = label
+        self.field = field
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.textSecondary)
+                .accessibilityHidden(true)
+            field()
+        }
+    }
+}
+
+/// Why a sheet's main action is off, at the foot's left (12, `t3`).
+struct SheetWhy: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.lumenSecondary)
+            .foregroundStyle(Theme.textTertiary)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

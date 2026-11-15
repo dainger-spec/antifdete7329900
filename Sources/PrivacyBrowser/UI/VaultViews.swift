@@ -780,10 +780,7 @@ struct ChangePasswordView: View {
                         PasswordRequirement(text: L("setup.req.match"), met: matches, shown: !confirmation.isEmpty)
                     }
                     .padding(.top, 12)
-                    Text(L("changepw.note"))
-                        .font(.lumenSecondary)
-                        .foregroundStyle(Theme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    ChangePasswordNote()
                         .padding(.top, 18)
                 }
                 .padding(.horizontal, 24)
@@ -818,6 +815,40 @@ struct ChangePasswordView: View {
             // be told now, or a message raised elsewhere meanwhile. Left open with the old password
             // in it, it invited a second Change that the vault refuses as a wrong password.
             if changed { dismiss() }
+        }
+    }
+}
+
+/// What changing the master password does and does not do (`changepw.note`), word for word, as
+/// three lines with a sign each instead of one wall of fourteen: what is encrypted again, where
+/// the new password goes, and — in amber — what it does not reach. A text of fewer sentences is
+/// shown whole.
+private struct ChangePasswordNote: View {
+    var body: some View {
+        let sentences = L("changepw.note").components(separatedBy: ". ")
+        VStack(alignment: .leading, spacing: 10) {
+            if sentences.count >= 3 {
+                line("key", sentences[0] + ".", warns: false)
+                line("arrow.triangle.2.circlepath", sentences[1] + ".", warns: false)
+                line("exclamationmark.triangle.fill", sentences[2...].joined(separator: ". "), warns: true)
+            } else {
+                line("key", L("changepw.note"), warns: false)
+            }
+        }
+    }
+
+    private func line(_ symbol: String, _ text: String, warns: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 9) {
+            Image(systemName: symbol)
+                .font(.system(size: 11))
+                .foregroundStyle(warns ? Theme.warning : Theme.textTertiary)
+                .frame(width: 14)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(.lumenSecondary)
+                .lineSpacing(2)
+                .foregroundStyle(warns ? Theme.textPrimary : Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
