@@ -53,6 +53,7 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 │  PasswordVault / HistoryStore / BookmarkStore ── per-profile encrypted documents           │
 │  EncryptedChunkStream / EncryptedDirectoryArchive / WebKitDataLayout ── WebKit data seal   │
 │  SyncCodec / SyncEngine ── encrypted sync client with per-record merges                    │
+│  VaultRestore ── a vault brought back from where it syncs: staged, read-only, resumable    │
 │  SyncTransport ── backend contract                                                         │
 │     ├── LocalDirectorySyncTransport  (local-only)                                          │
 │     └── HTTPSyncTransport            (own server, or the Lumen account: AccountSync)       │
@@ -163,6 +164,9 @@ Application Support/PrivacyBrowser/      (0700)
   settings.bin.unreadable         a settings.bin that could not be read, moved aside at the next change of settings, never written over
   proxies.bin                     AES-GCM(proxy-list key, ProxyList JSON)             [after the first proxy is added; this Mac only]
   sync-state.bin                  AES-GCM(sync key, per-object revision + hash, and the place they are of) [only after sync]
+  restore-staging/<vault id>/     a vault being brought back from its sync location (VaultRestore): the same layout as this
+                                  folder's, built here and moved into place — vault.json last, by the renames move.json lists —
+                                  once all of it has come  [only while "I already have a vault" is under way or was left unfinished]
   profiles/<uuid>/
     config.bin                    AES-GCM(profile key, ProfileConfiguration JSON) — also the person's own tags,
                                   notes and glyph (written only when set; the Profiles list reads them into
@@ -208,6 +212,19 @@ never leaves a half-written ciphertext.
 
 What a version does with a file a newer version wrote — refuses to read it, never writes over or
 deletes it — and which format each file carries: docs/UPDATES.md §4 (`DocumentFormat`).
+
+### No vault yet: one is made, or one is brought back
+
+With no `vault.json` the app is at its first launch (`AppModel.Phase.setup`): the sign-in and this
+Mac's connection first, where the build has an account server, then the master password's screen.
+That screen makes a new vault (`MasterVault.create`: a new vault ID, a new key) — or, by **I already
+have a vault**, brings back one a Mac synced to the Lumen account, a folder or a server of one's
+own, with that vault's own master password (`RestoreFlow`, `RestoreModel`, `VaultRestore`;
+docs/SYNC_FORMAT.md, *A Mac without a vault*). The brought vault is built in `restore-staging/`,
+moved into place whole, and opened as an unlock opens one (`AppModel.adoptRestoredVault`), with the
+place it came from as this Mac's sync target. A move into place that was cut short is finished when
+the app next starts, before the phase is decided (`VaultRestore.finishInterruptedMoves`). After
+"Forgot password…" moved a vault aside, the same screen is shown, with the same two ways.
 
 ### `index.bin` missing or unreadable
 
