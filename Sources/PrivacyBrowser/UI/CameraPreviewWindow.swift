@@ -5,10 +5,13 @@ import SwiftUI
 /// A separate window that shows a big live preview of the substituted camera and lets the person
 /// drag a crop rectangle over the source and adjust the look. Opened from the editor's "Open
 /// preview" button; it follows the editor's settings through a `CameraMirror` and writes changes
-/// back through `update`. One window is reused.
+/// back through `update`. One window is reused; closed, it lets its content go, and with it its
+/// previews (`CameraPreviewPresence`): the last preview gone, the video's copy on disk goes too.
 @MainActor
-final class CameraPreviewWindowController: NSWindowController {
+final class CameraPreviewWindowController: NSWindowController, NSWindowDelegate {
     static let shared = CameraPreviewWindowController()
+    /// `shared` was made: Lock has a window to close.
+    private static var made = false
 
     private init() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 640),
@@ -17,6 +20,20 @@ final class CameraPreviewWindowController: NSWindowController {
         window.isReleasedWhenClosed = false
         window.title = L("editor.camera.preview.window")
         super.init(window: window)
+        window.delegate = self
+        Self.made = true
+    }
+
+    /// Closed (its button, or Lock): the previews in it go, and a closed window keeps nothing of
+    /// the profile's camera (`present` gives it new content).
+    func windowWillClose(_ notification: Notification) {
+        window?.contentView = nil
+    }
+
+    /// At Lock: the window shows a profile's camera, and goes with the vault.
+    static func closeIfOpen() {
+        guard made else { return }
+        shared.close()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

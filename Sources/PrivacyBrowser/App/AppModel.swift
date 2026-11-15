@@ -186,6 +186,8 @@ final class AppModel: ObservableObject {
         AppEnvironment.removeStandaloneSafariHome(in: root)
         // Partial plaintext an unseal that did not finish left (R8): no profile runs yet.
         AppEnvironment.removeUnsealLeftovers(vault: root)
+        // A camera's video an earlier run left in plaintext for its preview (`CameraPreview`).
+        CameraPreview.removeLeftovers()
         let firstPhase: Phase = MasterVault.exists(in: root) ? .locked : .setup
         phase = firstPhase
         license = LicenseModel(root: root)
@@ -667,6 +669,10 @@ final class AppModel: ObservableObject {
         deviceSettings = DeviceSettings()
         deviceSettingsUnreadable = false
         phase = MasterVault.exists(in: root) ? .locked : .setup
+        // The camera preview's window, its copy of a video in plaintext and its decoded image go
+        // with the vault (the editor went with the profiles).
+        CameraPreviewWindowController.closeIfOpen()
+        CameraPreview.discardAll()
     }
 
     /// Changes the master password: the vault's key is wrapped anew under it, and nothing else

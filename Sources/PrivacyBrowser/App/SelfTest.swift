@@ -352,6 +352,7 @@ final class SelfTest {
         await group("window sizes") { try await windowSizes(repository) }
         await group("named Safari version") { try await namedSafariVersion(repository) }
         await group("two engines: said once for each pair") { enginesWarningOnce() }
+        await group("camera preview") { cameraPreview() }
         await group("local requests") { try await localRequests(repository) }
         await group("cookies at creation") { try await cookiesAtCreation(repository) }
         await group("diagnostics") { try await diagnosticsBundle(repository) }
@@ -2396,6 +2397,64 @@ final class SelfTest {
     /// the window size it was saved under — the profile's size again once that was changed in the
     /// editor — and never larger than the screen, or hanging outside it. On a defaults suite of its
     /// own; the window itself moved and reopened is not shown here.
+    /// The editor's camera preview (`CameraPreview`): an image is decoded once for the size it is
+    /// shown at, not at every frame; a video's copy for the player is in an owner-only folder of this
+    /// run, and goes with `discardAll` (the last preview closed, Lock, quit); at launch an earlier
+    /// version's copy and the folder of a run that is gone are removed, another process's is not.
+    private func cameraPreview() {
+        CameraPreview.discardAll()
+        let picture = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 3000, pixelsHigh: 2000, bitsPerSample: 8,
+                                       samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                       bytesPerRow: 0, bitsPerPixel: 0)
+        guard let png = picture?.representation(using: .png, properties: [:]) else {
+            check("camera preview: a picture to preview", false)
+            return
+        }
+        var camera = CameraSubstitution.off
+        camera.source = .image
+        camera.imageData = png
+        let before = CameraPreview.imageDecodes
+        for _ in 0..<15 { _ = CameraPreview.frame(for: camera, width: 427, height: 240, sequence: 0) }
+        // The crop moved, as a drag in the preview window moves it: the same decoded picture.
+        camera.crop = CameraSubstitution.Crop(enabled: true, x: 0.1, y: 0.1, width: 0.5, height: 0.5)
+        for step in 0..<15 {
+            camera.crop.x = 0.1 + Double(step) / 100
+            _ = CameraPreview.frame(for: camera, width: 427, height: 240, sequence: 0)
+        }
+        let decodes = CameraPreview.imageDecodes - before
+        check("camera preview: an image is decoded once for the size it is shown at, not at every frame",
+              (1...2).contains(decodes), "\(decodes) decodes for 30 frames")
+
+        let manager = FileManager.default
+        let folder = CameraPreview.videoFolder
+        camera.source = .video
+        camera.videoData = Data(repeating: 7, count: 4096)
+        _ = CameraPreview.frame(for: camera, width: 427, height: 240, sequence: 0)
+        let folderMode = (try? manager.attributesOfItem(atPath: folder.path))?[.posixPermissions] as? Int
+        let copyMode = (try? manager.attributesOfItem(atPath: folder.appendingPathComponent("live.mov").path))?[.posixPermissions] as? Int
+        CameraPreview.discardAll()
+        check("camera preview: a video's copy for its player is readable by this user alone, and goes with the previews",
+              folderMode == 0o700 && copyMode == 0o600 && !manager.fileExists(atPath: folder.path),
+              "folder \(folderMode.map { String($0, radix: 8) } ?? "none"), copy \(copyMode.map { String($0, radix: 8) } ?? "none"), left \(manager.fileExists(atPath: folder.path))")
+
+        // Leftovers: an earlier version's copy, the folder of a run whose process is gone, and the
+        // folder of a process that runs (launchd's, pid 1: not this user's, and never gone).
+        let temporary = manager.temporaryDirectory
+        let earlier = temporary.appendingPathComponent("pb-cam-live.mov")
+        var gone: pid_t = 99_998
+        while gone > 1000, kill(gone, 0) == 0 || errno != ESRCH { gone -= 1 }
+        let dead = temporary.appendingPathComponent("Lumen-camera-preview-\(gone)", isDirectory: true)
+        let running = temporary.appendingPathComponent("Lumen-camera-preview-1", isDirectory: true)
+        defer { try? manager.removeItem(at: running) }
+        manager.createFile(atPath: earlier.path, contents: Data("video".utf8))
+        try? manager.createDirectory(at: dead, withIntermediateDirectories: true)
+        try? manager.createDirectory(at: running, withIntermediateDirectories: true)
+        CameraPreview.removeLeftovers()
+        check("camera preview: at launch an earlier version's copy and a gone run's folder are removed, a running process's is not",
+              !manager.fileExists(atPath: earlier.path) && !manager.fileExists(atPath: dead.path) && manager.fileExists(atPath: running.path),
+              "earlier \(manager.fileExists(atPath: earlier.path)), gone \(manager.fileExists(atPath: dead.path)), running \(manager.fileExists(atPath: running.path))")
+    }
+
     /// Safari newer than the profiles' engine (`EngineWarning`): the profiles window says it until
     /// OK, not again for the same pair of versions, and again for a newer Safari. This Mac's own
     /// state is said, not checked: it is the runner image's.
