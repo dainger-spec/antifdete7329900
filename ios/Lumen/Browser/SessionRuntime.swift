@@ -126,6 +126,11 @@ final class SessionRuntime: ObservableObject {
             configuration.webExtensionController = controller
         }
         configuration.allowsInlineMediaPlayback = true
+        // No Safe Browsing lookups, as on the Mac by default (its ProfileConfiguration.safeBrowsingEnabled):
+        // the system makes them outside the session's data store, so from the iPhone's own address
+        // whatever the session's proxy. Off in every session: a proxy given to a session later
+        // reaches its open tabs, whose configuration stays the one they were made with.
+        configuration.preferences.isFraudulentWebsiteWarningEnabled = false
         // Safari's application name after WebKit's own string: the User-Agent Safari on this iPhone sends.
         configuration.applicationNameForUserAgent = UserAgentPreset.safariApplicationName(systemVersion: UIDevice.current.systemVersion)
         if proxy != nil, let rules = ContentRules.proxied { configuration.userContentController.add(rules) }
