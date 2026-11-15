@@ -175,6 +175,13 @@ final class AppModel: ObservableObject {
     /// The master password's screen is the first this run shows (no sign-in before it): the
     /// interface's language is offered on it (`FirstLaunchLanguagePicker`).
     let setupIsFirstScreen: Bool
+    /// The launch screen of this start of the app (WelcomeSplash), decided as the app starts
+    /// (`WelcomeLaunch`); nil: none — not the app a person opened, the setting off, or the app's own
+    /// restart.
+    let welcome: WelcomeLaunch.Decision?
+    /// The launch screen has opened into the window (or its window was closed): it is not shown
+    /// again while this process runs, whatever window opens.
+    @Published var welcomeFinished = false
     private var licenseObservation: AnyCancellable?
 
     init() {
@@ -190,6 +197,7 @@ final class AppModel: ObservableObject {
         CameraPreview.removeLeftovers()
         let firstPhase: Phase = MasterVault.exists(in: root) ? .locked : .setup
         phase = firstPhase
+        welcome = WelcomeLaunch.decide(firstLaunch: firstPhase == .setup)
         license = LicenseModel(root: root)
         let accountDone = !license.isConfigured || license.record.isSignedIn
         accountStepDone = accountDone

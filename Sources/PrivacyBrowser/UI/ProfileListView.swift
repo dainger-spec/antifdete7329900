@@ -17,35 +17,17 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            if model.phase == .unlocked && showsProfiles {
-                ProfileListView().transition(.opacity)
+            if let welcome = model.welcome, !model.welcomeFinished {
+                // The launch screen, before the first screen or the lock screen (WelcomeSplash).
+                WelcomeSplash(greeting: welcome.greeting, firstLaunch: welcome.firstLaunch, open: { openFromWelcome() })
+                    .transition(welcomeLeaving)
+                    .zIndex(1)
+                    // Its window closed meanwhile: a window opened again starts at the first screen.
+                    .onDisappear { model.welcomeFinished = true }
             } else {
-                // One backdrop for setup, unlock and "open": its eclipses close in while the
-                // password is checked and part when the vault opens.
-                LockBackdrop(phase: lockPhase) {
-                    switch model.phase {
-                    case .setup where !model.accountStepDone:
-                        // The first launch: sign in and connect this Mac, then the master password
-                        // (the owner's order, CONTRACT §10.1); no way past it — without a connected
-                        // Mac no profile can be made (§8.4).
-                        SignInFlow(license: model.license, onFinished: { model.accountStepDone = true }, standalone: false)
-                            .transition(.opacity)
-                    case .setup: SetupView().transition(.opacity)
-                    case .locked: UnlockView().transition(.opacity)
-                    case .unlocked: VaultOpenView().transition(.opacity)
-                    }
-                }
-                .transition(.opacity)
-                .overlay {
-                    // "Vault open": a key or a click goes on to the profiles at once.
-                    if model.phase == .unlocked && !showsProfiles {
-                        SkipLayer(skip: { showProfiles() })
-                    }
-                }
+                screens.transition(welcomeArriving)
             }
         }
-        .animation(Theme.appearAnimation, value: model.phase)
-        .animation(.easeOut(duration: 0.25), value: showsProfiles)
         .onAppear { showsProfiles = model.phase == .unlocked }
         .onChange(of: model.phase) { _, phase in
             guard phase == .unlocked else {
@@ -81,6 +63,64 @@ struct RootView: View {
 
     private func showProfiles() {
         if model.phase == .unlocked { showsProfiles = true }
+    }
+
+    /// The window's screens: the first launch's, the lock screen, "Vault open", the profiles.
+    private var screens: some View {
+        ZStack {
+            if model.phase == .unlocked && showsProfiles {
+                ProfileListView().transition(.opacity)
+            } else {
+                // One backdrop for setup, unlock and "open": its eclipses close in while the
+                // password is checked and part when the vault opens.
+                LockBackdrop(phase: lockPhase) {
+                    switch model.phase {
+                    case .setup where !model.accountStepDone:
+                        // The first launch: sign in and connect this Mac, then the master password
+                        // (the owner's order, CONTRACT §10.1); no way past it — without a connected
+                        // Mac no profile can be made (§8.4).
+                        SignInFlow(license: model.license, onFinished: { model.accountStepDone = true }, standalone: false)
+                            .transition(.opacity)
+                    case .setup: SetupView().transition(.opacity)
+                    case .locked: UnlockView().transition(.opacity)
+                    case .unlocked: VaultOpenView().transition(.opacity)
+                    }
+                }
+                .transition(.opacity)
+                .overlay {
+                    // "Vault open": a key or a click goes on to the profiles at once.
+                    if model.phase == .unlocked && !showsProfiles {
+                        SkipLayer(skip: { showProfiles() })
+                    }
+                }
+            }
+        }
+        .animation(Theme.appearAnimation, value: model.phase)
+        .animation(.easeOut(duration: 0.25), value: showsProfiles)
+    }
+
+    /// The opening (the owner's "then it opens smoothly"): the launch screen eases up and fades
+    /// while the window's first screen scales in from 98 % and fades in, 0.6 s; under Reduce Motion
+    /// a cross-fade.
+    private func openFromWelcome() {
+        let reduced = Motion.isReduced(reduceMotion)
+        withAnimation(reduced ? .easeOut(duration: WelcomeTiming.reducedOpening) : .easeInOut(duration: WelcomeTiming.opening)) {
+            model.welcomeFinished = true
+        }
+    }
+
+    private var welcomeLeaving: AnyTransition {
+        if Motion.isReduced(reduceMotion) { return .opacity }
+        return .asymmetric(insertion: .identity,
+                           removal: AnyTransition.opacity.combined(with: .offset(y: -30))
+                               .animation(.easeInOut(duration: WelcomeTiming.opening)))
+    }
+
+    private var welcomeArriving: AnyTransition {
+        if Motion.isReduced(reduceMotion) { return .opacity }
+        return .asymmetric(insertion: AnyTransition.scale(scale: 0.98).combined(with: .opacity)
+                               .animation(Motion.entry(duration: WelcomeTiming.opening)),
+                           removal: .identity)
     }
 }
 

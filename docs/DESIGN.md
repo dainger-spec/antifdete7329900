@@ -74,6 +74,20 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
   when it takes effect, control at the right), `SettingCustomRow` (more than a sentence under the
   title). No section is the system's form: Sync, WebRTC and Automation are pages of rows, and the
   sheets that open them from the Profiles window show the same rows (`embedded`).
+- Launch screen (`WelcomeSplash.swift`; when: `App/WelcomeLaunch.swift`, BrowserCore's
+  `WelcomeSplashPolicy`): before the first screen or the lock screen, in the same window, at the
+  first launch and at each start after a full quit — never for a profile's process, the self-test,
+  the snapshots, CI's runs or the app's own restarts (Settings › Language, an update's installer),
+  nor for a window opened again; off with Settings → Appearance → Greeting at launch. A greeting
+  written as with a pen in 1.6–2.2 s, in glass (macOS 26: Liquid Glass on the stroked shape; before:
+  a drawn tube), on the eclipse's horizon (`LumenHorizon`, the virtual machines' desktop's), "LUMEN"
+  under it; then the first launch's "Get started", or a 0.85 s hold; then the opening (0.6 s: the
+  screen eases up and fades, the window's content scales in from 98 %). Any click or key goes on at
+  once. The greeting is in the interface's language the first time, then the next of twelve
+  languages each start. The lettering is Lumen's own, drawn as knots in
+  `design/tools/welcome_lettering.py`, which writes the paths and the pen's pace for the app
+  (`WelcomeLettering.swift`) and for the prototype (`design/prototypes/welcome.html`;
+  `design/tools/record_welcome.mjs` records it).
 - Lock and first launch (`VaultViews.swift`): `LockBackdrop`, `LockScreen`, `LockPasswordField` (one
   field per screen takes the cursor: `takesFocus`), the master password's facts first and large,
   `PasswordRequirement`. Changing the master password uses the same fields and requirements.

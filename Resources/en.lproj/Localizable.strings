@@ -1221,6 +1221,9 @@
 "unlock.reset.title" = "Create a new vault?";
 "unlock.subtitle" = "Enter your master password to continue.";
 "unlock.title" = "Vault locked";
+"welcome.start" = "Get started";
+"welcome.skip" = "Continue";
+"welcome.hint" = "Lumen's welcome. Any key goes on.";
 "unlock.vault.info" = "Opened the vault created %1$@, in:\n%2$@\nIf you set your password in another build (from Cursor or swift run, unsandboxed, or with another bundle id), that build has its own vault with its own password.";
 "unlock.vault.test" = "This looks like a test vault: it was created by the CI migration check (password “migration-check”), not by the app.";
 "unlock.working" = "Unlocking…";
@@ -1884,6 +1887,8 @@
 "settings.appearance.entry" = "Entry screen";
 "settings.appearance.light" = "Lumen's light at entry";
 "settings.appearance.light.detail" = "Two eclipses in the corners of the entry screen and the profiles window. They come in once, as the app opens, and stay as a dimmed background.";
+"settings.appearance.welcome" = "Greeting at launch";
+"settings.appearance.welcome.detail" = "When Lumen opens after a full quit, and at its first launch: a welcome written by hand, in a different language each time, then the window opens. A couple of seconds; any key or click goes on at once.";
 "settings.appearance.listAndMotion" = "List and motion";
 "settings.appearance.density" = "Profile list density";
 "settings.appearance.density.detail" = "Compact: lower rows, more profiles on the screen.";
