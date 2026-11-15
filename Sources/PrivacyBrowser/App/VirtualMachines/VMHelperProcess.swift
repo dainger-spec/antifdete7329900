@@ -110,11 +110,13 @@ final class VMHelperProcess {
     private func take(_ event: VMHelperEvent) {
         switch event.kind {
         case .failed:
-            failure = event.message ?? L("vm.error.unknown")
+            // In the person's language where the app has words for the kind of failure, with the
+            // system's own under them; the system's alone otherwise (`VMCenter.failureText`).
+            failure = VMCenter.failureText(kind: event.failureKind, message: event.message)
             concluded = true
         case .stopped, .installed, .catalog:
             concluded = true
-        case .progress, .started, .traffic, .hosts:
+        case .progress, .started, .traffic, .hosts, .notKept:
             break
         }
         onEvent(event)

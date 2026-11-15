@@ -105,6 +105,10 @@ The helper answers in JSON lines on its standard output and ends when the machin
 | `install` | installs the restore image into the base's folder | `progress`…, `installed` |
 | `run` | runs a machine in a window until its macOS has shut down | `started`, `traffic`…, `stopped` |
 
+A helper that cannot do what it was asked says `failed`, with the system's own words for why
+(`message`) and, where the reason is one the app has words for, its kind (`failure`, "When
+something fails" below).
+
 After the request the app may write `stop` (shut the guest down) or `kill` (end the machine now).
 The end of the helper's input reads as `stop`: a machine does not outlive the app that started it,
 and an installation the app is not there to take ends with it.
@@ -125,6 +129,51 @@ What the helper does about the Mac and the app around it:
 - **The base and a machine being made**: a machine not made yet is a copy of the base's disk,
   so it is not started while the base is open (checked again after its proxy was asked), and
   the base is not opened while such a machine is starting.
+
+### When something fails
+
+A start, an installation or a question to Apple that fails used to be said in whatever words the
+helper had: an English sentence of its own in a Russian interface, or the framework's ("The
+operation couldn't be completed. (VZErrorDomain error 6.)"), which says what and never what to
+do. Now the helper says the **kind** of failure beside those words, and the app has its own for
+each kind, in the person's language, with what to do; the system's words stay under them as a
+technical detail. The kinds (`VMFailureKind`, BrowserCore) are decided from the error's domain
+and code and those of the errors under it — Virtualization's, Cocoa's, POSIX's, as numbers, so
+that the decision is tested on Linux too:
+
+| kind | when | what the person is told to do |
+|---|---|---|
+| `noRoom` | the Mac's disk is full — whichever error says so, and whatever error is over it | free some space; Disk Space… shows what the machines take |
+| `limit` | Apple's limit of two machines, which counts every app's | shut one down, in Lumen or in the other app |
+| `disk` | the framework does not take the machine's disk | quit what else may hold it; a disk that stays unreadable is made anew |
+| `files` | files the machine is made of are missing or unreadable | the folder, in the Finder |
+| `notSupportedHere` | this macOS does not run as a guest on this Mac as it is | update this Mac's macOS |
+| `configuration` | the framework refuses the machine's memory, processors or screen | change them in Edit… |
+| `noBase` | the machine has no disk yet and the base is not there | add the base system |
+| `catalog`, `nothingOffered` | Apple could not be asked; or offers nothing for this Mac | the connection; or update this Mac |
+| `image` | the restore image does not load | download it again, or another file |
+| `needsUpdate` | the installer wants this Mac's software updated first | Software Update, then Continue |
+| `installation` | the installation did not finish | Continue starts it over; nothing is downloaded again |
+
+A failure of none of these kinds is said in the system's words alone, as before. The numbers are
+Apple's as their headers have them; what a given failure on a Mac really carries is seen there —
+the detail line always shows the system's own words beside Lumen's.
+
+**A proxy that does not pass the check before a start** is said by what the check found — the
+Proxies section's words for each way of failing (a login the proxy rejects, a name that does not
+resolve, a port that refuses, one that takes the connection and says nothing) and its advice —
+not "does not answer" for all of them (`VMCenter.proxyProblem`). That check is the Proxies
+section's without what a machine does not use (`VMCenter.checkProxy`): one tunnel instead of
+three (the list shows no latency), and nothing asked of a SOCKS5 proxy's UDP, which never leaves
+a machine — a start no longer waits up to nine seconds for an association nobody uses.
+
+**A disk that is nearly full** is said before the machine is started (`VMStartRoom`): with less
+than 2 GB free a machine is not started — its macOS writes from its first second, to a disk that
+is a file on this Mac's, and writes that fail are a failing disk to it — and a machine not made
+yet, on a volume that cannot clone a file (not APFS), is not started where there is no room for a
+whole copy of the base's disk: said with the numbers, not after minutes of copying. The room is
+the larger of the system's two figures (the one "for important usage" is zero on volumes that
+have no such thing); where the system gives none, nothing is refused.
 
 ### A machine's identity
 
@@ -386,9 +435,12 @@ What holds it together, in `MachineRunner` and `VMSavedState`:
   machine the framework still refuses is shut down when closed, as before, and the row says so
   (`.unsupported`).
 - **Nothing is lost on the way.** A save that fails (the machine cannot be paused, the framework
-  says no) is no reason to lose what is open in it: the machine goes on and is shut down as a Mac
-  is. "Shut Down macOS" in the row's menu and in the window's is a real shutdown; "Start Anew…"
-  gives a sleeping machine's state up, after a question.
+  says no, the disk has no room for the state) is no reason to lose what is open in it: the
+  machine goes on and is shut down as a Mac is — and says so (`notKept`): the row reads
+  "shutting down…" from that moment, not "saving…", and keeps why until the machine's next start —
+  a full disk by name, anything else with the system's words. A state saved whose note could not
+  be written is removed and said the same way. "Shut Down macOS" in the row's menu and in the
+  window's is a real shutdown; "Start Anew…" gives a sleeping machine's state up, after a question.
 - **Closed while it wakes.** For the seconds a wake takes (the state read, then the machine
   resumed) it can be neither paused nor saved. A close in that time — its window, the row's Close,
   Lock, Quit, this Mac's logout or shutdown — is kept for when it is awake, and the machine is put
@@ -641,6 +693,12 @@ What is checked where:
 - `Tests/BrowserCoreTests/VirtualMachineTests.swift` (Linux and macOS): the profile list's format
   and its tolerance of a later version's, validation, the download's decisions for every answer a
   server gives, the settings file's text and what it refuses, the helper protocol's round trip.
+- `Tests/BrowserCoreTests/VMFailureTests.swift` (Linux and macOS): the kind of a failure for each
+  of the system's errors the app has words for, a full disk found under another error, the
+  helper's own failures, the events that carry them, and the room a start needs — on a volume
+  that clones and on one that cannot. The self-test checks that every kind has its words in the
+  interface's language, and the start's proxy check against its loopback proxies (one tunnel, no
+  UDP asked; a rejected login said as that).
 - `Tests/BrowserCoreTests/VMImageFetchTests.swift` (Linux and macOS): **the download itself**,
   against a file server on loopback that speaks ranges as Apple's does and can be told to be
   worse: the file whole over several connections (and no more than it was given), a file smaller
@@ -681,7 +739,9 @@ What is checked where:
 4. A new machine with a proxy: its first start clones the base in seconds; the guest reaches the
    web only through the proxy (its address at a "what is my IP" page is the proxy's), the time zone
    and Safari's language are the proxy's country's.
-5. The same machine with the proxy turned off at the provider: it is not started, and says why.
+5. The same machine with the proxy turned off at the provider: it is not started, and says why —
+   what the check found (a wrong password in the proxy's entry reads as a rejected login, not as
+   a proxy that does not answer).
 6. Shut Down closes the guest within some seconds; Lock with a machine running waits for it.
 7. "What sites see" in the machine's Safari, beside a real Mac's: the first measurement of the
    paravirtual GPU's fingerprint.

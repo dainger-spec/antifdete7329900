@@ -241,10 +241,11 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
             try prepareMachine()
             guard let hardwareModel = VZMacHardwareModel(dataRepresentation: try Data(contentsOf: files.hardwareModel)),
                   hardwareModel.isSupported else {
-                HelperIO.fail("This machine's macOS cannot run on this Mac (its virtual Mac model is not supported here).")
+                HelperIO.fail("This machine's macOS cannot run on this Mac (its virtual Mac model is not supported here).",
+                              kind: .notSupportedHere)
             }
             guard let identifier = VZMacMachineIdentifier(dataRepresentation: try Data(contentsOf: files.machineIdentifier)) else {
-                HelperIO.fail("This machine's identifier cannot be read.")
+                HelperIO.fail("This machine's identifier cannot be read.", kind: .files)
             }
             // A request the guest made before, and never took: not this start's. The same for
             // the word that says the machine was woken.
@@ -316,11 +317,11 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     private func prepareMachine() throws {
         guard !files.isComplete else { return }
         guard let basePath = request.baseDirectory else {
-            throw CocoaError(.fileNoSuchFile, userInfo: [NSLocalizedDescriptionKey: "This machine has no disk, and no base system to make it from."])
+            throw VMFailure(.noBase, "This machine has no disk, and no base system to make it from.")
         }
         let base = VMLibrary.MachineFiles(directory: URL(fileURLWithPath: basePath, isDirectory: true))
         guard base.isComplete else {
-            throw CocoaError(.fileNoSuchFile, userInfo: [NSLocalizedDescriptionKey: "The base system is not installed."])
+            throw VMFailure(.noBase, "The base system is not installed.")
         }
         let manager = FileManager.default
         try manager.createDirectory(at: files.share, withIntermediateDirectories: true)
@@ -793,23 +794,27 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         stopping = true
         haltCover()
         window?.title = request.windowTitle + " — " + text("sleeping", "saving…")
-        let giveUp: (String) -> Void = { [weak self] why in
+        let giveUp: (String, Error?) -> Void = { [weak self] why, error in
             HelperIO.log("sleep: the state was not saved (\(why)); the machine is shut down instead")
             guard let self, !self.finished else { return }
+            // Said to the app at once: the row then says the machine is shutting down, not being
+            // saved, and afterwards why it was not kept — a full disk above all.
+            HelperIO.emit(VMHelperEvent(kind: .notKept, message: error.map { ($0 as NSError).localizedDescription },
+                                        failure: error.flatMap { VMFailureKind.of($0) }?.rawValue))
             self.removeSavedState()
             self.canKeepState = false
             self.stopping = false
             guard machine.state == .paused, machine.canResume else { return self.shutDown(asking: false) }
             machine.resume { _ in DispatchQueue.main.async { self.shutDown(asking: false) } }
         }
-        guard machine.canPause else { return giveUp("the machine cannot be paused now") }
+        guard machine.canPause else { return giveUp("the machine cannot be paused now", nil) }
         machine.pause { result in
             DispatchQueue.main.async {
-                if case .failure(let error) = result { return giveUp(Self.kind(of: error)) }
+                if case .failure(let error) = result { return giveUp(Self.kind(of: error), error) }
                 self.removeSavedState()
                 machine.saveMachineStateTo(url: self.files.state) { error in
                     DispatchQueue.main.async {
-                        if let error { return giveUp(Self.kind(of: error)) }
+                        if let error { return giveUp(Self.kind(of: error), error) }
                         guard machine.canStop else { self.finishAsleep() }
                         machine.stop { _ in DispatchQueue.main.async { self.finishAsleep() } }
                     }
@@ -826,13 +831,27 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         trafficTimer?.invalidate()
         network?.stop()
         var asleep = false
+        var problem: Error?
         if let stamp = request.stateStamp, let mark = VMSavedState.mark(ofDisk: files.disk),
            FileManager.default.fileExists(atPath: files.state.path) {
             let names = (network?.knownNames() ?? []).map { VMSavedState.Name(name: $0.name, address: $0.address) }
             let info = VMSavedState(stamp: stamp, diskLength: mark.length, diskModified: mark.modified, names: names)
-            asleep = (try? info.write(to: files.stateInfo)) != nil
+            do {
+                try info.write(to: files.stateInfo)
+                asleep = true
+            } catch {
+                problem = error
+            }
         }
-        if !asleep { removeSavedState() }
+        if !asleep {
+            // A state without its note is nobody's: removed — and said, so that the machine's next
+            // start, an ordinary one, is not a surprise.
+            removeSavedState()
+            let why = problem.map { Self.kind(of: $0) } ?? "nothing to write it from"
+            HelperIO.log("sleep: the saved state's note was not written (\(why)); the state is not kept")
+            HelperIO.emit(VMHelperEvent(kind: .notKept, message: problem.map { ($0 as NSError).localizedDescription },
+                                        failure: problem.flatMap { VMFailureKind.of($0) }?.rawValue))
+        }
         try? FileManager.default.removeItem(at: shutdownRequestURL)
         HelperIO.emit(VMHelperEvent(kind: .stopped, asleep: asleep))
         exit(0)

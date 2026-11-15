@@ -4367,6 +4367,19 @@ final class SelfTest {
               wrong.isEmpty, wrong.joined(separator: " | "))
         check("errors in the person's language: the sync messages are the interface's",
               !L("sync.error.failed").hasPrefix("sync.") && !L("sync.error.profilesRunning").hasPrefix("sync."))
+        // A virtual machine's failures (`VMFailureKind`): each kind has words of the interface's,
+        // with the system's own kept under them as a technical detail; a failure of no kind the
+        // app knows is the system's words alone; a state that was not kept names a full disk.
+        let wordless = VMFailureKind.allCases.map(\.rawValue).filter { L("vm.failure.\($0)").hasPrefix("vm.") }
+        let full = VMCenter.failureText(kind: .noRoom, message: " No space left on device\n")
+        check("errors in the person's language: every kind of a virtual machine's failure has words (\(VMFailureKind.allCases.count)), with the system's own under them",
+              wordless.isEmpty && full == L("vm.failure.noRoom") + "\n" + String(format: L("vm.row.trouble.detail"), "No space left on device")
+                  && VMCenter.failureText(kind: .limit, message: nil) == L("vm.failure.limit")
+                  && VMCenter.failureText(kind: nil, message: "x") == "x" && VMCenter.failureText(kind: nil, message: nil) == L("vm.error.unknown")
+                  && VMCenter.notKeptText(kind: .noRoom, message: "x") == L("vm.row.notKept.noRoom")
+                  && VMCenter.notKeptText(kind: nil, message: nil) == L("vm.row.notKept")
+                  && VMCenter.text(of: VMStartRoom.Problem.full(needed: 2 << 30, free: 1 << 30)).contains(VMText.bytes(Int64(1) << 30)),
+              wordless.isEmpty ? full : wordless.joined(separator: ", "))
     }
 
     /// Dates the app's own windows show are in the interface's language (`Localization.locale`,

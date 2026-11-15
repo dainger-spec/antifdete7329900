@@ -126,7 +126,8 @@ enum MachineCatalog {
                     HelperIO.fail(error)
                 case .success(let image):
                     guard let requirements = image.mostFeaturefulSupportedConfiguration, requirements.hardwareModel.isSupported else {
-                        HelperIO.fail("The macOS Apple offers now cannot run in a virtual machine on this Mac. Update this Mac's macOS and try again.")
+                        HelperIO.fail("The macOS Apple offers now cannot run in a virtual machine on this Mac. Update this Mac's macOS and try again.",
+                                      kind: .nothingOffered)
                     }
                     HelperIO.emit(VMHelperEvent(kind: .catalog, image: restoreImage(image)))
                     exit(0)
@@ -146,7 +147,7 @@ enum MachineCatalog {
                     HelperIO.fail(error)
                 case .success(let image):
                     guard let requirements = image.mostFeaturefulSupportedConfiguration, requirements.hardwareModel.isSupported else {
-                        HelperIO.fail("This restore image's macOS cannot run in a virtual machine on this Mac.")
+                        HelperIO.fail("This restore image's macOS cannot run in a virtual machine on this Mac.", kind: .notSupportedHere)
                     }
                     HelperIO.emit(VMHelperEvent(kind: .catalog, image: restoreImage(image)))
                     exit(0)
@@ -194,7 +195,7 @@ final class MachineInstaller {
 
     private func install(_ image: VZMacOSRestoreImage, from imageURL: URL, into files: VMLibrary.MachineFiles) {
         guard let requirements = image.mostFeaturefulSupportedConfiguration, requirements.hardwareModel.isSupported else {
-            HelperIO.fail("This restore image's macOS cannot run in a virtual machine on this Mac.")
+            HelperIO.fail("This restore image's macOS cannot run in a virtual machine on this Mac.", kind: .notSupportedHere)
         }
         do {
             try FileManager.default.createDirectory(at: files.directory, withIntermediateDirectories: true)
