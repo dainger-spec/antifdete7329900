@@ -164,14 +164,15 @@ run's report holds the figures. None is in "What it measured" above: nothing her
   5,000 files (modelled on Linux: 0.66 s per 5,000, 2.5 s per 20,000); the unseal that is left is
   the files' own creation and decryption. *At a stop* in Safari's window the data was archived at
   each of the three attempts and once more for the forced seal — four archives of the same data,
-  every stop (above: "every seal was forced"). An attempt now archives again only what changed
-  since the last archive read it (`DirectoryStamp`: each entry's size, times and number, looked at
-  before it is read; an archive that met anything changed in its last half second is not relied
-  on). Expected: one archive for a stop whose data WebKit leaves alone from half a second before
-  the first attempt on, two when it wrote in that half second and not after; the quit's line says
-  how many were made and how many attempts found the data unchanged. The waits between the attempts are as they were (1 + 1 + 2 s):
-  a stop still takes at least those four seconds, and what is saved is what each archive costs,
-  which grows with the profile's data — on the check's nearly empty profiles, next to nothing.
+  every stop (above: "every seal was forced"). An attempt now archives the data again only when
+  something of it changed since the last archive read it (`DirectoryStamp`: each entry's size,
+  times and number, looked at before it is read; an archive that met anything changed in its last
+  half second is not relied on). Expected: one archive for a stop whose data WebKit leaves alone
+  from half a second before the first attempt on, two when it wrote in that half second and not
+  after; the quit's line says how many were made and how many attempts found the data unchanged.
+  The waits between the attempts are as they were (1 + 1 + 2 s): a stop still takes at least
+  those four seconds, and what is saved is what each archive costs, which grows with the
+  profile's data — on the check's nearly empty profiles, next to nothing.
 
 One more figure is only measured, nothing changed for it: **Safari's home** of a profile is
 restored before its process starts and sealed after it ends on the app's main thread
