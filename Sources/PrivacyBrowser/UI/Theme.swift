@@ -518,6 +518,59 @@ struct IconBadge: View {
     }
 }
 
+/// An empty state on the horizon in small (the lock screen's order, `LockScreen`): the title and a
+/// sentence above the light, what to do under it. `small`: a quieter one, for a state that passes
+/// (nothing found). The light is decoration: hidden from VoiceOver, never in the way of a click.
+struct LumenEmptyState<Actions: View>: View {
+    let title: String
+    let text: String
+    var small = false
+    @ViewBuilder let actions: () -> Actions
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 8) {
+                Text(title)
+                    .font(.system(size: small ? 20 : 24, weight: .bold))
+                    .tracking(small ? -0.4 : -0.5)
+                    .foregroundStyle(Theme.textPrimary)
+                    .multilineTextAlignment(.center)
+                    .accessibilityAddTraits(.isHeader)
+                Text(text)
+                    .font(.system(size: small ? 13 : 14))
+                    .lineSpacing(3)
+                    .foregroundStyle(Theme.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: 480)
+            .background(alignment: .bottom) {
+                // The picture's middle — the rim's top — 26 pt under the sentence; it fades to
+                // nothing before its own edges, so that no edge of it shows on the window's light.
+                Canvas(opaque: false, rendersAsynchronously: false) { context, size in
+                    context.withCGContext { cg in
+                        LumenHorizon.draw(in: cg, width: size.width, height: size.height, haze: true,
+                                          placed: LumenHorizon.Geometry(width: size.width, top: size.height / 2,
+                                                                        radius: small ? 1000 : 1150),
+                                          lift: false)
+                    }
+                }
+                .frame(width: small ? 520 : 680, height: 260)
+                .mask(EllipticalGradient(colors: [.black, .black, .clear], center: .center,
+                                         startRadiusFraction: 0, endRadiusFraction: 0.5))
+                .opacity(small ? 0.6 : 0.9)
+                .offset(y: 130 + 26)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+            actions()
+                .padding(.top, 26 + 40)
+        }
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
 /// A quiet empty state: a symbol over a line or two of text, centred in the room it is given.
 struct LumenEmptyHint: View {
     let symbol: String

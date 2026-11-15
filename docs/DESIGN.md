@@ -46,6 +46,8 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
 - Switches and checkboxes: `.lumenSwitch`, `.lumenCheckbox` (a real Toggle underneath for
   VoiceOver). Segmented choices: `LumenSegmented` — give it an accessibility label when it has a
   title. No system segmented controls.
+- Empty states: `LumenEmptyState` — the horizon in small, the title and a sentence above its light, what
+  to do under it (the lock screen's order); `small` for a state that passes (nothing found).
 - Fields: `lumenField(...)`; search: `LumenSearchField` (with its ⌘K key cap in the windows that
   have the palette). Keys: `KeyCap`.
 - A box that asks for the person: `LumenBanner(tone: .danger | .warning)` above a list (the proxy

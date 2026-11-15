@@ -2982,40 +2982,28 @@ private struct EmptyProfilesView: View {
     var onProxies: (() -> Void)?
 
     var body: some View {
-        VStack(spacing: 0) {
-            LumenGlyph(size: 44, color: Theme.textTertiary.opacity(0.55))
-                .padding(.bottom, 20)
-            Text(L("profiles.empty.title"))
-                .font(.lumenSheetTitle)
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.bottom, 6)
-            Text(L("profiles.empty.subtitle"))
-                .font(.lumenBody)
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 320)
-                .padding(.bottom, 20)
-            Button(action: onNew) { Label(L("profiles.action.new"), systemImage: "plus") }
-                .buttonStyle(.lumenPrimary)
-            HStack(spacing: 4) {
-                Button(L("profiles.menu.import"), action: onImport)
-                    .buttonStyle(.lumenGhost)
-                if let onProxies {
-                    Button(L("profiles.empty.proxies"), action: onProxies)
+        LumenEmptyState(title: L("profiles.empty.title"), text: L("profiles.empty.subtitle")) {
+            VStack(spacing: 0) {
+                Button(action: onNew) { Label(L("profiles.action.new"), systemImage: "plus") }
+                    .buttonStyle(.lumenPrimary)
+                HStack(spacing: 4) {
+                    Button(L("profiles.menu.import"), action: onImport)
                         .buttonStyle(.lumenGhost)
+                    if let onProxies {
+                        Button(L("profiles.empty.proxies"), action: onProxies)
+                            .buttonStyle(.lumenGhost)
+                    }
                 }
+                .padding(.top, 10)
+                Text(L(onProxies == nil ? "profiles.empty.hint.import" : "profiles.empty.hint"))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textTertiary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 380)
+                    .padding(.top, 14)
             }
-            .padding(.top, 10)
-            Text(L(onProxies == nil ? "profiles.empty.hint.import" : "profiles.empty.hint"))
-                .font(.lumenSecondary)
-                .foregroundStyle(Theme.textTertiary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 380)
-                .padding(.top, 14)
         }
-        .padding(40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -3026,22 +3014,12 @@ private struct NoMatchesView: View {
     let onShowAll: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            Text(L("profiles.noMatches"))
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.bottom, 8)
-            Text(query.isEmpty ? L("profiles.noMatches.filter") : String(format: L("profiles.noMatches.query"), query))
-                .font(.lumenBody)
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 340)
-                .padding(.bottom, 18)
+        LumenEmptyState(title: L("profiles.noMatches"),
+                        text: query.isEmpty ? L("profiles.noMatches.filter") : String(format: L("profiles.noMatches.query"), query),
+                        small: true) {
             Button(L("profiles.showAll"), action: onShowAll)
                 .buttonStyle(.lumenSecondary)
         }
-        .padding(40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .contain)
     }
 }
