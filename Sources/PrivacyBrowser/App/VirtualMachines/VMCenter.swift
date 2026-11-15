@@ -1,6 +1,7 @@
 import BrowserCore
 import Combine
 import Foundation
+import MachineCover
 import os
 
 /// The virtual machines of the unlocked vault (docs/VM.md): the profiles that are whole Macs, the
@@ -813,8 +814,11 @@ final class VMCenter: ObservableObject {
             }
             let helper = VMHelperProcess(onEvent: { [weak self] event in self?.take(event, of: id) },
                                          onEnd: { [weak self] failure in self?.ended(id, failure: failure) })
-            try helper.start(VMHelperRequest.run(profile: profile, library: library,
-                                                 hostCores: ProcessInfo.processInfo.activeProcessorCount, texts: Self.helperTexts))
+            var request = VMHelperRequest.run(profile: profile, library: library,
+                                              hostCores: ProcessInfo.processInfo.activeProcessorCount, texts: Self.helperTexts)
+            // The app's own "animations off": the start's cover moves nothing, as under Reduce Motion.
+            if !AppearancePreferences.animationsEnabled { request.reducesMotion = true }
+            try helper.start(request)
             helpers[id] = helper
             var updated = list
             updated.markLaunched(id)
@@ -1055,9 +1059,20 @@ final class VMCenter: ObservableObject {
     static var helperTexts: [String: String] {
         ["stop": L("vm.window.stop"), "stopQuestion": L("vm.window.stopQuestion"), "stopDetail": L("vm.window.stopDetail"),
          "stopNow": L("vm.window.stopNow"), "cancel": L("common.cancel"), "stopping": L("vm.window.stopping"),
-         "sleep": L("vm.window.sleep"), "sleeping": L("vm.window.sleeping"), "opening": L("vm.window.opening"),
+         "sleep": L("vm.window.sleep"), "sleeping": L("vm.window.sleeping"),
          "guestFullScreen": L("vm.window.guestFullScreen"), "nextStartQuestion": L("vm.window.nextStartQuestion"),
          "nextStartDetail": L("vm.window.nextStartDetail"), "keep": L("vm.window.keep")]
             .merging(VMNetworkTrouble.allCases.map { ("trouble." + $0.rawValue, L("vm.window.trouble")) }) { first, _ in first }
+            .merging(coverTexts) { first, _ in first }
+    }
+
+    /// The words of the cover over a machine's start (MachineCover), as its request carries them.
+    static var coverTexts: [String: String] {
+        [MachineCoverTexts.captionKey: L("vm.cover.caption"), MachineCoverTexts.key(.boot): L("vm.cover.boot"),
+         MachineCoverTexts.key(.signin): L("vm.cover.signin"), MachineCoverTexts.key(.locale): L("vm.cover.locale"),
+         MachineCoverTexts.key(.look): L("vm.cover.look"), MachineCoverTexts.key(.wallpaper): L("vm.cover.wallpaper"),
+         MachineCoverTexts.key(.safari): L("vm.cover.safari"), MachineCoverTexts.longerKey: L("vm.cover.longer"),
+         MachineCoverTexts.showKey: L("vm.cover.show"), MachineCoverTexts.timedOutKey: L("vm.cover.timedOut"),
+         MachineCoverTexts.labelKey: L("vm.cover.label")]
     }
 }
