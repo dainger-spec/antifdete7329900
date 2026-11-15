@@ -2349,7 +2349,7 @@
 "contract.account.checked" = "Rights checked %@. Renew early — the new period starts where the current one ends, no days are lost.";
 "contract.account.checked.member" = "Rights checked %1$@. The team owner manages the plan — %2$@.";
 "contract.account.checked.member.noEmail" = "Rights checked %@. The team owner manages the plan.";
-"contract.account.trial" = "Everything in Lumen. When the period ends, profiles open for export only — nothing is deleted.";
+"contract.account.trial" = "Everything in Lumen except sync, camera substitution and virtual machines. When the period ends, profiles open for export only — nothing is deleted.";
 "contract.account.period_ended" = "Nothing is deleted: after renewing, everything opens again on this Mac.";
 "contract.account.profiles" = "%1$@ here, %2$@ on other Macs. The limit is shared by all Macs; the server knows only how many profiles each Mac has.";
 "contract.account.profiles.left" = "%@ more possible";
