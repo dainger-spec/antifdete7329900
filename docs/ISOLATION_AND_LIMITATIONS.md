@@ -865,7 +865,11 @@ anything is written — into a file only its owner can read (0600).
 **One proxy, one line.** Wherever one proxy is entered — the profile editor's *New*, the list's
 *Add* and *Edit* — it is one field, read by the same parser as a line of Import
 (`ProxyListImport.readField`): `host:port:user:pass`, `user:pass@host:port`,
-`scheme://user:pass@host:port`, `host:port`. A string the field takes is one Import takes, and a
+`scheme://user:pass@host:port`, `host:port`. A line that does not read as written is read once
+more as a table's row (`ProxyListImport.columns`): its parts separated by tabs, spaces, `;`, `,`
+or `|`, the type as a word of its own, the IP-change link as a last column — never a line that
+reads as written, so a password with one of those characters stays a password, and never two
+proxies on one line as one with a login (unit-tested, `ProxyImportFormatsTests`). A string the field takes is one Import takes, and a
 proxy written back (`ProxyListImport.line(for:)`, also what Export writes) reads back as the same
 proxy (unit-tested). The type comes from the scheme; without one it is **not known** — never
 taken from a default — until a check finds it (both handshakes are tried, `ProxyProbe`), or, while

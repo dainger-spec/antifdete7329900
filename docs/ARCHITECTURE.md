@@ -415,7 +415,10 @@ session's data store is gone, or the tab has a dialog waiting. ISOLATION_AND_LIM
 ProxyListView (the Profiles window's Proxies section, its sidebar) ── ProxyListModel (AppModel.proxyList, made at unlock, dropped at lock)
    │  unlock    ProxyList.takeIn(profileProxies:) once: the profiles' own proxies become entries
    │  Import…   ProxyImportView: ProxyListImport.read(text) → report per line → ProxyList.add
-   │            (dedupe by host:port:user, limit; a line without a scheme: type unknown until checked)
+   │            (dedupe by host:port:user, limit; a line without a scheme: type unknown until checked;
+   │            a line not read as written is read once more as a table's row, ProxyListImport.columns)
+   │  shown     ProxyListFilter (all | working | failing | unchecked | unused) and the search, then
+   │            ProxyListOrder (a column title's click: name | country | latency | state; kept in defaults)
    │  Check     ProxyChecker.checkAll: ≤ 8 at a time, each
    │              1. ProxyProbe.run (on a thread, sockets only to the proxy): resolve → connect →
    │                 SOCKS5 and HTTP CONNECT handshakes at once → login → tunnel (target named to the
@@ -431,6 +434,8 @@ ProxyListView (the Profiles window's Proxies section, its sidebar) ── ProxyL
    │  Export…   ProxyExportView: plaintext warning → ProxyList.exportText → SecureFile.writeOwnerOnly (0600)
    │  Assign…   ProxyAssignView: ProxyList.rotation(of: proxies, over: profiles) → AppModel.assignProxies
    │            → ProfileRepository.assign → ProfileConfiguration.assigning (savingEdit of the proxy alone)
+   │  Replace…  a proxy with profiles on it: ProxyList.replacements (working, of the profiles' country,
+   │            unused first, faster first) → ProxyAssignView with those profiles and proxies ticked
    │  report    ProxyReport (ProxyReportView): the state, the step that failed, in words, with advice
    └─ every change saved at once (proxies.bin); check results when the run ends or is stopped
 
@@ -446,10 +451,12 @@ ProfileManager.launch ── a proxy: ProxyProbe (one tunnel, to the start page'
    ProxyListModel.checkProfileProxy; Show in Proxies)
 
 ProfilesScreen ── ProfileSelection (click / ⌘-click / ⇧-click) ── ProfileBulkBar (2 or more selected)
-   └─ ProfileActions.launchSeveral / stopSeveral / warmUpSeveral (hook) / assignProxies / deleteSeveral
-
-ProfilesScreen ── ProfileSelection (click / ⌘-click / ⇧-click) ── ProfileBulkBar (2 or more selected)
-   └─ ProfileActions.launchSeveral / stopSeveral / warmUpSeveral (hook) / assignProxies / deleteSeveral
+   │  the same from a right click on a selected row (SelectionMenuItems) and the selection's inspector
+   ├─ ProfileActions.launchSeveral / stopSeveral / warmUpSeveral (hook) / assignProxies / deleteSeveral
+   ├─ ProfileActions.tagSeveral → ProfileTagsView → AppModel.changeTags → ProfileRepository.changeTags
+   │  (ProfileTags.changing per profile, saved as savingEdit; unreadable settings left alone and said)
+   └─ rows: ProfileFilter (collections, tags, .proxyFailing) and the search (name, tags, notes, exit),
+      then ProfileListOrder inside each group (created | name | lastUsed; kept in defaults)
 ```
 
 - The list (`ProxyList`, BrowserCore) is a vault-level document like `settings.bin`, under its own
