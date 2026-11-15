@@ -172,6 +172,9 @@ Mac ↔ iPhone на тестовом сервере — в конце.
     (`SyncRead.pull`, затем сессии, затем `SyncRead.applyCookies`): сессия, сделанная первой синхронизацией
     или кнопкой «Вернуть удалённые профили», получает куки Mac до первого открытия, а не со следующим
     прогоном.
+27. **Face ID** для ключа хранилища — с `NSFaceIDUsageDescription` (ru в `project.yml` и
+    `ru.lproj/InfoPlist.strings`, en в `en.lproj/InfoPlist.strings`); без неё iOS не пускает приложение к
+    Face ID и спрашивает код.
 
 ## Итог первой версии (12 ноября 2026)
 

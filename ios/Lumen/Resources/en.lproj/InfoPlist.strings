@@ -1,0 +1,3 @@
+/* Lumen for iPhone: the English of Info.plist's texts (the Russian is in project.yml). */
+
+"NSFaceIDUsageDescription" = "Face ID opens the key of your Lumen for Mac vault kept on this iPhone.";
