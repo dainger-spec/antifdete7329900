@@ -262,6 +262,8 @@ public enum VMSetupState: Equatable, Sendable {
 /// at the next sign-in — a machine with instant wake is shut down once for it, as for a layout.
 public enum VMGuestTools {
     public static let version = 12
+    /// The first tools whose script says which step it is at and when the settings are in.
+    public static let saysWhenReady = 13
     /// From this version on an installed boot script takes a newer copy of itself at a machine's
     /// start: a base with tools this new needs nothing done to it for a later version's settings.
     public static let updatesItselfFrom = 2

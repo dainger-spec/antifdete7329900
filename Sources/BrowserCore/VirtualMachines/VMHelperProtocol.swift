@@ -91,9 +91,15 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
     /// The machine is shown as a browser: its guest's front window (Safari) is put full screen
     /// once its macOS has started, and the window covers the desktop until then.
     public var browserMode: Bool?
+    /// The settings a profile's machine starts with (`VMGuestSettings.revision`), as its guest's
+    /// boot script names them back once they are in place (`VMGuestStatus.readyRevision`): until
+    /// then a start's window keeps the machine's screen behind a cover (`VMStartCover`). Nil: no
+    /// cover — the base system, whose window is for its setup.
+    public var settingsRevision: String?
     /// The window's title, and its few words, in the person's language (the helper has no strings
-    /// of its own): `stop`, `stopQuestion`, `stopDetail`, `stopNow`, `cancel`, `stopping` — and
-    /// `hint`, a line shown above the machine's screen (what is left to do in the base).
+    /// of its own): `stop`, `stopQuestion`, `stopDetail`, `stopNow`, `cancel`, `stopping`, the
+    /// start's cover's (`cover.…`) — and `hint`, a line shown above the machine's screen (what is
+    /// left to do in the base).
     public var windowTitle: String
     public var texts: [String: String]
 
@@ -102,7 +108,7 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
                 display: Display = Display(VMDisplay.standard), macAddress: String? = nil, network: Network = .closed,
                 proxy: ProxySettings? = nil, blockedHosts: [String] = [], sound: Bool = true, fullScreen: Bool? = nil,
                 keepsState: Bool? = nil, stateStamp: String? = nil, browserMode: Bool? = nil,
-                windowTitle: String = "", texts: [String: String] = [:]) {
+                settingsRevision: String? = nil, windowTitle: String = "", texts: [String: String] = [:]) {
         self.mode = mode
         self.restoreImagePath = restoreImagePath
         self.machineDirectory = machineDirectory
@@ -120,6 +126,7 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
         self.keepsState = keepsState
         self.stateStamp = stateStamp
         self.browserMode = browserMode
+        self.settingsRevision = settingsRevision
         self.windowTitle = windowTitle
         self.texts = texts
     }
@@ -137,7 +144,9 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
                                       sound: profile.soundEnabled, fullScreen: profile.startsFullScreen ? true : nil,
                                       keepsState: profile.instantWake ? true : nil, browserMode: profile.browserMode ? true : nil,
                                       windowTitle: profile.name, texts: texts)
-        request.stateStamp = request.stamp(settingsRevision: VMGuestSettings(profile: profile).revision)
+        let revision = VMGuestSettings(profile: profile).revision
+        request.stateStamp = request.stamp(settingsRevision: revision)
+        request.settingsRevision = revision
         return request
     }
 

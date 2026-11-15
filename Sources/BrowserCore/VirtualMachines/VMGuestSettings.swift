@@ -237,6 +237,12 @@ public struct VMGuestStatus: Equatable, Sendable {
     /// What came of browser mode's menu bar (tools 12): "next" — hidden, or given back, at this
     /// start, which macOS takes at the next sign-in. Nil: nothing of it was changed.
     public var menuBarState: String?
+    /// Which step of the start the script is at (tools 13): what the cover over the machine's
+    /// screen says. Nil: an older script, or a word that is no step.
+    public var stage: VMSetupStage?
+    /// The settings (`VMGuestSettings.revision`) the script has put in place at this start —
+    /// written before Safari is opened, which then starts in them (tools 13): the cover goes.
+    public var readyRevision: String?
 
     /// The guest could not put Lumen's picture on its desktop.
     public var wallpaperFailed: Bool { wallpaperState == "failed" }
@@ -313,6 +319,8 @@ public struct VMGuestStatus: Equatable, Sendable {
         localeNow = values["LUMEN_LOCALE_NOW"]
         keyboardState = values["LUMEN_KEYBOARD_STATE"]
         menuBarState = values["LUMEN_MENU_BAR_STATE"]
+        stage = values["LUMEN_STAGE"].flatMap(VMSetupStage.init(rawValue:))
+        readyRevision = values["LUMEN_READY_REVISION"]
         setupDone = values["LUMEN_SETUP_DONE"] == "1"
     }
 }
