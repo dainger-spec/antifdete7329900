@@ -8,13 +8,24 @@ public struct Scenario: Codable, Equatable, Sendable, Identifiable {
     public var source: String
     public var createdAt: Date
     public var updatedAt: Date
+    /// The folder it is listed in; nil: none. Written by a later version than the first
+    /// scenarios: an older file has none, and an older version leaves it out.
+    public var folder: String?
+    /// A line about it, in the person's words.
+    public var note: String?
+    /// The template it was made from (`ScenarioTemplate.id`).
+    public var templateID: String?
 
-    public init(id: UUID = UUID(), name: String, source: String, createdAt: Date = Date(), updatedAt: Date? = nil) {
+    public init(id: UUID = UUID(), name: String, source: String, createdAt: Date = Date(), updatedAt: Date? = nil,
+                folder: String? = nil, note: String? = nil, templateID: String? = nil) {
         self.id = id
         self.name = name
         self.source = source
         self.createdAt = createdAt
         self.updatedAt = updatedAt ?? createdAt
+        self.folder = folder
+        self.note = note
+        self.templateID = templateID
     }
 }
 
@@ -41,6 +52,16 @@ public struct ScenarioLibrary: Codable, Equatable, Sendable {
     }
 
     public func scenario(_ id: UUID) -> Scenario? { scenarios.first { $0.id == id } }
+
+    /// The folders in use, by name.
+    public var folders: [String] {
+        Array(Set(scenarios.compactMap { $0.folder?.isEmpty == false ? $0.folder : nil })).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    /// A copy of `scenario` under a free name ("name 2"), made now.
+    public func copy(of scenario: Scenario, at date: Date = Date()) -> Scenario {
+        Scenario(name: freeName(scenario.name), source: scenario.source, createdAt: date, folder: scenario.folder, note: scenario.note, templateID: scenario.templateID)
+    }
 
     /// Adds `scenario`, or replaces the one with its id (its time of change moved on).
     public mutating func put(_ scenario: Scenario, at date: Date = Date()) {

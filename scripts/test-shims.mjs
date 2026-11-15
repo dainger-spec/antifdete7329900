@@ -2047,6 +2047,113 @@ test('scenario: what the script returns is the run\'s result, as JSON; nothing r
   assert.equal((await scenario('return 10n;')).message, '"10"');
 });
 
+// The scenario templates (ScenarioTemplates.swift): each script is real JavaScript of the scenario's
+// own commands. Run here against a page that records what it is asked: a script that does not
+// parse, calls a command there is none of, or leaves its work undone fails.
+const templatesSwift = readFileSync(new URL('../Sources/BrowserCore/Automation/ScenarioTemplates.swift', import.meta.url), 'utf8');
+const templateScripts = Object.fromEntries(templatesSwift.split('ScenarioTemplate(id: "').slice(1).map((part) =>
+  [part.split('"')[0], part.split('script: #"""\n')[1].split('"""#')[0]]));
+const PAGE_COMMANDS = ['goto', 'back', 'forward', 'reload', 'waitForLoadState', 'waitFor', 'waitForURL', 'click', 'dblclick', 'hover', 'selectOption',
+  'type', 'press', 'scroll', 'textContent', 'innerText', 'inputValue', 'getAttribute', 'count', 'isVisible', 'url', 'title', 'screenshot', 'pause', 'evaluate'];
+
+async function runTemplate(id, settings, { params = {}, answers = {} } = {}) {
+  let source = templateScripts[id].replace(/\{\{([A-Za-z0-9_.]+)\}\}/g, (_, key) => key);
+  for (const [name, value] of Object.entries(settings)) {
+    const line = new RegExp('^const ' + name + ' = .+?;( // .*)?$', 'm');
+    assert.ok(line.test(source), `${id}: no setting ${name}`);
+    source = source.replace(line, (_, label) => `const ${name} = ${JSON.stringify(value)};${label || ''}`);
+  }
+  const calls = [];
+  const page = {};
+  for (const name of PAGE_COMMANDS) {
+    page[name] = async (...args) => {
+      calls.push([name, ...args.filter((a) => typeof a !== 'function')]);
+      const answer = answers[name];
+      return typeof answer === 'function' ? answer(...args) : answer;
+    };
+  }
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const run = new AsyncFunction('page', 'params', 'log', 'sleep', source);
+  const result = await run(page, params, () => {}, async (ms) => { calls.push(['sleep', ms]); });
+  return { result, calls, names: calls.map((c) => c[0]) };
+}
+
+test('scenario templates: every one is there, parses, and names only commands a scenario has', async () => {
+  assert.deepEqual(Object.keys(templateScripts).sort(), ['collect', 'cookie', 'feed', 'form', 'list', 'opens', 'pages', 'post', 'screens', 'search', 'signedin', 'signin']);
+  for (const [id, script] of Object.entries(templateScripts)) {
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+    assert.doesNotThrow(() => new AsyncFunction('page', 'params', 'log', 'sleep', script), `${id} parses`);
+    for (const [, name] of script.matchAll(/\bpage\.([A-Za-z]+)\(/g)) assert.ok(PAGE_COMMANDS.includes(name), `${id}: page.${name}`);
+    // Nothing a page could find: a template never writes into the page.
+    assert.ok(!/setAttribute|innerHTML|\.value\s*=|dispatchEvent|world: 'page'/.test(script), `${id} writes nothing into the page`);
+    // Its settings are single lines the form can read, each with what it is.
+    const head = script.split('\n\n')[0].split('\n').slice(1);
+    for (const line of head) assert.match(line, /^const [A-Z][A-Z0-9_]* = .+; \/\/ \{\{label\.[A-Za-z]+\}\}$/, `${id}: ${line}`);
+  }
+});
+
+test('scenario templates: sign in types the profile\'s own login and password, then waits for the sign', async () => {
+  const run = await runTemplate('signin', { LOGIN_URL: 'https://shop.example/login', SIGNED_IN: 'text=My orders' }, { params: { login: 'alice', password: 's3cret' } });
+  assert.deepEqual(run.calls[0], ['goto', 'https://shop.example/login']);
+  assert.deepEqual(run.calls[1].slice(2), ['alice']);
+  assert.deepEqual(run.calls[2], ['type', 'input[type="password"]', 's3cret']);
+  assert.deepEqual(run.calls[3], ['press', 'Enter']);
+  assert.deepEqual(run.calls[4], ['waitFor', 'text=My orders', { timeout: 30000 }]);
+  assert.equal(run.result, 'result.signedIn');
+  // With a button named, the button; without a sign, the page's load.
+  const button = await runTemplate('signin', { LOGIN_URL: 'https://shop.example/login', SUBMIT_BUTTON: 'text=Sign in' });
+  assert.deepEqual(button.names, ['goto', 'type', 'type', 'click', 'waitForLoadState']);
+  assert.deepEqual(button.calls[1].slice(2), [''], 'a profile without a login types nothing');
+});
+
+test('scenario templates: the checks say what they found', async () => {
+  const a = { PAGE_URL: 'https://shop.example/account', SIGNED_IN: 'text=Sign out' };
+  assert.equal((await runTemplate('signedin', a, { answers: { isVisible: true } })).result, 'result.signedIn');
+  assert.equal((await runTemplate('signedin', a, { answers: { isVisible: false } })).result, 'result.notSignedIn');
+  const o = { PAGE_URL: 'https://shop.example/', BLOCK_TEXT: 'Access denied', MUST_SHOW: 'h1' };
+  assert.equal((await runTemplate('opens', o, { answers: { count: 1 } })).result, 'result.blocked');
+  const open = await runTemplate('opens', o, { answers: { count: 0, title: 'Shop' } });
+  assert.equal(open.result, 'Shop');
+  assert.deepEqual(open.calls.find((c) => c[0] === 'waitFor'), ['waitFor', 'h1', { timeout: 15000 }]);
+});
+
+test('scenario templates: activity — a feed is scrolled so many screens, pages are gone through, results are opened', async () => {
+  const feed = await runTemplate('feed', { PAGE_URL: 'https://news.example/', SCREENS: 4, PAUSE_FROM: 1, PAUSE_TO: 2 });
+  assert.equal(feed.names.filter((n) => n === 'scroll').length, 4);
+  assert.ok(feed.calls.filter((c) => c[0] === 'sleep').every((c) => c[1] >= 1000 && c[1] <= 2000));
+  assert.equal(feed.result, 4);
+  const pages = await runTemplate('pages', { PAGES: ['https://a.example/', 'https://b.example/'], STAY_SECONDS: 4, SCROLLS: 1 },
+    { answers: { goto: (url) => { if (url.includes('b.')) throw new Error('navigation failed'); } } });
+  assert.equal(pages.result, 1, 'a page that does not open is said and passed by');
+  await assert.rejects(runTemplate('pages', { PAGES: ['https://a.example/'] }, { answers: { goto: () => { throw new Error('stopped'); } } }), /stopped/, 'Stop still stops');
+  const search = await runTemplate('search', { QUERIES: ['red shoes'], OPEN_RESULTS: 2, READ_SECONDS: 1 },
+    { answers: { count: 5, evaluate: 'a[href="https\\:\\/\\/r\\.example\\/"]', url: 'https://r.example/' } });
+  assert.deepEqual(search.calls[0], ['goto', 'https://www.google.com/search?q=red%20shoes']);
+  assert.equal(search.names.filter((n) => n === 'click').length, 2);
+  assert.deepEqual(search.result, ['https://r.example/', 'https://r.example/']);
+  assert.equal((await runTemplate('search', { QUERIES: ['x'] }, { params: { query: 'own words' }, answers: { count: 0 } })).calls[0][1], 'https://www.google.com/search?q=own%20words');
+  const screens = await runTemplate('screens', { PAGE_URL: 'https://shop.example/', TIMES: 2, READ_SECONDS: 1 }, { answers: { count: 3, evaluate: 'a[href="x"]' } });
+  assert.equal(screens.result, 2);
+});
+
+test('scenario templates: forms and data', async () => {
+  const form = await runTemplate('form', { PAGE_URL: 'https://shop.example/contact', FIELDS: ['#name = Alice', '#mail = params.email', 'no equals'], DONE_SIGN: 'text=Thank you' }, { params: { email: 'a@example.com' } });
+  assert.deepEqual(form.calls.filter((c) => c[0] === 'type'), [['type', '#name', 'Alice'], ['type', '#mail', 'a@example.com']]);
+  assert.equal(form.result, 'result.sent');
+  const post = await runTemplate('post', { PAGE_URL: 'https://forum.example/new', TEXT_FIELD: 'textarea', TEXT: 'hello', SEND_BUTTON: 'text=Post' }, { params: { text: 'mine' } });
+  assert.deepEqual(post.calls.find((c) => c[0] === 'type'), ['type', 'textarea', 'mine'], 'the profile\'s own text first');
+  const cookie = await runTemplate('cookie', { PAGE_URL: 'https://news.example/' }, { answers: { isVisible: (s) => s === 'text=I agree' } });
+  assert.equal(cookie.result, 'I agree');
+  assert.deepEqual(cookie.calls.at(-1), ['click', 'text=I agree']);
+  assert.equal((await runTemplate('cookie', {}, { answers: { isVisible: false } })).result, 'result.noBanner');
+  const collect = await runTemplate('collect', { PAGE_URL: 'https://shop.example/account', WHAT: ['balance = .balance', 'orders = #orders'] },
+    { answers: { count: (s) => (s === '.balance' ? 1 : 0), innerText: ' 12.50 ' } });
+  assert.deepEqual(collect.result, { balance: '12.50', orders: '' });
+  const list = await runTemplate('list', { PAGE_URL: 'https://shop.example/', ITEMS: '.product h2', AT_MOST: 3 }, { answers: { evaluate: ['a', 'b'] } });
+  assert.deepEqual(list.result, ['a', 'b']);
+  assert.deepEqual(list.calls.find((c) => c[0] === 'evaluate')[1], { selector: '.product h2', most: 3 });
+});
+
 process.on('beforeExit', () => {
   if (failures) { console.log(`${failures} failure(s)`); process.exitCode = 1; }
   else console.log(`all shim tests passed (${JSC ? 'JavaScriptCore, Bun ' + Bun.version : 'V8, Node ' + process.version})`);
