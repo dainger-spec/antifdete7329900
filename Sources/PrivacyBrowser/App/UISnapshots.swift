@@ -1,5 +1,6 @@
 import AppKit
 import BrowserCore
+import MachineCover
 import SwiftUI
 
 /// `Lumen --render-ui-snapshots <folder>`: renders the app's screens with sample data
@@ -691,6 +692,7 @@ enum UISnapshots {
                 .environmentObject(model)
         }.capture(into: folder)
         problems += await proxyList(into: folder)
+        problems += await machineCover(into: folder)
         // A real browser window of a running profile (WebKit, toolbar, tab strip, start page).
         problems += await browserWindows(into: folder)
         // The launch screen (the Profiles window before unlocking), also while the vault opens.
@@ -904,6 +906,27 @@ enum UISnapshots {
     /// the one behind a VPN's substitute DNS, on the service's and on a working one; the Edit and
     /// Export sheets; and what a profile whose proxy did not work at its launch says. Nothing is
     /// checked here and nothing goes to the network.
+    // MARK: A virtual machine's start
+
+    /// The cover over a profile's machine while its start puts the profile's settings in place
+    /// (MachineCover; the helper shows it): in a MacBook Air 13″ window, at two steps — signing in,
+    /// and the look — and with "Show the screen" offered after a minute. Still frames, the glint
+    /// where design/prototypes/vm-cover.html's frames have it.
+    private static func machineCover(into folder: URL) async -> Int {
+        var problems = 0
+        let texts = MachineCoverTexts(VMCenter.coverTexts)
+        let shots: [(name: String, stage: VMSetupStage, offers: Bool, still: Double)] = [
+            ("vm-cover-signin", .signin, false, 1.9), ("vm-cover-look", .look, false, 3.0), ("vm-cover-longer", .locale, true, 4.1),
+        ]
+        for shot in shots {
+            let model = MachineCoverModel(name: "Vienna", texts: texts, stage: shot.stage, offersReveal: shot.offers) // l10n: not text
+            problems += await Shot(name: shot.name, size: CGSize(width: 1280, height: 832), titled: false) {
+                MachineCoverView(model: model, still: shot.still)
+            }.capture(into: folder)
+        }
+        return problems
+    }
+
     private static func proxyList(into folder: URL) async -> Int {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-snapshots-proxies-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }

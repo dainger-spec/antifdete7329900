@@ -122,6 +122,21 @@ final class VMGuestScriptTests: XCTestCase {
         try stub("pgrep", "exit 1")
         try stub("sw_vers", "case \"$1\" in -productVersion) echo 27.2.1 ;; -buildVersion) echo 26B131 ;; esac")
         try stub("logger", "exit 0")
+        // Each status the script puts in place: its step, noted in order (tools 13). And what the
+        // status said when Safari was opened.
+        let stages = root.appendingPathComponent("stages.log").path
+        try stub("mv", """
+            /usr/bin/env mv "$@" || exit $?
+            for last in "$@"; do :; done
+            case "$last" in
+              */lumen-status.env) /usr/bin/env sed -n 's/^LUMEN_STAGE=//p' "$last" >> '\(stages)' ;;
+            esac
+            """)
+        try stub("open", record + """
+
+            /usr/bin/env cp '\(share.path)/lumen-status.env' '\(root.appendingPathComponent("status-at-open").path)' 2>/dev/null
+            exit 0
+            """)
     }
 
     /// The script's text with its commands and its places turned to the test's.
@@ -162,7 +177,9 @@ final class VMGuestScriptTests: XCTestCase {
         let file = root.appendingPathComponent("boot.sh")
         try Data(text.utf8).write(to: file)
         if let settings { try Data(settings.utf8).write(to: share.appendingPathComponent(VMGuestSettings.fileName)) }
-        for name in ["calls.log", "sleeps"] { try? FileManager.default.removeItem(at: root.appendingPathComponent(name)) }
+        for name in ["calls.log", "sleeps", "stages.log", "status-at-open"] {
+            try? FileManager.default.removeItem(at: root.appendingPathComponent(name))
+        }
         try? FileManager.default.removeItem(at: share.appendingPathComponent("lumen-shutdown"))
 
         let process = Process()
@@ -186,6 +203,14 @@ final class VMGuestScriptTests: XCTestCase {
 
     private func status() -> VMGuestStatus {
         VMGuestStatus(text: (try? String(contentsOf: share.appendingPathComponent(VMGuestSettings.statusFileName), encoding: .utf8)) ?? "")
+    }
+
+    /// The steps the script said, one a status it put in place, in order; each said once here.
+    private func stagesSaid() -> [String] {
+        let text = (try? String(contentsOf: root.appendingPathComponent("stages.log"), encoding: .utf8)) ?? ""
+        var said: [String] = []
+        for line in text.split(separator: "\n").map(String.init) where said.last != line { said.append(line) }
+        return said
     }
 
     // MARK: - What a profile's settings do
@@ -738,6 +763,72 @@ final class VMGuestScriptTests: XCTestCase {
         XCTAssertNil(said.timeZoneNow)
         XCTAssertNil(said.localeNow)
         XCTAssertEqual(said.differences(from: settings).map(\.what), said.languageNow == nil ? [] : [.language])
+    }
+
+    // MARK: - The cover over the machine's screen (tools 13)
+
+    /// The script says which step it is at as it goes, and once this start's settings are in —
+    /// the language and region before them, the first picture too — which settings those were:
+    /// before Safari is opened, so that the person, let in then, finds Safari in the machine's
+    /// language. Not only after the picture's later looks.
+    func testTheScriptSaysItsStepsAndThatTheSettingsAreInBeforeSafari() throws {
+        try Data("PNG".utf8).write(to: share.appendingPathComponent(VMGuestSettings.wallpaperFileName))
+        let settings = VMGuestSettings(profile: VMProfile(name: "A", timeZoneIdentifier: "Europe/Berlin", language: "de-DE",
+                                                          localeFollowsProxy: false, startURL: "https://a.example/", appearance: "dark"))
+        let run = try boot(settings: settings.text, environment: ["SLEEPS_BEFORE_SHUTDOWN": "60"])
+        XCTAssertEqual(run.status, 0)
+        XCTAssertEqual(stagesSaid(), ["signin", "locale", "look", "wallpaper", "safari", "ready"])
+
+        // When Safari was opened: the settings were in, and said to be — not yet "applied".
+        let atOpening = VMGuestStatus(text: try String(contentsOf: root.appendingPathComponent("status-at-open"), encoding: .utf8))
+        XCTAssertEqual(atOpening.stage, .safari)
+        XCTAssertEqual(atOpening.readyRevision, settings.revision)
+        XCTAssertNil(atOpening.appliedRevision)
+        XCTAssertEqual(atOpening.toolsVersion, VMGuestTools.version)
+        let opened = try XCTUnwrap(run.calls.firstIndex(of: "tester open -a Safari https://a.example/"))
+        for earlier in ["tester defaults write -g AppleLanguages -array de-DE", "tester defaults write -g AppleLocale -string de_DE",
+                        "tester defaults write -g AppleInterfaceStyle -string Dark", "root systemsetup -settimezone Europe/Berlin"] {
+            XCTAssertLessThan(try XCTUnwrap(run.calls.firstIndex(of: earlier)), opened, earlier)
+        }
+        // The picture was set before (twice: at sign-in and four seconds on); its later looks come after.
+        let pictures = run.calls.indices.filter { run.calls[$0].hasPrefix("tester osascript ") }
+        XCTAssertEqual(pictures.count, 6, "\(run.calls)")
+        XCTAssertEqual(pictures.filter { $0 < opened }.count, 2)
+
+        // At the end: ready, applied, and what the app reads as the cover's word to go.
+        let said = status()
+        XCTAssertEqual(said.stage, .ready)
+        XCTAssertEqual(said.readyRevision, settings.revision)
+        XCTAssertEqual(said.appliedRevision, settings.revision)
+        let started = Date().addingTimeInterval(-30)
+        XCTAssertEqual(VMStartCover.state(status: atOpening, written: Date(), startedAt: started, revision: settings.revision,
+                                          now: Date()).reveal, .ready)
+        // A machine shown as a browser waits for Safari: the status after it was opened.
+        XCTAssertNil(VMStartCover.state(status: atOpening, written: Date(), startedAt: started, revision: settings.revision,
+                                        browserMode: true, now: Date()).reveal)
+        XCTAssertEqual(VMStartCover.state(status: said, written: Date(), startedAt: started, revision: settings.revision,
+                                          browserMode: true, now: Date()).reveal, .ready)
+    }
+
+    /// Without a picture or Safari the steps skip theirs; with nobody signed in the script waits
+    /// at the sign-in, and says nothing is in.
+    func testTheStepsOfAMachineWithoutPictureOrSafariAndOfOneNobodySignsInTo() throws {
+        let plain = VMGuestSettings(profile: VMProfile(name: "A", opensSafari: false, lumenWallpaper: false))
+        try boot(settings: plain.text)
+        XCTAssertEqual(stagesSaid(), ["signin", "locale", "look", "ready"])
+        XCTAssertEqual(status().readyRevision, plain.revision)
+
+        try boot(settings: plain.text, environment: ["CONSOLE_USER": "loginwindow"])
+        XCTAssertEqual(stagesSaid(), ["signin"])
+        XCTAssertEqual(status().stage, .signin)
+        XCTAssertNil(status().readyRevision)
+        XCTAssertNil(VMStartCover.state(status: status(), written: Date(), startedAt: Date().addingTimeInterval(-90),
+                                        revision: plain.revision, now: Date()).reveal)
+
+        // Settings whose revision is no revision name none back.
+        try boot(settings: "LUMEN_REVISION=a;b\nLUMEN_HOSTNAME=Mac\nLUMEN_OPEN_SAFARI=0\n")
+        XCTAssertEqual(status().stage, .ready)
+        XCTAssertNil(status().readyRevision)
     }
 
     // MARK: - A machine shown as a browser, and one woken from a saved state

@@ -109,6 +109,12 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
   (.16, 1, .3, 1). With Reduce Motion in macOS, or the animations off in Settings → Appearance, only
   colour and opacity change (`Motion.isReduced`).
 - Density (`AppearancePreferences.density`): rows of 52 or 40 pt.
+- A virtual machine's start (`Sources/MachineCover`, shown by the machines' helper): the
+  machine's own eclipse, a bead of light gliding along its horizon (6.4 s, then 1.6 s of rest)
+  and the haze over it breathing (6 s), "Setting up the machine" in capitals (11 semibold), the
+  profile's name (30 semibold), the step (14, `textSecondary`) cross-fading on the entry curve,
+  six dashes of 26 × 2 pt; "Show the screen" after a minute; the cover fades into the machine's
+  screen in 0.9 s. Approved by the owner on 15 November from `design/prototypes/vm-cover.html`.
 
 - Account (`AccountViews.swift`, docs/LICENSING.md): sign-in and this Mac's connection in the lock
   screen's pieces (`LockScreen`, `LockPasswordField`, `AccountTextField`, `LockActionButton`); Settings

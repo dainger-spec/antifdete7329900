@@ -32,6 +32,8 @@
 //   LumenVM         macOS only: the virtual machines' helper (docs/VM.md) — the one executable that
 //                   loads Apple's Virtualization.framework and is signed with its right. Put into
 //                   the app only by `VM=1 scripts/build-app.sh`; CI builds it with VM=check.
+//   MachineCover    macOS only: the cover over a virtual machine's screen while its start makes it
+//                   the profile's (SwiftUI) — shown by LumenVM, drawn by the app's UI snapshots.
 //
 import PackageDescription
 
@@ -147,9 +149,17 @@ targets.append(contentsOf: [
         name: "ObjCExceptions",
         path: "Sources/ObjCExceptions"
     ),
+    // The cover over a virtual machine's start (docs/VM.md): the helper shows it, the app's UI
+    // snapshots draw it. SwiftUI, and no Virtualization.framework: the app still links none.
+    .target(
+        name: "MachineCover",
+        dependencies: ["BrowserCore"],
+        path: "Sources/MachineCover"
+    ),
     .executableTarget(
         name: "PrivacyBrowser",
-        dependencies: ["BrowserCore", "TunnelCore", "TunnelTransport", "NetworkGuardCore", "ObjCExceptions", "CameraRendering"],
+        dependencies: ["BrowserCore", "TunnelCore", "TunnelTransport", "NetworkGuardCore", "ObjCExceptions", "CameraRendering",
+                       "MachineCover"],
         path: "Sources/PrivacyBrowser"
     ),
     .target(
@@ -171,7 +181,7 @@ targets.append(contentsOf: [
     // network through its profile's proxy (VMNetCore). The app itself links neither.
     .executableTarget(
         name: "LumenVM",
-        dependencies: ["BrowserCore", "VMNetCore"],
+        dependencies: ["BrowserCore", "VMNetCore", "MachineCover"],
         path: "Sources/LumenVM"
     ),
 ])

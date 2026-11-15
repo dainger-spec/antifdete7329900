@@ -71,9 +71,12 @@ Sources/BrowserCore/VirtualMachines/   the model, platform-independent, unit-tes
   VMDownload.swift       the resumable download's decisions (Range, If-Range), the chunk map
   VMImageFetch.swift     the download: several connections, chunk by chunk (tested on Linux)
   VMGuestSettings.swift  what the guest is told, what it says back
+  VMStartCover.swift     when a start's cover goes (the steps, the guest's word, the limits)
   VMHelperProtocol.swift the app's conversation with the helper
 Sources/VMNetCore/                     the machine's network through a proxy (docs/VM_NETWORK.md)
 Sources/LumenVM/                       the helper: Apple's Virtualization.framework
+  StartCover.swift       the cover over a start's screen, and what takes the events under it
+Sources/MachineCover/                  the cover's look (SwiftUI): the helper shows it, the app's snapshots draw it
 Sources/PrivacyBrowser/App/VirtualMachines/
   VMCenter.swift         the setup, the profiles, the machines running now
   VMHelperProcess.swift  one run of the helper
@@ -214,6 +217,20 @@ checked against the characters it may have, **never run** — and applies the ti
 language and region (for the signed-in account), the computer's name; opens Safari (on the
 profile's start page, if it has one); writes back which macOS and Safari this is; then waits for a
 file named `lumen-shutdown`, which it answers by quitting Safari and shutting macOS down.
+
+As it goes it says which step it is at (tools 13), in the status file: `LUMEN_STAGE` is `signin`
+from its first word (it waits for the person's session), then `locale` (the language and region,
+the keyboard), `look` (the appearance and accent, the clock and week, the scroll bars, the Dock),
+`wallpaper` (Lumen's picture, when the profile has it), `safari` and `ready`. Once this start's
+settings are in — the language and region written for the signed-in person, the first picture set
+and the four seconds the desktop is given — it names them (`LUMEN_READY_REVISION`, this start's
+`LUMEN_REVISION`), **before** it opens Safari, which then starts in them; not after the picture's
+later looks. `LUMEN_APPLIED_REVISION` is written after Safari was opened, as before. The machine's
+window keeps its screen behind a cover until then ("The start's cover" below). A base with tools 7
+to 12 needs nothing done to it: the app puts this script into the tools' folder at every start,
+and the older script there takes it and runs it before it reads the settings — so the first start
+with this Lumen already says its steps. (Tools 2 to 6 take it from the shared folder, once; tools 1
+must be installed again.)
 
 Before all that — at the start, before the automatic sign-in — it marks macOS's panes for a new
 Mac as seen for the person who signs in by themselves (`com.apple.SetupAssistant`: `DidSee…`,
@@ -416,8 +433,9 @@ A machine is a Mac in a window: a desktop, a Dock, a menu bar, Safari somewhere 
   Control-Command-F on the machine's own keyboard — events made for the machine's view, as a
   person's are; nothing in the guest is asked for a permission — which puts Safari over the
   machine's whole screen;
-- until then the machine's screen is behind a cover with its name (a click takes it away; two
-  minutes do too), so that the sign-in and the desktop are not what the person opened.
+- until then the machine's screen is behind the start's cover (below): its settings are in
+  place, then Safari is put over the machine's whole screen with its own keys, and then the
+  person is let in — the sign-in and the desktop are not what the person opened.
 
 With instant wake a machine in browser mode opens as a browser window in seconds, with no cover:
 it is as it was closed. "Safari Full Screen (in the Machine)" in the row's menu and "Full Screen
@@ -427,6 +445,50 @@ when it was pressed, or to leave full screen.
 Not run on a Mac: that the machine's view takes events made here as it takes a person's, and how
 the menu bar's setting reads on the newest macOS. The key is a toggle: a Safari that macOS
 itself brought back full screen would leave it; the menu's command puts it back.
+
+## The start's cover
+
+A machine's macOS shows its desktop well before the boot script has made it the profile's, and
+what the person opened in that time stayed as it was: Safari clicked at once was in the base's
+language for good, and the language, the Dock and the picture changed under the person's hands
+(the owner, 15 November). So from the start of a profile's machine its window shows a cover over
+the machine's screen, and lets nobody in until the guest says this start's settings are in.
+
+- **The look** (`Sources/MachineCover`, the owner approved it on 15 November): the machine's own
+  eclipse — the wallpaper's numbers, line for line, so that the horizon stays where it is as the
+  cover fades into a desktop with Lumen's picture —, a bead of light gliding along the horizon and
+  the haze over it breathing, "Setting up the machine", the profile's name, the step in words
+  ("Starting macOS…", "Signing in…", "Setting the language and region…", "Setting up the look…",
+  "Setting the wallpaper…", "Almost ready…") and six thin dashes for the steps. Under Reduce
+  Motion — macOS's, or the app's own animations turned off (`VMHelperRequest.reducesMotion`) —
+  nothing glides or breathes and the words only cross-fade. VoiceOver reads the name and the step.
+  The light is images made once per window size and moved on the GPU: a frame changes only
+  opacities and the glint's turn. `design/prototypes/vm-cover.html` is the same, frame for frame,
+  and `design/tools/record_vm_cover.mjs` records it.
+- **Who says when** (`VMStartCover.state`, unit-tested): the helper reads the guest's status file
+  itself, once a second, off its main thread and as a file of the guest's (`VMShareFile`). The
+  helper owns the machine's files and knows the moment its macOS started — a status written
+  before it is of a macOS that has since shut down; the app's own readings come at 25, 60, 120
+  and 240 seconds and would only add a hop. It compares with this start's settings
+  (`VMHelperRequest.settingsRevision`): tools 13 name them as ready before Safari is opened
+  (`LUMEN_READY_REVISION`); an older script, which says no steps, names them as applied once it
+  has opened Safari (`LUMEN_APPLIED_REVISION`). A machine shown as a browser waits for Safari.
+- **Nothing reaches the guest** while it is up: the machine's view is hidden (a hidden view takes
+  no event, and its tracking areas none), the screen's container is the window's first responder
+  and takes every key and key equivalent, and the cover takes every click and scroll. The title
+  bar's buttons, Shut Down in the window's menu and the app's commands work as ever; shutting down
+  or putting the machine to sleep halts the cover where it is. A failed start is said as before.
+- **Nobody is kept out**: "Taking longer than usual. Show the screen" after a minute; the cover
+  goes by itself after two minutes without a word from the guest at this start, or three while
+  its script says it is at work, and says so at the top of the window for eight seconds. The
+  helper's log says when and why it went ("cover: …").
+- **Not covered**: the base's window (its setup), and a machine woken as it was put to sleep —
+  its state is tied to its settings, so changed settings start it anew, covered. A machine closed
+  during its first start, before its settings were in, is covered as it wakes until they are.
+
+Not run on a Mac: that a hidden `VZVirtualMachineView` leaves the machine's display as it is
+(the framework draws the guest's screen into it; nothing of the guest's configuration depends on
+it), and how long the steps take on a machine's first start.
 
 ## What machines have in common
 
@@ -586,6 +648,11 @@ What is checked where:
   one stream from before taken up at its whole chunks, a file replaced between two runs started
   over, a server without ranges given one stream, connections cut short taken up again, a refusal
   said, only https fetched. Each time the file byte for byte.
+- `Tests/BrowserCoreTests/VMStartCoverTests.swift` (Linux and macOS): the start's cover — the
+  steps and the ready settings read from the status, this start's settings only, a status from
+  before the start, an older script, the limits, browser mode, which starts are covered. The UI
+  snapshots draw the cover in both languages (`vm-cover-signin`, `vm-cover-look`,
+  `vm-cover-longer`).
 - `Tests/BrowserCoreTests/VMGuestScriptTests.swift` (Linux and macOS): **the boot script itself,
   run from its first line to the shutdown** by `/bin/sh`, with every command it calls by its full
   path replaced by one of the test's own that writes down how it was called (a command the script
@@ -633,3 +700,8 @@ What is checked where:
    cover goes and Safari is in a window, the machine's view did not take the key made for it.
 10. "Network…" in a running machine's menu: hosts appear as pages load, with their counts;
     Block ends a host's connections at once and the page that needs it stops loading.
+11. A new machine's first start: the cover names the steps as they come and goes when the
+    language and region are in; Safari then opens in the machine's language, and a click, a
+    scroll or a key on the cover before that does nothing in the machine. The helper's log says
+    after how many seconds ("cover: the guest says this start's settings are in, after … s"). A
+    machine at its sign-in window (no automatic sign-in) offers "Show the screen" after a minute.

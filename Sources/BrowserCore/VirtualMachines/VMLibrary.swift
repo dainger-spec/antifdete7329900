@@ -260,8 +260,15 @@ public enum VMSetupState: Equatable, Sendable {
 ///
 /// 12: the status says when browser mode's menu bar was changed at this start, which macOS takes
 /// at the next sign-in — a machine with instant wake is shut down once for it, as for a layout.
+///
+/// 13: the status says, as the script goes, which step of the start it is at (`LUMEN_STAGE`) and,
+/// once this start's settings are in — before Safari is opened —, which settings those were
+/// (`LUMEN_READY_REVISION`): the machine's window keeps its screen behind a cover until then
+/// (`VMStartCover`).
 public enum VMGuestTools {
-    public static let version = 12
+    public static let version = 13
+    /// The first tools whose script says which step it is at and when the settings are in.
+    public static let saysWhenReady = 13
     /// From this version on an installed boot script takes a newer copy of itself at a machine's
     /// start: a base with tools this new needs nothing done to it for a later version's settings.
     public static let updatesItselfFrom = 2
