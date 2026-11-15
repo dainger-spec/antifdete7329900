@@ -678,6 +678,34 @@ public final class ProfileRepository: @unchecked Sendable {
         try warmUpRecordFile(for: id).save(record)
     }
 
+    // MARK: Warm-up history (this Mac only)
+
+    func warmUpHistoryURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("warmup-history.bin") }
+
+    func warmUpHistoryFile(for id: UUID) throws -> EncryptedDocumentFile<WarmUpHistory> {
+        EncryptedDocumentFile(url: warmUpHistoryURL(for: id),
+                              key: try profileKey(for: id).derive(info: "warm-up-history", salt: id.rawBytes),
+                              aad: "warm-up-history:v1:\(id.uuidString)")
+    }
+
+    /// The profile's warm-ups, the newest first (`WarmUpHistory`); none before the first was kept.
+    public func warmUpHistory(for id: UUID) throws -> WarmUpHistory {
+        try warmUpHistoryFile(for: id).load() ?? WarmUpHistory()
+    }
+
+    /// Adds a run to the profile's history. A history that cannot be read is moved aside as
+    /// `warmup-history.bin.unreadable`, never written over, and a new one begun.
+    public func addWarmUpRun(_ run: WarmUpRun, for id: UUID) throws {
+        var history = (try? warmUpHistory(for: id)) ?? WarmUpHistory()
+        history.add(run)
+        try warmUpHistoryFile(for: id).save(history)
+    }
+
+    /// Writes the profile's history as it is given (a run's late report amends its newest entry).
+    public func replaceWarmUpHistory(_ history: WarmUpHistory, for id: UUID) throws {
+        try warmUpHistoryFile(for: id).save(history)
+    }
+
     // MARK: Open tabs (this Mac only)
 
     func openTabsURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("tabs.bin") }

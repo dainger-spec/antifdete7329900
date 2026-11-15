@@ -1507,6 +1507,73 @@ persistent cookies sync between Macs, encrypted with the profile's key inside th
 
 ## 8c. Session warm-up robot
 
+**Since November 2026 (the Warm-up section).** What follows describes the robot as it was built;
+where this paragraph says otherwise, this paragraph holds.
+- *Where it is.* Warm-up is a section of the main window (sidebar → **Warm-up**): the profiles by
+  their warm-up state (running now, waiting, need attention, never warmed, warmed and when), the
+  templates, and the history. **New warm-up** is one sheet for one profile or a selection; a
+  profile's **Warm Up…** and the selection's bar open it with those profiles ticked. The two older
+  sheets are gone.
+- *Templates.* A template is a kind of browsing (`WarmUpInterest`: an ordinary day, news, shopping,
+  video, forums, travel, technology, finance, sport, food, games, home and cars) or a list of the
+  person's own; several are mixed in turn. `WarmUpCatalog` names each country's sites by interest
+  (the 43 countries' lists, tagged) and resolves a template for the country the profile's proxy
+  exits in; a country with fewer than three sites of its own for an interest gets the world's list
+  added, and the screen says so. Nothing is fetched to choose sites. A list of one's own is pasted
+  or read from a text file, each line checked as before, and by default gets the country's everyday
+  sites around it.
+- *Intensity.* Light, Normal, Deep (`WarmUpIntensity`): 8, 16 or 24 sites, up to 2, 3 or 4 pages
+  on each, 1 to 3 searches; the sheet's numbers are computed from these, not written beside them.
+- *Arriving.* A share of the sites (25–40 % by intensity; off with the sheet's switch) is reached
+  through the profile's search engine: the site's name typed as a search is typed, the results
+  looked at, the site's own result clicked. Whenever any step cannot be done as a person does it —
+  the engine's page does not load or shows a check, no such result in view after one scroll — the
+  address is opened as before, and an engine that showed a check is not asked again in that run.
+- *Reading.* With a plan of this kind (`readsByPage`) the stay follows the page: its text
+  (`WarmUpPageScripts.measure`, the page's main part) at a skimming pace plus a little per screen
+  of height, within the intensity's two times (`WarmUpReading.dwell`); scrolling goes in bursts
+  with reading pauses down to a depth of its own and never past the end; the pause before the next
+  site is a few seconds, now and then 12–40.
+- *Links.* Never a link whose words or address speak of signing in, registering or an account,
+  besides the older refusals. Among the rest a link is weighed (`WarmUpLinkPolicy.weight`): the
+  page's main part and headline-length text first, navigation and footer seldom, legal pages
+  hardly ever. After a followed page it goes back about one time in three and takes another.
+- *Cookie banners.* Twenty-six tools by their own buttons (`WarmUpConsent.tools`), and a banner of
+  no known tool only by a strict rule: a fixed or sticky box whose id or class speaks of cookies or
+  consent, a button whose whole text is one of the accept words, no form with fields around it.
+  Pressed with the pointer when its trusted moves are seen to reach the button, else with the
+  button's `click()` as before (a button inside a tool's shadow root is always the latter). The
+  sheet's choice: accept (the default), as people do (about one time in eight the tool's "only
+  necessary", where it has one), or leave banners alone. Banners inside cross-site frames are
+  still not reached.
+- *Pages it leaves at once.* After a page loads the robot's reader reports its marks
+  (`WarmUpPageScripts.signals`). A check or a refusal — Cloudflare, Google's "unusual traffic",
+  PerimeterX, DataDome, Akamai, Yandex, Amazon, a page that is only a reCAPTCHA or hCaptcha, an
+  "Access denied" title (`WarmUpBlockPage`) — is left after two to four seconds with nothing
+  pressed and named in the report; a widget on a page with text of its own is not taken for one.
+  A page with a password or card field in view, or a sign-in, checkout or payment address
+  (`WarmUpSensitivePage`), is left after one to two seconds: nothing is pressed, scrolled or
+  followed there. The marks are known tools' own elements and titles: a check of a tool not
+  listed is read as a page.
+- *A dead proxy.* Three pages in a row that do not load end the run ("the proxy does not answer",
+  `WarmUpHealth`) instead of going through the plan's timeouts.
+- *The report and the history.* A run is kept with its sites — how each was reached, pages, time,
+  cookies added, what went wrong — and its cookies split into those of the sites visited and those
+  of other domains (`WarmUpRun`; in a WebKit profile the second number is small by design:
+  cross-site tracking prevention). The last 50 runs of a profile are in `warmup-history.bin`,
+  sealed under the profile's key like `warmup-last.bin`, on this Mac only, not synced, not in an
+  export. A profile's state follows its last run (`WarmUpWarmth`); the Profiles list marks a warmed
+  profile and gathers the never-warmed under **Not warmed up**.
+- *The queue.* As many profiles at once as this Mac allows (`WarmUpConcurrency.automatic`: half the
+  processors, one profile per three gigabytes beyond the first four) or the person's number, 1–8;
+  Pause (the runs going on finish, none starts), take a waiting profile off, make it the next,
+  run the failed ones again. Profiles start 4–15 seconds apart. A profile that does not start is
+  said in its history and the section, not in an alert each.
+- *Not changed.* Everything goes through the profile's proxy and stays in the profile; nothing is
+  typed but a search, nothing submitted, bought or downloaded; a CAPTCHA is never answered. The
+  schedule is still "every N hours" (set for a selection from New warm-up's **Repeat**); a daily
+  rhythm in the profile's own time zone is not built.
+
 **⋯ → Warm Up…** visits a list of pages in one profile, one after the other, to give it a
 browsing past (cookies, history, site preferences) before it is used: a search first if one is
 given (with the profile's search engine — DuckDuckGo unless the profile's editor names another;
@@ -1643,12 +1710,12 @@ because this one was told to. The plan a scheduled run uses is the profile's sav
 ready-made or composed choice is cut and shuffled anew for each run, for the country the proxy
 exits in at that time.
 
-**Limits.** No browsing intelligence: the order is the list's, the links are chosen at random
-among the allowed ones in view, the timing is random within fixed ranges. Rhythm and paths are
+**Limits.** Little browsing intelligence: the reading time follows a page's length and the links
+are weighed, but by simple rules, and the rhythm is drawn from fixed ranges. Rhythm and paths are
 still a robot's, and sites that profile behaviour (or ask for a CAPTCHA) can tell; a CAPTCHA is not
 answered, and a cookie banner of a tool not listed above is left as it is. It does not sign in,
 fill forms (but a search box), play media or open new windows. Only one run per profile at a
-time, and the queue runs at most three profiles at once; the plan (`warmup.bin`), the schedule
+time, and the queue runs at most eight profiles at once; the plan (`warmup.bin`), the schedule
 (`warmup-schedule.bin`) and the last run (`warmup-last.bin`) stay on this Mac. A
 schedule only runs while the app is open and unlocked: it is a timer in the app, not a system
 job. The ready-made lists (general, by interest, and 43 countries) are part of the app; nothing is

@@ -51,6 +51,8 @@ public struct WarmUpQueue: Equatable, Sendable {
 
     public private(set) var entries: [Entry] = []
     private var lastID = 0
+    /// Paused: the runs going on finish, no waiting one starts (`startNext` gives none).
+    public var isPaused = false
 
     public init() {}
 
@@ -96,7 +98,7 @@ public struct WarmUpQueue: Equatable, Sendable {
     /// The next waiting entry, now running. Nil when `limit` already run (one at a time unless the
     /// person chose more on the queue's sheet) or none is waiting.
     public mutating func startNext(limit: Int = 1) -> Entry? {
-        guard running.count < max(1, limit), let index = entries.firstIndex(where: { $0.state == .waiting }) else { return nil }
+        guard !isPaused, running.count < max(1, limit), let index = entries.firstIndex(where: { $0.state == .waiting }) else { return nil }
         entries[index].state = .running
         return entries[index]
     }
@@ -118,6 +120,34 @@ public struct WarmUpQueue: Equatable, Sendable {
             cancelled.append(entries[index])
         }
         return cancelled
+    }
+
+    /// Takes one waiting entry off the queue; the entry, or nil when it is not waiting.
+    @discardableResult
+    public mutating func cancel(_ id: Int) -> Entry? {
+        guard let index = entries.firstIndex(where: { $0.id == id }), entries[index].state == .waiting else { return nil }
+        entries[index].state = .cancelled
+        return entries[index]
+    }
+
+    /// Makes a waiting entry the next to start: moved before every other waiting one.
+    public mutating func moveToFront(_ id: Int) {
+        guard let index = entries.firstIndex(where: { $0.id == id }), entries[index].state == .waiting,
+              let first = entries.firstIndex(where: { $0.state == .waiting }), first < index else { return }
+        let entry = entries.remove(at: index)
+        entries.insert(entry, at: first)
+    }
+
+    /// The profiles whose turn ended without a warm-up worth the name — not started, or ended by
+    /// the proxy — for "run the failed ones again".
+    public var failedProfiles: [UUID] {
+        entries.compactMap { entry in
+            switch entry.state {
+            case .skipped(.notStarted): return entry.profileID
+            case .done(let status?) where status.stopReason == "proxyNotAnswering": return entry.profileID
+            default: return nil
+            }
+        }
     }
 
     /// The running entry, cancelled too (Lock: the coordinator is going, and nothing will finish

@@ -52,7 +52,9 @@ popunder does (`/pb-warmup/popunder`, which the warm-up refuses); a page-world l
 click events and whether they were trusted (`/pb-warmup/event/<id>/<name>-<what>`), and what its page
 world can see of a robot (`window.webkit`, globals named like one) at its first scroll and click; a
 jump to a fragment `#x` is rewritten to `#/x`, as a single-page app's router might. `<name>` `alert`
-shows an alert; `broken` closes the connection without an answer (a page that does not load). `/pb-warmup/log.json` lists every `/pb-warmup/` request with its Referer, Cookie and
+shows an alert; `broken` closes the connection without an answer (a page that does not load). `captcha` bears a challenge page's title, `signin` has a
+password field in view, `banner` a consent tool's banner whose accept button reports its click
+(`banner-consent`). `/pb-warmup/log.json` lists every `/pb-warmup/` request with its Referer, Cookie and
 User-Agent headers and the time it came.
 
 `/pb-download/<name>?bytes=<n>` is a file to save, `n` bytes of a known pattern (0, 1, … 255, 0, …):
@@ -331,8 +333,20 @@ def warmup_page(name: str, run: str) -> bytes:
         + (" setTimeout(() => alert('PB warm-up'), 300);" if name == "alert" else "")
         + " })();</script>"
     )
-    return (f'<!doctype html><html><head><meta charset="utf-8"><title>PB warm-up {esc(name)}</title></head>'
-            f'<body style="font: 15px -apple-system; margin: 20px">{links}{filler}{script}</body></html>').encode()
+    # Pages the robot must tell from pages to read: a check ("captcha": the title a challenge page
+    # bears), a sign-in page ("signin": a password field in view) — both left at once, nothing
+    # pressed, no link followed — and a page with a consent tool's banner ("banner"), whose accept
+    # button reports its click (`banner-consent`) and takes the banner away.
+    title = "Just a moment..." if name == "captcha" else f"PB warm-up {esc(name)}"
+    extra = ""
+    if name == "signin":
+        extra = '<form><p><input type="text" name="user"> <input type="password" name="pass"> <button type="button">Sign in</button></p></form>'
+    if name == "banner":
+        extra = ('<div id="onetrust-banner-sdk" style="position:fixed;left:0;right:0;bottom:0;padding:16px;background:#eee">We use cookies. '
+                 '<button id="onetrust-accept-btn-handler" onclick="fetch(\'/pb-warmup/event/\' + encodeURIComponent(\'' + esc(run) + '\') + '
+                 '\'/banner-consent\'); this.parentElement.remove()">Accept all</button></div>')
+    return (f'<!doctype html><html><head><meta charset="utf-8"><title>{title}</title></head>'
+            f'<body style="font: 15px -apple-system; margin: 20px">{extra}{links}{filler}{script}</body></html>').encode()
 
 
 def leak_page(run: str) -> bytes:

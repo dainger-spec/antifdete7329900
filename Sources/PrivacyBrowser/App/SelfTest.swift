@@ -8522,6 +8522,32 @@ final class SelfTest {
             controller.closeTab(at: index) // answers the dialog
         }
 
+        // What the robot tells from pages to read: a check, a sign-in page, a consent banner; and a
+        // proxy that stopped answering.
+        let kinds = WarmUpPlan(addresses: [page("captcha"), page("signin"), page("banner")].joined(separator: "\n"), scroll: true, followLinks: true)
+        manager.startWarmUp(profile.id, plan: kinds)
+        _ = await waitUntil(timeout: 90) { robot.state != .running }
+        let kindLog = await proxyLog()
+        let kindEvents = kindLog.compactMap { entry -> String? in
+            entry.path.hasPrefix("/pb-warmup/event/\(run)/") ? String(entry.path.dropFirst("/pb-warmup/event/\(run)/".count)) : nil
+        }
+        let outcomes = robot.siteLog.map(\.outcomeKind)
+        check("warm-up: a page that asks whether the visitor is a robot, and a page to sign in on, are left at once — not scrolled, no link followed — and named in the run's report",
+              robot.state == .finished && outcomes == [.blocked, .sensitive, .visited] && robot.siteLog.first?.detail == "cloudflare"
+                  && !kindEvents.contains { $0.hasPrefix("captcha-scroll") || $0.hasPrefix("signin-scroll") }
+                  && !kindLog.contains { $0.path == "/pb-warmup/captcha-next" || $0.path == "/pb-warmup/signin-next" },
+              "state=\(robot.state) outcomes=\(robot.siteLog.map(\.outcome)) detail=\(robot.siteLog.first?.detail ?? "-") events=\(kindEvents)")
+        check("warm-up: a consent tool's banner is accepted while the page is read",
+              kindEvents.contains("banner-consent") && robot.status.consents == 1, "events=\(kindEvents) consents=\(robot.status.consents ?? -1)")
+        let silent = WarmUpPlan(addresses: [page("broken"), page("broken") + "&n=2", page("broken") + "&n=3", page("d")].joined(separator: "\n"),
+                                scroll: false, followLinks: false)
+        manager.startWarmUp(profile.id, plan: silent)
+        _ = await waitUntil(timeout: 90) { robot.state != .running }
+        let silentLog = await proxyLog()
+        check("warm-up: three pages in a row that do not load end the run as \"the proxy does not answer\"; the next page is never asked for",
+              robot.state == .stopped(.proxyNotAnswering) && robot.status.stopReason == "proxyNotAnswering" && !silentLog.contains { $0.path == "/pb-warmup/d" },
+              "state=\(robot.state) reason=\(robot.status.stopReason ?? "-")")
+
         // The profile stopped during a run: the robot is stopped first — while the session still
         // has its data store, before anything of the stop waits — and the data seals as usual.
         manager.startWarmUp(profile.id, plan: long)
@@ -8536,6 +8562,7 @@ final class SelfTest {
               stoppedFirst && sealError == nil && !manager.isRunning(profile.id)
                   && !webKitDataDirectoriesExist(profile.id) && messages.isEmpty,
               "stoppedFirst=\(stoppedFirst) state=\(robot.state) seal=\(sealError ?? "ok") messages=\(messages)")
+
         try await manager.deleteBecauseThePersonAsked(profile.id)
     }
 
@@ -8584,9 +8611,14 @@ final class SelfTest {
         defer { coordinator.shutDown() }
         // One at a time (the person's setting, 2 by default): the check is that the next waits for
         // the one before to be stopped and sealed.
-        let concurrency = WarmUpCoordinator.concurrency
+        let concurrency = WarmUpCoordinator.concurrencySetting
         WarmUpCoordinator.concurrency = 1
-        defer { WarmUpCoordinator.concurrency = concurrency }
+        let stagger = WarmUpCoordinator.stagger
+        WarmUpCoordinator.stagger = nil
+        defer {
+            WarmUpCoordinator.concurrencySetting = concurrency
+            WarmUpCoordinator.stagger = stagger
+        }
         let policy = NSApp.activationPolicy()
         NSApp.setActivationPolicy(.accessory)
         defer { NSApp.setActivationPolicy(policy) }

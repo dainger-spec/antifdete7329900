@@ -564,8 +564,9 @@ final class AppModel: ObservableObject {
         self.manager = manager
         // Queued and scheduled warm-ups start the way the warm-up screen does (startWarmUp).
         let warmUps = WarmUpCoordinator(manager: manager, repository: repository) { [weak self] plan, id in
-            await self?.startWarmUp(plan, for: id) ?? false
+            await self?.startWarmUp(plan, for: id, quiet: true) ?? false
         }
+        warmUps.userTemplates = { [weak self] in self?.warmUpTemplates() ?? [] }
         warmUps.forwardChanges(to: self)
         // The profile's journal says it was warmed, and the inspector of a profile it has shown
         // reads its last warm-up again.
@@ -1255,7 +1256,10 @@ final class AppModel: ObservableObject {
 
     /// Remembers `plan` for the profile and starts it, launching the profile first when it is
     /// stopped. False when it did not start (the launch failed, and said why).
-    func startWarmUp(_ plan: WarmUpPlan, for id: UUID) async -> Bool {
+    ///
+    /// `quiet`: a run of the queue — what goes wrong is kept in the profile's warm-up history and
+    /// shown in the Warm-up section, among the others, not in an alert for each profile.
+    func startWarmUp(_ plan: WarmUpPlan, for id: UUID, quiet: Bool = false) async -> Bool {
         guard let repository, let manager else { return false }
         // The person's traffic setting, whoever started the run.
         var plan = plan
@@ -1263,22 +1267,84 @@ final class AppModel: ObservableObject {
         do {
             try repository.saveWarmUpPlan(plan, for: id)
         } catch {
-            showError(error.localizedDescription)
+            if !quiet { showError(error.localizedDescription) }
         }
         // Starting or being encrypted (a launch or a stop under way): let that finish first.
         while manager.busyProfileIDs.contains(id) { try? await Task.sleep(nanoseconds: 100_000_000) }
         // A profile that is not running is started for the warm-up alone: no window of its own
         // appears, the robot browses in one the user never sees, and when the run ends the profile
         // stops and seals again. This is what "warm up without a window in my face" means.
-        if !manager.isRunning(id) { await launch(id, openingWindow: false) }
+        if !manager.isRunning(id) {
+            if quiet {
+                while isSyncing { try? await Task.sleep(nanoseconds: 100_000_000) }
+                await changeIPBeforeLaunch(id)
+                try? await manager.launch(id, openingWindow: false)
+                if isRunning(id) { recordInJournal(.launched, for: id) }
+                refresh()
+            } else {
+                await launch(id, openingWindow: false)
+            }
+        }
         // The manager of this unlock: a Lock while the profile started ends it.
         guard let current = self.manager, current === manager, current.isRunning(id) else { return false }
         guard current.startWarmUp(id, plan: plan) else {
             let name = profiles.first { $0.id == id }?.name ?? ""
-            showError(String(format: L("warmup.error.notStarted"), name))
+            if !quiet { showError(String(format: L("warmup.error.notStarted"), name)) }
             return false
         }
         return true
+    }
+
+    // MARK: Warm-up templates of the person's own
+
+    /// The person's own lists (`warmup-templates.bin`); none when the vault's cannot be read.
+    func warmUpTemplates() -> [WarmUpTemplate] {
+        guard let vault = repository?.vault else { return [] }
+        return (try? WarmUpTemplates.load(from: vault))?.templates ?? []
+    }
+
+    /// Keeps a list (new, or in place of the one with its id or its name); false when it could not
+    /// be kept — said.
+    @discardableResult
+    func saveWarmUpTemplate(_ template: WarmUpTemplate) -> Bool {
+        guard let vault = repository?.vault else { return false }
+        do {
+            var stored = try WarmUpTemplates.load(from: vault)
+            guard stored.save(template) else {
+                showError(String(format: L("warmup.templates.full"), WarmUpTemplates.maximumCount))
+                return false
+            }
+            try stored.save(to: vault)
+            objectWillChange.send()
+            return true
+        } catch {
+            showError(error.localizedDescription)
+            return false
+        }
+    }
+
+    func deleteWarmUpTemplate(_ id: UUID) {
+        guard let vault = repository?.vault else { return }
+        do {
+            var stored = try WarmUpTemplates.load(from: vault)
+            stored.remove(id)
+            try stored.save(to: vault)
+            objectWillChange.send()
+        } catch {
+            showError(error.localizedDescription)
+        }
+    }
+
+    /// Puts profiles into the warm-up queue with a choice of templates: each gets a plan of its own,
+    /// for the country its proxy exits in. The choice is kept as each profile's plan when its turn
+    /// comes (`startWarmUp`).
+    func warmUp(_ ids: [UUID], with choice: WarmUpChoice) {
+        guard let warmUps else { return }
+        let templates = warmUpTemplates()
+        let details = self.details
+        warmUps.enqueue(ids) { id in
+            choice.plan(countryCode: details[id]?.exitCountryCode, templates: templates) ?? WarmUpPlan()
+        }
     }
 
     /// Stops the profile's warm-up; the profile keeps running.

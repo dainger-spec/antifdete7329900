@@ -733,6 +733,9 @@ enum UISnapshots {
         // The Scenarios section (docs/AUTOMATION.md): the person's scenarios, the templates, a
         // template's form, a scenario's steps beside its code, a recording, the profiles of a run,
         // a run's table as it goes and once it has ended, the runs kept, and the first opening.
+
+        problems += await warmUp(into: folder)
+        // The scenario editor: a scenario chosen, its code with the commands beside it.
         let scenario = Scenario(name: L("scenarios.untitled"), source: L("scenarios.template"))
         let signIn = Scenario(name: L("scenarios.template.signin.title"),
                               source: ScenarioTemplate.template("signin")!.source(settings: ["LOGIN_URL": .text("https://shop.example/login"), "SIGNED_IN": .text("text=My orders")]) { L(ScenarioTemplate.wordKey($0)) },
@@ -1821,6 +1824,122 @@ private struct SafariProfileMarkerPreview: View {
         .frame(maxWidth: .infinity)
         .frame(height: 52)
         .background(ground)
+    }
+}
+
+extension UISnapshots {
+    /// The Warm-up section in each of its states, "New warm-up", a run's report and a list of one's
+    /// own: drawn from sample values, as the screen is a screen of values (`WarmUpScreen`).
+    fileprivate static func warmUp(into folder: URL) async -> Int {
+        var problems = 0
+        func id(_ byte: UInt8) -> UUID { UUID(uuid: (0x57, byte, 0x5E, 0x17, 0, byte, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, byte)) }
+        let now = Date()
+        func visit(_ site: String, _ arrival: WarmUpSiteVisit.Arrival = .address, _ outcome: WarmUpSiteVisit.Outcome = .visited,
+                   pages: Int = 2, seconds: Double = 84, cookies: Int = 0, detail: String? = nil) -> WarmUpSiteVisit {
+            WarmUpSiteVisit(site: site, arrival: arrival, outcome: outcome, pages: pages, seconds: seconds, cookies: cookies, detail: detail)
+        }
+        let germanSites = [visit("google.de", .query, pages: 3, seconds: 100, cookies: 9), visit("idealo.de", .search, pages: 4, seconds: 171, cookies: 31),
+                           visit("otto.de", pages: 3, seconds: 132, cookies: 28), visit("spiegel.de", .search, pages: 3, seconds: 125, cookies: 22),
+                           visit("chefkoch.de", cookies: 19), visit("wetter.de", seconds: 72, cookies: 12), visit("tagesschau.de", .search, cookies: 11),
+                           visit("kleinanzeigen.de", .address, .timedOut, pages: 0, seconds: 30), visit("amazon.de", .search, pages: 3, seconds: 146, cookies: 17),
+                           visit("youtube.com", pages: 1, seconds: 58, cookies: 8), visit("zeit.de", seconds: 69, cookies: 14)]
+        func run(_ ago: TimeInterval, _ result: WarmUpRunResult = .finished, sites: [WarmUpSiteVisit], planned: Int = 18, pages: Int = 41,
+                 visited: Int = 198, other: Int = 14, country: String = "de", scheduled: Bool = false) -> WarmUpRun {
+            WarmUpRun(startedAt: now.addingTimeInterval(-ago - 1_440), endedAt: now.addingTimeInterval(-ago), result: result, scheduled: scheduled,
+                      templates: ["day", "shop"], intensity: .normal, countryCode: country, plannedSites: planned, pages: pages, searches: 3, consents: 5,
+                      cookiesVisited: visited, cookiesOther: other, sites: sites)
+        }
+        let fine = run(600, sites: germanSites)
+        let blocked = run(2_400, sites: [visit("weather.com", cookies: 14), visit("nytimes.com", .search, pages: 3, cookies: 21),
+                                         visit("google.com", .query, .blocked, pages: 0, seconds: 3, detail: "google"),
+                                         visit("walmart.com", .address, .blocked, pages: 0, seconds: 3, detail: "perimeterx"),
+                                         visit("zillow.com", .address, .blocked, pages: 0, seconds: 4, detail: "perimeterx"),
+                                         visit("yelp.com", .address, .blocked, pages: 0, seconds: 3, detail: "datadome"), visit("cnn.com", cookies: 23)],
+                          planned: 16, pages: 23, visited: 58, other: 0, country: "us")
+        let dead = run(3_300, .proxyNotAnswering, sites: [visit("weather.com", seconds: 96, cookies: 7),
+                                                          visit("walmart.com", .address, .failed, pages: 0, seconds: 10),
+                                                          visit("cnn.com", .address, .failed, pages: 0, seconds: 10)],
+                       planned: 18, pages: 2, visited: 7, other: 0, country: "us")
+        var status = WarmUpStatus(phase: .running, visited: 7, total: 20, cookies: 84, secondsRemaining: 540, currentHost: "spiegel.de")
+        status.step = "read"
+        status.siteNumber = 7
+        status.siteCount = 18
+        status.pagesRead = 14
+        status.searchesTyped = 2
+        status.consents = 3
+        status.siteVisits = Array(germanSites.prefix(5))
+        var typing = WarmUpStatus(phase: .running, visited: 2, total: 24, cookies: 19, secondsRemaining: 1_260, currentHost: "google.com")
+        typing.step = "search"
+        let template = WarmUpTemplate(name: "Shops DE", addresses: ["https://zalando.de/", "https://www.mediamarkt.de/", "https://lidl.de/", "https://dm.de/"],
+                                      searches: ["sneaker sale", "drogerie angebote"])
+        let profiles = [
+            WarmUpProfileItem(id: id(1), name: "Northwind", tags: ["ads", "DE"], countryCode: "DE", state: .running(status), history: [run(86_400 * 3, sites: germanSites)]),
+            WarmUpProfileItem(id: id(2), name: "Ads US 11", tags: ["ads"], countryCode: "US", state: .running(typing)),
+            WarmUpProfileItem(id: id(3), name: "Ads US 12", tags: ["ads"], countryCode: "US", state: .waiting(next: true)),
+            WarmUpProfileItem(id: id(4), name: "Berlin Shop 05", tags: ["shop"], countryCode: "DE", state: .waiting(next: false)),
+            WarmUpProfileItem(id: id(5), name: "Marketplace US", tags: ["clients"], countryCode: "US", state: .attention(dead), history: [dead]),
+            WarmUpProfileItem(id: id(6), name: "Ads US 07", tags: ["ads"], countryCode: "US", state: .partly(blocked), history: [blocked]),
+            WarmUpProfileItem(id: id(7), name: "Research", countryCode: "NL", state: .never),
+            WarmUpProfileItem(id: id(8), name: "Atlas", tags: ["clients"], countryCode: "GB", state: .never),
+            WarmUpProfileItem(id: id(9), name: "Berlin Shop 04", tags: ["shop"], countryCode: "DE", state: .warmed(fine, fine.endedAt),
+                              history: [fine, run(86_400 * 3, sites: germanSites, visited: 174), run(86_400 * 6, .stopped, sites: Array(germanSites.prefix(4)), pages: 9, visited: 61, other: 0)],
+                              repeatHours: 24, nextRun: now.addingTimeInterval(18 * 3_600)),
+            WarmUpProfileItem(id: id(10), name: "Personal", countryCode: nil, state: .warmed(nil, now.addingTimeInterval(-86_400))),
+            WarmUpProfileItem(id: id(11), name: "Travel", countryCode: "PT", state: .warmed(nil, now.addingTimeInterval(-86_400 * 9))),
+        ]
+        let queue = WarmUpQueueSummary(done: 5, total: 21, atOnce: 4, secondsLeft: 6_000)
+        let section = CGSize(width: 1208, height: 860)
+        func screen(_ profiles: [WarmUpProfileItem], queue: WarmUpQueueSummary? = nil, tab: WarmUpScreen.Tab = .profiles, selected: UUID? = nil) -> some View {
+            WarmUpScreen(profiles: profiles, queue: queue, templates: [template], tab: tab, selected: selected)
+                .background(Theme.backdrop)
+        }
+        problems += await Shot(name: "warmup-section-live", size: section) { screen(profiles, queue: queue, selected: id(1)) }.capture(into: folder)
+        problems += await Shot(name: "warmup-section-paused", size: section) {
+            screen(profiles, queue: WarmUpQueueSummary(done: 5, total: 21, paused: true, atOnce: 2, automatic: false))
+        }.capture(into: folder)
+        let after = profiles.filter { !$0.isRunning && !$0.isWaiting }
+        problems += await Shot(name: "warmup-section-warmed", size: section) {
+            screen(after, queue: WarmUpQueueSummary(done: 21, total: 21, atOnce: 4, failed: 2), selected: id(9))
+        }.capture(into: folder)
+        problems += await Shot(name: "warmup-section-dead-proxy", size: section) { screen(after, selected: id(5)) }.capture(into: folder)
+        problems += await Shot(name: "warmup-section-captcha", size: section) { screen(after, selected: id(6)) }.capture(into: folder)
+        problems += await Shot(name: "warmup-section-narrow", size: CGSize(width: 700, height: 620)) { screen(profiles, queue: queue, selected: id(1)) }.capture(into: folder)
+        problems += await Shot(name: "warmup-templates", size: section) { screen(profiles, tab: .templates) }.capture(into: folder)
+        problems += await Shot(name: "warmup-history", size: section) { screen(profiles, tab: .history) }.capture(into: folder)
+        problems += await Shot(name: "warmup-empty", size: section) {
+            screen(profiles.map { item in
+                var item = item
+                item.state = .never
+                item.history = []
+                return item
+            })
+        }.capture(into: folder)
+        problems += await Shot(name: "warmup-new-one", size: CGSize(width: 940, height: 680), titled: false) {
+            WarmUpNewSheet(request: WarmUpNewRequest(profiles: [id(9)], templates: ["day", "shop"]), profiles: profiles, templates: [template], actions: WarmUpActions())
+        }.capture(into: folder)
+        problems += await Shot(name: "warmup-new-selection", size: CGSize(width: 940, height: 680), titled: false) {
+            WarmUpNewSheet(request: WarmUpNewRequest(profiles: after.map(\.id), templates: ["day", "news", "shop"]), profiles: profiles, templates: [template],
+                           actions: WarmUpActions())
+        }.capture(into: folder)
+        problems += await Shot(name: "warmup-new-nothing-chosen", size: CGSize(width: 940, height: 680), titled: false) {
+            WarmUpNewSheet(request: WarmUpNewRequest(profiles: []), profiles: profiles, templates: [template], actions: WarmUpActions())
+        }.capture(into: folder)
+        problems += await Shot(name: "warmup-report", size: CGSize(width: 760, height: 620), titled: false) {
+            WarmUpReportSheet(request: WarmUpReportRequest(profile: profiles[8], run: fine), templates: [template], again: {})
+        }.capture(into: folder)
+        problems += await Shot(name: "warmup-report-captcha", size: CGSize(width: 760, height: 620), titled: false) {
+            WarmUpReportSheet(request: WarmUpReportRequest(profile: profiles[5], run: blocked), templates: [template], again: {})
+        }.capture(into: folder)
+        problems += await Shot(name: "warmup-report-dead-proxy", size: CGSize(width: 760, height: 620), titled: false) {
+            WarmUpReportSheet(request: WarmUpReportRequest(profile: profiles[4], run: dead), templates: [template], again: {})
+        }.capture(into: folder)
+        problems += await Shot(name: "warmup-own-list", size: CGSize(width: 820, height: 620), titled: false) {
+            WarmUpTemplateEditor(template: template, actions: WarmUpActions())
+        }.capture(into: folder)
+        problems += await Shot(name: "warmup-own-list-new", size: CGSize(width: 820, height: 620), titled: false) {
+            WarmUpTemplateEditor(template: nil, actions: WarmUpActions())
+        }.capture(into: folder)
+        return problems
     }
 }
 
