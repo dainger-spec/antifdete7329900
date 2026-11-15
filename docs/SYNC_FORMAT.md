@@ -177,20 +177,31 @@ bound), settings, proxy credentials, passwords, URLs, or cookies (names, values,
 ## Engine algorithm
 
 The engine keeps per-object local state in `sync-state.bin`, encrypted: the last synced
-revision and the SHA-256 of the last synced bytes — and, from a server that keeps a generation of
-its data (`ServerGenerationTransport`: the Lumen server), the generation those records are of, with
-the server's address and the vault (format 2; without one the file stays the map of records,
-format 1, as every version before wrote it).
+revision and the SHA-256 of the last synced bytes; the place those records are of — a server's
+address and the vault, or a folder's path (`SyncEngine.place(of:)`); and, from a server that keeps a
+generation of its data (`ServerGenerationTransport`: the Lumen server), the generation those records
+are of. Format 2 with a generation (its server and vault are the place: what the version that
+brought generations reads); format 3 with a place and no generation (a folder, a server of one's
+own that keeps none), which a version from before places refuses rather than take another place's
+copies for newer; format 1, the map of records alone as every version before wrote it, names no
+place.
 
-0. **Start over when the records are not of the server's data** (the account server's CONTRACT
-   §16.2). The list names the server's generation (`X-Lumen-Server-Generation`: 32 hex, or `none`
-   when the server has no such vault). Another one than the one kept — the server's database put
-   back from a copy, its sync data deleted on the account page, another server, or the first run of
-   a client that knows of generations — and the records are forgotten, the new one kept. Whatever the
-   generation, an object the records name that is missing from the list or listed at a lower
-   revision forgets them too (a disk snapshot put back, another folder chosen): objects are never
-   deleted one by one there, and revisions only grow. A server that names no generation is spoken to
-   as before, and a generation kept for another address is dropped. Forgotten records mean every
+0. **Start over when the records are not of the sync location's data** (the account server's
+   CONTRACT §16.2). The records are of one place: kept for another — the account after a folder, a
+   folder after the account, a folder or server used before, any other folder or server — or for
+   none said (format 1, kept by a version from before places: the first sync after the update), they
+   are forgotten, and this place kept with them. Another place's revisions say nothing of this
+   one's: a folder used for months before the account holds older copies at higher revisions than
+   the vault the account made anew, and the account's records took them for newer — which a
+   version before this one pulled over this Mac's newer files. The list names the server's
+   generation (`X-Lumen-Server-Generation`: 32 hex, or `none` when the server has no such vault).
+   Another one than the one kept — the server's database put back from a copy, its sync data deleted
+   on the account page, or the first run of a client that knows of generations — and the records
+   are forgotten, the new one kept. Whatever the place and generation, an object the records name
+   that is missing from the list or listed at a lower revision forgets them too (a disk snapshot put
+   back, a file removed): objects are never deleted one by one there, and revisions only grow. A
+   server that names no generation is spoken to as before, and a generation kept for another address
+   is dropped. Forgotten records mean every
    object counts as changed here, and the steps below do the rest: what only this device has goes
    up (`If-None-Match: *`), what both have is merged — a config by its times, the other version kept
    beside it; without times, or equal ones, **this device's stays** and the server's is kept beside

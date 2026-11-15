@@ -162,7 +162,7 @@ Application Support/PrivacyBrowser/      (0700)
   settings.bin                    AES-GCM(device-settings key, DeviceSettings JSON)   [after configuring sync]
   settings.bin.unreadable         a settings.bin that could not be read, moved aside at the next change of settings, never written over
   proxies.bin                     AES-GCM(proxy-list key, ProxyList JSON)             [after the first proxy is added; this Mac only]
-  sync-state.bin                  AES-GCM(sync key, per-object revision + hash)        [only after sync]
+  sync-state.bin                  AES-GCM(sync key, per-object revision + hash, and the place they are of) [only after sync]
   profiles/<uuid>/
     config.bin                    AES-GCM(profile key, ProfileConfiguration JSON) — also the person's own tags,
                                   notes and glyph (written only when set; the Profiles list reads them into
