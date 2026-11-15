@@ -378,6 +378,13 @@ public enum AccountAPI {
         }
     }
 
+    /// `GET /v1/device/sync/vaults` (§16.1): the vaults the device's account keeps on the server, asked
+    /// with the device's token — what a Mac without a vault asks before it brings one back
+    /// (`VaultRestore`). Nothing is recorded of the asking, and nothing changes.
+    public static func syncVaults(deviceToken: ServerToken) -> AccountRequest {
+        AccountRequest(method: .get, path: "/v1/device/sync/vaults", bearer: deviceToken)
+    }
+
     /// `GET /v1/plans`, without authorization: for "Lost your key?" — how long after a payment the key
     /// can be fetched again with the invoice's number and the purchase code (`keyRetrievalSeconds`).
     public static func plans() -> AccountRequest {
@@ -519,7 +526,36 @@ public enum AccountAPI {
         }
     }
 
+    /// The account's vaults (`syncVaults`), the last changed first. An entry whose ID does not read
+    /// is left out; a time that does not read is none.
+    public static func syncVaults(from response: AccountResponse) -> Result<[AccountVault], AccountFailure> {
+        decode(SyncVaultsBody.self, from: response).map { body in
+            body.vaults.compactMap { entry -> AccountVault? in
+                guard let id = entry.vaultID.flatMap(UUID.init(uuidString:)) else { return nil }
+                return AccountVault(vaultID: id, changedAt: entry.changedAt)
+            }
+            .sorted { ($0.changedAt ?? .distantPast) > ($1.changedAt ?? .distantPast) }
+        }
+    }
+
     // MARK: Private
+
+    private struct SyncVaultsBody: Decodable {
+        struct Entry: Decodable {
+            var vaultID: String?
+            var changedAt: Date?
+
+            enum CodingKeys: String, CodingKey { case vaultID, changedAt }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                vaultID = try? container.decode(String.self, forKey: .vaultID)
+                changedAt = try? container.decode(Date.self, forKey: .changedAt)
+            }
+        }
+
+        var vaults: [Entry]
+    }
 
     static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()

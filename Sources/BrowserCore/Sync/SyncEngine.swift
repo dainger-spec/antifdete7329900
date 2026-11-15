@@ -196,6 +196,8 @@ public final class SyncEngine: @unchecked Sendable {
 
     /// New-device setup: download the vault header, verify the master password against it,
     /// and write it locally. Follow with `ProfileRepository(vault:)` + `SyncEngine.sync()`.
+    /// The app does not set a Mac up this way: `VaultRestore` builds the vault aside, writing nothing
+    /// to the sync location, and moves it into place only once all of it is there.
     public static func bootstrap(transport: SyncTransport, root: URL, password: String) async throws -> UnlockedVault {
         guard !MasterVault.exists(in: root) else { throw CoreError.vaultAlreadyExists }
         guard let blob = try await transport.fetch(objectID: vaultHeaderObjectID) else { throw CoreError.vaultNotFound }
@@ -378,6 +380,9 @@ public final class SyncEngine: @unchecked Sendable {
     /// (`ServerGenerationTransport.generationScope`: the account's, or a server of one's own), or a
     /// folder (its path). Nil for a transport that says neither.
     static func place(of transport: SyncTransport) -> String? {
+        // A restore reads the place through a transport that writes nothing (`VaultRestore`): the
+        // records it leaves are of the place it read, so that the first sync after it goes on from them.
+        if let readOnly = transport as? ReadOnlySyncTransport { return place(of: readOnly.inner) }
         if let server = transport as? ServerGenerationTransport { return serverPlace(server.generationScope) }
         if let folder = transport as? LocalDirectorySyncTransport { return "folder|" + folder.place }
         return nil

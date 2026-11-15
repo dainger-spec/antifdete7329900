@@ -201,6 +201,12 @@ final class AppModel: ObservableObject {
         AppEnvironment.removeUnsealLeftovers(vault: root)
         // A camera's video an earlier run left in plaintext for its preview (`CameraPreview`).
         CameraPreview.removeLeftovers()
+        // A vault brought back from its sync location (`VaultRestore`) whose move into place was cut
+        // short — the app quit, the power lost — is put in place now, before a vault is looked for:
+        // this Mac then has that vault, whole, and never half of one.
+        if VaultRestore.finishInterruptedMoves(in: root) {
+            Logger(subsystem: "PrivacyBrowser", category: "Vault").notice("A restored vault's move into place, cut short before, was finished")
+        }
         let firstPhase: Phase = MasterVault.exists(in: root) ? .locked : .setup
         phase = firstPhase
         welcome = WelcomeLaunch.decide(firstLaunch: firstPhase == .setup)
@@ -276,6 +282,22 @@ final class AppModel: ObservableObject {
             }.value
             try self.didUnlock(vault)
             self.license.forgetComparisons()
+        }
+    }
+
+    /// A vault brought back from its sync location (`RestoreModel`, `VaultRestore`) and moved into
+    /// place is this Mac's vault: it opens, as an unlock opens one — with the place it came from as
+    /// this Mac's sync target, kept in its `settings.bin`. `warning`: its master password is the
+    /// account's password or the license's key (§10.1, later) — said, as after an unlock.
+    func adoptRestoredVault(_ vault: UnlockedVault, warning: String?) {
+        guard phase == .setup, !isWorking else { return }
+        do {
+            try didUnlock(vault)
+            masterPasswordWarning = warning
+            masterPasswordRefusal = nil
+            license.forgetComparisons()
+        } catch {
+            showError(errorText(error))
         }
     }
 
@@ -1221,6 +1243,11 @@ final class AppModel: ObservableObject {
     /// Where this device syncs to; device-local, stored encrypted in `settings.bin`.
     var syncTarget: DeviceSettings.SyncTarget? { deviceSettings.syncTarget }
     var lastSyncStatus: DeviceSettings.SyncStatus? { deviceSettings.lastSync }
+
+    /// The open vault's ID — the one its header and the sync location name it by. Shown where this
+    /// Mac syncs to a server of one's own, which lists no vaults: a Mac without a vault is asked
+    /// for it to bring this one back (`RestoreModel.chooseServer`). Not a secret.
+    var syncVaultID: UUID? { repository?.vault.vaultID }
 
     /// LOCAL-ONLY transport: a folder (NAS, external disk). Stored as a security-scoped
     /// bookmark so the App Sandbox grants access again after relaunch.

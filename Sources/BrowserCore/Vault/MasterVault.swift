@@ -223,6 +223,14 @@ public final class UnlockedVault: @unchecked Sendable {
 
     private var vaultSalt: Data { withUnsafeBytes(of: header.vaultID.uuid) { Data($0) } }
 
+    /// This vault, open, at another folder: its files were moved there whole (`VaultRestore`, which
+    /// builds a restored vault aside and moves it into place once all of it is there). Nothing is
+    /// read or written; only a vault opened with the master password can be.
+    func moved(to newRoot: URL) throws -> UnlockedVault {
+        guard let masterKey else { throw CoreError.notGranted("the vault's header") }
+        return UnlockedVault(root: newRoot, header: header, masterKey: masterKey)
+    }
+
     /// Raises the vault's generation to this version's (`VaultHeader.currentFormat`) when it is
     /// lower — before anything is written that a version from before could not read, so that such a
     /// version refuses the whole vault instead of failing on one file after another (R3). Only with

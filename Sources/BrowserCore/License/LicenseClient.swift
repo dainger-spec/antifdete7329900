@@ -389,6 +389,15 @@ public struct LicenseClient: Sendable {
         return AccountAPI.devices(from: response)
     }
 
+    // MARK: The account's vaults
+
+    /// `GET /v1/device/sync/vaults` (§16.1): the vaults the account keeps on the server, with this
+    /// Mac's device token — asked by a Mac that has no vault and brings one back (`VaultRestore`).
+    public func syncVaults(deviceToken: ServerToken) async -> Result<[AccountVault], AccountFailure> {
+        guard let response = try? await transport.send(AccountAPI.syncVaults(deviceToken: deviceToken)) else { return .failure(.unreachable) }
+        return AccountAPI.syncVaults(from: response)
+    }
+
     // MARK: A purchase without registration: an email, a new key (§11.1)
 
     /// `POST /v1/anonymous/email`: a letter with a code goes to `email` when it has no account.

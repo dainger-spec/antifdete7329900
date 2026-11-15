@@ -82,6 +82,53 @@ enum UISnapshots {
         return (signedOut, signedIn, signedInWithKey, keyWithEmail)
     }
 
+    /// The setup screen's other way, a picture a step: where the vault is (with a restore that was
+    /// not finished), the account's vaults — two to choose from and one a newer version wrote — the
+    /// server's answers that are no list (sync not in the plan, a new device held, no vault), a
+    /// server of one's own, the master password and a wrong one, the vault coming and a run cut
+    /// short, and the vault here with a profile whose settings never reached the place.
+    private static func restoreFlow(into folder: URL, model: AppModel) async -> Int {
+        var problems = 0
+        let made = Date(timeIntervalSince1970: 1_773_316_800)
+        let now = Date()
+        let first = RestoreModel.Candidate(vaultID: UUID(uuidString: "6F1E2D3C-4B5A-4978-8695-A4B3C2D1E0F1")!, createdAt: made,
+                                           changedAt: now.addingTimeInterval(-26 * 3_600), passwordChanged: true)
+        let second = RestoreModel.Candidate(vaultID: UUID(uuidString: "0A1B2C3D-4E5F-4A6B-8C7D-9E0F1A2B3C4D")!,
+                                            createdAt: made.addingTimeInterval(190 * 86_400), changedAt: now.addingTimeInterval(-41 * 86_400))
+        let newer = RestoreModel.Candidate(vaultID: UUID(uuidString: "11111111-2222-4333-8444-555555555555")!, createdAt: nil,
+                                           changedAt: now.addingTimeInterval(-2 * 86_400), problem: L("restore.vault.newer"))
+        let names = ["Work", "Shop 1", "Shop 2", "Shop 3", "Mail", "Ads", "Bank", "Travel", "News", "Forum", "Market", "Support"]
+        let cut = errorText(CoreError.io("sync request failed: The network connection was lost."))
+        let samples: [(name: String, sample: RestoreModel, height: CGFloat)] = [
+            ("launch-restore-source",
+             RestoreModel(sample: .source, unfinished: [VaultRestore.Unfinished(vaultID: first.vaultID, createdAt: made, bytes: 41_300_000)]), 860),
+            ("launch-restore-account",
+             RestoreModel(sample: .account, place: .account, account: .vaults([first, second, newer]), selected: first.vaultID), 900),
+            ("launch-restore-not-in-plan", RestoreModel(sample: .account, place: .account, account: .state(.notInPlan)), 820),
+            ("launch-restore-on-hold",
+             RestoreModel(sample: .account, place: .account, account: .state(.onHold(until: now.addingTimeInterval(3 * 86_400)))), 780),
+            ("launch-restore-no-vaults", RestoreModel(sample: .account, place: .account, account: .state(.noVaults)), 780),
+            ("launch-restore-signed-out", RestoreModel(sample: .account, place: .account, account: .state(.signedOut)), 780),
+            ("launch-restore-server", RestoreModel(sample: .server), 900),
+            ("launch-restore-password", RestoreModel(sample: .password, place: .account, candidate: first), 900),
+            ("launch-restore-wrong-password",
+             RestoreModel(sample: .password, place: .folder(path: "/Volumes/NAS/lumen"), candidate: second, problem: L("restore.password.wrong")), 940),
+            ("launch-restore-bringing",
+             RestoreModel(sample: .bringing, place: .account, candidate: first, profileNames: names,
+                          progress: VaultRestore.Progress(listed: 61, fetched: 21, bytes: 12_400_000, alreadyHere: 13), continued: true), 820),
+            ("launch-restore-interrupted",
+             RestoreModel(sample: .bringing, place: .account, candidate: first, profileNames: names, interrupted: cut), 820),
+            ("launch-restore-done",
+             RestoreModel(sample: .done, place: .account, summary: .init(profiles: 12, withoutSettings: ["Shop 3"], place: .account)), 900),
+        ]
+        for entry in samples {
+            problems += await Shot(name: entry.name, size: CGSize(width: 1180, height: entry.height), edges: true) {
+                LockBackdrop { SetupView(restoring: entry.sample).environmentObject(model) }
+            }.capture(into: folder)
+        }
+        return problems
+    }
+
     private static func settings(into folder: URL, model: AppModel) async -> Int {
         var problems = 0
         for section in SettingsSection.allCases where section != .updates {
@@ -736,6 +783,9 @@ enum UISnapshots {
         problems += await Shot(name: "launch-setup-same-as-key", size: CGSize(width: 1180, height: 900), edges: true) {
             LockBackdrop { SetupView().environmentObject(refusedModel) }
         }.capture(into: folder)
+        // "I already have a vault" (RestoreFlow): the steps of bringing a vault back from where a Mac
+        // synced it, and what the Lumen server may answer — sample data, nothing asked of any server.
+        problems += await restoreFlow(into: folder, model: lockModel)
         // The first launch's first screen with an account server: the sign-in, the interface's
         // language on it (FirstLaunchLanguagePicker).
         problems += await Shot(name: "launch-sign-in", size: CGSize(width: 1180, height: 820), edges: true) {
