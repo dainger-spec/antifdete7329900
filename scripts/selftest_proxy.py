@@ -240,8 +240,9 @@ def header(request: str, name: str) -> str:
 def automation_page(name: str) -> bytes:
     """Pages for the automation commands' checks (SelfTest's `automationCommands`): `form` has a
     button, a field, an element that appears after 0.8 s, one that goes after 0.8 s, five items,
-    a button far below (reached by scrolling), and a link to `two`; both record every input event
-    with what a detector reads of it (`window.__take()`)."""
+    a button far below (reached by scrolling), a link to `two`, a list to choose in (`#choice`,
+    whose choice `#chosen` repeats) and a link that goes to `two` 0.4 s after its click (`#slow`);
+    both record every input event with what a detector reads of it (`window.__take()`)."""
     recorder = (
         "<script>(() => { const log = [];"
         " const types = ['pointerover','pointermove','pointerdown','pointerup','mousedown','mouseup','click','dblclick',"
@@ -265,6 +266,12 @@ def automation_page(name: str) -> bytes:
             "<p><input id=field autocomplete=off data-kind=text></p>"
             "<p id=gone>Going away</p>" + items +
             "<p><a id=next href=\"/pb-automation/two\">To page two</a></p>"
+            # A list to choose in, and a link whose page comes 0.4 s after the click (a form that a
+            # script checks first): the click has returned before anything begins to load.
+            "<p><select id=choice onchange=\"document.getElementById('chosen').textContent = this.value\">"
+            "<option value=\"\">Choose</option><option value=a>Alpha</option><option value=b>Beta</option></select>"
+            " <span id=chosen>none</span></p>"
+            "<p><a id=slow href=\"#\" onclick=\"setTimeout(() => { location.href = '/pb-automation/two'; }, 400); return false;\">Slow link</a></p>"
             "<div style=\"height:2400px\"></div>"
             "<button id=far onclick=\"this.textContent='far clicked'\">Far button</button>"
             "<script>setTimeout(() => { const p = document.createElement('p'); p.id = 'late'; p.textContent = 'Late';"

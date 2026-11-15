@@ -302,7 +302,7 @@ final class WebDriverExecutor {
         case .notVisible: return .notInteractable(String(describing: failure))
         case .covered: return .clickIntercepted(String(describing: failure))
         case .noWindow: return .noSuchWindow("the session's window is closed")
-        case .untypeable, .navigation: return .unknown(String(describing: failure))
+        case .untypeable, .navigation, .refused: return .unknown(String(describing: failure))
         }
     }
 

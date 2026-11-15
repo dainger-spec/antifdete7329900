@@ -219,8 +219,21 @@ public enum WebDriverKeys {
     private static let named: [UInt32: String] = [
         0xE003: "Backspace", 0xE004: "Tab", 0xE006: "Enter", 0xE007: "Enter", 0xE00C: "Escape", 0xE00D: "Space",
         0xE012: "ArrowLeft", 0xE013: "ArrowUp", 0xE014: "ArrowRight", 0xE015: "ArrowDown",
+        0xE00E: "PageUp", 0xE00F: "PageDown", 0xE010: "End", 0xE011: "Home", 0xE017: "Delete",
+        // The number pad's own of the same keys (Selenium has no names for them, other clients do).
+        0xE054: "PageUp", 0xE055: "PageDown", 0xE056: "End", 0xE057: "Home",
+        0xE058: "ArrowLeft", 0xE059: "ArrowUp", 0xE05A: "ArrowRight", 0xE05B: "ArrowDown", 0xE05D: "Delete",
     ]
-    private static let modifiers: [UInt32: String] = [0xE008: "Shift", 0xE009: "Control", 0xE00A: "Alt", 0xE03D: "Meta"]
+    /// The left key of each pair, and the right one (U+E050…): held alike.
+    private static let modifiers: [UInt32: String] = [0xE008: "Shift", 0xE009: "Control", 0xE00A: "Alt", 0xE03D: "Meta",
+                                                      0xE050: "Shift", 0xE051: "Control", 0xE052: "Alt", 0xE053: "Meta"]
+    /// Keys whose code point names a character (`Keys.NUMPAD5`, `Keys.ADD`, `Keys.SEMICOLON`):
+    /// typed as that character, from the keyboard's main rows.
+    private static let characters: [UInt32: Character] = [
+        0xE018: ";", 0xE019: "=", 0xE01A: "0", 0xE01B: "1", 0xE01C: "2", 0xE01D: "3", 0xE01E: "4", 0xE01F: "5",
+        0xE020: "6", 0xE021: "7", 0xE022: "8", 0xE023: "9", 0xE024: "*", 0xE025: "+", 0xE026: ",", 0xE027: "-",
+        0xE028: ".", 0xE029: "/",
+    ]
 
     /// The strokes `text` asks for. A modifier holds until the protocol's NULL (U+E000) or the
     /// text's end; a key this cannot press is refused by its code point.
@@ -232,7 +245,10 @@ public enum WebDriverKeys {
             if !run.isEmpty { strokes.append(.type(run)) }
             run = ""
         }
-        for character in text {
+        for given in text {
+            // A key that names a character is that character from here on.
+            let only = given.unicodeScalars.count == 1 ? given.unicodeScalars.first?.value : nil
+            let character = only.flatMap { characters[$0] } ?? given
             let scalars = Array(character.unicodeScalars)
             guard scalars.count == 1, (0xE000...0xE05D).contains(scalars[0].value) else {
                 if held.isEmpty {

@@ -3,7 +3,8 @@
 Scenarios act on a profile's pages with the app's own pointer, wheel and keyboard. There is no
 debugging protocol: nothing a page could find (`navigator.webdriver`, protocol objects, untrusted
 events). The promise is that **a page cannot tell a scenario from a person**, and the self-test
-holds every command to it.
+holds every command to it — but one, a choice in a list (`selectOption`), which cannot be made
+with the pointer and says what a page can see of it ("The one exception", below).
 
 Plan (the lead's note v2): 1 the shared input mechanism (`PageInput`, docs/PAGE_INPUT.md);
 2 the check group "the page cannot tell"; 3 the core commands (this file); 4 the editor and runs on
@@ -19,12 +20,14 @@ Names follow Playwright's so that a script moves over quickly; full compatibilit
 |---|---|
 | `goto(url, waitUntil)` | Loads the address as the address bar does; waits for another document, then for `load` or `domcontentloaded` |
 | `back()`, `forward()`, `reload()` | As the toolbar's buttons; wait for the page |
-| `waitForLoadState(state)` | `domcontentloaded` or `load` |
+| `waitForLoadState(state)` | `domcontentloaded` or `load`. Right after a click, a key or a choice in a list (within 1.5 s) it first waits for the page that action opens to begin loading: the old page is still "complete" for a moment after the click, and a wait that looked at once went on to read the page being left |
+| `waitForURL(pattern, waitUntil, timeout)` | Until the page's address matches, then for the page: an address written out, with `*` for a run of characters within one part of the path and `**` for any run (`'**/account'`), or a regular expression (`/\/orders\/\d+$/`). For a page that comes late after a click — a form a script checks first, a chain of redirects |
 | `waitFor(selector, state, timeout)` | `attached`, `detached`, `visible`, `hidden`; a timeout is an error |
 | `click(selector, clickCount)` | Waits for the element, scrolls it into view with the wheel, moves the pointer to a point inside it where it is on top, presses and lets go (2: a real double click); an element covered there is an error naming what covers it |
 | `hover(selector)`, `click(at:)` | The pointer over an element; a click at a viewport point |
+| `selectOption(selector, choice)` | Chooses in a list (a `<select>`, or its label): an option's value, else its words; `{value}`, `{label}`, `{index}`; a list of them where the list takes several. Gives back the values chosen. The pointer goes to the list; **the choice itself is set from the driver's world**, as AutoFill sets a field — see below |
 | `type(selector, text, delay)` | Clicks the field (unless focused), then key after key with Shift held around capitals; a character the keyboard layout has no key for is an error. The log says how many characters, never which |
-| `press("Enter" / "Shift+Tab" / "Meta+a")` | A key or a combination, modifier keys pressed before and let go after |
+| `press("Enter" / "Shift+Tab" / "Meta+a")` | A key or a combination, modifier keys pressed before and let go after. The keys with names: Enter, Tab, Backspace, Delete, Escape, Space, the four arrows (`ArrowDown`…), Home, End, PageUp, PageDown |
 | `scroll(by:)`, `scrollIntoView(selector)` | Wheel events where the pointer is |
 | `textContent`, `innerText`, `inputValue`, `getAttribute`, `count`, `isVisible`, `url`, `title` | Read from the driver's own content world |
 | `evaluate(body, args, world)` | A function body in the driver's own world by default, which the page's scripts cannot see. In the page's world only when asked for by name: **what runs there, the page can see** (its globals, its prototypes, its timing) |
@@ -39,6 +42,14 @@ in a component (`a >>> b >>> c`). Clicks aim at the element itself there, not at
 The driver reads the page (where an element is, whether it shows, its text) in a content world of
 its own; it never acts on the page from a script. Clicks, typing and scrolling are input events.
 
+**The one exception: a choice in a list.** A `<select>`'s list is the system's menu, not the page's:
+a press on it opens the menu for somebody to choose in, and nothing given to the web view chooses
+there. `selectOption` moves the pointer onto the list and then sets the option from the driver's
+world, sending the page the `input` and `change` it gets for a person's choice — but those two
+events are not marked as a person's (`isTrusted` is false), which a page that looks can see. It is
+what WebDriver's click on an `<option>` has done from the start, and what AutoFill does to a
+field. A scenario that must not be told apart there has to leave the list to the person.
+
 ## What proves it (self-test)
 
 - **"the page cannot tell"**: each trace kind with its fix and without it (docs/PAGE_INPUT.md).
@@ -47,7 +58,12 @@ its own; it never acts on the page from a script. Clicks, typing and scrolling a
   every press, the button held, wheel time and place, focus, keys with Shift, a real double click,
   user activation); the run changes nothing of the fingerprint surface (`fingerprint_probe.js`,
   `navigator.webdriver` false) or the page's globals; `evaluate` in the driver's world is not seen
-  by the page, while the same in the page's world — the control — is.
+  by the page, while the same in the page's world — the control — is. After that record is
+  taken: `selectOption` chooses by an option's words and by its place, the page hears of it, and
+  what cannot be chosen is said; Page Down, Home, End, Page Up and Delete reach the page as a
+  keyboard's keys of those names; `waitForLoadState` right after a click on a link whose page
+  comes 0.4 s later waits for that page (red on the code before: it read the page being left),
+  and `waitForURL` waits for an address and gives up after its time.
 - **"scenario runs"**: a scenario's commands in order with its log; an error ends the run with
   its reason **and the scenario's line** — a command's, and the script's own mistake; what the
   script returns is the run's result; Stop; commands without `await` held to their limit; a plan
@@ -203,21 +219,28 @@ Record ── AppModel.startRecording(on:) ── the profile started with a win
   `click; press('Meta+a'); type` — the typing replaces what was there, as it did.
 - **Enter in a form's field** is `page.press('Enter')`; the click the browser makes on the form's
   button for it is not a second step.
-- **Not recorded:** frames, dragging, file uploads, hovering; a choice in a `<select>` becomes a
-  comment (its list is the system's, not the page's).
+- **A choice in a list** (`<select>`) is `await page.selectOption(selector, 'value'); // its words`
+  — the choice itself, heard as the list's `change`. The click that opened the list is not a
+  step: replayed, it opened the system's menu and left it open. Chosen again before anything
+  else, the last choice counts; a page that loads after a choice is waited for, as after a click.
+  A card's month or year, and a list that takes several choices, stay a comment.
+- **Not recorded:** frames, dragging, file uploads, hovering.
 - **Only what the person does in a window they see.** A warm-up's pages (its window is in front
   fully transparent) and the page the profile's check measures with are left out. A recording
   ends when its profile stops — its window closed, its process ended — with the lines it has.
 - Nothing of the recorder is in a profile's pages before the first recording there. After it the
   script stays, idle: a page's script asks at its start whether a recording is on.
 
-Checked: `ScenarioRecordingTests` (which loads are steps, what typing leaves, each step's line);
+Checked: `ScenarioRecordingTests` (which loads are steps, what typing leaves, a list's choice,
+each step's line);
 the self-test's "automation commands" (a recording of the driver's own click and typing comes out
 as the lines that repeat them, and nothing is recorded after Stop); the page's script against
 real input in a browser while it was written (the fields, a password, a checkbox's label, a
 button without an id, Enter); `scripts/test-shims.mjs` runs the page's script and the driver's
-find on a stub page — secrets, and a field and a button in a component's shadow root named
-through its host and found there rather than in a look-alike form of the page.
+find on a stub page — secrets, a field and a button in a component's shadow root named
+through its host and found there rather than in a look-alike form of the page, a list's choice
+said as a step while its click is not, and the driver's own choosing (`PageDriver.chooseOptions`:
+by value, by words, by place, what it refuses) — in V8 and in JavaScriptCore.
 
 ## By the clock
 
@@ -292,8 +315,10 @@ a client (Selenium) ── http://127.0.0.1:<port>/wd/<profile's token>/<profile
        click ── the element brought into view, the point checked for what covers it, then the
                 pointer moved there and pressed (PageInput); an <option> is chosen in its list
        send keys ── the element focused, then keys one by one; the protocol's own key codes
-                (Enter, Tab, Backspace, arrows, Shift/Control/Alt/Meta held until NULL) through
-                WebDriverKeys; text the keyboard's layout has no key for is put in as text
+                (Enter, Tab, Backspace, Delete, arrows, Home, End, Page Up, Page Down;
+                Shift/Control/Alt/Meta of either side held until NULL; the number pad's digits
+                and signs as their characters) through WebDriverKeys; text the keyboard's
+                layout has no key for is put in as text
        text, tag, attribute, property, CSS value, rect, enabled, selected, displayed, clear
        execute/sync and /async ── the client's script in the driver's own world
        cookies of the page ── the profile's store (WKHTTPCookieStore)
@@ -392,7 +417,7 @@ docs/AUTOMATION_API.md).
 ### Checked
 
 `WebDriverProtocolTests` (the commands by method and path as Selenium sends them, the errors, the
-keys as strokes). The page's scripts against a real browser while they were written (finding by
+keys as strokes — the keys beside the arrows and the number pad's among them). The page's scripts against a real browser while they were written (finding by
 CSS and XPath, an invalid selector, a covered element, an option, clear, a script with elements in
 and out, a stale reference). In the full pipeline, `scripts/webdriver_check.sh`: `Lumen
 --webdriver-serve` over a temporary vault, and `scripts/webdriver_check.py` with Selenium's own

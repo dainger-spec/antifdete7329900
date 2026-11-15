@@ -55,6 +55,33 @@ final class ScenarioRecordingTests: XCTestCase {
         ])
     }
 
+    /// A choice in a list is a step a replay makes again; the click that opened the list is not
+    /// recorded at all (the page's side leaves it out), and a card's month is said without it.
+    func testAChoiceInAListIsReplayed() {
+        var recording = ScenarioRecording()
+        _ = recording.loaded("https://shop.example/address", at: start)
+        _ = recording.acted(RecordedStep(.select, selector: "select[name=\"country\"]", value: "FR", label: "France"), at: start.addingTimeInterval(1))
+        // Chosen again before anything else: the last choice is the step.
+        XCTAssertEqual(recording.acted(RecordedStep(.select, selector: "select[name=\"country\"]", value: "DE", label: "Germany"),
+                                       at: start.addingTimeInterval(2)),
+                       [RecordedStep(.select, selector: "select[name=\"country\"]", value: "DE", label: "Germany")])
+        // A list whose choice loads a page (a language's): the page is waited for, as after a click.
+        _ = recording.acted(RecordedStep(.select, selector: "#language", value: "it", label: "it"), at: start.addingTimeInterval(10))
+        XCTAssertEqual(recording.loaded("https://shop.example/it/address", at: start.addingTimeInterval(11)), [RecordedStep(.load)])
+        // A card's month: which list, not which month — whatever the page's side sent.
+        _ = recording.acted(RecordedStep(.select, selector: "#exp-month", value: "07", secret: true, label: "July"), at: start.addingTimeInterval(20))
+        _ = recording.acted(RecordedStep(.select, selector: "#size", value: "it's \"L\"", label: "Large\n(L)"), at: start.addingTimeInterval(21))
+        XCTAssertEqual(lines(recording), [
+            "await page.goto('https://shop.example/address');",
+            "await page.selectOption('select[name=\"country\"]', 'DE'); // Germany",
+            "await page.selectOption('#language', 'it');",
+            "await page.waitForLoadState();",
+            "// select #exp-month: •••",
+            "await page.selectOption('#size', 'it\\'s \"L\"'); // Large (L)",
+        ])
+        XCTAssertFalse(recording.steps.contains { $0.value == "07" || $0.label == "July" }, "a card's choice is never kept in a step")
+    }
+
     func testTextIsQuotedAsJavaScript() {
         XCTAssertEqual(ScenarioRecording.quoted("it's a \\ \"test\"\nline\u{2028}"), #"'it\'s a \\ "test"\nline"# + "\\u2028'")
         XCTAssertEqual(ScenarioRecording.quoted("привет"), "'привет'")

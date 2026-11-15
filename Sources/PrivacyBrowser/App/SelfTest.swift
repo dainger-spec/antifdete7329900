@@ -7595,6 +7595,57 @@ final class SelfTest {
         try? await Task.sleep(nanoseconds: 300_000_000)
         check("automation commands: after the recording is stopped nothing more is recorded", seen.steps.count == recordedLines.count,
               "\(seen.steps.count) steps")
+
+        // A choice in a list: by an option's words, the page hears of it; one that is not there is said.
+        var values: [String] = []
+        let chose = await outcome {
+            try await driver.goto(form)
+            try await driver.waitFor("#late")
+            values = try await driver.selectOption("#choice", ["Beta"])
+        }
+        let chosen = try? await driver.textContent("#chosen")
+        let byIndex = await outcome { values += try await driver.selectOption("#choice", [["index": 1]]) }
+        let noOption = await outcome { _ = try await driver.selectOption("#choice", ["Gamma"], timeout: 2) }
+        let notAList = await outcome { _ = try await driver.selectOption("#button", ["x"], timeout: 2) }
+        check("automation commands: selectOption chooses a list's option by its words or its place, the page hears of it, and what cannot be chosen is said",
+              chose == "ok" && chosen == "b" && byIndex == "ok" && values == ["b", "a"] && noOption.contains("has no option \"Gamma\"")
+                  && notAList.contains("is not a list"),
+              "\(chose) → \(chosen ?? "nil"); by index \(byIndex) \(values); \(noOption); \(notAList)")
+
+        // The keys beside the arrows reach the page as a keyboard's, by their names.
+        _ = try? await js(tab.webView, "return __take();")
+        let pressed = await outcome {
+            try await driver.click("#button")
+            for key in ["PageDown", "Home", "End", "PageUp", "Delete"] { try await driver.press(key) }
+        }
+        let pressedText = (try? await js(tab.webView, "return __take();")) as? String ?? "{}"
+        let pressedRecord = (try? JSONSerialization.jsonObject(with: Data(pressedText.utf8))) as? [String: Any] ?? [:]
+        let keyDowns = (pressedRecord["events"] as? [[String: Any]] ?? []).filter { $0["type"] as? String == "keydown" }
+        let keyNames = keyDowns.map { $0["key"] as? String ?? "?" }
+        check("automation commands: PageDown, Home, End, PageUp and Delete are pressed as a keyboard's keys of those names",
+              pressed == "ok" && keyNames == ["PageDown", "Home", "End", "PageUp", "Delete"] && keyDowns.allSatisfy { $0["trusted"] as? Bool == true },
+              "\(pressed): \(keyNames)")
+
+        // A page that comes a moment after the click: waitForLoadState right after the click waits
+        // for it (it used to find the old page still "complete" and go on to read that one), and
+        // waitForURL waits for an address however late.
+        let followed = await outcome {
+            try await driver.goto(form)
+            try await driver.waitFor("#late")
+            try await driver.click("#slow")
+            try await driver.waitForLoadState(.load)
+        }
+        let followedHeading = try? await driver.textContent("#heading")
+        let awaited = await outcome {
+            try await driver.goto(form)
+            try await driver.waitFor("#late")
+            try await driver.click("#slow")
+            try await driver.waitForURL(.glob("**/pb-automation/two"), timeout: 10)
+        }
+        let neverThere = await outcome { try await driver.waitForURL(.glob("**/pb-automation/three"), timeout: 1) }
+        check("automation commands: waitForLoadState right after a click waits for the page the click opens; waitForURL waits for an address, and gives up after its time",
+              followed == "ok" && followedHeading == "Page two" && awaited == "ok" && driver.url == two && neverThere.hasPrefix("timed out"),
+              "\(followed) → \(followedHeading ?? "nil"); waitForURL \(awaited) at \(driver.url?.lastPathComponent ?? "nil"); never: \(neverThere)")
     }
 
     // MARK: The page cannot tell (PageInput)

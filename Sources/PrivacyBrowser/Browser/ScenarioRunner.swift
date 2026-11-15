@@ -194,6 +194,27 @@ final class ScenarioRunner {
             let state = PageDriver.LoadState(rawValue: arguments.first as? String ?? "load") ?? .load
             try await driver.waitForLoadState(state, timeout: timeout(1))
             return nil
+        case "waitForURL":
+            guard let pattern = ScenarioURLPattern(arguments.first), pattern.isReadable else {
+                throw PageDriver.Failure.script("waitForURL takes an address as text ('**/account': * within a part of the path, ** for any run) or a regular expression")
+            }
+            let state = PageDriver.LoadState(rawValue: options(1)["waitUntil"] as? String ?? "load") ?? .load
+            try await driver.waitForURL(pattern, waitUntil: state, timeout: timeout(1))
+            return nil
+        case "selectOption":
+            // One choice or several: each an option's value or label as text, or {value}, {label}, {index}.
+            let given: Any = arguments.count > 1 ? arguments[1] : NSNull()
+            var choices: [Any] = []
+            for choice in given as? [Any] ?? [given] {
+                if choice is String || choice is [String: Any] {
+                    choices.append(choice)
+                } else if let number = choice as? NSNumber {
+                    choices.append(number.stringValue)
+                } else {
+                    throw PageDriver.Failure.script("selectOption takes what to choose: an option's value or label as text, or {value: …}, {label: …}, {index: …}")
+                }
+            }
+            return try await driver.selectOption(try string(0), choices, timeout: timeout(2))
         case "waitFor":
             let state = PageDriver.ElementState(rawValue: options(1)["state"] as? String ?? "visible") ?? .visible
             try await driver.waitFor(try string(0), state: state, timeout: timeout(1))
@@ -246,9 +267,9 @@ final class ScenarioRunner {
     // MARK: The script's side (its own thread)
 
     /// The commands the script's `page` has, by their names.
-    private static let pageCommands = ["goto", "back", "forward", "reload", "waitForLoadState", "waitFor", "click", "dblclick", "hover",
-                                       "type", "press", "scroll", "textContent", "innerText", "inputValue", "getAttribute", "count",
-                                       "isVisible", "url", "title", "screenshot", "pause"]
+    private static let pageCommands = ["goto", "back", "forward", "reload", "waitForLoadState", "waitFor", "waitForURL", "click", "dblclick",
+                                       "hover", "selectOption", "type", "press", "scroll", "textContent", "innerText", "inputValue",
+                                       "getAttribute", "count", "isVisible", "url", "title", "screenshot", "pause"]
 
     /// Builds the script's world and runs `source` in it, on `thread`.
     nonisolated private static func run(_ source: String, parametersJSON: String, on thread: ScriptThread, gate commands: ScriptGate,
@@ -371,6 +392,8 @@ final class ScenarioRunner {
             const page = {};
             for (const name of [\(names)]) page[name] = (...args) => __at(__line(), () => __command(name, args));
             page.waitForSelector = page.waitFor;
+            page.waitForURL = (url, options) => __at(__line(), () => __command('waitForURL', [
+              url instanceof RegExp ? {regex: url.source, flags: url.flags} : url, options === undefined ? null : options]));
             page.evaluate = (body, arg, options) => __at(__line(), () => __command('evaluate', [
               typeof body === 'function' ? 'return await (' + body.toString() + ')(__arg);' : String(body),
               arg === undefined ? null : arg, (options && options.world) || 'isolated']));

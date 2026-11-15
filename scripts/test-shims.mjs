@@ -1437,6 +1437,92 @@ test('recorder and driver: a field and a button in an open shadow root are named
   assert.equal(run(w, `document.activeElement = loginBox; loginBox.shadowRoot.activeElement = email; driver.focused() === email`), true);
 });
 
+// A choice in a list (a <select>): the recorder says the choice itself as a step — never the click
+// on the list, which a replay would make into the system's menu and leave open — and the driver
+// makes that choice again (PageDriver.chooseOptions), with `input` and `change` for the page.
+test('recorder: a choice in a list is a step with the option\'s value; the click on the list is not one', async () => {
+  const w = await recorderWindow();
+  const steps = JSON.parse(run(w, `
+    const list = new HTMLSelectElement({ id: 'country' }, 'Germany');
+    list.selectedOptions = [{ value: 'DE', label: '  Germany\\n (DE) ' }];
+    elements.push(list);
+    fire('click', list);
+    fire('change', list);
+    const several = new HTMLSelectElement({ id: 'tags' }, 'One');
+    several.multiple = true;
+    several.selectedOptions = [{ value: '1', label: 'One' }, { value: '2', label: 'Two' }];
+    elements.push(several);
+    fire('change', several);
+    const button = new Element('button', { id: 'go' });
+    elements.push(button);
+    fire('click', button);
+    JSON.stringify(posted.filter((m) => m.type !== 'hello'))`));
+  assert.deepEqual(steps, [
+    { type: 'select', selector: '#country', value: 'DE', label: 'Germany (DE)' },
+    { type: 'note', value: 'select #tags: One, Two' },
+    { type: 'click', selector: '#go' },
+  ]);
+});
+
+const driverChooseOptions = driverSwift.split('static let chooseOptions = """')[1].split('"""')[0].replace(/\\\\/g, '\\');
+
+function listWindow() {
+  const context = vm.createContext({});
+  vm.runInContext(`
+    var events = [];
+    class Event { constructor(type, init) { this.type = type; this.bubbles = !!(init && init.bubbles); } }
+    class HTMLLabelElement { constructor(control) { this.control = control; this.nodeName = 'LABEL'; } }
+    class Option {
+      constructor(list, value, label, disabled) { this.list = list; this.value = value; this.label = label; this.disabled = !!disabled; this.chosen = false; }
+      get selected() { return this.chosen; }
+      // As a list of one does: choosing an option lets the others go.
+      set selected(on) { if (on && !this.list.multiple) { for (const o of this.list.options) o.chosen = false; } this.chosen = !!on; }
+    }
+    class HTMLSelectElement {
+      constructor(options, multiple) {
+        this.nodeName = 'SELECT'; this.multiple = !!multiple; this.disabled = false;
+        this.options = options.map(([value, label, disabled]) => new Option(this, value, label, disabled));
+        if (!multiple) this.options[0].chosen = true;
+      }
+      dispatchEvent(event) { events.push(event.type + (event.bubbles ? '' : ' (not bubbling)')); return true; }
+      get chosen() { return this.options.filter((o) => o.selected).map((o) => o.value); }
+    }
+    var country = new HTMLSelectElement([['', 'Choose a country'], ['DE', 'Germany'], ['FR', ' France '], ['XX', 'Nowhere', true], ['Germany', 'A value named Germany']]);
+    var tags = new HTMLSelectElement([['1', 'One'], ['2', 'Two'], ['3', 'Three']], true);
+    var named = { '#country': country, '#tags': tags, 'label[for=country]': new HTMLLabelElement(country), '#button': { nodeName: 'BUTTON' } };
+    var document = { querySelectorAll: (selector) => named[selector] ? [named[selector]] : [] };
+    var choose = (selector, wanted) => { events.length = 0; return (function () {\n${driverFindAll}\n${driverChooseOptions}\n})(); };
+  `.replace('(function () {', '(function (selector, wanted) {').replace('})(); };', '})(selector, wanted); };'), context);
+  return context;
+}
+
+test('driver: selectOption chooses by value, then by label, by {label}, {value} and {index}; says what it cannot choose', () => {
+  const w = listWindow();
+  const choose = (selector, wanted) => JSON.parse(run(w, `JSON.stringify([choose(${JSON.stringify(selector)}, ${JSON.stringify(wanted)}), events, country.chosen, tags.chosen])`));
+  assert.deepEqual(choose('#country', ['DE']), [{ values: ['DE'] }, ['input', 'change'], ['DE'], []]);
+  // The same choice again changes nothing, and tells the page nothing.
+  assert.deepEqual(choose('#country', ['DE']), [{ values: ['DE'] }, [], ['DE'], []]);
+  // A value comes before a label of the same words; a label is taken without the spaces around it.
+  assert.deepEqual(choose('#country', ['Germany'])[0], { values: ['Germany'] });
+  assert.deepEqual(choose('#country', ['France'])[0], { values: ['FR'] });
+  assert.deepEqual(choose('#country', [{ label: 'Germany' }])[0], { values: ['DE'] });
+  assert.deepEqual(choose('#country', [{ value: 'FR' }])[0], { values: ['FR'] });
+  assert.deepEqual(choose('#country', [{ index: 1 }])[0], { values: ['DE'] });
+  // A label of the list is the list.
+  assert.deepEqual(choose('label[for=country]', ['FR']).slice(0, 3), [{ values: ['FR'] }, ['input', 'change'], ['FR']]);
+  // What cannot be chosen is said, and nothing is changed.
+  assert.deepEqual(choose('#country', ['Spain']), [{ problem: 'noOption', about: '"Spain"' }, [], ['FR'], []]);
+  assert.deepEqual(choose('#country', ['XX'])[0], { problem: 'optionDisabled', about: '"XX"' });
+  assert.deepEqual(choose('#country', ['DE', 'FR'])[0], { problem: 'several' });
+  assert.deepEqual(choose('#button', ['x'])[0], { problem: 'notList', about: 'button' });
+  assert.deepEqual(choose('#nothing', ['x'])[0], { problem: 'missing' });
+  // A list that takes several: these, in place of what was chosen.
+  assert.deepEqual(choose('#tags', ['1', 'Three']), [{ values: ['1', '3'] }, ['input', 'change'], ['FR'], ['1', '3']]);
+  assert.deepEqual(choose('#tags', [{ index: 1 }]), [{ values: ['2'] }, ['input', 'change'], ['FR'], ['2']]);
+  run(w, 'country.disabled = true');
+  assert.deepEqual(choose('#country', ['DE'])[0], { problem: 'disabled' });
+});
+
 // A scenario's errors name its line, and what it returns is its result (ScenarioRunner.lineSupport,
 // the prelude's own text): a command's failure is made by the app outside any call of the script,
 // so only the place the command was called from knows the line. Under Bun this is JavaScriptCore,
