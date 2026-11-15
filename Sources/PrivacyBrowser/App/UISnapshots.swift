@@ -987,6 +987,13 @@ enum UISnapshots {
             problems += await Shot(name: "proxies-narrow", size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: 620), edges: true) {
                 ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: [berlin.id]))
             }.capture(into: folder)
+            // Only the proxies that did not answer: the silent one selected, with "Replace in
+            // Profiles…" for the two profiles on it.
+            let failing = AnyView(ProxyListPanel(proxies: proxies, profileCounts: counts, profilesUsing: names,
+                                                 selection: .constant([silent.id]), filter: .failing))
+            problems += await Shot(name: "proxies-failing", size: CGSize(width: 1400, height: 860), edges: true) {
+                ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: failing)
+            }.capture(into: folder)
             problems += await Shot(name: "sheet-proxy-edit", size: CGSize(width: 560, height: 400), titled: false) {
                 ProxyEditView(proxies: proxies, entry: berlin, profileCount: 3)
             }.capture(into: folder)
