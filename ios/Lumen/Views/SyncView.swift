@@ -160,8 +160,9 @@ struct SyncView: View {
         }
     }
 
-    /// One run: the Mac's profiles read and made sessions here. The kept key is read behind Face ID or
-    /// the passcode; a key that no longer opens the vault (the master password changed on the Mac) is
+    /// One run: the Mac's profiles read and made sessions here, then the Mac's cookies brought into
+    /// them — into the sessions this run made too. The kept key is read behind Face ID or the
+    /// passcode; a key that no longer opens the vault (the master password changed on the Mac) is
     /// forgotten, and the password asked again. A `401` renews the document of rights, whose answer
     /// says why (§16.1): an unlinked iPhone is signed out; one still signed in runs once more.
     private func syncNow() {
@@ -193,7 +194,7 @@ struct SyncView: View {
         synced.forEach { SessionRuntimes.shared.close($0.id) }
         return await SyncRead.run(root: SyncKeychain.vaultFolder, key: kept.unlockKey, transport: transport,
                                   keptGeneration: SyncKeychain.generation, edits: model.catalog.localEdits(),
-                                  cookies: CookieBridge(sessions: synced), notHere: model.notSyncedHere)
+                                  notHere: model.notSyncedHere)
     }
 
     /// What a run did, said; and what follows from it.
@@ -204,10 +205,18 @@ struct SyncView: View {
             SyncKeychain.profileTokens = outcome.profileTokens
             // An edit the vault refused stays on its session, to go when it can; the reason is said.
             let made = model.applySynced(outcome.profiles, keepingEditsOf: Set(outcome.refusedEdits.map(\.profileID)))
-            var lines = [L("Профилей с Mac: %@, новых: %@", "\(outcome.profiles.count)", "\(made)")]
-            if outcome.cookiesSet + outcome.cookiesDeleted > 0 {
-                lines.append(L("Куки обновлены: %@", "\(outcome.cookiesSet + outcome.cookiesDeleted)"))
+            // Step 4, once the sessions are made: every session made from the vault gets its profile's
+            // cookies — one this run made too, before it is first opened. None of them runs now.
+            var cookies = 0
+            do {
+                let applied = try await SyncRead.applyCookies(root: SyncKeychain.vaultFolder, key: kept.unlockKey,
+                                                              stores: CookieBridge(sessions: model.sessions.filter { $0.syncedProfileID != nil }))
+                cookies = applied.set + applied.deleted
+            } catch {
+                NSLog("Lumen: the sync's cookies were not applied: %@", "\(error)")
             }
+            var lines = [L("Профилей с Mac: %@, новых: %@", "\(outcome.profiles.count)", "\(made)")]
+            if cookies > 0 { lines.append(L("Куки обновлены: %@", "\(cookies)")) }
             // Objects the server refused for the plan's space or their size wait; the rest synced (§16.1).
             if !outcome.deferredOverQuota.isEmpty { lines.append(SyncText.overQuota) }
             if !outcome.deferredTooLarge.isEmpty {

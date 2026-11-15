@@ -131,6 +131,26 @@ final class SyncCookieTests: XCTestCase {
         XCTAssertEqual(jar.deleted, [])
     }
 
+    /// Audit 4: a profile the run made a session of gets the Mac's cookies in the same run, not at the
+    /// next one — the app makes the run's sessions after `pull`, then runs the cookie step with them.
+    func testASessionTheRunMadeGetsTheMacsCookiesAtOnce() async throws {
+        let (_, shop, _, phone, key, root) = try await signedInOnTheMac()
+        let outcome = try await SyncRead.pull(root: root, key: key, transport: phone, keptGeneration: nil)
+        XCTAssertEqual(outcome.profiles.map(\.id), [shop], "the profile comes, to be made a session")
+        XCTAssertEqual(outcome.cookiesSet, 0, "the run itself touches no store")
+
+        // The app makes the session (a new, empty store), then the cookie step.
+        let stores = Stores()
+        stores.stores[shop] = []
+        stores.ids[shop] = UUID()
+        let applied = try await SyncRead.applyCookies(root: root, key: key, stores: stores)
+        XCTAssertEqual(applied.set, 2)
+        XCTAssertEqual(applied.deleted, 0)
+        XCTAssertEqual(stores.value("sid", shop), "mac-sid", "the Mac's sign-in is in the session before it first opens")
+        XCTAssertEqual(stores.value("csrf", shop), "mac-csrf")
+        XCTAssertEqual(BaselineStores.load(root: root)[shop], stores.ids[shop], "its baseline names its store")
+    }
+
     /// A profile with no session here keeps no baseline: a session made for it later starts from none.
     func testAProfileWithNoSessionHereKeepsNoBaseline() async throws {
         let (repository, shop, mac, phone, key, root) = try await signedInOnTheMac()

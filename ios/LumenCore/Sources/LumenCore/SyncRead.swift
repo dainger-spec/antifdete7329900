@@ -178,9 +178,10 @@ public enum SyncRead {
         }
     }
 
-    /// `cookies`: the stores of the sessions already made from the vault's profiles — after the run,
-    /// each gets its profile's cookies by the Mac's rules (step 4). A profile made a session by this
-    /// run gets them at the next one.
+    /// `cookies`: the stores of the sessions made from the vault's profiles before the run — after
+    /// the run, each gets its profile's cookies by the Mac's rules (step 4). The app leaves it out and
+    /// runs `applyCookies` once it has made the run's new sessions, so that those get theirs in the
+    /// same run too.
     /// `edits`: what was changed here in the sessions made from the vault (their name, description,
     /// tags; step 5). The run first takes what the Mac changed, then writes into the iPhone's copy
     /// only the fields edited here, onto the settings as they now are — never the copy from the last
@@ -245,6 +246,14 @@ public enum SyncRead {
             outcome.cookiesDeleted = applied.deleted
         }
         return outcome
+    }
+
+    /// Step 4 after the run (`pull` without `cookies`): each session made from the vault's profiles —
+    /// the ones the run's profiles were just made into too — gets its profile's cookies by the Mac's
+    /// rules, from the iPhone's copy of the vault. How many were set and deleted.
+    public static func applyCookies(root: URL, key: Data, stores: SyncCookieStores) async throws -> (set: Int, deleted: Int) {
+        let repository = try ProfileRepository(vault: MasterVault.open(in: root, deviceUnlockKey: key))
+        return await SyncCookieRun.run(repository: repository, stores: stores, root: root)
     }
 
     /// One edit made here, written into the iPhone's copy as the vault now has the profile: each field

@@ -284,9 +284,12 @@ final class AccountTests: LumenUITestCase {
 
         // Step 3: one run reads the Mac's profiles (the stand-in's vault, made by the Mac's own code)
         // and makes them sessions — the one behind a proxy with its proxy, login and password, bound.
+        // Step 4 in the same run (audit 4): the sessions it made get the Mac's cookies before they
+        // first open, not at the next run.
         app.buttons["syncNow"].tap()
         let result = wait(app.staticTexts["syncResult"], "the run says what came", timeout: 60)
         XCTAssertTrue(result.label.hasPrefix("Профилей с Mac: 2"), "both of the Mac's profiles came: \(result.label)")
+        XCTAssertTrue(result.label.contains("Куки обновлены: 1"), "the Mac's cookie went into the session the run made: \(result.label)")
         shot("79 the Mac's profiles read")
         app.buttons["syncDone"].tap()
         closePlan()
@@ -296,20 +299,22 @@ final class AccountTests: LumenUITestCase {
         openSession("Магазин с Mac")
         openPage("http://synced-\(run).lumentest:28380/whoami?t=synced")
         page("via: прокси B")
+        // The Mac's sign-in on macstate.lumentest is there at the session's first opening.
+        // /state says no "at:" line: the cookie's own line is waited for (as BrowserTests do).
+        go("http://macstate.lumentest:28380/state")
+        page("cookie: from-mac", timeout: 30)
         backToList()
 
-        // Step 4: the next run brings the Mac's cookies into the session made by the first — the
-        // Mac's sign-in on macstate.lumentest is there.
+        // The next run goes through with the sessions as they are.
         openPlan()
         reveal(app.buttons["syncButton"], "the sync's screen again").tap()
         wait(app.staticTexts["syncConnected"], "still connected", timeout: 15)
         app.buttons["syncNow"].tap()
         let second = wait(app.staticTexts["syncResult"], "the second run says what came", timeout: 60)
-        XCTAssertTrue(second.label.contains("Куки обновлены: 1"), "the Mac's cookie went into the session: \(second.label)")
+        XCTAssertTrue(second.label.hasPrefix("Профилей с Mac: 2, новых: 0"), "nothing new the second time: \(second.label)")
         app.buttons["syncDone"].tap()
         closePlan()
         openSession("Магазин с Mac")
-        // /state says no "at:" line: the cookie's own line is waited for (as BrowserTests do).
         go("http://macstate.lumentest:28380/state")
         page("cookie: from-mac", timeout: 30)
         backToList()
