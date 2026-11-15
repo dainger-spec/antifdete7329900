@@ -135,6 +135,13 @@ final class VMStartCoverTests: XCTestCase {
         XCTAssertFalse(VMStartCover.covers(settingsRevision: "9f", woken: true))
         XCTAssertFalse(VMStartCover.covers(settingsRevision: nil, woken: false))
         XCTAssertFalse(VMStartCover.covers(settingsRevision: "", woken: false))
+        // Put to sleep before its settings were in: the wake is covered until they are.
+        let midway = VMGuestStatus(text: "LUMEN_TOOLS_VERSION=13\nLUMEN_STAGE=locale\n")
+        XCTAssertTrue(VMStartCover.covers(settingsRevision: "9f", woken: true, asleepWith: midway))
+        let settled = VMGuestStatus(text: "LUMEN_TOOLS_VERSION=13\nLUMEN_STAGE=ready\nLUMEN_READY_REVISION=9f\n")
+        XCTAssertFalse(VMStartCover.covers(settingsRevision: "9f", woken: true, asleepWith: settled))
+        XCTAssertFalse(VMStartCover.covers(settingsRevision: "9f", woken: true,
+                                           asleepWith: VMGuestStatus(text: "LUMEN_TOOLS_VERSION=12\n")), "an older script cannot say")
 
         let library = VMLibrary(root: URL(fileURLWithPath: "/tmp/lib"))
         let profile = VMProfile(name: "A", language: "de-DE", instantWake: true)

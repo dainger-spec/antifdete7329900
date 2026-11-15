@@ -56,10 +56,10 @@ public final class MachineCoverModel: ObservableObject {
     public let name: String
     public let texts: MachineCoverTexts
     /// "Show the screen" was pressed.
-    public var showScreen: () -> Void
+    public var showScreen: @MainActor () -> Void
 
     public init(name: String, texts: MachineCoverTexts, stage: VMSetupStage = .boot, offersReveal: Bool = false,
-                leaving: Bool = false, showScreen: @escaping () -> Void = {}) {
+                leaving: Bool = false, showScreen: @escaping @MainActor () -> Void = {}) {
         self.name = name
         self.texts = texts
         self.stage = stage
@@ -89,12 +89,14 @@ public enum MachineCoverTiming {
     public static let breath = 6.0
     /// "Show the screen" comes in.
     public static let offerIn = 0.6
-    /// Ready: the last dashes fill; after this the words go (`wordsOut`) and the cover fades
-    /// (`reveal`, or `reducedReveal` under Reduce Motion) — the helper's.
+    /// Ready (`MachineCoverModel.leaving`): the last dashes fill; after this the words go
+    /// (`wordsOut`) and the cover fades (`reveal`, or `reducedReveal` under Reduce Motion), and the
+    /// helper takes the cover away once it has (`gone`).
     public static let revealDelay = 0.25
     public static let wordsOut = 0.4
     public static let reveal = 0.9
     public static let reducedReveal = 0.4
+    public static var gone: Double { revealDelay + reveal + 0.15 }
 
     /// The design's ease-out for things entering: cubic-bezier(.16, 1, .3, 1) (the app's `Motion.entry`).
     public static func entry(_ duration: Double) -> Animation { .timingCurve(0.16, 1, 0.3, 1, duration: duration) }
@@ -203,6 +205,12 @@ public struct MachineCoverView: View {
             .frame(width: size.width, height: size.height, alignment: .topLeading)
         }
         .background(Palette.backdrop)
+        // Going: the dashes fill (the stage is `ready`), then the words leave and the whole cover
+        // fades into the machine's screen under it.
+        .opacity(model.leaving ? 0 : 1)
+        .animation(reduced ? Animation.easeOut(duration: MachineCoverTiming.reducedReveal).delay(MachineCoverTiming.revealDelay)
+                       : Animation.timingCurve(0.4, 0, 0.2, 1, duration: MachineCoverTiming.reveal).delay(MachineCoverTiming.revealDelay),
+                   value: model.leaving)
         .onAppear {
             guard !entered else { return }
             if reduced {
@@ -302,7 +310,8 @@ public struct MachineCoverView: View {
         .frame(width: geometry.size.width)
         .opacity(visible ? 1 : 0)
         .offset(y: reduced ? 0 : (entered ? (model.leaving ? -6 : 0) : 6))
-        .animation(reduced ? Animation.easeOut(duration: MachineCoverTiming.wordsOut) : MachineCoverTiming.entry(MachineCoverTiming.wordsOut),
+        .animation((reduced ? Animation.easeOut(duration: MachineCoverTiming.wordsOut) : MachineCoverTiming.entry(MachineCoverTiming.wordsOut))
+                       .delay(MachineCoverTiming.revealDelay),
                    value: model.leaving)
         .offset(y: top)
     }

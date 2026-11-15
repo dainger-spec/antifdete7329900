@@ -96,6 +96,9 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
     /// then a start's window keeps the machine's screen behind a cover (`VMStartCover`). Nil: no
     /// cover — the base system, whose window is for its setup.
     public var settingsRevision: String?
+    /// The app's own "animations off" (Settings → Appearance): the cover moves nothing, as under
+    /// macOS's Reduce Motion, which the helper reads itself.
+    public var reducesMotion: Bool?
     /// The window's title, and its few words, in the person's language (the helper has no strings
     /// of its own): `stop`, `stopQuestion`, `stopDetail`, `stopNow`, `cancel`, `stopping`, the
     /// start's cover's (`cover.…`) — and `hint`, a line shown above the machine's screen (what is
@@ -108,7 +111,8 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
                 display: Display = Display(VMDisplay.standard), macAddress: String? = nil, network: Network = .closed,
                 proxy: ProxySettings? = nil, blockedHosts: [String] = [], sound: Bool = true, fullScreen: Bool? = nil,
                 keepsState: Bool? = nil, stateStamp: String? = nil, browserMode: Bool? = nil,
-                settingsRevision: String? = nil, windowTitle: String = "", texts: [String: String] = [:]) {
+                settingsRevision: String? = nil, reducesMotion: Bool? = nil, windowTitle: String = "",
+                texts: [String: String] = [:]) {
         self.mode = mode
         self.restoreImagePath = restoreImagePath
         self.machineDirectory = machineDirectory
@@ -127,6 +131,7 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
         self.stateStamp = stateStamp
         self.browserMode = browserMode
         self.settingsRevision = settingsRevision
+        self.reducesMotion = reducesMotion
         self.windowTitle = windowTitle
         self.texts = texts
     }

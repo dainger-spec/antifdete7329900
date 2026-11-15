@@ -71,9 +71,15 @@ public enum VMStartCover {
     /// whose window is for its setup; and not a machine woken from a saved state — it is as it was
     /// closed, with the very settings it was put to sleep with (a state is tied to them,
     /// `VMHelperRequest.stamp`: changed, the machine starts anew, and that start is covered).
-    public static func covers(settingsRevision: String?, woken: Bool) -> Bool {
+    ///
+    /// Unless it was put to sleep before those settings were in (closed during its first start):
+    /// its script goes on with them as it wakes, and the wake is covered until they are. What the
+    /// script said last before the sleep is `asleepWith`; only tools 13 and on say it.
+    public static func covers(settingsRevision: String?, woken: Bool, asleepWith status: VMGuestStatus? = nil) -> Bool {
         guard let settingsRevision, !settingsRevision.isEmpty else { return false }
-        return !woken
+        guard woken else { return true }
+        guard let status, (status.toolsVersion ?? 0) >= VMGuestTools.saysWhenReady else { return false }
+        return status.readyRevision != settingsRevision && status.appliedRevision != settingsRevision
     }
 
     /// What the cover shows, and whether it goes.
