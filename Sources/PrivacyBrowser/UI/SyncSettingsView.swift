@@ -161,6 +161,24 @@ struct SyncSettingsView: View {
                         .disabled(serverURL.isEmpty || !serverChanged)
                 }
                 .padding(.bottom, 6)
+                // A server of one's own lists no vaults: a Mac that brings this vault back from it is
+                // asked for the vault's ID ("I already have a vault"), so it is here to be noted.
+                if case .server? = model.syncTarget, let vaultID = model.syncVaultID {
+                    SettingRow(L("sync.vaultID.row"), detail: L("sync.vaultID.detail"), effect: nil) {
+                        VStack(alignment: .trailing, spacing: 6) {
+                            Text(verbatim: vaultID.uuidString)
+                                .font(.system(size: 11.5, design: .monospaced))
+                                .foregroundStyle(Theme.textSecondary)
+                                .textSelection(.enabled)
+                                .lineLimit(1)
+                            Button(L("sync.vaultID.copy")) {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(vaultID.uuidString, forType: .string)
+                            }
+                            .buttonStyle(.lumenSecondary)
+                        }
+                    }
+                }
             }
 
             SettingsCaption(L("sync.status"))

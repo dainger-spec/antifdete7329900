@@ -3174,3 +3174,6 @@
 "restore.done.withoutSettings" = "The settings of these profiles never reached that place, so they are in the list here and do not start: %1$@. On the Mac that has them, Sync Now sends them; settings with a camera video over %2$d MB are too large to sync until a smaller video is chosen.";
 "restore.done.notSynced" = "Did not come, because sync does not carry it: open tabs and site data other than cookies (a site that keeps its sign-in outside cookies asks you to sign in again), proxies in the list that no profile uses, scenarios, warm-up plans and virtual machines.";
 "restore.done.open" = "Open the Vault";
+"sync.vaultID.row" = "This vault's ID";
+"sync.vaultID.detail" = "Asked for when a Mac without a vault brings this one back from a server of your own. Not a secret: it opens nothing without the master password.";
+"sync.vaultID.copy" = "Copy";
