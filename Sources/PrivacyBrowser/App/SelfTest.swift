@@ -8531,9 +8531,9 @@ final class SelfTest {
         let kindEvents = kindLog.compactMap { entry -> String? in
             entry.path.hasPrefix("/pb-warmup/event/\(run)/") ? String(entry.path.dropFirst("/pb-warmup/event/\(run)/".count)) : nil
         }
-        let outcomes = robot.siteLog.map(\.outcomeKind)
+        let kindOutcomes = robot.siteLog.map(\.outcomeKind)
         check("warm-up: a page that asks whether the visitor is a robot, and a page to sign in on, are left at once — not scrolled, no link followed — and named in the run's report",
-              robot.state == .finished && outcomes == [.blocked, .sensitive, .visited] && robot.siteLog.first?.detail == "cloudflare"
+              robot.state == .finished && kindOutcomes == [.blocked, .sensitive, .visited] && robot.siteLog.first?.detail == "cloudflare"
                   && !kindEvents.contains { $0.hasPrefix("captcha-scroll") || $0.hasPrefix("signin-scroll") }
                   && !kindLog.contains { $0.path == "/pb-warmup/captcha-next" || $0.path == "/pb-warmup/signin-next" },
               "state=\(robot.state) outcomes=\(robot.siteLog.map(\.outcome)) detail=\(robot.siteLog.first?.detail ?? "-") events=\(kindEvents)")

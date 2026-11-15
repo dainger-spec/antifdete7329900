@@ -1970,6 +1970,7 @@ private struct Shot {
 
     /// Shows the window, lets SwiftUI and AppKit settle, writes `<name>.png` (the whole window,
     /// title bar included) and returns the number of problems (`extra` runs before the window closes).
+    @MainActor
     func capture(into folder: URL, extra: ((NSWindow) async -> Int)? = nil) async -> Int {
         let style: NSWindow.StyleMask = titled
             ? [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]

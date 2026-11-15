@@ -4,7 +4,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// What a run on many profiles is asked for (`ScenarioRunChooser`).
-struct ScenarioRunRequest {
+struct ScenarioBatchRequest {
     var profiles: [(id: UUID, name: String)]
     /// Profiles not run, each with why.
     var skipped: [UUID: String]
@@ -21,7 +21,7 @@ struct ScenarioRunChooser: View {
     let profiles: [ScenarioProfile]
     /// The profiles chosen as it opens (those selected in the Profiles list).
     var initial: Set<UUID> = []
-    let start: (ScenarioRunRequest) -> Void
+    let start: (ScenarioBatchRequest) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tagColors) private var tagColors
     @State private var chosen: Set<UUID> = []
@@ -62,7 +62,7 @@ struct ScenarioRunChooser: View {
                 Button {
                     var skipped: [UUID: String] = [:]
                     if skipsMissing { for profile in lacking { skipped[profile.id] = String(format: L("scenarios.run.skipped.values"), missing(profile).joined(separator: ", ")) } }
-                    start(ScenarioRunRequest(profiles: picked.map { (id: $0.id, name: $0.name) }, skipped: skipped, limit: limit,
+                    start(ScenarioBatchRequest(profiles: picked.map { (id: $0.id, name: $0.name) }, skipped: skipped, limit: limit,
                                              pause: Self.pauses[pause], stopsProfiles: stopsProfiles))
                 } label: { Label(runCount > 0 ? String(format: L("scenarios.choose.run"), runCount) : L("scenarios.run"), systemImage: "play.fill") }
                     .buttonStyle(.lumenPrimary)

@@ -1,4 +1,5 @@
 import AppKit
+import BrowserCore
 import Foundation
 import os
 import WebKit
