@@ -2774,6 +2774,7 @@
 "vm.error.limit" = "Two machines are running already — Apple's limit for macOS in virtual machines on one Mac. Shut one down first.";
 "vm.error.baseOpen" = "The base system is open. Shut it down first: a new machine is made from its disk.";
 "vm.error.proxyDown" = "The proxy does not answer, so the machine was not started: it would reach nothing. Check the proxy in the Proxies section.";
+"vm.error.proxyFailed" = "The machine was not started: its proxy did not pass the check, and the machine would reach nothing.";
 "vm.error.machineStarting" = "A machine is being made from the base system right now. Open the base when it has started.";
 "vm.note.connectionUnknown" = "Where this Mac's connection comes out could not be found: the machine keeps the time zone and language it had.";
 "vm.error.listUnreadable" = "The list of virtual machines could not be read, so nothing is written over it.";

@@ -754,12 +754,12 @@ final class VMCenter: ObservableObject {
         }
         running[id] = Running(phase: .checkingProxy)
         Task { [weak self] in
-            let check = await ProxyChecker.check(proxy)
+            let check = await Self.checkProxy(proxy)
             guard let self, self.running[id]?.phase == .checkingProxy, var profile = self.list.profile(id) else { return }
             self.exits[id] = check
             guard check.isAlive else {
                 self.running[id] = nil
-                self.problems[id] = L("vm.error.proxyDown")
+                self.problems[id] = Self.proxyProblem(proxy, check: check)
                 return
             }
             let followed = profile.followingProxy(check: check)
@@ -783,6 +783,25 @@ final class VMCenter: ObservableObject {
             self.running[id]?.phase = .starting
             self.launch(profile)
         }
+    }
+
+    /// The check of a machine's proxy before its start: does it work, where does it come out, and
+    /// its time zone — and nothing a machine does not use. The Proxies section's check also sets
+    /// up two more tunnels for a steady latency, which the machines' list does not show, and waits
+    /// for a SOCKS5 proxy's UDP (up to nine seconds where the proxy takes the association and
+    /// carries nothing, then a request for where it leaves from) — and UDP never leaves a machine
+    /// (docs/VM.md). A start, and a wake above all, is shorter by those.
+    static func checkProxy(_ proxy: ProxySettings) async -> ProxyCheckResult {
+        await ProxyChecker.check(proxy, latencySamples: 1, triesUDP: false)
+    }
+
+    /// Why a machine whose proxy did not pass its check was not started: what the check found, in
+    /// the words the Proxies section has for it (`ProxyReport`) — a login the proxy rejects is not
+    /// a proxy that is down, and asks something else of the person — and what to do about it.
+    static func proxyProblem(_ proxy: ProxySettings, check: ProxyCheckResult) -> String {
+        let report = ProxyReport(proxy: proxy, check: check)
+        guard let explanation = report.explanation else { return L("vm.error.proxyDown") }
+        return ([L("vm.error.proxyFailed"), explanation] + [report.advice].compactMap { $0 }).joined(separator: " ")
     }
 
     private func launch(_ profile: VMProfile) {

@@ -3569,6 +3569,27 @@ final class SelfTest {
             let http = await ProxyChecker.check(ProxySettings(kind: .httpConnect, host: loopback, port: httpPort))
             check("proxy checker, UDP: an HTTP proxy is not tried and nothing is said of its UDP",
                   http.isAlive && http.udp == nil && http.udpLabel == nil, String(describing: http))
+            // A virtual machine's start asks only what a machine uses (`VMCenter.checkProxy`): UDP
+            // never leaves a machine, and its list shows no latency. The same proxy — which
+            // relays UDP — comes back alive with its exit, one tunnel, and nothing asked of its UDP.
+            let forMachine = await VMCenter.checkProxy(withUDP)
+            check("virtual machines: the check before a machine's start sets up one tunnel and asks nothing of the proxy's UDP — alive, with the exit IP and time zone",
+                  forMachine.isAlive && forMachine.udp == nil && forMachine.exitIP == "203.0.113.21"
+                      && forMachine.timeZoneIdentifier == "Europe/Berlin" && forMachine.diagnosis?.latencies.count == 1,
+                  String(describing: forMachine))
+        }
+        // And a proxy that did not pass it: the machine's row says what the check found, in the
+        // Proxies section's words, with what to do — not "does not answer" whatever it was.
+        if let socksAuthPort = port("PB_SELFTEST_SOCKS_AUTH_PROXY_PORT") {
+            let secret = "pb-not-the-password-7c1"
+            let refusedLogin = ProxySettings(kind: .socks5, host: loopback, port: socksAuthPort, username: "pb-user2", password: secret)
+            let rejected = await VMCenter.checkProxy(refusedLogin)
+            let said = VMCenter.proxyProblem(refusedLogin, check: rejected)
+            check("virtual machines: a machine whose proxy rejects its login is told that, and what to do — never the password",
+                  !rejected.isAlive && rejected.diagnosis?.verdict == .credentialsRejected
+                      && said.contains(String(format: L("proxies.explain.credentialsRejected"), "SOCKS5"))
+                      && said.contains(L("proxies.advice.credentialsRejected")) && !said.contains(secret),
+                  said)
         }
         if let silentPort {
             let silent = await ProxyChecker.check(ProxySettings(kind: .socks5, host: loopback, port: silentPort))
