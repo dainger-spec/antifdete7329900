@@ -103,8 +103,9 @@ struct RootView: View {
     /// while the window's first screen scales in from 98 % and fades in, 0.6 s; under Reduce Motion
     /// a cross-fade.
     private func openFromWelcome() {
-        let reduced = Motion.isReduced(reduceMotion)
-        withAnimation(reduced ? .easeOut(duration: WelcomeTiming.reducedOpening) : .easeInOut(duration: WelcomeTiming.opening)) {
+        let animation: Animation = Motion.isReduced(reduceMotion)
+            ? .easeOut(duration: WelcomeTiming.reducedOpening) : .easeInOut(duration: WelcomeTiming.opening)
+        withAnimation(animation) {
             model.welcomeFinished = true
         }
     }

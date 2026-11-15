@@ -77,7 +77,7 @@ const TEXT = {
         setupSub: 'It encrypts the profile list, their settings, passwords, history and website data.', password: 'Master password' },
 }[ui];
 
-// MARK: Timing — the same numbers as WelcomeSplash.Timing.
+// MARK: Timing — the same numbers as WelcomeTiming (WelcomeSplash.swift).
 const T = {
   arcIn: 0.5,          // the horizon fades and rises in
   penStart: 0.3,       // the pen starts
@@ -151,7 +151,7 @@ function penAt(stroke, t) {
   return pen[i] + (pen[i + 1] - pen[i]) * (f - i);
 }
 
-// MARK: Layout — WelcomeSplash.Layout
+// MARK: Layout — WelcomeLayout (WelcomeSplash.swift)
 
 function layout(W, H) {
   const radius = W * 0.78, top = H * 0.54;
@@ -171,7 +171,7 @@ function layout(W, H) {
 
 // MARK: The horizon — LumenHorizon.draw (VMWallpaper's eclipse)
 
-function drawHorizon(ctx, L, corona = true) {
+function drawHorizon(ctx, L, haze = true) {
   const { W, H, radius, top } = L;
   ctx.fillStyle = '#08090B';
   ctx.fillRect(0, 0, W, H);
@@ -189,11 +189,11 @@ function drawHorizon(ctx, L, corona = true) {
    [at(1.06), 0.07], [at(1.13), 0.022], [1, 0]].forEach(([o, a]) => glow.addColorStop(o, `rgba(255,255,255,${a})`));
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, W, H);
-  if (corona) {
+  if (haze) {
     // The launch screen's own: a wider haze over the rim, as in the owner's mock.
-    const haze = ctx.createRadialGradient(cx, ly, lightRadius * 0.99, cx, ly, lightRadius * 1.12);
-    [[0, 0], [0.04, 0.11], [0.2, 0.05], [0.5, 0.015], [1, 0]].forEach(([o, a]) => haze.addColorStop(o, `rgba(255,255,255,${a})`));
-    ctx.fillStyle = haze;
+    const wide = ctx.createRadialGradient(cx, ly, lightRadius * 0.99, cx, ly, lightRadius * 1.12);
+    [[0, 0], [0.04, 0.11], [0.2, 0.05], [0.5, 0.015], [1, 0]].forEach(([o, a]) => wide.addColorStop(o, `rgba(255,255,255,${a})`));
+    ctx.fillStyle = wide;
     ctx.fillRect(0, 0, W, H);
   }
   const disc = ctx.createRadialGradient(cx, cy, radius * 0.9, cx, cy, radius);
@@ -329,9 +329,14 @@ function render(t) {
   document.body.style.background = '#08090B';
 
   // The horizon: in at the start, out with the opening.
-  const [horizon, hg] = layer('horizon', canvas.width, canvas.height);
-  hg.setTransform(scale, 0, 0, scale, 0, 0);
-  drawHorizon(hg, L);
+  // Drawn once per size, as the app keeps its picture (WelcomeHorizonPicture).
+  let horizon = layers.horizon;
+  if (!horizon || horizon.width !== canvas.width || horizon.height !== canvas.height) {
+    const [made, hg] = layer('horizon', canvas.width, canvas.height);
+    hg.setTransform(scale, 0, 0, scale, 0, 0);
+    drawHorizon(hg, L);
+    horizon = made;
+  }
   const arcIn = reduced ? progress(t, 0, T.reducedIn) : ease.out(progress(t, 0, T.arcIn));
   ctx.save();
   ctx.fillStyle = '#08090B';
