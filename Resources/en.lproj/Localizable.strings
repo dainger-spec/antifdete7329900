@@ -1109,6 +1109,7 @@
 "profiles.bulk.delete.message" = "Cookies, site data, cache, settings, history, bookmarks and saved passwords of these profiles are deleted: %@.";
 "profiles.bulk.delete.unreadable" = "Files Lumen could not read and set aside are in the folders of %1$@ (%2$ld). They are deleted too.";
 "profiles.bulk.namesAndMore" = "%1$@ and %2$ld more";
+"profiles.error.named" = "“%1$@”: %2$@";
 "proxies.title.closed" = "The proxy closes the connection without a word";
 "proxies.title.connectTimeout" = "The connection to the proxy gets no answer";
 "proxies.title.credentialsNeeded" = "The proxy asks for a user name and password";

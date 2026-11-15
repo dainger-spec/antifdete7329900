@@ -4495,6 +4495,12 @@ final class SelfTest {
         let sidebarTags: [String] = ProfileFilter.tags(of: [row, other])
         check("profiles: a tag in the sidebar shows the profiles with it, whatever its case; the search finds a profile by a tag or its notes",
               byTag && bySearch && sidebarTags == ["ads", "mobile", "US"], "sidebar tags \(sidebarTags)")
+        // An error about one profile names it, once.
+        let named: String = AppModel.profileErrorText("It does not open.", naming: "Shop 10")
+        let alreadyNamed: String = AppModel.profileErrorText("The settings of “Shop 10” could not be read.", naming: "Shop 10")
+        check("profiles: what goes wrong with a profile is said with its name, and a text that names it already is left as it is",
+              named != "It does not open." && named.contains("Shop 10") && named.hasSuffix("It does not open.")
+                && alreadyNamed == "The settings of “Shop 10” could not be read.", named)
     }
 
     /// A profile's window size: its window really opens at it — a page measures the window it is

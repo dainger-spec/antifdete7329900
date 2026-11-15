@@ -1109,6 +1109,7 @@
 "profiles.bulk.delete.message" = "Будут удалены cookie, данные сайтов, кэш, настройки, история, закладки и сохранённые пароли этих профилей: %@.";
 "profiles.bulk.delete.unreadable" = "Файлы, которые Lumen не смог прочитать и отложил, есть в папках профилей %1$@ (%2$ld). Они тоже будут удалены.";
 "profiles.bulk.namesAndMore" = "%1$@ и ещё %2$ld";
+"profiles.error.named" = "«%1$@»: %2$@";
 "proxies.title.closed" = "Прокси закрывает соединение, ничего не ответив";
 "proxies.title.connectTimeout" = "Соединение с прокси остаётся без ответа";
 "proxies.title.credentialsNeeded" = "Прокси требует логин и пароль";

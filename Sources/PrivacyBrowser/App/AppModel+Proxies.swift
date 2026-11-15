@@ -111,7 +111,7 @@ extension AppModel {
                     do {
                         try await manager.stop(id)
                     } catch {
-                        self.showError(errorText(error))
+                        self.showError(self.named(errorText(error), for: id))
                     }
                 }
             }
