@@ -314,6 +314,11 @@ final class AutomationHandler {
     var allowsAutomation: () -> Bool = { false }
     /// A saved scenario by its exact name (one), for `{"scenario": "…"}`.
     var savedScenario: (String) -> Scenario? = { _ in nil }
+    /// The parameters of a saved scenario's run on a profile: the profile's own values for
+    /// scenarios under what the request gave (`ScenarioValues.parametersJSON`). A text sent with
+    /// the request (`source`) gets the request's own and no more: what the person keeps for a
+    /// profile — a password — is read by the scenarios they wrote, not by whatever holds the token.
+    var profileParameters: (UUID, String) -> String = { _, given in given }
     /// Whether a WebDriver session drives the profile now (`WebDriverService.hasSession`): a run
     /// is refused beside it, as beside another run.
     var hasWebDriverSession: (UUID) -> Bool = { _ in false }
@@ -412,10 +417,12 @@ final class AutomationHandler {
                     return .error(409, "not_running", "Start the profile first (POST …/start).")
                 }
                 let name: String, source: String
+                var parametersJSON = spec.parametersJSON
                 if let text = spec.source {
                     (name, source) = ("API", text)
                 } else if let wanted = spec.scenario, let saved = savedScenario(wanted) {
                     (name, source) = (saved.name, saved.source)
+                    parametersJSON = profileParameters(summary.id, spec.parametersJSON)
                 } else {
                     return .error(404, "no_scenario", "No saved scenario is named \(spec.scenario ?? "") (exactly, one).")
                 }
@@ -423,7 +430,7 @@ final class AutomationHandler {
                     return .error(409, "busy", "A WebDriver session drives this profile; end it (quit) before a run.")
                 }
                 let runID = UUID()
-                guard manager.runScenario(summary.id, name: name, source: source, parametersJSON: spec.parametersJSON, runID: runID) else {
+                guard manager.runScenario(summary.id, name: name, source: source, parametersJSON: parametersJSON, runID: runID) else {
                     return .error(409, "busy", "A run of this profile is still going (POST …/scenario/stop).")
                 }
                 return .json(202, ScenarioAnswer(runID: runID.uuidString))
@@ -487,6 +494,9 @@ final class AutomationHandler {
         var outcome: String?
         /// Why it failed or stopped.
         var reason: String?
+        /// What the script returned (`return …`), as it is — any JSON value. Absent while the
+        /// run is going, when it did not finish, and when the script returned nothing.
+        var result: JSONValue?
         var lines: [Line]
 
         init(_ run: ProfileManager.ScenarioRunState) {
@@ -500,7 +510,43 @@ final class AutomationHandler {
             case .failed(let message)?: outcome = "failed"; reason = message
             case .stopped(let why)?: outcome = "stopped"; reason = why.rawValue
             }
-            lines = run.lines.map { Line(at: $0.at, kind: $0.kind.rawValue, text: $0.text) }
+            result = run.result.flatMap { JSONValue(text: $0) }
+            // The result is given once, as a value: not again as a line of text.
+            lines = run.lines.filter { $0.kind != .result }.map { Line(at: $0.at, kind: $0.kind.rawValue, text: $0.text) }
+        }
+    }
+
+    /// Any JSON value, given back as it came (a run's result).
+    private struct JSONValue: Encodable {
+        let value: Any
+
+        init?(text: String) {
+            guard let value = try? JSONSerialization.jsonObject(with: Data(text.utf8), options: [.fragmentsAllowed]) else { return nil }
+            self.value = value
+        }
+
+        private init(_ value: Any) { self.value = value }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.singleValueContainer()
+            switch value {
+            case let text as String:
+                try container.encode(text)
+            case let number as NSNumber:
+                if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                    try container.encode(number.boolValue)
+                } else if !CFNumberIsFloatType(number as CFNumber), let whole = Int64(exactly: number) {
+                    try container.encode(whole)
+                } else {
+                    try container.encode(number.doubleValue)
+                }
+            case let list as [Any]:
+                try container.encode(list.map { JSONValue($0) })
+            case let object as [String: Any]:
+                try container.encode(object.mapValues { JSONValue($0) })
+            default:
+                try container.encodeNil()
+            }
         }
     }
 

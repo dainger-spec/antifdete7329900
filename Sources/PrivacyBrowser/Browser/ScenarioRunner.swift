@@ -11,7 +11,8 @@ import WebKit
 ///
 /// What the script has: `page` (the core commands, each a promise), `log(...)`, `sleep(ms)` and
 /// `params` (the run's parameters). A command that fails rejects its promise with the reason, which
-/// the script may catch; one left uncaught ends the run with it.
+/// the script may catch; one left uncaught ends the run with it. An error names the scenario's
+/// line it came from ("… (line 12)"); what the script returns is the run's result (`Line.Kind.result`).
 @MainActor
 final class ScenarioRunner {
     enum StopReason: String, Equatable, Codable {
@@ -28,13 +29,20 @@ final class ScenarioRunner {
     }
 
     struct Line: Equatable, Codable {
-        enum Kind: String, Codable { case command, script, error, outcome }
+        enum Kind: String, Codable {
+            case command, script, error, outcome
+            /// What the script returned, as JSON text: the run's result (the API gives it as `result`).
+            case result
+        }
         var at: Date
         var kind: Kind
         var text: String
     }
 
     private static let log = Logger(subsystem: "PrivacyBrowser", category: "Scenario")
+    /// The longest result a run keeps, in UTF-8 bytes of its JSON: it crosses to the app with the
+    /// log, and is given whole by the API.
+    static let maximumResultBytes = 512 * 1024
 
     let driver: PageDriver
     private(set) var lines: [Line] = []
@@ -186,6 +194,27 @@ final class ScenarioRunner {
             let state = PageDriver.LoadState(rawValue: arguments.first as? String ?? "load") ?? .load
             try await driver.waitForLoadState(state, timeout: timeout(1))
             return nil
+        case "waitForURL":
+            guard let pattern = ScenarioURLPattern(arguments.first), pattern.isReadable else {
+                throw PageDriver.Failure.script("waitForURL takes an address as text ('**/account': * within a part of the path, ** for any run) or a regular expression")
+            }
+            let state = PageDriver.LoadState(rawValue: options(1)["waitUntil"] as? String ?? "load") ?? .load
+            try await driver.waitForURL(pattern, waitUntil: state, timeout: timeout(1))
+            return nil
+        case "selectOption":
+            // One choice or several: each an option's value or label as text, or {value}, {label}, {index}.
+            let given: Any = arguments.count > 1 ? arguments[1] : NSNull()
+            var choices: [Any] = []
+            for choice in given as? [Any] ?? [given] {
+                if choice is String || choice is [String: Any] {
+                    choices.append(choice)
+                } else if let number = choice as? NSNumber {
+                    choices.append(number.stringValue)
+                } else {
+                    throw PageDriver.Failure.script("selectOption takes what to choose: an option's value or label as text, or {value: …}, {label: …}, {index: …}")
+                }
+            }
+            return try await driver.selectOption(try string(0), choices, timeout: timeout(2))
         case "waitFor":
             let state = PageDriver.ElementState(rawValue: options(1)["state"] as? String ?? "visible") ?? .visible
             try await driver.waitFor(try string(0), state: state, timeout: timeout(1))
@@ -238,9 +267,9 @@ final class ScenarioRunner {
     // MARK: The script's side (its own thread)
 
     /// The commands the script's `page` has, by their names.
-    private static let pageCommands = ["goto", "back", "forward", "reload", "waitForLoadState", "waitFor", "click", "dblclick", "hover",
-                                       "type", "press", "scroll", "textContent", "innerText", "inputValue", "getAttribute", "count",
-                                       "isVisible", "url", "title", "screenshot", "pause"]
+    private static let pageCommands = ["goto", "back", "forward", "reload", "waitForLoadState", "waitFor", "waitForURL", "click", "dblclick",
+                                       "hover", "selectOption", "type", "press", "scroll", "textContent", "innerText", "inputValue",
+                                       "getAttribute", "count", "isVisible", "url", "title", "screenshot", "pause"]
 
     /// Builds the script's world and runs `source` in it, on `thread`.
     nonisolated private static func run(_ source: String, parametersJSON: String, on thread: ScriptThread, gate commands: ScriptGate,
@@ -256,6 +285,16 @@ final class ScenarioRunner {
                 MainActor.assumeIsolated {
                     guard let runner else { return }
                     if ok {
+                        // What the script returned (JSON text; none for nothing returned) is the
+                        // run's result — unless the run was stopped meanwhile, or it is too large
+                        // to carry, which the log says.
+                        if !message.isEmpty, runner.stopRequest == nil, runner.outcome == nil {
+                            if message.utf8.count <= Self.maximumResultBytes {
+                                runner.add(.result, message)
+                            } else {
+                                runner.add(.error, "The result is larger than \(Self.maximumResultBytes / 1024) KB and is left out: return less")
+                            }
+                        }
                         runner.end(.finished)
                     } else if let reason = runner.stopRequest {
                         runner.end(.stopped(reason))
@@ -340,26 +379,70 @@ final class ScenarioRunner {
         context.setObject(logged, forKeyedSubscript: "__log" as NSString)
         context.setObject(command, forKeyedSubscript: "__command" as NSString)
         context.exceptionHandler = { _, exception in
-            let message = exception?.toString() ?? "error"
+            var message = exception?.toString() ?? "error"
+            // A script that does not parse: the line the reading stopped at.
+            if let line = exception?.forProperty("line"), line.isNumber, line.toInt32() > 0 { message += " (line \(line.toInt32()))" }
             ended(false, message)
         }
         let names = pageCommands.map { "'\($0)'" }.joined(separator: ", ")
         let prelude = """
             const params = Object.freeze(\(parametersJSON));
             const log = (...parts) => __log(parts.map((p) => typeof p === 'string' ? p : JSON.stringify(p)).join(' '));
+            \(Self.lineSupport)
             const page = {};
-            for (const name of [\(names)]) page[name] = (...args) => __command(name, args);
+            for (const name of [\(names)]) page[name] = (...args) => __at(__line(), () => __command(name, args));
             page.waitForSelector = page.waitFor;
-            page.evaluate = (body, arg, options) => __command('evaluate', [
+            page.waitForURL = (url, options) => __at(__line(), () => __command('waitForURL', [
+              url instanceof RegExp ? {regex: url.source, flags: url.flags} : url, options === undefined ? null : options]));
+            page.evaluate = (body, arg, options) => __at(__line(), () => __command('evaluate', [
               typeof body === 'function' ? 'return await (' + body.toString() + ')(__arg);' : String(body),
-              arg === undefined ? null : arg, (options && options.world) || 'isolated']);
-            const sleep = (ms) => __command('pause', [ms]);
+              arg === undefined ? null : arg, (options && options.world) || 'isolated']));
+            const sleep = (ms) => __at(__line(), () => __command('pause', [ms]));
             """
         context.evaluateScript(prelude)
         // The script's first line is line 1 of what runs: its line numbers stay its own.
-        let script = "(async () => {" + source + "\n})().then(() => __ended(true, ''), (e) => __ended(false, String(e && e.stack ? e + '\\n' + e.stack : e)));"
+        let script = "(async () => {" + source + "\n})().then((value) => __ended(true, __result(value)), (e) => __ended(false, __failure(e)));"
         context.evaluateScript(script, withSourceURL: URL(string: "scenario.js"))
     }
+
+    /// The script's side of "which line": part of the prelude, in JavaScript, kept apart so that
+    /// scripts/test-shims.mjs runs this very text (in JavaScriptCore under Bun, in V8 under Node).
+    ///
+    /// A command that fails is rejected from this code, outside any call of the script, so its
+    /// error knows nothing of the scenario's lines: a script of a hundred lines with five
+    /// `page.click` failed with "no element matches #next" and no word of which. `__line()` reads
+    /// the line of the scenario a command is called from — the first frame of `scenario.js` (the
+    /// name the script is run under) in a stack made there; `__at` adds it to the error of a
+    /// command that fails, once ("… (line 12)", and `scenarioLine` on the error; "stopped" stays as
+    /// it is: a script may compare it). `__failure` is the
+    /// run's end by an error nobody caught: the script's own errors get their line the same way,
+    /// from their own stack. `__result` is what the script returned, as JSON text ('' for nothing).
+    static let lineSupport = #"""
+const __lineIn = (stack) => { const m = /scenario\.js:(\d+)/.exec(String(stack || '')); return m ? Number(m[1]) : 0; };
+const __line = () => __lineIn(new Error().stack);
+const __mark = (e, line) => {
+  try {
+    if (line > 0 && e && typeof e === 'object' && typeof e.message === 'string' && e.message !== 'stopped' && e.scenarioLine === undefined) {
+      e.scenarioLine = line;
+      e.message += ' (line ' + line + ')';
+    }
+  } catch (ignored) {}
+  return e;
+};
+const __at = (line, call) => {
+  let promise;
+  try { promise = call(); } catch (e) { throw __mark(e, line); }
+  return promise && typeof promise.then === 'function' ? promise.then(undefined, (e) => { throw __mark(e, line); }) : promise;
+};
+const __failure = (e) => {
+  __mark(e, __lineIn(e && e.stack));
+  return String(e && e.stack ? e + '\n' + e.stack : e);
+};
+const __result = (value) => {
+  if (value === undefined) { return ''; }
+  try { const text = JSON.stringify(value); return text === undefined ? '' : text; } catch (e) { return JSON.stringify(String(value)); }
+};
+"""#
 
     /// Throws an error with `message` in the script, from inside a call of it into this code
     /// (`__command`, `__log`): JavaScriptCore throws the context's exception set during the call
@@ -511,5 +594,24 @@ private final class LogGate: @unchecked Sendable {
         let count = leftOut
         leftOut = 0
         return count
+    }
+}
+
+extension ProfileManager.ScenarioRunState {
+    /// How long the run has taken: to its end's line, or to its last line so far.
+    var length: TimeInterval { max(0, (lines.last?.at ?? startedAt).timeIntervalSince(startedAt)) }
+
+    /// What the script returned, as JSON text; nil when it returned nothing, or has not ended.
+    var result: String? { lines.last(where: { $0.kind == .result })?.text }
+
+    /// The run's log as text, to copy or keep: the scenario's name and when it started, then each
+    /// line after the seconds since the start — where a run's time went is read off them.
+    var transcript: String {
+        var out = ["\(name) — \(ISO8601DateFormatter().string(from: startedAt))"]
+        for line in lines {
+            let seconds = String(format: "%9.3f", max(0, line.at.timeIntervalSince(startedAt)))
+            out.append("\(seconds)  \(line.kind == .result ? "result " : "")\(line.text)")
+        }
+        return out.joined(separator: "\n") + "\n"
     }
 }

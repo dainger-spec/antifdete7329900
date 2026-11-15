@@ -44,6 +44,12 @@ final class AppModel: ObservableObject {
     /// `scenarios.bin` did not open at this unlock (a newer version's, or unreadable): `scenarios`
     /// is empty, not the library — no schedule is dropped for a scenario that is not in it.
     private var scenariosUnread = false
+    /// Each profile's own values for scenarios (`scenario-values.bin`): what `params` holds in a
+    /// run on it that the editor or a schedule starts. This Mac's.
+    @Published private(set) var scenarioValues = ScenarioValues()
+    /// `scenario-values.bin` is a newer version's, or does not open: shown as none, and nothing
+    /// is written over it.
+    @Published private(set) var scenarioValuesRefused = false
     /// The last unlock attempt failed with a wrong password (the unlock screen then shows which
     /// vault it tried).
     @Published private(set) var unlockFailed = false
@@ -516,7 +522,9 @@ final class AppModel: ObservableObject {
                     || self.automationServer?.webDriver?.hasSession(id) == true
             },
             // A schedule's run: in front, but without the keyboard or the app's activation.
-            runScenario: { [weak self] scenario, id in await self?.runScenario(scenario, on: id, inBackground: true) ?? false },
+            runScenario: { [weak self] scenario, id, run in
+                await self?.runScenario(scenario, on: id, inBackground: true, runID: run) ?? false
+            },
             warmUp: { [weak self] id in
                 guard let self, let warmUps = self.warmUps else { return false }
                 warmUps.enqueue([id]) { self.warmUpPlan(for: $0).plan }
@@ -554,6 +562,9 @@ final class AppModel: ObservableObject {
         manager.refusesFailingProxy = { [weak self] in self?.settings.proxyFailure == .doNotLaunch }
         loadTagColors(from: vault)
         loadScenarios(from: vault)
+        loadScenarioValues(from: vault)
+        // How a run ended, for the schedule that started it (its row says so).
+        manager.onScenarioEnded = { [weak self] _, run, outcome in self?.scheduleCoordinator?.runEnded(run, outcome) }
         manager.onProxyLaunchRefused = { [weak self] id, proxy, diagnosis in
             self?.reportProxyProblem(of: id, proxy: proxy, diagnosis: diagnosis, notStarted: true)
         }
@@ -668,6 +679,8 @@ final class AppModel: ObservableObject {
         scenarios = ScenarioLibrary()
         scenariosRefused = false
         scenariosUnread = false
+        scenarioValues = ScenarioValues()
+        scenarioValuesRefused = false
         managerObservation = nil
         manager = nil
         repository = nil
@@ -988,6 +1001,7 @@ final class AppModel: ObservableObject {
     func deleteProfile(_ id: UUID) async {
         await perform { try await self.manager?.deleteBecauseThePersonAsked(id) }
         refresh()
+        forgetScenarioValues(ofDeleted: id)
     }
 
     func launch(_ id: UUID, openingWindow: Bool = true) async {
@@ -1444,14 +1458,76 @@ final class AppModel: ObservableObject {
     /// Runs `scenario` on profile `id`, starting the profile first when it is not running. False
     /// when the plan has no automation, the profile did not start, or a run of it is going.
     /// `inBackground`: a schedule's run, which must not take the keyboard from what the person is
-    /// doing (`SafariChromeHost.openScenarioPage`).
-    func runScenario(_ scenario: Scenario, on id: UUID, inBackground: Bool = false) async -> Bool {
+    /// doing (`SafariChromeHost.openScenarioPage`). The run's `params` are the profile's own
+    /// values (`scenarioValues`): the same scenario on another profile has that one's.
+    func runScenario(_ scenario: Scenario, on id: UUID, inBackground: Bool = false, runID: UUID = UUID()) async -> Bool {
         guard license.allowsAutomation, manager != nil else { return false }
         // A stopped profile is started without a window of its own: the run opens the one it acts
         // in. With the profile's as well there were two, one of them empty (the owner, 10 November).
         if !isRunning(id) { await launch(id, openingWindow: false) }
         guard let manager, isRunning(id) else { return false }
-        return manager.runScenario(id, name: scenario.name, source: scenario.source, inBackground: inBackground)
+        return manager.runScenario(id, name: scenario.name, source: scenario.source,
+                                   parametersJSON: scenarioValues.parametersJSON(for: id), runID: runID, inBackground: inBackground)
+    }
+
+    // MARK: A profile's values for scenarios
+
+    /// `scenario-values.bin` as it is. One that does not open is kept and said once; a save moves
+    /// it aside as `scenario-values.bin.unreadable`, never over it. A newer version's is said, and
+    /// nothing is written over it.
+    private func loadScenarioValues(from vault: UnlockedVault) {
+        do {
+            scenarioValues = try ScenarioValues.load(from: vault)
+            scenarioValuesRefused = false
+        } catch {
+            scenarioValues = ScenarioValues()
+            if case CoreError.newerFormat = error {
+                scenarioValuesRefused = true
+                showError(errorText(error))
+            } else {
+                Logger(subsystem: "PrivacyBrowser", category: "Vault")
+                    .error("scenario-values.bin could not be read: \(error.logKind, privacy: .public); kept, moved aside at the next save")
+                showError(L("scenarios.values.unreadable"))
+            }
+        }
+    }
+
+    /// Puts `values` in place of profile `id`'s own. False when they were not written.
+    @discardableResult
+    func saveScenarioValues(_ values: [ScenarioValues.Value], for id: UUID) -> Bool {
+        guard let repository else { return false }
+        guard !scenarioValuesRefused else {
+            showError(L("scenarios.values.newer"))
+            return false
+        }
+        var next = scenarioValues
+        next.set(values, for: id)
+        guard next != scenarioValues else { return true }
+        do {
+            try next.save(to: repository.vault)
+            scenarioValues = next
+            return true
+        } catch {
+            showError(errorText(error))
+            return false
+        }
+    }
+
+    /// A profile the person deleted takes its values with it: a password kept for a profile that
+    /// is gone is of no use to anyone but a thief. Only when the list was read and says the
+    /// profile is gone (a deletion that failed keeps them).
+    private func forgetScenarioValues(ofDeleted id: UUID) {
+        guard let repository, repository.indexState == .read, !profiles.contains(where: { $0.id == id }),
+              !scenarioValuesRefused, !scenarioValues.values(of: id).isEmpty else { return }
+        var next = scenarioValues
+        next.set([], for: id)
+        do {
+            try next.save(to: repository.vault)
+            scenarioValues = next
+        } catch {
+            Logger(subsystem: "PrivacyBrowser", category: "Vault")
+                .error("scenario-values.bin could not be written: \(error.logKind, privacy: .public)")
+        }
     }
 
     func stopScenario(on id: UUID) {
@@ -1692,6 +1768,8 @@ final class AppModel: ObservableObject {
             let matching = self?.scenarios.scenarios.filter { $0.name == name } ?? []
             return matching.count == 1 ? matching[0] : nil
         }
+        // A saved scenario run through the API has the profile's own values under the request's.
+        handler.profileParameters = { [weak self] id, given in self?.scenarioValues.parametersJSON(for: id, over: given) ?? given }
         let server = AutomationServer(settings: settings, handler: handler)
         // WebDriver, on the same listener: a session starts a profile as the API's start does.
         let webDriver = WebDriverService(manager: manager, repository: repository)

@@ -273,6 +273,13 @@ final class PageInput {
         "ArrowRight": Key(code: UInt16(kVK_RightArrow), characters: "\u{F703}", charactersIgnoringModifiers: "\u{F703}", modifiers: [.function, .numericPad]),
         "ArrowUp": Key(code: UInt16(kVK_UpArrow), characters: "\u{F700}", charactersIgnoringModifiers: "\u{F700}", modifiers: [.function, .numericPad]),
         "ArrowDown": Key(code: UInt16(kVK_DownArrow), characters: "\u{F701}", charactersIgnoringModifiers: "\u{F701}", modifiers: [.function, .numericPad]),
+        // The keys beside the arrows on a full keyboard: AppKit's own characters for them, with
+        // the function flag a keyboard gives them.
+        "Delete": Key(code: UInt16(kVK_ForwardDelete), characters: "\u{F728}", charactersIgnoringModifiers: "\u{F728}", modifiers: [.function]),
+        "Home": Key(code: UInt16(kVK_Home), characters: "\u{F729}", charactersIgnoringModifiers: "\u{F729}", modifiers: [.function]),
+        "End": Key(code: UInt16(kVK_End), characters: "\u{F72B}", charactersIgnoringModifiers: "\u{F72B}", modifiers: [.function]),
+        "PageUp": Key(code: UInt16(kVK_PageUp), characters: "\u{F72C}", charactersIgnoringModifiers: "\u{F72C}", modifiers: [.function]),
+        "PageDown": Key(code: UInt16(kVK_PageDown), characters: "\u{F72D}", charactersIgnoringModifiers: "\u{F72D}", modifiers: [.function]),
     ]
 
     /// The key of the current keyboard layout that types `character`, with Shift or Option if it

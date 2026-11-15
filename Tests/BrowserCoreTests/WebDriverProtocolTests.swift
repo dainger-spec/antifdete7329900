@@ -143,4 +143,27 @@ final class WebDriverProtocolTests: XCTestCase {
             XCTAssertEqual((error as? WebDriverError)?.code, "unsupported operation")
         }
     }
+
+    /// The keys beside the arrows (Selenium's Keys.DELETE, HOME, END, PAGE_UP, PAGE_DOWN), the
+    /// right-hand modifiers, and the keys that name a character (Keys.NUMPAD5, Keys.ADD): each
+    /// answered "unsupported operation" before.
+    func testTheKeysBesideTheArrowsAndTheNumberPad() throws {
+        XCTAssertEqual(try WebDriverKeys.strokes("\u{E011}\u{E010}\u{E00E}\u{E00F}\u{E017}"),
+                       [.press("Home"), .press("End"), .press("PageUp"), .press("PageDown"), .press("Delete")])
+        // Shift held with End: a selection to the line's end. The right Shift holds as the left.
+        XCTAssertEqual(try WebDriverKeys.strokes("\u{E008}\u{E010}\u{E000}x"), [.press("Shift+End"), .type("x")])
+        XCTAssertEqual(try WebDriverKeys.strokes("\u{E050}\u{E011}"), [.press("Shift+Home")])
+        XCTAssertEqual(try WebDriverKeys.strokes("\u{E053}a"), [.press("Meta+a")])
+        // The number pad's digits and signs are typed as their characters, in a run with the rest.
+        XCTAssertEqual(try WebDriverKeys.strokes("1\u{E01C}\u{E025}\u{E01A}\u{E028}5"), [.type("12+0.5")])
+        XCTAssertEqual(try WebDriverKeys.strokes("\u{E009}\u{E01B}"), [.press("Control+1")])
+        // The number pad's own Home, arrows and Delete.
+        XCTAssertEqual(try WebDriverKeys.strokes("\u{E057}\u{E05B}\u{E05D}"), [.press("Home"), .press("ArrowDown"), .press("Delete")])
+        // What a Mac's keyboard has no key for is still said, by its code point.
+        for key in ["\u{E016}", "\u{E05C}", "\u{E00B}"] {
+            XCTAssertThrowsError(try WebDriverKeys.strokes(key)) { error in
+                XCTAssertEqual((error as? WebDriverError)?.code, "unsupported operation")
+            }
+        }
+    }
 }

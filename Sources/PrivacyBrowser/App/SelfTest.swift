@@ -1293,6 +1293,29 @@ final class SelfTest {
               ran.status == 202 && state.status == 200 && state.body.contains("\"outcome\" : \"finished\"")
                   && state.body.contains("from the API 3"),
               "\(ran.status) \(ran.body.prefix(120)) / \(state.status) \(state.body.prefix(400))")
+        // What a scenario returns is the run's result. A saved scenario has the profile's own
+        // values for scenarios under what the request gave; a text sent with the request has the
+        // request's alone — a profile's password is not for whatever holds the token to read.
+        handler.savedScenario = { name in
+            name == "Saved \(run)" ? Scenario(name: name, source: "return {login: params.login, city: params.city, n: params.n};") : nil
+        }
+        handler.profileParameters = { id, given in
+            var values = ScenarioValues()
+            values.set([ScenarioValues.Value(name: "login", value: "alice"), ScenarioValues.Value(name: "city", value: "Paris")], for: id)
+            return values.parametersJSON(for: id, over: given)
+        }
+        let savedRun = await call("POST", base + "/scenario", body: "{\"scenario\": \"Saved \(run)\", \"params\": {\"city\": \"Rome\", \"n\": 2}}")
+        _ = await waitUntil(timeout: 20) { manager.scenarioRuns[profile.id]?.isRunning == false }
+        let savedState = await call("GET", base + "/scenario")
+        let sentRun = await call("POST", base + "/scenario", body: "{\"source\": \"return params.login === undefined ? 'none' : 'read';\"}")
+        _ = await waitUntil(timeout: 20) { manager.scenarioRuns[profile.id]?.isRunning == false }
+        let sentState = await call("GET", base + "/scenario")
+        handler.savedScenario = { _ in nil }
+        check("automation: what a scenario returns is the run's result; a saved scenario has the profile's own values under the request's, a text sent with the request only its own",
+              savedRun.status == 202 && savedState.body.contains("\"result\" : {") && savedState.body.contains("\"login\" : \"alice\"")
+                  && savedState.body.contains("\"city\" : \"Rome\"") && savedState.body.contains("\"n\" : 2")
+                  && sentRun.status == 202 && sentState.body.contains("\"result\" : \"none\""),
+              "\(savedRun.status) \(savedState.body.prefix(400)) / \(sentRun.status) \(sentState.body.prefix(300))")
         let unknown = await call("POST", base + "/scenario", body: "{\"scenario\": \"no such \(run)\"}")
         check("automation: a saved scenario that is not there is not found", unknown.status == 404 && unknown.body.contains("no_scenario"),
               "\(unknown.status) \(unknown.body.prefix(160))")
@@ -7331,6 +7354,31 @@ final class SelfTest {
                   "\(String(describing: failed)) / \(String(describing: broken))")
         }
 
+        // An error names the line of the scenario it came from — the command's, whose failure is
+        // made outside the script, and the script's own mistake; what the script returns is the
+        // run's result, in its log.
+        let (lineOfCommand, _, _) = await run("""
+            await page.goto(params.base + 'form');
+
+            await page.click('#nothing-like-it', {timeout: 1000});
+            """)
+        let (lineOfMistake, _, _) = await run("""
+            const nothing = undefined;
+            await page.goto(params.base + 'form');
+            nothing.field;
+            """)
+        let (returned, returnedLines, _) = await run("""
+            await page.goto(params.base + 'form');
+            return {title: await page.title(), items: await page.count('.item')};
+            """)
+        let result = returnedLines.last(where: { $0.kind == .result })?.text
+        var mistakeLine = false
+        if case .failed(let message)? = lineOfMistake { mistakeLine = message.hasSuffix("(line 3)") }
+        check("scenario runs: an error names the line of the scenario, a command's and the script's own; what the script returns is the run's result",
+              lineOfCommand == .failed("Error: no element matches #nothing-like-it (line 3)") && mistakeLine
+                  && returned == .finished && result == "{\"title\":\"PB automation form\",\"items\":5}",
+              "\(String(describing: lineOfCommand)) / \(String(describing: lineOfMistake)) / \(String(describing: returned)) \(result ?? "nil")")
+
         // Stop: a script waiting between commands, and one that loops without end.
         let (waiting, _, waitingTime) = await run("while (true) { await page.pause(200); }", stopAfter: 1.0, timeout: 10)
         // A main thread held up by the script would tick 0–1 times in the second (a 50 ms timer ticks
@@ -7591,6 +7639,57 @@ final class SelfTest {
         try? await Task.sleep(nanoseconds: 300_000_000)
         check("automation commands: after the recording is stopped nothing more is recorded", seen.steps.count == recordedLines.count,
               "\(seen.steps.count) steps")
+
+        // A choice in a list: by an option's words, the page hears of it; one that is not there is said.
+        var values: [String] = []
+        let chose = await outcome {
+            try await driver.goto(form)
+            try await driver.waitFor("#late")
+            values = try await driver.selectOption("#choice", ["Beta"])
+        }
+        let chosen = try? await driver.textContent("#chosen")
+        let byIndex = await outcome { values += try await driver.selectOption("#choice", [["index": 1]]) }
+        let noOption = await outcome { _ = try await driver.selectOption("#choice", ["Gamma"], timeout: 2) }
+        let notAList = await outcome { _ = try await driver.selectOption("#button", ["x"], timeout: 2) }
+        check("automation commands: selectOption chooses a list's option by its words or its place, the page hears of it, and what cannot be chosen is said",
+              chose == "ok" && chosen == "b" && byIndex == "ok" && values == ["b", "a"] && noOption.contains("has no option \"Gamma\"")
+                  && notAList.contains("is not a list"),
+              "\(chose) → \(chosen ?? "nil"); by index \(byIndex) \(values); \(noOption); \(notAList)")
+
+        // The keys beside the arrows reach the page as a keyboard's, by their names.
+        _ = try? await js(tab.webView, "return __take();")
+        let pressed = await outcome {
+            try await driver.click("#button")
+            for key in ["PageDown", "Home", "End", "PageUp", "Delete"] { try await driver.press(key) }
+        }
+        let pressedText = (try? await js(tab.webView, "return __take();")) as? String ?? "{}"
+        let pressedRecord = (try? JSONSerialization.jsonObject(with: Data(pressedText.utf8))) as? [String: Any] ?? [:]
+        let keyDowns = (pressedRecord["events"] as? [[String: Any]] ?? []).filter { $0["type"] as? String == "keydown" }
+        let keyNames = keyDowns.map { $0["key"] as? String ?? "?" }
+        check("automation commands: PageDown, Home, End, PageUp and Delete are pressed as a keyboard's keys of those names",
+              pressed == "ok" && keyNames == ["PageDown", "Home", "End", "PageUp", "Delete"] && keyDowns.allSatisfy { $0["trusted"] as? Bool == true },
+              "\(pressed): \(keyNames)")
+
+        // A page that comes a moment after the click: waitForLoadState right after the click waits
+        // for it (it used to find the old page still "complete" and go on to read that one), and
+        // waitForURL waits for an address however late.
+        let followed = await outcome {
+            try await driver.goto(form)
+            try await driver.waitFor("#late")
+            try await driver.click("#slow")
+            try await driver.waitForLoadState(.load)
+        }
+        let followedHeading = try? await driver.textContent("#heading")
+        let awaited = await outcome {
+            try await driver.goto(form)
+            try await driver.waitFor("#late")
+            try await driver.click("#slow")
+            try await driver.waitForURL(.glob("**/pb-automation/two"), timeout: 10)
+        }
+        let neverThere = await outcome { try await driver.waitForURL(.glob("**/pb-automation/three"), timeout: 1) }
+        check("automation commands: waitForLoadState right after a click waits for the page the click opens; waitForURL waits for an address, and gives up after its time",
+              followed == "ok" && followedHeading == "Page two" && awaited == "ok" && driver.url == two && neverThere.hasPrefix("timed out"),
+              "\(followed) → \(followedHeading ?? "nil"); waitForURL \(awaited) at \(driver.url?.lastPathComponent ?? "nil"); never: \(neverThere)")
     }
 
     // MARK: The page cannot tell (PageInput)

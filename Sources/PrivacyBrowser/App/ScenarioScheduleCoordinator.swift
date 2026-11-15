@@ -6,6 +6,8 @@ import os
 /// whose time has come are run — a scenario on its profile, or the profile's warm-up — and each
 /// plans its next time. A profile that is busy is looked at again ten minutes on; a run found too
 /// late is not made; without automation in the plan nothing is run, and the schedule says so.
+/// How a scenario's run that a schedule started ended — finished, failed and why, stopped — is
+/// written to the schedule when the run ends (`runEnded`): nobody may have been looking.
 ///
 /// Nothing wakes the Mac and nothing starts the app: a schedule is the app's own, while it runs.
 @MainActor
@@ -18,7 +20,8 @@ final class ScenarioScheduleCoordinator {
         /// The profile is starting, being sealed, running a scenario already, being recorded in, or
         /// driven by a WebDriver session.
         var isBusy: (UUID) -> Bool
-        var runScenario: (Scenario, UUID) async -> Bool
+        /// Starts the scenario on the profile as the run of this id; false when it did not start.
+        var runScenario: (Scenario, UUID, UUID) async -> Bool
         /// Puts the profile's warm-up in the warm-up queue; false when there is no queue.
         var warmUp: (UUID) -> Bool
     }
@@ -34,6 +37,13 @@ final class ScenarioScheduleCoordinator {
     private let actions: Actions
     private var loop: Task<Void, Never>?
     private var isShutDown = false
+    /// The scenario runs this started that have not ended: a run's id, and its schedule's.
+    private var runs: [UUID: UUID] = [:]
+    /// The schedule whose run is being started: its start is not written down yet.
+    private var starting: UUID?
+    /// A run that ended before its start was written down (a script that fails at once): its
+    /// end is written after the start.
+    private var endedEarly: (schedule: UUID, kind: ScenarioSchedule.End.Kind, reason: String?, at: Date)?
     private let log = Logger(subsystem: "PrivacyBrowser", category: "ScenarioSchedules")
 
     init(vault: UnlockedVault, actions: Actions) {
@@ -117,7 +127,12 @@ final class ScenarioScheduleCoordinator {
             switch schedule.action {
             case let .scenario(id):
                 if let scenario = actions.scenario(id) {
-                    started = await actions.runScenario(scenario, schedule.profileID)
+                    // The run is this schedule's from before it starts: its end may come at once.
+                    let run = UUID()
+                    runs[run] = schedule.id
+                    starting = schedule.id
+                    started = await actions.runScenario(scenario, schedule.profileID, run)
+                    if !started { runs[run] = nil }
                 } else {
                     started = false
                 }
@@ -126,6 +141,34 @@ final class ScenarioScheduleCoordinator {
             }
             if started { log.notice("A scheduled run started") } else { log.notice("A scheduled run did not start") }
             change { $0.record(schedule.id, started ? .started : .failed, at: Date()) }
+            starting = nil
+            if let early = endedEarly, early.schedule == schedule.id, started {
+                change { $0.recordEnd(early.schedule, early.kind, reason: early.reason, at: max(early.at, Date())) }
+            }
+            endedEarly = nil
         }
+    }
+
+    /// A scenario's run ended. One a schedule started leaves how it ended on that schedule; any
+    /// other run — the editor's, the API's — is not this's to write down.
+    func runEnded(_ run: UUID, _ outcome: ScenarioRunner.Outcome, at now: Date = Date()) {
+        guard let schedule = runs.removeValue(forKey: run) else { return }
+        let kind: ScenarioSchedule.End.Kind
+        var reason: String?
+        switch outcome {
+        case .finished:
+            kind = .finished
+        case .failed(let message):
+            kind = .failed
+            reason = message
+        case .stopped(let why):
+            kind = .stopped
+            reason = why.rawValue
+        }
+        if starting == schedule {
+            endedEarly = (schedule, kind, reason, now)
+            return
+        }
+        change { $0.recordEnd(schedule, kind, reason: reason, at: now) }
     }
 }

@@ -114,3 +114,82 @@ public enum ScenarioWait {
         return (seconds * 0.6)...max(0.01, seconds * 1.4)
     }
 }
+
+/// What `page.waitForURL(…)` waits for (docs/AUTOMATION.md): an address written out, with `*`
+/// for any run of characters within one part of a path and `**` for any run at all
+/// (`**/account`, `https://shop.example/orders/*`), or a regular expression (`/\/order\/\d+/`).
+/// The whole address must match a written one; a regular expression is looked for in it.
+public enum ScenarioURLPattern: Equatable, Sendable {
+    case glob(String)
+    case regex(String, caseInsensitive: Bool)
+
+    /// What the script gave: text, or `{regex, flags}` for a regular expression of its own.
+    public init?(_ value: Any?) {
+        if let text = value as? String, !text.isEmpty {
+            self = .glob(text)
+        } else if let object = value as? [String: Any], let source = object["regex"] as? String, !source.isEmpty {
+            self = .regex(source, caseInsensitive: (object["flags"] as? String ?? "").contains("i"))
+        } else {
+            return nil
+        }
+    }
+
+    /// As the run's log names it.
+    public var shown: String {
+        switch self {
+        case .glob(let text): return text
+        case .regex(let source, _): return "/\(source)/"
+        }
+    }
+
+    /// The regular expression a written address is: every character itself, but `**` any run and
+    /// `*` a run without `/`.
+    static func expression(forGlob glob: String) -> String {
+        var out = "^"
+        var rest = Substring(glob)
+        while let character = rest.first {
+            if rest.hasPrefix("**") {
+                out += ".*"
+                rest = rest.dropFirst(2)
+            } else if character == "*" {
+                out += "[^/]*"
+                rest = rest.dropFirst()
+            } else {
+                out += NSRegularExpression.escapedPattern(for: String(character))
+                rest = rest.dropFirst()
+            }
+        }
+        return out + "$"
+    }
+
+    /// Whether the page's address `url` is one this means. A written address is the same with and
+    /// without the `/` at its end (`https://shop.example` is where `https://shop.example/` is).
+    /// A regular expression that cannot be read matches nothing.
+    public func matches(_ url: String) -> Bool {
+        let pattern: String
+        var options: NSRegularExpression.Options = []
+        switch self {
+        case .glob(let text):
+            pattern = Self.expression(forGlob: text)
+            options = [.dotMatchesLineSeparators]
+        case .regex(let source, let caseInsensitive):
+            pattern = source
+            if caseInsensitive { options = [.caseInsensitive] }
+        }
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else { return false }
+        func found(_ text: String) -> Bool {
+            regex.firstMatch(in: text, range: NSRange(location: 0, length: (text as NSString).length)) != nil
+        }
+        if found(url) { return true }
+        guard case .glob = self else { return false }
+        return url.hasSuffix("/") ? found(String(url.dropLast())) : found(url + "/")
+    }
+
+    /// Whether this can be read at all: a regular expression's text may not be one.
+    public var isReadable: Bool {
+        switch self {
+        case .glob: return true
+        case .regex(let source, _): return (try? NSRegularExpression(pattern: source)) != nil
+        }
+    }
+}

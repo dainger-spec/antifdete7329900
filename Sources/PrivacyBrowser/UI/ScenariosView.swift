@@ -22,6 +22,8 @@ struct ScenariosView: View {
     @State private var showingSchedules: Bool
     /// The schedule that side opens its form with: "On a Schedule…" of the scenario on screen.
     @State private var proposedSchedule: ScenarioSchedule?
+    /// The chosen profile's own values for scenarios are being edited (`ScenarioValuesSheet`).
+    @State private var showingValues = false
     /// Steps shown as being recorded without a profile (the snapshots).
     var sampleRecording: [RecordedStep]?
 
@@ -44,6 +46,13 @@ struct ScenariosView: View {
     private var listed: [Scenario] { sample.map { [$0] } ?? model.scenarios.sorted }
     private var edited: Bool { selected.map { $0.name != name || $0.source != source } ?? false }
     private var run: ProfileManager.ScenarioRunState? { profileID.flatMap { model.scenarioRun(of: $0) } }
+    /// The names the scenario on screen reads from `params`, and those of them the chosen profile
+    /// has no text for: a run there would read them as nothing (a recorded password above all).
+    private var namesRead: [String] { ScenarioValues.namesRead(by: source) }
+    private var missingValues: [String] {
+        guard sample == nil, let profileID else { return [] }
+        return model.scenarioValues.missing(namesRead, for: profileID)
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -112,6 +121,12 @@ struct ScenariosView: View {
         }
         .confirmationDialog(String(format: L("scenarios.delete.question"), selected?.name ?? ""), isPresented: $confirmingDelete) {
             Button(L("scenarios.delete"), role: .destructive) { delete() }
+        }
+        .sheet(isPresented: $showingValues) {
+            if let profileID {
+                ScenarioValuesSheet(profileID: profileID, profileName: model.profiles.first { $0.id == profileID }?.name ?? "",
+                                    namesRead: namesRead)
+            }
         }
     }
 
@@ -284,6 +299,22 @@ struct ScenariosView: View {
             runBar
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
+            // What the scenario reads from params and the chosen profile has no text for: said
+            // before the run, with the way to fill it in.
+            if !isRecording, !missingValues.isEmpty {
+                HStack(spacing: 8) {
+                    Label(String(format: L("scenarios.values.missing"), missingValues.joined(separator: ", ")),
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button(L("scenarios.values.fill")) { showingValues = true }
+                        .buttonStyle(.lumenGhost)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 10)
+            }
             Group {
                 // While a recording goes on, its steps as they come; otherwise the last run's log.
                 if isRecording { RecordingLog(steps: recordedSteps) } else { RunLog(run: run) }
@@ -371,6 +402,12 @@ struct ScenariosView: View {
             // A recording belongs to the profile it began in, and a start to the one it was asked
             // for: the picker must not name another meanwhile.
             .disabled(isRecording || starting)
+            // The chosen profile's own values: what params holds in a run on it.
+            Button { showingValues = true } label: { Image(systemName: "list.bullet.rectangle") }
+                .buttonStyle(LumenIconButtonStyle(size: 28))
+                .help(L("scenarios.values.open"))
+                .accessibilityLabel(L("scenarios.values.open"))
+                .disabled(profileID == nil || isRecording || starting || sample != nil)
             if model.profiles.isEmpty {
                 Text(L("scenarios.noProfiles"))
                     .font(.lumenSecondary)
@@ -575,7 +612,7 @@ private struct RunLog: View {
                             HStack(alignment: .firstTextBaseline, spacing: 10) {
                                 Text(line.at.formatted(.dateTime.hour().minute().second().locale(Localization.locale)))
                                     .foregroundStyle(Theme.textTertiary)
-                                Text(line.text)
+                                Text(line.kind == .result ? String(format: L("scenarios.log.result"), String(line.text.prefix(4000))) : line.text)
                                     .foregroundStyle(color(line.kind))
                                     .textSelection(.enabled)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -594,6 +631,20 @@ private struct RunLog: View {
             }
             .background(Theme.card)
             .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius))
+            // The whole log as text (`ScenarioRunState.transcript`): each line a Text of its own
+            // cannot be selected across, and a run that failed is what gets sent to someone.
+            .overlay(alignment: .topTrailing) {
+                if let run, !run.lines.isEmpty {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(run.transcript, forType: .string)
+                    } label: { Image(systemName: "doc.on.doc") }
+                        .buttonStyle(LumenIconButtonStyle(size: 26))
+                        .help(L("scenarios.log.copy"))
+                        .accessibilityLabel(L("scenarios.log.copy"))
+                        .padding(6)
+                }
+            }
             .onChange(of: run?.lines.count ?? 0) { _, count in
                 if count > 0 { reader.scrollTo(count - 1, anchor: .bottom) }
             }
@@ -603,7 +654,7 @@ private struct RunLog: View {
     private func color(_ kind: ScenarioRunner.Line.Kind) -> Color {
         switch kind {
         case .command: return Theme.textSecondary
-        case .script: return Theme.textPrimary
+        case .script, .result: return Theme.textPrimary
         case .error: return Theme.danger
         case .outcome: return run?.outcome == .finished ? Theme.running : Theme.warning
         }
