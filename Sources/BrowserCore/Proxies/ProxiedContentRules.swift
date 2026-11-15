@@ -20,9 +20,16 @@ import Foundation
 /// security audit of 12 November 2026 (APP-14) every pattern wanted the host right after the
 /// scheme, so `ws://x@127.0.0.1:<port>` went by them all and a page could map this Mac's open
 /// ports from any profile; every pattern now starts with `urlStart`, which takes the user info.
+///
+/// The same patterns are the exception (`unless-top-url`), matched against the page's own address,
+/// and there the user info read as a host: `http://127.0.0.1:1@site.example/` — a user name
+/// "127.0.0.1", a password "1" — passed for a page on this Mac, and every load of that page went by
+/// the list (the fourth audit, 15 November 2026, NET-1). Each host is now followed by its port, if
+/// any, and the `/` a canonical http(s) or ws(s) address always has after it, never by the `:` or
+/// `@` of user info.
 public enum ProxiedContentRules {
     /// Changes with the rules, so that WebKit's compiled copy of an earlier list is not reused.
-    public static let identifier = "pb-proxied-profile-v3"
+    public static let identifier = "pb-proxied-profile-v4"
 
     /// How every pattern of this list and of `LocalNetworkRules` starts: a scheme, then a user name
     /// and password if the address has them (`x@`, `user:pass@` — a canonical URL writes any `/`,
@@ -30,13 +37,22 @@ public enum ProxiedContentRules {
     /// set are in WebKit's `url-filter` subset; alternation and counted repetition are not.
     public static let urlStart = #"^[a-z]+://([^/?#@]*@)?"#
 
+    /// How a host named by its name or IPv4 address ends in every pattern of this list and of
+    /// `LocalNetworkRules`: its port, if any, then the `/` that a canonical http(s) or ws(s) URL
+    /// always has after the host (`http://127.0.0.1?x` is `http://127.0.0.1/?x`). Not `[:/]`, which
+    /// also took the `:` between a user name and a password, so `http://127.0.0.1:1@site.example/`
+    /// read as an address on this Mac (NET-1).
+    public static let hostEnd = #"(:[0-9]+)?/"#
+
     /// URL patterns (WebKit's `url-filter` subset of regular expressions, matched case-insensitively
-    /// against the whole canonical URL) of an address on this Mac.
+    /// against the whole canonical URL) of an address on this Mac. A host by its name or IPv4 address
+    /// ends in `hostEnd`; an IPv6 one in its `]`, which user info cannot hold (a canonical URL writes
+    /// `[`, `]` and `:` in it percent-encoded).
     public static let thisMacURLPatterns: [String] = [
-        #"127\.[0-9]+\.[0-9]+\.[0-9]+[:/]"#,
-        #"0\.0\.0\.0[:/]"#,
-        #"localhost\.?[:/]"#,
-        #"[a-z0-9.-]*\.localhost\.?[:/]"#,
+        #"127\.[0-9]+\.[0-9]+\.[0-9]+(:[0-9]+)?/"#,
+        #"0\.0\.0\.0(:[0-9]+)?/"#,
+        #"localhost\.?(:[0-9]+)?/"#,
+        #"[a-z0-9.-]*\.localhost\.?(:[0-9]+)?/"#,
         #"\[::1\]"#,
         #"\[::\]"#,
         #"\[::ffff:7f"#,

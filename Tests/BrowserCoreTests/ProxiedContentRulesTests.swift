@@ -43,6 +43,38 @@ final class ProxiedContentRulesTests: XCTestCase {
         XCTAssertTrue(ProxiedContentRules.thisMacURLPatterns.allSatisfy { $0.hasPrefix(ProxiedContentRules.urlStart) })
     }
 
+    /// The fourth audit, NET-1: the exception for a page on this Mac (`unless-top-url`) is matched
+    /// against the page's own address, user info and all. A user name and password that read as an
+    /// address on this Mac (`127.0.0.1` and `1`, before a site of the internet) took the page for one,
+    /// and every load it made of this Mac went by the list. Canonical addresses, as WebKit matches
+    /// them: user info writes `[`, `]`, `/`, `@` and a password's `:` percent-encoded.
+    func testUserInfoThatReadsAsThisMacDoesNotMakeAPageOneOnThisMac() {
+        for top in ["http://127.0.0.1:1@attacker.example/scan", "http://localhost:x@attacker.example/", "http://localhost:1@attacker.example/",
+                    "http://127.0.0.1:631@attacker.example/", "http://0.0.0.0:1@attacker.example/", "http://app.localhost:1@attacker.example/",
+                    "http://localhost.:1@attacker.example/", "http://127.0.0.1:1@attacker.example:8080/", "https://127.0.0.1:1%3A2@attacker.example/",
+                    "ws://localhost:1@attacker.example/", "http://127.0.0.1@attacker.example/", "http://%5B%3A%3A1%5D@attacker.example/"] {
+            for url in ["http://127.0.0.1:631/", "ws://localhost:9222/", "http://[::1]:5000/", "http://x@127.0.0.1:8080/"] {
+                XCTAssertTrue(ProxiedContentRules.blocks(url, topURL: top), "\(url) from \(top)")
+            }
+        }
+        // As a load, such an address is the site's after the user info: through the proxy, not blocked.
+        for url in ["http://127.0.0.1:1@example.com/", "http://localhost:x@example.com/", "ws://localhost:1@example.com/s"] {
+            XCTAssertFalse(ProxiedContentRules.blocks(url, topURL: remotePage), url)
+        }
+        // A page really on this Mac keeps its own loads, whatever its address carries.
+        for top in ["http://localhost/", "http://localhost./x", "http://127.0.0.1:1@127.0.0.1:8000/", "http://u:p@localhost:3000/app",
+                    "http://app.localhost/", "http://[::1]:8080/", "http://0.0.0.0:8000/", "http://127.0.0.1/?q"] {
+            XCTAssertFalse(ProxiedContentRules.blocks("http://127.0.0.1:18080/pb-leak/report", topURL: top), top)
+        }
+        // Every name or IPv4 address ends in its port, if any, and the `/` after it; an IPv6 one in
+        // its brackets, which user info cannot hold.
+        for pattern in ProxiedContentRules.thisMacURLPatterns {
+            let host = String(pattern.dropFirst(ProxiedContentRules.urlStart.count))
+            XCTAssertTrue(host.hasSuffix(ProxiedContentRules.hostEnd) || host.hasPrefix(#"\["#), pattern)
+            XCTAssertFalse(host.contains("[:/]"), pattern)
+        }
+    }
+
     func testAPageTheUserOpenedOnThisMacKeepsItsOwnLoads() {
         let local = "http://127.0.0.1:18080/pb-leak/secure?run=run"
         XCTAssertFalse(ProxiedContentRules.blocks(local, resourceType: "document", topURL: local), "the page itself")

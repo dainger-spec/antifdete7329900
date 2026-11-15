@@ -1733,6 +1733,34 @@ final class SelfTest {
             check("Safari chrome: the secure half of the leak page ran in a secure context", false, "\(secure)")
         }
 
+        // A page of the internet at an address of its own site whose user name and password read as
+        // this Mac (`http://127.0.0.1:1@usertop-<run>.…/`) is no page on this Mac: the rule list's
+        // exception for one (`unless-top-url`) is matched against the page's address, user info and
+        // all, and took such an address for this Mac until the fourth audit (NET-1), so every load
+        // the page made of this Mac went by the list. A page of the site sends its own window there,
+        // as a site would; there its fetches to 127.0.0.1, localhost and ::1 must be refused, and the
+        // canary listener, read last below, must take none of its loads (an image and a WebSocket too).
+        let userTopHost = "usertop-\(run).\(domain)"
+        manager.openWindow(profile.id, url: URL(string: "http://\(userTopHost)/pb-leak/usertop-go?run=\(run)")!)
+        var userTop: [String: Any] = [:]
+        for _ in 0..<12 {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            log = await leakLog()
+            userTop = log.reports.first { $0["userTop"] as? Bool == true } ?? [:]
+            if !userTop.isEmpty { break }
+        }
+        info("Safari chrome: the page at an address whose user info reads as this Mac reported \(userTop)")
+        let userTopName = "Safari chrome: a page whose address has a user name and password that read as this Mac (http://127.0.0.1:1@…) is no page on this Mac: its fetches to 127.0.0.1, localhost and ::1 are refused"
+        let userTopFetches = ["userTop4", "userTopName", "userTop6"]
+        if userTop.isEmpty {
+            skip(userTopName, "the page at http://127.0.0.1:1@\(userTopHost)/ did not report in this run ("
+                 + (reached("\(userTopHost):80", "/pb-leak/usertop?") ? "it was loaded through the proxy" : "it was not loaded: Safari did not open the address")
+                 + "), so what its loads do is not shown")
+        } else {
+            check(userTopName, userTopFetches.allSatisfy { userTop[$0] as? String == "rejected" },
+                  userTopFetches.map { "\($0)=\(userTop[$0] ?? "nil")" }.joined(separator: " "))
+        }
+
         // Long enough for what Safari's chrome does on a timer (the page-text donation runs about
         // five seconds after a load) to happen while the capture is still looking.
         try? await Task.sleep(nanoseconds: 8_000_000_000)
@@ -1786,7 +1814,7 @@ final class SelfTest {
               log.targets.contains { $0.target == "aia-\(run).\(domain):443" && $0.path.hasPrefix("(tls refused") },
               log.targets.filter { $0.target.hasPrefix("aia-") }.map(\.path).joined(separator: " | "))
         let directs = log.canary.filter { !$0.contains("/pb-canary-control") }
-        let canaryName = "Safari chrome: nothing reached this Mac directly (the canary listener took no connection: no fetch, frame, worker, image, WebSocket or XHR, with a user name before the host or without)"
+        let canaryName = "Safari chrome: nothing reached this Mac directly (the canary listener took no connection: no fetch, frame, worker, image, WebSocket or XHR, with a user name before the host or without, nor any from a page whose own address has user info that reads as this Mac)"
         // A connection listed fails whatever the control says; none listed is a pass only where
         // the control was listed.
         if !directs.isEmpty || log.canary.contains(where: { $0.contains("/pb-canary-control") }) {

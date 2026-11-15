@@ -73,6 +73,12 @@ address or a DNS query with the run id in it, which a capture on the machine see
 `/pb-leak/log.json?run=<id>` lists, for that run, every request this proxy answered (its via,
 target and path), the page's reports, and the connections the canary listener took for the run.
 
+`/pb-leak/usertop-go?run=<id>` sends its own window to `http://127.0.0.1:1@usertop-<id>.leak.example.com/pb-leak/usertop?run=<id>`:
+its own site, at an address whose user name and password ("127.0.0.1", "1") read as this Mac, as
+a site could send itself to pass for a page on this Mac (the fourth audit, NET-1). That page loads
+the canary's port on 127.0.0.1, localhost and ::1 by fetches, an image and a WebSocket, and reports
+what each did (and the address it sees itself at) to `/pb-leak/report`, as `userTop`.
+
 `/pb-leak/secure?run=<id>` is the leak page's secure-context half, for a profile to open at
 `http://127.0.0.1:<port>/` (loopback is a secure context): WebTransport and WebRTC exist only
 there, so that is where their absence means something — in the page, a dedicated worker, a shared
@@ -514,6 +520,46 @@ def leak_service_worker(run: str, connect: bool = True) -> bytes:
     return script.replace("RUN", run).replace("CONNECT", "true" if connect else "false").encode()
 
 
+def leak_user_top_go(run: str) -> bytes:
+    """A page that sends its own window to its site at an address with user info that reads as
+    this Mac (see the module docstring)."""
+    page = r"""<!doctype html><html><head><title>PB user-info top RUN</title></head><body>to the user-info address RUN<script>
+location.href = 'http://127.0.0.1:1@usertop-RUN.leak.example.com/pb-leak/usertop?run=RUN';
+</script></body></html>"""
+    return page.replace("RUN", run).encode()
+
+
+def leak_user_top(run: str) -> bytes:
+    """The page at that address: its loads of this Mac, and what each did. A fetch the rule list
+    refuses is rejected; one it lets by reaches the canary, which answers it. Reported to its own
+    site without the user info, which fetch() refuses an address to carry."""
+    page = r"""<!doctype html><html><head><title>PB user-info top page RUN</title></head><body>usertop RUN<script>
+(async () => {
+  const result = { userTop: true, run: 'RUN', href: String(location.href), url: String(document.URL), errors: {} };
+  const timeout = (ms, value) => new Promise((resolve) => setTimeout(() => resolve(value), ms));
+  const attempt = async (name, body) => {
+    try { result[name] = await Promise.race([body(), timeout(4000, 'timeout')]); }
+    catch (e) { result[name] = 'rejected'; result.errors[name] = String((e && e.message) || e); }
+  };
+  const noCors = (url) => async () => { await fetch(url, { mode: 'no-cors', cache: 'no-store' }); return 'resolved'; };
+  await attempt('userTop4', noCors('http://127.0.0.1:CANARY/pb-leak/utop4?run=RUN'));
+  await attempt('userTopName', noCors('http://localhost:CANARY/pb-leak/utophost?run=RUN'));
+  await attempt('userTop6', noCors('http://[::1]:CANARY/pb-leak/utop6?run=RUN'));
+  await attempt('userTopImage', () => new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => resolve('loaded'); image.onerror = () => resolve('error');
+    image.src = 'http://127.0.0.1:CANARY/pb-leak/utopimg?run=RUN';
+  }));
+  await attempt('userTopWS', () => new Promise((resolve) => {
+    const ws = new WebSocket('ws://127.0.0.1:CANARY/pb-leak/utopws?run=RUN');
+    ws.onopen = () => resolve('open'); ws.onerror = () => resolve('error');
+  }));
+  await fetch('http://usertop-RUN.leak.example.com/pb-leak/report?run=RUN&data=' + encodeURIComponent(JSON.stringify(result)), { cache: 'no-store' });
+})();
+</script></body></html>"""
+    return page.replace("RUN", run).replace("CANARY", str(CANARY_PORT)).encode()
+
+
 def leak_frame(run: str) -> bytes:
     """The frame of the leak page: what a frame of another site can see."""
     page = r"""<!doctype html><html><head><title>PB leak frame</title></head><body>frame RUN<script>
@@ -602,6 +648,10 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
         body, content_type = b"postMessage(Intl.DateTimeFormat().resolvedOptions().timeZone)", "text/javascript"
     elif plain_path == "/pb-leak/frame":
         body, content_type = leak_frame(safe_run(query)), "text/html; charset=utf-8"
+    elif plain_path == "/pb-leak/usertop-go":
+        body, content_type = leak_user_top_go(safe_run(query)), "text/html; charset=utf-8"
+    elif plain_path == "/pb-leak/usertop":
+        body, content_type = leak_user_top(safe_run(query)), "text/html; charset=utf-8"
     elif plain_path == "/pb-cores":
         # What a page is told of the processor count, everywhere it can ask (scripts/cores_page.py);
         # the other-origin frame on "localhost" of the same port, the report into the leak log.
