@@ -712,7 +712,9 @@ What is checked where:
   helper's own failures, the events that carry them, and the room a start needs — on a volume
   that clones and on one that cannot. The self-test checks that every kind has its words in the
   interface's language, and the start's proxy check against its loopback proxies (one tunnel, no
-  UDP asked; a rejected login said as that).
+  UDP asked; a rejected login said as that). The UI snapshots draw the list's rows saying each of
+  these (`vm-list-states`: running, asleep, a rejected login, a full disk, Apple's limit with the
+  system's words under Lumen's, a machine shut down instead of kept).
 - `Tests/BrowserCoreTests/VMImageFetchTests.swift` (Linux and macOS): **the download itself**,
   against a file server on loopback that speaks ranges as Apple's does and can be told to be
   worse: the file whole over several connections (and no more than it was given), a file smaller

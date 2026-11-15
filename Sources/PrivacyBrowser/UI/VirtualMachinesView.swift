@@ -678,6 +678,38 @@ private struct VMRow: View {
     }
 }
 
+/// The machines' rows as they say what happened, with sample machines — for
+/// `--render-ui-snapshots`, which has no vault and runs no machine: running, asleep, a proxy that
+/// did not pass the start's check, a disk that is nearly full, a start macOS refused, a machine
+/// shut down instead of kept.
+struct VMListPreview: View {
+    struct Sample: Identifiable {
+        var profile: VMProfile
+        var state: VMCenter.Running?
+        var problem: String?
+        var exit: ProxyCheckResult?
+        var guest: VMGuestStatus?
+        var disk: Int64?
+        var asleep = false
+        var id: UUID { profile.id }
+    }
+
+    let samples: [Sample]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(samples) { sample in
+                VMRow(profile: sample.profile, state: sample.state, problem: sample.problem, exit: sample.exit,
+                      guest: sample.guest, disk: sample.disk, asleep: sample.asleep, canStart: true,
+                      start: {}, stop: {}, forceStop: {}, edit: {}, delete: {})
+            }
+        }
+        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Theme.surface)
+    }
+}
+
 // MARK: - The editor
 
 /// A machine's sign in the list: the Mac its screen is, on the machine's colour.
