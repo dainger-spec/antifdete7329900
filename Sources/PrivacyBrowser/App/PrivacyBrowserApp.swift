@@ -89,18 +89,6 @@ struct PrivacyBrowserApp: App {
                 HelpTopicMenuItems(model: model)
             }
         }
-        // The scenario editor (docs/AUTOMATION.md): File › Scenarios.
-        Window(L("window.scenarios.title"), id: "scenarios") {
-            ScenariosView()
-                .saysModelErrors()
-                .environmentObject(model)
-                .preferredColorScheme(.dark)
-                .background(WindowReader { window in
-                    Theme.applyAppWindow(to: window)
-                })
-        }
-        .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 1100, height: 760)
         // The app's own help (HelpView): Help › Lumen Help (⌘?), and Help in the Profiles window.
         Window(L("window.help.title"), id: "help") {
             HelpView(topic: $model.helpTopic)
@@ -231,7 +219,11 @@ private struct ScenariosMenuButton: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Button(L("menu.scenarios")) { openWindow(id: "scenarios") }
+        // The Profiles window's Scenarios section (docs/AUTOMATION.md).
+        Button(L("menu.scenarios")) {
+            model.scenariosRequested += 1
+            model.activateProfilesWindow()
+        }
             .keyboardShortcut(AppCommand.scenarios.keyEquivalent, modifiers: AppCommand.scenarios.modifiers)
             .disabled(model.phase != .unlocked)
     }
