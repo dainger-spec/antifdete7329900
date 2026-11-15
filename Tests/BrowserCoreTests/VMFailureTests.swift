@@ -17,7 +17,7 @@ final class VMFailureTests: XCTestCase {
 
     func testVirtualizationsErrorsAreKindsByTheirCodes() {
         let expected: [Int: VMFailureKind] = [
-            2: .configuration, 5: .disk, 6: .limit, 8: .noRoom, 10: .notSupportedHere,
+            5: .disk, 6: .limit, 8: .noRoom,
             10001: .catalog, 10002: .catalog, 10003: .nothingOffered, 10004: .image, 10005: .image,
             10006: .needsUpdate, 10007: .installation,
         ]
@@ -25,8 +25,9 @@ final class VMFailureTests: XCTestCase {
             XCTAssertEqual(VMFailureKind(domain: "VZErrorDomain", code: code), kind, "VZErrorDomain \(code)")
         }
         // An internal error, a state it was not in, a cancelled operation, a save or a restore:
-        // nothing the app can say more of than the system does.
-        for code in [1, 3, 4, 7, 9, 11, 12, 20001, 30001, 0, -1] {
+        // nothing the app can say more of than the system does. Nor an invalid configuration or
+        // "not supported", which cover too much for one piece of advice to be true of.
+        for code in [1, 2, 3, 4, 7, 9, 10, 11, 12, 20001, 30001, 0, -1] {
             XCTAssertNil(VMFailureKind(domain: "VZErrorDomain", code: code), "VZErrorDomain \(code)")
         }
     }
@@ -44,6 +45,7 @@ final class VMFailureTests: XCTestCase {
         XCTAssertNil(VMFailureKind(domain: "NSURLErrorDomain", code: 28))
         XCTAssertNil(VMFailureKind(domain: "NSCocoaErrorDomain", code: 8))
         XCTAssertNil(VMFailureKind(domain: "NSPOSIXErrorDomain", code: 6))
+        XCTAssertNil(VMFailureKind(domain: "NSPOSIXErrorDomain", code: 1), "\"not permitted\" is said of more than files")
         XCTAssertNil(VMFailureKind(domain: "", code: 640))
     }
 
@@ -81,7 +83,7 @@ final class VMFailureTests: XCTestCase {
 
     func testEveryKindHasAWordOfItsOwn() {
         XCTAssertEqual(Set(VMFailureKind.allCases.map(\.rawValue)),
-                       ["noRoom", "limit", "disk", "files", "notSupportedHere", "configuration", "noBase", "catalog",
+                       ["noRoom", "limit", "disk", "files", "notSupportedHere", "noBase", "catalog",
                         "nothingOffered", "image", "needsUpdate", "installation"])
     }
 

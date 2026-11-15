@@ -170,17 +170,18 @@ that the decision is tested on Linux too:
 |---|---|---|
 | `noRoom` | the Mac's disk is full — whichever error says so, and whatever error is over it | free some space; Disk Space… shows what the machines take |
 | `limit` | Apple's limit of two machines, which counts every app's | shut one down, in Lumen or in the other app |
-| `disk` | the framework does not take the machine's disk | quit what else may hold it; a disk that stays unreadable is made anew |
+| `disk` | the framework does not take the machine's disk | quit what else may hold it, or restart the Mac |
 | `files` | files the machine is made of are missing or unreadable | the folder, in the Finder |
-| `notSupportedHere` | this macOS does not run as a guest on this Mac as it is | update this Mac's macOS |
-| `configuration` | the framework refuses the machine's memory, processors or screen | change them in Edit… |
+| `notSupportedHere` | this macOS does not run as a guest on this Mac as it is (the helper asks the framework exactly that) | update this Mac's macOS |
 | `noBase` | the machine has no disk yet and the base is not there | add the base system |
 | `catalog`, `nothingOffered` | Apple could not be asked; or offers nothing for this Mac | the connection; or update this Mac |
 | `image` | the restore image does not load | download it again, or another file |
 | `needsUpdate` | the installer wants this Mac's software updated first | Software Update, then Continue |
 | `installation` | the installation did not finish | Continue starts it over; nothing is downloaded again |
 
-A failure of none of these kinds is said in the system's words alone, as before. The numbers are
+A failure of none of these kinds is said in the system's words alone, as before — among them the
+framework's "invalid configuration" and "not supported", each of which covers too many things for
+one piece of advice to be true of. The numbers are
 Apple's as their headers have them; what a given failure on a Mac really carries is seen there —
 the detail line always shows the system's own words beside Lumen's.
 

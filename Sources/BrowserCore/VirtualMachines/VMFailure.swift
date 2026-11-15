@@ -19,11 +19,10 @@ public enum VMFailureKind: String, Codable, Sendable, CaseIterable {
     case disk
     /// Files the machine is made of are missing or cannot be read.
     case files
-    /// This machine's macOS does not run as a guest on this Mac as it is (its virtual Mac model is
-    /// not supported: this Mac's macOS is older than the machine's).
+    /// This macOS does not run as a guest on this Mac as it is (its virtual Mac model is not
+    /// supported here: this Mac's macOS is older than it needs). Named by the helper, which asks
+    /// the framework exactly that; no code of the framework's is taken for it.
     case notSupportedHere
-    /// The framework refused the machine's hardware as the profile sets it.
-    case configuration
     /// The machine has no disk yet, and the base system it is made from is not there.
     case noBase
     /// Apple could not be asked which macOS it offers.
@@ -55,15 +54,14 @@ public enum VMFailureKind: String, Codable, Sendable, CaseIterable {
     /// The kind of one error by its domain and code; nil for one the app has no words for.
     public init?(domain: String, code: Int) {
         switch (domain, code) {
-        // Virtualization (VZError.Code): invalid configuration 2, invalid disk image 5, the limit
-        // of machines 6, out of disk space 8, not supported 10; the installation's: the catalog
-        // 10001 and 10002, nothing offered 10003, the image 10004 and 10005, an update needed
-        // 10006, the installation failed 10007.
-        case (Self.virtualizationDomain, 2): self = .configuration
+        // Virtualization (VZError.Code): invalid disk image 5, the limit of machines 6, out of
+        // disk space 8; the installation's: the catalog 10001 and 10002, nothing offered 10003,
+        // the image 10004 and 10005, an update needed 10006, the installation failed 10007. Not
+        // an invalid configuration (2) or "not supported" (10): each covers too many things for
+        // one piece of advice to be true of, and is left in the system's words.
         case (Self.virtualizationDomain, 5): self = .disk
         case (Self.virtualizationDomain, 6): self = .limit
         case (Self.virtualizationDomain, 8): self = .noRoom
-        case (Self.virtualizationDomain, 10): self = .notSupportedHere
         case (Self.virtualizationDomain, 10001), (Self.virtualizationDomain, 10002): self = .catalog
         case (Self.virtualizationDomain, 10003): self = .nothingOffered
         case (Self.virtualizationDomain, 10004), (Self.virtualizationDomain, 10005): self = .image
@@ -72,9 +70,10 @@ public enum VMFailureKind: String, Codable, Sendable, CaseIterable {
         // Cocoa: no such file 4 and 260, no permission 257 and 513, out of space 640.
         case (Self.cocoaDomain, 640): self = .noRoom
         case (Self.cocoaDomain, 4), (Self.cocoaDomain, 260), (Self.cocoaDomain, 257), (Self.cocoaDomain, 513): self = .files
-        // POSIX: ENOSPC 28 and EDQUOT 69; ENOENT 2, EACCES 13, EPERM 1.
+        // POSIX: ENOSPC 28 and EDQUOT 69; ENOENT 2 and EACCES 13 (not EPERM, which the system
+        // says of far more than files).
         case (Self.posixDomain, 28), (Self.posixDomain, 69): self = .noRoom
-        case (Self.posixDomain, 2), (Self.posixDomain, 13), (Self.posixDomain, 1): self = .files
+        case (Self.posixDomain, 2), (Self.posixDomain, 13): self = .files
         default: return nil
         }
     }

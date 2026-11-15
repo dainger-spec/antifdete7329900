@@ -2779,10 +2779,9 @@
 "vm.error.proxyFailed" = "The machine was not started: its proxy did not pass the check, and the machine would reach nothing.";
 "vm.failure.noRoom" = "There is no room left on this Mac's disk: a machine's disk is a file on it, and so is the state it keeps. Free some space — Disk Space… above the list shows what the machines take — and start again.";
 "vm.failure.limit" = "macOS runs two virtual machines with macOS at once on one Mac, and counts every app's — another virtualization app's as well as Lumen's. Shut one down and start this one again.";
-"vm.failure.disk" = "macOS does not take this machine's disk: the file is damaged, or another program has it open. Quit whatever else may be using it and start again. A disk that stays unreadable cannot be repaired from here: the machine is deleted and made anew.";
+"vm.failure.disk" = "macOS does not take this machine's disk: the file is damaged, or held open by another program. Quit anything else that may be using it — or restart this Mac — and start the machine again.";
 "vm.failure.files" = "Files this machine is made of are missing or cannot be read — the vault's folder was moved or restored in part, or its disk is not connected. ⋯ → Show in Finder opens the folder.";
 "vm.failure.notSupportedHere" = "This macOS does not run in a virtual machine on this Mac as it is: the Mac's own macOS is older than it needs. Update this Mac (System Settings → General → Software Update) and try again.";
-"vm.failure.configuration" = "macOS did not accept this machine's hardware as it is set — its memory, processors or screen. Change them in Edit… (less memory is the usual answer) and start again.";
 "vm.failure.noBase" = "This machine has never been started: its disk is made from the base system, which is not there. Add the base system first.";
 "vm.failure.catalog" = "Apple's servers could not be asked which macOS they offer. Check this Mac's internet connection — a VPN or a filter can be in the way — and continue.";
 "vm.failure.nothingOffered" = "Apple offers no macOS now that this Mac can run in a virtual machine. Update this Mac's macOS and try again.";
