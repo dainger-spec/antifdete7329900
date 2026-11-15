@@ -1044,6 +1044,8 @@ const ReflectConstruct = Reflect.construct;
 const ObjectCreate = Object.create;
 const ObjectDefineProperty = Object.defineProperty;
 const ObjectGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+const ObjectKeys = Object.keys;
+const ArrayIsArray = Array.isArray;
 const SymbolIterator = Symbol.iterator;
 const WeakMapGet = WeakMap.prototype.get;
 const WeakMapSet = WeakMap.prototype.set;
@@ -1490,16 +1492,53 @@ function patchSystemCamera(w, sc) {
   // The engine's own error for a camera that is not there (as `patchCamera`'s).
   function notFound() { try { return new w.DOMException('The requested device was not found.', 'NotFoundError'); } catch (e) { return new w.Error('NotFoundError'); } }
 
+  // The engine's own accessors and methods, taken before `serveDeviceGetters` replaces any and before
+  // the page could. Where a request goes is decided by what they say, and what the engine opened is
+  // looked at and stopped through them only: never by what a page put in their place (a `label`
+  // getter that gives the Mac's camera the sentinel's name, a `getTracks` handed the stream the
+  // engine opened at the first grant). Missing ones read as nothing: no sentinel, no camera.
+  function engineFunction(proto, key, accessor) {
+    const d = proto && ObjectGetOwnPropertyDescriptor(proto, key);
+    const f = d && (accessor ? d.get : d.value);
+    return typeof f === 'function' ? f : null;
+  }
+  const InfoProto = w.MediaDeviceInfo && w.MediaDeviceInfo.prototype;
+  const infoKind = engineFunction(InfoProto, 'kind', true), infoLabel = engineFunction(InfoProto, 'label', true);
+  const infoId = engineFunction(InfoProto, 'deviceId', true), infoGroup = engineFunction(InfoProto, 'groupId', true);
+  const StreamProto = w.MediaStream && w.MediaStream.prototype;
+  const streamTracks = engineFunction(StreamProto, 'getTracks', false);
+  const streamVideoTracks = engineFunction(StreamProto, 'getVideoTracks', false);
+  const TrackProto = w.MediaStreamTrack && w.MediaStreamTrack.prototype;
+  const trackSettings = engineFunction(TrackProto, 'getSettings', false);
+  const trackStop = engineFunction(TrackProto, 'stop', false);
+  // What the engine says of `self` through `f`; null when it cannot be read.
+  function ask(f, self) {
+    if (!f) return null;
+    try { return ReflectApply(f, self, []); } catch (e) { return null; }
+  }
+  function text(f, self) { const v = ask(f, self); return typeof v === 'string' ? v : ''; }
+  // An own data property of an object the engine made (a track's settings); nothing a page put on
+  // Object.prototype.
+  function ownValue(o, key) {
+    try { const d = ObjectGetOwnPropertyDescriptor(o, key); return d && 'value' in d ? d.value : undefined; } catch (e) { return undefined; }
+  }
+  // The engine's promise followed with its own `then`, its `constructor` made an own property first:
+  // `then` (and `await`) ask a promise for its constructor, and a getter a page put on
+  // Promise.prototype would be handed the promise — with it, the stream or the list it holds.
+  function follow(promise, onValue, onError) {
+    try {
+      ObjectDefineProperty(promise, 'constructor', { value: NativePromise, writable: true, configurable: true });
+      ReflectApply(PromiseThen, promise, [onValue, onError]);
+    } catch (e) { onError(e); }
+  }
+
   // A MediaDeviceInfo of ours that copies the real device's ids but reads the believable label, so
   // getUserMedia with that deviceId still reaches the real (virtual) device.
   function renamed(real) {
     if (!Info) return real;
     const device = Object.create(Info.prototype);
     fakeDevices.add(device);
-    let id = '', group = '';
-    try { id = String(real.deviceId); } catch (e) {}
-    try { group = String(real.groupId); } catch (e) {}
-    deviceData.set(device, { deviceId: id, kind: 'videoinput', groupId: group, label: sc.label });
+    deviceData.set(device, { deviceId: text(infoId, real), kind: 'videoinput', groupId: text(infoGroup, real), label: sc.label });
     return device;
   }
   function serveDeviceGetters() {
@@ -1532,12 +1571,11 @@ function patchSystemCamera(w, sc) {
   try { serveDeviceGetters(); } catch (e) {}
 
   const nativeEnum = MDP.enumerateDevices;
+  // The engine's list, as the engine names it: kinds and labels read with its own getters.
   function findSentinel(list) {
     for (let i = 0; i < list.length; i++) {
       const dev = list[i];
-      let label = '';
-      try { label = String(dev.label); } catch (e) {}
-      if (dev && dev.kind === 'videoinput' && label === sc.sentinel) return dev;
+      if (text(infoKind, dev) === 'videoinput' && text(infoLabel, dev) === sc.sentinel) return dev;
     }
     return null;
   }
@@ -1546,107 +1584,192 @@ function patchSystemCamera(w, sc) {
       const self = this;
       let real;
       try { real = ReflectApply(nativeEnum, self, []); } catch (e) { return w.Promise.reject(e); }
-      return real.then(function (list) {
-        const out = [];
-        let sentinelDev = null;
-        for (let i = 0; i < list.length; i++) {
-          const dev = list[i];
-          let label = '';
-          try { label = String(dev.label); } catch (e) {}
-          if (dev && dev.kind === 'videoinput' && label === sc.sentinel) { sentinelDev = dev; continue; }
-          // One camera only when using it — but only once devices are named. Before the page holds
-          // the camera permission the engine lists a single unnamed placeholder per kind; it stays,
-          // as in Safari, or the page would read "no camera" and may never ask for one.
-          if (sc.usedHere && dev && dev.kind === 'videoinput' && label) continue;
-          out.push(dev);
-        }
-        if (sc.usedHere && sentinelDev) out.unshift(renamed(sentinelDev));
-        return out;
+      return new w.Promise(function (resolve, reject) {
+        follow(real, function (list) {
+          try {
+            const out = [];
+            let sentinelDev = null;
+            for (let i = 0; i < list.length; i++) {
+              const dev = list[i];
+              const kind = text(infoKind, dev), label = text(infoLabel, dev);
+              if (kind === 'videoinput' && label === sc.sentinel) { sentinelDev = dev; continue; }
+              // One camera only when using it — but only once cameras are named. Before the page
+              // holds the camera permission the engine lists a single unnamed placeholder per kind,
+              // with an empty id; it stays, as in Safari, or the page would read "no camera" and may
+              // never ask for one. A named camera, or one with an id, is a real one: left out.
+              if (sc.usedHere && kind !== 'audioinput' && kind !== 'audiooutput' && (label || text(infoId, dev))) continue;
+              out.push(dev);
+            }
+            if (sc.usedHere && sentinelDev) out.unshift(renamed(sentinelDev));
+            resolve(out);
+          } catch (e) { reject(e); }
+        }, reject);
       });
     }));
   }
 
-  // The profile that uses the system camera: route a plain getUserMedia({video}) to the sentinel
-  // device, so the page gets the virtual one and never the Mac's real camera. The sentinel is found
+  // The profile that uses the system camera: route a getUserMedia({video}) that pins no device to the
+  // sentinel, so the page gets the virtual camera and never the Mac's real one. The sentinel is found
   // by its label, which the engine gives only once the page holds the camera permission:
-  //  - with it, the call goes straight to the sentinel; if the devices are named and none is the
+  //  - with it, the call goes straight to the sentinel; if the cameras are named and none is the
   //    sentinel, the virtual camera is gone: NotFoundError, and the real one is not even opened;
-  //  - before it, the page's own call is let through so the engine can ask; if what it opened is
-  //    not the sentinel, that stream is stopped before the page ever sees it and the sentinel is
-  //    opened instead (the real camera's light may blink once, at a site's first grant). No sentinel
-  //    after the grant, or one that will not open: the error, never the real camera.
+  //  - before it, the request is let through so the engine can ask; if what it opened is not the
+  //    sentinel, that stream is stopped before the page ever sees it and the sentinel is opened
+  //    instead (the real camera's light may blink once, at a site's first grant). No sentinel after
+  //    the grant, or one that will not open: the error, never the real camera.
+  // Only an exact pin — `deviceId: {exact: id}` with an id, or a list of ids — is the engine's own:
+  // the page named the one device it wants, or none fits and the engine says so. A bare deviceId (a
+  // string or a list) or `{ideal}` is an ideal, which the engine meets with its default camera when no
+  // device has that id: routed to the sentinel like a request that names none.
   if (sc.usedHere && typeof MDP.getUserMedia === 'function' && typeof nativeEnum === 'function') {
     const nativeGUM = MDP.getUserMedia;
+    // A plain copy of what a page passed: each own enumerable member read once, objects and lists
+    // copied the same way, into objects without a prototype and arrays of this script's own (written
+    // with defineProperty, so no setter a page put on Array.prototype is asked). Everything is
+    // decided on the copy: a getter, an iterator or a Proxy that answered this script one thing could
+    // answer the engine another.
+    const copied = function (value, depth) {
+      if (value === null || (typeof value !== 'object' && typeof value !== 'function')) return value;
+      if (depth > 8) return undefined;
+      if (ArrayIsArray(value)) {
+        const items = [];
+        const n = value.length;
+        for (let i = 0; i < n && i < 64; i++) {
+          ObjectDefineProperty(items, i, { value: copied(value[i], depth + 1), writable: true, enumerable: true, configurable: true });
+        }
+        return items;
+      }
+      const out = ObjectCreate(null);
+      const keys = ObjectKeys(value);
+      for (let i = 0; i < keys.length; i++) {
+        const v = copied(value[keys[i]], depth + 1);
+        if (v !== undefined) out[keys[i]] = v;
+      }
+      return out;
+    };
+    // What the engine is handed: the copy, its lists as sequences this script iterates — a page's
+    // Array.prototype[Symbol.iterator] is never asked for what the engine reads.
+    const forEngine = function (value) {
+      if (value === null || typeof value !== 'object') return value;
+      if (ArrayIsArray(value)) {
+        const items = [];
+        for (let i = 0; i < value.length; i++) {
+          ObjectDefineProperty(items, i, { value: forEngine(value[i]), writable: true, enumerable: true, configurable: true });
+        }
+        return sequenceOf(items);
+      }
+      const out = ObjectCreate(null);
+      const keys = ObjectKeys(value);
+      for (let i = 0; i < keys.length; i++) out[keys[i]] = forEngine(value[keys[i]]);
+      return out;
+    };
+    // Whether a copied deviceId pins a device: `{exact}` with an id, or a list of ids, each a
+    // non-empty string. A bare string or list, `{ideal}`, or an exact that names nothing, does not.
+    const pinsDevice = function (pin) {
+      if (pin === null || typeof pin !== 'object' || ArrayIsArray(pin)) return false;
+      const exact = pin.exact;
+      if (typeof exact === 'string') return exact !== '';
+      if (!ArrayIsArray(exact) || exact.length === 0) return false;
+      for (let i = 0; i < exact.length; i++) if (typeof exact[i] !== 'string' || exact[i] === '') return false;
+      return true;
+    };
     define(MDP, 'getUserMedia', method('getUserMedia', 1, function (constraints) {
       const self = this;
       // Nothing, null or not a dictionary: the engine's own answer to it, which asks for no device.
       if (constraints === null || (typeof constraints !== 'object' && typeof constraints !== 'function')) {
         return ReflectApply(nativeGUM, self, arguments);
       }
-      // The request's members read once, in the engine's (lexicographic) order, and the engine handed
-      // a copy of what was read here, never the page's object: a getter answering it "video" where it
-      // answered this script "none" would open the Mac's default camera. WebIDL: null or any object
-      // asks for the device, anything else by its truth. Kept here too because inside the async
-      // function below `arguments` is that function's own.
-      const wantAudio = constraints.audio;
-      const wantVideo = constraints.video;
+      // The request's members read once, in the engine's (lexicographic) order, and copied: the engine
+      // is handed the copy, never the page's object. WebIDL: null or any object asks for the device,
+      // anything else by its truth. Kept here too because inside the functions below `arguments` is
+      // their own.
+      let audio, video;
+      try {
+        audio = copied(constraints.audio, 0);
+        video = copied(constraints.video, 0);
+      } catch (e) { return w.Promise.reject(e); }
       const request = ObjectCreate(null);
-      if (wantAudio !== undefined) request.audio = wantAudio;
-      if (wantVideo !== undefined) request.video = wantVideo;
-      const args = [request];
-      const askedVideo = wantVideo === null
-        || (wantVideo !== undefined && (typeof wantVideo === 'object' || typeof wantVideo === 'function' || !!wantVideo));
-      if (!askedVideo) return ReflectApply(nativeGUM, self, args);
-      const videoObj = (wantVideo !== null && typeof wantVideo === 'object') ? wantVideo : null;
-      const already = videoObj && videoObj.deviceId && (videoObj.deviceId.exact || typeof videoObj.deviceId === 'string');
-      if (already) return ReflectApply(nativeGUM, self, args);
-      // The request with the video pinned to the sentinel; its video constraints and audio as asked.
-      const onSentinel = function (id) {
+      if (audio !== undefined) request.audio = audio;
+      if (video !== undefined) request.video = video;
+      const askedVideo = video === null
+        || (video !== undefined && (typeof video === 'object' || typeof video === 'function' || !!video));
+      if (!askedVideo || (video !== null && typeof video === 'object' && !ArrayIsArray(video) && pinsDevice(video.deviceId))) {
+        return ReflectApply(nativeGUM, self, [forEngine(request)]);
+      }
+      const videoObj = (video !== null && typeof video === 'object' && !ArrayIsArray(video)) ? video : null;
+      // The request with its video constraints but the deviceId, which pins no device here; its audio
+      // as asked. With `id`, the video pinned to that device (the sentinel).
+      const rerouted = function (id) {
         const merged = ObjectCreate(null);
-        if (wantAudio !== undefined) merged.audio = wantAudio;
-        const vc = {};
-        if (videoObj) { for (const k in videoObj) vc[k] = videoObj[k]; }
-        vc.deviceId = { exact: id };
+        if (audio !== undefined) merged.audio = audio;
+        if (!videoObj && id === undefined) { merged.video = video; return merged; }
+        const vc = ObjectCreate(null);
+        if (videoObj) {
+          const keys = ObjectKeys(videoObj);
+          for (let i = 0; i < keys.length; i++) if (keys[i] !== 'deviceId') vc[keys[i]] = videoObj[keys[i]];
+        }
+        if (id !== undefined) {
+          const exact = ObjectCreate(null);
+          exact.exact = id;
+          vc.deviceId = exact;
+        }
         merged.video = vc;
         return merged;
       };
-      const devices = async function () {
-        try { return await ReflectApply(nativeEnum, self, []); } catch (e) { return []; }
-      };
-      const idOf = function (list) { const s = findSentinel(list); return s ? String(s.deviceId) : null; };
+      const idOf = function (list) { const s = findSentinel(list); return s ? text(infoId, s) || null : null; };
       // Named cameras are what the page sees once it holds the camera permission; before it, none
       // is. Cameras only: a page that holds just the microphone may see its microphones named.
       const named = function (list) {
         for (let i = 0; i < list.length; i++) {
-          try { if (list[i].kind === 'videoinput' && String(list[i].label)) return true; } catch (e) {}
+          if (text(infoKind, list[i]) === 'videoinput' && text(infoLabel, list[i])) return true;
         }
         return false;
       };
       const videoDeviceOf = function (stream) {
-        try { const t = stream.getVideoTracks()[0]; const s = t && t.getSettings(); return s ? String(s.deviceId) : null; } catch (e) { return null; }
+        const tracks = ask(streamVideoTracks, stream);
+        const track = tracks && tracks[0];
+        const settings = track ? ask(trackSettings, track) : null;
+        const id = settings ? ownValue(settings, 'deviceId') : undefined;
+        return typeof id === 'string' ? id : null;
       };
       const stopAll = function (stream) {
-        try { const ts = stream.getTracks(); for (let i = 0; i < ts.length; i++) { try { ts[i].stop(); } catch (e) {} } } catch (e) {}
+        const tracks = ask(streamTracks, stream);
+        if (!tracks) return;
+        for (let i = 0; i < tracks.length; i++) ask(trackStop, tracks[i]);
       };
       return new w.Promise(function (resolve, reject) {
-        (async function () {
+        // The engine's answers, followed with its own `then`; nothing it opened passes through
+        // anything of the page's on the way.
+        const open = function (req, onStream, onError) {
+          let p;
+          try { p = ReflectApply(nativeGUM, self, [forEngine(req)]); } catch (e) { onError(e); return; }
+          follow(p, onStream, onError);
+        };
+        const devices = function (next) {
+          let p;
+          try { p = ReflectApply(nativeEnum, self, []); } catch (e) { next([]); return; }
+          follow(p, next, function () { next([]); });
+        };
+        devices(function (before) {
           try {
-            const before = await devices();
             const known = idOf(before);
-            if (known) { resolve(await ReflectApply(nativeGUM, self, [onSentinel(known)])); return; }
+            if (known) { open(rerouted(known), resolve, reject); return; }
             if (named(before)) { reject(notFound()); return; }
-            // No permission yet: the engine asks now, with the page's constraints as it passed them.
-            const first = await ReflectApply(nativeGUM, self, args);
-            const id = idOf(await devices());
-            if (id && videoDeviceOf(first) === id) { resolve(first); return; }
-            if (!id) { stopAll(first); reject(notFound()); return; }
-            let second;
-            try { second = await ReflectApply(nativeGUM, self, [onSentinel(id)]); }
-            catch (e) { stopAll(first); reject(e); return; }
-            stopAll(first);
-            resolve(second);
+            // No permission yet: the engine asks now, with the page's constraints as they were read
+            // (but the deviceId, which the virtual camera answers).
+            open(rerouted(), function (first) {
+              devices(function (after) {
+                try {
+                  const id = idOf(after);
+                  if (id && videoDeviceOf(first) === id) { resolve(first); return; }
+                  if (!id) { stopAll(first); reject(notFound()); return; }
+                  open(rerouted(id), function (second) { stopAll(first); resolve(second); },
+                       function (e) { stopAll(first); reject(e); });
+                } catch (e) { stopAll(first); reject(e); }
+              });
+            }, reject);
           } catch (e) { reject(e); }
-        })();
+        });
       });
     }));
   }

@@ -806,8 +806,10 @@ test('WebRTC unrestricted', () => {
 // The engine's media devices as WebKit shapes them: MediaDeviceInfo values behind prototype getters
 // that reject other receivers; before the page holds the camera permission one unnamed placeholder
 // per kind (Media Capture and Streams, "device information exposure"), after it every device with
-// its id and label. getUserMedia opens the device a deviceId pins, else the Mac's default camera;
-// with nothing asked it is a TypeError, as in the engine. Every call and stop is recorded. Its
+// its id and label. getUserMedia reads a deviceId as the engine does: given bare (a string or a
+// list) or as { ideal } it is the basic set's ideal — that device when there is one, else the Mac's
+// default camera; as { exact } it is required — that device, or OverconstrainedError before any
+// prompt. With nothing asked it is a TypeError, as in the engine. Every call and stop is recorded. Its
 // receiver check takes a MediaDevices of any frame, as WebKit's does, and it reads a request as
 // WebIDL converts it: each member once, null or any object asking for the device. `canvas`: a
 // document whose canvas gives a stream, for the drawn camera (`patchCamera`).
@@ -872,12 +874,27 @@ const cameraPrelude = ({ granted = false, micGranted = false, defaultCamera = 'r
       const audio = constraints === undefined || constraints === null ? undefined : constraints.audio;
       const video = constraints === undefined || constraints === null ? undefined : constraints.video;
       if (!askedFor(video) && !askedFor(audio)) return Promise.reject(new TypeError('At least one of audio and video must be requested'));
+      let id = '${defaultCamera}';
+      if (askedFor(video)) {
+        const exists = (x) => typeof x === 'string' && devices.some((d) => d.kind === 'videoinput' && d.id === x);
+        const ids = (v) => typeof v === 'string' ? [v] : (v !== null && typeof v === 'object' && typeof v[Symbol.iterator] === 'function') ? [...v] : [];
+        const pin = video !== null && typeof video === 'object' ? video.deviceId : undefined;
+        if (typeof pin === 'string' || (pin !== null && typeof pin === 'object' && typeof pin[Symbol.iterator] === 'function')) {
+          id = ids(pin).find(exists) || id;
+        } else if (pin !== null && typeof pin === 'object') {
+          const exact = pin.exact, ideal = pin.ideal;
+          // An exact list that names nothing is taken for no constraint at all (the riskier reading).
+          if (exact !== undefined && ids(exact).length) {
+            const match = ids(exact).find(exists);
+            if (!match) { const e = new Error('Overconstrained'); e.name = 'OverconstrainedError'; return Promise.reject(e); }
+            id = match;
+          } else if (ideal !== undefined) id = ids(ideal).find(exists) || id;
+        }
+      }
       if (${deny}) { const e = new Error('The request is not allowed'); e.name = 'NotAllowedError'; return Promise.reject(e); }
       if (askedFor(video)) camera.granted = true; else camera.micGranted = true;
       const tracks = [];
       if (askedFor(video)) {
-        const pin = video && video.deviceId;
-        const id = typeof pin === 'string' ? pin : (pin && pin.exact) || '${defaultCamera}';
         if (${virtualFails} && id === 'lumen-cam') { const e = new Error('Could not start video source'); e.name = 'NotReadableError'; return Promise.reject(e); }
         camera.opened.push(id);
         tracks.push(new MediaStreamTrack('video', id));
@@ -993,6 +1010,110 @@ test('system camera: a request is read once, as the engine reads it — a getter
     const state = cameraState(w);
     assert.equal(state.opened.filter((id) => id === 'real-cam').length, state.stopped.filter((id) => id === 'real-cam').length,
                  `granted ${granted}: a real camera opened was stopped unseen`);
+  }
+});
+
+// A request's outcome: its tracks, or the name of its error; and whether every Mac camera opened was
+// stopped before the page held it.
+const outcomeOf = (w, expr) => run(w, `navigator.mediaDevices.getUserMedia(${expr}).then((s) => JSON.stringify(s.getTracks().map((t) => [t.kind, t.deviceId, t.readyState])), (e) => e.name)`);
+const realStoppedUnseen = (w) => {
+  const state = cameraState(w);
+  return state.opened.filter((id) => id === 'real-cam').length === state.stopped.filter((id) => id === 'real-cam').length;
+};
+
+test('system camera: only an exact pin is the engine\'s — a bare deviceId, a list, { ideal } or an empty exact gets the virtual camera', async () => {
+  const virtual = JSON.stringify([['video', 'lumen-cam', 'live']]);
+  for (const granted of [true, false]) {
+    for (const [name, expr, expected] of [
+      ['video: true', `{ video: true }`, virtual],
+      // WebIDL: a bare string is the basic set's ideal, which the engine meets with its default camera.
+      ['a bare id nothing has', `{ video: { deviceId: 'anything' } }`, virtual],
+      // A bare id of the Mac's camera (one a site saved before): an ideal too, never a pin.
+      ['a bare id of the Mac\'s camera', `{ video: { deviceId: 'real-cam' } }`, virtual],
+      ['a list', `{ video: { deviceId: ['anything', 'real-cam'] } }`, virtual],
+      ['{ ideal }', `{ video: { deviceId: { ideal: 'anything' } } }`, virtual],
+      ['{ exact: \'\' }', `{ video: { deviceId: { exact: '' } } }`, virtual],
+      ['{ exact: [] }', `{ video: { deviceId: { exact: [] } } }`, virtual],
+      // An exact id is the engine's: one nothing has is its OverconstrainedError, before anything opens.
+      ['{ exact } of nothing', `{ video: { deviceId: { exact: 'unknown' } } }`, 'OverconstrainedError'],
+      ['{ exact: [ids] } of nothing', `{ video: { deviceId: { exact: ['unknown', 'other'] } } }`, 'OverconstrainedError'],
+    ]) {
+      const w = makeWindow(systemCamera(true), null, cameraPrelude({ granted }));
+      assert.equal(await outcomeOf(w, expr), expected, `granted ${granted}: ${name}`);
+      assert.ok(realStoppedUnseen(w), `granted ${granted}: ${name}: ${JSON.stringify(cameraState(w))}`);
+      if (expected === 'OverconstrainedError') assert.deepEqual(cameraState(w).opened, [], `granted ${granted}: ${name}`);
+    }
+  }
+});
+
+test('system camera: a deviceId is read once and handed on as read — a getter that pins for the shim and not for the engine never opens the Mac\'s camera', async () => {
+  for (const granted of [true, false]) {
+    for (const [name, expr] of [
+      // { exact } for the first reads, nothing after: the engine would have opened its default camera.
+      ['deviceId', `(() => { let r = 0; return { video: { get deviceId() { r++; return r <= 2 ? { exact: 'zzz' } : undefined; } } }; })()`],
+      ['deviceId.exact', `(() => { let r = 0; return { video: { deviceId: { get exact() { r++; return r <= 2 ? 'zzz' : undefined; } } } }; })()`],
+      // A list whose own iterator gives an id to whoever reads it first, nothing after.
+      ['exact: an iterable', `(() => { let r = 0; return { video: { deviceId: { exact: { [Symbol.iterator]() { r++; return (r <= 1 ? ['zzz'] : [])[Symbol.iterator](); } } } } }; })()`],
+    ]) {
+      const w = makeWindow(systemCamera(true), null, cameraPrelude({ granted }));
+      const outcome = await outcomeOf(w, expr);
+      assert.ok(outcome === 'OverconstrainedError' || outcome === JSON.stringify([['video', 'lumen-cam', 'live']]), `granted ${granted}: ${name}: ${outcome}`);
+      assert.ok(realStoppedUnseen(w), `granted ${granted}: ${name}: ${JSON.stringify(cameraState(w))}`);
+    }
+    // Arrays a page replaced the iterator of: the engine is handed the ids that were read.
+    const w = makeWindow(systemCamera(true), null, cameraPrelude({ granted }));
+    run(w, `var arrayIterator = Array.prototype[Symbol.iterator]; Array.prototype[Symbol.iterator] = function () { return arrayIterator.call([]); };`);
+    const outcome = await outcomeOf(w, `{ video: { deviceId: { exact: ['zzz'] } } }`);
+    run(w, `Array.prototype[Symbol.iterator] = arrayIterator;`);
+    assert.equal(outcome, 'OverconstrainedError', `granted ${granted}: a page's array iterator`);
+    assert.deepEqual(cameraState(w).opened, [], `granted ${granted}: a page's array iterator`);
+  }
+});
+
+test('system camera: what a page puts in the engine\'s place never decides where a request goes, nor gets what the engine opened', async () => {
+  const virtual = JSON.stringify([['video', 'lumen-cam', 'live']]);
+  for (const granted of [true, false]) {
+    // Every camera's label answers the virtual camera's name: the Mac's camera, listed first, would be taken for it.
+    const w = makeWindow(systemCamera(true), null, cameraPrelude({ granted }));
+    run(w, `Object.defineProperty(MediaDeviceInfo.prototype, 'label', { get() { return 'Lumen Camera'; }, configurable: true });
+            Object.defineProperty(MediaDeviceInfo.prototype, 'kind', { get() { return 'videoinput'; }, configurable: true });`);
+    assert.equal(await outcomeOf(w, `{ video: true }`), virtual, `granted ${granted}: a label getter`);
+    assert.ok(realStoppedUnseen(w), `granted ${granted}: a label getter`);
+    // Nor is the Mac's camera listed for it: its id is what would let a page pin it.
+    const ids = await run(w, `navigator.mediaDevices.enumerateDevices().then((l) => JSON.stringify(l.map((d) => JSON.stringify(d))))`).then(JSON.parse);
+    assert.ok(!ids.some((d) => d.includes('real-cam')), `granted ${granted}: listed ${ids}`);
+
+    // Every label empty: as before the permission, so nothing is dropped from the list.
+    const blank = makeWindow(systemCamera(true), null, cameraPrelude({ granted: true }));
+    run(blank, `Object.defineProperty(MediaDeviceInfo.prototype, 'label', { get() { return ''; }, configurable: true });`);
+    const blankIds = await run(blank, `navigator.mediaDevices.enumerateDevices().then((l) => JSON.stringify(l.map((d) => JSON.stringify(d))))`).then(JSON.parse);
+    assert.ok(!blankIds.some((d) => d.includes('real-cam')), `an empty label getter: listed ${blankIds}`);
+
+    // The stream the engine opened at the first grant, asked to a page's methods or then.
+    const s = makeWindow(systemCamera(true), null, cameraPrelude({ granted }));
+    run(s, `var seen = [];
+            var nativeThen = Promise.prototype.then;
+            for (const name of ['getTracks', 'getVideoTracks']) {
+              const f = MediaStream.prototype[name];
+              MediaStream.prototype[name] = function () { seen.push(this); return f.apply(this, arguments); };
+            }
+            for (const name of ['getSettings', 'stop']) {
+              const f = MediaStreamTrack.prototype[name];
+              MediaStreamTrack.prototype[name] = function () { seen.push(this); return f.apply(this, arguments); };
+            }
+            Promise.prototype.then = function (a, b) { seen.push(this); return nativeThen.call(this, a, b); };
+            Object.defineProperty(Promise.prototype, 'constructor', { get() { seen.push(this); return Promise; }, configurable: true });`);
+    const outcome = await outcomeOf(s, `{ video: true }`);
+    run(s, `Promise.prototype.then = nativeThen; delete Promise.prototype.constructor; Promise.prototype.constructor = Promise;`);
+    assert.equal(outcome, virtual, `granted ${granted}: replaced methods`);
+    // Whatever a page's code was handed holds none of the Mac's camera: no stream, track or promise of it.
+    const reached = await run(s, `Promise.all(seen.map((x) => (x && typeof x.then === 'function' && !(x instanceof MediaStream))
+                                    ? Promise.prototype.then.call(x, (v) => v, () => null) : x))
+                                  .then((all) => JSON.stringify(all.map((x) => x instanceof MediaStream ? x.getTracks().map((t) => t.deviceId)
+                                                                          : x instanceof MediaStreamTrack ? [x.deviceId]
+                                                                          : Array.isArray(x) ? x.map((d) => { try { return d.deviceId; } catch (e) { return '?'; } }) : [])))`)
+      .then(JSON.parse);
+    assert.ok(!reached.flat().includes('real-cam'), `granted ${granted}: a page's code was handed ${JSON.stringify(reached)}`);
   }
 });
 

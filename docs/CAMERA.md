@@ -192,7 +192,8 @@ grant. The gate handles both sides of it:
   it would read "no camera", and a page may then never ask). Nothing leaks: the placeholder is the
   same however many cameras there are.
 - The using profile's first `getUserMedia` on a site is let through with the page's own
-  constraints, so the engine asks for the permission. If what it opened is not the sentinel, that
+  constraints (but a `deviceId` that pins nothing, below), so the engine asks for the permission.
+  If what it opened is not the sentinel, that
   stream is stopped before the page ever holds it and the sentinel is opened instead; the page gets
   only the virtual camera. The cost: the Mac's real camera opens for a moment, so its light may
   blink once — at a site's first grant only. With the permission held, calls go straight to the
@@ -214,7 +215,23 @@ all when the virtual one is not there, the same as "No camera":
 - the request's members are read once, as WebIDL reads them (`video: null` asks for a camera, and
   gets the virtual one), and the engine is handed a copy: a getter that answers "no video" to the
   shim and "video" to the engine reached the Mac's default camera until the third audit
-  (14 November 2026).
+  (14 November 2026). The copy goes all the way down — each member of the video's constraints,
+  its `deviceId`, its `exact` read once, lists copied and handed on as sequences the shim iterates
+  — so a `deviceId` getter (or an `exact` getter, or a list's iterator) that pins a device for the
+  shim and nothing for the engine reaches nothing either;
+- only an **exact pin** is the engine's own: `deviceId: {exact: id}` (or a list of ids) names the
+  one device the page wants, and one that is not there is the engine's `OverconstrainedError`. A
+  bare `deviceId` — a string or a list, WebIDL's *ideal* — or `{ideal: …}`, or an `exact` that
+  names nothing, is routed to the virtual camera like a request that names no device: the engine
+  meets an ideal no device has with its default camera, the Mac's real one;
+- where a request goes is decided with the engine's own getters and methods, taken before the page
+  runs (a device's `kind`, `label` and `deviceId`; a stream's `getTracks`/`getVideoTracks`, a
+  track's `getSettings` and `stop`), and the engine's promises are followed with its own `then`
+  after their `constructor` is made their own: a `label` getter a page replaced to give the Mac's
+  camera the sentinel's name, a blank one that kept the Mac's camera (and its id) in the list, or
+  a `getTracks`, `then` or `Promise.prototype.constructor` handed the stream the engine opened at
+  the first grant, decides and receives nothing. Until the fourth audit (15 November 2026) a bare
+  `deviceId`, a `deviceId` getter, and each of these, got a page the Mac's real camera.
 
 Until 0.1.8 each of these handed the page the Mac's real camera — a substitution that silently did
 not happen. "No camera" itself now blocks whatever the delivery was last set to (the editor keeps
@@ -227,10 +244,12 @@ on but the device not there yet. (The owner saved one before the extension was o
 the real camera, and it read as broken — 11 November.) Below the plan nothing is refused: the
 camera is off at launch whatever it holds.
 
-`scripts/test-shims.mjs` covers all of it against a model of WebKit's media devices: the permission
-(per kind) and before it, the re-routing and that the real stream is stopped unseen, every
-fail-closed case above, a denial and pinned devices staying the engine's, the track's label, and a
-profile that does not use the device.
+`scripts/test-shims.mjs` covers all of it against a model of WebKit's media devices (a bare or
+`{ideal}` `deviceId` met with the default camera when no device has it, an unknown exact one an
+`OverconstrainedError`): the permission (per kind) and before it, the re-routing and that the real
+stream is stopped unseen, every fail-closed case above, a denial and exact pins staying the
+engine's, bare, listed and `{ideal}` ids and getters re-routed, a page's replaced getters, methods
+and `then`, the track's label, and a profile that does not use the device.
 
 ### The frames come from the app (0.1.8)
 
