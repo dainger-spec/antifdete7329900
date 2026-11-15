@@ -224,8 +224,10 @@ through its host and found there rather than in a look-alike form of the page.
 The editor's **Schedule** (bottom left, with how many are switched on): a scenario, or a
 profile's warm-up, every day at a time or every so many hours, with a random shift either way.
 **On a Schedule…** beside Run opens the same list with the form filled in for the scenario on
-screen and the chosen profile. A row says when its schedule runs next and how the last run went;
-deleting one asks first; saving a change leaves the schedule's switch as it was.
+screen and the chosen profile. A row says when its schedule runs next and how the last run went —
+that it was made, and once it has ended, **how it ended**: "finished in 42 s", "failed: no element
+matches #login (line 7)" as the row's warning, or stopped (by hand, with its profile, by the
+plan); deleting one asks first; saving a change leaves the schedule's switch as it was.
 
 - `ScenarioSchedule` (BrowserCore): what (`.scenario(id)` or `.warmUp`), the profile, when
   (`.daily(hour:minute:)` or `.every(hours:)`), the jitter in minutes, and the next run with its
@@ -239,6 +241,13 @@ deleting one asks first; saving a change leaves the schedule's switch as it was.
   minutes on. A run found more
   than six hours late is not made ("missed"); without automation in the plan nothing is run and
   the schedule says so. Schedules of deleted profiles and scenarios go with them.
+- **How a run ended** (`ScenarioSchedule.lastEnd`: finished, failed, stopped; the reason's first
+  line; when; how long): a schedule recorded only that its run started, and a scenario that failed
+  at its third step every night said "Last run: …" all the same. The coordinator gives each run it
+  starts an id and hears every run's end (`ProfileManager.onScenarioEnded` →
+  `ScenarioScheduleCoordinator.runEnded`); the end of a run it started is written to that
+  schedule, a run's start takes the end of the one before away. A warm-up's schedule keeps none:
+  the warm-up's own screen says how that went. A file from before has no ends and reads as it did.
 - Nothing wakes the Mac or starts the app: a schedule runs while Lumen does.
 - A scheduled run does not take the keyboard: its window is put in front without being made the
   key window and without activating the app (`openScenarioPage(inBackground:)`), so what the
@@ -249,7 +258,7 @@ deleting one asks first; saving a change leaves the schedule's switch as it was.
   the form says so when a warm-up by the clock would run beside it.
 
 Checked: `ScenarioScheduleTests` (the next run today or tomorrow, the random part within its
-limits, due, late, a run's record, the file).
+limits, due, late, a run's record, how a run ended and a file from before ends were kept, the file).
 
 ## WebDriver
 

@@ -2056,6 +2056,14 @@
 "schedule.when.jitter" = ", разброс ±%d мин";
 "schedule.state.off" = "Выключено";
 "schedule.state.last" = "Последний запуск: %@";
+"schedule.state.last.finished" = "Последний запуск: %1$@ — выполнен за %2$@";
+"schedule.state.last.failed" = "Последний запуск (%1$@) не удался: %2$@";
+"schedule.state.last.stopped" = "Последний запуск: %@ — остановлен вручную";
+"schedule.state.last.stopped.profile" = "Последний запуск: %@ — остановлен вместе с профилем";
+"schedule.state.last.stopped.plan" = "Последний запуск: %@ — остановлен: в тарифе больше нет автоматизации";
+"schedule.length.seconds" = "%d с";
+"schedule.length.minutes" = "%1$d мин %2$d с";
+"schedule.length.hours" = "%1$d ч %2$d мин";
 "schedule.state.failed" = "Прошлый запуск не удался: профиль не запустился или сценарий удалён";
 "schedule.state.missed" = "Прошлый запуск пропущен: Lumen был закрыт или заблокирован дольше 6 часов";
 "schedule.state.notInPlan" = "Не запускается: в тарифе нет автоматизации";

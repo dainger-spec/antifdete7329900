@@ -674,6 +674,24 @@ enum UISnapshots {
         var hourly = ScenarioSchedule(action: .warmUp, profileID: rows[0].id, when: .every(hours: 6), jitterMinutes: 30)
         hourly.nextRunAt = Date(timeIntervalSince1970: 1_793_015_000)
         hourly.lastResult = .missed
+        // How the last run ended, once it has: one that failed says why (with the scenario's
+        // line), one that finished in how long.
+        var failing = ScenarioSchedule(action: .scenario(scenario.id), profileID: rows[0].id, when: .daily(hour: 2, minute: 30), jitterMinutes: 0)
+        failing.nextRunAt = Date(timeIntervalSince1970: 1_793_020_000)
+        failing.lastRunAt = Date(timeIntervalSince1970: 1_792_933_600)
+        failing.lastResult = .started
+        failing.lastEnd = ScenarioSchedule.End(kind: .failed, reason: "Error: no element matches #login (line 7)",
+                                               endedAt: Date(timeIntervalSince1970: 1_792_933_631), duration: 31)
+        var finished = ScenarioSchedule(action: .scenario(scenario.id), profileID: rows[1].id, when: .every(hours: 12), jitterMinutes: 20)
+        finished.nextRunAt = Date(timeIntervalSince1970: 1_793_030_000)
+        finished.lastRunAt = Date(timeIntervalSince1970: 1_792_986_800)
+        finished.lastResult = .started
+        finished.lastEnd = ScenarioSchedule.End(kind: .finished, endedAt: Date(timeIntervalSince1970: 1_792_986_995), duration: 195)
+        problems += await Shot(name: "scenarios-schedule-ends", size: CGSize(width: 860, height: 760)) {
+            ScenarioSchedulesPane(sample: .init(schedules: [failing, finished, daily], scenarios: [scenario], profiles: clockProfiles, editing: nil))
+                .background(Theme.surface)
+                .environmentObject(model)
+        }.capture(into: folder)
         // A profile's own values for scenarios: the plain form, with a name the scenario reads offered empty.
         problems += await Shot(name: "scenarios-values", size: CGSize(width: 560, height: 380), titled: false) {
             ScenarioValuesSheet(profileID: rows[1].id, profileName: "Northwind", namesRead: ["login", "password", "city"],

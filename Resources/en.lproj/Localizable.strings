@@ -2056,6 +2056,14 @@
 "schedule.when.jitter" = ", within ±%d min";
 "schedule.state.off" = "Off";
 "schedule.state.last" = "Last run: %@";
+"schedule.state.last.finished" = "Last run: %1$@ — finished in %2$@";
+"schedule.state.last.failed" = "The last run (%1$@) failed: %2$@";
+"schedule.state.last.stopped" = "Last run: %@ — stopped by hand";
+"schedule.state.last.stopped.profile" = "Last run: %@ — stopped with its profile";
+"schedule.state.last.stopped.plan" = "Last run: %@ — stopped: the plan no longer has automation";
+"schedule.length.seconds" = "%d s";
+"schedule.length.minutes" = "%1$d min %2$d s";
+"schedule.length.hours" = "%1$d h %2$d min";
 "schedule.state.failed" = "The last run failed: the profile did not start, or the scenario was deleted";
 "schedule.state.missed" = "The last run was missed: Lumen was closed or locked for more than 6 hours";
 "schedule.state.notInPlan" = "Does not run: the plan has no automation";

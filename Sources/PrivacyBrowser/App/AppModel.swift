@@ -522,7 +522,9 @@ final class AppModel: ObservableObject {
                     || self.automationServer?.webDriver?.hasSession(id) == true
             },
             // A schedule's run: in front, but without the keyboard or the app's activation.
-            runScenario: { [weak self] scenario, id in await self?.runScenario(scenario, on: id, inBackground: true) ?? false },
+            runScenario: { [weak self] scenario, id, run in
+                await self?.runScenario(scenario, on: id, inBackground: true, runID: run) ?? false
+            },
             warmUp: { [weak self] id in
                 guard let self, let warmUps = self.warmUps else { return false }
                 warmUps.enqueue([id]) { self.warmUpPlan(for: $0).plan }
@@ -561,6 +563,8 @@ final class AppModel: ObservableObject {
         loadTagColors(from: vault)
         loadScenarios(from: vault)
         loadScenarioValues(from: vault)
+        // How a run ended, for the schedule that started it (its row says so).
+        manager.onScenarioEnded = { [weak self] _, run, outcome in self?.scheduleCoordinator?.runEnded(run, outcome) }
         manager.onProxyLaunchRefused = { [weak self] id, proxy, diagnosis in
             self?.reportProxyProblem(of: id, proxy: proxy, diagnosis: diagnosis, notStarted: true)
         }
