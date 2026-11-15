@@ -423,17 +423,45 @@ function noteReplacement() {
   }
 }
 
-// The profile's time zone, when the engine is not in it already. A profile in a process of its
-// own gives WebKit's processes its zone (ProfileProcess: TZ), so Date and Intl are the engine's
-// there — in the page, every frame and every worker, service workers included — and replacing
-// them would only put copies where Safari has its own. The engine is asked as a page asks it.
+// The profile's time zone, when the engine is not in it already, under the name THIS engine has
+// for it. A profile in a process of its own gives WebKit's processes its zone (ProfileProcess:
+// TZ), so Date and Intl are the engine's there — in the page, every frame and every worker,
+// service workers included — and replacing them would only put copies where Safari has its own.
+// An engine names some zones by an older name of theirs (its ICU's: Asia/Calcutta for
+// Asia/Kolkata, Europe/Kiev for Europe/Kyiv), and says that name for the zone it is in whatever
+// name it was given — while it may hand a name given to a formatter back as given. So the zone is
+// known by the name the engine lists for it (Intl.supportedValuesOf), which is what a page reads
+// in Safari on a Mac in that zone: the comparison with the engine's own zone is made on it, and
+// where Date is replaced the formatters are given it.
+const ZONE_NAMES = ['Asia/Calcutta', 'Asia/Kolkata', 'Asia/Katmandu', 'Asia/Kathmandu', 'Asia/Saigon', 'Asia/Ho_Chi_Minh',
+  'Asia/Rangoon', 'Asia/Yangon', 'Europe/Kiev', 'Europe/Kyiv', 'America/Buenos_Aires', 'America/Argentina/Buenos_Aires',
+  'America/Catamarca', 'America/Argentina/Catamarca', 'America/Cordoba', 'America/Argentina/Cordoba',
+  'America/Jujuy', 'America/Argentina/Jujuy', 'America/Mendoza', 'America/Argentina/Mendoza',
+  'America/Indianapolis', 'America/Indiana/Indianapolis', 'America/Louisville', 'America/Kentucky/Louisville',
+  'America/Godthab', 'America/Nuuk', 'America/Coral_Harbour', 'America/Atikokan', 'Atlantic/Faeroe', 'Atlantic/Faroe',
+  'Africa/Asmera', 'Africa/Asmara', 'Pacific/Truk', 'Pacific/Chuuk', 'Pacific/Ponape', 'Pacific/Pohnpei',
+  'Pacific/Enderbury', 'Pacific/Kanton'];
 const ZONE = (function () {
   const zone = CONFIG.timeZone;
   if (typeof zone !== 'string' || zone === '') return null;
   try {
     const NativeDTF = Intl.DateTimeFormat;
     const engine = new NativeDTF().resolvedOptions().timeZone;
-    if (engine === zone || engine === new NativeDTF('en-US', { timeZone: zone }).resolvedOptions().timeZone) return null;
+    if (engine === zone) return null;
+    // The zone's other name, if it has one (the pairs above: older, newer).
+    let other = null;
+    for (let i = 0; i < ZONE_NAMES.length; i++) if (ZONE_NAMES[i] === zone) other = ZONE_NAMES[i ^ 1];
+    // The name the engine itself has for the zone: the one it lists; else what it makes of the
+    // name in a formatter.
+    let listed = null;
+    try { listed = Intl.supportedValuesOf('timeZone'); } catch (e) {}
+    let name = null;
+    for (let i = 0; listed && i < listed.length && name !== zone; i++) {
+      if (listed[i] === zone || listed[i] === other) name = listed[i];
+    }
+    if (name === null) name = new NativeDTF('en-US', { timeZone: zone }).resolvedOptions().timeZone;
+    if (engine === name || engine === other) return null;
+    return name;
   } catch (e) {}
   return zone;
 })();

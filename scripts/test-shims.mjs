@@ -772,11 +772,11 @@ test('a profile whose engine already answers as the profile: the script replaces
   });
 });
 
-test('the engine is in the profile\'s zone when it says the zone\'s name as the profile does, or as it would itself say the profile\'s', () => {
-  // The process is given the profile's zone by its name (TZ), and the engine may say it under the
-  // name it holds as canonical (V8: Asia/Calcutta for Asia/Kolkata; JavaScriptCore keeps the name).
+test('the engine is in the profile\'s zone under whichever of the zone\'s names the profile and the engine use', () => {
+  // The process is given the profile's zone by a name (TZ); the engine says the zone it is in by
+  // the name its own data has for it (Asia/Calcutta in one ICU, Asia/Kolkata in another).
   const engineName = inZone('Asia/Kolkata', (plain) => run(plain, `Intl.DateTimeFormat().resolvedOptions().timeZone`));
-  for (const named of ['Asia/Kolkata', engineName]) {
+  for (const named of ['Asia/Kolkata', 'Asia/Calcutta', engineName]) {
     inEngineZone('Asia/Kolkata', () => {
       const w = makeWindow({ ...ownProcess, timeZone: named }, null, takeProperties);
       assert.deepEqual(replacedProperties(w), [], named);
@@ -787,6 +787,40 @@ test('the engine is in the profile\'s zone when it says the zone\'s name as the 
   inEngineZone('Asia/Kolkata', () => {
     assert.ok(replacedProperties(makeWindow({ ...ownProcess, timeZone: 'Asia/Kathmandu' }, null, takeProperties)).includes('window.Date'));
   });
+});
+
+test('an engine that lists a zone by its older name and hands a formatter\'s zone back as given: the script names the zone as that engine does', () => {
+  // Such an engine, whatever this one's ICU: in the zone it says Asia/Calcutta, a formatter given
+  // Asia/Kolkata says Asia/Kolkata, and Asia/Calcutta is the name it lists (Node 22 on CI; Safari's
+  // JavaScriptCore has such names too).
+  const olderNames = `{ const Native = Intl.DateTimeFormat, given = new WeakMap(), resolved = Native.prototype.resolvedOptions;
+    const Named = function DateTimeFormat(locales, options) {
+      const zone = options === undefined || options === null ? undefined : options.timeZone;
+      const formatter = Reflect.construct(Native, [locales, options], new.target || Named);
+      given.set(formatter, zone === undefined ? (globalThis.__inZone ? 'Asia/Calcutta' : undefined) : String(zone));
+      return formatter;
+    };
+    Named.prototype = Native.prototype; Named.supportedLocalesOf = Native.supportedLocalesOf;
+    Native.prototype.resolvedOptions = function resolvedOptions() {
+      const options = Reflect.apply(resolved, this, []);
+      if (given.get(this) !== undefined) options.timeZone = given.get(this);
+      return options;
+    };
+    Intl.DateTimeFormat = Named;
+    Intl.supportedValuesOf = () => ['Asia/Calcutta', 'Asia/Katmandu', 'Asia/Tokyo', 'Europe/Berlin']; }`;
+  // The engine in the zone, the profile naming it the newer way: nothing replaced.
+  inEngineZone('Asia/Kolkata', () => {
+    const w = makeWindow({ ...ownProcess, timeZone: 'Asia/Kolkata' }, null, 'globalThis.__inZone = true;' + olderNames + takeProperties);
+    assert.deepEqual(replacedProperties(w), []);
+    assert.equal(run(w, `Intl.DateTimeFormat().resolvedOptions().timeZone`), 'Asia/Calcutta');
+  });
+  // The engine elsewhere: Date replaced, and the zone named as that engine would name its own.
+  for (const named of ['Asia/Kolkata', 'Asia/Calcutta']) {
+    const w = makeWindow({ ...base, timeZone: named }, null, olderNames);
+    assert.equal(run(w, `[Intl.DateTimeFormat().resolvedOptions().timeZone, new Intl.DateTimeFormat('en', { hour: 'numeric' }).resolvedOptions().timeZone,
+      new Intl.DateTimeFormat('en', { timeZone: 'Asia/Kathmandu' }).resolvedOptions().timeZone, new Date(Date.UTC(2024, 0, 15, 12)).getHours()].join()`),
+                 'Asia/Calcutta,Asia/Calcutta,Asia/Kathmandu,17', named);
+  }
 });
 
 test('only what a setting needs is replaced: another zone brings Date, an ephemeral store the quota, Safari\'s object its two functions — and toString only with them', () => {

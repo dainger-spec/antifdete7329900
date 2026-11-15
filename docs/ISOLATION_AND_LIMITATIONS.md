@@ -1269,6 +1269,15 @@ engines themselves disagree on what a setter or a local date gives; and the name
 gives a zone for dates when it kept another zone's time (Lord Howe before 1981) is the name of
 that time, where the engines say today's.
 
+**The zone's name.** An engine names some zones by an older name (its ICU's: `Asia/Calcutta` for
+Asia/Kolkata, `Europe/Kiev` for Europe/Kyiv) and says that name for the zone it is in, while it may
+hand a name given to a formatter back as given. The script knows the profile's zone by the name
+the engine lists for it (`Intl.supportedValuesOf('timeZone')`, with the pairs of names it may be
+under): the question whether the engine is already in the profile's zone is asked on that name,
+and where `Date` is replaced, `Intl.DateTimeFormat().resolvedOptions().timeZone` says it — what a
+page reads in that engine on a Mac in that zone (CI, 15 November: Node 22 said Asia/Calcutta where
+the script said Asia/Kolkata).
+
 ### What a page can ask the script
 
 What the script replaces prints as native code and has the engine's shape; a page can still ask
