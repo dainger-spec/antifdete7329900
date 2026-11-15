@@ -821,6 +821,9 @@
 "profiles.device.mac" = "Mac";
 "profiles.empty.subtitle" = "Create your first isolated profile to start browsing.";
 "profiles.empty.title" = "No profiles yet";
+"profiles.empty.proxies" = "Add Proxies…";
+"profiles.empty.hint" = "A profile made on another Mac, or kept as a backup, comes in through Import. If you work through proxies, paste their list into Proxies first: each new profile then takes one from the list.";
+"profiles.empty.hint.import" = "A profile made on another Mac, or kept as a backup, comes in through Import.";
 "profiles.exit.direct" = "Direct";
 "profiles.exit.unknownCountry" = "The exit country shows after a launch that looks the proxy up (time zone from the proxy, or the exit-IP warning).";
 "profiles.exit.unknown.notChecked" = "Country unknown: this proxy has not been checked, and the profile has not launched through it looking up its location. Check it in Proxies.";

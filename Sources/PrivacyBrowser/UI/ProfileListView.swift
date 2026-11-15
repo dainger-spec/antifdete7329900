@@ -1381,7 +1381,8 @@ struct ProfilesScreen: View {
             // above says so), and their folders are kept.
             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if rows.isEmpty {
-            EmptyProfilesView(onNew: actions.newProfile)
+            EmptyProfilesView(onNew: actions.newProfile, onImport: actions.importProfile,
+                              onProxies: proxyCount == nil ? nil : actions.openProxies)
         } else if visibleRows.isEmpty {
             NoMatchesView(query: search.trimmingCharacters(in: .whitespacesAndNewlines)) {
                 withAnimation(Theme.appearAnimation) {
@@ -2837,8 +2838,15 @@ struct GuardNoticeBar: View {
     }
 }
 
+/// No profile yet: what the window is for, and the three ways a first profile comes — made here,
+/// brought from another Mac or a backup (Import), or made for the proxies of a list pasted into
+/// Proxies first (docs/ROADMAP.md §1.7: a person who has not seen the app makes a profile with a
+/// proxy without being told where).
 private struct EmptyProfilesView: View {
     let onNew: () -> Void
+    var onImport: () -> Void = {}
+    /// Nil: the window has no Proxies section.
+    var onProxies: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -2856,6 +2864,22 @@ private struct EmptyProfilesView: View {
                 .padding(.bottom, 20)
             Button(action: onNew) { Label(L("profiles.action.new"), systemImage: "plus") }
                 .buttonStyle(.lumenPrimary)
+            HStack(spacing: 4) {
+                Button(L("profiles.menu.import"), action: onImport)
+                    .buttonStyle(.lumenGhost)
+                if let onProxies {
+                    Button(L("profiles.empty.proxies"), action: onProxies)
+                        .buttonStyle(.lumenGhost)
+                }
+            }
+            .padding(.top, 10)
+            Text(L(onProxies == nil ? "profiles.empty.hint.import" : "profiles.empty.hint"))
+                .font(.lumenSecondary)
+                .foregroundStyle(Theme.textTertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 380)
+                .padding(.top, 14)
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
