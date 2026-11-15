@@ -9,6 +9,10 @@ import Foundation
 ///     http://proxy.example.com:3128  # Berlin 1
 ///     [2001:db8::1]:1080
 ///     socks5://user:pass@1.2.3.4:1080[https://provider.example/changeip?key=…]
+///     1.2.3.4	1080	user	pass                 (columns: copied from a spreadsheet or a provider's table)
+///     socks5 1.2.3.4 1080 user pass
+///     1.2.3.4;1080;user;pass                   (also "," and "|")
+///     1.2.3.4:1080:user:pass https://provider.example/changeip?key=…
 ///
 /// Each line is taken apart as the editor's Host field takes a pasted proxy apart
 /// (`ProxyHostField`), so a line the list accepts is one the editor would accept too. A line with a
@@ -21,6 +25,12 @@ import Foundation
 /// a usable proxy is reported with its line number and why, as the cookie import reports its file —
 /// never silently dropped. The same proxy twice (the same host, port and user name,
 /// `ProxyList.identity(of:)`) is read once: the first time.
+///
+/// A line that does not read as written is read once more as columns (`columns`): its parts
+/// separated by tabs, spaces, ";", "," or "|" — a row of a spreadsheet, of a provider's table or of
+/// its CSV file — with the type as a word of its own ("socks5", "http") and the IP-change link as
+/// a column of its own. Only then: a line that reads as written is never read another way, so a
+/// password with a ";" or a "|" in it stays what it was.
 public enum ProxyListImport {
     /// At most this many proxies are read from one paste (the list's own limit).
     public static let maximumProxies = ProxyList.maximumEntries
@@ -108,8 +118,17 @@ public enum ProxyListImport {
                 break
             }
             let (written, label) = splitLabel(trimmed)
-            let (address, link) = splitChangeLink(written)
-            switch proxy(in: address, defaultKind: defaultKind) {
+            let (address, bracketLink) = splitChangeLink(written)
+            var link = bracketLink
+            var result = proxy(in: address, defaultKind: defaultKind)
+            // Not a proxy as written: its parts may stand in columns. What is wrong with the line
+            // as written is what is reported when that does not make a proxy either.
+            if case .failure = result, let inColumns = columns(address),
+               case .success(let read) = proxy(in: inColumns.address, defaultKind: defaultKind) {
+                result = .success(read)
+                link = link ?? inColumns.link
+            }
+            switch result {
             case .failure(let failure):
                 report.problems.append(Problem(line: number, text: shown, reason: failure.reason))
             case .success(let (proxy, kindGiven)):
@@ -292,6 +311,65 @@ public enum ProxyListImport {
             return (written[..<range.lowerBound].trimmingCharacters(in: junk), link)
         }
         return (written, nil)
+    }
+
+    /// What stands between the columns of a row: tabs and spaces (a no-break space too), ";", ","
+    /// and "|".
+    private static let columnSeparators = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "\u{00A0};,|"))
+
+    /// The words a type's column holds, with the scheme each stands for.
+    private static let kindWords = ["socks5": "socks5", "socks5h": "socks5", "socks": "socks5", "http": "http", "https": "https"]
+
+    /// A line whose parts stand in columns, as the one address `proxy(in:)` reads — or nil when it
+    /// has no columns. From the columns, in this order: a last one that is an http(s) link with a
+    /// path or a query is the IP-change link (a proxy's own address has neither); a first or a last
+    /// one that is a type's word ("socks5", "HTTP") is the type; what is left — two to four parts,
+    /// each possibly several already joined by ":" — is joined by ":" into `host:port:user:password`
+    /// (or the other orders `ProxyHostField` reads). Quotes around a column, as a CSV file writes
+    /// them, are taken off.
+    ///
+    /// Not columns, and nil: two proxies on one line ("1.2.3.4:8080 5.6.7.8:8080", "1.2.3.4 8080
+    /// 5.6.7.8 8080") — joined, the second would be read as the first one's user name and password.
+    /// Such a line stays what it was: not read, and said.
+    static func columns(_ written: String) -> (address: String, link: URL?)? {
+        var parts = written.components(separatedBy: columnSeparators)
+            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "\"'")) }
+            .filter { !$0.isEmpty }
+        guard parts.count >= 2 else { return nil }
+        var link: URL?
+        if let last = parts.last, looksLikeLink(last), let url = ProxyIPChange.link(from: last) {
+            link = url
+            parts.removeLast()
+        }
+        var scheme = ""
+        if let first = parts.first, parts.count > 1, let word = kindWords[first.lowercased()] {
+            scheme = word + "://"
+            parts.removeFirst()
+        } else if let last = parts.last, parts.count > 1, let word = kindWords[last.lowercased()] {
+            scheme = word + "://"
+            parts.removeLast()
+        }
+        guard !parts.isEmpty, parts.count <= 4 else { return nil }
+        // Two columns that are each a proxy's whole address: two proxies.
+        let whole = parts.filter { part in
+            guard case .success(let field) = ProxyHostField.read(part), field.port != nil else { return false }
+            return ProxyHostField.isPlausibleHost(field.host)
+        }
+        guard whole.count < 2 else { return nil }
+        let joined = parts.joined(separator: ":")
+        let pieces = joined.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+        if pieces.count == 4, ProxySettings.isIPv4(pieces[0]), ProxySettings.isIPv4(pieces[2]) { return nil }
+        return (scheme + joined, link)
+    }
+
+    /// An http(s) address with a path or a query: what an IP-change link is, and what a proxy's
+    /// own address (`http://1.2.3.4:8080`) is not.
+    private static func looksLikeLink(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        guard lower.hasPrefix("http://") || lower.hasPrefix("https://"), let components = URLComponents(string: text) else {
+            return false
+        }
+        return components.path.count > 1 || components.query != nil
     }
 
     /// Whitespace, control characters and the invisible ones copied with text (BOM, zero-width).

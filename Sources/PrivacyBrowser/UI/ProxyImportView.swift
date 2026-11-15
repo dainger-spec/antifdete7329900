@@ -3,7 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// Adds proxies to the list from pasted text (or a text file), one per line, in the forms
-/// providers hand them out (`ProxyListImport`). What was read is shown as it is typed: how many
+/// providers hand them out and as rows copied from a table (`ProxyListImport`). What was read is shown as it is typed: how many
 /// proxies, and every line that could not be read with its number and why — before anything is
 /// added, as the cookie import shows its report.
 struct ProxyImportView: View {
@@ -118,6 +118,7 @@ struct ProxyImportView: View {
         1.2.3.4:1080:user:password
         user:password@proxy.example.com:3128
         socks5://user:password@1.2.3.4:1080  # Berlin 1
+        socks5 1.2.3.4 1080 user password
         """
 
     // MARK: Report

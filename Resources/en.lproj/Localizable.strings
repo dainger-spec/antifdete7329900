@@ -1050,7 +1050,7 @@
 "proxies.status.invalid" = "Invalid settings";
 "proxies.latency" = "%ld ms";
 "proxies.import.title" = "Import Proxies";
-"proxies.import.explanation" = "One proxy per line: host:port, host:port:user:password, user:password@host:port or scheme://user:password@host:port (socks5, http, https). Text after “ #” becomes the proxy's name.";
+"proxies.import.explanation" = "One proxy per line: host:port, host:port:user:password, user:password@host:port or scheme://user:password@host:port (socks5, http, https). A row copied from a table is read too: its parts separated by tabs, spaces, “;” or “,”. Text after “ #” becomes the proxy's name.";
 "proxies.import.kind" = "Type of lines without a scheme";
 "proxies.import.chooseFile" = "From File…";
 "proxies.import.add" = "Add Proxies: %ld";
@@ -1066,7 +1066,7 @@
 "proxies.reason.missingPort" = "No port: a proxy is a host and a port, such as 1.2.3.4:1080";
 "proxies.reason.duplicate" = "The same proxy as on line %ld";
 "proxies.reason.tooMany" = "No more than %ld proxies are read at once; the lines from here on were skipped";
-"proxies.reason.whitespace" = "Spaces inside the address: one proxy per line, without spaces";
+"proxies.reason.whitespace" = "Not read as one proxy. One proxy per line; when its parts are separated by spaces or tabs, they go host, port, user name, password";
 "proxies.reason.scheme" = "The scheme “%@” is not supported (use socks5, http or https)";
 "proxies.reason.path" = "A proxy address has no path after its port";
 "proxies.reason.emptyUser" = "Empty user name before “@”";
