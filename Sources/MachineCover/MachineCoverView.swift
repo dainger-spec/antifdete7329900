@@ -169,6 +169,7 @@ private final class HorizonLayers {
 ///
 /// The light moves on the GPU: the picture and its layers are images made once per size, and a
 /// frame changes only their opacity and the glint's turn.
+@MainActor
 public struct MachineCoverView: View {
     @ObservedObject private var model: MachineCoverModel
     private let reducesMotion: Bool
