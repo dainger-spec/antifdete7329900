@@ -261,7 +261,8 @@ a client (Selenium) ── http://127.0.0.1:<port>/wd/<profile's token>/<profile
                                            message = "webdriver:" + the profile's UUID, upper case)
   ```
 
-  (`WebDriverRoute.token`; `scripts/pbctl webdriver <profile>` prints the address). Under `/wd/`
+  (`WebDriverRoute.token`; `scripts/pbctl webdriver <profile>`, a developer script of this source
+  repository that the app does not ship, prints the address). Under `/wd/`
   only that profile's token is taken, for that profile alone — not the API's token, not another
   profile's; under `/v1/` only the API's. So an address given to a script, or left in its logs,
   drives that one profile and nothing else of the API. Renewing the API's token changes every
