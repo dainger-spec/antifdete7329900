@@ -125,6 +125,26 @@ extension AppModel {
             await deleteProfile(id)
         }
     }
+
+    /// Adds tags to, and removes tags from, each of `ids` — the selection's "Tags…"
+    /// (`ProfileRepository.changeTags`): saved as an edit of each profile, synced like one. Says,
+    /// once, which profiles could not be changed (their settings do not read: they are left as they
+    /// are), and how many had no room for every tag.
+    @discardableResult
+    func changeTags(of ids: [UUID], adding: [String], removing: [String]) -> TagChangeOutcome? {
+        guard let repository else { return nil }
+        let outcome = repository.changeTags(of: ids, adding: adding, removing: removing)
+        let failed = ids.filter { outcome.failed[$0] != nil }
+        if let first = failed.first {
+            let names = failed.map { id in profiles.first { $0.id == id }?.name ?? id.uuidString }
+            showError(String(format: L("profiles.tags.failed"), ProfileListView.listed(names), outcome.failed[first] ?? ""))
+        }
+        if !outcome.full.isEmpty {
+            showError(String(format: L("profiles.tags.full"), outcome.full.count, ProfileTags.maximumCount))
+        }
+        if !outcome.changed.isEmpty { refresh() }
+        return outcome
+    }
 }
 
 /// A profile that was started with a proxy that does not work, and how it does not

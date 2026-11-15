@@ -258,6 +258,13 @@ enum UISnapshots {
         problems += await Shot(name: "profiles-proxied", size: CGSize(width: 1180, height: 560), edges: true) {
             ProfilesPreview(rows: rows, filter: .proxied, sync: .failed)
         }.capture(into: folder)
+        // Tags for a selection (the bar's "Tags…"): one to add, one of theirs marked to be removed.
+        let tagged = [rows[1], rows[3], rows[6], rows[8]].map { ProfileTagsPanel.Profile(name: $0.name, tags: $0.tags) }
+        problems += await Shot(name: "sheet-profile-tags", size: CGSize(width: 520, height: 400), titled: false) {
+            ProfileTagsPanel(profiles: tagged, knownTags: ["ads", "clients", "DE", "mobile", "NL", "Q4 campaign", "warm-up"],
+                             added: ["Q4 campaign"], removing: ["warm-up"])
+                .environment(\.tagColors, sampleTagColors)
+        }.capture(into: folder)
         // The inspector: one profile (Northwind), one whose settings cannot be read (R1: said there
         // too, and it does not start), several, and over the list in a window too narrow for both.
         let northwind = rows[1].id

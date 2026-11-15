@@ -181,6 +181,8 @@ struct ProfileListView: View {
     @State private var section: ProfilesSection = .profiles
     @State private var proxySelection: Set<UUID> = []
     @State private var assigningProxies: ProxyAssignView.Request?
+    /// The selection whose tags are being changed (`ProfileTagsView`).
+    @State private var tagging: ProfileTagsView.Request?
     /// Profiles of the selection waiting for the one confirmation that deletes them all.
     @State private var pendingBulkDelete: [UUID] = []
     /// The inspector at the window's right, as the person left it.
@@ -278,6 +280,7 @@ struct ProfileListView: View {
                 showProxies(selecting: [])
             }
             .sheet(item: $assigningProxies) { request in ProxyAssignView(request: request) }
+            .sheet(item: $tagging) { request in ProfileTagsView(request: request).environment(\.tagColors, model.tagColors) }
             // ⌘K.
             .sheet(isPresented: $model.showingPalette) {
                 CommandPaletteView(commands: paletteCommands, onClose: { model.showingPalette = false })
@@ -622,6 +625,7 @@ struct ProfileListView: View {
             warmUpSeveral: { ids in warmUpSeveral(ids) },
             assignProxies: { ids in assigningProxies = ProxyAssignView.Request(profileIDs: Set(ids), proxyIDs: []) },
             deleteSeveral: { ids in pendingBulkDelete = ids },
+            tagSeveral: { ids in tagging = ProfileTagsView.Request(profileIDs: ids) },
             setTagColor: { tag, color in model.setTagColor(color, for: tag) },
             openPalette: { model.showingPalette = true },
             openScenarios: { openWindow(id: "scenarios") },
@@ -858,6 +862,8 @@ struct ProfileActions {
     var assignProxies: ([UUID]) -> Void = { _ in }
     /// Asks once, naming how many, before deleting.
     var deleteSeveral: ([UUID]) -> Void = { _ in }
+    /// Tags added to and removed from all of them (`ProfileTagsView`).
+    var tagSeveral: ([UUID]) -> Void = { _ in }
     /// A tag's colour for the whole vault (`TagColors`); nil takes it away.
     var setTagColor: (String, Int?) -> Void = { _, _ in }
     /// The sidebar's own rows (the owner, 10 November: in the interface, not behind a menu): the
@@ -1393,7 +1399,9 @@ struct ProfilesScreen: View {
 
     private func groupView(_ kind: GroupKind, _ rows: [ProfileRowItem], _ columns: ProfileColumns,
                            showsCaption: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // Found once for the group, not for each of its rows.
+        let selected = selectedRows
+        return VStack(alignment: .leading, spacing: 0) {
             if showsCaption {
                 HStack(spacing: 8) {
                     Text(groupTitle(kind)).lumenCaps(kind == .attention ? Theme.danger : Theme.textTertiary)
@@ -1410,8 +1418,10 @@ struct ProfilesScreen: View {
             }
             ForEach(rows) { row in
                 ProfileRow(row: row, columns: columns, actions: actions, isSelected: selection.contains(row.id),
-                           showsCheckbox: selectedRows.count >= 2, height: appearance.density.rowHeight,
+                           showsCheckbox: selected.count >= 2, height: appearance.density.rowHeight,
                            countryBackdrop: appearance.countryBackdrop,
+                           // One of several selected: its context menu is the selection's.
+                           selection: selected.count >= 2 && selection.contains(row.id) ? selected : [],
                            onClick: { click in selection.click(row.id, click, order: displayOrder.map(\.id)) },
                            // A double click is what a person opens a thing with: the profile is
                            // launched, and stays the chosen one.
@@ -1786,6 +1796,10 @@ private struct ProfileRow: View {
     var height: CGFloat = 52
     /// Settings › Appearance: the exit country's flag fading behind the row (`CountryBackdrop`).
     var countryBackdrop = false
+    /// The selected rows, when this row is one of several: a right click on it then offers what
+    /// can be done to all of them (`SelectionMenuItems`), as the Finder does — not this row's own
+    /// menu, which would act on one profile while thirty are selected.
+    var selection: [ProfileRowItem] = []
     /// A click on the row itself (not on its buttons or menu): selects it (`ProfileSelection`).
     var onClick: (ProfileSelection.Click) -> Void = { _ in }
     var onDoubleClick: () -> Void = {}
@@ -1832,7 +1846,13 @@ private struct ProfileRow: View {
         .onHover { hovered = $0 }
         .animation(Motion.hover(hovered), value: hovered)
         .opacity(row.activity == .sealing ? 0.6 : 1)
-        .contextMenu { ProfileMenuItems(row: row, actions: actions) }
+        .contextMenu {
+            if selection.count >= 2 {
+                SelectionMenuItems(rows: selection, actions: actions)
+            } else {
+                ProfileMenuItems(row: row, actions: actions)
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(row.name))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -2087,6 +2107,35 @@ private struct ProfileMenuItems: View {
         Button(L("profiles.row.export")) { actions.exportProfile(row.id) }
         Divider()
         Button(L("profiles.row.delete"), role: .destructive) { actions.delete(row.id) }
+    }
+}
+
+/// The context menu of a row that is one of several selected: what the selection's bar does, for
+/// all of them — launch the stopped ones, stop the running ones, warm them up, give them proxies,
+/// change their tags, delete them (asked once, naming how many).
+private struct SelectionMenuItems: View {
+    let rows: [ProfileRowItem]
+    let actions: ProfileActions
+
+    var body: some View {
+        let ids = rows.map(\.id)
+        // Settings that cannot be read do not start (R1): not counted among those to launch.
+        let stopped = rows.filter { $0.activity == .stopped && $0.exit != .unreadable }.map(\.id)
+        let running = rows.filter(\.isRunning).map(\.id)
+        Button(stopped.isEmpty ? L("profiles.bulk.launch") : String(format: L("inspector.launchSome"), stopped.count)) {
+            actions.launchSeveral(stopped)
+        }
+        .disabled(stopped.isEmpty)
+        Button(running.isEmpty ? L("profiles.bulk.stop") : String(format: L("inspector.stopSome"), running.count)) {
+            actions.stopSeveral(running)
+        }
+        .disabled(running.isEmpty)
+        Divider()
+        Button(L("profiles.bulk.warmUp")) { actions.warmUpSeveral(ids) }
+        Button(L("profiles.bulk.assignProxy")) { actions.assignProxies(ids) }
+        Button(L("profiles.bulk.tags")) { actions.tagSeveral(ids) }
+        Divider()
+        Button(String(format: L("profiles.selection.delete"), rows.count), role: .destructive) { actions.deleteSeveral(ids) }
     }
 }
 
