@@ -350,7 +350,8 @@ CI (`.github/workflows/ci.yml`) runs on every push:
      the current one or after the last; ask before closing a window of several tabs; page zoom of
      new tabs; in a build without the App Sandbox, each profile its own app in the Dock (its own
      process and Safari's window) and how many letters of its name its Dock icon shows. In a
-     profile shown in Safari's own window, tabs, zoom and downloads follow Safari's settings.
+     profile shown in Safari's own window, where a new tab opens and the page zoom are Safari's own;
+     Restore tabs and Downloads apply there too.
    - **Proxies:** the list; checks only on request; a profile whose proxy does not work either
      starts and says why (the default) or is not started at all — its proxy is asked first. Either
      way nothing goes around the proxy.

@@ -132,7 +132,7 @@ Background tabs keep running. WebKit may throttle timers in views that aren't in
 |---|---|---|
 | WebKit networking process | WebKit runs one network process per app, with one session per data store inside it | Isolation is per session (logical), not per OS process |
 | Device fingerprint | see §2 | Profiles can be linked by fingerprinting |
-| Downloads folder | Downloads go to `~/Downloads` in plaintext — or the folder Settings → Downloads names, or where the save panel is told (asking each time: also for a download of a background tab or a minimised window, whose tab and window are brought up for the panel; until the third audit, 14 November 2026, those went to the folder unasked) | Outside the encrypted storage |
+| Downloads folder | Downloads go to `~/Downloads` in plaintext — or the folder Settings → Downloads names, or where the save panel is told (asking each time: also for a download of a background tab or a minimised window, whose tab and window are brought up for the panel; until the third audit, 14 November 2026, those went to the folder unasked). In Safari's window the same, since 15 November (`HostedDownloads`; before, a download there did nothing): taken at WebKit's own download interface, never by Safari's download code, whose services a profile is refused. What is a download is decided as Safari decides it — a response the engine cannot show, one sent as an attachment, a link with `download` — but Safari's once-per-site question whether a site may download is not asked, as it never was in a window of ours. View › Show Downloads (⌥⌘L) lists the run's files with where each went and how it ended, and the profile's Dock icon counts those ended since the list was looked at; no file is opened or shown in the Finder from a profile's process | Outside the encrypted storage |
 
 ## 2. Fingerprinting and "Apple device" consistency
 
@@ -1754,13 +1754,25 @@ is out of scope either way (above).
   addresses a profile left open (`tabs.bin`, encrypted with the profile's key, never synced or
   exported) and opens them at its next start: never for an ephemeral profile or one that keeps no
   history, and turning it off forgets them at the profile's next stop. What a file holds is
-  filtered again when read: only web addresses are ever opened from it.
+  filtered again when read: only web addresses are ever opened from it. In Safari's window too,
+  since 15 November (`SafariTabs`; before, the setting did nothing there and every Mac profile
+  started on its start page): Safari's own way back to a session is its saved window state, which
+  a profile's window does not have, so the tabs are read from Safari's windows as they stand —
+  every few seconds while the person is in them, as a window closes and as the profile stops —
+  and opened again by Safari's own File › New Tab at End and the tab's `loadURL:`, the tab that
+  was shown brought in front with Window › Show Next/Previous Tab. Kept there: the pages of the
+  person's windows, in order, and the tab shown. Not kept: a pinned tab's pin, tab groups other
+  than the one shown, a window opened for a scenario's run or a WebDriver session, and a tab left
+  on an address that became a download. Windows that held no page at the end leave nothing open.
+  Should this Safari's tabs not tell their pages (the names are private), each window is kept as
+  the one page in front of it; should it make no tab our way, what was kept stays as it was.
 - **Settings** are this Mac's, in the app's defaults (per key; nothing secret in them — a chosen
   download folder is its path, and in the App Sandbox a bookmark to it). A profile in its own
   process gets the browsing ones over its channel when it starts and whenever they change
   (`ProfileCommand.preferences`), the download folder written out as a path, since that
-  process's home is the profile's own. In Safari's own window, tabs, zoom and downloads follow
-  Safari's settings instead.
+  process's home is the profile's own. In Safari's own window, where a new tab opens and the
+  page zoom are Safari's own; the download folder, asking each time and Restore tabs apply there
+  as in a window of ours.
 
 **Crash fix.** Earlier builds released a browser window's controller from inside
 `windowWillClose`. That could free the `NSWindow` while AppKit was still closing it (a
