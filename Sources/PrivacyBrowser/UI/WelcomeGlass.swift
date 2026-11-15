@@ -244,6 +244,8 @@ final class WelcomeGlassCanvas {
     private var blurs: [Int: MPSImageGaussianBlur] = [:]
     /// The masks hold the whole greeting already (nothing to draw again while it settles).
     private var whole = false
+    /// The last frame's commands, until the GPU is done with them.
+    private var inFlight: MTLCommandBuffer?
 
     init(renderer: WelcomeGlassRenderer) {
         self.renderer = renderer
@@ -251,6 +253,8 @@ final class WelcomeGlassCanvas {
 
     /// Lets go of every texture (the screen has opened).
     func release() {
+        inFlight?.waitUntilCompleted()
+        inFlight = nil
         maskContext = nil
         lineContext = nil
         mask = nil; soft = nil; sharp = nil; glow = nil
@@ -263,8 +267,15 @@ final class WelcomeGlassCanvas {
 
     /// Draws `frame` into the layer's next drawable.
     func draw(_ frame: WelcomeGlassFrame, into layer: CAMetalLayer) {
+        // The masks are written by the CPU: not while the GPU may still read the last frame's.
+        inFlight?.waitUntilCompleted()
         guard let buffer = renderer.queue.makeCommandBuffer(), prepare(frame, buffer) else { return }
-        guard let drawable = layer.nextDrawable() else { return }
+        inFlight = buffer
+        guard let drawable = layer.nextDrawable() else {
+            // The blurs are encoded: they run all the same, for the next frame.
+            buffer.commit()
+            return
+        }
         encode(frame, into: drawable.texture, buffer)
         buffer.present(drawable)
         buffer.commit()
