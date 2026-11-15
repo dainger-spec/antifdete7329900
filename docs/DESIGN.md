@@ -74,6 +74,24 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
   when it takes effect, control at the right), `SettingCustomRow` (more than a sentence under the
   title). No section is the system's form: Sync, WebRTC and Automation are pages of rows, and the
   sheets that open them from the Profiles window show the same rows (`embedded`).
+- Launch screen (`WelcomeSplash.swift`, `WelcomeGlass.swift`; when: `App/WelcomeLaunch.swift`,
+  BrowserCore's `WelcomeSplashPolicy`): before the first screen or the lock screen, in the same
+  window, at the first launch and at each start after a full quit — never for a profile's process,
+  the self-test, the snapshots, CI's runs or the app's own restarts (Settings › Language, an
+  update's installer), nor for a window opened again; off with Settings → Appearance → Greeting at
+  launch. The greeting is Pacifico's own outline (`design/fonts/Pacifico`, SIL OFL 1.1; the licence
+  ships in `Resources/ThirdPartyNotices.txt`), revealed by a pen moving along its letters in
+  1.8–2.4 s, in clear glass lit by the eclipse's horizon (`LumenHorizon`, the virtual machines'
+  desktop's): a Metal shader compiled from source as the app starts, Core Graphics masks blurred by
+  Metal Performance Shaders, four samples a pixel; where Metal is missing, the outline drawn in
+  SwiftUI. Then one light along the greeting, "LUMEN"; the first launch's "Get started", or a
+  0.9 s hold; then the opening (0.6 s: the screen eases up 30 pt and fades, the window's content
+  scales in from 98 % over it). Any click or key goes on at once. The greeting is in the
+  interface's language the first time, then the next of twelve languages each start.
+  `design/tools/welcome_lettering.py` makes the outlines, the pen's way (from the outline's skeleton)
+  and its pace for the app (`WelcomeLettering.swift`) and the prototype the owner approved
+  (`design/prototypes/welcome.html`, the same shader in WebGL; `design/tools/record_welcome.mjs`
+  records it).
 - Lock and first launch (`VaultViews.swift`): `LockBackdrop`, `LockScreen`, `LockPasswordField` (one
   field per screen takes the cursor: `takesFocus`), the master password's facts first and large,
   `PasswordRequirement`. Changing the master password uses the same fields and requirements.

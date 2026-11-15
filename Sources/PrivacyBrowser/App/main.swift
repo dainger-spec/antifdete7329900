@@ -231,6 +231,9 @@ MainActor.assumeIsolated {
         // English); set before AppKit builds its menus.
         Localization.applyProcessLanguage()
         SimplifiedModeNotice.presentsAutomatically = true
+        // The app as a person opens it: the one start that may show the launch screen
+        // (WelcomeLaunch) — not CI's Settings window check, which runs this same branch.
+        WelcomeLaunch.interactiveStart = !arguments.contains("--settings-window-check")
         PrivacyBrowserApp.main()
     }
 }

@@ -3,8 +3,8 @@ import SwiftUI
 // MARK: - Appearance
 
 /// Settings → Appearance (the design's, new): the light at entry with a miniature of the lock
-/// screen, the profile list's density, the interface's animations. Only the app's own windows:
-/// pages follow macOS, as in Safari.
+/// screen, the greeting at launch, the profile list's density, the interface's animations. Only
+/// the app's own windows: pages follow macOS, as in Safari.
 struct AppearanceSettings: View {
     @ObservedObject private var appearance = AppearancePreferences.shared
 
@@ -15,6 +15,9 @@ struct AppearanceSettings: View {
                 .padding(.bottom, 18)
             SettingRow(L("settings.appearance.light"), detail: L("settings.appearance.light.detail"), effect: .now) {
                 SettingSwitch(isOn: $appearance.entryLight, label: L("settings.appearance.light"))
+            }
+            SettingRow(L("settings.appearance.welcome"), detail: L("settings.appearance.welcome.detail"), effect: .appStart) {
+                SettingSwitch(isOn: $appearance.welcome, label: L("settings.appearance.welcome"))
             }
             SettingsCaption(L("settings.appearance.listAndMotion"))
             SettingRow(L("settings.appearance.density"), detail: L("settings.appearance.density.detail"), effect: .now) {
