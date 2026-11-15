@@ -38,7 +38,9 @@ Sync through the account:
   `sync_not_in_plan` (an iPhone's, said if a Mac ever gets it), `429`. `507 quota_exceeded` and
   `413 too_large` are about one object: it waits (`SyncReport.deferredOverQuota`,
   `deferredTooLarge`), the rest syncs, and the status says the plan's space is full, with the
-  account page a click away.
+  account page a click away; or, for one too large, which profile's settings or files wait
+  (`SyncReport.tooLargeByProfile`) and why — the settings hold the camera's image and video, and
+  a smaller video makes them sync (below).
 - **`409 generation_changed`** stops the run with nothing more written and nothing said; the app
   runs again at once, once, and that run starts over (below).
 
@@ -259,7 +261,13 @@ place.
 A lost CAS race leaves the object in `report.deferred`; the next sync retries it. So does a write
 the server refuses for that object alone — `413` (too large) or `507` (no room left in the plan's
 sync space): the object waits (`report.deferredTooLarge`, `report.deferredOverQuota`) and the run
-goes on with the rest.
+goes on with the rest. The Lumen server takes 16 MiB an object. A profile's settings (`config.bin`)
+hold its camera's image and video, whose bytes the object carries about 2.48 times over (base64 in
+the settings' JSON, in the payload and in the envelope, each 4/3, and a `\/` for one character in
+64): the editor keeps the two together within `CameraSubstitution.maxMediaBytes` (6 MiB, a 14.9 MiB
+object). A profile saved before with more — a video of up to 12 MiB was taken — keeps working on
+its Mac, and its settings wait at every sync; the app names the profile and says to choose a
+smaller video.
 
 A profile file this device cannot open — damaged, cut short, under another key — is handled before
 any of the above, and never pushed: it once was, over the server's good copy of the settings, which

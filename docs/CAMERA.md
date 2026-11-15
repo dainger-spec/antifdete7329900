@@ -52,7 +52,16 @@ not `.off`, so a profile that never used it is stored as before (`ProfileConfigu
   copies' cameras under one id.
 - **imageData / videoData** — the chosen media's bytes. The app reads the file (the editor's file
   picker) and keeps the bytes; the profile's pages never touch the disk, and no file path is stored
-  or logged. Capped (an image at 4 MB, a video at 12 MB) because they travel with the profile.
+  or logged. Both are kept in the profile's settings, whichever is the source, and synced with
+  them as one object, which the Lumen server takes up to 16 MiB; on the way the bytes are written
+  as base64 three times (×2.48). So the editor takes an image of up to 4 MB, and the image and the
+  video together of up to about 6 MB (`CameraSubstitution.maxMediaBytes`, `mediaFitsSync`: their
+  size in the settings' JSON, so an uncompressed image counts for up to twice its size); a larger
+  file is refused with the limits. Until the fourth audit (15 November 2026) a video of up to
+  12 MB was taken, and the profile's settings were then refused at every sync, under a message that
+  named no profile. Such a profile keeps working (12 MB stays what a stored profile is held to):
+  the editor says its settings do not sync, and Sync Now names it and says to choose a smaller
+  video.
 
 ## The shim — `PrivacyScripts.patchCamera`
 

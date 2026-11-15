@@ -35,6 +35,7 @@ final class GenerationStubServer: URLProtocol {
         var holdUntil: Date?
         var beforePut: ((Int) -> Void)?
         var writeCount = 0
+        var maxObjectBytes: Int?
     }
 
     static let host = "gen.test"
@@ -73,6 +74,12 @@ final class GenerationStubServer: URLProtocol {
         get { state.writeCount }
         set { state.writeCount = newValue }
     }
+    /// Writes of more bytes than this are refused `413 too_large`, as the Lumen server refuses what is
+    /// over `LUMEN_SYNC_MAX_OBJECT_MB` (16 MiB). Nil: any size.
+    static var maxObjectBytes: Int? {
+        get { state.maxObjectBytes }
+        set { state.maxObjectBytes = newValue }
+    }
 
     static func reset() {
         lock.lock(); defer { lock.unlock() }
@@ -83,6 +90,7 @@ final class GenerationStubServer: URLProtocol {
         holdUntil = nil
         beforePut = nil
         writeCount = 0
+        maxObjectBytes = nil
     }
 
     static func newGeneration() -> String { UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased() }
@@ -189,12 +197,15 @@ final class GenerationStubServer: URLProtocol {
         case ("PUT", 5):
             writeCount += 1
             beforePut?(writeCount)
+            // Read once: a body that came as a stream is not there a second time.
+            let sent = body(of: request)
             let now = vaults[vaultID]
             let current = now?.generation ?? "none"
             let id = parts[4]
             if let status = refused[id] {
                 return status == 413 ? refusal(413, "too_large") : refusal(507, "quota_exceeded", headers: said(current))
             }
+            if let maxObjectBytes, sent.count > maxObjectBytes { return refusal(413, "too_large") }
             if knowsGenerations, let named, named != current {
                 return refusal(409, "generation_changed", headers: said(current))
             }
@@ -213,7 +224,7 @@ final class GenerationStubServer: URLProtocol {
             guard let revision = request.value(forHTTPHeaderField: HTTPSyncTransport.revisionHeader).flatMap(Int.init),
                   revision > (existing ?? 0) else { return refusal(400, "bad_revision", headers: said(current)) }
             var updated = now ?? Vault(generation: newGeneration(), objects: [:])
-            updated.objects[id] = (revision, body(of: request))
+            updated.objects[id] = (revision, sent)
             vaults[vaultID] = updated
             var headers = said(updated.generation)
             headers["ETag"] = "\"\(revision)\""
@@ -626,6 +637,8 @@ final class ServerGenerationTests: XCTestCase {
         let report = try await sync(a)
         XCTAssertEqual(report.deferredOverQuota, ["profile/\(one.uuidString)/bookmarks"])
         XCTAssertEqual(report.deferredTooLarge, ["profile/\(one.uuidString)/history"])
+        XCTAssertEqual(report.tooLargeByProfile.map(\.profileID), [one], "the app names the profile")
+        XCTAssertEqual(report.tooLargeByProfile.first?.files, ["history.bin"])
         XCTAssertTrue(report.deferred.contains("profile/\(one.uuidString)/bookmarks"))
         XCTAssertTrue(report.pushed.contains("profile/\(two.uuidString)/bookmarks"), "the rest went on: \(report.pushed)")
         XCTAssertTrue(report.pushed.contains("profile/\(two.uuidString)/config"))
@@ -636,6 +649,52 @@ final class ServerGenerationTests: XCTestCase {
         XCTAssertTrue(next.pushed.contains("profile/\(one.uuidString)/bookmarks"), "\(next.pushed)")
         XCTAssertTrue(next.pushed.contains("profile/\(one.uuidString)/history"), "\(next.pushed)")
         XCTAssertTrue(next.deferredOverQuota.isEmpty)
+    }
+
+    /// The camera's image and video are in the profile's settings, which sync as one object, and the
+    /// Lumen server takes 16 MiB an object: media within `CameraSubstitution.maxMediaBytes` keep the
+    /// settings under it, as the server gets them; more (a video of up to 12 MiB was taken before)
+    /// made settings that were refused at every sync. The report names that profile and its settings,
+    /// which stay as they are on this Mac.
+    func testCameraMediaWithinTheLimitSyncAndSettingsTooLargeAreNamed() async throws {
+        GenerationStubServer.maxObjectBytes = 16 << 20
+        func media(_ count: Int) -> Data {
+            // Compressed media's bytes look random; so do these.
+            var generator = SystemRandomNumberGenerator()
+            var data = Data(capacity: count + 8)
+            while data.count < count {
+                var word = generator.next()
+                withUnsafeBytes(of: &word) { data.append(contentsOf: $0) }
+            }
+            return data.prefix(count)
+        }
+        func camera(video: Int) -> CameraSubstitution {
+            CameraSubstitution(mode: .substitute, source: .video, deviceSecret: CameraSubstitution.newDeviceSecret(),
+                               videoData: media(video), videoType: "video/mp4")
+        }
+        let a = try newVault("A")
+        let fits = try a.create(name: "Fits", configuration: ProfileConfiguration(cameraSubstitution: camera(video: CameraSubstitution.maxMediaBytes))).id
+        let large = try a.create(name: "Large", configuration: ProfileConfiguration(cameraSubstitution: camera(video: 7 << 20))).id
+        XCTAssertTrue(try a.loadConfiguration(fits).cameraSubstitution.mediaFitsSync)
+        XCTAssertFalse(try a.loadConfiguration(large).cameraSubstitution.mediaFitsSync, "what the editor now refuses")
+        // An image and a video are kept together: the two count as one.
+        var both = try a.loadConfiguration(fits).cameraSubstitution
+        both.imageData = media(1 << 20)
+        XCTAssertFalse(both.mediaFitsSync)
+        // An uncompressed image with long runs of white takes up to twice its size in the settings.
+        XCTAssertFalse(CameraSubstitution(mode: .substitute, source: .image, imageData: Data(repeating: 0xFF, count: 4 << 20),
+                                          imageType: "image/bmp").mediaFitsSync)
+
+        let report = try await sync(a)
+        XCTAssertTrue(report.pushed.contains("profile/\(fits.uuidString)/config"), "\(report.pushed)")
+        XCTAssertEqual(report.deferredTooLarge, ["profile/\(large.uuidString)/config"])
+        XCTAssertEqual(report.tooLargeByProfile.map(\.profileID), [large])
+        XCTAssertEqual(report.tooLargeByProfile.first?.files, ["config.bin"])
+        XCTAssertEqual(try a.loadConfiguration(large).cameraSubstitution.videoData?.count, 7 << 20, "kept here as it was")
+        let object = try objectID(a, "profile/\(fits.uuidString)/config")
+        let size = try XCTUnwrap(GenerationStubServer.blob(vault: a.vault.vaultID, object: object)).count
+        XCTAssertLessThan(size, 16 << 20)
+        XCTAssertGreaterThan(size, 14 << 20, "about 2.5 times the media, as computed")
     }
 
     /// The tokens of the synced profiles are read from the state with a generation kept (format 2).

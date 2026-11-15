@@ -41,6 +41,23 @@ public struct SyncReport: Equatable, Sendable {
     /// the run went on with the rest (the Lumen server's CONTRACT §16.1).
     public var deferredOverQuota: [String] = []
     public var deferredTooLarge: [String] = []
+
+    /// The profiles whose files the server refused for their size (`deferredTooLarge`), each with the
+    /// names of those files as in its folder (`config.bin`: its settings, which hold the camera's
+    /// image and video), in the order refused — what the app names to the person. What is no
+    /// profile's file (the index, the tags' colours) is not here.
+    public var tooLargeByProfile: [(profileID: UUID, files: [String])] {
+        var order: [UUID] = []
+        var files: [UUID: [String]] = [:]
+        for name in deferredTooLarge {
+            let parts = name.split(separator: "/", omittingEmptySubsequences: false)
+            guard parts.count == 3, parts[0] == "profile", let id = UUID(uuidString: String(parts[1])),
+                  let file = ProfileSyncFile(rawValue: String(parts[2])) else { continue }
+            if files[id] == nil { order.append(id) }
+            files[id, default: []].append(file.rawValue + ".bin")
+        }
+        return order.map { (profileID: $0, files: files[$0] ?? []) }
+    }
     /// This run forgot what the device last synced before comparing anything: the sync location's
     /// data is not what those records describe — they are another place's (another folder or server,
     /// the account after a folder, a folder after the account), the server's generation is another

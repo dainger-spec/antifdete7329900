@@ -246,7 +246,7 @@
 "editor.camera.source.bars" = "Test pattern";
 "editor.camera.source.image" = "Image";
 "editor.camera.source.video" = "Video";
-"editor.camera.video.note" = "The video loops. It is kept with the profile and synced, so keep it short.";
+"editor.camera.video.note" = "The video loops. It is kept in the profile's settings and synced with them, so keep it short: the image and the video together may take about %d MB.";
 "editor.camera.color" = "Colour";
 "editor.camera.width" = "Width";
 "editor.camera.height" = "Height";
@@ -274,7 +274,8 @@
 "editor.camera.media.none" = "No file chosen";
 "editor.camera.media.stored" = "chosen file";
 "editor.camera.error.numbers" = "The camera's width, height and frame rate must be whole numbers.";
-"editor.camera.error.tooLarge" = "That file is larger than %d MB.";
+"editor.camera.error.tooLarge" = "That file is too large. The camera's image and video are kept in the profile's settings and synced with them (both, whichever is the source), so an image may take up to %1$d MB, and the image and the video together about %2$d MB. Choose a smaller file, or remove the other one under its source.";
+"editor.camera.media.tooLargeToSync" = "This camera's image and video together take more than the %d MB that sync takes: the camera works here as before, but the profile's settings do not sync until you choose a smaller video or image (or remove one).";
 "editor.camera.error.read" = "Could not read %@.";
 
 /* Camera: adjustments, crop, playback */
@@ -1981,6 +1982,10 @@
 "sync.account.rateLimited" = "Too many sync requests to the Lumen server: try again later.";
 "sync.account.overQuota" = "The plan's sync space is full: changes that need more space are not synced. How much is used is on your account page.";
 "sync.account.tooLarge" = "An object is too large to sync: it waits, and the rest was synced.";
+"sync.tooLarge.settings" = "Too large to sync: the settings of %1$@. They hold the profile's camera image and video, which make them larger than the sync server takes. They wait on this Mac, where the profile works as before; the rest was synced. To sync them, choose a smaller video or image in the profile's Camera settings (about %2$d MB for the two together).";
+"sync.tooLarge.files" = "Too large to sync: %1$@ of the profile “%2$@”, larger than the sync server takes. They wait on this Mac; the rest was synced.";
+"sync.tooLarge.name" = "“%@”";
+"sync.tooLarge.more" = "and %ld more";
 "sync.account.openPage" = "Open Account Page";
 "sync.status.overQuota" = "%ld waiting for space";
 "sync.status.tooLarge" = "%ld too large";
@@ -2224,7 +2229,7 @@
 "help.camera.know.safari" = "It works in the real Safari window as well as the app's own.";
 "help.camera.know.detect" = "The frames are drawn, not from a sensor: a check that looks for a live camera can still tell.";
 "help.camera.know.permission" = "A page still asks you for the camera the first time, as before.";
-"help.camera.know.size" = "An image or video is kept with the profile and synced, so keep it small.";
+"help.camera.know.size" = "An image or video is kept in the profile's settings and synced with them, so it is kept small: an image up to 4 MB, the image and the video together about 6 MB; a larger file is refused. A profile that holds more from an earlier version works as before, but its settings do not sync until you choose a smaller video or image.";
 "help.camera.know.system" = "Delivery: the JavaScript shim draws the frames, or the system camera (if installed) feeds them through macOS, so a page cannot tell it from the built-in camera.";
 "help.camera.know.systemInstall" = "The system camera is installed once: Camera → System camera → Install…, then switch on “Media extension” for Lumen in System Settings → General → Login Items & Extensions. Until it is on, a profile set to it gets no camera and cannot be saved with it; after an app update Lumen replaces it by itself.";
 "help.topic.warmUp" = "Warm-Up";
