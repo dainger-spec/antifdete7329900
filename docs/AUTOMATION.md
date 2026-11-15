@@ -164,17 +164,88 @@ an empty password.
 - A profile the person deletes takes its values with it (`AppModel.deleteProfile`). The run's log
   never holds a value: typing is logged by its length.
 
-Where a person finds it (the owner, 10 November: behind File › Scenarios alone it was hidden, and what
-a scenario may say was in this file only): the Profiles window's sidebar has Scenarios, Automation
-API and Help beside Profiles and Proxies, and "Commands and Search" (⌘K) above them; the editor's
-Commands button, the automation settings and Help › Lumen Help (⌘?) open the app's own help
-(`HelpView`) — how a scenario is run, every command with what it takes, the API's requests with
-commands to copy, connecting Selenium — in the interface's language. The Help menu lists the
-topics, so the menu bar's own search finds each by its name.
+Where a person finds it: **Scenarios is a section of the Profiles window**, beside Profiles and
+Proxies (File › Scenarios, ⇧⌘E and ⌘K's command show it), built as those lists are. The automation
+settings and Help › Lumen Help (⌘?) open the app's own help (`HelpView`) — how a scenario is made
+and run, every command with what it takes, the API's requests, connecting Selenium — in the
+interface's language.
+
+## The Scenarios section
+
+Four tabs under the window's header (`ScenariosSection`): **My Scenarios**, **Templates**, **Runs**,
+**Schedule**. A scenario opens in place (`ScenarioEditor`), a run's table too (`ScenarioRunTable`).
+
+### Steps
+
+A scenario's text is read as steps (`ScenarioSteps`, BrowserCore). Nothing is parsed into a model and
+written back: the text is cut into whole statements — a lossless partition, the pieces joined are the
+text byte for byte — and each statement is a step. A one-line command of a known shape
+(`await page.click('#buy');`, `await page.type(FIELD, params.login || '');`, `return 'done';` …) is
+read for its words; the comment above a statement is the step's name; `for (let i = 0; i < N; i++) {}`
+and `if (await page.isVisible(…)) {}` are blocks with steps inside; anything else is a step of its
+own code, shown as it is. Moving a step, removing it, switching it off (its lines become comments
+marked `//- `) and changing what a command is given are moves and rewrites of whole lines, so what
+is not understood is never touched. A text that cannot be cut safely — a bracket or a template left
+open — is one step, and the editor says so.
+
+The `const NAME = value; // what it is` lines at a scenario's head are its **settings**
+(`ScenarioSettings`): text, a number, `true`/`false`, or a list of texts. The editor shows them as
+fields above the steps and writes a changed one back into its line.
+
+### Templates
+
+`ScenarioTemplate` (BrowserCore): twelve ready scenarios — sign in, check that an account is signed
+in, check that a site opens, scroll a feed, search and open results, go through a list of pages, open
+a few pages of a site, fill in a form, write and send a text, accept a cookie banner, collect data
+from a page, collect a list. Each is a real script of the commands above, written with settings at
+its head and a comment over each step; what differs by profile (a login, a password) is read as
+`params.<name>`, the profile's own values. No template writes into a page. The Templates tab lists
+them by kind and shows the chosen one beside the list — its steps, what it asks for, what it takes
+from a profile; **Use the Template** opens its form (the settings as questions, the steps as they
+will be on the right), and the scenario made is an ordinary one.
+
+### On many profiles
+
+**Run…** takes the profiles (`ScenarioRunChooser`): search, a tag chooses all that have it; a profile
+that has no text for a value the scenario reads is said, and skipped unless asked otherwise; how
+many at once (1, 3, 5, 10 — three unless changed), a random pause between starts, and whether the
+profiles the run started are stopped again when their scenario has ended.
+
+`ScenarioBatch` (BrowserCore) is the bookkeeping — who waits, who is at work, how each ended —
+and `ScenarioBatchCoordinator` (the app) starts each run through `AppModel.runScenario` with a run
+id of its own and looks twice a second at how it stands. The table (`ScenarioRunTable`) has a row a
+profile: waiting, running, done, **failed at step N** (the step the error's "(line N)" is in) and
+why, stopped, skipped and why; how long it took; what the scenario returned. A row opens that
+profile's steps (those before the failed one passed) or its log. **Run the Failed Again** makes a
+run of those that failed or were stopped; the table is copied as text with tabs or saved as CSV.
+The editor's **Check** is a run of one profile, and marks the failed step among the editor's steps.
+
+The runs are kept: `scenario-runs.bin` at the vault's root, sealed under the scenarios' key — the
+last 100, newest first; for a profile whose run failed, the last 300 lines of its log; never a
+profile's values. A run the app did not see the end of (it quit, the vault was locked) is found as
+one that was stopped. This Mac's; not synced. Runs a schedule makes are not among them yet: a
+schedule's own row says how its last run ended.
+
+### A scenario as a file
+
+**Export…** writes a `.lumenscenario` file (`ScenarioFile`: JSON with the scenario's name, note and
+text — no folder, no schedule, nothing of a profile). **Import a Scenario File…** reads one (at
+most 2 MB, refused when it is not one or is a newer version's) and shows, before anything is added,
+its steps, the sites its text names and the profile's values it reads: a scenario does in a profile
+whatever a person can.
+
+Checked: `ScenarioStepsTests` (the cut is lossless on every template, a recording and hostile texts;
+what is read as which step; each change leaves the other steps as they were; settings read and
+written back; every template's form is its head's settings), `ScenarioBatchTests` (the queue and its
+limit, ends counted once, Stop, the table as text and CSV, the runs' file, a scenario's file, an
+older library); `scripts/test-shims.mjs` runs every template against a page that records what it is
+asked. The screens are drawn by the UI snapshots (`scenarios*`).
 
 ## Recording
 
-A scenario can be recorded from what a person does (the editor's **Record**, beside Run).
+A scenario can be recorded from what a person does (the editor's **Record**; New Scenario ›
+Record Actions makes one to record into). While it goes the editor shows the steps in words; at Stop
+they become lines after the step chosen in the editor, or at the scenario's end.
 
 ```
 Record ── AppModel.startRecording(on:) ── the profile started with a window if it is stopped
@@ -189,15 +260,16 @@ Record ── AppModel.startRecording(on:) ── the profile started with a win
    ScenarioRecorder ── Event.loaded(address) | .acted(step) ── ProfileEvent.recorded ── the app
    AppModel.recorded: ScenarioRecording ── which loads are steps (the first page and an address
                opened: goto; a page that follows a click or Enter within 5 s: waitForLoadState, once)
-   Stop Recording ── ScenarioRecording.line(for:) per step, added to the end of the scenario the
-               recording was for (AppModel.recordingScenario) — or put in place of the example a
-               new scenario begins with, while that example is untouched
+   Stop Recording ── ScenarioRecording.line(for:) per step, added after the step chosen in the
+               editor of the scenario the recording was for (AppModel.recordingScenario), at its
+               end when none is chosen — or put in place of the example a scenario written in
+               code begins with, while that example is untouched
 ```
 
 - **The scenario it is for.** A recording belongs to the scenario on screen when Record was
-  pressed. The list keeps to it until the recording ends; the editor's window closed and opened
-  again shows that scenario, not the list's first; and the steps go to it whatever is on screen
-  when the recording ends (a scenario deleted meanwhile: a new one gets them).
+  pressed. Its editor stays until the recording ends; the Scenarios section left and shown
+  again shows that scenario, where Stop is; a recording whose scenario was deleted meanwhile is
+  ended there, its steps dropped.
 
 - **Selectors**, in this order: an `id` that is unique and not made for this load only (`:r1:`,
   `ember123`, long runs of digits); `data-testid`, `data-test-id`, `data-test`, `data-qa`,
@@ -244,9 +316,9 @@ by value, by words, by place, what it refuses) — in V8 and in JavaScriptCore.
 
 ## By the clock
 
-The editor's **Schedule** (bottom left, with how many are switched on): a scenario, or a
+The section's **Schedule** tab: a scenario, or a
 profile's warm-up, every day at a time or every so many hours, with a random shift either way.
-**On a Schedule…** beside Run opens the same list with the form filled in for the scenario on
+**On a Schedule…** in a scenario's ⋯ menu opens the same list with the form filled in for the scenario on
 screen and the chosen profile. A row says when its schedule runs next and how the last run went —
 that it was made, and once it has ended, **how it ended**: "finished in 42 s", "failed: no element
 matches #login (line 7)" as the row's warning, or stopped (by hand, with its profile, by the

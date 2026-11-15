@@ -20,7 +20,8 @@ struct ScenarioEditor: View {
     let back: () -> Void
     let run: (Scenario) -> Void
     let openRun: (UUID) -> Void
-    let schedule: () -> Void
+    /// "On a Schedule…": the scenario, and the profile chosen in the editor.
+    let schedule: (Scenario, UUID?) -> Void
 
     @EnvironmentObject private var model: AppModel
     @AppStorage("scenarios.editor.mode") private var storedMode = Mode.both.rawValue
@@ -74,6 +75,8 @@ struct ScenarioEditor: View {
             name = scenario.name
             source = scenario.source
             profileID = model.recordingProfile ?? profiles.first?.id
+            // A recording whose profile stopped while this was not on screen ends now.
+            if recordingStopped { stopRecording() }
         }
         .onDisappear { if sample == nil, edited { save() } }
         .onChange(of: profiles.map(\.id)) { _, ids in
@@ -173,7 +176,7 @@ struct ScenarioEditor: View {
                 .keyboardShortcut("s")
         }
         MoreMenu {
-            Button(L("scenarios.schedule.this")) { if edited { save() }; schedule() }
+            Button(L("scenarios.schedule.this")) { if edited { save() }; schedule(scenario, profileID) }
             Button(L("scenarios.duplicate")) { if edited { save() }; model.saveScenario(model.scenarios.copy(of: Scenario(name: name, source: source, folder: scenario.folder, templateID: scenario.templateID))) }
             Divider()
             Button(L("scenarios.delete"), role: .destructive) { confirmingDelete = true }

@@ -69,6 +69,8 @@ private struct ScenariosSectionBody: View {
     @State private var reviewing: ScenarioFile?
     @State private var pendingDelete: Scenario?
     @State private var entered = false
+    /// The schedule the Schedule tab opens its form with: "On a Schedule…" of a scenario.
+    @State private var proposed: ScenarioSchedule?
 
     private var scenarios: [Scenario] { sample?.scenarios ?? model.scenarios.sorted }
     private var allowed: Bool { sample != nil || model.allowsAutomation }
@@ -86,6 +88,16 @@ private struct ScenariosSectionBody: View {
             content(runs: runs, batches: batches)
         }
         .onAppear {
+            // A recording going on is of its own scenario: the section shown again shows that one,
+            // where Stop is — not the list.
+            if sample == nil, model.recordingProfile != nil {
+                if let recording = model.recordingScenario, model.scenarios.scenario(recording) != nil {
+                    place = .editor(recording)
+                } else {
+                    // Its scenario is gone: there is nowhere for its steps to go, and no Stop to press.
+                    _ = model.stopRecording()
+                }
+            }
             guard !entered, let sample else { return }
             entered = true
             tab = sample.tab
@@ -132,7 +144,14 @@ private struct ScenariosSectionBody: View {
             if let scenario = scenarios.first(where: { $0.id == id }) {
                 ScenarioEditor(scenario: scenario, profiles: profiles, allowed: allowed, sample: sample,
                                back: { place = .tabs }, run: { choosingFor = $0 }, openRun: { place = .run($0) },
-                               schedule: { tab = .schedule; place = .tabs })
+                               schedule: { scheduled, profile in
+                                   // One that is there already is in the list, with its Edit: a second form would add its twin.
+                                   let action = ScenarioSchedule.Action.scenario(scheduled.id)
+                                   let exists = profile.map { id in model.scenarioSchedules.schedules.contains { $0.action == action && $0.profileID == id } } ?? true
+                                   proposed = exists ? nil : profile.map { ScenarioSchedule(action: action, profileID: $0, when: .daily(hour: 10, minute: 0), jitterMinutes: 15) }
+                                   tab = .schedule
+                                   place = .tabs
+                               })
                     .id(id)
             }
         case .run(let id):
@@ -163,7 +182,7 @@ private struct ScenariosSectionBody: View {
                         if model.saveScenario(scenario) { place = .editor(scenario.id) }
                     }, record: { begin(.record) })
                 case .runs: ScenarioRunList(runs: runs, search: search) { place = .run($0) }
-                case .schedule: ScenarioSchedulesPane(sample: scheduleSample, embedded: true)
+                case .schedule: ScenarioSchedulesPane(sample: scheduleSample, proposed: proposed, embedded: true)
                 }
             }
         }
