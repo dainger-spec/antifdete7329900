@@ -276,7 +276,11 @@ for (const [zone, iso, offset, hour] of [
     const w = makeWindow({ ...base, timeZone: zone });
     assert.equal(run(w, `new Date('${iso}').getTimezoneOffset()`), offset);
     assert.equal(run(w, `new Date('${iso}').getHours()`), hour);
-    assert.equal(run(w, `Intl.DateTimeFormat().resolvedOptions().timeZone`), new Intl.DateTimeFormat('en', { timeZone: zone }).resolvedOptions().timeZone);
+    // The zone is named as this engine names it for itself: an engine with an older zone list says
+    // Asia/Calcutta for its own zone while a formatter hands Asia/Kolkata back as given (Bun in CI).
+    const named = run(w, `Intl.DateTimeFormat().resolvedOptions().timeZone`);
+    const asGiven = new Intl.DateTimeFormat('en', { timeZone: zone }).resolvedOptions().timeZone;
+    assert.ok(named === asGiven || (zone === 'Asia/Kolkata' && named === 'Asia/Calcutta'), `${named} for ${zone}`);
     const expectedLocal = new Intl.DateTimeFormat('en-US', { timeZone: zone, dateStyle: 'full', timeStyle: 'long' }).format(new Date(iso));
     assert.equal(run(w, `new Date('${iso}').toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'long' })`), expectedLocal);
     const s = run(w, `new Date('${iso}').toString()`);
