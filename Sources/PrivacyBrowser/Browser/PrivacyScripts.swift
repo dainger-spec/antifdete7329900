@@ -1830,7 +1830,7 @@ function patchCamera(w, cam) {
   const ours = new WeakSet();          // our video tracks
   const trackData = new WeakMap();     // track -> { settings, capabilities, constraints, cancel }
   const fakeDevices = new WeakSet();   // our MediaDeviceInfo
-  const deviceData = new WeakMap();    // device -> { deviceId, kind, groupId, labelWhenGranted }
+  const deviceData = new WeakMap();    // device -> { deviceId, kind, groupId, label }: shown once the camera is granted
 
   function notFound() { try { return new w.DOMException('The requested device was not found.', 'NotFoundError'); } catch (e) { return new w.Error('NotFoundError'); } }
 
@@ -2170,7 +2170,10 @@ function patchCamera(w, cam) {
           // would throw on them: serve our value first, and reach the engine only for a real one.
           if (fakeDevices.has(this)) {
             const data = deviceData.get(this) || {};
-            if (key === 'label') return videoGranted ? (data.label || '') : '';
+            // Before the camera is granted the entry is Safari's placeholder: no name, and no ids —
+            // a page is shown nothing of this profile's camera (its ids come from the profile's
+            // secret) until it is allowed the camera.
+            if (key === 'label' || key === 'deviceId' || key === 'groupId') return videoGranted ? (data[key] || '') : '';
             return data[key];
           }
           return nativeGet.call(this); // receiver check + the real value
@@ -2182,7 +2185,8 @@ function patchCamera(w, cam) {
     if (toJSON && typeof toJSON.value === 'function') {
       define(proto, 'toJSON', method('toJSON', 0, function () {
         if (!fakeDevices.has(this)) return toJSON.value.call(this);
-        return { deviceId: deviceId, kind: 'videoinput', groupId: groupId, label: videoGranted ? defaultLabel : '' };
+        if (!videoGranted) return { deviceId: '', kind: 'videoinput', groupId: '', label: '' };
+        return { deviceId: deviceId, kind: 'videoinput', groupId: groupId, label: defaultLabel };
       }));
     }
     const InputProto = w.InputDeviceInfo && w.InputDeviceInfo.prototype;
@@ -2190,7 +2194,8 @@ function patchCamera(w, cam) {
       const nativeCaps = InputProto.getCapabilities;
       define(InputProto, 'getCapabilities', method('getCapabilities', 0, function () {
         if (!fakeDevices.has(this)) return ReflectApply(nativeCaps, this, arguments);
-        return capabilities();
+        // The placeholder before the grant has no device behind it: no capabilities (and no ids).
+        return videoGranted ? capabilities() : {};
       }));
     }
   }

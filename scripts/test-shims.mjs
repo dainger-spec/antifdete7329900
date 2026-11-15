@@ -830,6 +830,10 @@ const cameraPrelude = ({ granted = false, micGranted = false, defaultCamera = 'r
   }
   MediaDeviceInfo.prototype.toJSON = function toJSON() { reject(this, MediaDeviceInfo); const v = info.get(this); return { deviceId: v.deviceId, kind: v.kind, groupId: v.groupId, label: v.label }; };
   class InputDeviceInfo extends MediaDeviceInfo {}
+  // A placeholder (no permission yet, an empty id) has no device behind it: no capabilities.
+  InputDeviceInfo.prototype.getCapabilities = function getCapabilities() {
+    reject(this, InputDeviceInfo); const v = info.get(this); return v.deviceId ? { deviceId: v.deviceId, groupId: v.groupId } : {};
+  };
   globalThis.MediaDeviceInfo = MediaDeviceInfo; globalThis.InputDeviceInfo = InputDeviceInfo;
   const device = (id, label, kind) => { const d = Object.create(InputDeviceInfo.prototype); info.set(d, { deviceId: id, kind, groupId: id ? 'g-' + id : '', label }); return d; };
   // granted: the camera permission (and with it the microphone's); micGranted: the microphone's alone.
@@ -1200,6 +1204,36 @@ test('drawn camera and "No camera": a request that answers the engine otherwise 
     assert.equal(audioOnly, 'audio', mode);
     assert.deepEqual(cameraOpened(w), [], `${mode}: a video member on Object.prototype`);
   }
+});
+
+test('drawn camera: before the camera is granted its entry is Safari\'s placeholder — no name, no ids — after it, ids of the profile\'s own', async () => {
+  const profile = (secret) => ({ ...base, camera: { ...drawnCamera.camera, secret, label: 'FaceTime HD Camera' } });
+  const entry = (w) => run(w, `navigator.mediaDevices.enumerateDevices().then((l) => {
+    const d = l.filter((x) => x.kind === 'videoinput')[0];
+    return JSON.stringify({ deviceId: d.deviceId, groupId: d.groupId, label: d.label, json: d.toJSON(), caps: d.getCapabilities() });
+  })`).then(JSON.parse);
+  // Two copies of a profile, one secret (as before each copy got its own): a page that holds no
+  // permission reads nothing that links them — as in Safari, an empty id, group and name.
+  const placeholder = { deviceId: '', groupId: '', label: '', json: { deviceId: '', kind: 'videoinput', groupId: '', label: '' }, caps: {} };
+  for (const granted of [false, true]) {
+    const w = makeWindow(profile('secret-one'), null, cameraPrelude({ granted, canvas: true }));
+    assert.deepEqual(await entry(w), placeholder, `the engine's permission ${granted}, not asked here yet`);
+  }
+  // Once the camera is granted: the profile's own per-origin ids and its name.
+  const granted = async (secret) => {
+    const w = makeWindow(profile(secret), null, cameraPrelude({ canvas: true }));
+    await run(w, `navigator.mediaDevices.getUserMedia({ video: true })`);
+    return entry(w);
+  };
+  const one = await granted('secret-one'), again = await granted('secret-one'), other = await granted('secret-two');
+  assert.match(one.deviceId, /^[0-9a-f]{64}$/);
+  assert.match(one.groupId, /^[0-9a-f]{64}$/);
+  assert.equal(one.label, 'FaceTime HD Camera');
+  assert.deepEqual(one.json, { deviceId: one.deviceId, kind: 'videoinput', groupId: one.groupId, label: 'FaceTime HD Camera' });
+  assert.equal(one.caps.deviceId, one.deviceId);
+  assert.deepEqual([again.deviceId, again.groupId], [one.deviceId, one.groupId], 'stable for one profile');
+  assert.notEqual(other.deviceId, one.deviceId, 'another profile (another secret), another camera');
+  assert.notEqual(other.groupId, one.groupId);
 });
 
 test('system camera installed, not this profile\'s: the virtual device is hidden, the Mac\'s camera stays as it is', async () => {

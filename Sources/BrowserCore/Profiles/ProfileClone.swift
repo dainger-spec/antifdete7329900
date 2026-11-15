@@ -7,7 +7,9 @@ import Foundation
 /// A copy carries nothing that is the original's own: not its data (cookies, history, passwords,
 /// bookmarks, website data — a new profile has none), nor what its launches learned (where its
 /// proxy came out, `lastProxyLocation`), nor the person's notes about it (they are about that
-/// profile's accounts), nor its glyph's colour (a copy is told apart at a glance).
+/// profile's accounts), nor its glyph's colour (a copy is told apart at a glance), nor its camera's
+/// identity (`CameraSubstitution.deviceSecret`, from which every site is shown the camera's
+/// `deviceId` and `groupId`: with the original's, any site would see the copies as one).
 public enum ProfileClone {
     /// At most this many copies at once.
     public static let maximumCopies = 50
@@ -30,6 +32,11 @@ public enum ProfileClone {
         copy.webRTCRelay = nil
         copy.notes = ""
         copy.avatar = nil
+        // A camera of its own: the same choices, another identity — as a new profile's camera gets one
+        // when substitution is first turned on (the editor), never none where the original has one.
+        if !copy.cameraSubstitution.deviceSecret.isEmpty {
+            copy.cameraSubstitution.deviceSecret = CameraSubstitution.newDeviceSecret()
+        }
         return copy
     }
 

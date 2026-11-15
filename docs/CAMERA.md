@@ -45,8 +45,11 @@ not `.off`, so a profile that never used it is stored as before (`ProfileConfigu
 - **audio** — the real microphone, a silent track, or none, when a page asks for audio.
 - **alsoScreenShare** — substitute `getDisplayMedia` with the same stream, too.
 - **deviceSecret** — a random secret kept with the profile; the shim derives a stable, per-origin
-  `deviceId`/`groupId` from it (a real browser salts them per origin). The editor fills it when
-  substitution is first turned on.
+  `deviceId`/`groupId` from it (a real browser salts them per origin, in the profile's website
+  data). The editor fills it when substitution is first turned on, and each copy of a profile
+  (Duplicate, `ProfileClone`) gets one of its own: the same camera choices, another camera to a site.
+  Until the fourth audit (15 November 2026) copies kept the original's, and every site saw the
+  copies' cameras under one id.
 - **imageData / videoData** — the chosen media's bytes. The app reads the file (the editor's file
   picker) and keeps the bytes; the profile's pages never touch the disk, and no file path is stored
   or logged. Capped (an image at 4 MB, a video at 12 MB) because they travel with the profile.
@@ -82,8 +85,10 @@ same bar as the rest of the file:
   in both "Substitute" and "No camera". In the app's own window (`BrowserTab`) the engine is told
   no for every camera request while the drawing shim is on, whatever a page did; Safari's window
   asks with Safari's own prompt;
-- `enumerateDevices` lists our one camera with the label only after the page is granted it (as a
-  real browser hides labels until then), its `deviceId`/`groupId` salted per origin;
+- `enumerateDevices` lists our one camera as Safari lists a camera before the page is granted it —
+  an empty label, `deviceId` and `groupId`, and no capabilities — and once it is granted, with the
+  label and its `deviceId`/`groupId` salted per origin (until the fourth audit the ids were there
+  before the grant);
 - faint, moving sensor-like grain on every frame, so the picture is never frozen (the first thing a
   virtual-camera check looks for), and `bars` also carries a moving bar and a running clock.
 
