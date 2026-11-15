@@ -725,6 +725,7 @@ enum UISnapshots {
         problems += await Shot(name: "launch-open", size: CGSize(width: 1180, height: 740), edges: true) {
             LockBackdrop(phase: .open) { VaultOpenView() }
         }.capture(into: folder)
+        problems += await welcome(into: folder)
         problems += await Shot(name: "app-icon", size: CGSize(width: 900, height: 640), titled: false) {
             AppIconSheet()
         }.capture(into: folder)
@@ -738,6 +739,42 @@ enum UISnapshots {
         }.capture(into: folder)
         problems += await Shot(name: "flags", size: CGSize(width: 900, height: 620), titled: false) {
             FlagSheet()
+        }.capture(into: folder)
+        return problems
+    }
+
+    // MARK: The launch screen
+
+    /// The launch screen (WelcomeSplash), still at chosen moments: a later launch's greeting written
+    /// and settled, in Russian and in English; the Russian one 60 % written; the first launch's, with
+    /// its button; and the Russian one in the glass drawn here — what macOS before 26 shows, and on
+    /// 26 the only glass a cached picture of a window holds (Liquid Glass is the window server's).
+    private static func welcome(into folder: URL) async -> Int {
+        guard let russian = WelcomeLettering.all.first(where: { $0.code == "ru" }),
+              let english = WelcomeLettering.all.first(where: { $0.code == "en" }) else {
+            print("FAIL the launch screen has no greeting in Russian or English")
+            return 1
+        }
+        func settled(_ greeting: WelcomeLettering) -> Double {
+            WelcomeTiming(duration: greeting.duration, reduced: false).settledAt + 0.5
+        }
+        let size = CGSize(width: 1180, height: 740)
+        var problems = 0
+        problems += await Shot(name: "welcome-ru", size: size, edges: true) {
+            WelcomeSplash(greeting: russian, firstLaunch: false, open: {}, still: settled(russian))
+        }.capture(into: folder)
+        problems += await Shot(name: "welcome-ru-writing", size: size, edges: true) {
+            WelcomeSplash(greeting: russian, firstLaunch: false, open: {},
+                          still: WelcomeTiming.penStart + russian.duration * 0.6)
+        }.capture(into: folder)
+        problems += await Shot(name: "welcome-en", size: size, edges: true) {
+            WelcomeSplash(greeting: english, firstLaunch: false, open: {}, still: settled(english))
+        }.capture(into: folder)
+        problems += await Shot(name: "welcome-en-first", size: size, edges: true) {
+            WelcomeSplash(greeting: english, firstLaunch: true, open: {}, still: settled(english))
+        }.capture(into: folder)
+        problems += await Shot(name: "welcome-ru-drawn-glass", size: size, edges: true) {
+            WelcomeSplash(greeting: russian, firstLaunch: true, open: {}, still: settled(russian), drawnGlass: true)
         }.capture(into: folder)
         return problems
     }
