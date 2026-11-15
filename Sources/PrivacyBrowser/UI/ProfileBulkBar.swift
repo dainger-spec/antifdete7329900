@@ -63,8 +63,9 @@ struct ProfileSelection: Equatable {
 
 /// The bar floating at the bottom of the Profiles list while several profiles are selected (the
 /// design's `bulk`): how many, and what can be done to all of them at once — launch the stopped
-/// ones, stop the running ones, warm them up, give them proxies of the list, delete them. Each goes
-/// out through `ProfileActions` with the profiles in the order the list shows them.
+/// ones, stop the running ones, warm them up, give them proxies of the list, change their tags,
+/// delete them. Each goes out through `ProfileActions` with the profiles in the order the list
+/// shows them.
 struct ProfileBulkBar: View {
     /// The selected rows, in the list's order.
     let rows: [ProfileRowItem]
@@ -119,6 +120,9 @@ struct ProfileBulkBar: View {
             Button { actions.assignProxies(ids) } label: { label(L("profiles.bulk.assignProxy"), "network", compact) }
                 .buttonStyle(.lumenGhost)
                 .help(L("profiles.bulk.assignProxy.help"))
+            Button { actions.tagSeveral(ids) } label: { label(L("profiles.bulk.tags"), "tag", compact) }
+                .buttonStyle(.lumenGhost)
+                .help(L("profiles.bulk.tags.help"))
             Button(role: .destructive) { actions.deleteSeveral(ids) } label: { label(L("profiles.bulk.delete"), "trash", compact) }
                 .buttonStyle(.lumenDestructive)
                 .help(L("profiles.bulk.delete.help"))

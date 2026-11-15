@@ -1081,7 +1081,7 @@ final class AppModel: ObservableObject {
     /// The Profiles window's Delete, once the person confirmed it (one profile, or each of several):
     /// the only caller of the one path that deletes a profile's data.
     func deleteProfile(_ id: UUID) async {
-        await perform { try await self.manager?.deleteBecauseThePersonAsked(id) }
+        await perform(for: id) { try await self.manager?.deleteBecauseThePersonAsked(id) }
         refresh()
         forgetScenarioValues(ofDeleted: id)
     }
@@ -1091,7 +1091,7 @@ final class AppModel: ObservableObject {
         while isSyncing { try? await Task.sleep(nanoseconds: 100_000_000) }
         await changeIPBeforeLaunch(id)
         let wasRunning = isRunning(id)
-        await perform { try await self.manager?.launch(id, openingWindow: openingWindow) }
+        await perform(for: id) { try await self.manager?.launch(id, openingWindow: openingWindow) }
         if !wasRunning, isRunning(id) { recordInJournal(.launched, for: id) }
         refresh()
     }
@@ -1188,7 +1188,7 @@ final class AppModel: ObservableObject {
     }
 
     func stop(_ id: UUID) async {
-        await perform { try await self.manager?.stop(id) }
+        await perform(for: id) { try await self.manager?.stop(id) }
     }
 
     func isRunning(_ id: UUID) -> Bool { manager?.runningProfileIDs.contains(id) ?? false }
@@ -1999,14 +1999,33 @@ final class AppModel: ObservableObject {
         errorMessage = shown.suffix(5).joined(separator: "\n\n")
     }
 
-    private func perform(_ work: () async throws -> Void) async {
+    /// `id`: the profile the work is on — what goes wrong is then said with its name
+    /// (`named(_:for:)`): with thirty profiles starting at once, "the profile doesn't open" alone
+    /// does not say which.
+    private func perform(for id: UUID? = nil, _ work: () async throws -> Void) async {
         isWorking = true
         defer { isWorking = false }
         do {
             try await work()
         } catch {
-            showError(errorText(error))
+            let text = errorText(error)
+            showError(id.map { named(text, for: $0) } ?? text)
         }
+    }
+
+    /// What went wrong with profile `id`, said with its name (`profileErrorText(_:naming:)`); as it is for
+    /// a profile that is no longer listed.
+    func named(_ text: String, for id: UUID) -> String {
+        guard let name = profiles.first(where: { $0.id == id })?.name else { return text }
+        return Self.profileErrorText(text, naming: name)
+    }
+
+    /// `text` with the profile's name before it — "“Shop 14”: …" — unless it names the profile
+    /// already, in quotes, as the core's errors about a profile's files do.
+    static func profileErrorText(_ text: String, naming name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !text.contains("“\(trimmed)”"), !text.contains("«\(trimmed)»") else { return text }
+        return String(format: L("profiles.error.named"), trimmed, text)
     }
 }
 

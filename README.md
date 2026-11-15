@@ -228,7 +228,8 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    first launch); history recording and retention, AutoFill,
    cookie sync. Changes apply at the next launch. Tags and notes are the person's own: the
    Profiles list shows the tags on each row, lists them in its sidebar (a click shows the
-   profiles with that tag) and its search finds a profile by its name, a tag or its notes; they
+   profiles with that tag) and its search finds a profile by its name, a tag or its notes — and by
+   where it exits: its proxy's address, the country's name or its two letters, "Direct"; they
    are kept encrypted in the profile's settings, synced and exported with it, and no page sees
    them. The **View for websites** picker sets what the profile calls itself: Safari on this Mac
    (macOS 26), or a mobile view — Safari on this Mac under an iPhone's (Safari 26, 27) or an
@@ -310,7 +311,10 @@ CI (`.github/workflows/ci.yml`) runs on every push:
      scheme whose type was not checked gets it from its first check, as an imported line.
    - **Import…** takes a pasted list or a text file, one proxy per line: `host:port`,
      `host:port:user:pass`, `user:pass@host:port` or `socks5://` / `http://` / `https://user:pass@host:port`
-     (` # Berlin 1` after a proxy names it). A line without a scheme gets its type from the first
+     (` # Berlin 1` after a proxy names it). A row copied from a spreadsheet, a provider's table or
+     its CSV file is read too: the parts separated by tabs, spaces, `;`, `,` or `|`, the type as a
+     word of its own (`socks5 1.2.3.4 1080 user pass`), the IP-change link as a last column. A line
+     that reads as written is never read another way. A line without a scheme gets its type from the first
      check (**Found by Check**, the default; until then it is given to no profile), or the type
      chosen in the sheet. Lines that cannot be read are listed with their number and why before
      anything is added; a proxy already listed (the same host, port and user name) is not added
@@ -333,11 +337,24 @@ CI (`.github/workflows/ci.yml`) runs on every push:
      of them get it, with several they get them in turn (round-robin). A running profile uses its
      new proxy from its next launch. In the profile editor, **From the List** chooses one of the
      list's proxies. The list shows how many profiles use each proxy.
+   - Under the header: **All**, **Working**, **Not working**, **Not checked**, **Unused**, each
+     with how many there are; a click on the Proxy, Exit, Latency or State column's title sorts by
+     it (another click goes back to the order of adding). What the filter hides is never acted on.
+   - **Replace in Profiles…** (a proxy's inspector and menu, while profiles use it): for a proxy
+     that stopped answering. Assign opens with exactly the profiles on it ticked and, ticked for
+     them, the working proxies that fit best — of the country those profiles came out in, the
+     unused first, the faster first. Nothing changes until Assign is pressed there.
    - A profile started with a proxy that does not work says so in the Profiles window — which
      profile, what the same probe found, what to do — with **Check Proxy** and **Show in Proxies**.
 12. **Several profiles at once:** ⌘-click (or ⇧-click for a range) selects rows of the Profiles
    list; with two or more selected, a bar above the list launches, stops, warms up, assigns
-   proxies to or deletes them all (deleting asks once, naming how many).
+   proxies to, changes the tags of or deletes them all (deleting asks once, naming how many). A
+   right click on one of the selected rows offers the same for all of them. **Tags…** adds tags
+   to every selected profile and takes away the ones marked among the tags they have, saying
+   first how many profiles it changes. The list is in the order the profiles were made in, or —
+   the ⋯ menu's **Sort By**, or a click on the Name or the State column's title — by name or by
+   the last launch. The sidebar's **Proxy Not Working** (there while there are such profiles)
+   gathers the profiles whose proxy did not answer at its last check or at their last launch.
 13. **Settings** (⌘, or **⋯ → Settings…**) — one window, a section per subject, and under every
    setting a sentence on what it does and when it takes effect (at once, for new tabs, at a
    profile's next start, at the app's next start, for new profiles, or "not a choice"):
@@ -458,7 +475,7 @@ CI (`.github/workflows/ci.yml`) runs on every push:
 | Duplicate a profile | **⋯ → Duplicate…**: 1–50 copies set up as the profile is — device, languages and time zone, WebRTC, camera, search engine, tags — with none of its data (cookies, history, passwords, notes) and nothing its launches learned; named on from it ("Shop 2", "Shop 3"); each with the original's proxy, none, or the list's in turn — those no profile uses yet first, then those that answered, of a country when one is chosen. The sheet shows what each copy will be called and get before anything is made; the plan's profile limit counts each copy. **Checked by unit tests** (what a copy carries and does not, names, the order proxies are given in) |
 | Profile sync: cookies and settings | A profile's persistent cookies sync as `cookies.bin` (encrypted with the profile key), merged cookie by cookie — the newer change wins, deletions included; recorded when the profile stops, applied at its next launch before the first page loads, imported cookies joining at that launch. Settings changed on two Macs: the newer edit wins, the other kept as `config.bin.conflict`. Session and partitioned cookies, and ephemeral profiles, never sync ([docs/SYNC_FORMAT.md](docs/SYNC_FORMAT.md)). **Checked by the self-test** with a second vault set up from the sync folder, and by unit tests |
 | Proxy manager: import, stepwise check, edit, export, assign, rotate, change IP | **Profiles window sidebar → Proxies**: a list kept encrypted in the vault (`proxies.bin`, this Mac only); each profile keeps its own copy of its proxy, linked to the list by host, port and user name — profiles' proxies are taken into the list once, an edit in the list reaches the profiles that use it as it is, and a missing entry never leaves a profile without its proxy. Import reads pasted lines or a text file — `host:port`, `host:port:user:pass`, `user:pass@host:port`, `socks5://` / `http://` / `https://user:pass@host:port`, ` # label` — reports every line it could not read with its number and why, and leaves the type of a line without a scheme to the first check (`ProxyListImport`). The check (`ProxyProbe`, POSIX sockets, only to the proxy) resolves the name, connects, tries a SOCKS5 and an HTTP handshake at once, logs in, opens a tunnel (the target named to the proxy), then asks the geolocation services through the proxy (`allowFailover = false`): exit IP, country, city, network, median latency of three tunnels. Distinct states, each with its own symbol and colour, a report step by step with advice: host not found, DNS failed, a VPN's substitute DNS (fake IP: every address in 198.18.0.0/15 or 240.0.0.0/4 and no proxy's answer there — behind such a DNS a name that does not exist looks the same), refused, unreachable, no connection, **silent after connecting**, closes at once, not a proxy, login needed or rejected, refuses this Mac, no way out, no answer through it. A profile whose proxy does not work at its launch says why, with Check. Edit (profiles follow), export (plaintext warning, 0600 file), assign one to many or round-robin. Each proxy says where it came from — added by you, or given by Lumen's own proxy service (which does not exist yet: the list, its file and its screens tell the two apart already). **Change IP** (mobile proxies): a proxy can keep its provider's IP-change link — typed in its sheet, or read from an import line as `socks5://user:pass@host:port[https://…]`, and exported the same way; **Change IP** in its inspector or menu opens the link from the app (not through the proxy, no cookies, a neutral User-Agent), then checks the proxy until it answers again and shows the new exit IP, or what the provider said. **Change the IP when a profile starts** does it before each launch from the app — never while another running profile is on that proxy. The link holds the provider's key: it is kept encrypted with the list, never logged; a list with one is written in format 3 (docs/UPDATES.md). **Checked by the self-test** against every listener of the self-test proxy (HTTP, SOCKS5, both with a login none/wrong/right, IPv6, silent, closed, unknown host), end to end with exit details, inside a packet capture that fails on any packet of the app past loopback; the probe's verdicts against scripted servers, parsing, the link and migration by unit tests |
-| Several profiles at once | ⌘-click and ⇧-click select rows of the Profiles list; with two or more, a bar acts on all of them: Launch (the stopped ones, at most four starting at a time: the next when one of those has its window up — `LaunchQueue`, checked by unit tests and the self-test), Stop (the running ones, sealed together), Warm Up (opens the warm-up for the first; a hook for a queue), Assign Proxy (from the list, one or in turn), Delete (one confirmation naming the count) |
+| Several profiles at once | ⌘-click and ⇧-click select rows of the Profiles list; with two or more, a bar acts on all of them: Launch (the stopped ones, at most four starting at a time: the next when one of those has its window up — `LaunchQueue`, checked by unit tests and the self-test), Stop (the running ones, sealed together), Warm Up (opens the warm-up for the first; a hook for a queue), Assign Proxy (from the list, one or in turn), Tags (added to and removed from all of them, each saved as an edit of its own; settings that do not read are left alone and said — checked by unit tests), Delete (one confirmation naming the count). A right click on a selected row acts on the selection. What goes wrong with one of them is said with its name |
 
 ### Approximated (the platform offers no native API)
 

@@ -577,6 +577,10 @@ struct SelectionInspectorView: View {
                 }
                 Button(L("inspector.warmUpQueue")) { actions.warmUpSeveral(rows.map(\.id)) }
                     .buttonStyle(LumenButtonStyle(kind: .ghost, fullWidth: true))
+                Button(L("profiles.bulk.assignProxy")) { actions.assignProxies(rows.map(\.id)) }
+                    .buttonStyle(LumenButtonStyle(kind: .ghost, fullWidth: true))
+                Button(L("profiles.bulk.tags")) { actions.tagSeveral(rows.map(\.id)) }
+                    .buttonStyle(LumenButtonStyle(kind: .ghost, fullWidth: true))
             }
             .padding(.top, 18)
             if stopped.count > LaunchQueue.atOnce {

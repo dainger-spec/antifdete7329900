@@ -32,6 +32,19 @@ public enum ProfileTags {
     public static func contains(_ tags: [String], _ tag: String) -> Bool {
         tags.contains { $0.caseInsensitiveCompare(tag) == .orderedSame }
     }
+
+    /// `tags` after a change made to several profiles at once (`ProfileRepository.changeTags`):
+    /// those of `removing` taken away, whatever their case, then those of `adding` the profile
+    /// does not have yet put after its own, in the order given. A profile holds at most
+    /// `maximumCount`: the tags there was no room for are `notAdded` — said, never dropped
+    /// silently. A tag in both lists is added: the removal is of what the profile had.
+    public static func changing(_ tags: [String], adding: [String], removing: [String]) -> (tags: [String], notAdded: [String]) {
+        let dropped = normalized(removing)
+        let kept = normalized(tags).filter { !contains(dropped, $0) }
+        let wanted = normalized(adding).filter { !contains(kept, $0) }
+        let room = max(0, maximumCount - kept.count)
+        return (kept + wanted.prefix(room), Array(wanted.dropFirst(room)))
+    }
 }
 
 /// How a profile's glyph looks (`ProfileConfiguration.avatar`): a colour of the app's palette,

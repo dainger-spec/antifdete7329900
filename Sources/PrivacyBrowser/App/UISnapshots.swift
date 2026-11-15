@@ -315,6 +315,21 @@ enum UISnapshots {
         problems += await Shot(name: "profiles-proxied", size: CGSize(width: 1180, height: 560), edges: true) {
             ProfilesPreview(rows: rows, filter: .proxied, sync: .failed)
         }.capture(into: folder)
+        // The list by name (the Name column's title says so, with its arrow), and the sidebar's
+        // "Proxy not working": the profiles whose proxy did not answer.
+        problems += await Shot(name: "profiles-by-name", size: CGSize(width: 1180, height: 620), edges: true) {
+            ProfilesPreview(rows: rows, order: .name)
+        }.capture(into: folder)
+        problems += await Shot(name: "profiles-proxy-failing", size: CGSize(width: 1180, height: 560), edges: true) {
+            ProfilesPreview(rows: rows, filter: .proxyFailing)
+        }.capture(into: folder)
+        // Tags for a selection (the bar's "Tags…"): one to add, one of theirs marked to be removed.
+        let tagged = [rows[1], rows[3], rows[6], rows[8]].map { ProfileTagsPanel.Profile(name: $0.name, tags: $0.tags) }
+        problems += await Shot(name: "sheet-profile-tags", size: CGSize(width: 520, height: 400), titled: false) {
+            ProfileTagsPanel(profiles: tagged, knownTags: ["ads", "clients", "DE", "mobile", "NL", "Q4 campaign", "warm-up"],
+                             added: ["Q4 campaign"], removing: ["warm-up"])
+                .environment(\.tagColors, sampleTagColors)
+        }.capture(into: folder)
         // The inspector: one profile (Northwind), one whose settings cannot be read (R1: said there
         // too, and it does not start), several, and over the list in a window too narrow for both.
         let northwind = rows[1].id
@@ -1126,6 +1141,13 @@ enum UISnapshots {
             problems += await Shot(name: "proxies-narrow", size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: 620), edges: true) {
                 ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: [berlin.id]))
             }.capture(into: folder)
+            // Only the proxies that did not answer: the silent one selected, with "Replace in
+            // Profiles…" for the two profiles on it.
+            let failing = AnyView(ProxyListPanel(proxies: proxies, profileCounts: counts, profilesUsing: names,
+                                                 selection: .constant([silent.id]), filter: .failing))
+            problems += await Shot(name: "proxies-failing", size: CGSize(width: 1400, height: 860), edges: true) {
+                ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: failing)
+            }.capture(into: folder)
             problems += await Shot(name: "sheet-proxy-edit", size: CGSize(width: 560, height: 400), titled: false) {
                 ProxyEditView(proxies: proxies, entry: berlin, profileCount: 3)
             }.capture(into: folder)
@@ -1690,7 +1712,7 @@ enum UISnapshots {
             ProfileRowItem(id: id(9), name: "Marketplace US", activity: .stopped,
                            exit: .proxy(endpoint: "us-dal.proxy.example:1080", countryCode: "US"), ephemeral: false,
                            appearsAs: mac, lastUsed: now.addingTimeInterval(-2 * 3_600), tags: ["clients"],
-                           problem: "us-dal.proxy.example:1080"), // l10n: not text
+                           problem: "us-dal.proxy.example:1080", proxyFailed: true), // l10n: not text
         ]
     }
 }
@@ -1886,11 +1908,13 @@ private struct ProfilesPreview: View {
     var engineWarning: EngineWarning.Facts?
     var updatedTo: String?
     var updateOffer: UpdateOffer?
+    var order: ProfileListOrder = .created
 
     var body: some View {
         ProfilesScreen(rows: rows, isWorking: isWorking, sync: sync, filter: $filter, search: $search, actions: actions,
                        section: .constant(section), proxyCount: proxyCount, proxies: proxies, indexNotice: indexNotice,
-                       keptDeleted: keptDeleted, showsInspector: .constant(showsInspector), inspectorInfo: inspectorInfo,
+                       keptDeleted: keptDeleted, showsInspector: .constant(showsInspector), order: .constant(order),
+                       inspectorInfo: inspectorInfo,
                        guardReady: true, initialSelection: selected, initialBannersExpanded: bannersExpanded,
                        proxyProblem: proxyProblem, guardNotice: guardNotice, engineWarning: engineWarning,
                        updateOffer: updateOffer, updatedTo: updatedTo)

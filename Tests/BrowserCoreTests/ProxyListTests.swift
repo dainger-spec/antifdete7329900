@@ -78,7 +78,7 @@ final class ProxyListImportTests: XCTestCase {
             ftp://h.example:21
             h.example:99999
             h.example:port
-            1.2.3.4 1080
+            1.2.3.4:1080 5.6.7.8:1080
             a:b:c
             @h.example:80
             300.1.1.1:80
@@ -100,7 +100,8 @@ final class ProxyListImportTests: XCTestCase {
             .unreadable(.hasPath),
             .unreadable(.unterminatedIPv6),
         ])
-        XCTAssertEqual(report.problems[4].text, "1.2.3.4 1080")
+        // Two proxies on one line: not read as the first with the second for its login.
+        XCTAssertEqual(report.problems[4].text, "1.2.3.4:1080 5.6.7.8:1080")
         XCTAssertEqual(report.failures.count, 10)
     }
 
@@ -159,7 +160,9 @@ final class ProxyListImportTests: XCTestCase {
         XCTAssertEqual(ProxyListImport.readField("1.2.3.4"), .problem(.missingPort))
         XCTAssertEqual(ProxyListImport.readField("h.example:99999"), .problem(.unreadable(.invalidPort("99999"))))
         XCTAssertEqual(ProxyListImport.readField("ftp://h.example:21"), .problem(.unreadable(.unsupportedScheme("ftp"))))
-        XCTAssertEqual(ProxyListImport.readField("1.2.3.4 1080"), .problem(.unreadable(.containsWhitespace)))
+        XCTAssertEqual(ProxyListImport.readField("1.2.3.4:1080 5.6.7.8:1080"), .problem(.unreadable(.containsWhitespace)))
+        // Its parts with a space between them, as a table gives them (`ProxyImportFormatsTests`).
+        XCTAssertEqual(proxy("1.2.3.4 1080")?.proxy, ProxySettings(kind: .socks5, host: "1.2.3.4", port: 1080))
         XCTAssertEqual(ProxyListImport.readField("1.2.3.4:1080\n5.6.7.8:1080"), .several(2))
         XCTAssertEqual(ProxyListImport.readField("# provider\n1.2.3.4:1080  # Berlin"),
                        .proxy(ProxyListImport.Line(line: 2, proxy: ProxySettings(kind: .socks5, host: "1.2.3.4", port: 1080),

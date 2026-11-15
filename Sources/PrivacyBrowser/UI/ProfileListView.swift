@@ -181,6 +181,10 @@ struct ProfileListView: View {
     @State private var section: ProfilesSection = .profiles
     @State private var proxySelection: Set<UUID> = []
     @State private var assigningProxies: ProxyAssignView.Request?
+    /// The selection whose tags are being changed (`ProfileTagsView`).
+    @State private var tagging: ProfileTagsView.Request?
+    /// The order of the list's rows, as the person left it.
+    @AppStorage("profiles.order") private var order: ProfileListOrder = .created
     /// Profiles of the selection waiting for the one confirmation that deletes them all.
     @State private var pendingBulkDelete: [UUID] = []
     /// The inspector at the window's right, as the person left it.
@@ -278,6 +282,7 @@ struct ProfileListView: View {
                 showProxies(selecting: [])
             }
             .sheet(item: $assigningProxies) { request in ProxyAssignView(request: request) }
+            .sheet(item: $tagging) { request in ProfileTagsView(request: request).environment(\.tagColors, model.tagColors) }
             // ⌘K.
             .sheet(isPresented: $model.showingPalette) {
                 CommandPaletteView(commands: paletteCommands, onClose: { model.showingPalette = false })
@@ -389,6 +394,7 @@ struct ProfileListView: View {
                        revealKeptDeleted: { model.revealProfileFolder($0) },
                        proxyAlerts: proxyAlerts,
                        showsInspector: $showsInspector,
+                       order: $order,
                        inspectorInfo: { id in
                            let details = model.details[id]
                            // The proxy list's last check of the profile's proxy: its city and latency.
@@ -516,10 +522,13 @@ struct ProfileListView: View {
             // No details: its settings could not be read (`AppModel.refresh`) — not "Direct" (R1).
             var exit = ProfileExit.unreadable
             var exitNote: String?
+            // Its proxy did not answer: at the profile's last launch, or at the list's last check of it.
+            var proxyFailed = problem != nil
             let lookupFailed = model.manager?.proxyLocationUnknown.contains(profile.id) ?? false
             if let details {
                 if let endpoint = details.proxyEndpoint {
                     let check = details.proxyIdentity.flatMap { listed[$0]?.lastCheck }
+                    if check?.isAlive == false { proxyFailed = true }
                     let country = details.exitCountryCode ?? (check?.isAlive == true ? check?.countryCode : nil)
                     exit = .proxy(endpoint: endpoint, countryCode: country)
                     if country == nil { exitNote = ProfileRowItem.unknownCountryNote(check: check, lookupFailed: lookupFailed) }
@@ -549,7 +558,8 @@ struct ProfileListView: View {
                 },
                 deviceSymbol: details.flatMap { ProfileRowItem.deviceSymbol($0.deviceGeneration) },
                 exportOnly: exportOnly(profile.id),
-                directCountry: details?.proxyEndpoint == nil ? details?.exitCountryCode : nil)
+                directCountry: details?.proxyEndpoint == nil ? details?.exitCountryCode : nil,
+                proxyFailed: proxyFailed)
         }
     }
 
@@ -627,6 +637,7 @@ struct ProfileListView: View {
             warmUpSeveral: { ids in warmUpSeveral(ids) },
             assignProxies: { ids in assigningProxies = ProxyAssignView.Request(profileIDs: Set(ids), proxyIDs: []) },
             deleteSeveral: { ids in pendingBulkDelete = ids },
+            tagSeveral: { ids in tagging = ProfileTagsView.Request(profileIDs: ids) },
             setTagColor: { tag, color in model.setTagColor(color, for: tag) },
             openPalette: { model.showingPalette = true },
             openScenarios: { openWindow(id: "scenarios") },
@@ -689,6 +700,9 @@ struct ProfileRowItem: Identifiable {
     /// A profile with no proxy: the country its own connection exits in, once a launch looked it up
     /// (the lead, 7 November: a direct connection is an exit like a proxy's).
     var directCountry: String?
+    /// Its proxy did not answer — at its last launch (`problem`), or at the proxy list's last check
+    /// of that proxy: the sidebar's "Proxy not working" gathers such profiles.
+    var proxyFailed = false
 
     var isRunning: Bool { activity == .running }
     /// "Starting…", or "Changing IP…" while its proxy gets a new IP first.
@@ -700,6 +714,28 @@ struct ProfileRowItem: Identifiable {
     var isActive: Bool { activity != .stopped }
     var usesProxy: Bool { if case .proxy = exit { return true } else { return false } }
     var connectsDirectly: Bool { exit == .direct }
+    /// What the search finds the profile by, beside its name, tags and notes: where it exits — its
+    /// proxy's address and the country as the row names it, or "Direct" — so that "which profile is
+    /// on this proxy" and "the ones in Germany" are one search each.
+    var exitSearchTexts: [String] {
+        switch exit {
+        case .direct:
+            return [L("profiles.exit.direct")] + (directCountry.map { [CountryNames.name(for: $0)] } ?? [])
+        case let .proxy(endpoint, code):
+            return [endpoint] + (code.map { [CountryNames.name(for: $0)] } ?? [])
+        case .unreadable:
+            return []
+        }
+    }
+    /// The exit's country as two letters ("DE"): found only by exactly that, not by every word
+    /// with those letters in it.
+    var exitCountryCode: String? {
+        switch exit {
+        case .direct: return directCountry
+        case let .proxy(_, code): return code
+        case .unreadable: return nil
+        }
+    }
     /// Under the profile's commands in the palette (⌘K): the country it exits in, then its tags.
     var paletteDetail: String {
         var parts: [String] = []
@@ -761,6 +797,9 @@ enum ProfileExit: Equatable {
 
 enum ProfileFilter: Hashable {
     case all, running, proxied, direct, ephemeral
+    /// The profiles whose proxy did not answer (`ProfileRowItem.proxyFailed`): what to give
+    /// another proxy to.
+    case proxyFailing
     /// The profiles with this tag, whatever its case.
     case tag(String)
 
@@ -771,6 +810,7 @@ enum ProfileFilter: Hashable {
         case .proxied: return L("profiles.filter.proxied")
         case .direct: return L("profiles.filter.direct")
         case .ephemeral: return L("profiles.filter.ephemeral")
+        case .proxyFailing: return L("profiles.filter.proxyFailing")
         case .tag(let tag): return tag
         }
     }
@@ -782,6 +822,7 @@ enum ProfileFilter: Hashable {
         case .proxied: return "globe"
         case .direct: return "arrow.right"
         case .ephemeral: return "hourglass"
+        case .proxyFailing: return "exclamationmark.triangle"
         case .tag: return "number"
         }
     }
@@ -793,6 +834,7 @@ enum ProfileFilter: Hashable {
         case .proxied: return row.usesProxy
         case .direct: return row.connectsDirectly
         case .ephemeral: return row.ephemeral
+        case .proxyFailing: return row.proxyFailed
         case .tag(let tag): return ProfileTags.contains(row.tags, tag)
         }
     }
@@ -863,6 +905,8 @@ struct ProfileActions {
     var assignProxies: ([UUID]) -> Void = { _ in }
     /// Asks once, naming how many, before deleting.
     var deleteSeveral: ([UUID]) -> Void = { _ in }
+    /// Tags added to and removed from all of them (`ProfileTagsView`).
+    var tagSeveral: ([UUID]) -> Void = { _ in }
     /// A tag's colour for the whole vault (`TagColors`); nil takes it away.
     var setTagColor: (String, Int?) -> Void = { _, _ in }
     /// The sidebar's own rows (the owner, 10 November: in the interface, not behind a menu): the
@@ -909,6 +953,9 @@ struct ProfilesScreen: View {
     /// button: beside the list when the window has room for both, over the list's right side when
     /// it has not (the rows keep their columns).
     var showsInspector: Binding<Bool> = .constant(false)
+    /// The order of the rows inside each group (`ProfileListOrder`): the ⋯ menu's "Sort by", and a
+    /// click on the Name or the State column's title.
+    var order: Binding<ProfileListOrder> = .constant(.created)
     /// What the inspector shows of a profile beyond its row.
     var inspectorInfo: (UUID) -> InspectorInfo = { _ in InspectorInfo() }
     /// A profile is inspected: what it keeps is counted (`AppModel.loadInspectorCounts`).
@@ -1228,9 +1275,11 @@ struct ProfilesScreen: View {
     }
 
     private var groups: [RowGroup] {
-        [RowGroup(kind: .attention, rows: visibleRows.filter(\.needsAttention)),
-         RowGroup(kind: .running, rows: visibleRows.filter { !$0.needsAttention && $0.isActive }),
-         RowGroup(kind: .ready, rows: visibleRows.filter { !$0.needsAttention && !$0.isActive })]
+        // In the order chosen, inside each group: the groups themselves stay.
+        let visible = order.wrappedValue.sorted(visibleRows, name: { $0.name }, lastUsed: { $0.lastUsed })
+        return [RowGroup(kind: .attention, rows: visible.filter(\.needsAttention)),
+                RowGroup(kind: .running, rows: visible.filter { !$0.needsAttention && $0.isActive }),
+                RowGroup(kind: .ready, rows: visible.filter { !$0.needsAttention && !$0.isActive })]
             .filter { !$0.rows.isEmpty }
     }
 
@@ -1246,11 +1295,15 @@ struct ProfilesScreen: View {
         }
     }
 
-    /// The search finds a profile by its name, one of its tags or its notes.
+    /// The search finds a profile by its name, one of its tags or its notes — and by where it
+    /// exits: its proxy's address, the country's name as the row shows it or its two letters
+    /// alone ("DE"), "Direct" (`ProfileRowItem.exitSearchTexts`).
     static func matches(_ row: ProfileRowItem, _ query: String) -> Bool {
-        row.name.localizedCaseInsensitiveContains(query)
-            || row.tags.contains { $0.localizedCaseInsensitiveContains(query) }
-            || row.notes.localizedCaseInsensitiveContains(query)
+        if row.name.localizedCaseInsensitiveContains(query) { return true }
+        if row.tags.contains(where: { $0.localizedCaseInsensitiveContains(query) }) { return true }
+        if row.notes.localizedCaseInsensitiveContains(query) { return true }
+        if row.exitSearchTexts.contains(where: { $0.localizedCaseInsensitiveContains(query) }) { return true }
+        return row.exitCountryCode?.caseInsensitiveCompare(query) == .orderedSame
     }
 
     private var header: some View {
@@ -1285,6 +1338,12 @@ struct ProfilesScreen: View {
             // Only what is done rarely, in groups: import, sync, the network guard, automation and the
             // master password (they are in Settings and ⌘K too).
             MoreMenu {
+                Picker(L("profiles.sort"), selection: order) {
+                    Text(L("profiles.sort.created")).tag(ProfileListOrder.created)
+                    Text(L("profiles.sort.name")).tag(ProfileListOrder.name)
+                    Text(L("profiles.sort.lastUsed")).tag(ProfileListOrder.lastUsed)
+                }
+                Divider()
                 Button(L("profiles.menu.import"), action: actions.importProfile)
                 Divider()
                 Button(L("profiles.menu.sync"), action: actions.openSync)
@@ -1327,7 +1386,8 @@ struct ProfilesScreen: View {
             // above says so), and their folders are kept.
             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if rows.isEmpty {
-            EmptyProfilesView(onNew: actions.newProfile)
+            EmptyProfilesView(onNew: actions.newProfile, onImport: actions.importProfile,
+                              onProxies: proxyCount == nil ? nil : actions.openProxies)
         } else if visibleRows.isEmpty {
             NoMatchesView(query: search.trimmingCharacters(in: .whitespacesAndNewlines)) {
                 withAnimation(Theme.appearAnimation) {
@@ -1381,13 +1441,22 @@ struct ProfilesScreen: View {
 
     private func columnHeader(_ columns: ProfileColumns) -> some View {
         HStack(spacing: ProfileColumns.gap) {
-            Text(L("profiles.column.name")).lumenCaps().frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, ProfileColumns.nameInset)
+            SortableColumnTitle(title: L("profiles.column.name"), sorted: order.wrappedValue == .name, ascending: true,
+                                help: L(order.wrappedValue == .name ? "profiles.sort.name.on" : "profiles.sort.name.help")) {
+                order.wrappedValue = order.wrappedValue == .name ? .created : .name
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, ProfileColumns.nameInset)
             Text(L("profiles.column.exit")).lumenCaps().frame(width: ProfileColumns.exit, alignment: .leading)
             if columns.showsAppearsAs {
                 Text(L("profiles.column.appearsAs")).lumenCaps().frame(width: ProfileColumns.appearsAs, alignment: .leading)
             }
-            Text(L("profiles.column.state")).lumenCaps().frame(width: columns.state, alignment: .leading)
+            // The State column says when a stopped profile was last launched: its title sorts by that.
+            SortableColumnTitle(title: L("profiles.column.state"), sorted: order.wrappedValue == .lastUsed, ascending: false,
+                                help: L(order.wrappedValue == .lastUsed ? "profiles.sort.lastUsed.on" : "profiles.sort.lastUsed.help")) {
+                order.wrappedValue = order.wrappedValue == .lastUsed ? .created : .lastUsed
+            }
+            .frame(width: columns.state, alignment: .leading)
             Color.clear.frame(width: ProfileColumns.actions, height: 1)
         }
         .lineLimit(1)
@@ -1398,7 +1467,9 @@ struct ProfilesScreen: View {
 
     private func groupView(_ kind: GroupKind, _ rows: [ProfileRowItem], _ columns: ProfileColumns,
                            showsCaption: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // Found once for the group, not for each of its rows.
+        let selected = selectedRows
+        return VStack(alignment: .leading, spacing: 0) {
             if showsCaption {
                 HStack(spacing: 8) {
                     Text(groupTitle(kind)).lumenCaps(kind == .attention ? Theme.danger : Theme.textTertiary)
@@ -1415,8 +1486,10 @@ struct ProfilesScreen: View {
             }
             ForEach(rows) { row in
                 ProfileRow(row: row, columns: columns, actions: actions, isSelected: selection.contains(row.id),
-                           showsCheckbox: selectedRows.count >= 2, height: appearance.density.rowHeight,
+                           showsCheckbox: selected.count >= 2, height: appearance.density.rowHeight,
                            countryBackdrop: appearance.countryBackdrop,
+                           // One of several selected: its context menu is the selection's.
+                           selection: selected.count >= 2 && selection.contains(row.id) ? selected : [],
                            onClick: { click in selection.click(row.id, click, order: displayOrder.map(\.id)) },
                            // A double click is what a person opens a thing with: the profile is
                            // launched, and stays the chosen one.
@@ -1520,6 +1593,18 @@ private struct ProfilesSidebar: View {
                     caption(L("profiles.filters"))
                     item(.running)
                     item(.proxied)
+                    // Only while there are such profiles (or it is the list shown): then in red, as
+                    // the count beside Proxies.
+                    let failing = rows.filter(ProfileFilter.proxyFailing.includes).count
+                    if failing > 0 || (section == .profiles && filter == .proxyFailing) {
+                        sidebarButton(symbol: ProfileFilter.proxyFailing.symbol, title: ProfileFilter.proxyFailing.title,
+                                      count: failing, alert: failing > 0,
+                                      selected: section == .profiles && filter == .proxyFailing) {
+                            filter = .proxyFailing
+                            section = .profiles
+                        }
+                        .help(L("profiles.filter.proxyFailing.help"))
+                    }
                     item(.direct)
                     item(.ephemeral)
                     let tags = ProfileFilter.tags(of: rows)
@@ -1791,6 +1876,10 @@ private struct ProfileRow: View {
     var height: CGFloat = 52
     /// Settings › Appearance: the exit country's flag fading behind the row (`CountryBackdrop`).
     var countryBackdrop = false
+    /// The selected rows, when this row is one of several: a right click on it then offers what
+    /// can be done to all of them (`SelectionMenuItems`), as the Finder does — not this row's own
+    /// menu, which would act on one profile while thirty are selected.
+    var selection: [ProfileRowItem] = []
     /// A click on the row itself (not on its buttons or menu): selects it (`ProfileSelection`).
     var onClick: (ProfileSelection.Click) -> Void = { _ in }
     var onDoubleClick: () -> Void = {}
@@ -1837,7 +1926,13 @@ private struct ProfileRow: View {
         .onHover { hovered = $0 }
         .animation(Motion.hover(hovered), value: hovered)
         .opacity(row.activity == .sealing ? 0.6 : 1)
-        .contextMenu { ProfileMenuItems(row: row, actions: actions) }
+        .contextMenu {
+            if selection.count >= 2 {
+                SelectionMenuItems(rows: selection, actions: actions)
+            } else {
+                ProfileMenuItems(row: row, actions: actions)
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(row.name))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -2092,6 +2187,65 @@ private struct ProfileMenuItems: View {
         Button(L("profiles.row.export")) { actions.exportProfile(row.id) }
         Divider()
         Button(L("profiles.row.delete"), role: .destructive) { actions.delete(row.id) }
+    }
+}
+
+/// The context menu of a row that is one of several selected: what the selection's bar does, for
+/// all of them — launch the stopped ones, stop the running ones, warm them up, give them proxies,
+/// change their tags, delete them (asked once, naming how many).
+private struct SelectionMenuItems: View {
+    let rows: [ProfileRowItem]
+    let actions: ProfileActions
+
+    var body: some View {
+        let ids = rows.map(\.id)
+        // Settings that cannot be read do not start (R1): not counted among those to launch.
+        let stopped = rows.filter { $0.activity == .stopped && $0.exit != .unreadable }.map(\.id)
+        let running = rows.filter(\.isRunning).map(\.id)
+        Button(stopped.isEmpty ? L("profiles.bulk.launch") : String(format: L("inspector.launchSome"), stopped.count)) {
+            actions.launchSeveral(stopped)
+        }
+        .disabled(stopped.isEmpty)
+        Button(running.isEmpty ? L("profiles.bulk.stop") : String(format: L("inspector.stopSome"), running.count)) {
+            actions.stopSeveral(running)
+        }
+        .disabled(running.isEmpty)
+        Divider()
+        Button(L("profiles.bulk.warmUp")) { actions.warmUpSeveral(ids) }
+        Button(L("profiles.bulk.assignProxy")) { actions.assignProxies(ids) }
+        Button(L("profiles.bulk.tags")) { actions.tagSeveral(ids) }
+        Divider()
+        Button(String(format: L("profiles.selection.delete"), rows.count), role: .destructive) { actions.deleteSeveral(ids) }
+    }
+}
+
+/// A column's title that sorts the list by that column: a click sorts, another click goes back to
+/// the list's own order. Sorted, it is a tone brighter with an arrow beside it — up for A to Z,
+/// down for the latest first.
+struct SortableColumnTitle: View {
+    let title: String
+    let sorted: Bool
+    var ascending = true
+    let help: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Text(title).lumenCaps(sorted ? Theme.textSecondary : Theme.textTertiary)
+                if sorted {
+                    Image(systemName: ascending ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(Theme.textSecondary)
+                        .accessibilityHidden(true)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityHint(help)
+        .accessibilityAddTraits(sorted ? .isSelected : [])
     }
 }
 
@@ -2689,8 +2843,15 @@ struct GuardNoticeBar: View {
     }
 }
 
+/// No profile yet: what the window is for, and the three ways a first profile comes — made here,
+/// brought from another Mac or a backup (Import), or made for the proxies of a list pasted into
+/// Proxies first (docs/ROADMAP.md §1.7: a person who has not seen the app makes a profile with a
+/// proxy without being told where).
 private struct EmptyProfilesView: View {
     let onNew: () -> Void
+    var onImport: () -> Void = {}
+    /// Nil: the window has no Proxies section.
+    var onProxies: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -2708,6 +2869,22 @@ private struct EmptyProfilesView: View {
                 .padding(.bottom, 20)
             Button(action: onNew) { Label(L("profiles.action.new"), systemImage: "plus") }
                 .buttonStyle(.lumenPrimary)
+            HStack(spacing: 4) {
+                Button(L("profiles.menu.import"), action: onImport)
+                    .buttonStyle(.lumenGhost)
+                if let onProxies {
+                    Button(L("profiles.empty.proxies"), action: onProxies)
+                        .buttonStyle(.lumenGhost)
+                }
+            }
+            .padding(.top, 10)
+            Text(L(onProxies == nil ? "profiles.empty.hint.import" : "profiles.empty.hint"))
+                .font(.lumenSecondary)
+                .foregroundStyle(Theme.textTertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 380)
+                .padding(.top, 14)
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
