@@ -495,8 +495,15 @@ struct ProfileListView: View {
     /// with its flag, when it is known — from the profile's last launch through its proxy, else from
     /// the proxy list's last check of that proxy; otherwise the proxy's address, with why its country
     /// is not known; without a proxy, "Direct".
+    ///
+    /// The window draws at every change of the model, the manager, the license and the proxy list
+    /// (each result of a check of the list), and this runs each time: what it needs of the whole
+    /// list of proxies and of all the profiles is found once here — the list by proxy, the
+    /// profiles that open only for export — not once per row.
     private func rows(with proxyEntries: [ProxyListEntry]) -> [ProfileRowItem] {
-        model.profiles.map { profile in
+        let listed = ProxyList.entriesByIdentity(proxyEntries)
+        let exportOnly = model.license.exportOnlyTest()
+        return model.profiles.map { profile in
             let running = model.isRunning(profile.id)
             let busy = model.isBusy(profile.id)
             let details = model.details[profile.id]
@@ -512,9 +519,7 @@ struct ProfileListView: View {
             let lookupFailed = model.manager?.proxyLocationUnknown.contains(profile.id) ?? false
             if let details {
                 if let endpoint = details.proxyEndpoint {
-                    let check = details.proxyIdentity.flatMap { identity in
-                        proxyEntries.first { ProxyList.identity(of: $0.proxy) == identity }?.lastCheck
-                    }
+                    let check = details.proxyIdentity.flatMap { listed[$0]?.lastCheck }
                     let country = details.exitCountryCode ?? (check?.isAlive == true ? check?.countryCode : nil)
                     exit = .proxy(endpoint: endpoint, countryCode: country)
                     if country == nil { exitNote = ProfileRowItem.unknownCountryNote(check: check, lookupFailed: lookupFailed) }
@@ -543,7 +548,7 @@ struct ProfileListView: View {
                            $0.proxy.displayAddress)
                 },
                 deviceSymbol: details.flatMap { ProfileRowItem.deviceSymbol($0.deviceGeneration) },
-                exportOnly: model.license.isExportOnly(profile.id),
+                exportOnly: exportOnly(profile.id),
                 directCountry: details?.proxyEndpoint == nil ? details?.exitCountryCode : nil)
         }
     }

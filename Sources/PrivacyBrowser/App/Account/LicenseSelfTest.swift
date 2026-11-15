@@ -229,6 +229,25 @@ enum LicenseSelfTest {
         let storedMode = stored.mode
         // Asked of the license alone: in FULL the gate would start the profile.
         let storedOpens = stored.refusalToOpen(profile.id) == nil
+        // The Profiles window's export-only mark is found once for all its rows (`exportOnlyTest`):
+        // with ten profiles more here than the plan allows, it marks the ten made last — the ones
+        // the gate refuses, asked one by one — and no other.
+        let allowedHere = stored.state?.allowedProfilesHere ?? 0
+        let many: [ProfileSummary] = (0..<(allowedHere + 10)).compactMap { index in
+            let json = "{\"id\":\"\(UUID().uuidString)\",\"name\":\"p\(index)\",\"createdAt\":\(700_000_000 + index),\"revision\":1}"
+            return try? JSONDecoder().decode(ProfileSummary.self, from: Data(json.utf8))
+        }
+        stored.profilesHere = { many }
+        let exportOnly = stored.exportOnlyTest()
+        let marks = many.map { exportOnly($0.id) }
+        let refusals = many.map { stored.refusalToOpen($0.id) != nil }
+        stored.profilesHere = { [profile] in [profile] }
+        check("the Profiles window's export-only mark, found once for all its rows, is the gate's answer for each profile: "
+              + "the ten past what the plan allows here, and no other",
+              storedMode == .full && allowedHere > 0 && many.count == allowedHere + 10 && marks == refusals
+              && marks.prefix(allowedHere).allSatisfy { !$0 } && marks.suffix(10).allSatisfy { $0 },
+              "mode \(String(describing: storedMode)), allowed here \(allowedHere), profiles \(many.count), "
+              + "marked \(marks.filter { $0 }.count), refused by the gate \(refusals.filter { $0 }.count)")
         let file = AccountFile(directory: folder)
         var changed = false
         if var record = try? file.load(), var envelope = record.entitlement,
