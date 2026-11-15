@@ -11,13 +11,23 @@ import assert from 'node:assert/strict';
 const swift = readFileSync(new URL('../Sources/PrivacyBrowser/Browser/PrivacyScripts.swift', import.meta.url), 'utf8');
 const body = swift.split('static let shimBody = #"""')[1].split('"""#')[0];
 
+// What the engine knows of its own objects whatever their realm: a WebIDL receiver check accepts a
+// platform object of the right interface from any frame (WebKit: jsDynamicCast), not only one of the
+// function's own realm. Shared by every window made here, for the interfaces whose checks a test
+// calls across frames (RTCPeerConnection, MediaDevices).
+const engineObjects = new WeakSet();
+
 // A realm shaped like a WebKit window: navigator and screen values are accessors on the
 // prototypes that reject other receivers; window attributes are own accessors.
 function makeWindow(config, parentContext, prelude) {
   const context = vm.createContext({});
+  // Taken by the realm's code and the prelude, and gone before the shim installs.
+  Object.defineProperty(context, '__engineObjects', { value: engineObjects, configurable: true });
   vm.runInContext(`
     var window = globalThis;
     const illegal = (o, C) => { if (!(o instanceof C)) throw new TypeError('illegal invocation'); };
+    const engineObjects = globalThis.__engineObjects;
+    const branded = (o) => { if (!engineObjects.has(o)) throw new TypeError('illegal invocation'); };
     class Geolocation { getCurrentPosition() { illegal(this, Geolocation); throw new Error('native called'); } watchPosition() { illegal(this, Geolocation); } clearWatch() { illegal(this, Geolocation); } }
     // As WebKit shapes them: values behind prototype getters that reject other receivers.
     const slots = new WeakMap();
@@ -42,9 +52,11 @@ function makeWindow(config, parentContext, prelude) {
     globalThis.WeakRef = WeakRef;
     // Blob workers, as far as hookWorkers reaches them: a Blob, URL.createObjectURL and a Worker
     // that keeps the URL it was given.
-    globalThis.Blob = class Blob { constructor(parts, options) { this.parts = parts; this.type = (options && options.type) || ''; } };
+    // The parts are converted as a WebIDL sequence (through their @@iterator), and each URL's Blob is
+    // kept where only the engine (a test) reads it.
+    globalThis.Blob = class Blob { constructor(parts, options) { this.parts = []; for (const part of parts) this.parts.push(part); this.type = (options && options.type) || ''; } };
     let blobCount = 0;
-    globalThis.URL = class URL { static createObjectURL(blob) { return 'blob:test/' + (++blobCount); } };
+    globalThis.URL = class URL { static createObjectURL(blob) { const url = 'blob:test/' + (++blobCount); engine.blobs.set(url, blob); return url; } };
     globalThis.Worker = class Worker { constructor(url) { this.url = String(url); } };
     class Navigator {
       get platform() { illegal(this, Navigator); return 'MacIntel'; } get maxTouchPoints() { illegal(this, Navigator); return 0; }
@@ -109,7 +121,7 @@ function makeWindow(config, parentContext, prelude) {
     };
     globalThis.RTCStatsReport = class RTCStatsReport extends Map {};
     // What only the engine knows: every peer connection it made (a test reads it; pages never get it).
-    const engine = { instances: [], added: [], resolved: [] };
+    const engine = { instances: [], added: [], resolved: [], blobs: new Map() };
     // As libwebrtc: a candidate's address that is a name (not IPv4, not IPv6) is resolved by this Mac.
     const resolveNamed = (line) => {
       const m = reflectApply(RegExp.prototype.exec, /^(?:a=)?candidate:\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+(\\S+)/i, [line]);
@@ -119,11 +131,12 @@ function makeWindow(config, parentContext, prelude) {
     globalThis.RTCPeerConnection = class RTCPeerConnection {
       constructor(c) {
         this.config = convert(c); this.closed = false; this.gathered = this.config.iceCandidatePoolSize > 0;
+        engineObjects.add(this);
         engine.instances.push(this);
       }
-      setConfiguration(c) { illegal(this, RTCPeerConnection); this.config = convert(c); }
+      setConfiguration(c) { branded(this); this.config = convert(c); }
       getConfiguration() {
-        illegal(this, RTCPeerConnection);
+        branded(this);
         const c = this.config, servers = [];
         for (let i = 0; c.iceServers && i < c.iceServers.length; i++) {
           const s = c.iceServers[i], copy = {};
@@ -138,11 +151,11 @@ function makeWindow(config, parentContext, prelude) {
         own('iceTransportPolicy', c.iceTransportPolicy || 'all'); own('rtcpMuxPolicy', 'require');
         return result;
       }
-      close() { illegal(this, RTCPeerConnection); this.closed = true; }
-      get signalingState() { illegal(this, RTCPeerConnection); return this.closed ? 'closed' : 'stable'; }
-      get remoteDescription() { illegal(this, RTCPeerConnection); return this.remote || null; }
+      close() { branded(this); this.closed = true; }
+      get signalingState() { branded(this); return this.closed ? 'closed' : 'stable'; }
+      get remoteDescription() { branded(this); return this.remote || null; }
       addIceCandidate(c) {
-        illegal(this, RTCPeerConnection);
+        branded(this);
         const invalid = () => { const e = new Error('InvalidStateError'); e.name = 'InvalidStateError'; return Promise.reject(e); };
         if (this.closed || !this.remote) return invalid();
         const line = c === undefined || c === null || c.candidate === undefined ? '' : NativeString(c.candidate);
@@ -151,14 +164,14 @@ function makeWindow(config, parentContext, prelude) {
         return Promise.resolve();
       }
       setRemoteDescription(d) {
-        illegal(this, RTCPeerConnection);
+        branded(this);
         const sdp = NativeString(d.sdp), type = NativeString(d.type);
         this.remote = { sdp, type };
         for (const line of sdp.split('\\n')) resolveNamed(line.trim());
         return Promise.resolve();
       }
       // As WebKit: a promise of a new maplike report each call, its entries plain objects.
-      getStats() { illegal(this, RTCPeerConnection); return Promise.resolve(report(this.stats)); }
+      getStats() { branded(this); return Promise.resolve(report(this.stats)); }
     };
     const report = (stats) => new RTCStatsReport((stats || []).map(([id, entry]) => [id, Object.assign({}, entry)]));
     globalThis.RTCRtpSender = class RTCRtpSender {
@@ -187,6 +200,7 @@ function makeWindow(config, parentContext, prelude) {
   context.top = parentContext ? parentContext.top : context;
   // What a test adds to the realm before the shim installs (the camera's devices, below).
   if (prelude) vm.runInContext(prelude, context);
+  vm.runInContext('delete globalThis.__engineObjects;', context);
   vm.runInContext(`(function install(CONFIG) {\n${body}\n})(${JSON.stringify(config)});`, context);
   return context;
 }
@@ -508,6 +522,43 @@ test('workers made from a blob are hooked whenever a substitution reaches them, 
   assert.equal(hooked({ ...base, fingerprint: { ...real, language: 'de-DE' } }), true, 'a language');
 });
 
+// What a blob worker starts with: this script and the part of CONFIG a worker reads — never the
+// camera's media (copied into every frame's script, tens of MB with a video) nor the WebRTC relay's
+// credentials (a worker can read its own script back; a page that put its own Blob in place would be
+// handed it). Read where only the engine sees it: the Blob behind the worker's URL.
+test('a blob worker gets only what a worker uses: never the camera\'s media, never the relay\'s credentials', () => {
+  const relay = { urls: ['turn:127.0.0.1:50000?transport=udp'], username: 'relay-user-7', credential: 'relay-secret-7' };
+  const video = 'data:video/mp4;base64,' + 'QUJD'.repeat(32) + 'VIDEO-MEDIA';
+  const config = { ...base, timeZone: 'Europe/Berlin', storageQuota: 0.6 * 128 * 2 ** 30, webRTC: 'tunnel', webRTCRelay: relay,
+                   camera: { ...noCamera.camera, mode: 'substitute', source: 'video', videoURL: video },
+                   systemCamera: { sentinel: 'Lumen Camera', usedHere: false, label: 'FaceTime HD Camera' } };
+  const w = makeWindow(config);
+  const scriptOf = (url) => run(w, `__engine.blobs.get(${JSON.stringify(url)}).parts.filter((p) => typeof p === 'string').join('')`);
+  const url = run(w, `new Worker(URL.createObjectURL(new Blob(['postMessage(1)']))).url`);
+  const script = scriptOf(url);
+  for (const secret of ['relay-user-7', 'relay-secret-7', 'turn:127.0.0.1', 'VIDEO-MEDIA', 'Lumen Camera']) {
+    assert.ok(!script.includes(secret), `the worker's script carries ${secret}`);
+  }
+  // The page's own Blob, put in place before its worker starts, is not handed the script; the
+  // worker is still made of it.
+  run(w, `var handed = []; var PageBlob = Blob; window.Blob = class Blob extends PageBlob { constructor(parts, o) { super(parts, o); handed.push(this.parts.join('')); } };`);
+  const second = run(w, `new Worker(URL.createObjectURL(new PageBlob(['postMessage(2)']))).url`);
+  assert.equal(run(w, `handed.length`), 0, 'the page\'s Blob was handed the worker\'s script');
+  assert.ok(scriptOf(second).startsWith('try { (0, eval)('), 'the worker made of the page\'s blob starts with the script');
+  // What it does carry: the shim, run with the worker's part of CONFIG.
+  const evaluated = JSON.parse(/^try \{ \(0, eval\)\((.*)\); \} catch \(e\) \{\}/s.exec(script)[1]);
+  assert.ok(evaluated.startsWith('(function install(CONFIG) {'));
+  const workerConfig = JSON.parse(evaluated.slice(evaluated.lastIndexOf('})(') + 3, -2));
+  assert.deepEqual(workerConfig, { timeZone: 'Europe/Berlin', storageQuota: config.storageQuota });
+  // The iOS app's fingerprint and an iPhone's platform go too: a worker answers them.
+  const phone = { platform: 'iPhone', width: 402, height: 874, maxTouchPoints: 5 };
+  const fingerprint = { seed: 's', canvas: 'noise', webgl: 'real', audio: 'real', language: null, unstable: false, naive: false };
+  const ios = makeWindow({ ...base, phone, fingerprint });
+  const iosURL = run(ios, `new Worker(URL.createObjectURL(new Blob(['postMessage(1)']))).url`);
+  const iosScript = JSON.parse(/^try \{ \(0, eval\)\((.*)\); \} catch \(e\) \{\}/s.exec(run(ios, `__engine.blobs.get(${JSON.stringify(iosURL)}).parts.join('')`))[1]);
+  assert.deepEqual(JSON.parse(iosScript.slice(iosScript.lastIndexOf('})(') + 3, -2)), { phone, fingerprint });
+});
+
 test('storage quota: Safari\'s instead of the app default', async () => {
   // WebKit: ceil(0.6 × 128 GB) for a browser's top-level origin on any Mac.
   const w = makeWindow({ ...base, storageQuota: 0.6 * 128 * 2 ** 30 });
@@ -708,6 +759,32 @@ test('WebRTC through the tunnel: a remote candidate named by a host name never r
   assert.equal(run(w, `RTCPeerConnection.prototype.setRemoteDescription.toString()`), nativeText('setRemoteDescription'));
 });
 
+// The engine keeps the relay, with its credentials, as the configuration of every connection the
+// shim makes; a frame's getConfiguration called on another frame's connection (WebIDL takes one of
+// any frame) does not know the page's view of it, and must not show the relay instead.
+test('WebRTC through the tunnel: another frame\'s getConfiguration never shows the relay', () => {
+  const relay = { urls: ['turn:127.0.0.1:50000?transport=udp'], username: 'relay-user-7', credential: 'relay-secret-7' };
+  const config = { ...base, webRTC: 'tunnel', webRTCRelay: relay };
+  const top = makeWindow(config);
+  const frame = makeWindow(config, top);
+  top.__frameGetConfiguration = run(frame, 'RTCPeerConnection.prototype.getConfiguration');
+  top.__framePC = run(frame, `new RTCPeerConnection({ iceServers: [{ urls: 'stun:frame.example:3478' }] })`);
+  const seen = [
+    run(top, `JSON.stringify(__frameGetConfiguration.call(new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.example.com:3478' }] })))`),
+    run(top, `JSON.stringify(RTCPeerConnection.prototype.getConfiguration.call(__framePC))`),
+  ];
+  for (const text of seen) {
+    for (const secret of ['relay-user-7', 'relay-secret-7', '127.0.0.1']) assert.ok(!text.includes(secret), `${secret} in ${text}`);
+  }
+  // Each frame's own connections still read the page's own servers.
+  assert.equal(run(top, `JSON.stringify(new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.example.com:3478' }] }).getConfiguration().iceServers)`),
+               JSON.stringify([{ urls: 'stun:stun.example.com:3478' }]));
+  assert.equal(run(frame, `JSON.stringify(__engine.instances.length && new RTCPeerConnection({ iceServers: [{ urls: 'stun:frame.example:3478' }] }).getConfiguration().iceServers)`),
+               JSON.stringify([{ urls: 'stun:frame.example:3478' }]));
+  // And the engine still has the relay for them all.
+  assert.equal(run(top, `__engine.instances.filter((pc) => !pc.closed).every((pc) => pc.config.iceServers[0].credential === 'relay-secret-7')`), true);
+});
+
 test('WebRTC through the tunnel: the validating connection never gathers', () => {
   const relay = { urls: ['turn:192.0.2.10:3478?transport=udp'], username: 'u1', credential: 'c1' };
   const w = makeWindow({ ...base, webRTC: 'tunnel', webRTCRelay: relay });
@@ -730,10 +807,16 @@ test('WebRTC unrestricted', () => {
 // that reject other receivers; before the page holds the camera permission one unnamed placeholder
 // per kind (Media Capture and Streams, "device information exposure"), after it every device with
 // its id and label. getUserMedia opens the device a deviceId pins, else the Mac's default camera;
-// with nothing asked it is a TypeError, as in the engine. Every call and stop is recorded.
+// with nothing asked it is a TypeError, as in the engine. Every call and stop is recorded. Its
+// receiver check takes a MediaDevices of any frame, as WebKit's does, and it reads a request as
+// WebIDL converts it: each member once, null or any object asking for the device. `canvas`: a
+// document whose canvas gives a stream, for the drawn camera (`patchCamera`).
 const cameraPrelude = ({ granted = false, micGranted = false, defaultCamera = 'real-cam', withVirtual = true, deny = false,
-                        virtualFails = false } = {}) => `(() => {
+                        virtualFails = false, canvas = false } = {}) => `(() => {
   const reject = (o, C) => { if (!(o instanceof C)) throw new TypeError('illegal invocation'); };
+  const engineObjects = globalThis.__engineObjects;
+  const branded = (o) => { if (!engineObjects.has(o)) throw new TypeError('illegal invocation'); };
+  const askedFor = (v) => v === null || (v !== undefined && (typeof v === 'object' || typeof v === 'function' || !!v));
   // The engine's DOMException (a bare vm realm has none).
   if (typeof globalThis.DOMException !== 'function') {
     globalThis.DOMException = class DOMException extends Error { constructor(message, name) { super(message); this.name = name || 'Error'; } };
@@ -771,8 +854,9 @@ const cameraPrelude = ({ granted = false, micGranted = false, defaultCamera = 'r
   }
   globalThis.MediaStream = MediaStream;
   class MediaDevices {
+    get ondevicechange() { branded(this); return null; }
     enumerateDevices() {
-      reject(this, MediaDevices);
+      branded(this);
       // Per kind: a kind the page holds no permission for is one unnamed placeholder.
       const out = [];
       for (const kind of ['videoinput', 'audioinput']) {
@@ -783,25 +867,35 @@ const cameraPrelude = ({ granted = false, micGranted = false, defaultCamera = 'r
       return Promise.resolve(out);
     }
     getUserMedia(constraints) {
-      reject(this, MediaDevices);
+      branded(this);
       camera.calls.push(constraints === undefined ? null : JSON.parse(JSON.stringify(constraints)));
-      if (!constraints || (!constraints.video && !constraints.audio)) return Promise.reject(new TypeError('At least one of audio and video must be requested'));
+      const audio = constraints === undefined || constraints === null ? undefined : constraints.audio;
+      const video = constraints === undefined || constraints === null ? undefined : constraints.video;
+      if (!askedFor(video) && !askedFor(audio)) return Promise.reject(new TypeError('At least one of audio and video must be requested'));
       if (${deny}) { const e = new Error('The request is not allowed'); e.name = 'NotAllowedError'; return Promise.reject(e); }
-      if (constraints.video) camera.granted = true; else camera.micGranted = true;
+      if (askedFor(video)) camera.granted = true; else camera.micGranted = true;
       const tracks = [];
-      if (constraints.video) {
-        const pin = constraints.video.deviceId;
+      if (askedFor(video)) {
+        const pin = video && video.deviceId;
         const id = typeof pin === 'string' ? pin : (pin && pin.exact) || '${defaultCamera}';
         if (${virtualFails} && id === 'lumen-cam') { const e = new Error('Could not start video source'); e.name = 'NotReadableError'; return Promise.reject(e); }
         camera.opened.push(id);
         tracks.push(new MediaStreamTrack('video', id));
       }
-      if (constraints.audio) tracks.push(new MediaStreamTrack('audio', 'mic'));
+      if (askedFor(audio)) tracks.push(new MediaStreamTrack('audio', 'mic'));
       return Promise.resolve(new MediaStream(tracks));
     }
   }
   globalThis.MediaDevices = MediaDevices;
   navigator.mediaDevices = Object.create(MediaDevices.prototype);
+  engineObjects.add(navigator.mediaDevices);
+  if (${canvas}) {
+    // What the drawn camera draws on: a canvas whose stream has one video track (its frames are not modelled).
+    globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => ({}),
+                                                    captureStream: () => new MediaStream([new MediaStreamTrack('video', 'drawn')]) }) };
+    globalThis.requestAnimationFrame = () => 1;
+    globalThis.cancelAnimationFrame = () => {};
+  }
 })();`;
 
 const systemCamera = (usedHere) => ({ ...base, systemCamera: { sentinel: 'Lumen Camera', usedHere, label: 'FaceTime HD Camera' } });
@@ -887,6 +981,21 @@ test('system camera: a denial, a call without video and a pinned device are the 
   await assert.rejects(run(w, `navigator.mediaDevices.getUserMedia()`), (e) => e.name === 'TypeError');
 });
 
+test('system camera: a request is read once, as the engine reads it — a getter that changes its answer never opens the Mac\'s camera', async () => {
+  for (const granted of [true, false]) {
+    const w = makeWindow(systemCamera(true), null, cameraPrelude({ granted }));
+    // No video the first time it is read, a video after: the engine is handed what was read, which asks for nothing.
+    await assert.rejects(run(w, `(() => { let n = 0; return navigator.mediaDevices.getUserMedia({ get video() { return n++ > 0; } }); })()`),
+                         (e) => e.name === 'TypeError', `granted ${granted}`);
+    assert.deepEqual(cameraState(w).opened, [], `granted ${granted}: a getter that changes its answer`);
+    // WebIDL: video null asks for the camera: the virtual one.
+    assert.deepEqual(await openedBy(w, { video: null }), [['video', 'lumen-cam', 'live']], `granted ${granted}: video null`);
+    const state = cameraState(w);
+    assert.equal(state.opened.filter((id) => id === 'real-cam').length, state.stopped.filter((id) => id === 'real-cam').length,
+                 `granted ${granted}: a real camera opened was stopped unseen`);
+  }
+});
+
 test('system camera: the track a page holds names the virtual camera with the profile\'s name, never "Lumen Camera"', async () => {
   const labels = (w, constraints) => run(w, `navigator.mediaDevices.getUserMedia(${JSON.stringify(constraints)}).then((s) => JSON.stringify(s.getTracks().map((t) => t.label)))`).then(JSON.parse);
   const w = makeWindow(systemCamera(true), null, cameraPrelude({ granted: true }));
@@ -913,6 +1022,63 @@ test('"No camera": none listed before the permission or after, a camera request 
   await assert.rejects(run(w, `navigator.mediaDevices.getUserMedia({ video: true, audio: true })`), (e) => e.name === 'NotFoundError');
   assert.deepEqual(cameraState(w).opened, []);   // no camera opened for it
   assert.deepEqual(await openedBy(w, { audio: true }), [['audio', 'mic', 'live']]);
+});
+
+// The drawn camera ("Substitute", delivered by the shim) and "No camera": no request reaches the
+// Mac's camera, whatever object it is made on, whichever frame's function makes it, and however its
+// members answer. The engine's receiver check takes a MediaDevices of any frame (WebIDL), so a frame's
+// function called on another frame's object (or the other way round) is a request the engine serves.
+const drawnCamera = { ...base, camera: { ...noCamera.camera, mode: 'substitute' } };
+const cameraCalls = [
+  // This frame's function, a frame's MediaDevices.
+  ['this function, a frame\'s object', `MediaDevices.prototype.getUserMedia.call(__frameDevices, { video: true })`],
+  // A frame's function — the "clean function from an iframe" — on this frame's own object.
+  ['a frame\'s function, this object', `__frameGetUserMedia.call(navigator.mediaDevices, { video: true })`],
+  // WebIDL: a member that is null asks for the device, as an object does.
+  ['video: null', `navigator.mediaDevices.getUserMedia({ video: null })`],
+];
+const cameraOpened = (...windows) => windows.flatMap((w) => cameraState(w).opened);
+
+test('drawn camera and "No camera": another frame\'s MediaDevices or getUserMedia never reaches the Mac\'s camera', async () => {
+  for (const [mode, config] of [['block', noCamera], ['substitute', drawnCamera]]) {
+    const top = makeWindow(config, null, cameraPrelude({ granted: true, canvas: true }));
+    const frame = makeWindow(config, top, cameraPrelude({ granted: true, canvas: true }));
+    top.__frameDevices = run(frame, 'navigator.mediaDevices');
+    top.__frameGetUserMedia = run(frame, 'MediaDevices.prototype.getUserMedia');
+    for (const [name, call] of cameraCalls) {
+      const outcome = await run(top, call).then((stream) => stream.getTracks().map((t) => t.deviceId).join(), (e) => e.name);
+      assert.equal(outcome, mode === 'block' ? 'NotFoundError' : 'drawn', `${mode}, ${name}`);
+      assert.deepEqual(cameraOpened(top, frame), [], `${mode}, ${name}: the Mac's camera was opened`);
+    }
+    // What is no MediaDevices at all still gets the engine's TypeError, and opens nothing.
+    await assert.rejects(async () => run(top, `MediaDevices.prototype.getUserMedia.call({}, { video: true })`), (e) => e.name === 'TypeError');
+    assert.deepEqual(cameraOpened(top, frame), [], `${mode}: no MediaDevices`);
+    // The list, asked of either object through either function, has no real camera in it: only the
+    // drawn one, or none.
+    top.__frameEnumerate = run(frame, 'MediaDevices.prototype.enumerateDevices');
+    for (const call of [`MediaDevices.prototype.enumerateDevices.call(__frameDevices)`, `__frameEnumerate.call(navigator.mediaDevices)`]) {
+      const cameras = await run(top, `${call}.then((l) => JSON.stringify(l.filter((d) => d.kind === 'videoinput').map((d) => d.deviceId)))`).then(JSON.parse);
+      assert.equal(cameras.length, mode === 'block' ? 0 : 1, `${mode}, ${call}: ${JSON.stringify(cameras)}`);
+      assert.ok(!cameras.includes('real-cam'), `${mode}, ${call}: ${JSON.stringify(cameras)}`);
+    }
+  }
+});
+
+test('drawn camera and "No camera": a request that answers the engine otherwise than the shim never reaches the Mac\'s camera', async () => {
+  for (const [mode, config] of [['block', noCamera], ['substitute', drawnCamera]]) {
+    const w = makeWindow(config, null, cameraPrelude({ granted: true, canvas: true }));
+    // No video the first time it is read, a video after: the engine is never handed the page's object.
+    await assert.rejects(run(w, `(() => { let n = 0; return navigator.mediaDevices.getUserMedia({ get video() { return n++ > 0; } }); })()`),
+                         (e) => e.name === 'TypeError', mode);
+    assert.deepEqual(cameraOpened(w), [], `${mode}: a getter that changes its answer`);
+    // The microphone's request ("real" audio) is the shim's own object: what a page puts on
+    // Object.prototype is no member of it.
+    run(w, `var reads = 0; Object.defineProperty(Object.prototype, 'video', { get() { return reads++ > 0; }, configurable: true });`);
+    const audioOnly = await run(w, `navigator.mediaDevices.getUserMedia({ audio: true }).then((s) => s.getTracks().map((t) => t.kind).join(), (e) => e.name)`);
+    run(w, `delete Object.prototype.video;`);
+    assert.equal(audioOnly, 'audio', mode);
+    assert.deepEqual(cameraOpened(w), [], `${mode}: a video member on Object.prototype`);
+  }
 });
 
 test('system camera installed, not this profile\'s: the virtual device is hidden, the Mac\'s camera stays as it is', async () => {
@@ -997,6 +1163,123 @@ test('recorder: autocomplete passwords, one-time codes and card fields are secre
   const note = run(w, `const s = new HTMLSelectElement({ id: 'exp', autocomplete: 'cc-exp-month' }, '07'); elements.push(s); fire('change', s);
                        posted.filter((m) => m.type === 'note').pop().value`);
   assert.equal(note, 'select #exp: •••');
+});
+
+// A web component's own elements (an open shadow root): the recorder names them through their
+// host (`host >>> inner`), and the driver's find (PageDriver.findAll) looks there — not at a
+// look-alike in the page itself. A stub DOM with shadow roots and the few selectors these use.
+const driverSwift = readFileSync(new URL('../Sources/PrivacyBrowser/Browser/PageDriver.swift', import.meta.url), 'utf8');
+const driverFindAll = driverSwift.split('private static let findAll = """')[1].split('"""')[0].replace(/\\\\/g, '\\');
+
+async function shadowWindow() {
+  const context = vm.createContext({});
+  vm.runInContext(`
+    var window = globalThis;
+    window.top = window;
+    var posted = [];
+    const listeners = {};
+    var addEventListener = (type, fn) => { (listeners[type] = listeners[type] || []).push(fn); };
+    // An event as a window's capture listener sees it: retargeted to the outermost host, its
+    // composed path from the element itself out.
+    var fire = (type, path, extra) => {
+      const event = Object.assign({ type, target: path.find((n) => n.getRootNode && n.getRootNode() === document) || path[0],
+                                    isTrusted: true, isComposing: false, detail: 1, composedPath: () => path }, extra || {});
+      for (const fn of listeners[type] || []) fn(event);
+    };
+    var pathOf = (el) => { const path = []; for (let n = el; n; n = n.parentNode || n.host) path.push(n); return path.concat([window]); };
+    class Node {
+      constructor() { this.parentNode = null; this.children = []; }
+      append(...kids) { for (const k of kids) { k.parentNode = this; this.children.push(k); } return this; }
+      getRootNode() { let n = this; while (n.parentNode) n = n.parentNode; return n; }
+      contains(other) { for (let n = other; n; n = n.parentNode) { if (n === this) return true; } return false; }
+      querySelectorAll(selector) {
+        const out = [];
+        const walk = (n) => { for (const c of n.children) { if (matches(c, selector)) out.push(c); walk(c); } };
+        walk(this);
+        return out;
+      }
+      elementFromPoint() { return this.hit || null; }
+    }
+    class Element extends Node {
+      constructor(tag, attrs, text) { super(); this.tagName = tag.toUpperCase(); this.attrs = Object.assign({}, attrs); this.ownText = text || ''; this.isConnected = true; this.nodeType = 1; this.shadowRoot = null; }
+      get parentElement() { return this.parentNode instanceof Element ? this.parentNode : null; }
+      getAttribute(name) { return name in this.attrs ? String(this.attrs[name]) : null; }
+      get id() { return this.attrs.id || ''; }
+      get innerText() { return [this.ownText, ...this.children.map((c) => c.innerText)].filter(Boolean).join(' '); }
+      closest() { return null; }
+      attachShadow() { this.shadowRoot = new ShadowRoot(this); return this.shadowRoot; }
+    }
+    class ShadowRoot extends Node { constructor(host) { super(); this.host = host; this.nodeType = 11; this.activeElement = null; } }
+    class HTMLInputElement extends Element { constructor(attrs) { super('input', attrs); this.type = this.attrs.type || 'text'; this.value = ''; } }
+    class HTMLTextAreaElement extends Element {}
+    class HTMLSelectElement extends Element {}
+    class HTMLLabelElement extends Element {}
+    Object.assign(globalThis, { Node, Element, ShadowRoot, HTMLInputElement, HTMLTextAreaElement, HTMLSelectElement, HTMLLabelElement });
+    // "*", "body *", and compounds (tag, #id, [name="value"], :nth-of-type(n)) joined by " > ".
+    var matches = (el, selector) => {
+      if (selector === '*') return true;
+      if (selector === 'body *') return el !== document.body && document.body.contains(el);
+      const compounds = selector.split(' > ');
+      let node = el;
+      for (let i = compounds.length - 1; i >= 0; i--) {
+        if (!node || !(node instanceof Element)) return false;
+        const m = /^([a-z-]+)?(?:#([\\w-]+))?(?:\\[([\\w-]+)="([^"]*)"\\])?(?::nth-of-type\\((\\d+)\\))?$/.exec(compounds[i]);
+        if (!m) throw new SyntaxError('stub: ' + compounds[i]);
+        if (m[1] && node.tagName.toLowerCase() !== m[1]) return false;
+        if (m[2] && node.id !== m[2]) return false;
+        if (m[3] && node.getAttribute(m[3]) !== m[4]) return false;
+        if (m[5]) {
+          const same = node.parentNode.children.filter((c) => c.tagName === node.tagName);
+          if (same.indexOf(node) + 1 !== Number(m[5])) return false;
+        }
+        node = node.parentNode;
+      }
+      return true;
+    };
+    var document = new Node();
+    document.nodeType = 9;
+    document.documentElement = new Element('html');
+    document.body = new Element('body');
+    document.append(document.documentElement);
+    document.documentElement.append(document.body);
+    var CSS = { escape: (text) => text };
+    var location = { href: 'https://example.com/login' };
+    var performance = { now: () => 0 };
+    window.webkit = { messageHandlers: { rec: { postMessage: (message) => { posted.push(message); return { recording: true }; } } } };
+
+    // A newsletter form in the page itself, and a login box whose form is its own (open shadow root).
+    var footerEmail = new HTMLInputElement({ name: 'email' });
+    var subscribe = new Element('button', {}, 'Subscribe');
+    document.body.append(new Element('form').append(footerEmail, new Element('div').append(subscribe)));
+    var loginBox = new Element('login-box');
+    document.body.append(loginBox);
+    var email = new HTMLInputElement({ name: 'email' });
+    var proceed = new Element('button', {}, 'Continue');
+    loginBox.attachShadow().append(new Element('form').append(email, new Element('div').append(proceed)));
+  `, context);
+  vm.runInContext('const HANDLER = "rec";\n' + recorderBody, context);
+  vm.runInContext('globalThis.driver = (() => {\n' + driverFindAll + '\nreturn { find, at, holds, focused };\n})();', context);
+  await new Promise((resolve) => setImmediate(resolve));   // the hello's reply: recording
+  return context;
+}
+
+test('recorder and driver: a field and a button in an open shadow root are named through their host and found there', async () => {
+  const w = await shadowWindow();
+  run(w, `fire('focusin', pathOf(email)); email.value = 'me@example.com'; fire('input', pathOf(email)); fire('focusout', pathOf(email));
+          fire('click', pathOf(proceed));`);
+  const steps = JSON.parse(run(w, 'JSON.stringify(posted.filter((m) => m.type !== "hello"))'));
+  assert.deepEqual(steps.map((m) => [m.type, m.selector]),
+                   [['fill', 'body > login-box >>> input[name="email"]'], ['click', 'body > login-box >>> text=Continue']]);
+  // The replay finds the component's own elements, not the newsletter's of the same shape.
+  assert.equal(run(w, `driver.find(${JSON.stringify(steps[0].selector)})[0] === email`), true);
+  assert.equal(run(w, `driver.find(${JSON.stringify(steps[1].selector)})[0] === proceed`), true);
+  assert.equal(run(w, `driver.find('input[name="email"]').length === 1 && driver.find('input[name="email"]')[0] === footerEmail`), true,
+               'a selector of the page itself still finds only the page\'s own');
+  assert.equal(run(w, `driver.find('text=Continue').length`), 0, 'nor does a text of the page itself look into components');
+  // Where the pointer lands: the button inside the box, not the box that hides it from the page.
+  assert.equal(run(w, `document.hit = loginBox; loginBox.shadowRoot.hit = proceed; driver.at(5, 5) === proceed`), true);
+  assert.equal(run(w, `driver.holds(proceed, driver.at(5, 5)) && driver.holds(loginBox, proceed) && !driver.holds(subscribe, proceed)`), true);
+  assert.equal(run(w, `document.activeElement = loginBox; loginBox.shadowRoot.activeElement = email; driver.focused() === email`), true);
 });
 
 process.on('beforeExit', () => {

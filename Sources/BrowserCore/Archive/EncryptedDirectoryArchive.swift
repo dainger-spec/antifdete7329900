@@ -232,14 +232,19 @@ public enum EncryptedDirectoryArchive {
     }
 
     /// An archive to write, after `prefix` (bytes the file starts with), under `key`.
+    /// `writtenWhenEmpty`: written, as an archive with no root, even when no root was routed to it
+    /// — a file that must exist whatever the sources held (a profile's export), and that replaces
+    /// whatever was at `url` before.
     public struct TranscodeDestination {
         public let url: URL
         public let key: SymmetricKey
         public let prefix: Data
-        public init(url: URL, key: SymmetricKey, prefix: Data = Data()) {
+        public let writtenWhenEmpty: Bool
+        public init(url: URL, key: SymmetricKey, prefix: Data = Data(), writtenWhenEmpty: Bool = false) {
             self.url = url
             self.key = key
             self.prefix = prefix
+            self.writtenWhenEmpty = writtenWhenEmpty
         }
     }
 
@@ -250,7 +255,8 @@ public enum EncryptedDirectoryArchive {
     /// `route(source, label)` names the destination (by index) and the new label of each root,
     /// or nil to leave the root out. A destination is written to a temporary file and moved into
     /// place only once every source has authenticated to its end, so a damaged or tampered source
-    /// leaves no destination behind; a destination no root was routed to is not written at all.
+    /// leaves no destination behind; a destination no root was routed to is not written at all,
+    /// unless it asks to be (`writtenWhenEmpty`).
     @discardableResult
     public static func transcode(sources: [TranscodeSource], to destinations: [TranscodeDestination],
                                  route: (_ source: Int, _ label: String) throws -> (destination: Int, label: String)?) throws -> Stats {
@@ -283,8 +289,11 @@ public enum EncryptedDirectoryArchive {
                 }
                 let handle = try FileHandle(forWritingTo: temp)
                 try handle.write(contentsOf: destination.prefix)
-                outputs.append(Output(temp: temp, handle: handle,
-                                      writer: try EncryptedChunkWriter(handle: handle, key: destination.key, chunkSize: defaultChunkSize)))
+                let output = Output(temp: temp, handle: handle,
+                                    writer: try EncryptedChunkWriter(handle: handle, key: destination.key, chunkSize: defaultChunkSize))
+                // Finished and moved into place below even if nothing is routed to it.
+                output.used = destination.writtenWhenEmpty
+                outputs.append(output)
             }
             for (index, source) in sources.enumerated() {
                 let handle = try FileHandle(forReadingFrom: source.url)

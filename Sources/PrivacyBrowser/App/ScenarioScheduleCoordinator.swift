@@ -15,7 +15,8 @@ final class ScenarioScheduleCoordinator {
         var profiles: () -> Set<UUID>
         var scenario: (UUID) -> Scenario?
         var scenarios: () -> Set<UUID>
-        /// The profile is starting, being sealed, or running a scenario already.
+        /// The profile is starting, being sealed, running a scenario already, being recorded in, or
+        /// driven by a WebDriver session.
         var isBusy: (UUID) -> Bool
         var runScenario: (Scenario, UUID) async -> Bool
         /// Puts the profile's warm-up in the warm-up queue; false when there is no queue.

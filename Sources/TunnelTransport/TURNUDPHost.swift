@@ -19,8 +19,9 @@ public final class TURNUDPHost {
     /// The TURN URL pages are given for this host (IPv4 only).
     public var turnURL: String { "turn:\(address.ip):\(address.port)?transport=udp" }
 
+    /// `admit`: which clients may allocate (`TURNServer.Admit`), asked and answered on `queue`.
     public init(route template: TunnelRoute, bindTo ip: IPAddr, queue: DispatchQueue, relays: PeerRelayFactory,
-                log: @escaping (String) -> Void = { _ in }) throws {
+                log: @escaping (String) -> Void = { _ in }, admit: TURNServer.Admit? = nil) throws {
         guard ip.family == .v4 else { throw HostError.socket("IPv4 only") }
         let fd = socket(AF_INET, SOCK_DGRAM, 0)
         guard fd >= 0 else { throw HostError.socket("socket: \(errno)") }
@@ -59,7 +60,7 @@ public final class TURNUDPHost {
                     }
                 }
             }
-        }, log: log)
+        }, log: log, admit: admit)
         source.setEventHandler { [weak self] in self?.readAvailable() }
         source.setCancelHandler { Darwin.close(fd) }
         source.resume()

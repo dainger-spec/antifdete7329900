@@ -97,6 +97,10 @@ struct ScenariosView: View {
                 selection = sample.id
                 name = sample.name
                 source = sample.source
+            } else if let recording = model.recordingScenario, model.scenarios.scenario(recording) != nil {
+                // A recording going on is for its own scenario: the window opened again shows that
+                // one, where its steps go — not the first of the list.
+                if selection != recording { select(recording) }
             } else if selection == nil {
                 select(model.scenarios.sorted.first?.id)
             }
@@ -126,6 +130,8 @@ struct ScenariosView: View {
                 .buttonStyle(.lumenGhost)
                 .help(L("scenarios.new"))
                 .accessibilityLabel(L("scenarios.new"))
+                // A recording's scenario stays on screen until it ends: its steps go there.
+                .disabled(isRecording)
             }
             .padding(.horizontal, 14)
             .padding(.top, 38)
@@ -149,6 +155,7 @@ struct ScenariosView: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .disabled(isRecording && selection != scenario.id)
                     }
                 }
                 .padding(.horizontal, 8)
@@ -462,18 +469,30 @@ struct ScenariosView: View {
         if edited { save() }
         starting = true
         Task { @MainActor in
-            let started = await model.startRecording(on: profileID)
+            let started = await model.startRecording(on: profileID, for: selection)
             starting = false
             // A launch that failed has said why; a refusal nobody said is said here.
             if !started, model.errorMessage == nil { model.showError(L("scenarios.start.failed")) }
         }
     }
 
-    /// The recording's steps go to the scenario's end, as lines to be changed there.
+    /// The recording's steps go to the end of the scenario it was for, as lines to be changed
+    /// there — shown first if another is on screen; never into another scenario: one that is gone
+    /// meanwhile gets a new scenario of its own.
     private func stopRecording() {
+        let target = model.recordingScenario
         let steps = model.stopRecording()
         guard !steps.isEmpty else { return }
         let lines = steps.map { ScenarioRecording.line(for: $0, passwordNote: L("scenarios.record.password")) }
+        if let target, model.scenarios.scenario(target) != nil {
+            showingSchedules = false
+            if selection != target { select(target) }
+        } else {
+            let scenario = Scenario(name: model.scenarios.freeName(L("scenarios.untitled")), source: "")
+            guard model.saveScenario(scenario) else { return }
+            showingSchedules = false
+            select(scenario.id)
+        }
         // A scenario that is still the example, or empty, is replaced: a first recording must not
         // open example.com first.
         let untouched = source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || source == L("scenarios.template")

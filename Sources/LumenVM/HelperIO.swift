@@ -79,6 +79,9 @@ final class HelperDelegate: NSObject, NSApplicationDelegate {
             // The app gone, or calling it off: nothing to finish.
             HelperIO.readCommands { _ in exit(1) }
             MachineCatalog.run()
+        case .inspect:
+            HelperIO.readCommands { _ in exit(1) }
+            MachineCatalog.inspect(request.restoreImagePath)
         case .install:
             // An installation the app is not there to take is not one: it ends with the app, and
             // the next one starts over.

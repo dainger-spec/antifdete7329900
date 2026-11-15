@@ -401,6 +401,7 @@ final class SelfTest {
         await group("processor count") { try await processorCountInOwnProcess(repository) }
         await group("a phone's window") { try await phoneWindowAndSearch(repository) }
         await group("closing a profile's window") { try await closingTheWindowEndsTheProfile(repository) }
+        await group("a profile's process leaves nothing open") { try await profileProcessLeavesNothingOpen(repository) }
         await group("interface and websites' languages") { try await interfaceApartFromWebsites(repository) }
         await group("languages per profile") { try await languagesPerProfile(repository) }
         await group("a direct connection is an exit") { try await directConnectionIsAnExit(repository) }
@@ -4241,7 +4242,10 @@ final class SelfTest {
             .staleAppcast(generatedAt: Date(), newestAccepted: Date()), .invalidItem("x"), .notNewer(build: "1", running: "2"),
             .needsNewerSystem("26.0"), .archiveLength(expected: 2, found: 1), .archiveHash,
         ]
+        // A sync server's refusal by its code (`HTTPSyncTransport`): the Lumen server's, or one's own.
+        let refusals = [SyncServerRefusal(status: 507, code: "quota_exceeded"), SyncServerRefusal(status: 403, code: "forbidden")]
         let errors: [(Error, String)] = core.map { ($0, $0.description) } + update.map { ($0, $0.description) }
+            + refusals.map { ($0, $0.description) }
             + [(PasswordVaultError.duplicate, ""), (PasswordVaultError.notFound, "")]
         var wrong: [String] = []
         for (error, english) in errors {
@@ -4771,7 +4775,15 @@ final class SelfTest {
             finding(topic).map { "\($0.key) \($0.values) fix \($0.fix?.rawValue ?? "none")" } ?? "no finding (\(run.step))"
         }
 
+        // The check asks the profile's process for its network report, without the self-test's probe:
+        // what another app left on the clipboard must still be there after it.
+        let clipboardMarker = "pb-selftest-clipboard-\(UUID().uuidString)"
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(clipboardMarker, forType: .string)
         await run.run()
+        let clipboardAfter = NSPasteboard.general.string(forType: .string)
+        check("profile check: what is on the clipboard stays there (only the self-test's own probe clears it)",
+              clipboardAfter == clipboardMarker, clipboardAfter == nil ? "the clipboard was emptied" : "the clipboard holds something else")
         check("profile check: the proxy's exit is found through the proxy, and named",
               finding(.proxy)?.key == "check.proxy.alive" && finding(.proxy)?.values.first == "country:DE", said(.proxy))
         check("profile check: a time zone set elsewhere than the exit is found, with the fix that takes it from the connection",
@@ -5688,6 +5700,54 @@ final class SelfTest {
               "ended \(ended ? "with status \(exited.map(String.init) ?? "?")" : "NOT within 60 s"), seal \(sealReport == nil ? "NOT reported" : "reported"), "
               + "in plaintext: \(plaintext.isEmpty ? "nothing" : plaintext.joined(separator: ", ")), messages \(messages)")
         if !ended { await manager.shutDown() }
+    }
+
+    /// Every run of a profile in its own process gives back what the app opened for it: the object
+    /// that stands for the process, and both its pipes, go once the process has ended. Each run used
+    /// to keep two descriptors for as long as the app ran, and after a hundred or so runs the app
+    /// could open no file (audit 3, #5). Started and stopped six times, the app holds no more
+    /// descriptors than after the first run, and no process had to be killed.
+    private func profileProcessLeavesNothingOpen(_ repository: ProfileRepository) async throws {
+        let name = "profile process: started and stopped six times, the app holds no more descriptors than after the first, and kills none"
+        guard !AppEnvironment.isSandboxed else {
+            skip(name, "the sandboxed build runs no process per profile", .build)
+            return
+        }
+        let profile = try repository.create(name: "Runs and descriptors", configuration: ProfileConfiguration(
+            ephemeral: true, matchProxyLocation: false))
+        defer { try? repository.delete(profile.id) }
+        let manager = ProfileManager(repository: repository)
+        var running = false
+        manager.onProfileRunning = { _, _ in running = true }
+        func openDescriptors() -> Int { (try? FileManager.default.contentsOfDirectory(atPath: "/dev/fd"))?.count ?? -1 }
+        let given = ProcessInfo.processInfo.environment["PB_PROFILE_PROCESS"]
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        defer { if let given { setenv("PB_PROFILE_PROCESS", given, 1) } else { unsetenv("PB_PROFILE_PROCESS") } }
+        let killedBefore = ProfileProcess.forcedExits
+        var counts: [Int] = []
+        var failure: String?
+        for run in 1...6 {
+            running = false
+            do {
+                try await manager.launch(profile.id, openingWindow: false)
+            } catch {
+                failure = "run \(run) did not start: \(error)"
+                break
+            }
+            guard await waitUntil(timeout: 60, { running }) else {
+                failure = "run \(run) did not come up"
+                break
+            }
+            try await manager.stop(profile.id)
+            // Its last words are read, and its event pipe closed, a moment after its exit.
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            counts.append(openDescriptors())
+        }
+        await manager.shutDown()
+        let killed = ProfileProcess.forcedExits - killedBefore
+        // The first run opens what stays open for every later one (the log's, WebKit's): from the first on.
+        let grew = counts.count == 6 ? counts[5] - counts[0] : Int.max
+        check(name, failure == nil && killed == 0 && grew < 3, failure ?? "descriptors after each run \(counts), killed \(killed)")
     }
 
     private func mobileViewInItsOwnProcess(_ repository: ProfileRepository) async throws {
@@ -7718,8 +7778,10 @@ final class SelfTest {
         check("warm-up: trusted pointer moves reach its pages (pages see a pointer before a click)",
               ["a", "b", "c"].contains { events.contains("\($0)-move") }, "\(events.filter { $0.contains("move") }.sorted())")
         let referers = Dictionary(log.map { ($0.path, $0.referer) }, uniquingKeysWith: { first, _ in first })
-        let refused = ["/pb-warmup/logout", "/pb-warmup/partner", "/pb-warmup/file.zip", "/pb-warmup/popup"]
-        check("warm-up: from each page it follows only the plain link of the same site (with the page as Referer), never sign-out, another site, a file or a new window",
+        // A window a page opens by script on the robot's click (the popunder of each page) is refused:
+        // it never loads, and never takes the robot's place in its window.
+        let refused = ["/pb-warmup/logout", "/pb-warmup/partner", "/pb-warmup/file.zip", "/pb-warmup/popup", "/pb-warmup/popunder"]
+        check("warm-up: from each page it follows only the plain link of the same site (with the page as Referer), never sign-out, another site, a file or a new window, and a window a page opens is refused",
               ["a", "b", "c"].allSatisfy { referers["/pb-warmup/\($0)-next"] == page($0) }
                   && !log.contains { refused.contains($0.path) }
                   && loaded.allSatisfy { $0.followed?.path == "\($0.url.path)-next" && $0.followedOutcome == .loaded },

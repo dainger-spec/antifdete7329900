@@ -41,10 +41,11 @@ final class VMGuestScriptTests: XCTestCase {
 
     /// The commands the script calls and what stands for each: the real tool where it only reads
     /// or works on the test's own files, a recorder where it would change a system.
-    private static let passedOn = ["sed", "head", "ls", "mkdir", "cksum", "cut", "tr", "cp", "chmod", "rm", "mv", "mktemp"]
+    private static let passedOn = ["sed", "head", "ls", "mkdir", "cksum", "cut", "tr", "cp", "chmod", "rm", "mv", "mktemp", "grep"]
     private static let recorded = ["defaults", "scutil", "systemsetup", "osascript", "open", "killall", "shutdown", "chown", "ln",
-                                   "mount", "mount_virtiofs"]
-    private static let answered = ["sh", "sleep", "launchctl", "sudo", "stat", "id", "pgrep", "sw_vers", "logger"]
+                                   "mount", "mount_virtiofs", "sysadminctl", "pmset", "mdutil", "softwareupdate", "sntp"]
+    private static let answered = ["sh", "sleep", "launchctl", "sudo", "stat", "id", "pgrep", "sw_vers", "logger",
+                                   "sysctl", "fdesetup", "stty", "readlink"]
 
     private func writeStubs() throws {
         let bin = root.appendingPathComponent("bin")
@@ -68,9 +69,16 @@ final class VMGuestScriptTests: XCTestCase {
             if [ "$1" = read ]; then
               case "$2 $3" in
                 "/Applications/Safari.app/Contents/Info CFBundleShortVersionString") echo 27.2 ;;
+                "/Library/Preferences/com.apple.loginwindow autoLoginUser") [ -z "${AUTOLOGIN_USER-tester}" ] && exit 1; echo "${AUTOLOGIN_USER-tester}" ;;
+                "MobileMeAccounts Accounts") [ -z "$APPLE_ID" ] && exit 1; printf '(\n    {\n        AccountID = "%s";\n    }\n)\n' "$APPLE_ID" ;;
                 "com.apple.dock orientation") [ -z "$DOCK_ORIENTATION" ] && exit 1; echo "$DOCK_ORIENTATION" ;;
                 "com.apple.dock autohide") [ -z "$DOCK_AUTOHIDE" ] && exit 1; echo "$DOCK_AUTOHIDE" ;;
                 "com.apple.dock tilesize") [ -z "$DOCK_TILESIZE" ] && exit 1; echo "$DOCK_TILESIZE" ;;
+                "-g AppleLocale") [ -z "$APPLE_LOCALE" ] && exit 1; echo "$APPLE_LOCALE" ;;
+                "-g AppleLanguages") [ -z "$APPLE_LANGUAGES" ] && exit 1; printf '(\n    "%s",\n    "ru-RU"\n)\n' "$APPLE_LANGUAGES" ;;
+                "io.lumenbrowser.guest keyboard") [ -z "$KEYBOARD_NOTED" ] && exit 1; echo "$KEYBOARD_NOTED" ;;
+                "io.lumenbrowser.guest locale") [ -z "$LOCALE_NOTED" ] && exit 1; echo "$LOCALE_NOTED" ;;
+                "io.lumenbrowser.guest browser") [ -z "$BROWSER_NOTED" ] && exit 1; echo "$BROWSER_NOTED" ;;
                 *) exit 1 ;;
               esac
             fi
@@ -104,7 +112,13 @@ final class VMGuestScriptTests: XCTestCase {
               printf '%s\n' "${CONSOLE_USER-tester}"
             fi
             """)
-        try stub("id", "[ \"$1\" = -u ] && [ \"$2\" = tester ] && echo 501")
+        try stub("id", "case \"$1\" in -un) echo \"${INSTALL_USER-tester}\" ;; -u) [ \"$2\" = tester ] && echo 501 ;; *) exit 1 ;; esac")
+        // The installer's: a virtual Mac, FileVault as the test says, no terminal to set.
+        try stub("sysctl", "[ \"$2\" = hw.model ] && echo \"${HW_MODEL-VirtualMac2,1}\"")
+        try stub("fdesetup", "[ \"$1\" = isactive ] && echo \"${FILEVAULT-false}\"")
+        try stub("stty", "exit 0")
+        // Where /etc/localtime points: the time zone the system has.
+        try stub("readlink", "[ -n \"$LOCALTIME\" ] && echo \"$LOCALTIME\"")
         try stub("pgrep", "exit 1")
         try stub("sw_vers", "case \"$1\" in -productVersion) echo 27.2.1 ;; -buildVersion) echo 26B131 ;; esac")
         try stub("logger", "exit 0")
@@ -247,7 +261,7 @@ final class VMGuestScriptTests: XCTestCase {
         XCTAssertEqual(run.status, 0)
         for untouched in ["AppleInterfaceStyle", "AppleAccentColor", "AppleICUForce", "AppleFirstWeekday", "AppleShowScrollBars",
                           "com.apple.dock orientation -string", "com.apple.dock autohide -bool", "com.apple.dock tilesize -int",
-                          "AppleLanguages", "AppleLocale", "settimezone", "osascript"] {
+                          "write -g AppleLanguages", "write -g AppleLocale", "settimezone", "osascript"] {
             XCTAssertFalse(run.calls.contains { $0.contains(untouched) }, "\(untouched): \(run.calls)")
         }
         XCTAssertFalse(run.has("root killall Dock"))
@@ -361,7 +375,7 @@ final class VMGuestScriptTests: XCTestCase {
         let run = try boot(settings: hostile)
         XCTAssertEqual(run.status, 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: marker), "a value was run as a command")
-        for refused in ["AppleLanguages", "AppleLocale", "settimezone", "AppleInterfaceStyle", "AppleAccentColor", "AppleICUForce",
+        for refused in ["write -g AppleLanguages", "write -g AppleLocale", "settimezone", "AppleInterfaceStyle", "AppleAccentColor", "AppleICUForce",
                         "AppleFirstWeekday", "AppleShowScrollBars", "com.apple.dock orientation -string", "com.apple.dock autohide -bool",
                         "com.apple.dock tilesize -int", "scutil", "osascript", "example", "touch", "passwd"] {
             XCTAssertFalse(run.calls.contains { $0.contains(refused) }, "\(refused): \(run.calls)")
@@ -376,7 +390,8 @@ final class VMGuestScriptTests: XCTestCase {
             let run = try boot(settings: VMGuestSettings(profile: VMProfile(name: "A", appearance: "dark")).text,
                                environment: ["CONSOLE_USER": nobody])
             XCTAssertEqual(run.status, 0, nobody)
-            XCTAssertFalse(run.calls.contains { $0.hasPrefix("tester ") }, "\(nobody): \(run.calls)")
+            // Nothing of a person's — but macOS's panes for a new Mac, marked seen before any sign-in.
+            XCTAssertFalse(run.calls.contains { $0.hasPrefix("tester ") && !$0.contains("com.apple.SetupAssistant") }, "\(nobody): \(run.calls)")
             XCTAssertFalse(run.calls.contains { $0.contains("AppleInterfaceStyle") || $0.contains(" open ") }, "\(nobody): \(run.calls)")
             // The system's own is set all the same, and the status says which system this is.
             XCTAssertTrue(run.has("root scutil --set HostName MacBook-Air"), nobody)
@@ -385,10 +400,91 @@ final class VMGuestScriptTests: XCTestCase {
         }
     }
 
+    /// Each machine is a Mac its macOS has never seen: its panes for a new Mac — the "Welcome"
+    /// screen whose button did not answer in a client's machine — are marked seen for the person
+    /// who signs in by themselves, before anything else, and so before the sign-in.
+    func testMacOSsPanesForANewMacAreMarkedSeenBeforeTheSignIn() throws {
+        let run = try boot(settings: VMGuestSettings(profile: VMProfile(name: "A")).text)
+        for key in ["DidSeeCloudSetup", "DidSeePrivacy", "DidSeeIntelligence", "DidSeeWelcome", "DidSeeScreenTime"] {
+            XCTAssertTrue(run.has("tester defaults write com.apple.SetupAssistant \(key) -bool true"), "\(key): \(run.calls)")
+        }
+        XCTAssertTrue(run.has("tester defaults write com.apple.SetupAssistant LastSeenCloudProductVersion -string 27.2.1"))
+        XCTAssertTrue(run.has("tester defaults write com.apple.SetupAssistant LastSeenBuddyBuildVersion -string 26B131"))
+        XCTAssertTrue(run.has("tester defaults write com.apple.SetupAssistant LastPrivacyBundleVersion -string 9999"))
+        // First of all: before the shared folder is looked for, before any setting of the person's.
+        let marked = try XCTUnwrap(run.calls.firstIndex { $0.contains("com.apple.SetupAssistant") })
+        let firstOther = try XCTUnwrap(run.calls.firstIndex { !$0.contains("com.apple.SetupAssistant") && !$0.contains("loginwindow autoLoginUser") })
+        XCTAssertLessThan(marked, firstOther)
+
+        // No one signs in by themselves, or a name that is no account's: nothing is written.
+        for who in ["", "nobody-here", "a b; touch x"] {
+            let quiet = try boot(settings: VMGuestSettings(profile: VMProfile(name: "A")).text, environment: ["AUTOLOGIN_USER": who])
+            XCTAssertFalse(quiet.calls.contains { $0.contains("com.apple.SetupAssistant") }, "\(who): \(quiet.calls)")
+        }
+    }
+
+    // MARK: - The installer
+
+    /// The installer (install.sh) on the test's ground, beside the files it installs, with nothing
+    /// on its input (no password typed): what it said, and what it called.
+    private func install(environment: [String: String] = [:]) throws -> (status: Int32, said: String, calls: [String]) {
+        let folder = root.appendingPathComponent("installer", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for name in ["lumen-guest.sh", "io.lumenbrowser.guest.plist"] {
+            try Data(contentsOf: Self.folder.appendingPathComponent(name)).write(to: folder.appendingPathComponent(name))
+        }
+        let text = try onTestGround(try String(contentsOf: Self.folder.appendingPathComponent("install.sh"), encoding: .utf8))
+        let file = folder.appendingPathComponent("install.sh")
+        try Data(text.utf8).write(to: file)
+        try? FileManager.default.removeItem(at: root.appendingPathComponent("calls.log"))
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [file.path]
+        process.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"].merging(environment) { _, mine in mine }
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        process.standardInput = FileHandle.nullDevice
+        try process.run()
+        let said = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
+        let log = (try? String(contentsOf: root.appendingPathComponent("calls.log"), encoding: .utf8)) ?? ""
+        return (process.terminationStatus, said, log.split(separator: "\n").map(String.init))
+    }
+
+    /// The choices of macOS's setup that would make a poor base — an Apple ID, which would be in
+    /// every machine; FileVault, with which none signs in by itself — stop the installer before it
+    /// changes anything or asks for the password, said in both languages with what to do.
+    func testTheInstallerStopsOnAnAppleIDOrFileVaultAndSaysWhatToDo() throws {
+        let signedIn = try install(environment: ["APPLE_ID": "someone@example.com"])
+        XCTAssertEqual(signedIn.status, 1)
+        XCTAssertTrue(signedIn.said.contains("signed in to an Apple ID"), signedIn.said)
+        XCTAssertTrue(signedIn.said.contains("выполнен вход в Apple ID"), signedIn.said)
+        XCTAssertTrue(signedIn.said.contains("Sign Out"), signedIn.said)
+        XCTAssertFalse(signedIn.said.contains("Password of"), "asked for the password first")
+        XCTAssertFalse(signedIn.calls.contains { $0.contains("sysadminctl") || $0.contains("pmset") }, "\(signedIn.calls)")
+
+        let encrypted = try install(environment: ["FILEVAULT": "true"])
+        XCTAssertEqual(encrypted.status, 1)
+        XCTAssertTrue(encrypted.said.contains("FileVault is on"), encrypted.said)
+        XCTAssertTrue(encrypted.said.contains("включён FileVault"), encrypted.said)
+        XCTAssertFalse(encrypted.said.contains("Password of"))
+
+        // Neither: on to the password (none is typed here, and it stops there).
+        let fine = try install()
+        XCTAssertTrue(fine.said.contains("Password of \"tester\""), fine.said)
+        XCTAssertTrue(fine.said.contains("an empty password"), fine.said)
+        XCTAssertFalse(fine.said.contains("Остановлено"), fine.said)
+
+        // Not a virtual Mac, or as root: refused as before.
+        XCTAssertTrue(try install(environment: ["HW_MODEL": "Mac15,3"]).said.contains("for a Lumen virtual machine"))
+        XCTAssertTrue(try install(environment: ["INSTALL_USER": "root"]).said.contains("not as root"))
+    }
+
     func testAMachineWithoutSettingsKeepsWhatItHas() throws {
         let run = try boot(settings: nil)
         XCTAssertEqual(run.status, 0)
-        XCTAssertFalse(run.calls.contains { $0.contains("scutil") || $0.contains(" open ") || $0.contains("AppleLanguages") }, "\(run.calls)")
+        XCTAssertFalse(run.calls.contains { $0.contains("scutil") || $0.contains(" open ") || $0.contains("write -g AppleLanguages") }, "\(run.calls)")
         XCTAssertEqual(status().toolsVersion, VMGuestTools.version)
         XCTAssertEqual(run.calls.last, "root shutdown -h now")
     }
@@ -537,5 +633,175 @@ final class VMGuestScriptTests: XCTestCase {
         let second = try boot(settings: settings)
         XCTAssertEqual(second.count("tester osascript "), 0, "\(second.calls)")
         XCTAssertEqual(status().wallpaperState, "kept")
+    }
+
+    // MARK: - The keyboard, the region's leftovers, and what the system has
+
+    private static func layout(_ id: Int, _ name: String) -> String {
+        "<dict><key>InputSourceKind</key><string>Keyboard Layout</string><key>KeyboardLayout ID</key><integer>\(id)</integer>"
+            + "<key>KeyboardLayout Name</key><string>\(name)</string></dict>"
+    }
+
+    /// The layouts that go with the machine's language are written once, the first the one in
+    /// use; macOS takes them at the next sign-in, and the status says so.
+    func testTheKeyboardsLayoutsAreWrittenOnceAndAreInUseFromTheNextStart() throws {
+        let american = VMGuestSettings(profile: VMProfile(name: "A", language: "en-US", localeFollowsProxy: false, lumenWallpaper: false,
+                                                          keyboard: VMKeyboardLayout.automatic))
+        XCTAssertTrue(american.text.contains("LUMEN_KEYBOARD=us\n"), american.text)
+        let first = try boot(settings: american.text)
+        let us = Self.layout(0, "U.S.")
+        XCTAssertTrue(first.has("tester defaults write com.apple.HIToolbox AppleEnabledInputSources -array \(us)"), "\(first.calls)")
+        XCTAssertTrue(first.has("tester defaults write com.apple.HIToolbox AppleSelectedInputSources -array \(us)"))
+        XCTAssertTrue(first.has("tester defaults write com.apple.HIToolbox AppleCurrentKeyboardLayoutInputSourceID -string com.apple.keylayout.US"))
+        XCTAssertTrue(first.has("tester defaults write io.lumenbrowser.guest keyboard -string us"))
+        XCTAssertEqual(status().keyboardState, "next")
+        XCTAssertTrue(status().keyboardFromNextStart)
+        XCTAssertTrue(status().waitsForTheNextStart)
+
+        // The same choice at the next start: nothing is written again — what the person added
+        // in the machine since stays.
+        let second = try boot(settings: american.text, environment: ["KEYBOARD_NOTED": "us"])
+        XCTAssertFalse(second.calls.contains { $0.contains("defaults write com.apple.HIToolbox") }, "\(second.calls)")
+        XCTAssertEqual(status().keyboardState, "set")
+        XCTAssertFalse(status().waitsForTheNextStart)
+
+        // A layout that types no Latin letters comes with the plain Latin one, and is the one in use.
+        let russian = VMGuestSettings(profile: VMProfile(name: "A", lumenWallpaper: false, keyboard: "russian"))
+        XCTAssertTrue(russian.text.contains("LUMEN_KEYBOARD=russian,abc\n"), russian.text)
+        let third = try boot(settings: russian.text, environment: ["KEYBOARD_NOTED": "us"])
+        XCTAssertTrue(third.has("tester defaults write com.apple.HIToolbox AppleEnabledInputSources -array "
+                                + "\(Self.layout(19456, "Russian")) \(Self.layout(252, "ABC"))"), "\(third.calls)")
+        XCTAssertTrue(third.has("tester defaults write com.apple.HIToolbox AppleCurrentKeyboardLayoutInputSourceID -string com.apple.keylayout.Russian"))
+
+        // No choice: the base's layouts are left, and nothing is said of them.
+        let plain = try boot(settings: VMGuestSettings(profile: VMProfile(name: "A", language: "en-US", localeFollowsProxy: false,
+                                                                          lumenWallpaper: false)).text)
+        XCTAssertFalse(plain.calls.contains { $0.contains("HIToolbox") || $0.contains("guest keyboard") }, "\(plain.calls)")
+        XCTAssertNil(status().keyboardState)
+
+        // And what is no layout of Lumen's reaches no command, whole or in part.
+        for hostile in ["us;reboot", "us,klingon", "$(reboot)", "US"] {
+            let run = try boot(settings: "LUMEN_REVISION=1\nLUMEN_HOSTNAME=Mac\nLUMEN_KEYBOARD=\(hostile)\n")
+            XCTAssertFalse(run.calls.contains { $0.contains("HIToolbox") }, "\(hostile): \(run.calls)")
+        }
+    }
+
+    /// A machine given another region than it had loses what macOS wrote down for the old one —
+    /// once: what the person changes in the machine afterwards is kept.
+    func testAMachineThatComesToAnotherRegionLosesWhatTheOldOneLeftBehind() throws {
+        let settings = VMGuestSettings(profile: VMProfile(name: "A", language: "en-US", localeFollowsProxy: false, lumenWallpaper: false,
+                                                          hourCycle: "24")).text
+        let first = try boot(settings: settings, environment: ["LOCALE_NOTED": "ru_RU"])
+        for key in ["AppleMeasurementUnits", "AppleMetricUnits", "AppleTemperatureUnit", "AppleICUDateFormatStrings",
+                    "AppleICUNumberSymbols", "AppleFirstWeekday", "AppleICUForce12HourTime"] {
+            XCTAssertTrue(first.has("tester defaults delete -g \(key)"), "\(key): \(first.calls)")
+        }
+        XCTAssertTrue(first.has("tester defaults write io.lumenbrowser.guest locale -string en_US"))
+        // What the profile sets of them is written after, and stands.
+        let removed = try XCTUnwrap(first.calls.firstIndex(of: "tester defaults delete -g AppleICUForce24HourTime"))
+        let written = try XCTUnwrap(first.calls.firstIndex(of: "tester defaults write -g AppleICUForce24HourTime -bool true"))
+        XCTAssertLessThan(removed, written)
+
+        let second = try boot(settings: settings, environment: ["LOCALE_NOTED": "en_US"])
+        XCTAssertTrue(second.has("tester defaults write -g AppleLocale -string en_US"))
+        XCTAssertFalse(second.calls.contains { $0.contains("AppleMeasurementUnits") || $0.contains("AppleTemperatureUnit")
+            || $0.contains("defaults delete -g AppleICUForce24HourTime") || $0.contains("guest locale -string") }, "\(second.calls)")
+    }
+
+    /// The script reads the time zone, the language and the locale back from the system, and
+    /// Lumen compares them with what it asked for.
+    func testWhatTheSystemHasIsReadBackAndComparedWithWhatWasAsked() throws {
+        let settings = VMGuestSettings(profile: VMProfile(name: "A", timeZoneIdentifier: "Europe/Berlin", language: "de-DE",
+                                                          localeFollowsProxy: false, lumenWallpaper: false, regionCode: "AT"))
+        let zones = root.appendingPathComponent("zoneinfo").path
+        try boot(settings: settings.text, environment: ["LOCALTIME": zones + "/Europe/Berlin", "APPLE_LANGUAGES": "de-DE",
+                                                        "APPLE_LOCALE": "de_AT"])
+        var said = status()
+        XCTAssertEqual(said.timeZoneNow, "Europe/Berlin")
+        XCTAssertEqual(said.languageNow, "de-DE")
+        XCTAssertEqual(said.localeNow, "de_AT")
+        XCTAssertEqual(said.differences(from: settings), [])
+
+        // A system that took none of it: each is named, with what was asked and what there is.
+        try boot(settings: settings.text, environment: ["LOCALTIME": zones + "/Europe/Moscow", "APPLE_LANGUAGES": "ru-RU",
+                                                        "APPLE_LOCALE": "ru_RU@calendar=gregorian"])
+        said = status()
+        XCTAssertEqual(said.differences(from: settings), [
+            VMGuestStatus.Difference(what: .timeZone, asked: "Europe/Berlin", has: "Europe/Moscow"),
+            VMGuestStatus.Difference(what: .language, asked: "de-DE", has: "ru-RU"),
+            VMGuestStatus.Difference(what: .locale, asked: "de_AT", has: "ru_RU"),
+        ])
+
+        // What the system says that is no time zone or language is not passed on.
+        try boot(settings: settings.text, environment: ["LOCALTIME": "/etc/../x y", "APPLE_LANGUAGES": "de DE;", "APPLE_LOCALE": "$(x)"])
+        said = status()
+        XCTAssertNil(said.timeZoneNow)
+        XCTAssertNil(said.localeNow)
+        XCTAssertEqual(said.differences(from: settings).map(\.what), said.languageNow == nil ? [] : [.language])
+    }
+
+    // MARK: - A machine shown as a browser, and one woken from a saved state
+
+    func testAMachineShownAsABrowserHidesItsMenuBarAndDockAndGetsThemBack() throws {
+        let browser = VMGuestSettings(profile: VMProfile(name: "A", lumenWallpaper: false, browserMode: true))
+        XCTAssertTrue(browser.text.contains("LUMEN_BROWSER_MODE=1\n"), browser.text)
+        let first = try boot(settings: browser.text)
+        XCTAssertTrue(first.has("tester defaults write -g _HIHideMenuBar -bool true"), "\(first.calls)")
+        XCTAssertTrue(first.has("tester defaults write com.apple.dock autohide -bool true"))
+        XCTAssertTrue(first.has("tester defaults write io.lumenbrowser.guest browser -string 1"))
+        XCTAssertTrue(first.has("root killall Dock"))
+        // The menu bar takes it at the next sign-in, and the status says so: a machine with
+        // instant wake is shut down once for it.
+        XCTAssertEqual(status().menuBarState, "next")
+        XCTAssertTrue(status().waitsForTheNextStart)
+
+        // So already: nothing is written again, and the Dock is left running.
+        let second = try boot(settings: browser.text, environment: ["BROWSER_NOTED": "1", "DOCK_AUTOHIDE": "1"])
+        XCTAssertFalse(second.calls.contains { $0.contains("_HIHideMenuBar") || $0.contains("write com.apple.dock") || $0.contains("killall Dock") },
+                       "\(second.calls)")
+        XCTAssertNil(status().menuBarState)
+        XCTAssertFalse(status().waitsForTheNextStart)
+
+        // No longer shown so: the menu bar is back, and the Dock too — unless the profile hides it.
+        let plain = VMGuestSettings(profile: VMProfile(name: "A", lumenWallpaper: false))
+        XCTAssertFalse(plain.text.contains("LUMEN_BROWSER_MODE"))
+        let third = try boot(settings: plain.text, environment: ["BROWSER_NOTED": "1", "DOCK_AUTOHIDE": "1"])
+        XCTAssertTrue(third.has("tester defaults delete -g _HIHideMenuBar"), "\(third.calls)")
+        XCTAssertTrue(third.has("tester defaults delete io.lumenbrowser.guest browser"))
+        XCTAssertTrue(third.has("tester defaults write com.apple.dock autohide -bool false"))
+        XCTAssertEqual(status().menuBarState, "next", "the menu bar comes back at the next sign-in too")
+        let hidden = VMGuestSettings(profile: VMProfile(name: "A", lumenWallpaper: false, dockAutohide: true))
+        let fourth = try boot(settings: hidden.text, environment: ["BROWSER_NOTED": "1", "DOCK_AUTOHIDE": "1"])
+        XCTAssertTrue(fourth.has("tester defaults delete -g _HIHideMenuBar"))
+        XCTAssertFalse(fourth.calls.contains { $0.contains("write com.apple.dock autohide") }, "\(fourth.calls)")
+
+        // A machine never shown so: none of it is touched.
+        let fifth = try boot(settings: plain.text)
+        XCTAssertFalse(fifth.calls.contains { $0.contains("_HIHideMenuBar") || $0.contains("write com.apple.dock") }, "\(fifth.calls)")
+        XCTAssertNil(status().menuBarState)
+    }
+
+    func testAMachineWokenFromASavedStateAsksForTheTimeOnce() throws {
+        let settings = VMGuestSettings(profile: VMProfile(name: "A", lumenWallpaper: false)).text
+        let woke = share.appendingPathComponent(VMGuestSettings.wokeFileName)
+        try Data("abc123".utf8).write(to: woke)
+        let asked = "root sntp -sS time.apple.com"
+        let first = try boot(settings: settings)
+        XCTAssertEqual(first.count(asked), 1, "\(first.calls)")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: woke.path), "the word is taken once")
+        // The clock is set before the machine is asked anything else: before its shutdown here.
+        XCTAssertLessThan(try XCTUnwrap(first.calls.firstIndex(of: asked)), try XCTUnwrap(first.calls.firstIndex(of: "root shutdown -h now")))
+
+        // Not woken: the time is not asked for.
+        XCTAssertEqual(try boot(settings: settings).count(asked), 0)
+        // What is no word of Lumen's, or a link left in its place, asks for nothing.
+        try Data("$(reboot) ;".utf8).write(to: woke)
+        XCTAssertEqual(try boot(settings: settings).count(asked), 0)
+        try? FileManager.default.removeItem(at: woke)
+        let secret = root.appendingPathComponent("secret")
+        try Data("abc123".utf8).write(to: secret)
+        try FileManager.default.createSymbolicLink(at: woke, withDestinationURL: secret)
+        XCTAssertEqual(try boot(settings: settings).count(asked), 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secret.path))
     }
 }

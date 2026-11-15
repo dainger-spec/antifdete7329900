@@ -4,13 +4,20 @@ import Foundation
 /// virtualization right), and what the helper says back.
 ///
 /// The request is one JSON line on the helper's standard input — never arguments: it carries the
-/// proxy's password — and after it the app may write `stop` (ask the guest to shut down) or `kill`
-/// (end it now) as lines of their own. The helper answers with one JSON line per event on its
-/// standard output, and ends when the machine has.
+/// proxy's password — and after it the app may write commands as lines of their own
+/// (`VMHelperCommand`): `stop` (close the machine: put it to sleep where the request says so,
+/// else ask the guest to shut down), `shutdown` (ask the guest to shut down, whatever the request
+/// says), `kill` (end it now), `hosts on` and `hosts off` (say where the machine connects, or
+/// stop saying), `block <name>` (block a host from now on) and `fullscreen` (put the guest's
+/// front window full screen). The helper answers with one JSON line per event on its standard
+/// output, and ends when the machine has.
 public struct VMHelperRequest: Codable, Equatable, Sendable {
     public enum Mode: String, Codable, Sendable {
         /// Which macOS Apple offers for this Mac's virtual machines (a `catalog` event, then exit).
         case catalog
+        /// Which macOS the restore image at `restoreImagePath` holds — one the person already had —
+        /// and whether it runs on this Mac: a `catalog` event (its address the file's), then exit.
+        case inspect
         /// Install the restore image into `machineDirectory` (the base): `progress` events, then
         /// `installed`.
         case install
@@ -72,6 +79,18 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
     public var sound: Bool
     /// The machine's window opens full screen. Nil: as a window.
     public var fullScreen: Bool?
+    /// Instant wake: `stop` puts the machine to sleep — its state saved beside its disk
+    /// (`VMLibrary.MachineFiles.state`) — and a start that finds a state saved for this very
+    /// request (`stateStamp`) and this very disk wakes it instead of starting its macOS. Nil or
+    /// false: a state found is removed, and the machine starts and shuts down as a Mac does.
+    public var keepsState: Bool?
+    /// What a saved state must have been saved for to be woken by this request: the machine's
+    /// hardware and the settings its macOS was started with. Anything of them changed — more
+    /// memory, another language — and the machine starts anew, so that the change takes.
+    public var stateStamp: String?
+    /// The machine is shown as a browser: its guest's front window (Safari) is put full screen
+    /// once its macOS has started, and the window covers the desktop until then.
+    public var browserMode: Bool?
     /// The window's title, and its few words, in the person's language (the helper has no strings
     /// of its own): `stop`, `stopQuestion`, `stopDetail`, `stopNow`, `cancel`, `stopping` — and
     /// `hint`, a line shown above the machine's screen (what is left to do in the base).
@@ -82,6 +101,7 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
                 cores: Int = 4, memoryBytes: Int64 = 4 << 30, diskBytes: Int64 = VMRequirements.diskImageBytes,
                 display: Display = Display(VMDisplay.standard), macAddress: String? = nil, network: Network = .closed,
                 proxy: ProxySettings? = nil, blockedHosts: [String] = [], sound: Bool = true, fullScreen: Bool? = nil,
+                keepsState: Bool? = nil, stateStamp: String? = nil, browserMode: Bool? = nil,
                 windowTitle: String = "", texts: [String: String] = [:]) {
         self.mode = mode
         self.restoreImagePath = restoreImagePath
@@ -97,6 +117,9 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
         self.blockedHosts = blockedHosts
         self.sound = sound
         self.fullScreen = fullScreen
+        self.keepsState = keepsState
+        self.stateStamp = stateStamp
+        self.browserMode = browserMode
         self.windowTitle = windowTitle
         self.texts = texts
     }
@@ -104,15 +127,31 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
     /// The request to start a profile's machine. A profile with a proxy never gets the direct
     /// network: without a usable proxy it is closed.
     public static func run(profile: VMProfile, library: VMLibrary, hostCores: Int, texts: [String: String]) -> VMHelperRequest {
-        VMHelperRequest(mode: .run, machineDirectory: library.machineDirectory(for: profile.id).path,
-                        baseDirectory: library.baseDirectory.path,
-                        cores: min(profile.cores ?? VMRequirements.coresWanted, VMRequirements.cores(hostCores: hostCores)),
-                        memoryBytes: Int64(profile.memoryGB) * VMRequirements.gibibyte,
-                        display: Display(profile.display), macAddress: profile.macAddress,
-                        network: profile.proxy == nil ? .direct : .proxy, proxy: profile.proxy,
-                        blockedHosts: VMRequirements.blockedHosts + profile.blockedHosts.compactMap(VMProfile.blockedHost),
-                        sound: profile.soundEnabled, fullScreen: profile.startsFullScreen ? true : nil,
-                        windowTitle: profile.name, texts: texts)
+        var request = VMHelperRequest(mode: .run, machineDirectory: library.machineDirectory(for: profile.id).path,
+                                      baseDirectory: library.baseDirectory.path,
+                                      cores: min(profile.cores ?? VMRequirements.coresWanted, VMRequirements.cores(hostCores: hostCores)),
+                                      memoryBytes: Int64(profile.memoryGB) * VMRequirements.gibibyte,
+                                      display: Display(profile.display), macAddress: profile.macAddress,
+                                      network: profile.proxy == nil ? .direct : .proxy, proxy: profile.proxy,
+                                      blockedHosts: VMRequirements.blockedHosts + profile.blockedHosts.compactMap(VMProfile.blockedHost),
+                                      sound: profile.soundEnabled, fullScreen: profile.startsFullScreen ? true : nil,
+                                      keepsState: profile.instantWake ? true : nil, browserMode: profile.browserMode ? true : nil,
+                                      windowTitle: profile.name, texts: texts)
+        request.stateStamp = request.stamp(settingsRevision: VMGuestSettings(profile: profile).revision)
+        return request
+    }
+
+    /// What a saved state of this request's machine goes with (`stateStamp`): its hardware as the
+    /// framework is told of it, and the revision of the settings its macOS starts with. Not the
+    /// proxy, nor what is blocked: the network is this process's own and is made anew each time.
+    /// Nor sound: a machine whose state is kept has none.
+    public func stamp(settingsRevision: String) -> String {
+        VMGuestSettings.revision(of: [
+            "cores=\(cores)", "memory=\(memoryBytes)",
+            "display=\(display.pixelsWide)x\(display.pixelsHigh)@\(display.pixelsPerInch)",
+            "mac=\(macAddress ?? "")", "network=\(network == .absent ? "absent" : "card")",
+            "settings=\(settingsRevision)",
+        ])
     }
 
     /// One line, as the helper reads it.
@@ -129,6 +168,35 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
 public struct VMHelperEvent: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, Sendable {
         case catalog, progress, installed, started, traffic, stopped, failed
+        /// Where the machine connects (`hosts`): said every few seconds while the app asks for
+        /// it (`hosts on`).
+        case hosts
+    }
+
+    /// One host a machine's macOS talks to (`VMNetHost`, which the app does not link).
+    public struct Host: Codable, Equatable, Sendable, Identifiable {
+        public var name: String
+        public var connections: UInt64
+        public var open: Int
+        public var bytesUp: UInt64
+        public var bytesDown: UInt64
+        /// Questions for it and connections to it refused because it is blocked.
+        public var blocked: UInt64
+        /// Seconds since it was last asked for or carried anything.
+        public var idle: Double
+
+        public var id: String { name }
+
+        public init(name: String, connections: UInt64 = 0, open: Int = 0, bytesUp: UInt64 = 0, bytesDown: UInt64 = 0,
+                    blocked: UInt64 = 0, idle: Double = 0) {
+            self.name = name
+            self.connections = connections
+            self.open = open
+            self.bytesUp = bytesUp
+            self.bytesDown = bytesDown
+            self.blocked = blocked
+            self.idle = idle
+        }
     }
 
     public var kind: Kind
@@ -151,10 +219,19 @@ public struct VMHelperEvent: Codable, Equatable, Sendable {
     public var viaSystemProxy: Bool?
     /// `failed`: why, in the system's own words (shown to the person as given).
     public var message: String?
+    /// `started`: the machine was woken from a saved state — it is as it was closed.
+    public var woke: Bool?
+    /// `started`: a saved state was there and was not used — `VMWakeRefusal`'s raw value.
+    public var notWoken: String?
+    /// `stopped`: the machine was put to sleep — its state is saved for its next start.
+    public var asleep: Bool?
+    /// `hosts`: where the machine connects, the host seen last first.
+    public var hosts: [Host]?
 
     public init(kind: Kind, image: VMRestoreImage? = nil, fraction: Double? = nil, bytesUp: UInt64? = nil,
                 bytesDown: UInt64? = nil, connections: Int? = nil, trouble: String? = nil, troubleDetail: String? = nil,
-                viaSystemProxy: Bool? = nil, message: String? = nil) {
+                viaSystemProxy: Bool? = nil, message: String? = nil, woke: Bool? = nil, notWoken: String? = nil,
+                asleep: Bool? = nil, hosts: [Host]? = nil) {
         self.kind = kind
         self.image = image
         self.fraction = fraction
@@ -165,6 +242,10 @@ public struct VMHelperEvent: Codable, Equatable, Sendable {
         self.troubleDetail = troubleDetail
         self.viaSystemProxy = viaSystemProxy
         self.message = message
+        self.woke = woke
+        self.notWoken = notWoken
+        self.asleep = asleep
+        self.hosts = hosts
     }
 
     public func line() -> String {
@@ -198,4 +279,124 @@ public enum VMNetworkTrouble: String, Codable, Sendable, CaseIterable {
     /// How many connections must fail one after another, none made since, before the machine is
     /// said to have no way out: a page's one dead address is not that.
     public static let failuresBeforeSaying: UInt64 = 4
+}
+
+/// What the app writes to the helper after its request, a line each.
+public enum VMHelperCommand: Equatable, Sendable {
+    /// Close the machine: put it to sleep where the request keeps its state, else shut it down.
+    case stop
+    /// Shut the machine's macOS down, whatever the request says of its state.
+    case shutdown
+    /// End the machine now.
+    case kill
+    /// Say where the machine connects every few seconds (`VMHelperEvent.Kind.hosts`), or stop.
+    case hosts(Bool)
+    /// Block a host name, and every name under it, from now on.
+    case block(String)
+    /// Put the guest's front window full screen (the key a person would press for it).
+    case fullScreen
+
+    /// The line the helper reads.
+    public var line: String {
+        switch self {
+        case .stop: return "stop"
+        case .shutdown: return "shutdown"
+        case .kill: return "kill"
+        case .hosts(let on): return on ? "hosts on" : "hosts off"
+        case .block(let name): return "block " + name
+        case .fullScreen: return "fullscreen"
+        }
+    }
+
+    /// The command a line is; nil for anything else. A name to block must be one the network
+    /// would take (`VMProfile.blockedHost`) — whatever else follows the word is no command.
+    public init?(line: String) {
+        let words = line.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+        switch (words.first, words.count) {
+        case ("stop", 1): self = .stop
+        case ("shutdown", 1): self = .shutdown
+        case ("kill", 1): self = .kill
+        case ("fullscreen", 1): self = .fullScreen
+        case ("hosts", 2) where words[1] == "on" || words[1] == "off": self = .hosts(words[1] == "on")
+        case ("block", 2):
+            guard let name = VMProfile.blockedHost(words[1]), name == words[1] else { return nil }
+            self = .block(name)
+        default: return nil
+        }
+    }
+}
+
+/// Why a saved state that was there was not used to wake a machine.
+public enum VMWakeRefusal: String, Codable, Sendable, CaseIterable {
+    /// Saved for other hardware or other settings than this start's: the change must take.
+    case changed
+    /// Not this disk's any more (the disk was written since), or not a state that reads.
+    case stale
+    /// The framework did not take it.
+    case failed
+    /// No state was there to refuse: this machine, as it is made on this Mac, cannot be saved at
+    /// all (the framework says so), and is shut down when it is closed.
+    case unsupported
+}
+
+/// What a saved state goes with, kept beside it (`VMLibrary.MachineFiles.stateInfo`): a state is
+/// a machine's memory at one moment, and is good only for the very disk of that moment and the
+/// very hardware — woken on a disk that has moved on, its macOS would write what it remembers
+/// over what is there.
+public struct VMSavedState: Codable, Equatable, Sendable {
+    /// One name the machine's network gave a stand-in address for (`VMNetKnownName`): the woken
+    /// machine still holds the addresses.
+    public struct Name: Codable, Equatable, Sendable {
+        public var name: String
+        public var address: UInt32
+
+        public init(name: String, address: UInt32) {
+            self.name = name
+            self.address = address
+        }
+    }
+
+    /// The request's `stateStamp` when the state was saved.
+    public var stamp: String
+    /// The disk as it was left when the machine had stopped after the save: its length and when
+    /// it was last written (seconds since 1970).
+    public var diskLength: Int64
+    public var diskModified: Double
+    public var savedAt: Date
+    public var names: [Name]
+
+    public init(stamp: String, diskLength: Int64, diskModified: Double, savedAt: Date = Date(), names: [Name] = []) {
+        self.stamp = stamp
+        self.diskLength = diskLength
+        self.diskModified = diskModified
+        self.savedAt = savedAt
+        self.names = names
+    }
+
+    /// The disk's length and last write, as a state is tied to them; nil when it cannot be asked.
+    public static func mark(ofDisk url: URL) -> (length: Int64, modified: Double)? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let length = (attributes[.size] as? NSNumber)?.int64Value,
+              let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 else { return nil }
+        return (length, modified)
+    }
+
+    /// Whether a state with this note may wake a machine started by a request stamped `stamp`
+    /// whose disk is at `disk` now; and if not, why.
+    public func refusal(stamp: String?, disk: URL) -> VMWakeRefusal? {
+        guard let stamp, stamp == self.stamp else { return .changed }
+        guard let mark = Self.mark(ofDisk: disk), mark.length == diskLength, mark.modified == diskModified else { return .stale }
+        return nil
+    }
+
+    public static func read(from url: URL) -> VMSavedState? {
+        // A note of a megabyte is none: a full pool of names is far below that.
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue,
+              size <= 8 << 20, let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONCoding.decoder.decode(VMSavedState.self, from: data)
+    }
+
+    public func write(to url: URL) throws {
+        try SecureFile.write(try JSONCoding.encoder.encode(self), to: url)
+    }
 }

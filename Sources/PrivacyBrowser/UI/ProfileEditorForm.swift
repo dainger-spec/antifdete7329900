@@ -1401,6 +1401,7 @@ private struct CookiePaste: View {
     var onChooseFile: () -> Void
     var onDropFile: (URL) -> Void
     @State private var targeted = false
+    @State private var reading: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1423,7 +1424,7 @@ private struct CookiePaste: View {
                     .font(.system(size: 11, design: .monospaced))
                     .lineLimit(3...6)
                     .lumenField(L("editor.cookies.placeholder"), isEmpty: draft.cookieText.isEmpty, height: nil)
-                    .onChange(of: draft.cookieText) { _, _ in draft.readCookieText() }
+                    .onChange(of: draft.cookieText) { _, _ in readPastedText() }
             }
             HStack(spacing: 10) {
                 Button(action: onChooseFile) {
@@ -1453,6 +1454,22 @@ private struct CookiePaste: View {
                 DispatchQueue.main.async { onDropFile(url) }
             }
             return true
+        }
+    }
+
+    /// What was pasted, read as Import Cookies reads a file: off the main thread, a moment after the
+    /// last change. A long paste (the importer takes 32 MiB) read on every keystroke held up the
+    /// window (audit 3, #21). Saving reads it at once if its reading is not over
+    /// (`ProfileDraft.unreadCookieText`).
+    private func readPastedText() {
+        reading?.cancel()
+        guard let text = draft.cookieTextChanged() else { return }
+        reading = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled else { return }
+            let report = await Task.detached(priority: .userInitiated) { CookieImporter.read(Data(text.utf8)) }.value
+            guard !Task.isCancelled else { return }
+            draft.takeCookieReport(report, readFrom: text)
         }
     }
 }

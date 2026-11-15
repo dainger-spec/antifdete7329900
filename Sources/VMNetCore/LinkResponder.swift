@@ -1,10 +1,11 @@
 import Foundation
 
 /// Everything on the guest's wire that the stack answers by itself, without a connection: ARP for
-/// the gateway, a ping of the gateway, DHCP, DNS, and "nothing is there" for other UDP. TCP
-/// segments are sorted out and handed back for `NetworkLoop` to end at the proxy.
+/// the gateway, a ping of the gateway, DHCP, DNS, the time (NTP), and "nothing is there" for other
+/// UDP. TCP segments are sorted out and handed back for `NetworkLoop` to end at the proxy.
 ///
-/// No sockets and no clock of its own: a frame goes in with the time, frames come out.
+/// No sockets: a frame goes in with the time, frames come out. The one clock it reads is the
+/// calendar's (`wallClock`), for the guest's question what time it is.
 struct LinkResponder {
     /// What a frame from the guest asks of the stack.
     enum Verdict {
@@ -27,14 +28,29 @@ struct LinkResponder {
     private var identification = UInt16.random(in: 0...UInt16.max)
     private var unreachableTokens = LinkResponder.unreachableBurst
     private var unreachableRefilled = -Double.infinity
+    /// Seconds since 1970, as the guest is told the time; the tests give their own.
+    var wallClock: () -> Double = { Date().timeIntervalSince1970 }
 
     init(configuration: VMNetConfiguration, dnsPoolCapacity: Int = 60_000) {
         self.configuration = configuration
         dhcp = DHCPServer(guestMAC: configuration.guestMAC, guestAddress: configuration.guestAddress,
                           gatewayAddress: configuration.gatewayAddress, prefixLength: configuration.prefixLength,
                           mtu: configuration.effectiveMTU)
-        dns = DNSResponder(blockedHostSuffixes: configuration.blockedHostSuffixes, poolCapacity: dnsPoolCapacity)
+        dns = DNSResponder(blockedHostSuffixes: configuration.blockedHostSuffixes, poolCapacity: dnsPoolCapacity,
+                           knownNames: configuration.knownNames)
     }
+
+    /// Whether a name (lower case) is blocked, or under a blocked one.
+    func isBlocked(_ name: String) -> Bool { dns.isBlocked(name) }
+
+    /// Blocks a name and everything under it from now on.
+    mutating func block(_ suffix: String) { dns.block(suffix) }
+
+    /// The blocked name the guest last asked for, once.
+    mutating func takeBlockedName() -> String? { dns.takeBlockedName() }
+
+    /// Every name the guest was given a fake address for, with it.
+    var knownNames: [VMNetKnownName] { dns.knownNames }
 
     /// The host name a fake address stands for, when the guest connects to it.
     mutating func name(forFakeAddress address: VMNetIPv4) -> String? {
@@ -116,6 +132,15 @@ struct LinkResponder {
             guard let reply else { return .ignore }
             return .reply(FrameBuilder.udp(destinationMAC: frame.source, sourceMAC: configuration.gatewayMAC,
                                            source: packet.destination, sourcePort: DNSResponder.port,
+                                           destination: packet.source, destinationPort: datagram.sourcePort,
+                                           payload: reply, identification: nextIdentification()))
+        }
+        if datagram.destinationPort == TimeResponder.port, toGateway, isUnicast(packet.source), isUnicast(packet.destination),
+           let reply = TimeResponder.reply(to: datagram.payload, now: wallClock(), reference: packet.destination) {
+            // What time it is, whoever was asked: this Mac's clock, "from" the server asked.
+            counters.timeQueries += 1
+            return .reply(FrameBuilder.udp(destinationMAC: frame.source, sourceMAC: configuration.gatewayMAC,
+                                           source: packet.destination, sourcePort: TimeResponder.port,
                                            destination: packet.source, destinationPort: datagram.sourcePort,
                                            payload: reply, identification: nextIdentification()))
         }

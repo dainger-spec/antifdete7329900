@@ -210,13 +210,18 @@ enum SafariChromeHost {
     /// `inBackground`: a run nobody asked for just now (a schedule's): the window is put in front
     /// without being made key and without activating the app, so whatever the person is typing
     /// into keeps the keyboard. A run started from the app (Run) brings it forward as before.
-    static func openScenarioPage(session: BrowserSession, inBackground: Bool = false) async -> (webView: WKWebView, navigate: (URL) -> Void)? {
+    ///
+    /// `forWebDriver`: a WebDriver session's page, in a new window that is the session's alone —
+    /// neither the window a run had before nor one the next run takes, so a run and a session on
+    /// the same profile never act on the same page, and the session's end closes no run's window.
+    static func openScenarioPage(session: BrowserSession, inBackground: Bool = false,
+                                 forWebDriver: Bool = false) async -> (webView: WKWebView, navigate: (URL) -> Void)? {
         guard isPrepared, canHost(session.configuration), let blank = URL(string: "about:blank") else { return nil }
         // The window of the run before, while it is open: a window for each run left as many
         // windows — and web processes — as there were runs (a script calling the API in a loop).
         // Whatever tab a person chose in it since, its page is the one acted on, and addresses go
         // to that page itself.
-        if let window = scenarioWindow, window.isVisible, let webView = pageWebView(in: window) {
+        if !forWebDriver, let window = scenarioWindow, window.isVisible, let webView = pageWebView(in: window) {
             if inBackground {
                 window.orderFrontRegardless()
             } else {
@@ -248,8 +253,12 @@ enum SafariChromeHost {
         // Safari builds the tab's web view as it loads the page.
         for _ in 0..<60 {
             if let webView = pageWebView(in: controller.window) {
-                log.notice("A scenario's run has a window of Safari's")
-                scenarioWindow = controller.window
+                if forWebDriver {
+                    log.notice("A WebDriver session has a window of Safari's of its own")
+                } else {
+                    log.notice("A scenario's run has a window of Safari's")
+                    scenarioWindow = controller.window
+                }
                 return (webView, navigation(tab: tab, webView: webView))
             }
             try? await Task.sleep(nanoseconds: 100_000_000)
@@ -304,6 +313,17 @@ enum SafariChromeHost {
     static var onLastWindowClosed: (() -> Void)?
     private static var isWatchingWindows = false
     private static var isClosingEveryWindow = false
+    /// Windows whose closing is not the profile's last window closing (`closeKeepingProfile`).
+    private static let closingKeepsProfile = NSHashTable<NSWindow>.weakObjects()
+
+    /// Closes `window` as its close button does, but its being the last of Safari's windows does not
+    /// quit the profile: a WebDriver session's window, closed as the session ends. A profile the
+    /// session found running — out of sight, say — stays as it was (docs/AUTOMATION.md, "WebDriver");
+    /// one the session started is stopped by the session's end, which seals its data.
+    static func closeKeepingProfile(_ window: NSWindow) {
+        closingKeepsProfile.add(window)
+        window.performClose(nil)
+    }
 
     private static func watchWindows() {
         guard !isWatchingWindows else { return }
@@ -314,7 +334,7 @@ enum SafariChromeHost {
                 // Where it was, for the profile's next first window — closed by the user, or by a
                 // stop or a quit before the seal.
                 if isBrowserWindow(closing) { SavedWindowFrame.save(closing.frame, for: savedFrameSize) }
-                guard !isClosingEveryWindow, isBrowserWindow(closing) else { return }
+                guard !isClosingEveryWindow, isBrowserWindow(closing), !closingKeepsProfile.contains(closing) else { return }
                 let others = NSApp.windows.filter { $0 !== closing && $0.isVisible && isBrowserWindow($0) }
                 if others.isEmpty {
                     log.notice("Safari's last window of this profile closed: the profile quits")

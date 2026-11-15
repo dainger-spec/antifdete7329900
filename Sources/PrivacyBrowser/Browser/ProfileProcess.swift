@@ -46,11 +46,12 @@ final class ProfileProcess {
     private(set) var isForWarmUpOnly: Bool
     private let process: Process
     private let log = Logger(subsystem: "PrivacyBrowser", category: "ProfileProcess")
-    /// Called on the main actor when the child has exited, however it exited.
+    /// Called on the main actor when the child has exited, however it exited. It must not hold
+    /// this object (capture it weakly): it is let go once it has been called (`didExit`).
     var onExit: (@MainActor (Int32) -> Void)?
-    /// What the profile tells the manager (`ProfileChannel`).
+    /// What the profile tells the manager (`ProfileChannel`). It must not hold this object either.
     var onEvent: (@MainActor (ProfileEvent) -> Void)?
-    /// Open for as long as the child runs: the key first, then commands.
+    /// Open for as long as the child runs: the key first, then commands. Closed when it has exited.
     private var commands: FileHandle?
 
     var isRunning: Bool { process.isRunning }
@@ -127,6 +128,9 @@ final class ProfileProcess {
 
         let keyPipe = Pipe()
         process.standardInput = keyPipe
+        // A command written in the moment between the child's exit and this process noticing it
+        // fails, and is not a signal that ends the app (SIGPIPE, which the app ignores too: main).
+        _ = fcntl(keyPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         // What the profile says back. Safari's own frameworks print on this stream too, so only
         // prefixed lines are ours and the rest is passed on to the log as it was.
         let eventPipe = Pipe()
@@ -137,20 +141,26 @@ final class ProfileProcess {
 
         // The profile's grant first: its key and its entry in the index, not the vault's master
         // key (`ProfileGrant`). Written after the fork so that it exists only in the two
-        // processes' memory and the pipe buffer.
-        keyPipe.fileHandleForWriting.write(record)
+        // processes' memory and the pipe buffer. A child that is already gone gets none, and its
+        // exit is handled as any other.
+        try? keyPipe.fileHandleForWriting.write(contentsOf: record)
 
         let child = ProfileProcess(profileID: profileID, isForWarmUpOnly: forWarmUpOnly, process: process)
         // The same pipe carries the commands after the grant; it stays open until the child exits.
         child.commands = keyPipe.fileHandleForWriting
-        ProfileChannel.readLines(from: eventPipe.fileHandleForReading) { [weak child] line in
+        let events = eventPipe.fileHandleForReading
+        ProfileChannel.readLines(from: events, onEnd: {
+            // The child, and whatever inherited its output, closed it: nothing more comes.
+            try? events.close()
+        }) { [weak child] line in
             guard let event = ProfileChannel.decode(ProfileEvent.self, from: line, prefix: ProfileChannel.eventPrefix) else {
                 FileHandle.standardError.write(Data((line + "\n").utf8))
                 return
             }
             child?.onEvent?(event)
         }
-        // Called on one of Foundation's queues, not the main one.
+        // Called on one of Foundation's queues, not the main one. It holds the object until its
+        // exit has been handled, and is then let go with everything else that held it (`didExit`).
         let pid = process.processIdentifier
         process.terminationHandler = { finished in
             let status = finished.terminationStatus
@@ -161,7 +171,10 @@ final class ProfileProcess {
             Logger(subsystem: "PrivacyBrowser", category: "ProfileProcess")
                 .notice("Profile \(profileID.uuidString, privacy: .public)'s process \(pid, privacy: .public) ended: \(signaled ? "signal" : "exit status", privacy: .public) \(status, privacy: .public)")
             DispatchQueue.main.async {
-                MainActor.assumeIsolated { child.onExit?(status) }
+                MainActor.assumeIsolated {
+                    child.onExit?(status)
+                    child.didExit()
+                }
             }
         }
         // Notice, not info: info lines are not kept, and which pid was which profile is the first
@@ -296,6 +309,18 @@ final class ProfileProcess {
             environment[browsingPreferencesVariable] = String(decoding: json, as: UTF8.self)
         }
         return environment
+    }
+
+    /// The child has exited and its exit has been handled: its command pipe is closed, and nothing
+    /// this object set up holds it any more, so that it goes — with its pipes' descriptors — once the
+    /// manager lets it go. (Each run's object stayed, with two open descriptors, for as long as the
+    /// app ran: after a hundred or so runs it could open no file.) The event pipe closes when the
+    /// last of what the child said has been read (`start`). Events still arriving are passed on.
+    private func didExit() {
+        onExit = nil
+        process.terminationHandler = nil
+        try? commands?.close()
+        commands = nil
     }
 
     /// Asks the child to quit, which is what seals its data. The command is the ordinary way and

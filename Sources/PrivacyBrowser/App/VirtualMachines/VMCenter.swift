@@ -63,6 +63,10 @@ final class VMCenter: ObservableObject {
         var troubleDetail: String?
         /// Its connections go through the proxy this Mac's network settings name.
         var viaSystemProxy = false
+        /// It was woken from a saved state at this start: it is as it was closed.
+        var woke = false
+        /// Its macOS is being shut down (`shutDown`), not put to sleep.
+        var shuttingDown = false
     }
 
     @Published private(set) var list: VMProfiles
@@ -83,6 +87,16 @@ final class VMCenter: ObservableObject {
     @Published private(set) var guests: [UUID: VMGuestStatus] = [:]
     /// What each machine's files take on disk; the base's under `VMCenter.baseID`.
     @Published private(set) var diskUsage: [UUID: Int64] = [:]
+    /// The machines put to sleep (instant wake): each has a saved state for its next start.
+    @Published private(set) var asleep: Set<UUID> = []
+    /// Why a machine with instant wake was started anew at its last start instead of woken.
+    @Published private(set) var wakeNotes: [UUID: VMWakeRefusal] = [:]
+    /// When each machine's macOS last started anew rather than woken (since unlock): what its
+    /// status file said before that is of a macOS that has since shut down (`VMGuestStatus.asOf`).
+    private var startedAnew: [UUID: Date] = [:]
+    /// Where a running machine's macOS connects, while its network panel is open — the person's
+    /// browsing: shown, never kept or logged.
+    @Published private(set) var hosts: [UUID: [VMHelperEvent.Host]] = [:]
 
     /// The base's place in `diskUsage`, and the place of what was fetched for it (Apple's restore
     /// image, whole or in part).
@@ -103,6 +117,10 @@ final class VMCenter: ObservableObject {
     private var helpers: [UUID: VMHelperProcess] = [:]
     private var setupHelper: VMHelperProcess?
     private var downloader: VMImageDownloader?
+    /// A restore image the person already had, being checked (the helper's `inspect`) and then
+    /// taken into the library: the setup's first step says so instead of "downloading".
+    @Published private(set) var importingFile = false
+    private var importer: VMImageImport?
     /// The current run of the setup: what an earlier one still says is not listened to.
     private var setupRun: UUID?
     private var awake: NSObjectProtocol?
@@ -124,6 +142,7 @@ final class VMCenter: ObservableObject {
             log.error("The virtual machines' list could not be read: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
         }
         for profile in list.profiles { readGuestStatus(of: profile.id) }
+        asleep = Set(list.profiles.map(\.id).filter { library.machine(for: $0).hasSavedState })
         measureDisk()
     }
 
@@ -240,9 +259,9 @@ final class VMCenter: ObservableObject {
         let run = beginRun()
         holdAwake(true)
         excludeFromBackups()
-        activity = .downloading(VMImageDownloader.Progress(have: VMLibrary.fileSize(library.partialRestoreImageURL),
-                                                           total: library.downloadState().flatMap { $0.image == image ? $0.expectedLength : nil },
-                                                           speed: nil))
+        let saved = library.downloadState().flatMap { $0.image == image ? $0 : nil }
+        activity = .downloading(VMImageDownloader.Progress(have: saved.map { library.downloadedBytes($0) } ?? 0,
+                                                           total: saved?.expectedLength, speed: nil))
         let downloader = VMImageDownloader(library: library, image: image, onProgress: { [weak self] progress in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
@@ -274,11 +293,97 @@ final class VMCenter: ObservableObject {
         guard case .downloading? = activity else { return }
         downloader?.pause()
         downloader = nil
+        // A copy of the person's file is called off, not paused: it starts over if chosen again.
+        importer?.cancel()
+        importer = nil
+        importingFile = false
         setupRun = nil
         activity = nil
         holdAwake(false)
         setup = library.setupState()
         measureDisk()
+    }
+
+    /// The person chose a restore image they already have (`VMImageImport`): the helper loads it
+    /// as the installer would and says which macOS it is and that it runs on this Mac; it is then
+    /// cloned or copied into the download's place, and the setup goes on with the installation as
+    /// after a download. The person's own file is never moved or changed.
+    func useImageFile(_ source: URL) {
+        guard activity == nil, Self.availability == .available else { return }
+        guard isAllowed() else {
+            setupError = L("vm.error.notInPlan")
+            return
+        }
+        switch library.setupState() {
+        case .ready, .needsGuestSetup:
+            return
+        case .none, .downloading, .downloaded:
+            break
+        }
+        if let problem = VMImageImport.problem(with: source) {
+            setupError = Self.text(of: problem)
+            return
+        }
+        setupError = nil
+        importingFile = true
+        let run = beginRun()
+        activity = .asking
+        var image: VMRestoreImage?
+        let helper = VMHelperProcess(onEvent: { event in
+            if event.kind == .catalog { image = event.image }
+        }, onEnd: { [weak self] failure in
+            guard let self, self.setupRun == run else { return }
+            self.setupHelper = nil
+            guard let image, failure == nil else {
+                return self.setupFailed(String(format: L("vm.import.error.notAnImage"), failure ?? L("vm.error.unknown")))
+            }
+            self.offeredImage = image
+            self.takeImage(from: source, run: run)
+        })
+        start(helper, VMHelperRequest(mode: .inspect, restoreImagePath: source.path))
+    }
+
+    private func takeImage(from source: URL, run: UUID) {
+        holdAwake(true)
+        excludeFromBackups()
+        activity = .downloading(VMImageDownloader.Progress(have: 0, total: VMLibrary.fileSize(source), speed: nil))
+        let importer = VMImageImport(source: source, library: library, onProgress: { [weak self] progress in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, self.setupRun == run else { return }
+                    self.activity = .downloading(progress)
+                }
+            }
+        }, onFinish: { [weak self] result in
+            let failure: Error?
+            if case .failure(let error) = result { failure = error } else { failure = nil }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, self.setupRun == run else { return }
+                    self.importer = nil
+                    self.importingFile = false
+                    if let failure {
+                        return self.setupFailed((failure as? VMImageImport.Problem).map(Self.text(of:)) ?? errorText(failure))
+                    }
+                    self.measureDisk()
+                    self.install()
+                }
+            }
+        })
+        self.importer = importer
+        importer.start()
+    }
+
+    /// What is wrong with a file the person chose, in their language.
+    static func text(of problem: VMImageImport.Problem) -> String {
+        switch problem {
+        case .notAFile: return L("vm.import.error.notAFile")
+        case .tooSmall: return L("vm.import.error.tooSmall")
+        case .notARestoreImage: return L("vm.import.error.notAZip")
+        case .unreadable: return L("vm.import.error.unreadable")
+        case .notEnoughSpace(let needed, let free):
+            return String(format: L("vm.import.error.space"), VMText.bytes(needed), VMText.bytes(free))
+        }
     }
 
     private func install() {
@@ -372,7 +477,7 @@ final class VMCenter: ObservableObject {
         // A base not set up yet says in its own window what is left to do in it.
         var baseTexts = Self.helperTexts
         if info.stage != .ready {
-            baseTexts["hint"] = L(network == .absent ? "vm.base.hint" : "vm.base.hint.online")
+            baseTexts["guide"] = L("vm.base.guide")
         }
         let run = beginRun()
         activity = .guestSetup
@@ -449,6 +554,9 @@ final class VMCenter: ObservableObject {
         setupRun = nil
         setupHelper = nil
         downloader = nil
+        importer?.cancel()
+        importer = nil
+        importingFile = false
         activity = nil
         holdAwake(false)
         setupError = text
@@ -509,14 +617,24 @@ final class VMCenter: ObservableObject {
         let share = library.base.share
         try FileManager.default.createDirectory(at: share, withIntermediateDirectories: true)
         for name in names where !name.hasPrefix(".") {
-            let target = share.appendingPathComponent(name)
-            try? FileManager.default.removeItem(at: target)
-            try FileManager.default.copyItem(at: source.appendingPathComponent(name), to: target)
             let runs = name.hasSuffix(".command") || name.hasSuffix(".sh")
-            try FileManager.default.setAttributes([.posixPermissions: runs ? 0o755 : 0o644], ofItemAtPath: target.path)
+            try Self.placeFresh(source.appendingPathComponent(name), at: share.appendingPathComponent(name), runs: runs)
         }
         // What an earlier setup said is not this one's.
         try? FileManager.default.removeItem(at: library.base.status)
+    }
+
+    /// One of the tools, into a folder the guest reads: its bytes in a new file, not a copy of the
+    /// file. A copy keeps the file's extended attributes, and in a Lumen downloaded from the
+    /// internet those may be the download's quarantine — on which macOS in the machine would
+    /// refuse to run "Install Lumen Tools" (or ask about it), with nothing of it from the internet.
+    static func placeFresh(_ source: URL, at target: URL, runs: Bool) throws {
+        let data = try Data(contentsOf: source)
+        try? FileManager.default.removeItem(at: target)
+        guard FileManager.default.createFile(atPath: target.path, contents: data,
+                                             attributes: [.posixPermissions: runs ? 0o755 : 0o644]) else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: target.path])
+        }
     }
 
     // MARK: Profiles
@@ -561,6 +679,8 @@ final class VMCenter: ObservableObject {
         exits[id] = nil
         guests[id] = nil
         diskUsage[id] = nil
+        asleep.remove(id)
+        wakeNotes[id] = nil
     }
 
     // MARK: Running
@@ -590,6 +710,7 @@ final class VMCenter: ObservableObject {
             return
         }
         problems[id] = nil
+        wakeNotes[id] = nil
         guard let proxy = profile.proxy else {
             guard profile.asksWhereTheConnectionComesOut else {
                 running[id] = Running(phase: .starting)
@@ -681,9 +802,7 @@ final class VMCenter: ObservableObject {
                FileManager.default.fileExists(atPath: script.path) {
                 try? FileManager.default.createDirectory(at: files.tools, withIntermediateDirectories: true)
                 for folder in [files.tools, files.share] {
-                    let copy = folder.appendingPathComponent(VMGuestSettings.scriptFileName)
-                    try? FileManager.default.removeItem(at: copy)
-                    try? FileManager.default.copyItem(at: script, to: copy)
+                    try? Self.placeFresh(script, at: folder.appendingPathComponent(VMGuestSettings.scriptFileName), runs: true)
                 }
             }
             if profile.lumenWallpaper {
@@ -710,6 +829,19 @@ final class VMCenter: ObservableObject {
         switch event.kind {
         case .started:
             if running[id]?.phase == .starting { running[id]?.phase = .running }
+            running[id]?.woke = event.woke == true
+            wakeNotes[id] = event.notWoken.flatMap(VMWakeRefusal.init(rawValue:))
+            // Started anew, its macOS has what the one before wrote for "the next start"; woken,
+            // it is the macOS that wrote it.
+            if event.woke == true {
+                startedAnew[id] = nil
+            } else {
+                let now = Date()
+                startedAnew[id] = now
+                guests[id] = guests[id]?.asOf(start: now, written: nil)
+            }
+            // Woken or started anew, the saved state is used up.
+            asleep.remove(id)
             // What the guest says of itself — its system, its tools, whether Lumen's picture is on
             // its desktop — is read while it runs too, not only when it has stopped.
             for delay in [25.0, 60, 120, 240] {
@@ -726,6 +858,9 @@ final class VMCenter: ObservableObject {
             running[id]?.trouble = event.trouble.flatMap(VMNetworkTrouble.init(rawValue:))
             running[id]?.troubleDetail = event.troubleDetail
             running[id]?.viaSystemProxy = event.viaSystemProxy ?? false
+        case .hosts:
+            // Only while the panel asks: an answer that comes after it was closed is dropped.
+            if hosts[id] != nil { hosts[id] = event.hosts ?? [] }
         default:
             break
         }
@@ -734,12 +869,72 @@ final class VMCenter: ObservableObject {
     private func ended(_ id: UUID, failure: String?) {
         helpers[id] = nil
         running[id] = nil
+        hosts[id] = nil
         if let failure { problems[id] = failure }
+        if library.machine(for: id).hasSavedState { asleep.insert(id) } else { asleep.remove(id) }
         readGuestStatus(of: id)
         measureDisk()
     }
 
-    /// Shuts the machine's macOS down as its own menu would.
+    /// Shuts the machine's macOS down as its own menu would, whatever its instant wake says:
+    /// nothing is kept for the next start.
+    func shutDown(_ id: UUID) {
+        guard let state = running[id], state.phase != .checkingProxy else { return stop(id) }
+        running[id]?.phase = .stopping
+        running[id]?.shuttingDown = true
+        helpers[id]?.send(.shutdown)
+    }
+
+    /// The person asked for a machine that sleeps to be started anew: its saved state — what was
+    /// open in it — is given up, and its macOS starts as after a shutdown that did not happen.
+    func startAnewBecauseThePersonAsked(_ id: UUID) {
+        guard running[id] == nil, helpers[id] == nil else { return }
+        let files = library.machine(for: id)
+        for url in [files.state, files.stateInfo] { try? FileManager.default.removeItem(at: url) }
+        asleep.remove(id)
+        start(id)
+    }
+
+    /// The network panel of a running machine was opened or closed: the helper says where the
+    /// machine connects only while it is open.
+    func watchNetwork(of id: UUID, _ watching: Bool) {
+        if watching {
+            guard helpers[id] != nil else { return }
+            if hosts[id] == nil { hosts[id] = [] }
+            helpers[id]?.send(.hosts(true))
+        } else {
+            hosts[id] = nil
+            helpers[id]?.send(.hosts(false))
+        }
+    }
+
+    /// Blocks a host for the machine: at once in the running machine, and — written into its
+    /// profile — at every later start. Throws what is wrong with the name or the list.
+    func block(_ host: String, in id: UUID) throws {
+        guard let name = VMProfile.blockedHost(host), var profile = list.profile(id) else {
+            throw CoreError.invalidConfiguration("a blocked name must be a host name such as ads.example.com")
+        }
+        if !profile.blockedHosts.contains(name) {
+            profile.blockedHosts.append(name)
+            try save(profile)
+        }
+        helpers[id]?.send(.block(name))
+    }
+
+    /// Whether a host is one the machine's profile blocks, or under one.
+    func isBlocked(_ host: String, in id: UUID) -> Bool {
+        guard let profile = list.profile(id) else { return false }
+        return profile.blockedHosts.contains { host == $0 || host.hasSuffix("." + $0) }
+    }
+
+    /// Puts the front window of the machine's macOS full screen, or back (the key a person would
+    /// press for it).
+    func toggleGuestFullScreen(_ id: UUID) {
+        helpers[id]?.send(.fullScreen)
+    }
+
+    /// Closes the machine: with instant wake it is put to sleep as it is; otherwise its macOS is
+    /// shut down as its own menu would.
     func stop(_ id: UUID) {
         guard let state = running[id] else { return }
         if state.phase == .checkingProxy {
@@ -764,6 +959,7 @@ final class VMCenter: ObservableObject {
             setupHelper?.terminate()
             setupHelper = nil
             activity = nil
+            importingFile = false
         case .downloading?: pauseDownload()
         case .installing?: cancelInstallation()
         case .guestSetup?: closeBase()
@@ -792,9 +988,14 @@ final class VMCenter: ObservableObject {
     private func readGuestStatus(of id: UUID) {
         let url = library.machine(for: id).status
         Task { [weak self] in
-            let read = await Task.detached(priority: .utility) { VMGuestStatus.read(from: url) }.value
+            // And when it was written — read first, so that a file put in place meanwhile is taken
+            // as older, not newer: one from before the machine's macOS last started anew.
+            let (read, written) = await Task.detached(priority: .utility) { () -> (Result<VMGuestStatus, VMShareFile.Refusal>, Date?) in
+                let written = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+                return (VMGuestStatus.read(from: url), written)
+            }.value
             guard let self, let status = self.accepted(read) else { return }
-            self.guests[id] = status
+            self.guests[id] = status.asOf(start: self.startedAnew[id], written: written)
         }
     }
 
@@ -853,7 +1054,10 @@ final class VMCenter: ObservableObject {
     /// The helper's few words, in the person's language (it has no strings of its own).
     static var helperTexts: [String: String] {
         ["stop": L("vm.window.stop"), "stopQuestion": L("vm.window.stopQuestion"), "stopDetail": L("vm.window.stopDetail"),
-         "stopNow": L("vm.window.stopNow"), "cancel": L("common.cancel"), "stopping": L("vm.window.stopping")]
+         "stopNow": L("vm.window.stopNow"), "cancel": L("common.cancel"), "stopping": L("vm.window.stopping"),
+         "sleep": L("vm.window.sleep"), "sleeping": L("vm.window.sleeping"), "opening": L("vm.window.opening"),
+         "guestFullScreen": L("vm.window.guestFullScreen"), "nextStartQuestion": L("vm.window.nextStartQuestion"),
+         "nextStartDetail": L("vm.window.nextStartDetail"), "keep": L("vm.window.keep")]
             .merging(VMNetworkTrouble.allCases.map { ("trouble." + $0.rawValue, L("vm.window.trouble")) }) { first, _ in first }
     }
 }

@@ -31,7 +31,10 @@ Names follow Playwright's so that a script moves over quickly; full compatibilit
 | `screenshot(selector?)` | A PNG of the viewport or of an element's part in view |
 | `pause(range)` | A pause of random length |
 
-Selectors are CSS, or `text=…` for the smallest visible elements whose text holds it.
+Selectors are CSS, or `text=…` for the smallest visible elements whose text holds it. Neither
+looks into a web component's own elements (an open shadow root): `host >>> inner` does — `inner`
+(CSS or `text=`) inside the shadow root of each element `host` finds, and again for a component
+in a component (`a >>> b >>> c`). Clicks aim at the element itself there, not at its host.
 
 The driver reads the page (where an element is, whether it shows, its text) in a content world of
 its own; it never acts on the page from a script. Clicks, typing and scrolling are input events.
@@ -69,6 +72,9 @@ the page's own record.
   `page.evaluate(fn, arg, {world: 'page'})` takes a function or a function body;
   `page.url()` and `page.title()` are promises too (in Playwright they are not);
 - `log(...)` for the run's log, `sleep(ms)`, `params` (the run's parameters, read-only).
+  `sleep(Infinity)` — or any wait longer than a year — waits until Stop; a negative number or
+  `NaN` does not wait. A `type` delay is held to a year a key the same way (`ScenarioWait`:
+  a number past what the system's sleep holds stopped the profile's process).
 
 A script's commands act one at a time, in the order they were asked for, whatever the script awaits
 (two at once — a forgotten `await`, `Promise.all` — moved one pointer two ways). Lines logged faster
@@ -114,15 +120,25 @@ Record ── AppModel.startRecording(on:) ── the profile started with a win
    ScenarioRecorder ── Event.loaded(address) | .acted(step) ── ProfileEvent.recorded ── the app
    AppModel.recorded: ScenarioRecording ── which loads are steps (the first page and an address
                opened: goto; a page that follows a click or Enter within 5 s: waitForLoadState, once)
-   Stop Recording ── ScenarioRecording.line(for:) per step, added to the scenario's end — or put in
-               place of the example a new scenario begins with, while that example is untouched
+   Stop Recording ── ScenarioRecording.line(for:) per step, added to the end of the scenario the
+               recording was for (AppModel.recordingScenario) — or put in place of the example a
+               new scenario begins with, while that example is untouched
 ```
+
+- **The scenario it is for.** A recording belongs to the scenario on screen when Record was
+  pressed. The list keeps to it until the recording ends; the editor's window closed and opened
+  again shows that scenario, not the list's first; and the steps go to it whatever is on screen
+  when the recording ends (a scenario deleted meanwhile: a new one gets them).
 
 - **Selectors**, in this order: an `id` that is unique and not made for this load only (`:r1:`,
   `ember123`, long runs of digits); `data-testid`, `data-test-id`, `data-test`, `data-qa`,
   `data-cy`; `name`, `aria-label`, `placeholder`, `title` with the tag; for a link or button, its
   text (`text=…`) when exactly one element has it; else the path from the nearest ancestor that
-  can be named, by position among siblings of its kind.
+  can be named, by position among siblings of its kind. An element inside a web component's open
+  shadow root is named by the same rules within that root, after its host's selector and `>>>`
+  (`body > login-box >>> input[name="email"]`): a selector of the page itself would find nothing
+  there on a replay, or a look-alike outside the component. A closed shadow root shows the page
+  only its host, which is what is recorded.
 - **A password is never recorded.** The page's side sends no text for a secret's field, the
   profile's process drops any that came, and the line is
   `await page.type(selector, params.password || '');` with a comment that says so. A secret's
@@ -146,7 +162,9 @@ Checked: `ScenarioRecordingTests` (which loads are steps, what typing leaves, ea
 the self-test's "automation commands" (a recording of the driver's own click and typing comes out
 as the lines that repeat them, and nothing is recorded after Stop); the page's script against
 real input in a browser while it was written (the fields, a password, a checkbox's label, a
-button without an id, Enter).
+button without an id, Enter); `scripts/test-shims.mjs` runs the page's script and the driver's
+find on a stub page — secrets, and a field and a button in a component's shadow root named
+through its host and found there rather than in a look-alike form of the page.
 
 ## By the clock
 
@@ -164,7 +182,8 @@ deleting one asks first; saving a change leaves the schedule's switch as it was.
 - `ScenarioScheduleCoordinator` looks at the clock once a minute while the vault is open: a due
   scenario is run as the editor's Run runs it (`AppModel.runScenario`), a due warm-up goes into
   the warm-up queue with the profile's own plan. A profile that is starting, being sealed,
-  running a scenario or being recorded in is looked at again ten minutes on. A run found more
+  running a scenario, being recorded in or driven by a WebDriver session is looked at again ten
+  minutes on. A run found more
   than six hours late is not made ("missed"); without automation in the plan nothing is run and
   the schedule says so. Schedules of deleted profiles and scenarios go with them.
 - Nothing wakes the Mac or starts the app: a schedule runs while Lumen does.
@@ -202,8 +221,9 @@ a client (Selenium) ── http://127.0.0.1:<port>/wd/<profile's token>/<profile
        a command:   ProfileManager.webDriver(id, WebDriverCall) ── ProfileCommand.webDriver to the
                     profile's own process, answered by ProfileEvent.webDriverAnswer (by the call's id)
        quit:        "close"; a profile the session started is stopped
-   WebDriverExecutor (where the window is) ── PageDriver for a window of Safari's
-       (SafariChromeHost.openScenarioPage) or, where Safari's chrome is not hosted, of the app's own
+   WebDriverExecutor (where the window is) ── PageDriver for a window of Safari's, the session's
+       own (SafariChromeHost.openScenarioPage(forWebDriver:): never a run's) or, where Safari's
+       chrome is not hosted, of the app's own
        navigate (http, https or about:blank only; else "invalid argument"), back, forward,
        refresh, title, url, source ── PageDriver
        find (css selector, xpath, link text, partial link text, tag name), with the implicit wait
@@ -237,7 +257,17 @@ a client (Selenium) ── http://127.0.0.1:<port>/wd/<profile's token>/<profile
   drives that one profile and nothing else of the API. Renewing the API's token changes every
   profile's address. 127.0.0.1 only.
 - **A session is a launch.** One session a profile at a time; ending it closes its window, and
-  stops the profile when the session started it (a profile that was running stays).
+  stops the profile when the session started it (a profile that was running stays — out of
+  sight, too: the session's window closing is not the profile's last window closing).
+- **A window of its own.** A session never acts in a scenario's run's window, and no run takes
+  the session's: a run started from the editor opens its own. While a session drives a
+  profile, a schedule's run on it waits (the profile is busy, looked at again ten minutes on)
+  and the API's run is refused (`409 busy`).
+- **Many profiles at once:** one script per profile, side by side, as many as the plan's
+  profiles. A command being answered — a launch, a page's load, a find's implicit wait — holds
+  no other up; only connections still sending their request are limited (32 at once), and one
+  past that is answered with the protocol's `unknown error` ("Too many requests are arriving at
+  once"), not acted on, and can be sent again (docs/AUTOMATION_API.md).
 - **What a page can tell.** Nothing new: `navigator.webdriver` stays false, and clicks and keys
   are the driver's own (docs/PAGE_INPUT.md). `clear`, choosing an `<option>` and text put in
   where the layout has no key set values from the driver's world, as AutoFill does.
@@ -248,6 +278,10 @@ a client (Selenium) ── http://127.0.0.1:<port>/wd/<profile's token>/<profile
   session, the Actions API (ActionChains), file uploads, printing. Each answers with the
   protocol's own error ("unsupported operation", "no such alert").
 - **The plan:** part of automation (`allowsAutomation`), refused without it with the reason.
+- **Clients:** Selenium in any language, WebdriverIO, or anything else that speaks the protocol.
+  A web page's request is refused (it carries `Origin` or `Sec-Fetch-Site`); Node's built-in
+  `fetch`, which WebdriverIO sends every command with, adds `Sec-Fetch-Mode` alone of those
+  headers, and that is answered.
 
 ### Selenium (Python)
 

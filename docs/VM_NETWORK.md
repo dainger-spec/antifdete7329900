@@ -26,7 +26,8 @@ itself from DHCP.
 | ping the router | answers. A ping of anything else gets no answer |
 | a DNS query — to the router or to **any** other address | answers it itself and asks nobody (below) |
 | opens a TCP connection | ends it here and carries its bytes through the proxy (below) |
-| any other UDP (QUIC, STUN, NTP, …) | drops it and answers "port unreachable" at once, so that the guest gives up now instead of after a timeout; nothing is said to broadcasts and multicast |
+| a question for the time (NTP, port 123) — to **any** address | answers it itself with this Mac's clock, "from" the server asked; nothing leaves (`TimeResponder`) |
+| any other UDP (QUIC, STUN, …) | drops it and answers "port unreachable" at once, so that the guest gives up now instead of after a timeout; nothing is said to broadcasts and multicast |
 | IPv6, in any form | nothing. No router advertisement is ever sent, so the guest has no IPv6 address but a link-local one, and no IPv6 route |
 
 ### DNS: a name for every address, and no query that leaves
@@ -99,12 +100,38 @@ close(ends[1])                  // the descriptor stays the app's
 
 `guestMAC` must be the address of the virtual machine's network card (DHCP answers no other), and
 `counters()` may be asked at any time from any thread: bytes each way, connections opened, failed
-and open now, DNS queries and how many were blocked, datagrams dropped.
+and open now, DNS queries and how many were blocked, datagrams dropped, questions for the time.
+
+### Where a machine connects, and blocking a host as it runs
+
+`hosts()` is what went to and from each host the guest asked for, the one seen last first
+(`VMNetHost`: connections, how many are open, bytes each way, how often it was refused as
+blocked; at most 400 hosts, the one unseen the longest forgotten first). `block(host:)` blocks
+a name and everything under it from now on: its questions are answered "no such name", a
+connection to the address the guest still holds for it is refused, and those open are reset.
+The app shows the list in a running machine's "Network…" panel and asks for it only while the
+panel is open (`hosts on` / `hosts off` to the helper, a `hosts` event every two seconds); a
+host blocked there is written into the profile's own list too.
+
+This **is** the person's browsing. It lives in the helper's memory and the panel's, and nowhere
+else: no log line carries a name (the log's rule above holds — the tests look), and nothing is
+written to disk.
+
+### A network that goes on after a wake
+
+`knownNames()` — after `stop()` — is every name the guest was given a stand-in address for, with
+it; `VMNetConfiguration.knownNames` hands them to the next run, which gives the same names the
+same addresses (`FakeAddressPool(restoring:)`: what is no entry of a pool is left out, fresh
+addresses go on after the highest known, and the ones below it that nobody has are given out
+before any is used twice). A machine woken from a saved state (docs/VM.md, "Instant wake")
+still holds those addresses — in its resolver's cache, in connections it is about to open.
 
 ## Limits
 
-- **TCP over IPv4 only.** No UDP gets out (so no QUIC/HTTP/3, no WebRTC media, no NTP: the guest's
-  clock comes from the host), no IPv6, no ICMP beyond the router's ping.
+- **TCP over IPv4 only.** No UDP gets out (so no QUIC/HTTP/3, no WebRTC media), no IPv6, no ICMP
+  beyond the router's ping. The guest's clock is this Mac's: set from the virtual Mac's as it
+  starts, and told again whenever it asks (NTP is answered here, by this Mac's clock) — which is
+  what sets a machine woken from a saved state right.
 - **One guest per network**, one address. Guests do not see each other or this Mac.
 - **No TLS is opened or read.** The stack moves bytes; what the proxy and the site see is the
   guest's own TLS.

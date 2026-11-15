@@ -22,8 +22,15 @@ licensing, and has the machines.
    first what it takes (disk, memory, time), then:
 2. asks Apple which macOS this Mac can run as a guest, and **downloads it from Apple's servers**
    into the vault's folder — about 25 GB. None of it is in Lumen's own download: the app stays the
-   size it was. The download can be paused, and goes on from where it stopped — also after a quit,
-   a lost connection or a restart of the Mac;
+   size it was. It comes over **six connections at once**, in chunks of 32 MB (`VMImageFetch`): a
+   network that gives each connection only so much — far from Apple's servers, through a VPN,
+   under a provider's shaping — gives six several times that (people's reports, 14 November: one
+   connection was slow). The download can be paused, and goes on with the chunks that are not here
+   yet — also after a quit, a lost connection or a restart of the Mac. **Or the person's own file:**
+   "I have the file…" (on the opening screen, and beside a paused download) takes a restore image
+   (`.ipsw`) they already have — downloaded by Lumen on another Mac, by a download manager ("Copy
+   Apple's link" while Lumen downloads gives the address), or a colleague's — see "A file the person
+   has" below;
 3. installs macOS from it (10–20 minutes) into the **base system**; the downloaded image is
    removed when the base is set up (until then, starting over is an installation, not a download);
 4. opens the base in a window, for macOS's own first-run setup (the country, an account) and
@@ -61,7 +68,8 @@ Sources/BrowserCore/VirtualMachines/   the model, platform-independent, unit-tes
   VMProfile.swift        a profile and the list (vms.bin, encrypted in the vault)
   VMDisplay.swift        screens of real Macs; what the setup needs (VMRequirements)
   VMLibrary.swift        where machines are on disk; how far the setup got
-  VMDownload.swift       the resumable download's decisions (Range, If-Range)
+  VMDownload.swift       the resumable download's decisions (Range, If-Range), the chunk map
+  VMImageFetch.swift     the download: several connections, chunk by chunk (tested on Linux)
   VMGuestSettings.swift  what the guest is told, what it says back
   VMHelperProtocol.swift the app's conversation with the helper
 Sources/VMNetCore/                     the machine's network through a proxy (docs/VM_NETWORK.md)
@@ -69,7 +77,7 @@ Sources/LumenVM/                       the helper: Apple's Virtualization.framew
 Sources/PrivacyBrowser/App/VirtualMachines/
   VMCenter.swift         the setup, the profiles, the machines running now
   VMHelperProcess.swift  one run of the helper
-  VMImageDownloader.swift the download itself
+  VMImageDownloader.swift the download as the app has it: its failures in the person's language
 Sources/PrivacyBrowser/UI/VirtualMachinesView.swift   the section, the setup's steps, the editor
 Resources/VMGuest/                     what the base system's macOS gets
 Resources/LumenVM.entitlements         the helper's one right
@@ -177,11 +185,25 @@ machine: nothing of a proxied machine goes direct.
 
 ### The guest's tools
 
-`Resources/VMGuest/` is copied into the folder the base shares with the app, and the person runs
-`Install Lumen Tools.command` there once (it refuses to run on anything but a virtual Mac). It:
+While the base is set up, its window has a panel beside macOS's screen: what to press on each of
+the setup's screens, the choices that matter in orange (no Apple ID, no FileVault, a password made
+up for the machine, then Install Lumen Tools) — the app sends it as `texts["guide"]`, lines of
+`# ` a title, `! ` a step that matters, `> ` a note. People chose what made a poor base with one
+line above the screen to go by (14 November); how the base connects to the internet during its
+setup does not matter to the machines, and the guide says so.
 
-- turns on automatic sign-in for the account the person made (not possible with FileVault on in
-  the guest — it says so, and how to turn it on by hand);
+`Resources/VMGuest/` is put into the folder the base shares with the app — each file's bytes in a
+new file, not a copy of the file: a copy keeps extended attributes, and a Lumen downloaded from the
+internet may carry the download's quarantine on them, on which macOS in the machine would refuse
+to run the installer or ask about it — and the person runs `Install Lumen Tools.command` there once
+(it refuses to run on anything but a virtual Mac). Opened from Terminal it is the same:
+`sh "/Volumes/My Shared Files/install.sh"`. It:
+
+- first, before it changes anything or asks for the password, stops on the two choices of macOS's
+  setup that make a poor base, and says in English and Russian what to do (tools 9): an Apple ID
+  signed in (it would be in every machine made from this one — `MobileMeAccounts`), FileVault on
+  (no machine could sign in by itself — `fdesetup isactive`);
+- turns on automatic sign-in for the account the person made;
 - turns off sleep, the screen saver's lock and automatic macOS updates;
 - installs `lumen-guest.sh` as the root LaunchDaemon `io.lumenbrowser.guest`;
 - writes `lumen-status.env` into the shared folder and shuts the machine down.
@@ -192,6 +214,14 @@ checked against the characters it may have, **never run** — and applies the ti
 language and region (for the signed-in account), the computer's name; opens Safari (on the
 profile's start page, if it has one); writes back which macOS and Safari this is; then waits for a
 file named `lumen-shutdown`, which it answers by quitting Safari and shutting macOS down.
+
+Before all that — at the start, before the automatic sign-in — it marks macOS's panes for a new
+Mac as seen for the person who signs in by themselves (`com.apple.SetupAssistant`: `DidSee…`,
+`LastSeen…` with this macOS's version and build; tools 8). Every profile's machine is a Mac its
+macOS has never seen, a hardware identity of its own, and at its first sign-in macOS showed them
+again — on recent macOS its "Welcome" screen, whose "Get Started" did not answer a click in a client's
+machine (14 November). The person saw them all in the base's setup. Not measured on a Mac yet:
+which of the keys that screen reads.
 
 Shut Down in the app (or closing the machine's window) asks that way first — no question on the
 guest's screen — then presses the virtual power button after 20 seconds, and ends the machine after
@@ -249,13 +279,16 @@ most, off the main thread; anything else is ignored and logged by its kind.
 | Accent colour | macOS's nine; a new machine gets one at random, as Macs differ in theirs |
 | Computer's name | as Sharing shows it |
 | Scroll bars | while scrolling, always, or by the pointing device. Left to the system a machine's always show — its pointer is a mouse to macOS — and take a strip of every page's width, which a page can measure and no MacBook has; a new machine with a MacBook's screen gets "while scrolling" |
+| Keyboard layout | the base's, as chosen in its setup and the same in every machine; by the machine's language (`VMKeyboardLayout`: U.S., British, German, French, Spanish and Russian where the country's own is known for certain, the plain Latin "ABC" for other Latin-letter languages and countries, the base's left for the rest); or one of them by name. A new machine gets "by the language" |
 | Dock | bottom, left or right; always shown or hiding; small, medium or large. What it leaves of the screen is what a page is told is free (`screen.availWidth`, `availHeight`) |
 | Wallpaper | Lumen's eclipse, drawn by the app for the machine's screen pixel for pixel (`VMWallpaper`; no picture is carried in the app); or the picture left as it is in the machine |
 | At start | Safari opened or not; its start page, and up to five more, each in a tab; the window full screen |
+| Instant wake | off unless chosen. Closing the machine keeps it as it is, and opening it brings it back in seconds ("Instant wake" below). Such a machine has no sound |
+| Browser mode | off unless chosen. The machine is shown as a browser: Safari over its whole screen, the menu bar and the Dock out of sight ("Browser mode" below) |
 
 Those of the guest's own system are applied in it by the boot script and need **tools 2** (the
 wallpaper: tools 3; the region's clock and week, the scroll bars, the Dock and the pages after
-the first: tools 5, `VMGuestTools.version`); a base set up with tools 1 says so in the list and in the
+the first: tools 5; the keyboard: tools 10, `VMGuestTools.version`); a base set up with tools 1 says so in the list and in the
 editor, and running Install Lumen Tools in the base again updates it. From tools 2 on, the boot
 script takes a newer copy of itself from the shared folder at a machine's start (the app puts its
 own there), so later versions — tools 3 among them — need no visit to the base
@@ -273,6 +306,127 @@ is said back in the status file (`LUMEN_WALLPAPER_STATE`, and `LUMEN_WALLPAPER_N
 system's words for a failure), which the app reads while the machine runs: a picture that was
 not set is said in the machine's row, and so is a machine made with the first tools, whose boot
 script takes no newer one.
+
+### What the base's region leaves behind, and what the system has (tools 10)
+
+A machine whose language follows its proxy is given the language and the locale. Three things of
+the base's region stayed behind that, found by reading the script against what macOS keeps (not
+on a machine: none could be run here):
+
+- **The keyboard's layouts** (`com.apple.HIToolbox`) are the person's, chosen in macOS's setup: a
+  base set up in Russian gave every machine a Russian layout, whatever its language. The setting
+  above writes them (`AppleEnabledInputSources`, `AppleSelectedInputSources`,
+  `AppleInputSourceHistory`, `AppleCurrentKeyboardLayoutInputSourceID`) — once per choice, noted in
+  the person's `io.lumenbrowser.guest` — and macOS takes them at sign-in: in use from the
+  machine's **next** start, which the status says (`LUMEN_KEYBOARD_STATE=next`) and the row repeats.
+  A machine with instant wake is woken, not started, so its next Close is a shutdown, once ("Instant
+  wake" below).
+- **What macOS wrote down for the old region**: its units and temperature scale
+  (`AppleMeasurementUnits`, `AppleMetricUnits`, `AppleTemperatureUnit`), its own formats of dates
+  and numbers (`AppleICU…`), its clock and week. With only `AppleLocale` changed they stood: a
+  machine in the United States with centimetres and Celsius. They are removed once for each locale
+  a machine is given (noted the same way), as System Settings does when the region is changed;
+  the profile's own clock and week are written after, and what the person changes in the machine
+  afterwards is kept.
+- **Whether macOS took it at all** was assumed. The script now reads the time zone
+  (`/etc/localtime`), the person's first language and their locale back from the system into the
+  status file (`LUMEN_TIMEZONE_NOW`, `LUMEN_LANGUAGE_NOW`, `LUMEN_LOCALE_NOW`), and the app
+  compares them with what it asked for (`VMGuestStatus.differences(from:)` — only once the script
+  says it applied these very settings): a difference is said in the machine's row.
+
+What was looked at and needs nothing: the network (no DNS query, UDP or IPv6 leaves, by
+`docs/VM_NETWORK.md`), where the time zone and language come from (the proxy's exit, looked up
+anew at every start, not the last check in the list), the clock (the host's; automatic time zone
+is switched off). The layouts' numbers and names are macOS's own, as known; that a machine takes
+them, and the units, is to be seen on a Mac.
+
+## Instant wake
+
+A machine's start is its macOS's: half a minute to the desktop, and everything in it closed when
+it was shut down. With **instant wake** on (a profile's setting, off unless chosen) closing the
+machine *saves* it instead — its memory, as Apple's framework writes it
+(`VZVirtualMachine.saveMachineStateTo`, macOS 14) — and its next start brings that back
+(`restoreMachineStateFrom`, then `resume`): the same pages, the same place, in seconds.
+
+What holds it together, in `MachineRunner` and `VMSavedState`:
+
+- **A state is one disk's, at one moment.** A machine's memory, woken on a disk that has gone on
+  without it, would write what it remembers over what is there. So the state is used by the next
+  start or removed by it, and removed *before* the machine runs again, taken or not; and beside
+  it lies a note (`state.json`) of the disk as it was left when the machine had stopped after the
+  save — its length and the time of its last write. A disk that is not exactly that is not this
+  state's (`VMWakeRefusal.stale`), and the machine starts anew, as after a Mac lost power.
+- **A state is one machine's.** The note carries the request's `stateStamp`: the hardware the
+  framework is told of (processors, memory, screen, network card) and the revision of the settings
+  the machine's macOS starts with. Anything of them changed — more memory, another language, a
+  proxy that came out in another time zone — and the machine starts anew (`.changed`), so that
+  the change takes; the row says why. What is this Mac's side only (the name, what is blocked,
+  the proxy's address) is not in the stamp.
+- **What can be saved.** The framework saves a Mac's own trackpad and keyboard, a disk, a network
+  card and shared folders — and refuses a machine with sound, with the framework's source of
+  random numbers, or with the USB pointer (`validateSaveRestoreSupport`). A machine with instant
+  wake is made without them (`MachineConfiguration`): it is **silent**, which the setting says. A
+  machine the framework still refuses is shut down when closed, as before, and the row says so
+  (`.unsupported`).
+- **Nothing is lost on the way.** A save that fails (the machine cannot be paused, the framework
+  says no) is no reason to lose what is open in it: the machine goes on and is shut down as a Mac
+  is. "Shut Down macOS" in the row's menu and in the window's is a real shutdown; "Start Anew…"
+  gives a sleeping machine's state up, after a question.
+- **Closed while it wakes.** For the seconds a wake takes (the state read, then the machine
+  resumed) it can be neither paused nor saved. A close in that time — its window, the row's Close,
+  Lock, Quit, this Mac's logout or shutdown — is kept for when it is awake, and the machine is put
+  to sleep again then; it is not shut down, and its state is not removed for it. A state the
+  framework does not take leaves nothing to keep: the machine, which never ran, is then not
+  started. A wake that has not ended in 45 seconds is not waited for (the app gives a machine 75 on
+  Lock and Quit): the helper ends, and a state not yet taken stays for the next start.
+- **What macOS takes only at a start.** A keyboard layout and browser mode's menu bar are written
+  after sign-in and taken at the next one (the status says `LUMEN_KEYBOARD_STATE=next`,
+  `LUMEN_MENU_BAR_STATE=next`), and a machine put to sleep is woken, never started. So while one of
+  them waits, the row's Close is "Shut Down" and says why, and the window's close asks — shut down
+  this once, or keep it as it is; Lock, Quit, this Mac's shutdown and the window's "Close and Keep"
+  put it to sleep as always, and it waits on. A machine started anew has what the macOS before it
+  wrote: a status file from before that start is not taken for one about the macOS running now
+  (`VMGuestStatus.asOf`, by the file's time).
+- **The network.** The guest's connections are this process's and end with it: woken, the guest
+  finds them reset and opens new ones. What it still holds are the stand-in addresses its DNS was
+  given for names; the network takes those back by the same addresses (`VMNetConfiguration.knownNames`,
+  kept in the note — a machine's browsing, beside its memory, which holds the same and more).
+- **The clock.** A woken machine has the clock of the moment it was put to sleep. The helper
+  leaves a word in the shared folder (`lumen-woke`), and the boot script — which went on where it
+  was — asks for the time then (`sntp -sS`, tools 11); the machine's network answers every such
+  question with this Mac's clock, and nothing leaves (docs/VM_NETWORK.md).
+
+A sleeping machine takes about as much disk as it has memory. Lock, Quit and this Mac's own
+shutdown put such a machine to sleep too — faster than shutting it down.
+
+Not run on a Mac: that the framework takes this set of devices (it is the set other tools use
+for it), how long a save and a wake take, and that `sntp` sets the clock as written.
+
+## Browser mode
+
+A machine is a Mac in a window: a desktop, a Dock, a menu bar, Safari somewhere in it. In
+**browser mode** (a profile's setting, off unless chosen) it is shown as a browser:
+
+- its macOS keeps the menu bar and the Dock out of sight (`_HIHideMenuBar`, the Dock's hiding;
+  tools 11 — noted beside the person's settings, so that a machine no longer shown so gets them
+  back), and Safari is opened whatever else the profile says. The menu bar takes it at the next
+  sign-in, which the status says (`LUMEN_MENU_BAR_STATE=next`, tools 12): with instant wake the
+  machine is shut down once for it, as for a keyboard layout;
+- when the boot script says it has opened Safari (the status file), the helper presses
+  Control-Command-F on the machine's own keyboard — events made for the machine's view, as a
+  person's are; nothing in the guest is asked for a permission — which puts Safari over the
+  machine's whole screen;
+- until then the machine's screen is behind a cover with its name (a click takes it away; two
+  minutes do too), so that the sign-in and the desktop are not what the person opened.
+
+With instant wake a machine in browser mode opens as a browser window in seconds, with no cover:
+it is as it was closed. "Safari Full Screen (in the Machine)" in the row's menu and "Full Screen
+in the Machine" in the window's press the same key again — for a Safari that was not in front
+when it was pressed, or to leave full screen.
+
+Not run on a Mac: that the machine's view takes events made here as it takes a person's, and how
+the menu bar's setting reads on the newest macOS. The key is a toggle: a Safari that macOS
+itself brought back full screen would leave it; the menu's command puts it back.
 
 ## What machines have in common
 
@@ -348,13 +502,56 @@ what was in this app's hands, and was found slowing a machine on a person's Mac 
 
 Not measured: how much each of these is worth on a given Mac.
 
+## The download
+
+`VMImageFetch` (BrowserCore) fetches the restore image in chunks of 32 MB, six at a time, each a
+`Range` request on a URLSession of its own: one session would carry them all on one HTTP/2
+connection, which is no faster than one request. The partial file has the whole length from the
+start; a chunk counts only when every byte of it was written, and the chunks that are here are
+kept in `restore.json` (`VMChunkMap`, runs of indexes), written at most once a second and at once
+at a pause. The setup shows what the chunks that are here come to, not the partial file's length.
+
+- The first request asks for the first chunk; its answer says the file's length and its validator
+  (a strong `ETag`, else `Last-Modified`). Every other chunk is asked for under `If-Range`: a file
+  Apple replaced meanwhile comes back whole (200), and the download starts over (twice at most,
+  then it says so) rather than glue two files together.
+- A download of one stream from before (no chunk map) counts the chunks its partial file holds
+  whole.
+- A server that answers the first request with 200 has no ranges: the whole file comes in one
+  stream, which starts over if it breaks.
+- A chunk that does not come whole is asked for again after a moment; a network that brings
+  nothing again and again is given up on, with what is here kept. A server's own trouble (5xx,
+  408, 429) is tried again; any other refusal is said.
+- The connections go the way any app's do on this Mac — its VPN, its system proxy.
+
+### A file the person has
+
+"I have the file…" opens a file panel for an `.ipsw`. `VMImageImport.problem` first tells, without
+Apple, what is no restore image (not a file, smaller than 1 GB, not a ZIP archive — every `.ipsw`
+is one). Then the helper loads it as the installer would (`inspect`, a `catalog` event with the
+file's macOS and build) and says whether it runs in a virtual machine on this Mac; Apple's
+installer verifies it again as it installs. It is then cloned into the download's place where the
+volume can (APFS, the same volume: no room taken, at once) and copied otherwise — into a file of
+its own (`restore.ipsw.importing`), put in the image's place only when whole, the room checked
+first. A paused download of Lumen's own is set aside only then. The person's file is never moved
+or changed; the copy is removed with the downloaded image once the base is set up. A copy can be
+called off (Cancel) and leaves things as they were.
+
+`Tests/BrowserCoreTests/VMImageImportTests.swift`: what is no restore image said before Apple is
+asked, the file copied into the image's place with the person's own left as it was, a clone or a
+copy the same, a paused download set aside only once the file is whole (and kept when the copy is
+called off), a file that is not there.
+
 ## What is not measured, and what does not work
 
 - **How a machine looks to a site that studies the device.** Safari in the guest is real and
-  nothing is injected, but the guest's graphics are Apple's paravirtual GPU, not a Mac's own. What
-  that changes in what a page can read (WebGL limits and extensions, canvas output, timing) is not
-  measured yet: nothing here could run a machine. The app's own probe ("What sites see") opened in
-  a machine's Safari, beside the same on a real Mac, is the measurement to make before any claim.
+  nothing is injected, but the guest's graphics are Apple's paravirtual GPU, not a Mac's own.
+  **WebGL, measured** (the owner, 14 November, browserleaks.com/webgl in a machine's Safari 27.2
+  and in the same Mac's own Safari 27.2): the unmasked renderer is "Apple GPU" in both — Safari
+  names no graphics card to a page —, every limit shown is the same, and so are the report's hash
+  (97C494A4D0C794F1C38D869698CD4F4A) and the drawn image's (52497E308A4259F66BF07A8977E40D65).
+  By WebGL a machine is that Mac. **Not measured**: WebGPU, the 2D canvas, audio, timing — no
+  claim is made of them, and "cannot be told from a Mac" is not said.
 - **No camera.** A guest has no camera device; a site that asks for one finds none.
 - **UDP through a proxy**: none, by design (above). A site that needs WebRTC media will not have it
   in a proxied machine.
@@ -382,6 +579,13 @@ What is checked where:
 - `Tests/BrowserCoreTests/VirtualMachineTests.swift` (Linux and macOS): the profile list's format
   and its tolerance of a later version's, validation, the download's decisions for every answer a
   server gives, the settings file's text and what it refuses, the helper protocol's round trip.
+- `Tests/BrowserCoreTests/VMImageFetchTests.swift` (Linux and macOS): **the download itself**,
+  against a file server on loopback that speaks ranges as Apple's does and can be told to be
+  worse: the file whole over several connections (and no more than it was given), a file smaller
+  than a chunk, a paused download going on with only the chunks it did not have, a download of
+  one stream from before taken up at its whole chunks, a file replaced between two runs started
+  over, a server without ranges given one stream, connections cut short taken up again, a refusal
+  said, only https fetched. Each time the file byte for byte.
 - `Tests/BrowserCoreTests/VMGuestScriptTests.swift` (Linux and macOS): **the boot script itself,
   run from its first line to the shutdown** by `/bin/sh`, with every command it calls by its full
   path replaced by one of the test's own that writes down how it was called (a command the script
@@ -414,3 +618,18 @@ What is checked where:
 6. Shut Down closes the guest within some seconds; Lock with a machine running waits for it.
 7. "What sites see" in the machine's Safari, beside a real Mac's: the first measurement of the
    paravirtual GPU's fingerprint.
+8. Instant wake on for a machine: its first start is the usual one; Close puts it to sleep in
+   seconds ("asleep · opens at once" in its row, a `state.vzvmsave` beside its disk); Open brings
+   it back as it was — the same pages — in seconds, its clock right within a few more, and pages
+   load again. Change its memory and open it: it starts anew, and the row says why. A row that
+   says the machine cannot be saved names the one thing to look into first: the helper's log
+   line "wake: this machine cannot be saved". Open it and close its window at once, while it is
+   still black: it is put to sleep again once awake ("asleep" in the row), not shut down, and
+   the next Open brings it back as it was. On its first start with a new keyboard layout the row
+   says the layout waits, its button is Shut Down, and the window's close asks; after that one
+   shutdown the layout is in use.
+9. Browser mode on: the machine's start is covered, and the cover goes when Safari is over the
+   whole screen; "Safari Full Screen (in the Machine)" in the row's menu toggles it. If the
+   cover goes and Safari is in a window, the machine's view did not take the key made for it.
+10. "Network…" in a running machine's menu: hosts appear as pages load, with their counts;
+    Block ends a host's connections at once and the page that needs it stops loading.

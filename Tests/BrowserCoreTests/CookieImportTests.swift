@@ -207,6 +207,31 @@ final class CookieImportTests: XCTestCase {
         XCTAssertEqual(report.problems.first?.name, "bad")
     }
 
+    /// A crafted file — braces nested hundreds of thousands deep, open or closed, or broken
+    /// entries nested in one another — is read in time that grows with its length, not with its
+    /// square: the editor reads what is pasted as it changes (audit 3, #21). Only the objects the
+    /// first `deepestObject` levels open are looked at one by one.
+    func testDeeplyNestedBracesAreReadInLinearTime() {
+        let depth = 200_000
+        let started = Date()
+        let closed = CookieImporter.read(Data((String(repeating: "{", count: depth) + String(repeating: "}", count: depth)).utf8), now: now)
+        XCTAssertTrue(closed.cookies.isEmpty)
+        let open = CookieImporter.read(Data(String(repeating: "{", count: depth).utf8), now: now)
+        XCTAssertTrue(open.cookies.isEmpty)
+        let broken = String(repeating: #"{"name":,"#, count: 5_000) + String(repeating: "}", count: 5_000)
+        let unreadable = CookieImporter.read(Data(broken.utf8), now: now)
+        XCTAssertTrue(unreadable.cookies.isEmpty)
+        let entries = unreadable.problems.filter { if case .unreadableEntry = $0.reason { return true } else { return false } }
+        XCTAssertEqual(entries.count, JSONReader.deepestObject, "\(reasons(unreadable).prefix(3))")
+        XCTAssertLessThan(Date().timeIntervalSince(started), 20, "nested braces took quadratic time")
+
+        // The cookies of a damaged export are still read on both sides of such a part.
+        let mixed = "[{\"name\": \"a\", \"value\": \"1\", \"domain\": \"example.com\"},\n"
+            + String(repeating: "{", count: 1_000) + String(repeating: "}", count: 1_000)
+            + ",\n{\"name\": \"b\", \"value\": \"2\", \"domain\": \"example.com\"}]\n"
+        XCTAssertEqual(CookieImporter.read(Data(mixed.utf8), now: now).cookies.map(\.name), ["a", "b"])
+    }
+
     // MARK: Encodings and files that are not cookies
 
     func testUTF16AndByteOrderMarks() {

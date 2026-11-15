@@ -22,7 +22,7 @@
 # link left in its place is replaced, not followed. What it keeps for itself is in a folder of
 # root's (/Library/Application Support/Lumen), not in /Users/Shared.
 
-TOOLS_VERSION=7
+TOOLS_VERSION=12
 SHARE="/Volumes/My Shared Files"
 OWN_MOUNT=/var/run/lumen-share
 TAG=com.apple.virtio-fs.automount
@@ -42,6 +42,39 @@ only() {
   esac
   return 0
 }
+
+# Every profile's machine is, to its macOS, a Mac it has never seen: a hardware identity of its
+# own. At the first sign-in on such a Mac, macOS shows the person its panes for a new Mac — and on
+# recent macOS its "Welcome" screen, whose "Get Started" did not answer a click in a machine (a
+# client's report, 14 November). The person signed in by itself (the base's account) has seen
+# them all in the base's setup: they are marked seen for them here, at the start, before the
+# sign-in. Keys macOS does not know are not read; nothing of it reaches the network.
+quiet_setup_assistant() {
+  who="$1"
+  only 'A-Za-z0-9._-' "$who" || return 0
+  /usr/bin/id -u "$who" >/dev/null 2>&1 || return 0
+  version="$(/usr/bin/sw_vers -productVersion 2>/dev/null)"
+  build="$(/usr/bin/sw_vers -buildVersion 2>/dev/null)"
+  for key in DidSeeCloudSetup DidSeePrivacy DidSeeSiriSetup DidSeeTouchIDSetup DidSeeScreenTime \
+      DidSeeAppearanceSetup DidSeeAccessibility DidSeeActivationLock DidSeeApplePaySetup DidSeeAvatarSetup \
+      DidSeeiCloudLoginForStorageServices DidSeeSyncSetup DidSeeSyncSetup2 DidSeeTermsOfAddress \
+      DidSeeTrueTonePrivacy DidSeeIntelligence DidSeeLockdownMode DidSeeWelcome; do
+    /usr/bin/sudo -u "$who" /usr/bin/defaults write com.apple.SetupAssistant "$key" -bool true 2>/dev/null
+  done
+  if only '0-9.' "$version"; then
+    for key in LastSeenCloudProductVersion LastSeenDiagnosticsProductVersion LastSeenSiriProductVersion \
+        LastPreLoginTasksPerformedVersion; do
+      /usr/bin/sudo -u "$who" /usr/bin/defaults write com.apple.SetupAssistant "$key" -string "$version" 2>/dev/null
+    done
+  fi
+  if only 'A-Za-z0-9' "$build"; then
+    for key in LastSeenBuddyBuildVersion LastPreLoginTasksPerformedBuild; do
+      /usr/bin/sudo -u "$who" /usr/bin/defaults write com.apple.SetupAssistant "$key" -string "$build" 2>/dev/null
+    done
+  fi
+  /usr/bin/sudo -u "$who" /usr/bin/defaults write com.apple.SetupAssistant LastPrivacyBundleVersion -string 9999 2>/dev/null
+}
+quiet_setup_assistant "$(/usr/bin/defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser 2>/dev/null)"
 
 # mounted DIRECTORY: true when a volume is mounted there (it is on another device than the folder
 # it is in).
@@ -122,7 +155,7 @@ fi
 
 revision="" timezone="" language="" locale="" hostname="" start_url="" computer="" appearance="" accent="" open_safari=1
 wallpaper=0 hours="" first_weekday="" dock_position="" dock_autohide="" dock_size="" scrollbars=""
-start_url_2="" start_url_3="" start_url_4="" start_url_5="" start_url_6=""
+start_url_2="" start_url_3="" start_url_4="" start_url_5="" start_url_6="" keyboard="" browser_mode=0
 settings="$share/lumen-settings.env"
 if [ -n "$share" ] && [ -f "$settings" ] && [ ! -L "$settings" ]; then
   revision="$(value LUMEN_REVISION "$settings")"
@@ -147,6 +180,8 @@ if [ -n "$share" ] && [ -f "$settings" ] && [ ! -L "$settings" ]; then
   start_url_4="$(value LUMEN_START_URL_4 "$settings")"
   start_url_5="$(value LUMEN_START_URL_5 "$settings")"
   start_url_6="$(value LUMEN_START_URL_6 "$settings")"
+  keyboard="$(value LUMEN_KEYBOARD "$settings")"
+  browser_mode="$(value LUMEN_BROWSER_MODE "$settings")"
 fi
 only 'A-Za-z0-9' "$revision" || revision=""
 only 'A-Za-z0-9_+/-' "$timezone" || timezone=""
@@ -177,6 +212,23 @@ case "$dock_position" in bottom|left|right) ;; *) dock_position="" ;; esac
 case "$dock_autohide" in 0|1) ;; *) dock_autohide="" ;; esac
 case "$dock_size" in 16|[2-9][0-9]|1[01][0-9]|12[0-8]) ;; *) dock_size="" ;; esac
 case "$scrollbars" in Automatic|WhenScrolling|Always) ;; *) scrollbars="" ;; esac
+only 'a-z,' "$keyboard" || keyboard=""
+[ "$browser_mode" = 1 ] || browser_mode=0
+
+# layout NAME: macOS's own number, name and identifier of a keyboard layout Lumen names, into
+# layout_id, layout_name and layout_source; false for a name that is none of them.
+layout() {
+  case "$1" in
+    us) layout_id=0 layout_name="U.S." layout_source=com.apple.keylayout.US ;;
+    british) layout_id=2 layout_name="British" layout_source=com.apple.keylayout.British ;;
+    german) layout_id=3 layout_name="German" layout_source=com.apple.keylayout.German ;;
+    french) layout_id=1 layout_name="French" layout_source=com.apple.keylayout.French ;;
+    spanish) layout_id=87 layout_name="Spanish - ISO" layout_source=com.apple.keylayout.Spanish-ISO ;;
+    russian) layout_id=19456 layout_name="Russian" layout_source=com.apple.keylayout.Russian ;;
+    abc) layout_id=252 layout_name="ABC" layout_source=com.apple.keylayout.ABC ;;
+    *) return 1 ;;
+  esac
+}
 
 # The colour of selected text that goes with an accent colour, as System Settings sets the two.
 highlight() {
@@ -236,6 +288,18 @@ write_status() {
     [ -z "$1" ] || printf 'LUMEN_APPLIED_REVISION=%s\n' "$1"
     [ -z "$wallpaper_state" ] || printf 'LUMEN_WALLPAPER_STATE=%s\n' "$wallpaper_state"
     [ -z "$wallpaper_note" ] || printf 'LUMEN_WALLPAPER_NOTE=%s\n' "$wallpaper_note"
+    [ -z "$keyboard_state" ] || printf 'LUMEN_KEYBOARD_STATE=%s\n' "$keyboard_state"
+    [ -z "$menu_bar_state" ] || printf 'LUMEN_MENU_BAR_STATE=%s\n' "$menu_bar_state"
+    # What the system has now, read back from it: Lumen compares it with what it asked for.
+    zone_now="$(/usr/bin/readlink /etc/localtime 2>/dev/null)"
+    zone_now="${zone_now#/var/db/timezone/zoneinfo/}"
+    ! only 'A-Za-z0-9_+/-' "$zone_now" || printf 'LUMEN_TIMEZONE_NOW=%s\n' "$zone_now"
+    if [ -n "$user" ]; then
+      language_now="$(as_user /usr/bin/defaults read -g AppleLanguages 2>/dev/null | /usr/bin/tr -d ' ",()' | /usr/bin/sed -n '/./{p;q;}')"
+      ! only 'A-Za-z0-9-' "$language_now" || printf 'LUMEN_LANGUAGE_NOW=%s\n' "$language_now"
+      locale_now="$(as_user /usr/bin/defaults read -g AppleLocale 2>/dev/null | /usr/bin/head -n 1)"
+      ! only 'A-Za-z0-9_@=;-' "$locale_now" || printf 'LUMEN_LOCALE_NOW=%s\n' "$locale_now"
+    fi
     printf 'LUMEN_SETUP_DONE=1\n'
   } > "$said_file" 2>/dev/null
   /bin/chmod 644 "$said_file" 2>/dev/null
@@ -330,6 +394,39 @@ set_wallpaper() {
   esac
 }
 
+# The keyboard's layouts, the first the one in use: macOS keeps them per person and takes them at
+# sign-in, so what is written here — after it — is in use from the machine's next start, which
+# the status says (a machine with instant wake is woken, not started: Lumen shuts it down once for
+# it). Written once per choice (the choice is noted beside the person's settings): layouts the
+# person adds in the machine afterwards stay until the profile's choice changes.
+keyboard_state=""
+menu_bar_state=""
+set_keyboard() {
+  [ -n "$keyboard" ] || return 0
+  if [ "$(as_user /usr/bin/defaults read io.lumenbrowser.guest keyboard 2>/dev/null)" = "$keyboard" ]; then
+    keyboard_state=set
+    return 0
+  fi
+  set --
+  first_source=""
+  old_ifs="$IFS"
+  IFS=,
+  for name in $keyboard; do
+    IFS="$old_ifs"
+    layout "$name" || return 0
+    [ -n "$first_source" ] || first_source="$layout_source"
+    set -- "$@" "<dict><key>InputSourceKind</key><string>Keyboard Layout</string><key>KeyboardLayout ID</key><integer>$layout_id</integer><key>KeyboardLayout Name</key><string>$layout_name</string></dict>"
+  done
+  IFS="$old_ifs"
+  [ "$#" -gt 0 ] || return 0
+  as_user /usr/bin/defaults write com.apple.HIToolbox AppleEnabledInputSources -array "$@" 2>/dev/null || return 0
+  as_user /usr/bin/defaults write com.apple.HIToolbox AppleSelectedInputSources -array "$1" 2>/dev/null
+  as_user /usr/bin/defaults write com.apple.HIToolbox AppleInputSourceHistory -array "$1" 2>/dev/null
+  as_user /usr/bin/defaults write com.apple.HIToolbox AppleCurrentKeyboardLayoutInputSourceID -string "$first_source" 2>/dev/null
+  as_user /usr/bin/defaults write io.lumenbrowser.guest keyboard -string "$keyboard" 2>/dev/null
+  keyboard_state=next
+}
+
 # The person's side — the language Safari tells sites, and Safari itself — once someone is signed
 # in (automatic sign-in: at once; otherwise when the person has typed the password).
 user_done=0
@@ -342,8 +439,26 @@ apply_for_user() {
   [ -n "$uid" ] || { user=""; return 1; }
   if [ -n "$language" ]; then
     as_user /usr/bin/defaults write -g AppleLanguages -array "$language"
-    [ -z "$locale" ] || as_user /usr/bin/defaults write -g AppleLocale -string "$locale"
+    if [ -n "$locale" ]; then
+      # A machine that comes to another region — the base's person chose theirs in macOS's setup,
+      # and this machine's language follows its proxy to another — leaves behind what macOS wrote
+      # down for the old one: its units, its temperature scale, its own formats of dates and
+      # numbers, its clock and week. They are removed once for each region the machine is given
+      # (which one was last is noted beside the person's settings) — System Settings does the same
+      # as the region changes —, so that the new region's own stand; what the profile sets of them
+      # is written below, and what the person changes in the machine afterwards is kept.
+      as_user /usr/bin/defaults write -g AppleLocale -string "$locale"
+      if [ "$(as_user /usr/bin/defaults read io.lumenbrowser.guest locale 2>/dev/null)" != "$locale" ]; then
+        for key in AppleMeasurementUnits AppleMetricUnits AppleTemperatureUnit AppleICUDateFormatStrings \
+            AppleICUTimeFormatStrings AppleICUNumberFormatStrings AppleICUNumberSymbols AppleICUForce12HourTime \
+            AppleICUForce24HourTime AppleFirstWeekday; do
+          as_user /usr/bin/defaults delete -g "$key" 2>/dev/null
+        done
+        as_user /usr/bin/defaults write io.lumenbrowser.guest locale -string "$locale" 2>/dev/null
+      fi
+    fi
   fi
+  set_keyboard
   # The system's look, which a page can read: set before Safari is opened, which takes it then.
   case "$appearance" in
     dark)
@@ -379,6 +494,25 @@ apply_for_user() {
   [ -z "$scrollbars" ] || as_user /usr/bin/defaults write -g AppleShowScrollBars -string "$scrollbars"
   # The Dock: what it leaves of the screen is what a page is told is free. It is started again
   # only when something of it was changed — it takes its settings as it starts.
+  # A machine shown as a browser: the menu bar and the Dock stay out of sight, whatever is in
+  # front (Safari full screen hides both by itself; this is for the moments it is not). The menu
+  # bar takes it at the next sign-in, which the status says (a machine with instant wake is woken,
+  # not started: Lumen shuts it down once for it). Noted beside the person's settings, so that a
+  # machine no longer shown so gets its menu bar back, and its Dock unless the profile hides it.
+  browser_was="$(as_user /usr/bin/defaults read io.lumenbrowser.guest browser 2>/dev/null)"
+  if [ "$browser_mode" = 1 ]; then
+    dock_autohide=1
+    if [ "$browser_was" != 1 ]; then
+      as_user /usr/bin/defaults write -g _HIHideMenuBar -bool true
+      as_user /usr/bin/defaults write io.lumenbrowser.guest browser -string 1 2>/dev/null
+      menu_bar_state=next
+    fi
+  elif [ "$browser_was" = 1 ]; then
+    as_user /usr/bin/defaults delete -g _HIHideMenuBar 2>/dev/null
+    as_user /usr/bin/defaults delete io.lumenbrowser.guest browser 2>/dev/null
+    [ -n "$dock_autohide" ] || dock_autohide=0
+    menu_bar_state=next
+  fi
   dock_changed=0
   if [ -n "$dock_position" ] && [ "$(as_user /usr/bin/defaults read com.apple.dock orientation 2>/dev/null)" != "$dock_position" ]; then
     as_user /usr/bin/defaults write com.apple.dock orientation -string "$dock_position"
@@ -432,8 +566,24 @@ quit_safari() {
 
 write_status ""
 ticks=0
+woke_word=""
 while :; do
   [ "$user_done" = 1 ] || apply_for_user
+  # Lumen woke this machine from a saved state (it leaves a word of its own in the shared folder
+  # each time): this script went on where it was, and so did the clock — at the moment the
+  # machine was put to sleep. The time is asked for; the machine's network answers with the
+  # Mac's clock, whoever is asked, and nothing leaves.
+  if [ -n "$share" ] && [ -f "$share/lumen-woke" ] && [ ! -L "$share/lumen-woke" ]; then
+    word="$(/usr/bin/head -c 64 "$share/lumen-woke" 2>/dev/null)"
+    /bin/rm -f "$share/lumen-woke" 2>/dev/null
+    if only 'A-Za-z0-9' "$word" && [ "$word" != "$woke_word" ]; then
+      woke_word="$word"
+      log "woken from a saved state: asking for the time"
+      # Answered at once by the machine's own network; waited for, so that the clock is right
+      # before anything else here goes on.
+      /usr/bin/sntp -sS time.apple.com >/dev/null 2>&1
+    fi
+  fi
   # The picture again at about 10, 20, 40 and 80 seconds after sign-in; then it is left for good.
   if [ "$user_done" = 1 ] && [ "$wallpaper_looks" -lt 4 ]; then
     ticks=$((ticks + 1))

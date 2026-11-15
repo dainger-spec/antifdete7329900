@@ -28,6 +28,11 @@ enum ProfileSessionHost {
     }
 
     static func start(arguments: [String]) {
+        // What this process says goes to the manager alone. With the manager gone (it crashed, or
+        // was force-quit), saying it fails — and must not end this process with SIGPIPE before it
+        // has sealed the profile's data (main.swift ignores the signal; this holds even if
+        // something loaded later puts it back).
+        _ = fcntl(STDOUT_FILENO, F_SETNOSIGPIPE, 1)
         guard let index = arguments.firstIndex(of: "--profile-session"),
               arguments.indices.contains(index + 1),
               let profileID = UUID(uuidString: arguments[index + 1]) else {
@@ -222,6 +227,9 @@ enum ProfileSessionHost {
             Task { @MainActor in
                 do {
                     try await manager.launch(self.profileID, openingWindow: !self.isForWarmUpOnly)
+                    // A launch that found a Lock or quit under way returns without the profile:
+                    // this process is quitting, and has nothing to announce.
+                    guard manager.isRunning(self.profileID) else { return }
                     self.showedWindow = !self.isForWarmUpOnly
                     self.isReady = true
                     ProfileSessionHost.send(.running(hostsSafariChrome: SafariChromeHost.isHosting))

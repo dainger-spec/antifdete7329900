@@ -93,6 +93,19 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
     /// an address is. Off: the Mac's time zone and the base system's language (or set by hand,
     /// `localeFollowsProxy` off). With a proxy it means nothing: `localeFollowsProxy` does.
     public var localeFollowsConnection: Bool
+    /// The keyboard's layouts in the machine: nil — the base system's, as they are; "auto"
+    /// (`VMKeyboardLayout.automatic`) — those that go with the machine's language, whoever chose
+    /// it; or one layout's name (`VMKeyboardLayout`). The base's layouts are the ones its person
+    /// chose in macOS's setup, the same in every machine made from it — a Russian one in a machine
+    /// whose language follows a proxy in the United States, unless this says otherwise.
+    public var keyboard: String?
+    /// Closing the machine keeps it as it is — every app and page open — and opening it brings it
+    /// back in seconds, instead of shutting its macOS down and starting it again (docs/VM.md,
+    /// "Instant wake"). The kept state takes about as much disk as the machine has memory.
+    public var instantWake: Bool
+    /// The machine is shown as a browser: Safari over its whole screen, the menu bar and the Dock
+    /// out of sight (docs/VM.md, "Browser mode").
+    public var browserMode: Bool
 
     public init(id: UUID = UUID(), name: String, createdAt: Date = Date(), lastLaunchedAt: Date? = nil,
                 proxy: ProxySettings? = nil, timeZoneIdentifier: String? = nil, language: String? = nil,
@@ -103,7 +116,8 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
                 computerName: String? = nil, opensSafari: Bool = true, colorIndex: Int? = nil, lumenWallpaper: Bool = true,
                 regionCode: String? = nil, hourCycle: String? = nil, firstWeekday: Int? = nil, dockPosition: String? = nil,
                 dockAutohide: Bool? = nil, dockSize: String? = nil, scrollBars: String? = nil, moreStartURLs: [String] = [],
-                blockedHosts: [String] = [], startsFullScreen: Bool = false, localeFollowsConnection: Bool = false) {
+                blockedHosts: [String] = [], startsFullScreen: Bool = false, localeFollowsConnection: Bool = false,
+                keyboard: String? = nil, instantWake: Bool = false, browserMode: Bool = false) {
         self.id = id
         self.name = name
         self.createdAt = createdAt
@@ -137,13 +151,17 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         self.blockedHosts = blockedHosts
         self.startsFullScreen = startsFullScreen
         self.localeFollowsConnection = localeFollowsConnection
+        self.keyboard = keyboard
+        self.instantWake = instantWake
+        self.browserMode = browserMode
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, createdAt, lastLaunchedAt, proxy, timeZoneIdentifier, language, countryCode, localeFollowsProxy,
              displayID, memoryGB, macAddress, startURL, notes, cores, soundEnabled, appearance, accent, computerName,
              opensSafari, colorIndex, lumenWallpaper, regionCode, hourCycle, firstWeekday, dockPosition, dockAutohide, dockSize,
-             scrollBars, moreStartURLs, blockedHosts, startsFullScreen, localeFollowsConnection
+             scrollBars, moreStartURLs, blockedHosts, startsFullScreen, localeFollowsConnection, keyboard,
+             instantWake, browserMode
     }
 
     /// Tolerant of what a later version adds or an earlier one lacked: defaults for what is absent.
@@ -183,6 +201,9 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         blockedHosts = try c.decodeIfPresent([String].self, forKey: .blockedHosts) ?? []
         startsFullScreen = try c.decodeIfPresent(Bool.self, forKey: .startsFullScreen) ?? false
         localeFollowsConnection = try c.decodeIfPresent(Bool.self, forKey: .localeFollowsConnection) ?? false
+        keyboard = try c.decodeIfPresent(String.self, forKey: .keyboard)
+        instantWake = try c.decodeIfPresent(Bool.self, forKey: .instantWake) ?? false
+        browserMode = try c.decodeIfPresent(Bool.self, forKey: .browserMode) ?? false
     }
 
     /// How many pages Safari may be told to open at start beside the first.
@@ -303,6 +324,9 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         if let scrollBars, VMScrollBars(rawValue: scrollBars) == nil {
             throw CoreError.invalidConfiguration("unknown scroll bar setting")
         }
+        if let keyboard, keyboard != VMKeyboardLayout.automatic, VMKeyboardLayout(rawValue: keyboard) == nil {
+            throw CoreError.invalidConfiguration("unknown keyboard layout")
+        }
         guard moreStartURLs.count <= Self.moreStartURLsLimit, moreStartURLs.allSatisfy({ VMGuestSettings.startURL($0) != nil }) else {
             throw CoreError.invalidConfiguration("every start page must be an http or https address, and there may be \(Self.moreStartURLsLimit + 1) of them")
         }
@@ -391,6 +415,68 @@ public enum VMScrollBars: String, CaseIterable, Sendable {
     /// are left to the system (a mouse: always).
     public static func standard(for display: VMDisplay) -> VMScrollBars? {
         display.id.hasPrefix("macbook") ? .whenScrolling : nil
+    }
+}
+
+/// A keyboard layout of the guest's macOS that Lumen can set: the raw value is what the boot script
+/// is told, and the script has macOS's own number, name and identifier for each. Only layouts
+/// whose three are known for certain are here; a language none of them is for gets the plain Latin
+/// one (`abc`) when it is written in Latin letters, and is left with the base's otherwise.
+public enum VMKeyboardLayout: String, CaseIterable, Sendable {
+    case us, british, german, french, spanish, russian, abc
+
+    /// A profile's `keyboard` for "what goes with the machine's language".
+    public static let automatic = "auto"
+
+    /// macOS's identifier of the layout (`AppleCurrentKeyboardLayoutInputSourceID`).
+    public var source: String {
+        switch self {
+        case .us: return "com.apple.keylayout.US"
+        case .british: return "com.apple.keylayout.British"
+        case .german: return "com.apple.keylayout.German"
+        case .french: return "com.apple.keylayout.French"
+        case .spanish: return "com.apple.keylayout.Spanish-ISO"
+        case .russian: return "com.apple.keylayout.Russian"
+        case .abc: return "com.apple.keylayout.ABC"
+        }
+    }
+
+    /// Types Latin letters: a layout that does not is given the plain Latin one beside it, as
+    /// macOS's own setup does — an address cannot be typed in Cyrillic.
+    public var isLatin: Bool { self != .russian }
+
+    /// The layouts a machine is given, the first the one in use: for a profile's `keyboard` and
+    /// the language the machine will have. Empty: the machine's own are left as they are.
+    public static func layouts(setting: String?, language: String?) -> [VMKeyboardLayout] {
+        guard let setting else { return [] }
+        if setting == automatic { return language.map(layouts(for:)) ?? [] }
+        guard let layout = VMKeyboardLayout(rawValue: setting) else { return [] }
+        return layout.isLatin ? [layout] : [layout, .abc]
+    }
+
+    /// Languages written in Latin letters that the plain Latin layout serves where none of their
+    /// own is known here.
+    private static let latin: Set<String> = [
+        "en", "de", "fr", "es", "it", "pt", "nl", "sv", "nb", "no", "da", "fi", "pl", "cs", "sk", "hu", "ro", "tr",
+        "id", "ms", "vi", "hr", "sl", "et", "lv", "lt", "ca", "is", "ga", "sq", "fil", "tl", "sw", "af",
+    ]
+
+    /// The layouts that go with a language tag ("en-US", "de-AT", "ru"): the country's own where
+    /// it is known for certain, the plain Latin one for other Latin-letter languages and
+    /// countries, nothing for the rest.
+    static func layouts(for language: String) -> [VMKeyboardLayout] {
+        let parts = language.split(separator: "-").map { $0.lowercased() }
+        guard let primary = parts.first else { return [] }
+        let region = parts.dropFirst().last { $0.count == 2 }?.uppercased()
+        switch (primary, region) {
+        case ("en", "GB"), ("en", "IE"): return [.british]
+        case ("en", _): return [.us]
+        case ("de", nil), ("de", "DE"), ("de", "AT"): return [.german]
+        case ("fr", nil), ("fr", "FR"): return [.french]
+        case ("es", nil), ("es", "ES"): return [.spanish]
+        case ("ru", _): return [.russian, .abc]
+        default: return latin.contains(primary) ? [.abc] : []
+        }
     }
 }
 

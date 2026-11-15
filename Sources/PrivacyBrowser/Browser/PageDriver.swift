@@ -215,16 +215,45 @@ final class PageDriver {
     }
 
     /// Finds elements by CSS, or by their text with `text=` (as Playwright: the smallest visible
-    /// elements whose text holds it, case and spacing aside).
+    /// elements whose text holds it, case and spacing aside). `host >>> inner`: `inner` (CSS or
+    /// `text=`) inside the open shadow root of each element `host` finds — a web component's own
+    /// elements, which no selector of the document reaches; the recorder names them so. `at`: the
+    /// element at a viewport point, inside open shadow roots too; `holds`: whether `t` is `e` or
+    /// in it, across shadow roots; `focused`: the element with the focus, likewise.
     private static let findAll = """
-        const find = (selector) => {
-          if (!selector.startsWith('text=')) return Array.from(document.querySelectorAll(selector));
+        const findIn = (scope, selector) => {
+          if (!selector.startsWith('text=')) return Array.from(scope.querySelectorAll(selector));
           const wanted = selector.slice(5).trim().replace(/^"(.*)"$/, '$1').replace(/\\s+/g, ' ').toLowerCase();
-          const all = Array.from(document.querySelectorAll('body *')).filter((e) => {
+          const all = Array.from(scope.querySelectorAll(scope === document ? 'body *' : '*')).filter((e) => {
             const text = (e.innerText || '').replace(/\\s+/g, ' ').trim().toLowerCase();
             return text.includes(wanted);
           });
           return all.filter((e) => !all.some((other) => other !== e && e.contains(other)));
+        };
+        const find = (selector) => {
+          if (selector.startsWith('text=')) return findIn(document, selector);
+          const [first, ...inner] = selector.split(/\\s+>>>\\s+/);
+          let found = findIn(document, first);
+          for (const step of inner) found = found.flatMap((host) => host.shadowRoot ? findIn(host.shadowRoot, step) : []);
+          return found;
+        };
+        const at = (x, y) => {
+          let t = document.elementFromPoint(x, y);
+          while (t && t.shadowRoot && typeof t.shadowRoot.elementFromPoint === 'function') {
+            const inner = t.shadowRoot.elementFromPoint(x, y);
+            if (!inner || inner === t) break;
+            t = inner;
+          }
+          return t;
+        };
+        const holds = (e, t) => {
+          for (let n = t; n; n = n.parentNode || (n.nodeType === 11 ? n.host : null)) { if (n === e) return true; }
+          return false;
+        };
+        const focused = () => {
+          let a = document.activeElement;
+          while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement;
+          return a;
         };
 
         """
@@ -257,8 +286,8 @@ final class PageDriver {
             let point = try await pointerTarget(selector, timeout: timeout)
             try await moveTo(point)
             let still = try await isolated(Self.findAll + """
-                const e = find(selector)[0], t = document.elementFromPoint(x, y);
-                return !!e && !!t && (t === e || e.contains(t));
+                const e = find(selector)[0], t = at(x, y);
+                return !!e && !!t && holds(e, t);
                 """, ["selector": selector, "x": point.x, "y": point.y]) as? Bool
             if still == true { return }
             if attempt == 2 { throw Failure.covered(selector, by: "the page moving under the pointer") }
@@ -290,9 +319,9 @@ final class PageDriver {
             let point = CGPoint(x: info.inView.minX + info.inView.width * Double.random(in: 0.3...0.7, using: &generator),
                                 y: info.inView.minY + info.inView.height * Double.random(in: 0.35...0.65, using: &generator))
             let top = try await isolated(Self.findAll + """
-                const e = find(selector)[0], t = document.elementFromPoint(x, y);
+                const e = find(selector)[0], t = at(x, y);
                 if (!e || !t) return 'nothing';
-                if (t === e || e.contains(t)) return '';
+                if (holds(e, t)) return '';
                 return t.id ? '#' + t.id : t.nodeName.toLowerCase();
                 """, ["selector": selector, "x": point.x, "y": point.y]) as? String
             if top == "" { return point }
@@ -447,7 +476,7 @@ final class PageDriver {
             return key
         }
         if let selector {
-            let focused = try await isolated(Self.findAll + "const e = find(selector)[0]; return !!e && document.activeElement === e;",
+            let focused = try await isolated(Self.findAll + "const e = find(selector)[0]; return !!e && focused() === e;",
                                              ["selector": selector]) as? Bool
             if focused != true { try await click(selector) }
         }

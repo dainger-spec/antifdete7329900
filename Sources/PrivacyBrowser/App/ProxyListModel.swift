@@ -35,6 +35,8 @@ final class ProxyListModel: ObservableObject {
     private var checkTask: Task<Void, Never>?
     /// The current check run: a run that ended (stopped, or replaced) acts on nothing any more.
     private var checkRun: UUID?
+    /// Entries of the running check edited before their result came: checked again after it.
+    private var editedDuringCheck: Set<UUID> = []
     private let log = Logger(subsystem: "PrivacyBrowser", category: "ProxyList")
 
     init(vault: UnlockedVault, onError: @escaping (String) -> Void) {
@@ -265,17 +267,29 @@ final class ProxyListModel: ObservableObject {
         checking = Set(targets.map(\.id))
         checkedCount = 0
         checkTotal = targets.count
+        editedDuringCheck = []
+        // What each was when the run began: its result is about that proxy.
+        let checkedProxies = Dictionary(targets.map { ($0.id, $0.proxy) }, uniquingKeysWith: { first, _ in first })
         checkTask = Task { [weak self] in
             await ProxyChecker.checkAll(targets) { [weak self] id, result in
-                guard let self, self.checkRun == run else { return }
-                // The type it found is the entry's from now on, and the profiles on it follow.
-                if let previous = self.list.record(result, for: id), let entry = self.list.entry(id) {
+                guard let self, self.checkRun == run, let checked = checkedProxies[id] else { return }
+                // Kept only while the entry still connects as it was checked; the type it found is
+                // the entry's from now on, and the profiles on it follow. One edited meanwhile keeps
+                // what its edit left, and is checked again as it is now.
+                let recorded = self.list.record(result, for: id, checked: checked)
+                if let previous = recorded.previous, let entry = self.list.entry(id) {
                     self.onEntryChanged?(entry, previous)
                 }
+                if !recorded.kept { self.editedDuringCheck.insert(id) }
                 self.checking.remove(id)
                 self.checkedCount += 1
             }
-            self?.finishCheck(run)
+            // Stopped: nothing more. Else the entries edited meanwhile that no check of their own
+            // (the Edit sheet's) has spoken for yet are checked as they are now.
+            guard let self, self.checkRun == run else { return }
+            let again = self.editedDuringCheck.filter { self.list.entry($0).map { $0.lastCheck == nil } ?? false }
+            self.finishCheck(run)
+            if !again.isEmpty { self.check(again) }
         }
     }
 
@@ -306,6 +320,7 @@ final class ProxyListModel: ObservableObject {
         checkRun = nil
         checkTask = nil
         checking = []
+        editedDuringCheck = []
         save(list)
     }
 

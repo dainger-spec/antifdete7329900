@@ -124,8 +124,8 @@ public final class ProfileRepository: @unchecked Sendable {
     /// `indexState`, under `lock`.
     private var state: IndexState = .read
     /// With the index missing when the vault was unlocked: the SHA-256 of the `index.bin` this
-    /// repository wrote since (one put together from the profiles' key copies, or a profile
-    /// created). A file there with other bytes was put back by someone — a backup restored, as the
+    /// repository wrote last since (one put together from the profiles' key copies, a profile
+    /// created, any later change). A file there with other bytes was put back by someone — a backup restored, as the
     /// app tells a person to — and is never written over: the next unlock reads it.
     private var writtenWhileMissing: Data?
     /// The profiles the index was put together from, at unlock, out of their key copies: the index
@@ -1005,7 +1005,15 @@ public final class ProfileRepository: @unchecked Sendable {
         let plaintext = try JSONCoding.encoder.encode(index)
         let sealed = try AEAD.seal(plaintext, key: vault.indexKey, aad: indexAAD)
         try SecureFile.write(sealed, to: indexURL)
-        if case .missing = state { writtenWhileMissing = Data(SHA256.hash(data: sealed)) }
+        // What this process wrote last, for as long as the check above applies: the index put
+        // together while it was missing is followed by this session's own writes, and each is
+        // compared with the one before it — not with the first, which every later write would then
+        // fail as "put back" (audit 3, #20).
+        if case .missing = state {
+            writtenWhileMissing = Data(SHA256.hash(data: sealed))
+        } else if writtenWhileMissing != nil {
+            writtenWhileMissing = Data(SHA256.hash(data: sealed))
+        }
     }
 
     var indexAAD: String { "profile-index:v1:\(vault.vaultID.uuidString)" }

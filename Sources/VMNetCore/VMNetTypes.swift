@@ -111,6 +111,10 @@ public struct VMNetConfiguration: Sendable {
     /// software-update hosts, so a guest never downloads gigabytes of updates through a paid proxy.
     public var blockedHostSuffixes: [String]
     public var mtu: Int
+    /// Names the guest was given fake addresses for at an earlier run of this network, with those
+    /// addresses: a machine woken from a saved state still holds them (in its resolver's cache,
+    /// in connections it is about to open) and must find the same names behind them.
+    public var knownNames: [VMNetKnownName] = []
 
     public init(guestMAC: VMNetMAC, gatewayMAC: VMNetMAC,
                 gatewayAddress: VMNetIPv4 = VMNetIPv4(0xC0A8_0101), guestAddress: VMNetIPv4 = VMNetIPv4(0xC0A8_0117),
@@ -145,8 +149,51 @@ public struct VMNetCounters: Equatable, Sendable {
     public var dnsQueries: UInt64 = 0
     /// Queries answered "no such name" because the name is under a blocked suffix.
     public var dnsBlocked: UInt64 = 0
-    /// UDP that is not DHCP or DNS.
+    /// UDP that is not DHCP, DNS or a question for the time.
     public var datagramsDropped: UInt64 = 0
+    /// Questions for the time (NTP) answered with this Mac's clock.
+    public var timeQueries: UInt64 = 0
 
     public init() {}
+}
+
+/// A name the guest asked for and the fake address it was given for it (`FakeAddressPool`).
+public struct VMNetKnownName: Equatable, Sendable {
+    public var name: String
+    /// In host byte order, as `VMNetIPv4.value`.
+    public var address: UInt32
+
+    public init(name: String, address: UInt32) {
+        self.name = name
+        self.address = address
+    }
+}
+
+/// What the network has carried to and from one host the guest asked for, since it started. This
+/// IS the person's browsing — shown to them while the machine runs, kept in memory only, and
+/// never written to a log.
+public struct VMNetHost: Equatable, Sendable {
+    /// The name the guest asked for, or the address it connected to as written.
+    public var name: String
+    /// Connections the guest opened to it, made or not.
+    public var connections: UInt64
+    /// Of them, open now.
+    public var open: Int
+    public var bytesFromGuest: UInt64
+    public var bytesToGuest: UInt64
+    /// Questions for the name and connections to it refused because it is blocked.
+    public var blocked: UInt64
+    /// Seconds since the guest last asked for it or carried anything to or from it.
+    public var idle: Double
+
+    public init(name: String, connections: UInt64 = 0, open: Int = 0, bytesFromGuest: UInt64 = 0, bytesToGuest: UInt64 = 0,
+                blocked: UInt64 = 0, idle: Double = 0) {
+        self.name = name
+        self.connections = connections
+        self.open = open
+        self.bytesFromGuest = bytesFromGuest
+        self.bytesToGuest = bytesToGuest
+        self.blocked = blocked
+        self.idle = idle
+    }
 }

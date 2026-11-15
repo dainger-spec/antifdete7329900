@@ -114,7 +114,7 @@ final class VMHelperProcess {
             concluded = true
         case .stopped, .installed, .catalog:
             concluded = true
-        case .progress, .started, .traffic:
+        case .progress, .started, .traffic, .hosts:
             break
         }
         onEvent(event)
@@ -131,8 +131,12 @@ final class VMHelperProcess {
         onEnd(failure)
     }
 
-    /// Asks the guest's macOS to shut down, as its own menu would (the helper then ends).
-    func stop() { send("stop") }
+    /// Closes the machine (the helper then ends): put to sleep where its state is kept, else its
+    /// macOS is asked to shut down, as its own menu would.
+    func stop() { send(.stop) }
+
+    /// One of the helper's commands (`VMHelperCommand`), while the machine runs.
+    func send(_ command: VMHelperCommand) { send(command.line) }
 
     /// Ends the machine now, as pulling a Mac's plug would.
     ///

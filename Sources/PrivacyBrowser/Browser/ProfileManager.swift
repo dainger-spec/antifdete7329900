@@ -183,10 +183,14 @@ final class ProfileManager: ObservableObject {
         case invalidProxy(host: String)
         /// The proxy answered 407 and the profile has no user name and password for it.
         case proxyNeedsCredentials(host: String)
+        /// A process of the profile that an earlier run of the app left behind is still sealing
+        /// its data (`launch`).
+        case stillSealing(name: String)
         var errorDescription: String? {
             switch self {
             case .invalidProxy(let host): return String(format: L("launch.error.proxyInvalid"), host)
             case .proxyNeedsCredentials(let host): return String(format: L("launch.error.proxyNeedsCredentials"), host)
+            case .stillSealing(let name): return String(format: L("launch.error.stillSealing"), name)
             }
         }
     }
@@ -314,6 +318,17 @@ final class ProfileManager: ObservableObject {
         busyProfileIDs.insert(id)
         defer { busyProfileIDs.remove(id) }
 
+        // A process of this profile that an app before this one left running (it crashed or was
+        // killed) quits by itself when its channel closes, and seals the profile's data as it goes:
+        // a second process on the same home and website data would write under it. Waited for, as
+        // long as a stop waits for a process to seal, then refused.
+        if ProfileProcess.isEnabled, !runsInProfileProcess, safariHomeVault.isInUse(profileID: id) {
+            log.notice("\(id.uuidString, privacy: .public) is still held by a process an earlier run left: waiting for it to seal and quit")
+            guard await waitUntilHomeIsFree(of: id, seconds: 30) else {
+                if isShuttingDown { return }
+                throw LaunchError.stillSealing(name: (try? repository.summary(for: id).name) ?? "")
+            }
+        }
         // Partial plaintext an unseal of this profile that did not finish left (R8): first, whatever
         // the launch then does, and before its archives are extracted again.
         AppEnvironment.removeUnsealLeftovers(vault: repository.root, of: id)
@@ -429,6 +444,12 @@ final class ProfileManager: ObservableObject {
         if let lookup { proxyLookupFinished(lookup, for: id, name: summary.name, stored: stored) }
         var configuration = stored.applying(location)
         configuration.webRTCRelay = await webRTCRelay(for: id, configuration)
+        // Lock or Quit began while the manager's word on WebRTC was awaited (`shutDown` ends that
+        // wait): as above, nothing is opened, and what was decrypted is sealed again.
+        if isShuttingDown {
+            if !stored.ephemeral { try await webDataVault.seal(profileID: id, key: key, activeStore: false) }
+            return
+        }
         // Camera substitution is the plan's (docs/CAMERA.md). Below pro/team the profile's camera is
         // turned off here — before the session's shim or the system camera's config is built from it —
         // so a stored camera never reaches a page on a plan that does not open it.
@@ -589,12 +610,17 @@ final class ProfileManager: ObservableObject {
             processorCores: stored.deviceGeneration.processorCores,
             cameraAllowed: cameraAllowed(),
             systemCameraActive: systemCameraActive)
-        child.onEvent = { [weak self] event in
-            guard let self else { return }
+        // The process object is held by `children` and, until its exit has been handled, by its own
+        // termination handler — never by what it calls: each of these held it, and it and its
+        // pipes were never freed (`ProfileProcess.didExit`).
+        child.onEvent = { [weak self, weak child] event in
+            guard let self, let child else { return }
             switch event {
             case .error(let message):
                 self.onError?(message)
             case .running(let hostsSafariChrome):
+                // A process stopped meanwhile says it too, as its launch returns into its quit.
+                guard self.children[id] === child else { break }
                 self.windowsUp.insert(id)
                 self.resumeWindowWaiters(of: id, up: true)
                 self.onProfileRunning?(id, hostsSafariChrome)
@@ -651,8 +677,8 @@ final class ProfileManager: ObservableObject {
                 self.onWindowLook?(id, look)
             }
         }
-        child.onExit = { [weak self] status in
-            guard let self else { return }
+        child.onExit = { [weak self, weak child] status in
+            guard let self, let child else { return }
             guard self.children[id] === child else {
                 // The manager no longer holds this process for the profile: nothing below runs for
                 // it (its home is sealed by whatever took it out, or at the next launch). Said, so
@@ -734,7 +760,10 @@ final class ProfileManager: ObservableObject {
             if children[id] === child { held = await NetworkGuard.shared.hold(pid: pid, proxy: proxy) }
             if held, children[id] === child, let exit {
                 do {
-                    relay = try WebRTCRelays.shared.start(profile: id, proxy: proxy, exit: exit)
+                    // Its allocations only from this process's sockets; where the kernel's table
+                    // cannot be read, only the self-test's stand-in for the guard lets them in.
+                    relay = try WebRTCRelays.shared.start(profile: id, proxy: proxy, exit: exit, clientPID: pid,
+                                                          admitsUnread: NetworkGuard.shared.selfTestStandIn)
                 } catch {
                     log.error("The WebRTC relay of \(id.uuidString, privacy: .public) did not start: \(error.logKind, privacy: .public)")
                 }
@@ -842,9 +871,24 @@ final class ProfileManager: ObservableObject {
         for waiter in waiters { waiter.resume(returning: message) }
     }
 
+    /// This process is quitting (`shutDown`): a launch waits for the manager's word no longer.
+    private static var webRTCWaitEnded = false
+
+    /// Lock or quit in a profile's own process: a launch waiting for the manager's word on WebRTC
+    /// goes on without it, to find the quit. The manager sends no word to a process it has stopped,
+    /// and the wait (up to 40 s) held the quit past the 30 s the manager gives a stopping process
+    /// before it kills it (audit 3, #22).
+    private static func endWebRTCWait() {
+        webRTCWaitEnded = true
+        let waiters = webRTCWaiters
+        webRTCWaiters.removeAll()
+        for waiter in waiters { waiter.resume(returning: webRTCMessage) }
+    }
+
     /// The manager's decision, waited for at most `seconds`; nil when none came (WebRTC then off).
     private static func webRTCDecision(within seconds: Double) async -> WebRTCLaunchMessage? {
         if let webRTCMessage { return webRTCMessage }
+        if webRTCWaitEnded { return nil }
         return await withCheckedContinuation { continuation in
             webRTCWaiters.append(continuation)
             Task { @MainActor in
@@ -1126,15 +1170,19 @@ final class ProfileManager: ObservableObject {
     }
 
     /// The page a WebDriver session of profile `id` acts in: the one it has, while its window is
-    /// there; else a new one, where a scenario's run would get its own.
+    /// there; else a new one of its own, where a scenario's run would get one — never a run's
+    /// window, nor one a run takes after (`openScenarioPage(forWebDriver:)`). Closing it as the
+    /// session ends is not the profile's last window closing: a profile the session found running
+    /// stays, and one it started is stopped by the session's end (`WebDriverService.end`).
     private func webDriverExecutor(for id: UUID, _ session: BrowserSession) async throws -> WebDriverExecutor {
         if let executor = webDriverExecutors[id], executor.driver.webView.window != nil { return executor }
         webDriverExecutors.removeValue(forKey: id)?.close()
         if SafariChromeHost.isHosting, SafariChromeHost.canHost(session.configuration),
-           let page = await SafariChromeHost.openScenarioPage(session: session) {
+           let page = await SafariChromeHost.openScenarioPage(session: session, forWebDriver: true) {
             let window = page.webView.window
             let executor = WebDriverExecutor(driver: PageDriver(webView: page.webView, navigate: page.navigate), windowKind: "Safari's") {
-                [weak window] in window?.performClose(nil)
+                [weak window] in
+                if let window { SafariChromeHost.closeKeepingProfile(window) }
             }
             webDriverExecutors[id] = executor
             return executor
@@ -1142,7 +1190,12 @@ final class ProfileManager: ObservableObject {
         let controller = session.openWindow(url: nil)
         guard let tab = controller.selectedTab else { throw WebDriverError.sessionNotCreated("the profile gave no window to act in") }
         let executor = WebDriverExecutor(driver: PageDriver(webView: tab.webView) { [weak tab] url in _ = tab?.load(url) },
-                                         windowKind: "the app's own") { [weak controller] in controller?.close() }
+                                         windowKind: "the app's own") { [weak controller] in
+            // Not one of the profile's own windows as it closes, as the warm-up's is not: its
+            // closing is not the profile's last window closing (`BrowserSession.windowDidClose`).
+            controller?.isForWarmUp = true
+            controller?.close()
+        }
         webDriverExecutors[id] = executor
         return executor
     }
@@ -1276,7 +1329,7 @@ final class ProfileManager: ObservableObject {
         if runsInProfileProcess {
             // The manager answers within the time its proxy check takes (`ProxyUDPCheck`).
             guard let message = await Self.webRTCDecision(within: 40) else {
-                log.error("No word from the manager on this launch's WebRTC: it stays off")
+                if !isShuttingDown { log.error("No word from the manager on this launch's WebRTC: it stays off") }
                 return nil
             }
             return message.relay.map { WebRTCRelay(urls: $0.urls, username: $0.username, credential: $0.credential) }
@@ -1419,6 +1472,7 @@ final class ProfileManager: ObservableObject {
     /// running profile. Returns when nothing is running, launching or sealing.
     func shutDown() async {
         isShuttingDown = true
+        if runsInProfileProcess { Self.endWebRTCWait() }
         await waitWhileBusy()
         await stopAll()
         await waitWhileBusy()
@@ -1830,6 +1884,17 @@ final class ProfileManager: ObservableObject {
             try await webDataVault.seal(profileID: id, key: key, activeStore: false)
         }
         try safariHomeVault.seal(profileID: id, key: key)
+    }
+
+    /// Returns true once no process holds the profile's home (`SafariHomeVault.isInUse`), false if
+    /// one still does after `seconds` or a Lock or Quit began meanwhile.
+    private func waitUntilHomeIsFree(of id: UUID, seconds: TimeInterval) async -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while safariHomeVault.isInUse(profileID: id) {
+            guard Date() < deadline, !isShuttingDown else { return false }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        return true
     }
 
     /// A home still held by a profile's process that a crashed manager left behind is sealed once

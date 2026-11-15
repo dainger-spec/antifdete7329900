@@ -88,9 +88,18 @@ Now (`LicenseModel`, `RefreshSchedule`, `LicenseClient.refreshReport`):
   that refuses a renewal for its label (HTTP 400, `invalid_request`, `field: "label"`) gets it
   again without one at once, and no label for the rest of the run: the renewal matters more than
   the label.
+- **Before sync through the account.** The device token is also this Mac's key to the Lumen sync
+  server (the **Lumen account** sync target, CONTRACT §16.1; docs/SYNC_FORMAT.md). The first sync
+  after the app starts — and a header published after a change of the master password — waits for a
+  renewal of this run that reached the server with this Mac still signed in
+  (`LicenseModel.renewForSync`): a token copied to another Mac with the app's files is
+  `machine_mismatch` or `device_revoked` by then and gone (§9.4), so nothing syncs in its name. A
+  renewal that does not reach the server holds the sync back with a word of why; a `401` from the
+  sync server renews again, which signs an unlinked Mac out. Signing out leaves the target chosen,
+  and the sync waits for a sign-in.
 - **Said.** Each renewal in the app's log (subsystem `PrivacyBrowser`, category `License`): asked,
   and why (`launch`, `unlocked`, `profiles`, `timer`, `network`, `wake`, `active`, `retry`,
-  `manual`); done, and for how long the document works; or `License renewal failed` at `error`
+  `manual`, `sync`); done, and for how long the document works; or `License renewal failed` at `error`
   level, with why (no answer and the error's kind, the server's HTTP status and code, an answer
   not taken and the check's name), the next try, and how long this Mac works without the server.
   Nothing of the person's: no address, no message, no label. And to the person: once renewals
@@ -140,6 +149,10 @@ A key is the whole account for whoever holds it — no email, no password. So (t
   taken: unlink one, then connect) the key is held until the action ends.
 - **A key the server no longer knows** (`key_not_found`: replaced by support or on another Mac) is
   removed from the vault and asked for anew (§10.1).
+- **Signing out** — by the person, or by the server (`device_revoked`, `machine_mismatch`) — removes
+  the key from the vault: at once while the vault is open, else at its next unlock, which removes
+  any key kept there while this Mac is not signed in with one (Settings → Account works while the
+  vault is locked; the key used to stay there for good). Not while `account.json` cannot be read.
 - **On disk only inside the vault**: `account-key.bin`, AES-GCM under `HKDF(VMK, "account-key")`,
   this Mac's, never synced (`AccountKeyVault`). A profile's own process, opened with a grant,
   cannot derive the key. Never in `account.json`, the defaults, a log or a report.
@@ -322,7 +335,10 @@ The design's "Аккаунт" boards (`docs/DESIGN.md`), in `UI/AccountViews.swi
 - **Settings › Account**: the plan and until when, how long without the server, for a key's
   account without an email its reminders, this Mac's code, sign out (`signout.consequences`), for a
   key's account linking an email and replacing the key, the license's Macs with this one marked and
-  the others unlinkable (`unlink.consequences`; the key asked for when not kept), the site.
+  the others unlinkable (`unlink.consequences`; the key asked for when not kept), its iPhones apart
+  under their own count (`platform: "ios"`, `phonesUsed` of `phoneLimit`; CONTRACT §4.3) — "iPhone
+  K7Q2", their own confirmation (no pause for the Macs), and their Unlink open during the Macs'
+  pause, which an iPhone's unlink neither waits for nor starts — the site.
 - **Banners** above the profiles in §8.5's order, the period's end warned a week and a day before;
   **the sidebar's line** about the rights; a profile that may only be exported says so in its row
   and does not open — the rule, said as a rule.

@@ -500,6 +500,7 @@ final class AppModel: ObservableObject {
             isBusy: { [weak self] id in
                 guard let self else { return true }
                 return self.isBusy(id) || self.scenarioRun(of: id)?.isRunning == true || self.recordingProfile == id
+                    || self.automationServer?.webDriver?.hasSession(id) == true
             },
             // A schedule's run: in front, but without the keyboard or the app's activation.
             runScenario: { [weak self] scenario, id in await self?.runScenario(scenario, on: id, inBackground: true) ?? false },
@@ -639,6 +640,7 @@ final class AppModel: ObservableObject {
         scheduleCoordinator = nil
         scenarioSchedules = ScenarioSchedules()
         recordingProfile = nil
+        recordingScenario = nil
         recorded = ScenarioRecording()
         await manager?.shutDown()
         // The machines' macOS is shut down, as a Mac's is, before the vault that holds their
@@ -668,13 +670,15 @@ final class AppModel: ObservableObject {
     /// the data saved after the change included (docs/ARCHITECTURE.md, Changing the master
     /// password). With sync set up, the new header goes to the sync location right away, so that a
     /// new device joins with the new password and not the old; out of reach, it goes at the next
-    /// sync, and the person is told so.
-    func changePassword(current: String, new: String) async {
-        guard let repository else { return }
+    /// sync, and the person is told so. True when the password was changed, whatever was said
+    /// after: the sheet closes on it, not on there being no message.
+    @discardableResult
+    func changePassword(current: String, new: String) async -> Bool {
+        guard let repository else { return false }
         // §10.1: the new master password is held to the rule a first one is.
         if let refusal = refusalOfMasterPassword(new) {
             masterPasswordRefusal = refusal
-            return
+            return false
         }
         masterPasswordRefusal = nil
         let vault = repository.vault
@@ -690,10 +694,13 @@ final class AppModel: ObservableObject {
             changed = true
         }
         if changed, let target { await publishPasswordChange(target, repository: repository) }
+        return changed
     }
 
     private func passwordRevisionThere(_ target: DeviceSettings.SyncTarget?, repository: ProfileRepository) async -> Int? {
         guard let target, !isSyncing else { return nil }
+        // Through the account, as a sync: after a renewal of this run (CONTRACT §16.1).
+        if target == .account { _ = await license.renewForSync() }
         var folder: URL?
         defer { folder?.stopAccessingSecurityScopedResource() }
         do {
@@ -708,6 +715,7 @@ final class AppModel: ObservableObject {
     /// The header of a change of the master password made here, to the sync location (header only:
     /// no profile's files, so not held back by running profiles).
     private func publishPasswordChange(_ target: DeviceSettings.SyncTarget, repository: ProfileRepository) async {
+        if target == .account { _ = await license.renewForSync() }
         var folder: URL?
         defer { folder?.stopAccessingSecurityScopedResource() }
         do {
@@ -893,7 +901,8 @@ final class AppModel: ObservableObject {
         // The settings this edit is of. Settings that cannot be read stop the save (R1): the form
         // was opened without them, and saved, the profile would start without its proxy.
         let stored = try repository.loadConfiguration(id)
-        let saved = configuration.savingEdit(over: stored)
+        // Another proxy: the location its check found in the editor, not the old proxy's.
+        let saved = configuration.savingEditorEdit(over: stored)
         try repository.saveConfiguration(saved, for: id)
         if saved.proxy != stored.proxy {
             let entry = saved.proxy.flatMap { proxyList?.list.entry(for: $0) }
@@ -1198,6 +1207,25 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Sync through the Lumen account (`AccountSync`): the account server, with this Mac's device token;
+    /// nothing to type. Offered while this Mac is signed in (`accountSyncOffered`).
+    func setSyncThroughAccount() {
+        guard accountSyncOffered else { return }
+        do {
+            try updateDeviceSettings { $0.syncTarget = .account }
+            // With sync a renewal carries the synced profiles' tokens, without it none: the license is told.
+            refresh()
+        } catch {
+            showError(errorText(error))
+        }
+    }
+
+    /// "Lumen account" is offered among the places to sync to: this Mac is signed in to an account
+    /// (`AccountSync.isOffered`).
+    var accountSyncOffered: Bool {
+        license.isConfigured && AccountSync.isOffered(signedIn: license.record.isSignedIn, entitlement: license.state?.entitlement)
+    }
+
     func clearSyncTarget() {
         do {
             try updateDeviceSettings { $0.syncTarget = nil }
@@ -1215,6 +1243,11 @@ final class AppModel: ObservableObject {
             showError(L("sync.error.profilesRunning"))
             return
         }
+        // Through the account, a device the server holds back is not asked again before its time (§16.1).
+        if target == .account, let held = deviceSettings.lastSync?.heldUntil, held > Date() {
+            showError(AccountSyncText.onHold(held))
+            return
+        }
         isWorking = true
         defer { isWorking = false }
         isSyncing = true
@@ -1225,13 +1258,24 @@ final class AppModel: ObservableObject {
             showError(L("sync.error.profilesRunning"))
             return
         }
+        // Through the account: after a renewal of this run reached the server, this Mac still signed
+        // in (CONTRACT §16.1); `syncTransport` refuses before.
+        if target == .account { _ = await license.renewForSync() }
         var scopedFolder: URL?
         defer { scopedFolder?.stopAccessingSecurityScopedResource() }
-        let status: DeviceSettings.SyncStatus
+        var status: DeviceSettings.SyncStatus?
         do {
             let (transport, folder) = try syncTransport(for: target, vaultID: repository.vault.vaultID)
             scopedFolder = folder
-            let report = try await SyncEngine(repository: repository, transport: transport).sync()
+            let report: SyncReport
+            do {
+                report = try await SyncEngine(repository: repository, transport: transport).sync()
+            } catch {
+                // The server's data changed under the run (§16.2): nothing more was written, and the
+                // next run starts over from the list — this one, at once, once. Nothing is said.
+                guard (error as? SyncServerRefusal)?.isGenerationChanged == true else { throw error }
+                report = try await SyncEngine(repository: repository, transport: transport).sync()
+            }
             if report.pulled.contains("labels") { loadTagColors(from: repository.vault) }
             // A profile deleted on another device: nothing of it is deleted here. Its folder stays
             // for the person to bring back or remove (R3); WebKit's store of it outside the vault —
@@ -1247,14 +1291,49 @@ final class AppModel: ObservableObject {
             for id in report.settingsVersionsToReview {
                 showError(String(format: L("sync.versions.review"), name(id), repository.keptSettings(for: id).count))
             }
+            // Objects the server refused for the plan's space or their size wait; the rest synced (§16.1).
+            if !report.deferredOverQuota.isEmpty { showError(L("sync.account.overQuota")) }
+            if !report.deferredTooLarge.isEmpty {
+                Logger(subsystem: "PrivacyBrowser", category: "Sync")
+                    .notice("Sync: \(report.deferredTooLarge.count, privacy: .public) object(s) larger than the server takes, deferred")
+                showError(L("sync.account.tooLarge"))
+            }
             status = DeviceSettings.SyncStatus(report: report)
         } catch {
-            let message = errorText(error)
-            status = DeviceSettings.SyncStatus(error: message)
-            showError(String(format: L("sync.error.failed"), message))
+            status = await syncFailure(error, target: target)
         }
-        try? updateDeviceSettings { $0.lastSync = status }
+        if let status { try? updateDeviceSettings { $0.lastSync = status } }
         refresh()
+    }
+
+    /// A sync that failed: said, and its status to keep (nil: nothing to say or keep). Through the
+    /// account the server's refusals are states, each in its own words (CONTRACT §16.1); nothing on this
+    /// Mac is changed by any of them.
+    private func syncFailure(_ error: Error, target: DeviceSettings.SyncTarget) async -> DeviceSettings.SyncStatus? {
+        guard target == .account else {
+            let message = errorText(error)
+            showError(String(format: L("sync.error.failed"), message))
+            return DeviceSettings.SyncStatus(error: message)
+        }
+        let outcome = AccountSync.outcome(of: error)
+        switch outcome {
+        case .generationChanged:
+            // Twice in a row: the next sync starts over (§16.2, 7) — not a failure to show.
+            return nil
+        case .unauthorized:
+            // The token is no longer the server's: the renewal says why — `device_revoked` signs this
+            // Mac out (§9.4), and the status says so.
+            _ = await license.renewForSync(again: true)
+        case .onHold(let until):
+            let text = AccountSyncText.onHold(until)
+            showError(text)
+            return DeviceSettings.SyncStatus(error: text, heldUntil: until)
+        default:
+            break
+        }
+        let message = AccountSyncText.text(outcome, error: error, signedIn: license.record.isSignedIn)
+        showError(String(format: L("sync.error.failed"), message))
+        return DeviceSettings.SyncStatus(error: message)
     }
 
     // MARK: Scenarios
@@ -1333,11 +1412,14 @@ final class AppModel: ObservableObject {
     /// The profile a scenario is being recorded in, and what has been recorded so far.
     @Published private(set) var recordingProfile: UUID?
     @Published private(set) var recorded = ScenarioRecording()
+    /// The scenario the recording is for: its steps go there when it ends, whichever scenario the
+    /// editor shows by then — its window may have been closed and opened again meanwhile.
+    @Published private(set) var recordingScenario: UUID?
 
-    /// Begins recording what the person does in profile `id`'s window, starting the profile first
-    /// when it is not running. False when the plan has no automation, a recording is going
-    /// already, or the profile did not start.
-    func startRecording(on id: UUID) async -> Bool {
+    /// Begins recording what the person does in profile `id`'s window, for `scenario`, starting
+    /// the profile first when it is not running. False when the plan has no automation, a
+    /// recording is going already, or the profile did not start.
+    func startRecording(on id: UUID, for scenario: UUID? = nil) async -> Bool {
         guard license.allowsAutomation, manager != nil, recordingProfile == nil else { return false }
         if !isRunning(id) { await launch(id) }
         guard let manager, isRunning(id) else { return false }
@@ -1352,18 +1434,22 @@ final class AppModel: ObservableObject {
         // Set before the recording begins: a profile run in this process says its first page —
         // the one in front — as it begins, and what is said of another profile is dropped above.
         recordingProfile = id
+        recordingScenario = scenario
         guard manager.startRecording(id) else {
             recordingProfile = nil
+            recordingScenario = nil
             return false
         }
         return true
     }
 
-    /// Ends the recording; its steps are the caller's to put into a scenario.
+    /// Ends the recording; its steps are the caller's to put into the scenario it was for
+    /// (`recordingScenario`, read before this).
     @discardableResult
     func stopRecording() -> [RecordedStep] {
         if let id = recordingProfile { manager?.stopRecording(id) }
         recordingProfile = nil
+        recordingScenario = nil
         return recorded.steps
     }
 
@@ -1453,6 +1539,17 @@ final class AppModel: ObservableObject {
             return (LocalDirectorySyncTransport(directory: folder), scoped)
         case let .server(baseURL, token):
             return (try HTTPSyncTransport(configuration: .init(baseURL: baseURL, vaultID: vaultID, bearerToken: token)), nil)
+        case .account:
+            // The account server and this Mac's device token (CONTRACT §16.1), once a renewal of this
+            // run reached the server with this Mac signed in. A development build's own server on this
+            // Mac may be plain HTTP, as its license's is (`AccountConfiguration`).
+            guard let configuration = license.configuration, let token = license.record.deviceToken, !token.isEmpty else {
+                throw AccountSyncUnavailable(reason: .notSignedIn)
+            }
+            guard license.renewedForSync else { throw AccountSyncUnavailable(reason: .notChecked) }
+            return (try AccountSync.transport(server: configuration.serverURL, deviceToken: token, vaultID: vaultID,
+                                              allowInsecureLocalhost: configuration.source == .environment,
+                                              session: AccountSyncText.session), nil)
         }
     }
 
@@ -1561,6 +1658,7 @@ final class AppModel: ObservableObject {
             }
         }
         webDriver.stop = { [weak self] id in await self?.stop(id) }
+        handler.hasWebDriverSession = { [weak webDriver] id in webDriver?.hasSession(id) ?? false }
         server.webDriver = webDriver
         server.onStateChange = { [weak self] state in self?.automationState = state }
         automationServer = server

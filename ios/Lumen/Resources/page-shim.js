@@ -35,8 +35,9 @@ function patchWindow(w) {
   try { patchToString(w); } catch (e) {}
   if (CONFIG.timeZone) { try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {} }
   if (CONFIG.phone) { try { patchPhone(w, CONFIG.phone); } catch (e) {} }
-  // Workers made from a blob run this same function with the same CONFIG (hookWorkers): every
-  // substitution above `if (IS_WORKER) return` reaches them — the time zone, an iPhone's
+  // Workers made from a blob run this same function with the part of CONFIG read here
+  // (`WORKER_KEYS`, hookWorkers): every substitution above `if (IS_WORKER) return` reaches them —
+  // and a key read here must be in WORKER_KEYS too — the time zone, an iPhone's
   // platform, the storage quota, and the iOS app's fingerprint (ios/shim/fingerprint.js, put in
   // this function by ios/scripts/build-shim.py). So they are hooked whenever any of those is on,
   // and only then (substitutesInWorkers): a worker left unhooked beside a substituted page answers
@@ -942,12 +943,32 @@ function patchWebRTC(w, policy, relay) {
       }
       return copies;
     };
+    // The relay as the engine reports it back: by its credentials, which are this launch's alone.
+    const isRelayServer = (server) => {
+      if (!isObject(server)) return false;
+      for (let i = 0; i < relayServers.length; i++) {
+        if (server.username === relayServers[i].username || server.credential === relayServers[i].credential) return true;
+      }
+      return false;
+    };
     define(nativeProto, 'getConfiguration', method('getConfiguration', 0, function () {
       const result = call(nativeGetConfiguration, this); // the engine's receiver check
       const view = call(WeakMapGet, pageView, this);
       if (view) {
         ObjectDefineProperty(result, 'iceServers', { value: copyServers(view.iceServers), writable: true, enumerable: true, configurable: true });
         ObjectDefineProperty(result, 'iceTransportPolicy', { value: view.iceTransportPolicy, writable: true, enumerable: true, configurable: true });
+      } else {
+        // A connection this realm did not make — another frame's, asked through this frame's
+        // function, or the other way round — keeps the relay in the engine all the same, and its
+        // view is that frame's: the relay is taken out, never shown with its credentials.
+        const servers = result.iceServers;
+        const kept = [];
+        let removed = false;
+        for (let i = 0; servers && i < servers.length; i++) {
+          if (isRelayServer(servers[i])) removed = true;
+          else kept[kept.length] = servers[i];
+        }
+        if (removed) ObjectDefineProperty(result, 'iceServers', { value: kept, writable: true, enumerable: true, configurable: true });
       }
       return result;
     }));
@@ -1291,18 +1312,31 @@ function patchSystemCamera(w, sc) {
     const nativeGUM = MDP.getUserMedia;
     define(MDP, 'getUserMedia', method('getUserMedia', 1, function (constraints) {
       const self = this;
-      // The page's own arguments, kept here: inside the async function below `arguments` is that
-      // function's own (empty), and getUserMedia() with nothing in it is a TypeError.
-      const args = arguments;
-      const wantVideo = constraints && constraints.video;
-      if (!wantVideo) return ReflectApply(nativeGUM, self, args);
-      const videoObj = (typeof wantVideo === 'object') ? wantVideo : null;
+      // Nothing, null or not a dictionary: the engine's own answer to it, which asks for no device.
+      if (constraints === null || (typeof constraints !== 'object' && typeof constraints !== 'function')) {
+        return ReflectApply(nativeGUM, self, arguments);
+      }
+      // The request's members read once, in the engine's (lexicographic) order, and the engine handed
+      // a copy of what was read here, never the page's object: a getter answering it "video" where it
+      // answered this script "none" would open the Mac's default camera. WebIDL: null or any object
+      // asks for the device, anything else by its truth. Kept here too because inside the async
+      // function below `arguments` is that function's own.
+      const wantAudio = constraints.audio;
+      const wantVideo = constraints.video;
+      const request = ObjectCreate(null);
+      if (wantAudio !== undefined) request.audio = wantAudio;
+      if (wantVideo !== undefined) request.video = wantVideo;
+      const args = [request];
+      const askedVideo = wantVideo === null
+        || (wantVideo !== undefined && (typeof wantVideo === 'object' || typeof wantVideo === 'function' || !!wantVideo));
+      if (!askedVideo) return ReflectApply(nativeGUM, self, args);
+      const videoObj = (wantVideo !== null && typeof wantVideo === 'object') ? wantVideo : null;
       const already = videoObj && videoObj.deviceId && (videoObj.deviceId.exact || typeof videoObj.deviceId === 'string');
       if (already) return ReflectApply(nativeGUM, self, args);
-      // The page's constraints with the video pinned to the sentinel; everything else as it asked.
+      // The request with the video pinned to the sentinel; its video constraints and audio as asked.
       const onSentinel = function (id) {
-        const merged = {};
-        for (const key in constraints) merged[key] = constraints[key];
+        const merged = ObjectCreate(null);
+        if (wantAudio !== undefined) merged.audio = wantAudio;
         const vc = {};
         if (videoObj) { for (const k in videoObj) vc[k] = videoObj[k]; }
         vc.deviceId = { exact: id };
@@ -1603,7 +1637,11 @@ function patchCamera(w, cam) {
   async function audioTrack(request, nativeGUM) {
     if (cam.audio === 'off') return null;
     if (cam.audio === 'real' && typeof nativeGUM === 'function') {
-      try { const s = await ReflectApply(nativeGUM, md, [{ audio: request }]); return s.getAudioTracks()[0] || null; } catch (e) { return null; }
+      // A request without a prototype: the engine reads its `video` as missing, whatever a page
+      // put on Object.prototype.
+      const only = ObjectCreate(null);
+      only.audio = request;
+      try { const s = await ReflectApply(nativeGUM, md, [only]); return s.getAudioTracks()[0] || null; } catch (e) { return null; }
     }
     return silentAudioTrack();
   }
@@ -1613,27 +1651,49 @@ function patchCamera(w, cam) {
     const nativeGUM = MDP.getUserMedia;
     const nativeEnum = MDP.enumerateDevices;
     const nativeDisplay = MDP.getDisplayMedia;
+    // Whether the engine takes `self` for a MediaDevices: its receiver check is not tied to a realm,
+    // so another frame's MediaDevices (or this one's handed to another frame's function) is one as
+    // much as this realm's own. Asked of an accessor of the engine's that does nothing else,
+    // captured before the page runs; nothing the page can replace (`w.MediaDevices`, instanceof) is
+    // asked. Without that accessor, anything is taken for one: the substitution, never the camera.
+    const devicechange = ObjectGetOwnPropertyDescriptor(MDP, 'ondevicechange');
+    const brandCheck = devicechange && typeof devicechange.get === 'function' ? devicechange.get : null;
+    const isMediaDevices = function (self) {
+      if (!brandCheck) return true;
+      try { ReflectApply(brandCheck, self, []); return true; } catch (e) { return false; }
+    };
+    // A member of a request as the engine reads it (WebIDL `boolean or MediaTrackConstraints`, false
+    // when missing): null or any object asks for the device, anything else by its truth.
+    const asked = function (value) {
+      return value === null || (value !== undefined && (typeof value === 'object' || typeof value === 'function' || !!value));
+    };
 
     if (typeof nativeGUM === 'function') {
       define(MDP, 'getUserMedia', method('getUserMedia', 1, function (constraints) {
         const self = this;
-        if (w.MediaDevices && !(self instanceof w.MediaDevices)) return ReflectApply(nativeGUM, self, arguments);
-        const wantVideo = constraints && constraints.video;
-        const wantAudio = constraints && constraints.audio;
-        if (!wantVideo && !wantAudio) return ReflectApply(nativeGUM, self, arguments); // the engine's own TypeError
+        // The engine is never handed the page's own request (a getter could answer it otherwise
+        // than it answered here) nor a receiver it would take: what reaches it asks for no device,
+        // so all that can come back is its own TypeError.
+        if (!isMediaDevices(self)) return ReflectApply(nativeGUM, self, [ObjectCreate(null)]);
+        const isRequest = constraints !== null && (typeof constraints === 'object' || typeof constraints === 'function');
+        if (!isRequest) return ReflectApply(nativeGUM, self, arguments); // undefined, null or not a dictionary
+        // Each member read once, in the engine's (lexicographic) order.
+        const wantAudio = constraints.audio;
+        const wantVideo = constraints.video;
+        if (!asked(wantVideo) && !asked(wantAudio)) return ReflectApply(nativeGUM, self, [ObjectCreate(null)]);
         return new w.Promise(function (resolve, reject) {
           (async function () {
             try {
               const tracks = [];
-              if (wantVideo) {
+              if (asked(wantVideo)) {
                 if (mode === 'block') { reject(notFound()); return; }
                 tracks.push(makeVideoTrack(resolveVideo(wantVideo)));
                 videoGranted = true;
               }
-              if (wantAudio) {
+              if (asked(wantAudio)) {
                 const a = await audioTrack(wantAudio, nativeGUM);
                 if (a) tracks.push(a);
-                else if (!wantVideo) { reject(notFound()); return; }
+                else if (!asked(wantVideo)) { reject(notFound()); return; }
               }
               resolve(new w.MediaStream(tracks));
             } catch (e) { reject(e); }
@@ -1647,15 +1707,24 @@ function patchCamera(w, cam) {
         const self = this;
         let real;
         try { real = ReflectApply(nativeEnum, self, []); } catch (e) { return w.Promise.reject(e); }
-        return real.then(function (list) { return buildDeviceList(list); },
-                         function () { return buildDeviceList([]); });
+        // Whatever realm `self` is of, the list is filtered here; its promise is followed with the
+        // engine's own `then`, so a page's Promise.prototype.then never sees the list as it came.
+        return call(PromiseThen, real, function (list) { return buildDeviceList(list); },
+                    function () { return buildDeviceList([]); });
       }));
     }
 
     if (cam.screenShare && mode === 'substitute' && typeof nativeDisplay === 'function') {
       define(MDP, 'getDisplayMedia', method('getDisplayMedia', 0, function (constraints) {
         const self = this;
-        if (w.MediaDevices && !(self instanceof w.MediaDevices)) return ReflectApply(nativeDisplay, self, arguments);
+        // Any MediaDevices gets the substitution, as for getUserMedia; what is no MediaDevices gets
+        // the engine's TypeError from a request for nothing.
+        if (!isMediaDevices(self)) {
+          const none = ObjectCreate(null);
+          none.audio = false;
+          none.video = false;
+          return ReflectApply(nativeDisplay, self, [none]);
+        }
         return new w.Promise(function (resolve, reject) {
           try {
             const res = resolveVideo(constraints && constraints.video);
@@ -1667,9 +1736,22 @@ function patchCamera(w, cam) {
     }
   }
 
+  // The engine's own `kind` getter, taken before `serveDeviceGetters` replaces it and before the
+  // page could: a real camera's entry is never handed to anything the page put in its place.
+  const nativeKind = (function () {
+    const proto = w.MediaDeviceInfo && w.MediaDeviceInfo.prototype;
+    const d = proto && ObjectGetOwnPropertyDescriptor(proto, 'kind');
+    return d && typeof d.get === 'function' ? d.get : null;
+  })();
   function buildDeviceList(list) {
     const out = [];
-    for (let i = 0; i < list.length; i++) { const d = list[i]; if (d && d.kind === 'videoinput') continue; out.push(d); }
+    for (let i = 0; i < list.length; i++) {
+      const d = list[i];
+      let kind;
+      try { kind = nativeKind ? call(nativeKind, d) : d.kind; } catch (e) { continue; } // unreadable: left out
+      if (kind === 'videoinput') continue;
+      out.push(d);
+    }
     if (mode === 'substitute') { const fake = makeFakeCamera(); if (fake) out.unshift(fake); }
     return out;
   }
@@ -1783,17 +1865,42 @@ function substitutesInWorkers(config) {
   return !!(config.timeZone || config.phone || config.storageQuota) || fingerprint;
 }
 
+// What a worker is given of CONFIG: what the script reads there before `if (IS_WORKER) return` —
+// the time zone, an iPhone's platform, the storage quota, the iOS app's fingerprint — and nothing
+// else. Never the camera (its media is tens of MB, which every frame would copy into its bootstrap)
+// nor the WebRTC relay's credentials (a worker's script can read its own source back, and they are
+// the page's to use, never to read). Written out once, here, before any page script runs.
+const WORKER_KEYS = ['timeZone', 'phone', 'storageQuota', 'fingerprint'];
+const JSONStringify = JSON.stringify;
+const WORKER_CONFIG = (function () {
+  const out = {};
+  for (let i = 0; i < WORKER_KEYS.length; i++) {
+    const value = CONFIG[WORKER_KEYS[i]];
+    if (value !== undefined && value !== null) out[WORKER_KEYS[i]] = value;
+  }
+  return ReflectApply(JSONStringify, null, [out]);
+})();
+
 function hookWorkers(w) {
   const URLClass = w.URL;
   const nativeCreate = URLClass && URLClass.createObjectURL;
-  if (!SOURCE || typeof nativeCreate !== 'function' || typeof w.Blob !== 'function' || typeof w.WeakRef !== 'function') return;
+  // The engine's Blob, taken now: the page's own, put in its place later, is never handed the script.
+  const NativeBlob = w.Blob;
+  if (!SOURCE || typeof nativeCreate !== 'function' || typeof NativeBlob !== 'function' || typeof w.WeakRef !== 'function') return;
   const blobs = new Map();        // blob: URL this realm created → WeakRef to its Blob
   const replacements = new Map(); // that URL → the URL of the same Blob behind this script
-  // A CSP without 'unsafe-eval' stops the eval, never the page's own code after it.
-  const bootstrap = 'try { (0, eval)(' + JSON.stringify('(' + SOURCE + ')(' + JSON.stringify(CONFIG) + ');') + '); } catch (e) {}';
+  // A CSP without 'unsafe-eval' stops the eval, never the page's own code after it. Made at the
+  // first worker, not for every frame that never starts one.
+  let bootstrapText = null;
+  const bootstrap = () => {
+    if (bootstrapText === null) {
+      bootstrapText = 'try { (0, eval)(' + ReflectApply(JSONStringify, null, ['(' + SOURCE + ')(' + WORKER_CONFIG + ');']) + '); } catch (e) {}';
+    }
+    return bootstrapText;
+  };
   define(URLClass, 'createObjectURL', method('createObjectURL', 1, function (object) {
     const url = nativeCreate.apply(this, arguments);
-    if (object instanceof w.Blob) {
+    if (object instanceof NativeBlob) {
       if (blobs.size > 500) blobs.forEach((ref, key) => { if (!ref.deref()) blobs.delete(key); });
       blobs.set(url, new w.WeakRef(object));
     }
@@ -1822,15 +1929,19 @@ function hookWorkers(w) {
     const blob = blobs.has(key) ? blobs.get(key).deref() : undefined;
     if (!blob) return null;
     const text = read(key);
-    let parts = [bootstrap, blob];
+    let parts = [bootstrap(), blob];
     if (text !== null) {
       const prologue = PROLOGUE.exec(text)[0];
       // On the directive's own line, so the page's next line keeps its columns too.
       const newline = /\r?\n$/.exec(prologue);
-      parts = newline ? [prologue.slice(0, newline.index) + ';', bootstrap, text.slice(newline.index)]
-                      : [prologue, bootstrap, text.slice(prologue.length)];
+      parts = newline ? [prologue.slice(0, newline.index) + ';', bootstrap(), text.slice(newline.index)]
+                      : [prologue, bootstrap(), text.slice(prologue.length)];
     }
-    const replacement = nativeCreate.call(URLClass, new w.Blob(parts, { type: blob.type || 'text/javascript' }));
+    // Handed to the engine through closures of this script (`sequenceOf`, ReflectApply), not an
+    // array iterator or a Function.prototype.call a page can replace.
+    const options = ObjectCreate(null);
+    options.type = blob.type || 'text/javascript';
+    const replacement = ReflectApply(nativeCreate, URLClass, [new NativeBlob(sequenceOf(parts), options)]);
     replacements.set(key, replacement);
     return replacement;
   }

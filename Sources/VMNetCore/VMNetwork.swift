@@ -21,6 +21,8 @@ public final class VMNetwork: @unchecked Sendable {
     private var loop: NetworkLoop?
     private var loopThread: Thread?
     private var lastCounters = VMNetCounters()
+    private var lastHosts: [VMNetHost] = []
+    private var lastNames: [VMNetKnownName] = []
     private var logHandler: (@Sendable (String) -> Void)?
     private var optionsValue = NetworkLoop.Options()
 
@@ -109,6 +111,8 @@ public final class VMNetwork: @unchecked Sendable {
         running.waitUntilEnded()
         state.lock()
         lastCounters = running.snapshot
+        lastHosts = running.hostSnapshot
+        lastNames = running.namesAtEnd
         loop = nil
         loopThread = nil
         state.unlock()
@@ -119,6 +123,34 @@ public final class VMNetwork: @unchecked Sendable {
         state.lock()
         defer { state.unlock() }
         return loop?.snapshot ?? lastCounters
+    }
+
+    /// What went to and from each host the guest asked for, the one seen last first; at most
+    /// `NetworkLoop.hostLimit` of them. The person's browsing: for their eyes while the machine
+    /// runs, never for a log or a file. May be called from any thread.
+    public func hosts() -> [VMNetHost] {
+        state.lock()
+        defer { state.unlock() }
+        return loop?.hostSnapshot ?? lastHosts
+    }
+
+    /// Blocks a host name and every name under it from now on, while the network runs: questions
+    /// for it are answered "no such name", connections to it refused, and those open are ended.
+    /// May be called from any thread; does nothing when the network does not run.
+    public func block(host: String) {
+        state.lock()
+        let running = loop
+        state.unlock()
+        running?.block(host)
+    }
+
+    /// After `stop()`: every name the guest was given a fake address for, with it — what a later
+    /// run is handed (`VMNetConfiguration.knownNames`) for a machine woken from a saved state.
+    /// Empty while the network runs. The person's browsing: kept only beside that saved state.
+    public func knownNames() -> [VMNetKnownName] {
+        state.lock()
+        defer { state.unlock() }
+        return lastNames
     }
 
     /// The loop's settings, for tests: shorter timeouts, smaller buffers. Read at `start()`.

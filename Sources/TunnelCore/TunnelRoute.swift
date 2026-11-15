@@ -1,8 +1,9 @@
 import Foundation
 
 /// A profile's way out for WebRTC: the TURN server the profile's pages are pointed at (on
-/// 127.0.0.1, in the app's own process, `WebRTCRelays`), the credentials only those pages know, and
-/// the profile's SOCKS5 proxy the relayed UDP leaves through. One route per running profile, each
+/// 127.0.0.1, in the app's own process, `WebRTCRelays`, which takes allocations only from sockets of
+/// the profile's process), the credentials only those pages are given, and the profile's SOCKS5
+/// proxy the relayed UDP leaves through. One route per running profile, each
 /// with its own server, credentials and proxy: profiles behind different proxies relay side by side.
 public struct TunnelRoute: Codable, Equatable, Sendable {
     /// Random per profile launch; the extension never learns which profile it is.

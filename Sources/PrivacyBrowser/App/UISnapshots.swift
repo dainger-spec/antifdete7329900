@@ -56,7 +56,8 @@ enum UISnapshots {
         let devices = AccountDevices(devices: [
             AccountDevice(deviceID: "d1", code: "B119", label: "Studio", lastSeenAt: now, profileCount: 21, mine: true), // l10n: not text
             AccountDevice(deviceID: "d2", code: "3KQ9", label: "", lastSeenAt: now.addingTimeInterval(-3 * 86_400), profileCount: 9, mine: true),
-        ], limit: 3, used: 2, unlinkAvailableAt: nil, unlinkCooldownSeconds: 604_800, offlineWorkSeconds: 604_800)
+            AccountDevice(deviceID: "p1", code: "K7Q2", lastSeenAt: now.addingTimeInterval(-7_200), profileCount: 2, mine: true, platform: "ios"),
+        ], limit: 3, used: 2, unlinkAvailableAt: nil, unlinkCooldownSeconds: 604_800, offlineWorkSeconds: 604_800, phoneLimit: 3, phonesUsed: 1)
         let signedIn = LicenseModel(preview: record, state: LicenseState(mode: .full, entitlement: p, check: .valid(p), banners: [],
                                                                          allowedProfilesHere: 38, worksWithoutServerUntil: p.graceEndsAt, now: now),
                                     devices: devices)

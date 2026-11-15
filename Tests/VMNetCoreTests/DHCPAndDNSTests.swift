@@ -409,6 +409,146 @@ final class DNSResponderTests: XCTestCase {
     }
 }
 
+final class KnownNamesAndTimeTests: XCTestCase {
+    func testAPoolTakesBackTheNamesOfAnEarlierOneByTheSameAddresses() {
+        var pool = FakeAddressPool(capacity: 100)
+        let a = pool.address(for: "a.example"), b = pool.address(for: "b.example"), c = pool.address(for: "c.example")
+        _ = pool.name(for: a)
+        // The one unused the longest first.
+        XCTAssertEqual(pool.entries.map(\.name), ["b.example", "c.example", "a.example"])
+
+        var restored = FakeAddressPool(capacity: 100, restoring: pool.entries)
+        XCTAssertEqual(restored.count, 3)
+        XCTAssertEqual(restored.name(for: b), "b.example")
+        XCTAssertEqual(restored.address(for: "c.example"), c)
+        XCTAssertEqual(restored.address(for: "a.example"), a)
+        // A new name: the next address nobody had.
+        let d = restored.address(for: "d.example")
+        XCTAssertEqual(d.string, "198.18.0.4")
+        XCTAssertEqual(restored.entries.map(\.name), ["b.example", "c.example", "a.example", "d.example"])
+
+        // What is no entry of a pool is left out; of too many, the last are kept.
+        let odd = [VMNetKnownName(name: "x.example", address: VMNetIPv4(string: "10.0.0.1")!.value),
+                   VMNetKnownName(name: "y.example", address: VMNetIPv4(string: "198.18.0.0")!.value),
+                   VMNetKnownName(name: "z.example", address: VMNetIPv4(string: "198.18.0.255")!.value),
+                   VMNetKnownName(name: "", address: VMNetIPv4(string: "198.18.0.9")!.value),
+                   VMNetKnownName(name: "one.example", address: VMNetIPv4(string: "198.18.1.7")!.value),
+                   VMNetKnownName(name: "one.example", address: VMNetIPv4(string: "198.18.1.8")!.value),
+                   VMNetKnownName(name: "two.example", address: VMNetIPv4(string: "198.18.1.7")!.value)]
+        var careful = FakeAddressPool(capacity: 100, restoring: odd)
+        XCTAssertEqual(careful.entries, [VMNetKnownName(name: "one.example", address: VMNetIPv4(string: "198.18.1.7")!.value)])
+        // Fresh addresses go on after the highest one known.
+        XCTAssertEqual(careful.address(for: "new.example").string, "198.18.1.8")
+        let many = (0..<10).map { VMNetKnownName(name: "n\($0).example", address: FakeAddressPool.network + UInt32($0) + 1) }
+        XCTAssertEqual(FakeAddressPool(capacity: 4, restoring: many).entries.map(\.name), ["n6.example", "n7.example", "n8.example", "n9.example"])
+
+        XCTAssertEqual(FakeAddressPool.index(of: VMNetIPv4(string: "198.18.0.1")!.value), 0)
+        XCTAssertEqual(FakeAddressPool.index(of: VMNetIPv4(string: "198.18.1.1")!.value), 254)
+        XCTAssertEqual(FakeAddressPool.index(of: VMNetIPv4(string: "198.19.255.254")!.value), FakeAddressPool.usableAddresses - 1)
+        XCTAssertNil(FakeAddressPool.index(of: VMNetIPv4(string: "198.20.0.1")!.value))
+        XCTAssertNil(FakeAddressPool.index(of: VMNetIPv4(string: "198.17.255.254")!.value))
+    }
+
+    func testARestoredPoolGivesOutEveryAddressOfTheRangeBeforeAnyTwice() {
+        // The names known sit high in the range: the addresses below them are not lost.
+        let known = [VMNetKnownName(name: "high.example", address: FakeAddressPool.network + 256 * 3 + 5)]
+        var pool = FakeAddressPool(capacity: 10, restoring: known)
+        var seen: Set<UInt32> = [known[0].address]
+        for index in 0..<(FakeAddressPool.usableAddresses - 1) {
+            let address = pool.address(for: "name\(index).example").value
+            XCTAssertTrue(FakeAddressPool.contains(VMNetIPv4(address)))
+            XCTAssertTrue(seen.insert(address).inserted || index >= 10, "an address was given twice while its name was still known")
+        }
+        XCTAssertEqual(seen.count, FakeAddressPool.usableAddresses)
+    }
+
+    func testOnlyNamesTheResponderWouldGiveAnAddressAreTakenBack() {
+        let known = [VMNetKnownName(name: "fine.example", address: FakeAddressPool.network + 1),
+                     VMNetKnownName(name: "Upper.example", address: FakeAddressPool.network + 2),
+                     VMNetKnownName(name: "localhost", address: FakeAddressPool.network + 3),
+                     VMNetKnownName(name: "192.168.1.1", address: FakeAddressPool.network + 4),
+                     VMNetKnownName(name: "a b.example", address: FakeAddressPool.network + 5)]
+        var responder = DNSResponder(blockedHostSuffixes: [], knownNames: known)
+        XCTAssertEqual(responder.knownNames, [known[0]])
+        XCTAssertEqual(responder.name(for: VMNetIPv4(FakeAddressPool.network + 1)), "fine.example")
+        XCTAssertNil(responder.name(for: VMNetIPv4(FakeAddressPool.network + 4)))
+    }
+
+    func testANameIsBlockedFromNowOnAndTheLastOneAskedForIsSaidOnce() {
+        var responder = DNSResponder(blockedHostSuffixes: [])
+        func ask(_ name: String) -> DNSResponder.Outcome {
+            Wire.dnsQuery(name).withUnsafeBytes { responder.respond(to: $0).outcome }
+        }
+        XCTAssertEqual(ask("www.ads.example"), .answered)
+        XCTAssertNil(responder.takeBlockedName())
+        responder.block(".ADS.example.")
+        responder.block("ads.example")
+        XCTAssertEqual(ask("www.ads.example"), .blocked)
+        XCTAssertEqual(ask("ads.example"), .blocked)
+        XCTAssertEqual(ask("notads.example"), .answered)
+        XCTAssertEqual(responder.takeBlockedName(), "ads.example")
+        XCTAssertNil(responder.takeBlockedName())
+        responder.block("")
+        XCTAssertEqual(ask("anything.example"), .answered)
+    }
+
+    func testTheTimeIsToldAsAServerTellsIt() throws {
+        var request = [UInt8](repeating: 0, count: 48)
+        request[0] = 0x1B  // no warning, version 3, a client
+        request[2] = 6
+        for index in 0..<8 { request[40 + index] = UInt8(index + 1) }
+        let server = VMNetIPv4(string: "17.253.4.125")!
+        // 2026-11-14 12:00:00.5 UTC.
+        let now = 1_794_657_600.5
+        let reply = try XCTUnwrap(request.withUnsafeBytes { TimeResponder.reply(to: $0, now: now, reference: server) })
+        XCTAssertEqual(reply.count, 48)
+        XCTAssertEqual(reply[0], 0x1C)  // version 3, a server
+        XCTAssertEqual(reply[1], 2)
+        XCTAssertEqual(reply[2], 6)
+        XCTAssertEqual(Array(reply[12..<16]), [17, 253, 4, 125])
+        XCTAssertEqual(Array(reply[24..<32]), [1, 2, 3, 4, 5, 6, 7, 8])
+        let seconds: UInt32 = 1_794_657_600 + 2_208_988_800
+        let stamp = [UInt8(seconds >> 24), UInt8(seconds >> 16 & 0xFF), UInt8(seconds >> 8 & 0xFF), UInt8(seconds & 0xFF), 0x80, 0, 0, 0]
+        XCTAssertEqual(Array(reply[16..<24]), stamp)
+        XCTAssertEqual(Array(reply[32..<40]), stamp)
+        XCTAssertEqual(Array(reply[40..<48]), stamp)
+
+        // Not a client's request: a server's answer, a short one, a version nobody speaks.
+        for change in [{ (bytes: inout [UInt8]) in bytes[0] = 0x1C }, { $0 = Array($0.prefix(47)) }, { $0[0] = 0x03 }, { $0[0] = 0x3B }] {
+            var other = request
+            change(&other)
+            XCTAssertNil(other.withUnsafeBytes { TimeResponder.reply(to: $0, now: now, reference: server) })
+        }
+        XCTAssertNil(request.withUnsafeBytes { TimeResponder.reply(to: $0, now: -1, reference: server) })
+    }
+
+    func testAQuestionForTheTimeIsAnsweredFromTheServerAskedAndAnythingElseOnItsPortIsNot() throws {
+        var responder = LinkResponder(configuration: Wire.configuration())
+        responder.wallClock = { 1_794_657_600 }
+        var counters = VMNetCounters()
+        var request = [UInt8](repeating: 0, count: 48)
+        request[0] = 0x23
+        let server = VMNetIPv4(string: "17.253.4.125")!
+        let asked = Wire.udp(from: 51_000, to: server, 123, payload: request)
+        guard case .reply(let frame) = asked.withUnsafeBytes({ responder.handle($0, now: 1, counters: &counters) }) else { return XCTFail("no answer") }
+        let reply = try XCTUnwrap(Wire.seenUDP(frame))
+        XCTAssertEqual(reply.source, server)
+        XCTAssertEqual(reply.sourcePort, 123)
+        XCTAssertEqual(reply.destination, Wire.guest)
+        XCTAssertEqual(reply.destinationPort, 51_000)
+        XCTAssertTrue(reply.checksumValid)
+        XCTAssertEqual(reply.payload.count, 48)
+        XCTAssertEqual(counters.timeQueries, 1)
+        XCTAssertEqual(counters.datagramsDropped, 0)
+        // Nonsense on the same port is other UDP: nothing listens there.
+        let nonsense = Wire.udp(from: 51_001, to: server, 123, payload: [1, 2, 3])
+        guard case .reply(let refusal) = nonsense.withUnsafeBytes({ responder.handle($0, now: 1, counters: &counters) }) else { return XCTFail("no answer") }
+        XCTAssertNil(Wire.seenUDP(refusal))
+        XCTAssertEqual(counters.timeQueries, 1)
+        XCTAssertEqual(counters.datagramsDropped, 1)
+    }
+}
+
 final class DestinationPolicyTests: XCTestCase {
     private func decide(_ address: String, port: UInt16 = 443, names: [String: String] = [:]) -> DestinationPolicy.Decision {
         DestinationPolicy.decide(address: VMNetIPv4(string: address)!, port: port, gateway: Wire.gateway, prefixLength: 24) { names[$0.string] }
