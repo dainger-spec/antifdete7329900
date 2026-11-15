@@ -194,12 +194,13 @@ enum SafariChromeHost {
                 WindowSizing.apply(size, to: window)
             }
         }
-        // Whose window it is, before it is seen: the profile's name and colour (`SafariProfileMarker`).
-        SafariProfileMarker.install(session: session)
-        if let window = controller.window { SafariProfileMarker.mark(window) }
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
+        // Whose window it is: the profile's name and colour, once the window is laid out
+        // (`SafariProfileMarker`, which compares the window around its chip).
+        SafariProfileMarker.install(session: session)
+        if let window = controller.window { SafariProfileMarker.mark(window) }
         // Safari's history items act on the profile's own history (`HistoryMenuRoute`).
         HistoryMenuRoute.install(session: session)
         // View › Show Downloads lists the profile's downloads (`HostedDownloads`).
@@ -250,11 +251,7 @@ enum SafariChromeHost {
             return nil
         }
         let tab = SafariChrome.newestTab()
-        if let window = controller.window {
-            automationWindows.add(window)
-            SafariProfileMarker.install(session: session)
-            SafariProfileMarker.mark(window)
-        }
+        if let window = controller.window { automationWindows.add(window) }
         if let window = controller.window, let size = session.configuration.windowSize {
             WindowSizing.apply(size, to: window)
         }
@@ -268,6 +265,9 @@ enum SafariChromeHost {
         }
         HistoryMenuRoute.install(session: session)
         HostedDownloads.routeMenu()
+        // A run's window says whose it is too (`SafariProfileMarker`).
+        SafariProfileMarker.install(session: session)
+        if let window = controller.window { SafariProfileMarker.mark(window) }
         // Safari builds the tab's web view as it loads the page.
         for _ in 0..<60 {
             if let webView = pageWebView(in: controller.window) {

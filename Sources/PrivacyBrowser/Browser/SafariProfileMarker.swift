@@ -53,7 +53,7 @@ enum SafariProfileMarker {
         if Self.session !== session {
             Self.session = session
             model = BrowserChromeModel(profileName: session.profileName, profileID: session.profileID,
-                                       exit: exit(of: session), avatar: session.configuration.avatar)
+                                       exit: whereItExits(session), avatar: session.configuration.avatar)
         }
         keepTitlesMarked()
         guard !isWatching else { return }
@@ -68,7 +68,7 @@ enum SafariProfileMarker {
         }
     }
 
-    private static func exit(of session: BrowserSession) -> ProfileExit {
+    private static func whereItExits(_ session: BrowserSession) -> ProfileExit {
         guard let proxy = session.configuration.proxy else { return .direct }
         return .proxy(endpoint: "\(proxy.host):\(proxy.port)", countryCode: session.exitLocation?.countryCode)
     }
@@ -76,7 +76,7 @@ enum SafariProfileMarker {
     /// Where the profile exits became known after its window was up: the chip shows the flag.
     static func exitChanged() {
         guard let session, let model else { return }
-        model.exit = exit(of: session)
+        model.exit = whereItExits(session)
         // The chip is wider or narrower by a flag: its place in the toolbar follows.
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
@@ -94,13 +94,17 @@ enum SafariProfileMarker {
 
     // MARK: A window
 
-    /// Makes `window`, one of Safari's browser windows, say whose it is. Once per window.
+    /// Makes `window`, one of Safari's browser windows, say whose it is: its title from now on,
+    /// and the chip — put in again should Safari's own arranging of its toolbar have taken it out.
+    /// For a window that is on screen: what is compared around the chip is the window as laid out.
     static func mark(_ window: NSWindow) {
-        guard !isTurnedOff, !isSuspended, let model, !marked.contains(window) else { return }
-        marked.add(window)
-        // Through the title's setter, which puts the name before it (`keepTitlesMarked`).
-        window.title = window.title
-        guard !droppedForGeometry else { return }
+        guard !isTurnedOff, !isSuspended, let model else { return }
+        if !marked.contains(window) {
+            marked.add(window)
+            // Through the title's setter, which puts the name before it (`keepTitlesMarked`).
+            window.title = window.title
+        }
+        guard !droppedForGeometry, accessory(of: window) == nil else { return }
         let before = geometry(of: window)
         let host = NSHostingView(rootView: SafariProfileMarkerView(model: model))
         host.translatesAutoresizingMaskIntoConstraints = false
