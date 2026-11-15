@@ -739,7 +739,7 @@ final class VMCenter: ObservableObject {
         // What a whole copy would take is counted only where one would be made.
         let baseDiskBytes = !isMade && room.clones == false ? VMLibrary.allocatedSize(of: library.baseDirectory) : 0
         if let problem = VMStartRoom.problem(free: room.free, isMade: isMade, volumeClones: room.clones, baseDiskBytes: baseDiskBytes) {
-            problems[id] = Self.text(of: problem)
+            problems[id] = Self.roomText(of: problem)
             return
         }
         problems[id] = nil
@@ -786,12 +786,12 @@ final class VMCenter: ObservableObject {
         }
         running[id] = Running(phase: .checkingProxy)
         Task { [weak self] in
-            let check = await Self.checkProxy(proxy)
+            let check = await VMCenter.checkProxy(proxy)
             guard let self, self.running[id]?.phase == .checkingProxy, var profile = self.list.profile(id) else { return }
             self.exits[id] = check
             guard check.isAlive else {
                 self.running[id] = nil
-                self.problems[id] = Self.proxyProblem(proxy, check: check)
+                self.problems[id] = VMCenter.proxyProblem(proxy, check: check)
                 return
             }
             let followed = profile.followingProxy(check: check)
@@ -1134,7 +1134,7 @@ final class VMCenter: ObservableObject {
 
     /// Why a machine is not started onto a disk that is nearly full (`VMStartRoom`), with the
     /// numbers.
-    static func text(of problem: VMStartRoom.Problem) -> String {
+    static func roomText(of problem: VMStartRoom.Problem) -> String {
         switch problem {
         case .full(let needed, let free):
             return String(format: L("vm.error.diskFull"), VMText.bytes(free), VMText.bytes(needed))

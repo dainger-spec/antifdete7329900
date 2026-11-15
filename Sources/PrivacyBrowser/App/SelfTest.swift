@@ -4378,7 +4378,7 @@ final class SelfTest {
                   && VMCenter.failureText(kind: nil, message: "x") == "x" && VMCenter.failureText(kind: nil, message: nil) == L("vm.error.unknown")
                   && VMCenter.notKeptText(kind: .noRoom, message: "x") == L("vm.row.notKept.noRoom")
                   && VMCenter.notKeptText(kind: nil, message: nil) == L("vm.row.notKept")
-                  && VMCenter.text(of: VMStartRoom.Problem.full(needed: 2 << 30, free: 1 << 30)).contains(VMText.bytes(Int64(1) << 30)),
+                  && VMCenter.roomText(of: VMStartRoom.Problem.full(needed: 2 << 30, free: 1 << 30)).contains(VMText.bytes(Int64(1) << 30)),
               wordless.isEmpty ? full : wordless.joined(separator: ", "))
     }
 

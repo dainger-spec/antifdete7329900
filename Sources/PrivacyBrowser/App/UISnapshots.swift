@@ -960,7 +960,7 @@ enum UISnapshots {
             .init(profile: machine("Mail FR", "fr.proxy.example", "FR"), // l10n: not text
                   problem: VMCenter.proxyProblem(rejectedProxy, check: rejected), exit: rejected, guest: guest, disk: 5 * gigabyte),
             .init(profile: machine("Bank UK", "uk.proxy.example", "GB", display: "imac-24"), // l10n: not text
-                  problem: VMCenter.text(of: VMStartRoom.Problem.full(needed: VMStartRoom.floorBytes, free: gigabyte + gigabyte / 4)),
+                  problem: VMCenter.roomText(of: VMStartRoom.Problem.full(needed: VMStartRoom.floorBytes, free: gigabyte + gigabyte / 4)),
                   guest: guest, disk: 7 * gigabyte),
             .init(profile: machine("Forum PL", "pl.proxy.example", "PL"), // l10n: not text
                   problem: VMCenter.failureText(kind: .limit,
