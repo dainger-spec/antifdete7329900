@@ -53,7 +53,7 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
 - Sheets (`SheetChrome.swift`): `SheetHeader` (17 semibold, a sentence in 13, the horizon's light along the
   sheet's top edge), fields under their labels (`SheetField`) in the app's own look — no system form for
   what is typed —, `SheetFooter` with why the main action is off at its left (`SheetWhy`), Cancel quiet and
-  the one lit main action. What must be known is said in lines with a sign, not in a wall (`ChangePasswordNote`).
+  the one lit main action. What must be known is said in short paragraphs, not in a wall; a sign only where it says a risk (`ChangePasswordNote`).
 - Fields: `lumenField(...)`; search: `LumenSearchField` (with its ⌘K key cap in the windows that
   have the palette). Keys: `KeyCap`.
 - A box that asks for the person: `LumenBanner(tone: .danger | .warning)` above a list (the proxy
@@ -77,7 +77,8 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
   under the title bar's band (`ProfilesScreen.inspectorTop`): a scroll view reaching under the title
   bar gets macOS 26's edge effect there, which a window's picture does not draw. In the narrowest
   window the state column narrows first, so that a name keeps its 200 pt.
-- Proxies section (`ProxyListView.swift`, `ProxyInspector.swift`): the same header, the design's
+- Proxies section (`ProxyListView.swift`, `ProxyInspector.swift`): the inspector docks as the profiles' does
+  (the table compact beside it: the proxy, the exit's country code, the state); the same header, the design's
   table (its selected row in the design's tone: the system's highlight is off), the proxy's
   inspector with its check step by step.
 - Settings (`SettingsView.swift`, `SettingsPages.swift`): sidebar with search and three groups;

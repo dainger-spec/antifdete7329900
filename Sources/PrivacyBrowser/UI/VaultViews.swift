@@ -820,35 +820,34 @@ struct ChangePasswordView: View {
 }
 
 /// What changing the master password does and does not do (`changepw.note`), word for word, as
-/// three lines with a sign each instead of one wall of fourteen: what is encrypted again, where
-/// the new password goes, and — in amber — what it does not reach. A text of fewer sentences is
-/// shown whole.
+/// three short paragraphs instead of one wall of fourteen lines: what is encrypted again, where the
+/// new password goes, and what it does not reach — that one with the warning's sign, the only one
+/// that says a risk. A text of fewer sentences is shown whole.
 private struct ChangePasswordNote: View {
     var body: some View {
         let sentences = L("changepw.note").components(separatedBy: ". ")
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             if sentences.count >= 3 {
-                line("key", sentences[0] + ".", warns: false)
-                line("arrow.triangle.2.circlepath", sentences[1] + ".", warns: false)
-                line("exclamationmark.triangle.fill", sentences[2...].joined(separator: ". "), warns: true)
+                paragraph(sentences[0] + ".")
+                paragraph(sentences[1] + ".")
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.warning)
+                        .accessibilityHidden(true)
+                    paragraph(sentences[2...].joined(separator: ". "))
+                }
             } else {
-                line("key", L("changepw.note"), warns: false)
+                paragraph(L("changepw.note"))
             }
         }
     }
 
-    private func line(_ symbol: String, _ text: String, warns: Bool) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 9) {
-            Image(systemName: symbol)
-                .font(.system(size: 11))
-                .foregroundStyle(warns ? Theme.warning : Theme.textTertiary)
-                .frame(width: 14)
-                .accessibilityHidden(true)
-            Text(text)
-                .font(.lumenSecondary)
-                .lineSpacing(2)
-                .foregroundStyle(warns ? Theme.textPrimary : Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+    private func paragraph(_ text: String) -> some View {
+        Text(text)
+            .font(.lumenSecondary)
+            .lineSpacing(2)
+            .foregroundStyle(Theme.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
