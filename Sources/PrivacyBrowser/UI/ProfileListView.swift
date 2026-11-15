@@ -1026,8 +1026,12 @@ struct ProfilesScreen: View {
 
     var body: some View {
         GeometryReader { geometry in
-            // Beside the list only when the rows keep their columns.
-            let inspectorFits = geometry.size.width - Self.sidebarWidth - Self.inspectorWidth >= ProfileColumns.minimumContentWidth
+            // Beside the list, to the window's top, only when the rows keep their columns; with less
+            // room beside the list under the header, the list compact; with too little for that,
+            // over the list.
+            let room = geometry.size.width - Self.sidebarWidth - Self.inspectorWidth
+            let inspectorFits = room >= ProfileColumns.minimumContentWidth
+            let inspectorDocks = !inspectorFits && room >= ProfileColumns.minimumCompactWidth
             HStack(spacing: 0) {
                 ProfilesSidebar(rows: rows, sync: sync, filter: $filter, section: section, proxyCount: proxyCount,
                                 proxyAlerts: proxyAlerts, showsVirtualMachines: virtualMachines != nil,
@@ -1036,7 +1040,8 @@ struct ProfilesScreen: View {
                     .lumenFrost()
                     .overlay(alignment: .trailing) { Rectangle().fill(Theme.divider).frame(width: 1) }
                     .opacity(appeared ? 1 : 0)
-                main(inspectorOver: inspectorShown && !inspectorFits)
+                main(inspectorOver: inspectorShown && !inspectorFits && !inspectorDocks,
+                     inspectorDocked: inspectorShown && inspectorDocks)
                 if inspectorShown && inspectorFits {
                     inspector(top: Self.inspectorTop)
                         .opacity(appeared ? 1 : 0)
@@ -1068,10 +1073,12 @@ struct ProfilesScreen: View {
         }
     }
 
-    /// The list (or the proxies), under the header. `inspectorOver`: the window has no room for the
-    /// inspector beside the list, so it lies over the list's right side — the list's only: the
-    /// header and the banners above it, with their buttons, stay within reach.
-    private func main(inspectorOver: Bool) -> some View {
+    /// The list (or the proxies), under the header. `inspectorDocked`: the window has no room for
+    /// the inspector beside the whole list, so it stands beside the list under the header, and the
+    /// list is compact (`ProfileColumns.compact`): nothing of a row is under it. `inspectorOver`:
+    /// not even that — it lies over the list's right side, opaque. Either way the header and the
+    /// banners above, with their buttons, stay within reach.
+    private func main(inspectorOver: Bool, inspectorDocked: Bool) -> some View {
         Group {
             if section.wrappedValue == .proxies, let proxies {
                 proxies
@@ -1081,14 +1088,8 @@ struct ProfilesScreen: View {
                 VStack(spacing: 0) {
                     header
                     bannerStack
-                    content
-                        .overlay(alignment: .trailing) {
-                            if inspectorOver {
-                                inspector(top: 8)
-                                    .shadow(color: .black.opacity(0.55), radius: 30, x: -6)
-                                    .transition(.move(edge: .trailing).combined(with: .opacity))
-                            }
-                        }
+                    HStack(spacing: 0) {
+                    content(compact: inspectorDocked)
                         .overlay(alignment: .bottom) {
                             // Floating over the list's foot, while several are selected.
                             if selectedRows.count >= 2 {
@@ -1100,6 +1101,18 @@ struct ProfilesScreen: View {
                                     .transition(.move(edge: .bottom).combined(with: .opacity))
                             }
                         }
+                        if inspectorDocked {
+                            inspector(top: 8, docked: true)
+                                .transition(.opacity)
+                        }
+                    }
+                    .overlay(alignment: .trailing) {
+                        if inspectorOver {
+                            inspector(top: 8, opaque: true)
+                                .shadow(color: .black.opacity(0.55), radius: 30, x: -6)
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
+                        }
+                    }
                     if let guardNotice {
                         GuardNoticeBar(notice: guardNotice, open: openGuardSettings, hide: hideGuardNotice)
                             .padding(.top, 10)
@@ -1227,7 +1240,23 @@ struct ProfilesScreen: View {
 
     /// `top`: where its content starts — under the title bar's band beside the list
     /// (`inspectorTop`), just under the header over it.
-    private func inspector(top: CGFloat) -> some View {
+    /// `docked`: beside the list under the header — its top-left corner rounded, a hairline along
+    /// its top and left. `opaque`: over the list, so no row shows through it.
+    private func inspector(top: CGFloat, docked: Bool = false, opaque: Bool = false) -> some View {
+        let shape = UnevenRoundedRectangle(topLeadingRadius: docked ? 14 : 0, style: .continuous)
+        return inspectorContent
+        .frame(width: Self.inspectorWidth)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .padding(.top, top)
+        .background(shape.fill(opaque ? Theme.sidebar : Theme.sidebar.opacity(docked ? 0.86 : 0.8)))
+        .overlay { if docked { shape.strokeBorder(Theme.hairline, lineWidth: 1) } }
+        .overlay(alignment: .leading) { if !docked { Rectangle().fill(Theme.divider).frame(width: 1) } }
+        .clipShape(shape)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(L("inspector.title"))
+    }
+
+    private var inspectorContent: some View {
         Group {
             if selectedRows.count == 1, let row = selectedRows.first {
                 ProfileInspectorView(row: row, info: inspectorInfo(row.id), actions: actions,
@@ -1239,13 +1268,6 @@ struct ProfilesScreen: View {
                 EmptyInspectorView()
             }
         }
-        .frame(width: Self.inspectorWidth)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .padding(.top, top)
-        .background(Theme.sidebar.opacity(0.8))
-        .overlay(alignment: .leading) { Rectangle().fill(Theme.divider).frame(width: 1) }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(L("inspector.title"))
     }
 
     /// The window comes in: the sidebar fades in, the list rises 10 pt (the design's 0.9 s); under
@@ -1379,8 +1401,9 @@ struct ProfilesScreen: View {
             : String(format: L("profiles.count"), rows.count)
     }
 
+    /// `compact`: the inspector stands beside the list (`main`).
     @ViewBuilder
-    private var content: some View {
+    private func content(compact: Bool) -> some View {
         if rows.isEmpty, let indexNotice, indexNotice.kind != .unlisted {
             // Not "no profiles yet": the index that lists them is missing or unreadable (the notice
             // above says so), and their folders are kept.
@@ -1397,10 +1420,10 @@ struct ProfilesScreen: View {
             }
         } else {
             GeometryReader { geometry in
-                let columns = ProfileColumns(contentWidth: geometry.size.width)
+                let columns = ProfileColumns(contentWidth: geometry.size.width, compact: compact)
                 ScrollView {
                     listStack(columns)
-                        .padding(.horizontal, 20)
+                        .padding(.horizontal, columns.margin)
                         // The last row stays above the floating bar.
                         .padding(.bottom, selectedRows.count >= 2 ? 88 : 24)
                 }
@@ -1447,7 +1470,7 @@ struct ProfilesScreen: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, ProfileColumns.nameInset)
-            Text(L("profiles.column.exit")).lumenCaps().frame(width: ProfileColumns.exit, alignment: .leading)
+            Text(L(columns.compact ? "inspector.exit" : "profiles.column.exit")).lumenCaps().frame(width: columns.exitWidth, alignment: .leading)
             if columns.showsAppearsAs {
                 Text(L("profiles.column.appearsAs")).lumenCaps().frame(width: ProfileColumns.appearsAs, alignment: .leading)
             }
@@ -1457,7 +1480,7 @@ struct ProfilesScreen: View {
                 order.wrappedValue = order.wrappedValue == .lastUsed ? .created : .lastUsed
             }
             .frame(width: columns.state, alignment: .leading)
-            Color.clear.frame(width: ProfileColumns.actions, height: 1)
+            if !columns.compact { Color.clear.frame(width: ProfileColumns.actions, height: 1) }
         }
         .lineLimit(1)
         .padding(.horizontal, ProfileColumns.rowPadding)
@@ -1535,6 +1558,13 @@ struct ProfileColumns {
     /// The name's slot (its letters' circle included).
     static let minimumName: CGFloat = 200
 
+    /// The list beside the inspector under the header: the name, the exit as its flag and code (or
+    /// its sign alone), the state — no "Appears as", no buttons, narrower page margins.
+    let compact: Bool
+    /// The exit column: wide enough for "Settings cannot be read", or for a flag and a code.
+    let exitWidth: CGFloat
+    /// The list's margin at each side.
+    let margin: CGFloat
     let showsAppearsAs: Bool
     /// The state column: full, or narrower in a narrow window rather than leaving the name a few
     /// letters ("Mar…", "N…" at the narrowest window: CI run 555's profiles-narrow).
@@ -1544,10 +1574,20 @@ struct ProfileColumns {
     /// page margins and the rows' own padding on both sides, the columns, the narrowest name.
     static let minimumContentWidth: CGFloat = 2 * 20 + 2 * Self.rowPadding + Self.exit + Self.fullState + Self.actions + 3 * Self.gap + Self.minimumName
 
-    init(contentWidth: CGFloat) {
-        showsAppearsAs = contentWidth >= Self.minimumContentWidth + Self.appearsAs + Self.gap
+    static let compactExit: CGFloat = 48
+    static let compactState: CGFloat = 162
+    static let compactMargin: CGFloat = 12
+    /// The narrowest compact list: its margins and padding, the checkbox, a name of 120 pt beside its
+    /// circle, the exit, the state.
+    static let minimumCompactWidth: CGFloat = 2 * Self.compactMargin + 2 * Self.rowPadding + Self.nameInset + 120 + Self.compactExit + Self.compactState + 2 * Self.gap
+
+    init(contentWidth: CGFloat, compact: Bool = false) {
+        self.compact = compact
+        exitWidth = compact ? Self.compactExit : Self.exit
+        margin = compact ? Self.compactMargin : 20
+        showsAppearsAs = !compact && contentWidth >= Self.minimumContentWidth + Self.appearsAs + Self.gap
         let short = max(0, Self.minimumContentWidth - contentWidth)
-        state = max(Self.minimumState, Self.fullState - short)
+        state = compact ? Self.compactState : max(Self.minimumState, Self.fullState - short)
     }
 }
 
@@ -1892,12 +1932,14 @@ private struct ProfileRow: View {
             nameCell
                 .shadow(color: backdropCountry == nil ? .clear : Color.black.opacity(0.6), radius: 2.5, y: 1)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            exitCell.frame(width: ProfileColumns.exit, alignment: .leading)
+            exitCell.frame(width: columns.exitWidth, alignment: .leading)
             if columns.showsAppearsAs {
                 seenCell.frame(width: ProfileColumns.appearsAs, alignment: .leading)
             }
             stateCell.frame(width: columns.state, alignment: .leading)
-            actionsCell.frame(width: ProfileColumns.actions, alignment: .trailing)
+            // Beside the inspector the row has no buttons of its own: the inspector has them, and
+            // the context menu.
+            if !columns.compact { actionsCell.frame(width: ProfileColumns.actions, alignment: .trailing) }
         }
         .padding(.horizontal, ProfileColumns.rowPadding)
         .frame(height: height)
@@ -1997,7 +2039,7 @@ private struct ProfileRow: View {
 
     private var exitCell: some View {
         HStack(spacing: 6) {
-            ExitLabel(exit: row.exit, note: row.exitNote, directCountry: row.directCountry)
+            ExitLabel(exit: row.exit, note: row.exitNote, directCountry: row.directCountry, signOnly: columns.compact)
             if row.exitUnconfirmed {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 11))
@@ -2260,6 +2302,10 @@ struct ExitLabel: View {
     var note: String?
     /// With no proxy: the country the profile's own connection exits in, when a launch found it.
     var directCountry: String?
+    /// The list beside the inspector: where there is no country to say in two letters — no proxy,
+    /// a proxy whose country is unknown, settings that cannot be read — the sign alone, with its
+    /// words on hover and for VoiceOver.
+    var signOnly = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -2284,11 +2330,15 @@ struct ExitLabel: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Theme.textTertiary)
                     .frame(width: flagSize)
+                    .help(signOnly ? L("profiles.exit.direct") : "")
+                    .accessibilityLabel(L("profiles.exit.direct"))
                 // No country yet: "Direct" and why on hover — never an empty cell, never a guess.
-                Text(L("profiles.exit.direct"))
-                    .font(.lumenBody)
-                    .foregroundStyle(Theme.textSecondary)
-                    .help(note ?? L("inspector.exit.directNotYet"))
+                if !signOnly {
+                    Text(L("profiles.exit.direct"))
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textSecondary)
+                        .help(note ?? L("inspector.exit.directNotYet"))
+                }
             case let .proxy(endpoint, code?):
                 // The flag to find it by eye, the words to say what it is — a flag alone tells the
                 // Netherlands from France poorly, and nothing to VoiceOver (the owner, 1 November).
@@ -2311,20 +2361,28 @@ struct ExitLabel: View {
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.textTertiary)
                     .frame(width: flagSize)
-                Text(endpoint)
-                    .font(.lumenBody)
-                    .foregroundStyle(Theme.textPrimary)
-                    .truncationMode(.middle)
-                    .help(note ?? L("profiles.exit.unknownCountry"))
+                    .help(signOnly ? endpoint : "")
+                    .accessibilityLabel(endpoint)
+                if !signOnly {
+                    Text(endpoint)
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textPrimary)
+                        .truncationMode(.middle)
+                        .help(note ?? L("profiles.exit.unknownCountry"))
+                }
             case .unreadable:
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.warning)
                     .frame(width: flagSize)
-                Text(L("profiles.exit.unreadable"))
-                    .font(.lumenBody)
-                    .foregroundStyle(Theme.textSecondary)
-                    .help(String(format: L("profiles.exit.unreadable.help"), L("profiles.menu.syncNow"), L("profiles.menu.more")))
+                    .help(signOnly ? L("profiles.exit.unreadable") : "")
+                    .accessibilityLabel(L("profiles.exit.unreadable"))
+                if !signOnly {
+                    Text(L("profiles.exit.unreadable"))
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textSecondary)
+                        .help(String(format: L("profiles.exit.unreadable.help"), L("profiles.menu.syncNow"), L("profiles.menu.more")))
+                }
             }
         }
         .lineLimit(1)

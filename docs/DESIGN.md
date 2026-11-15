@@ -61,8 +61,11 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
 - Profiles window (`ProfileListView.swift`): sidebar (`ProfilesSidebar`), header (title, count line,
   search, inspector toggle, ⋯, New profile — `ProfilesScreen.headerTop/headerHeight/headerTrailing`,
   which the self-test's clicks use too), the list in three groups, the floating selection bar
-  (`ProfileBulkBar`), the inspector (`ProfileInspector.swift`, 320 pt; beside the list when the rows
-  keep their columns, over the list — never the header — when not). An inspector's content starts
+  (`ProfileBulkBar`, glass: the rows show through it blurred), the inspector (`ProfileInspector.swift`,
+  320 pt): to the window's top beside the list when the rows keep their columns; with less room, beside
+  the list under the header, its top-left corner rounded, the list compact (`ProfileColumns.compact`:
+  name, the exit as flag and code or its sign alone, state — the row's buttons are the inspector's);
+  in the narrowest window over the list, opaque. No row is ever read through it. An inspector's content starts
   under the title bar's band (`ProfilesScreen.inspectorTop`): a scroll view reaching under the title
   bar gets macOS 26's edge effect there, which a window's picture does not draw. In the narrowest
   window the state column narrows first, so that a name keeps its 200 pt.
