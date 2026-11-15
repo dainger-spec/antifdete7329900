@@ -287,7 +287,14 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    waiting one starts; the rest of the queue can be cancelled.
 9. **Stop**, or closing the last window, saves history and encrypts the profile's website
    data. **Lock** stops every profile and forgets the keys. Quitting (⌘Q) does the same,
-   and waits until every profile is sealed.
+   and waits until every profile is sealed. **Unlock with Touch ID** (Settings → Security; off by
+   default; on a Mac with Touch ID, in a build signed with the provisioning profile) opens the
+   vault in place of the master password: turned on with the password typed once more, it keeps
+   the vault's key on this Mac behind Touch ID — no longer in memory alone, which the setting and
+   the lock screen say. The password is still asked after the Mac restarts, after 14 days without
+   typing it, when Touch ID does not recognise the finger, and to change it or show saved
+   passwords; changing it, or the Mac's fingerprints, turns Touch ID unlocking off
+   ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), "Unlocking with Touch ID").
 10. **Sync (optional):** **More → Sync…** offers the **Lumen account** (while this Mac is signed
    in: the Lumen server, reached with this Mac's own sign-in, which Lumen for iPhone syncs with
    too), a folder (local-only), or an **own server** (client for the documented API; its address
@@ -368,13 +375,30 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    - **Updates**, **Keyboard Shortcuts** (the app's own, as its menus define them: ⌘K and ⌃⌘V
      among them) and **About** (version, macOS, this Mac's Safari and WebKit, the build; links when
      the release sets `WEBSITE_URL` / `SUPPORT_URL`).
+   - **The search** above the sections looks through the settings themselves — their names, then
+     the sentences under them — not only the sections' names: "zoom", "Dock" or "quit" lists the
+     page that holds the setting and says which one it found, Return opens the best answer, and
+     the page marks that row and scrolls to it. Each word typed is the start of a word (in a name,
+     also four letters or more inside one; a word of seven letters or more also by another of its
+     forms). The window opens on the page it was last left on.
+   - **The menus** carry the app's own commands, each with its key where it has one, from one
+     table (`AppCommand`) that Settings › Keyboard Shortcuts and Help list as well: the app menu
+     has **Check for Updates…**, **Account…** and **Lock Vault** (⇧⌘L); **File** has New Profile
+     (⌘N), Command Palette (⌘K), **Proxies…** (⇧⌘P), Scenarios (⇧⌘E) and **Sync Now** — or
+     **Set Up Sync…** until a place to sync to is chosen. Lock from the menu, the keyboard or the
+     palette asks first while profiles run and lists what it stops, as Quit does and under the
+     same setting (Startup › Confirm quitting); the Lock button of the Profiles window locks at
+     once, as before.
 14. **Command palette** (⌘K, **File** menu): the Profiles window comes to the front (opened again
    if it was closed) with a search field over what the app can do — each profile's own commands
    (launch, or new window and stop while it runs; edit; warm up), found by its name, its tags or
-   the country it exits in; the proxies; warming up several profiles; Sync Now; Lock; each section
-   of Settings; Copy Short Report. Each word typed matches the start of a word, then the inside of
-   one, then letters in order. ↑/↓ choose, Return runs, Esc closes. In a page that uses ⌘K itself,
-   the page gets the key first, as in Safari.
+   the country it exits in; the proxies; warming up several profiles; Sync Now; Lock; Check for
+   Updates; each section of Settings; Copy Short Report — and, once something is typed, every
+   single setting by its name ("Settings: Page zoom", with its page under it), which opens
+   Settings on that page with the row marked. Each word typed matches the start of a word, then
+   the inside of one, then letters in order (a single setting only when the words typed are really
+   in its name). ↑/↓ choose, Return runs, Esc closes. In a page that uses ⌘K itself, the page gets
+   the key first, as in Safari.
 15. **Paste as Typed** (⌃⌘V, **Edit** menu — in a profile shown in Safari's own window, in Safari's
    Edit menu): the clipboard's text is typed into the page's focused field as a person types it,
    for a field that refuses pasting or watches typing. Each character is a key down and a key up

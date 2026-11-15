@@ -115,6 +115,14 @@ public enum MasterVault {
         return UnlockedVault(root: root, header: header, masterKey: SymmetricKey(data: raw))
     }
 
+    /// Opens the vault with its master key itself — the one Touch ID released from what this Mac
+    /// keeps for it (`BiometricUnlock.unlock`, which checks the key against the vault before this).
+    /// Never a key that was typed, sent or kept in the clear.
+    static func unlock(header: VaultHeader, root: URL, masterKey: Data) throws -> UnlockedVault {
+        guard masterKey.count == 32 else { throw CoreError.corruptData("master key length") }
+        return UnlockedVault(root: root, header: header, masterKey: SymmetricKey(data: masterKey))
+    }
+
     /// Opens the vault for one profile, without a password: the vault a profile's own process
     /// works in (`ProfileGrant`, which the app hands to that process over a pipe). It reads and
     /// writes that profile's files and refuses everything else the vault holds.
@@ -229,6 +237,16 @@ public final class UnlockedVault: @unchecked Sendable {
     func moved(to newRoot: URL) throws -> UnlockedVault {
         guard let masterKey else { throw CoreError.notGranted("the vault's header") }
         return UnlockedVault(root: newRoot, header: header, masterKey: masterKey)
+    }
+
+    /// The vault's master key sealed under `key`, for what unlocking with Touch ID keeps on this Mac
+    /// (`BiometricUnlock.enroll`). Only a vault opened with the master password has it to seal: a
+    /// profile's own process, opened with a grant, is refused.
+    func sealedMasterKey(under key: SymmetricKey, aad: String) throws -> Data {
+        guard let masterKey else { throw CoreError.notGranted("the vault's master key") }
+        var raw = masterKey.rawBytes
+        defer { wipe(&raw) }
+        return try AEAD.seal(raw, key: key, aad: aad)
     }
 
     /// Raises the vault's generation to this version's (`VaultHeader.currentFormat`) when it is

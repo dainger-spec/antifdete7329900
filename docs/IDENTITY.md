@@ -78,8 +78,11 @@ Browsing, and local requests allowed (`ProfileTransfer.LeftOut`, the security au
 is often someone else's, and each sends something around the proxy); the import window names those
 it leaves out, and they are set again in the profile's editor.
 
-**The keychain.** The app's code keeps nothing in a keychain, and a profile's process must neither
-keep anything in one nor be shown anything of one, whatever the app's signature holds. There are two
+**The keychain.** The app's code keeps one thing in a keychain, and only when the person turns on
+unlocking with Touch ID: a random key in the data-protection keychain, readable after Touch ID
+alone (`TouchIDUnlock`; docs/ARCHITECTURE.md, "Unlocking with Touch ID"). A profile's process must
+neither keep anything in a keychain nor be shown anything of one, whatever the app's signature
+holds — that item included. There are two
 to reach. The data-protection keychain opens to an application identifier, an access group or an app
 group: a build with the network extension (`NE=1`) gives the app `<TEAM_ID>.io.lumenbrowser.Lumen`
 and the app group, and Safari's code in a process holding them would keep its "Safari Defaults"

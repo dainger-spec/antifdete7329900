@@ -348,6 +348,16 @@ final class SelfTest {
         await group("earlier versions' Safari keys") { earlierVersionsSafariKeys() }
         await group("update gate") { try updateGate(repository) }
         await group("settings") { try await appSettings(repository) }
+        // How things are found: the Settings search over the settings themselves, the palette's
+        // single settings, the one table of the app's keys (UsabilityChecks).
+        await group("finding settings, help and commands") {
+            for result in UsabilityChecks.run() { check(result.name, result.passed, result.detail) }
+        }
+        // Unlocking with Touch ID (TouchIDChecks): its texts, absent where it cannot work, the key
+        // in the keychain. A profile's process is asked for the key in the keychain group below.
+        await group("unlocking with Touch ID") {
+            for result in TouchIDChecks.run() { touchIDVerdict(result) }
+        }
         await group("editor labels") { try editorLabels() }
         await group("window sizes") { try await windowSizes(repository) }
         await group("named Safari version") { try await namedSafariVersion(repository) }
@@ -5772,7 +5782,8 @@ final class SelfTest {
     /// app's own executable — a profile as it was started before LumenProfile — are the controls.
     private func keychainBetweenProfiles(_ repository: ProfileRepository) async throws {
         guard !AppEnvironment.isSandboxed else {
-            for name in [KeychainIsolation.entitlementsName, KeychainIsolation.loginName, KeychainIsolation.itemsName] {
+            for name in [KeychainIsolation.entitlementsName, KeychainIsolation.loginName, KeychainIsolation.itemsName,
+                         TouchIDChecks.profileName] {
                 skip(name, "the sandboxed build runs no process per profile", .build)
             }
             return
@@ -5812,7 +5823,10 @@ final class SelfTest {
         let outcome = await KeychainIsolation.look(manager: manager, profiles: first.id, second.id) { detail in
             self.info("keychain: \(detail)")
         }
+        // The key kept for unlocking with Touch ID, asked of a profile's process (TouchIDChecks).
+        let touchID = await TouchIDChecks.keyApartFromProfile(manager: manager, profile: second.id)
         await manager.shutDown()
+        touchIDVerdict(touchID)
         for (name, verdict) in KeychainIsolation.verdicts(outcome) {
             switch verdict {
             case .pass: check(name, true)
@@ -5827,6 +5841,16 @@ final class SelfTest {
                     skip(name, why, name == KeychainIsolation.entitlementsName ? .build : .machine)
                 }
             }
+        }
+    }
+
+    /// A check of unlocking with Touch ID, as it came out: passed, failed, or not made here — by
+    /// how this build is signed, or by this Mac (`TouchIDChecks`).
+    private func touchIDVerdict(_ result: TouchIDChecks.Result) {
+        switch result.verdict {
+        case .pass: check(result.name, true)
+        case .fail(let why): check(result.name, false, why)
+        case .skip(let why, let inBuild): skip(result.name, why, inBuild ? .build : .machine)
         }
     }
 

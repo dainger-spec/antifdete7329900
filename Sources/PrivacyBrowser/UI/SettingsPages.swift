@@ -1,3 +1,4 @@
+import BrowserCore
 import SwiftUI
 
 // MARK: - Appearance
@@ -118,6 +119,7 @@ private struct AppearanceThumbnail: View {
 struct SecuritySettings: View {
     @EnvironmentObject private var model: AppModel
     @State private var changingPassword = false
+    @State private var turningTouchIDOn = false
 
     var body: some View {
         SettingsPage(title: L("settings.section.security"), subtitle: L("settings.security.subtitle")) {
@@ -125,6 +127,35 @@ struct SecuritySettings: View {
                 Button(L("settings.security.password.change")) { changingPassword = true }
                     .buttonStyle(.lumenSecondary)
                     .disabled(model.phase != .unlocked)
+            }
+            if model.touchID.offered {
+                // Unlocking with Touch ID: off until turned on here, with the master password typed
+                // once more; what it keeps on this Mac is said under it (AppModel+TouchID).
+                SettingCustomRow(L("settings.security.touchID")) {
+                    Text(String(format: L("settings.security.touchID.detail"), BiometricUnlock.passwordEveryDays))
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Label(L("settings.security.touchID.kept"), systemImage: "key")
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 4)
+                    if let note = touchIDNote {
+                        Label(note, systemImage: "exclamationmark.circle")
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.warning)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 4)
+                    }
+                } control: {
+                    SettingSwitch(isOn: Binding(get: { model.touchID.isOn },
+                                                set: { on in
+                                                    if on { turningTouchIDOn = true } else { model.turnTouchIDOff() }
+                                                }),
+                                  label: L("settings.security.touchID"))
+                        .disabled(model.phase != .unlocked || (!model.touchID.isOn && model.touchID.sensor != .ready))
+                }
             }
             SettingRow(L("settings.security.lock"), detail: L("profiles.action.lock.help"), effect: nil) {
                 Button(L("profiles.action.lock")) { Task { await model.lock() } }
@@ -137,5 +168,89 @@ struct SecuritySettings: View {
             }
         }
         .sheet(isPresented: $changingPassword) { ChangePasswordView() }
+        .sheet(isPresented: $turningTouchIDOn) { TouchIDTurnOnView() }
+        // The sensor as it is now (a fingerprint added since, the lid opened). Not where it is not
+        // offered: there is nothing to ask, and the pictures' stand-in state stays as given.
+        .onAppear { if TouchIDUnlock.isOfferedHere { model.refreshTouchID() } }
+    }
+
+    /// Under the Touch ID row: what the sensor says when it does not answer, or why the master
+    /// password is asked at the next unlock although it is on.
+    private var touchIDNote: String? {
+        if let sensor = TouchIDText.sensorNote(model.touchID.sensor) { return sensor }
+        if case .password(let reason) = model.touchID.decision { return TouchIDText.passwordAsked(reason) }
+        return nil
+    }
+}
+
+/// Turning unlocking with Touch ID on (Settings › Security): what it keeps on this Mac and when the
+/// master password is still asked, said before the choice, and the master password typed once more
+/// — an unlocked Mac left alone must not be enough to add a way into the vault.
+struct TouchIDTurnOnView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var password = ""
+    @State private var working = false
+    @State private var problem: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SheetHeader(title: L("touchid.on.title"))
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 10) {
+                    fact("touchid", L("touchid.on.fact.opens"))
+                    fact("key", L("touchid.on.fact.kept"))
+                    fact("lock", String(format: L("touchid.on.fact.password"), BiometricUnlock.passwordEveryDays))
+                }
+                LockPasswordField(label: L("setup.field.password"), password: $password, error: problem != nil, onSubmit: turnOn)
+                    .padding(.top, 20)
+                if let problem {
+                    MasterPasswordRefusalLine(text: problem)
+                        .padding(.top, 10)
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 6)
+            .padding(.bottom, 20)
+            SheetFooter {
+                Button(L("common.cancel")) { dismiss() }
+                    .buttonStyle(.lumenSecondary)
+                    .keyboardShortcut(.cancelAction)
+                Button(L("touchid.on.action"), action: turnOn)
+                    .buttonStyle(.lumenPrimary)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(password.isEmpty || working)
+            }
+        }
+        .sheetFrame(width: 480)
+        .background(Theme.raised)
+        .onChange(of: password) { _, _ in problem = nil }
+    }
+
+    private func fact(_ symbol: String, _ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 18)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(.lumenBody)
+                .foregroundStyle(Theme.textPrimary)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func turnOn() {
+        // Return reaches the field's submit and the default button: one press is one try.
+        guard !password.isEmpty, !working else { return }
+        working = true
+        let typed = password
+        Task {
+            problem = await model.turnTouchIDOn(password: typed)
+            working = false
+            if problem == nil { dismiss() }
+        }
     }
 }

@@ -136,6 +136,16 @@ enum UISnapshots {
                 SettingsView(section: section).environmentObject(model)
             }.capture(into: folder)
         }
+        // The search, with a setting's name typed: the pages that answer, each with the setting it
+        // found, and that setting's row marked on its page (SettingsSearch).
+        problems += await Shot(name: "settings-search", size: SettingsView.size, edges: true) {
+            SettingsView(section: .behavior, search: L("settings.behavior.zoom")).environmentObject(model)
+        }.capture(into: folder)
+        // The command palette with the same typed: the single setting, and the page it is on.
+        problems += await Shot(name: "palette-setting", size: CommandPaletteView.size, titled: false) {
+            CommandPaletteView(commands: paletteSample(sampleRows()), query: L("settings.behavior.zoom"))
+                .environment(\.appModelForCommands, model)
+        }.capture(into: folder)
         // A Mac whose Safari runs a newer engine than profiles, on whatever runner this is.
         EngineWarning.standIn = EngineWarning.Facts(safari: "27.2", engine: "26.6.2", macOS: 26) // l10n: not text
         problems += await Shot(name: "settings-about-engines", size: SettingsView.size, edges: true) {
@@ -776,6 +786,28 @@ enum UISnapshots {
         }.capture(into: folder)
         problems += await Shot(name: "launch-setup", size: CGSize(width: 1180, height: 820), edges: true) {
             LockBackdrop { SetupView().environmentObject(lockModel) }
+        }.capture(into: folder)
+        // Unlocking with Touch ID turned on (Settings › Security), as a Mac with Touch ID shows it —
+        // a stand-in state: nothing is kept and Touch ID is not asked. The lock screen with its
+        // second action; the same after a restart, when the password is asked; the setting; and
+        // the sheet that turns it on.
+        let touchModel = AppModel()
+        touchModel.touchIDAskedAtStart = true
+        touchModel.touchID = TouchIDStatus(offered: true, sensor: .ready, decision: .touchID)
+        problems += await Shot(name: "launch-unlock-touchid", size: CGSize(width: 1180, height: 780), edges: true) {
+            LockBackdrop { UnlockView().environmentObject(touchModel) }
+        }.capture(into: folder)
+        let restartedModel = AppModel()
+        restartedModel.touchIDAskedAtStart = true
+        restartedModel.touchID = TouchIDStatus(offered: true, sensor: .ready, decision: .password(.restarted))
+        problems += await Shot(name: "launch-unlock-touchid-restarted", size: CGSize(width: 1180, height: 780), edges: true) {
+            LockBackdrop { UnlockView().environmentObject(restartedModel) }
+        }.capture(into: folder)
+        problems += await Shot(name: "settings-security-touchid", size: SettingsView.size, edges: true) {
+            SettingsView(section: .security).environmentObject(touchModel)
+        }.capture(into: folder)
+        problems += await Shot(name: "sheet-touchid-on", size: CGSize(width: 480, height: 400), titled: false) {
+            TouchIDTurnOnView().environmentObject(touchModel)
         }.capture(into: folder)
         // §10.1: a master password that is the license's key, refused under its field.
         let refusedModel = AppModel()

@@ -244,8 +244,8 @@ enum HelpContent {
         case .keys:
             return [
                 .heading("keys.app"),
-                .shortcuts([("⌘K", "keys.palette"), ("⌘N", "keys.newProfile"), ("⇧⌘E", "keys.scenarios"), ("⌘,", "keys.settings"),
-                            ("⌘?", "keys.help")]),
+                // Every key the app's own commands have, from the table the menus take them from.
+                .shortcuts(AppCommand.allCases.map { (keys: $0.keys, about: $0.helpKey) }),
                 .heading("keys.window"),
                 .paragraph("keys.window.note"),
                 .shortcuts([("⌘T", "keys.newTab"), ("⇧⌘T", "keys.reopenTab"), ("⌘L", "keys.address"), ("⌘R", "keys.reload"),

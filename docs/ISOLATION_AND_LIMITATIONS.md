@@ -676,6 +676,7 @@ storage and network (§1, §4).
 | Bookmarks | encrypted (`bookmarks.bin`) | encrypted | in memory, saved encrypted on every change |
 | Sync target and token | encrypted (`settings.bin`, not synced) | in memory | — |
 | Proxy list (addresses, credentials, labels, last checks) | encrypted (`proxies.bin`, this Mac only, not synced) | in memory | — (a profile has its own copy of its proxy in `config.bin`) |
+| The vault's master key | wrapped under the master password (`vault.json`). With **Unlock with Touch ID** on (off by default; Settings → Security): also wrapped under a random key (`unlock-touchid.json`), and that key in this Mac's data-protection keychain, readable by this app after Touch ID only, this device only | in memory | a profile's own process never has it |
 | WebKit website data | encrypted (`webdata.pbsa`) | encrypted | **plaintext on disk** in WebKit's directories |
 
 **Why WebKit data is plaintext while a profile runs.** WebKit chooses the location of an
@@ -1803,6 +1804,12 @@ locations.
 - Device fingerprinting that links profiles through hardware or rendering
   characteristics (§2).
 - Offline guessing of a weak master password by anyone holding `vault.json`.
+- With **Unlock with Touch ID** turned on: someone who can pass Touch ID on this Mac in this
+  account (an enrolled finger) opens the vault without the master password, until this Mac
+  restarts or 14 days pass since the password was last typed. The vault's key is then kept on this
+  Mac behind its Touch ID and no longer in memory alone (docs/ARCHITECTURE.md, "Unlocking with
+  Touch ID"). Adding a fingerprint — which takes the Mac's own password — ends it: the master
+  password is asked. Off by default.
 - A sync server rolling back to an older complete snapshot (no signed manifest).
 
 **What other programs on this Mac can reach.** The app registers no URL scheme, no AppleScript
