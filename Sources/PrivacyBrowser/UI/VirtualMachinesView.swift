@@ -622,7 +622,9 @@ private struct VMRow: View {
     private var action: some View {
         switch state?.phase {
         case nil:
-            Button(action: start) { Label(L(asleep ? "vm.row.wake" : "vm.row.start"), systemImage: asleep ? "bolt.fill" : "play.fill") }
+            // One mark for both: a sleeping machine's row already says "opens at once" beside its name
+            // (the owner, 15 November: no lightning on Open).
+            Button(action: start) { Label(L(asleep ? "vm.row.wake" : "vm.row.start"), systemImage: "play.fill") }
                 .buttonStyle(.lumenSecondary)
                 .disabled(!canStart)
                 .help(canStart ? L(asleep ? "vm.row.wake.help" : "vm.row.start.help")
