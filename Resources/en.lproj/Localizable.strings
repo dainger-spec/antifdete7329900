@@ -890,6 +890,7 @@
 "profiles.sync.notYet" = "Not synced yet";
 "profiles.sync.off" = "Sync is off";
 "profiles.sync.synced" = "Synced %@";
+"profiles.sync.synced.title" = "Synced";
 "profiles.sync.syncing" = "Syncing…";
 "profiles.title" = "Profiles";
 /* Proxy list (Profiles → ⋯ → Proxies…), import, checks, assignment; several profiles at once */

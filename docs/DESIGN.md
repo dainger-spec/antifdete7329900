@@ -66,7 +66,8 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
 
 ## Windows
 
-- Profiles window (`ProfileListView.swift`): sidebar (`ProfilesSidebar`), header (title, count line,
+- Profiles window (`ProfileListView.swift`): sidebar (`ProfilesSidebar`; its collections and tags fade out
+  above the foot, where sync says what and when on two lines), header (title, count line,
   search, inspector toggle, ⋯, New profile — `ProfilesScreen.headerTop/headerHeight/headerTrailing`,
   which the self-test's clicks use too), the list in three groups, the floating selection bar
   (`ProfileBulkBar`, glass: the rows show through it blurred), the inspector (`ProfileInspector.swift`,

@@ -890,6 +890,7 @@
 "profiles.sync.notYet" = "Ещё не синхронизировано";
 "profiles.sync.off" = "Без синхронизации";
 "profiles.sync.synced" = "Синхронизировано %@";
+"profiles.sync.synced.title" = "Синхронизировано";
 "profiles.sync.syncing" = "Синхронизация…";
 "profiles.title" = "Профили";
 /* Proxy list (Profiles → ⋯ → Proxies…), import, checks, assignment; several profiles at once */

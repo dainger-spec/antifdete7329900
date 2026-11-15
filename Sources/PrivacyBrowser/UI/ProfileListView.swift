@@ -1662,9 +1662,14 @@ private struct ProfilesSidebar: View {
                         ForEach(tags, id: \.self) { tag in tagItem(tag) }
                     }
                 }
+                // Room for the last row to come clear of the fade below.
+                .padding(.bottom, 20)
             }
             .scrollIndicators(.automatic)
             .frame(maxHeight: .infinity)
+            // The rows go out over the last 24 pt instead of being cut flat by the foot.
+            .mask(LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.9), .init(color: .clear, location: 1)],
+                                 startPoint: .top, endPoint: .bottom))
             .padding(.bottom, 12)
             SyncStatusButton(sync: sync, action: actions.openSync)
                 .padding(.bottom, rights == nil ? 8 : 2)
@@ -1712,6 +1717,8 @@ private struct ProfilesSidebar: View {
                     .font(.lumenBody)
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
+                    // "Commands and Search" was cut to "Commands and S…" beside its keys.
+                    .minimumScaleFactor(0.85)
                 Spacer(minLength: 4)
                 KeyCap(keys: "⌘K", small: true) // l10n: not text
             }
@@ -1871,11 +1878,28 @@ private struct SyncStatusButton: View {
                     .font(.system(size: 12))
                     .foregroundStyle(sync == .failed ? Theme.warning : Theme.textTertiary)
                     .frame(width: 18)
-                Text(text)
-                    .font(.lumenSecondary)
-                    .foregroundStyle(sync == .failed ? Theme.warning : Theme.textSecondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                if case .synced(let date) = sync {
+                    // Two even lines — what, and when — instead of one sentence broken where it
+                    // happens to break ("Синхронизировано 4 / минуты назад").
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(L("profiles.sync.synced.title"))
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.textSecondary)
+                        Text(date.shownRelative)
+                            .font(.lumenCaption)
+                            .foregroundStyle(Theme.textTertiary)
+                            .monospacedDigit()
+                    }
+                    .lineLimit(1)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(text)
+                } else {
+                    Text(text)
+                        .font(.lumenSecondary)
+                        .foregroundStyle(sync == .failed ? Theme.warning : Theme.textSecondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10)
