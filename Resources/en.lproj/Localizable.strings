@@ -100,6 +100,12 @@
 "downloads.title" = "Downloads";
 "downloads.none" = "Nothing has been downloaded in this profile yet. Files are saved to %@.";
 "downloads.list" = "Saved to %@:";
+"downloads.clear" = "Clear List";
+"downloads.failed.named" = "“%1$@” could not be downloaded: %2$@";
+"downloads.state.failed" = "failed: %@";
+"downloads.state.finished" = "saved";
+"downloads.state.progress" = "downloading, %ld%%";
+"downloads.state.running" = "downloading";
 "editor.defaultName" = "Profile %ld";
 "editor.ephemeral" = "Ephemeral (no website data or history written to disk)";
 "editor.ephemeral.detail" = "No website data or history is written to disk; nothing is left once it stops.";
@@ -1401,6 +1407,7 @@
 /* Network guard of a profile's own process */
 "network.webViewOffProfile" = "A page of this profile was about to open outside its data and proxy, and was stopped: better a page that does not open than one opened from this Mac's own address. Please report this with the diagnostics: Settings → Diagnostics → Collect Diagnostics…";
 "safari.chrome.missingPieces" = "This macOS's Safari no longer has parts the Safari window of a profile relies on (%@). The profile still loads only through its proxy, but some of Safari's window may misbehave; an update of Lumen is needed.";
+"safari.menu.untitled" = "Untitled";
 "safari.unavailable.title" = "This Safari feature is not available in a profile";
 "safari.unavailable.item" = "“%@” relies on services of the real Safari that a profile does not have, so it did not work. The profile keeps running; the details are in the log.";
 "safari.unavailable.action" = "This relies on services of the real Safari that a profile does not have, so it did not work. The profile keeps running; the details are in the log.";
@@ -1626,7 +1633,7 @@
 "settings.startup.open.window" = "The Profiles window";
 "settings.startup.open.reopen" = "And the profiles open at quit";
 "settings.startup.restoreTabs" = "Restore tabs";
-"settings.startup.restoreTabs.detail" = "A profile opens again with the pages it had open when it stopped, the tab that was shown in front. Never an ephemeral profile, nor one that keeps no history; kept encrypted, on this Mac only. In Safari's own window, Safari's setting applies.";
+"settings.startup.restoreTabs.detail" = "A profile opens again with the pages it had open when it stopped, the tab that was shown in front. Never an ephemeral profile, nor one that keeps no history; kept encrypted, on this Mac only. In Safari's own window too.";
 "settings.startup.confirmQuit" = "Confirm quitting";
 "settings.startup.confirmQuit.detail" = "While profiles run, ⌘Q asks first and lists what it stops; their data is then encrypted.";
 "settings.newProfiles.subtitle" = "What a profile made with ＋ starts with. Each one changes it in its own editor.";
@@ -1657,7 +1664,7 @@
 "settings.behavior.dockLetters" = "Letters of the name on the Dock icon";
 "settings.behavior.dockLetters.detail" = "A profile in its own process shows the first letters of its name on its icon, so that profiles are told apart in the Dock.";
 "settings.behavior.dockLetters.none" = "None";
-"settings.behavior.safariNote" = "In a profile shown in Safari's own window, tabs, zoom and downloads follow Safari's settings (Safari → Settings in that window).";
+"settings.behavior.safariNote" = "In a profile shown in Safari's own window, where a new tab opens and the page zoom are Safari's own (its View menu). Restore tabs and Downloads apply there as in the app's windows.";
 "settings.proxies.subtitle" = "The proxy list, and what happens with a proxy that does not work.";
 "settings.proxies.list" = "Proxy list";
 "settings.proxies.list.detail" = "Import, check, edit and assign proxies; kept encrypted in the vault, on this Mac only.";
@@ -1669,7 +1676,7 @@
 "settings.proxies.failure.detail" = "Either way nothing goes around the proxy: such a profile loads no page, and the Profiles window says why.";
 "settings.proxies.failure.launch" = "Start the profile, say why";
 "settings.proxies.failure.doNotLaunch" = "Do not start the profile";
-"settings.downloads.subtitle" = "Where the app's browser windows save files.";
+"settings.downloads.subtitle" = "Where every profile's windows save files, Safari's own window included.";
 "settings.downloads.folder" = "Save downloads to";
 "settings.downloads.folder.detail" = "Now: %@";
 "settings.downloads.folder.choose" = "Choose…";

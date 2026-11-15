@@ -402,6 +402,13 @@ final class BrowserSession {
     /// every one open when the profile was stopped. Nil while none was closed.
     private(set) var lastOpenTabs: OpenTabs?
 
+    /// In Safari's window the tabs are Safari's, read as they stand (`SafariTabs`): what its
+    /// windows hold now is what the profile leaves open, should it stop now.
+    func keepOpenTabs(_ tabs: OpenTabs) {
+        guard !isClosing else { return }
+        lastOpenTabs = tabs
+    }
+
     /// A window for the warm-up robot: a real window with a real tab, because WebKit only loads,
     /// scrolls and runs scripts for content that is in one, but placed far off every screen so the
     /// user never sees it and it never takes focus. Closed when the run ends.

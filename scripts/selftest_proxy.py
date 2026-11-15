@@ -55,6 +55,11 @@ jump to a fragment `#x` is rewritten to `#/x`, as a single-page app's router mig
 shows an alert; `broken` closes the connection without an answer (a page that does not load). `/pb-warmup/log.json` lists every `/pb-warmup/` request with its Referer, Cookie and
 User-Agent headers and the time it came.
 
+`/pb-download/<name>?bytes=<n>` is a file to save, `n` bytes of a known pattern (0, 1, … 255, 0, …):
+sent as an attachment of a type a browser could show (`Content-Disposition: attachment`), or with
+`attachment=0` as `application/octet-stream` with no such header — the two ways a response is a
+download (the self-test's downloads in Safari's window).
+
 `/pb-automation/form` and `/pb-automation/two` are the pages of the automation commands' checks
 (`automation_page`): elements to click, type into, wait for and scroll to, and a recorder of every
 input event (`window.__take()`).
@@ -729,6 +734,22 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
             cookie_name = "".join(c if c.isalnum() else "_" for c in name)
             extra_headers = f"Set-Cookie: pbwarm_{cookie_name}={run or 'x'}; Max-Age=86400; Path=/\r\n"
             body, content_type = warmup_page(name, run), "text/html; charset=utf-8"
+    elif plain_path.startswith("/pb-download/"):
+        # A file to save (SelfTest's downloads in Safari's window): `bytes` of a known pattern, sent
+        # either to be saved — an attachment of a type a browser could show — or, with
+        # `attachment=0`, as a type no browser shows, without a word about saving it.
+        params = parse_qs(query)
+        name = "".join(c for c in plain_path[len("/pb-download/"):] if c.isalnum() or c in "._-")[:80] or "file.bin"
+        try:
+            size = max(0, min(int(params.get("bytes", ["4096"])[0]), 4_000_000))
+        except ValueError:
+            size = 4096
+        body = (bytes(range(256)) * (size // 256 + 1))[:size]
+        if params.get("attachment", ["1"])[0] != "0":
+            content_type = "text/plain"
+            extra_headers = f'Content-Disposition: attachment; filename="{name}"\r\n'
+        else:
+            content_type = "application/octet-stream"
     elif plain_path == "/pb-app-banner":
         # A Smart App Banner, as youtube.com has one. Measured (CI 564): Safari's chrome brings no
         # banner tracker up for it; the tracker that ended profiles belongs to the app-link banner

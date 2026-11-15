@@ -30,6 +30,18 @@ enum WindowProbeAction: Codable, Equatable {
     /// coordinates (a runner's process cannot be the active app, run 42429698672) — and what the
     /// page heard, as JSON in `detail` (`TapProbe`).
     case tap
+    /// A new tab on this address, after the window's last one: in Safari's window as File › New Tab
+    /// at End and the address bar make one (`SafariTabs.openTab`), in ours as ⌘T and the address do.
+    case openTab(String)
+    /// The profile's downloads as View › Show Downloads lists them, in `detail`; found when the
+    /// menu bar's item is routed to that list (`HostedDownloads`).
+    case downloads
+    /// The page in front goes to this address, as a link on it would send it (the web view's own
+    /// load): a link to a file, say.
+    case go(String)
+    /// Safari's own Bookmarks › Add Bookmark… (⌘D), sent as its item sends it; the sheet it brings
+    /// is told and its default button pressed, and then what the Bookmarks menu lists.
+    case addBookmark
 }
 
 struct WindowLook: Codable, Equatable {
@@ -43,6 +55,8 @@ struct WindowLook: Codable, Equatable {
     var selected = -1
     var overviewShown = false
     var urls: [String] = []
+    /// In Safari's window: how its tabs' pages were read (`SafariTabs.source`).
+    var tabsSource = ""
     /// The accessibility identifiers of the window's controls that are shown.
     var controls: [String] = []
     /// The menu bar's items with a ⌘ shortcut: "⌘T New Tab".
@@ -129,6 +143,64 @@ enum WindowProbe {
                 look.detail = await TapProbe.run(webView, in: window)
                 look.found = !look.detail.isEmpty
             }
+        case .openTab(let address):
+            look.action = "open a tab"
+            if let window, let url = URL(string: address) {
+                if SafariChromeHost.isHosting, SafariChromeHost.isBrowserWindow(window) {
+                    look.found = await SafariTabs.openTab(url, in: window)
+                } else if let controller {
+                    controller.addTab(url: url)
+                    look.found = true
+                }
+            }
+        case .go(let address):
+            look.action = "go"
+            if let window, let url = URL(string: address) {
+                let page = controller?.selectedTab?.webView ?? (SafariChromeHost.isBrowserWindow(window) ? SafariChromeHost.frontPage(in: window) : nil)
+                if let page {
+                    _ = page.load(URLRequest(url: url))
+                    look.found = true
+                }
+            }
+        case .addBookmark:
+            look.action = "add a bookmark"
+            if let window, SafariChromeHost.isHosting, SafariChromeHost.isBrowserWindow(window) {
+                var said: [String] = []
+                let page = SafariChromeHost.frontPage(in: window)?.title ?? ""
+                let untitledBefore = SafariChrome.untitledMenuItems
+                let taken = SafariTabs.send(["addBookmark:"], to: window)
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                said.append(taken ? "the action was taken" : "the action was NOT taken (\(SafariTabs.lastException ?? "nothing takes it"))")
+                if let sheet = window.attachedSheet {
+                    said.append("sheet \(String(describing: type(of: sheet)))")
+                    // The sheet's own Add: its default button, pressed as Return presses it.
+                    if let button = sheet.defaultButtonCell?.controlView as? NSButton, button.isEnabled {
+                        button.performClick(nil)
+                        said.append("its default button '\(button.title)' pressed")
+                        try? await Task.sleep(nanoseconds: 1_000_000_000)
+                        look.found = window.attachedSheet == nil
+                    } else {
+                        said.append("no default button to press")
+                        window.endSheet(sheet)
+                    }
+                } else {
+                    said.append("no sheet")
+                }
+                said.append("menu items made without a title, titled: \(SafariChrome.untitledMenuItems - untitledBefore)")
+                let listed = bookmarkTitles()
+                said.append("the Bookmarks menu \(!page.isEmpty && listed.contains(page) ? "lists" : "does NOT list") the page '\(page)' (\(listed.count) items)")
+                look.found = look.found && !page.isEmpty && listed.contains(page)
+                look.detail = said.joined(separator: "; ")
+            }
+        case .downloads:
+            look.action = "downloads"
+            if SafariChromeHost.isHosting {
+                look.found = HostedDownloads.shared.isRouted
+                look.detail = HostedDownloads.shared.listText() + "\n" + HostedDownloads.counts.text
+            } else {
+                look.found = controller != nil
+                look.detail = BrowserTab.finishedDownloads.map(\.lastPathComponent).joined(separator: "\n")
+            }
         case .search(let text):
             look.action = "search"
             if let window, let field = addressField(in: window) {
@@ -150,10 +222,36 @@ enum WindowProbe {
             look.selected = controller.selectedTabIndex
             look.overviewShown = controller.isShowingTabOverview
             look.urls = controller.tabs.map { $0.url?.absoluteString ?? "" }
+        } else if SafariChromeHost.isHosting, let window, SafariChromeHost.isBrowserWindow(window) {
+            // Safari's window: its tabs as Safari hands them out, and how their pages were read.
+            _ = SafariTabs.snapshot()
+            let own = SafariTabs.tabs().filter { $0.window === window }
+            look.tabs = own.count
+            look.selected = own.firstIndex(where: \.isSelected) ?? -1
+            look.urls = own.map { $0.url?.absoluteString ?? "" }
+            look.tabsSource = SafariTabs.source
         }
         if let window { look.controls = identifiers(in: window) }
         look.menuItems = menuShortcuts(NSApp.mainMenu)
         return look
+    }
+
+    /// The titles of what Safari's Bookmarks menu lists, its submenus with it, filled as AppKit
+    /// fills a menu before it shows it: the menu is the one that has Add Bookmark….
+    private static func bookmarkTitles() -> [String] {
+        let add = NSSelectorFromString("addBookmark:")
+        guard let menu = NSApp.mainMenu?.items.compactMap(\.submenu).first(where: { $0.items.contains { $0.action == add } }) else { return [] }
+        var titles: [String] = []
+        func read(_ menu: NSMenu, depth: Int) {
+            menu.delegate?.menuNeedsUpdate?(menu)
+            menu.update()
+            for item in menu.items where !item.isSeparatorItem {
+                titles.append(item.title)
+                if let submenu = item.submenu, depth < 4 { read(submenu, depth: depth + 1) }
+            }
+        }
+        read(menu, depth: 0)
+        return titles
     }
 
     private static func bottomBar(in view: NSView?) -> MobileBottomBar? {

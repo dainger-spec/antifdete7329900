@@ -166,13 +166,17 @@ enum SafariChromeHost {
         configuration.deviceGeneration.platform == .macOS
     }
 
-    static func open(session: BrowserSession, url: URL?) -> Bool {
+    /// `restoring`: the tabs the profile left open at its last stop (Settings → Startup → Restore
+    /// tabs), which a start opens again instead of the start page — this window on the first of
+    /// them, the rest after it (`SafariTabs.reopen`). A window asked for later has none.
+    static func open(session: BrowserSession, url: URL?, restoring tabs: OpenTabs? = nil) -> Bool {
         guard isPrepared else { return false }
         watchWindows()
         // Registered before the window exists: Safari builds the first web view while opening it,
         // and that web view must already get the profile's data store.
         ProfileNetworkGuard.register(session: session)
-        let address = url ?? session.configuration.startURL
+        let kept = tabs?.windows ?? []
+        let address = kept.first?.tabs.first ?? url ?? session.configuration.startURL
         guard let controller = SafariChrome.openWindow(address: address) else {
             log.error("Safari's chrome did not open a window for \(session.profileName, privacy: .private); using ours")
             failure = .windowDidNotOpen
@@ -195,6 +199,11 @@ enum SafariChromeHost {
         NSApplication.shared.activate(ignoringOtherApps: true)
         // Safari's history items act on the profile's own history (`HistoryMenuRoute`).
         HistoryMenuRoute.install(session: session)
+        // View › Show Downloads lists the profile's downloads (`HostedDownloads`).
+        HostedDownloads.routeMenu()
+        // What the windows hold is the profile's to open again at its next start (`SafariTabs`).
+        SafariTabs.follow()
+        if let window = controller.window, !kept.isEmpty { SafariTabs.reopen(kept, first: window) }
         log.notice("A profile runs in Safari's chrome")
         return true
     }
@@ -238,6 +247,7 @@ enum SafariChromeHost {
             return nil
         }
         let tab = SafariChrome.newestTab()
+        if let window = controller.window { automationWindows.add(window) }
         if let window = controller.window, let size = session.configuration.windowSize {
             WindowSizing.apply(size, to: window)
         }
@@ -250,6 +260,7 @@ enum SafariChromeHost {
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
         HistoryMenuRoute.install(session: session)
+        HostedDownloads.routeMenu()
         // Safari builds the tab's web view as it loads the page.
         for _ in 0..<60 {
             if let webView = pageWebView(in: controller.window) {
@@ -269,6 +280,11 @@ enum SafariChromeHost {
 
     /// The window the last run opened, for the next one (`openScenarioPage`).
     private static weak var scenarioWindow: NSWindow?
+    /// The windows opened for a scenario's run or a WebDriver session: their pages are the run's,
+    /// not tabs the profile leaves open for its next start (`SafariTabs`).
+    private static let automationWindows = NSHashTable<NSWindow>.weakObjects()
+
+    static func isAutomationWindow(_ window: NSWindow) -> Bool { automationWindows.contains(window) }
 
     /// How a run goes to an address in Safari's window: through the tab (`loadURL:`), as the
     /// address bar does, so that the chrome's own bookkeeping follows. The tab is the newest one
@@ -294,6 +310,9 @@ enum SafariChromeHost {
             }
         }
     }
+
+    /// The page in front of `window`, one of Safari's browser windows: the web view of the tab shown.
+    static func frontPage(in window: NSWindow) -> WKWebView? { pageWebView(in: window) }
 
     /// The largest web view shown in `window`: its tab's page.
     private static func pageWebView(in window: NSWindow?) -> WKWebView? {
@@ -337,8 +356,13 @@ enum SafariChromeHost {
                 guard !isClosingEveryWindow, isBrowserWindow(closing), !closingKeepsProfile.contains(closing) else { return }
                 let others = NSApp.windows.filter { $0 !== closing && $0.isVisible && isBrowserWindow($0) }
                 if others.isEmpty {
+                    // The last window's tabs are what the profile leaves open (`SafariTabs`).
+                    SafariTabs.note(closing: closing, isLast: true)
                     log.notice("Safari's last window of this profile closed: the profile quits")
                     onLastWindowClosed?()
+                } else {
+                    // Its tabs are gone with it: the windows left are read without it.
+                    SafariTabs.note(closing: closing)
                 }
             }
         }
@@ -367,6 +391,9 @@ enum SafariChromeHost {
     /// Closes every browser window of Safari's, as a quit or a stop does before the profile's data
     /// is sealed: the windows go when the user quits, rather than staying up through the seal.
     static func closeEveryWindow() {
+        // Stopped with windows open: what the profile leaves open is all of them, read while they
+        // are still there.
+        SafariTabs.note(leaving: true)
         isClosingEveryWindow = true
         defer { isClosingEveryWindow = false }
         for window in NSApp.windows where isBrowserWindow(window) && window.isVisible {

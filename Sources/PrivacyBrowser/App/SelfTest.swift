@@ -402,6 +402,7 @@ final class SelfTest {
         await group("processor count") { try await processorCountInOwnProcess(repository) }
         await group("a phone's window") { try await phoneWindowAndSearch(repository) }
         await group("closing a profile's window") { try await closingTheWindowEndsTheProfile(repository) }
+        await group("Safari's window, every day") { try await safarisWindowEveryDay(repository) }
         await group("a profile's process leaves nothing open") { try await profileProcessLeavesNothingOpen(repository) }
         await group("interface and websites' languages") { try await interfaceApartFromWebsites(repository) }
         await group("languages per profile") { try await languagesPerProfile(repository) }
@@ -5787,6 +5788,176 @@ final class SelfTest {
               "ended \(ended ? "with status \(exited.map(String.init) ?? "?")" : "NOT within 60 s"), seal \(sealReport == nil ? "NOT reported" : "reported"), "
               + "in plaintext: \(plaintext.isEmpty ? "nothing" : plaintext.joined(separator: ", ")), messages \(messages)")
         if !ended { await manager.shutDown() }
+    }
+
+    // MARK: Safari's window, every day: downloads, a bookmark, the tabs it left
+
+    /// What a person does every day in a profile's window, in the window every Mac profile has —
+    /// Safari's — and in the profile's own process, as the app runs one. Until 15 November none of
+    /// the three worked there:
+    ///   * a download did nothing and said nothing (docs/SAFARI_SUBSYSTEMS.md, O6), and View › Show
+    ///     Downloads was disabled. Now a link to a file — one sent to be saved, and one of a type no
+    ///     browser shows — is saved in the folder Settings → Downloads names, with the bytes the
+    ///     proxy sent, and the window's list has it (`HostedDownloads`);
+    ///   * Bookmarks › Add Bookmark… (⌘D) threw and added nothing (docs/SAFARI_MENU.md, "broken").
+    ///     Now Safari's sheet comes and its Add puts the page in the Bookmarks menu
+    ///     (`SafariChrome.tolerateUntitledMenuItems`);
+    ///   * Settings → Startup → Restore tabs did nothing: a start opened the start page whatever the
+    ///     profile had left open. Now a second tab, opened as File › New Tab at End and the address
+    ///     bar open one, is kept with the first at a stop and both are open again at the next start,
+    ///     through the proxy, the same one in front (`SafariTabs`).
+    private func safarisWindowEveryDay(_ repository: ProfileRepository) async throws {
+        let savedName = "Safari chrome: a file downloaded in Safari's window is saved in the folder the settings name, with the bytes the proxy sent — one sent to be saved, one of a type no browser shows"
+        let listedName = "Safari chrome: View › Show Downloads lists the profile's downloads"
+        let bookmarkName = "Safari chrome: Bookmarks › Add Bookmark… (⌘D) brings Safari's sheet, and its Add puts the page in the Bookmarks menu"
+        let keptName = "Safari chrome: a profile stopped with two tabs open in Safari's window keeps both, and the one shown"
+        let reopenedName = "Safari chrome: its next start opens both again in Safari's window, through its proxy, the same tab in front"
+        let names = [savedName, listedName, bookmarkName, keptName, reopenedName]
+        guard !AppEnvironment.isSandboxed else {
+            for name in names { skip(name, "the sandboxed build runs no process per profile", .build) }
+            return
+        }
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            for name in names { skip(name, "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the pages and the files)") }
+            return
+        }
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
+        let one = URL(string: "http://proxied.selftest.invalid/one?run=\(run)")!
+        let two = URL(string: "http://proxied.selftest.invalid/two?run=\(run)")!
+        let both = [one.absoluteString, two.absoluteString]
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("pb-selftest-safari-downloads-\(run)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        defer { BrowsingPreferences.current = BrowsingPreferences() }
+        BrowsingPreferences.current.restoreTabs = true
+        BrowsingPreferences.current.downloadFolder = folder.path
+        let profile = try repository.create(name: "Safari's window, every day", configuration: ProfileConfiguration(
+            startURL: one, proxy: proxy, matchProxyLocation: false))
+        defer { try? repository.delete(profile.id) }
+        let manager = ProfileManager(repository: repository)
+        var messages: [String] = []
+        manager.onError = { messages.append($0) }
+        var hostsChrome: Bool?
+        manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
+        var exited: Int32?
+        manager.onChildExited = { _, status in exited = status }
+        manager.onChildStopped = { _, status in exited = status }
+        var look: WindowLook?
+        manager.onWindowLook = { _, answer in look = answer }
+        var networkReport: ProfileNetworkReport?
+        manager.onNetworkReport = { _, report in networkReport = report }
+        let givenProcess = ProcessInfo.processInfo.environment["PB_PROFILE_PROCESS"]
+        defer { if let givenProcess { setenv("PB_PROFILE_PROCESS", givenProcess, 1) } else { unsetenv("PB_PROFILE_PROCESS") } }
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+
+        /// The profile in its own process, Safari's window up.
+        func start() async -> Bool {
+            hostsChrome = nil
+            exited = nil
+            do { try await manager.launch(profile.id) } catch {
+                messages.append("the profile's process did not start: \(error)")
+                return false
+            }
+            if let pid = manager.processIdentifier(of: profile.id) { info("egress-pid \(pid)") }
+            _ = await waitUntil(timeout: 90) { hostsChrome != nil || exited != nil }
+            return hostsChrome == true && exited == nil
+        }
+        func ask(_ action: WindowProbeAction) async -> WindowLook {
+            look = nil
+            guard manager.lookAtWindow(profile.id, action) else { return WindowLook(action: "\(action)", detail: "no process") }
+            _ = await waitUntil(timeout: 30) { look != nil }
+            return look ?? WindowLook(action: "\(action)", detail: "no answer")
+        }
+        /// What the window holds, asked until it holds `wanted` or `seconds` have passed.
+        func window(holding wanted: [String], within seconds: Int) async -> WindowLook {
+            var seen = await ask(.describe)
+            for _ in 0..<seconds where seen.urls != wanted {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                seen = await ask(.describe)
+            }
+            return seen
+        }
+        /// The paths of this run's requests the proxy answered.
+        func requested() async -> [String] {
+            let url = URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!
+            guard let text = try? await loadThroughProxy(repository, proxy, url: url),
+                  let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { return [] }
+            return (object["targets"] as? [[String: Any]] ?? []).compactMap { $0["path"] as? String }
+        }
+        func said(_ seen: WindowLook) -> String {
+            "tabs \(seen.tabs), shown \(seen.selected), pages \(seen.urls), read from \(seen.tabsSource.isEmpty ? "nothing" : seen.tabsSource)"
+        }
+
+        guard await start() else {
+            let why = "Safari's window did not come up in the profile's process (running \(String(describing: hostsChrome)), "
+                + "ended \(exited.map(String.init) ?? "no"), \(messages))"
+            for name in names { check(name, false, why) }
+            await manager.shutDown()
+            return
+        }
+        _ = await window(holding: [one.absoluteString], within: 10)
+
+        // Downloads: the page in front is sent to a file, as a link on it sends it — one the server
+        // sends to be saved (an attachment of a type a browser could show), one of a type no
+        // browser shows, with no word about saving it.
+        let sizes = ["pb-saved-\(run).txt": 70_000, "pb-binary-\(run).bin": 4_096]
+        _ = await ask(.go("http://proxied.selftest.invalid/pb-download/pb-saved-\(run).txt?run=\(run)&bytes=70000"))
+        _ = await ask(.go("http://proxied.selftest.invalid/pb-download/pb-binary-\(run).bin?run=\(run)&bytes=4096&attachment=0"))
+        func isSaved(_ name: String, _ size: Int) -> Bool {
+            let wanted = Data((0..<size).map { UInt8($0 % 256) })
+            return (try? Data(contentsOf: folder.appendingPathComponent(name))) == wanted
+        }
+        let saved = await waitUntil(timeout: 30) { sizes.allSatisfy { isSaved($0.key, $0.value) } }
+        let inFolder = ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).sorted()
+        let downloadPaths = await requested().filter { $0.hasPrefix("/pb-download/") }
+        let listed = await ask(.downloads)
+        networkReport = nil
+        _ = manager.checkNetwork(profile.id)
+        _ = await waitUntil(timeout: 40) { networkReport != nil }
+        info("Safari's window, downloads: the profile's process says \(networkReport?.downloads ?? "nothing (no report)"); "
+             + "the folder holds \(inFolder); asked of the proxy: \(downloadPaths)")
+        check(savedName, saved && downloadPaths.count >= 2,
+              "the folder holds \(inFolder) (wanted \(sizes.keys.sorted()), with their bytes); asked of the proxy: \(downloadPaths); "
+              + "the profile's process: \(networkReport?.downloads ?? "no report")")
+        check(listedName, listed.found && sizes.keys.allSatisfy { listed.detail.contains($0) },
+              "the item \(listed.found ? "is" : "is NOT") routed to the profile's list; the list: \(listed.detail.replacingOccurrences(of: "\n", with: " | "))")
+
+        // The second tab, as File › New Tab at End and the address bar open one.
+        let opened = await ask(.openTab(two.absoluteString))
+        let before = await window(holding: both, within: 10)
+        info("Safari's window, tabs: with a second tab opened — \(said(before))")
+
+        // ⌘D on the page in front (the second tab's), Safari's own sheet and its Add.
+        let bookmarked = await ask(.addBookmark)
+        check(bookmarkName, bookmarked.found, bookmarked.detail.isEmpty ? "no answer" : bookmarked.detail)
+
+        try? await manager.stop(profile.id)
+        _ = await waitUntil(timeout: 60) { exited != nil }
+        let kept = try repository.openTabs(for: profile.id)
+        check(keptName, opened.found && kept?.windows == [OpenTabs.Window(tabs: [one, two], selected: 1)],
+              "the second tab \(opened.found ? "opened" : "did NOT open"); the window held \(said(before)); "
+              + "kept \(kept.map { String(describing: $0.windows) } ?? "nothing")")
+
+        let earlier = await requested().count
+        guard await start() else {
+            check(reopenedName, false, "Safari's window did not come up at the second start (running \(String(describing: hostsChrome)), "
+                  + "ended \(exited.map(String.init) ?? "no"), \(messages))")
+            await manager.shutDown()
+            return
+        }
+        let again = await window(holding: both, within: 20)
+        let asked = Array(await requested().dropFirst(earlier))
+        check(reopenedName,
+              again.urls == both && again.selected == 1
+                && asked.contains { $0.hasPrefix("/one") } && asked.contains { $0.hasPrefix("/two") },
+              "the window holds \(said(again)); asked of the proxy since the start: \(asked.joined(separator: " "))")
+        // Nothing was downloaded again: a tab is opened on a page, never on a file.
+        let downloadedAgain = asked.filter { $0.hasPrefix("/pb-download/") }
+        info("Safari's window, the second start: downloads asked of the proxy again: \(downloadedAgain.isEmpty ? "none" : downloadedAgain.joined(separator: " "))")
+        try? await manager.stop(profile.id)
+        _ = await waitUntil(timeout: 60) { exited != nil }
+        await manager.shutDown()
     }
 
     /// Every run of a profile in its own process gives back what the app opened for it: the object
