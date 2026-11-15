@@ -15,6 +15,12 @@ by `VMCenter.deleteMachineBecauseThePersonAsked`, called from the machines' own 
 or, for every machine at once, by `VMCenter.deleteEverythingBecauseThePersonAsked`, called from the
 Disk Space sheet's own "Delete everything" confirmation.
 
+A vault being brought back from its sync location (`VaultRestore`, docs/SYNC_FORMAT.md) is built in a
+staging folder — copies of the profiles' synced files, as the sync location holds them. What an
+unfinished restore downloaded goes only by `VaultRestore.discardStagingBecauseThePersonAsked`, called
+from `RestoreModel.discardUnfinished`, which the setup screen's own Discard confirmation calls: not
+by a failed run, not by a new vault made instead, not at the app's start.
+
 The one path is `ProfileManager.deleteBecauseThePersonAsked`; its one caller is
 `AppModel.deleteProfile`, which the Profiles window's Delete confirmation calls (one profile, or
 each of several through `deleteProfiles`). A deleted profile's kept folder (R3) goes only by
@@ -88,6 +94,17 @@ RULES = [
     ("a virtual machine's folder removed",
      re.compile(r"removeItem\s*\(\s*at:\s*(self\.)?library\.machineDirectory\s*\("),
      {("PrivacyBrowser/App/VirtualMachines/VMCenter.swift", "deleteMachineBecauseThePersonAsked"): "the one path"}),
+    # A vault being brought back from its sync location (docs/SYNC_FORMAT.md): what an unfinished
+    # restore downloaded — copies of the profiles' synced files — goes only by the person's Discard.
+    ("the one path that discards an unfinished restore's download",
+     re.compile(r"\bdiscardStagingBecauseThePersonAsked\s*\("),
+     {("PrivacyBrowser/App/RestoreModel.swift", "discardUnfinished"): "the Discard confirmation's handler"}),
+    ("the Discard's handler called",
+     re.compile(r"(^|[^\w])discardUnfinished\s*\("),
+     {("PrivacyBrowser/UI/RestoreViews.swift", "body"): "the Discard confirmation"}),
+    ("a restore's staging folder removed",
+     re.compile(r"removeItem\s*\(\s*at:\s*(self\.)?(restoreStaging\b|(VaultRestore\.)?stagingRoot\s*\(|(VaultRestore\.)?stagingDirectory\s*\()"),
+     {("BrowserCore/Sync/VaultRestore.swift", "discardStagingBecauseThePersonAsked"): "the one path's end"}),
 ]
 
 # Files whose own profiles are made and deleted for a check, never the person's.
@@ -126,7 +143,7 @@ def scan(root):
                 lines = handle.read().split("\n")
             for index, line in enumerate(lines):
                 code = line.split("//", 1)[0]
-                if re.match(r"\s*(public |private |internal |@\w+ )*func ", code):
+                if re.match(r"\s*(public |private |internal |static |@\w+ )*func ", code):
                     continue  # a declaration, not a call
                 for what, pattern, allowed in RULES:
                     if pattern.search(code):
@@ -225,6 +242,33 @@ final class VMHelperProcess {
     }
 }
 """,
+        "BrowserCore/Sync/VaultRestore.swift": """
+public enum VaultRestore {
+    public static func download(into staged: UnlockedVault) async throws {
+        try? FileManager.default.removeItem(at: stagingDirectory(for: vaultID, in: root))
+    }
+    public static func discardStagingBecauseThePersonAsked(_ vaultID: UUID, in root: URL) throws {
+        try FileManager.default.removeItem(at: restoreStaging)
+    }
+}
+""",
+        "PrivacyBrowser/App/RestoreModel.swift": """
+final class RestoreModel {
+    func stoppedShort(_ error: Error) {
+        try? VaultRestore.discardStagingBecauseThePersonAsked(vaultID, in: root)
+    }
+    func discardUnfinished(_ vaultID: UUID, app: AppModel) {
+        try VaultRestore.discardStagingBecauseThePersonAsked(vaultID, in: app.root)
+    }
+}
+""",
+        "PrivacyBrowser/App/CreateVault.swift": """
+final class AppModel {
+    func createVault(password: String) async {
+        restore.discardUnfinished(vaultID, app: self)
+    }
+}
+""",
     }
     expected = {
         ("PrivacyBrowser/App/Account/LicenseModel.swift", "signOut"),
@@ -236,6 +280,9 @@ final class VMHelperProcess {
         ("PrivacyBrowser/UI/VirtualMachinesView.swift", "signedOut"),
         ("PrivacyBrowser/UI/VirtualMachinesStorageView.swift", "planEnded"),
         ("PrivacyBrowser/App/VirtualMachines/VMHelperProcess.swift", "ended"),
+        ("BrowserCore/Sync/VaultRestore.swift", "download"),
+        ("PrivacyBrowser/App/RestoreModel.swift", "stoppedShort"),
+        ("PrivacyBrowser/App/CreateVault.swift", "createVault"),
     }
     with tempfile.TemporaryDirectory() as root:
         for relative, text in planted_bad.items():
