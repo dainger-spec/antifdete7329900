@@ -125,6 +125,10 @@ def report(steps):
             lines.append(f"- {run['profiles']} running, by kind: {'; '.join(run['byKind'])}")
         if run.get("notUp"):
             lines.append(f"- {run['profiles']} running, no window: {'; '.join(run['notUp'])}")
+        if "homeSeals" in run:
+            lines.append(f"- {run['profiles']} running, Safari's homes on the app's main thread: {run['homeRestores']} restored in "
+                         f"{run['homeRestoreMs']} ms in all, {run['homeSeals']} sealed in {run['homeSealMs']} ms in all "
+                         f"(the longest so far in this run: a restore {run['homeRestoreLongestMs']} ms, a seal {run['homeSealLongestMs']} ms)")
         if run.get("leftAfterStop"):
             lines.append(f"- {run['profiles']} running, still there 3 s after the stop: {', '.join(run['leftAfterStop'])}")
     lines.append("")
@@ -145,6 +149,11 @@ def report(steps):
     if disk:
         lines.append(f"**On disk after the runs:** the vault takes {round(disk['vaultBytes'] / 1048576, 1)} MB for "
                      f"{disk['profiles']} profiles, {disk['launched']} of which have run once, on a page or two each.")
+    homes = steps.get("homes", [{}])[0]
+    if homes:
+        lines.append(f"**Safari's homes, on the app's main thread:** {homes['seals']} sealed in {homes['sealMs']} ms in all "
+                     f"(the longest {homes['sealLongestMs']} ms), {homes['restores']} restored in {homes['restoreMs']} ms in all "
+                     f"(the longest {homes['restoreLongestMs']} ms): what a stop and a start of a profile hold the Profiles window for.")
     last = steps.get("launch-last", [{}])[0]
     if last:
         lines.append(f"**With {last['profiles']} profiles in the vault**, one more launch: "

@@ -286,6 +286,10 @@ enum ScaleCheck {
             running = [:]
             errors = []
             let cpuBefore = cpuTicks()
+            // Safari's home of each profile is restored before its process starts and sealed after
+            // it ends, on this process's main thread (`SafariHomeVault`): what that took for the group.
+            let homeRestoresBefore = SafariHomeVault.restores
+            let homeSealsBefore = SafariHomeVault.seals
             let batchStart = Date()
             var launchCalls: [UUID: Date] = [:]
             for id in group {
@@ -358,6 +362,12 @@ enum ScaleCheck {
                            "memoryPerProfileMB": group.isEmpty ? 0 : (totalMB / Double(group.count) * 10).rounded() / 10,
                            "processCount": processes.count, "byKind": byKind, "pressure": pressure,
                            "cpuBusyPercent": busy ?? -1, "machine": machine, "stopAllMs": stopMs,
+                           "homeRestores": SafariHomeVault.restores.count - homeRestoresBefore.count,
+                           "homeRestoreMs": ((SafariHomeVault.restores.seconds - homeRestoresBefore.seconds) * 100_000).rounded() / 100,
+                           "homeRestoreLongestMs": (SafariHomeVault.restores.longest * 100_000).rounded() / 100,
+                           "homeSeals": SafariHomeVault.seals.count - homeSealsBefore.count,
+                           "homeSealMs": ((SafariHomeVault.seals.seconds - homeSealsBefore.seconds) * 100_000).rounded() / 100,
+                           "homeSealLongestMs": (SafariHomeVault.seals.longest * 100_000).rounded() / 100,
                            "leftAfterStop": left, "notUp": notUp, "errors": errors, "each": perProfile])
         }
 
@@ -427,6 +437,14 @@ enum ScaleCheck {
         // What the vault takes once the profiles have run: each one launched holds its sealed data.
         let launched = Set(proxiedIDs.prefix(offset) + quitGroup + [lastID]).count
         report("disk", ["vaultBytes": size(of: root), "profiles": count, "launched": launched])
+        // Safari's homes over the whole check: each sealed after its profile's process ended, and
+        // restored before a profile that had run started again — both on this process's main thread.
+        report("homes", ["restores": SafariHomeVault.restores.count,
+                         "restoreMs": (SafariHomeVault.restores.seconds * 100_000).rounded() / 100,
+                         "restoreLongestMs": (SafariHomeVault.restores.longest * 100_000).rounded() / 100,
+                         "seals": SafariHomeVault.seals.count,
+                         "sealMs": (SafariHomeVault.seals.seconds * 100_000).rounded() / 100,
+                         "sealLongestMs": (SafariHomeVault.seals.longest * 100_000).rounded() / 100])
         print("SCALE-DONE")
         return 0
     }

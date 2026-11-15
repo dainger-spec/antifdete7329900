@@ -167,11 +167,18 @@ run's report holds the figures. None is in "What it measured" above: nothing her
   every stop (above: "every seal was forced"). An attempt now archives again only what changed
   since the last archive read it (`DirectoryStamp`: each entry's size, times and number, looked at
   before it is read; an archive that met anything changed in its last half second is not relied
-  on). Expected: two archives for a stop whose data WebKit leaves alone after the first second,
-  one when it was left alone before; the quit's line says how many were made and how many
-  attempts found the data unchanged. The waits between the attempts are as they were (1 + 1 + 2 s):
+  on). Expected: one archive for a stop whose data WebKit leaves alone from half a second before
+  the first attempt on, two when it wrote in that half second and not after; the quit's line says
+  how many were made and how many attempts found the data unchanged. The waits between the attempts are as they were (1 + 1 + 2 s):
   a stop still takes at least those four seconds, and what is saved is what each archive costs,
   which grows with the profile's data — on the check's nearly empty profiles, next to nothing.
+
+One more figure is only measured, nothing changed for it: **Safari's home** of a profile is
+restored before its process starts and sealed after it ends on the app's main thread
+(`SafariHomeVault`), so the Profiles window waits that long at every start and stop. The report
+says what it took per group and in all (`homes`). On a nearly empty profile it is expected to be
+a few milliseconds; if a run shows otherwise, or a home grows with use, moving it off the main
+thread is the next step.
 
 ## What the product holds today, and what gives out first
 
