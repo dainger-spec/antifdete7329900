@@ -204,7 +204,7 @@
 
 /* The sync with the Mac's vault (SyncView). */
 "Синхронизация" = "Sync";
-"Синхронизация с Mac — в платных тарифах. Профили на этом iPhone остаются как есть." = "Sync with your Mac comes with the paid plans. The profiles on this iPhone stay as they are.";
+"Синхронизация с Mac — в платных тарифах. Профили на этом iPhone остаются как есть." = "Sync with your Mac comes with a paid plan. The profiles on this iPhone stay as they are.";
 "Синхронизация ещё не включена. Включите её в Lumen для Mac, затем вернитесь сюда." = "Sync is not turned on yet. Turn it on in Lumen for Mac, then come back here.";
 "Мастер-пароль" = "Master password";
 "Мастер-пароль хранилища Lumen для Mac. Он нужен один раз: на этом iPhone остаётся только ключ, под Face ID или кодом телефона." = "The master password of your Lumen for Mac vault. It is asked once: this iPhone keeps only a key, behind Face ID or its passcode.";
