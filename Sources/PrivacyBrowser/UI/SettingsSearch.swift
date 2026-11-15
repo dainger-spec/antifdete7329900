@@ -32,7 +32,12 @@ enum SettingsSearch {
         let score: Int
     }
 
-    static let entries: [SettingsSearchEntry] = [
+    /// Every setting the search looks through: those every copy of the app shows, and unlocking
+    /// with Touch ID where this Mac and this build offer it (`TouchIDUnlock.isOfferedHere`).
+    static let entries: [SettingsSearchEntry] = everywhere
+        + (TouchIDUnlock.isOfferedHere ? [SettingsSearchEntry(.security, "settings.security.touchID", detail: "settings.security.touchID.detail")] : [])
+
+    private static let everywhere: [SettingsSearchEntry] = [
         SettingsSearchEntry(.account, "license.account.caption.plan"),
         SettingsSearchEntry(.account, "license.account.code", detail: "license.account.codeHint"),
         SettingsSearchEntry(.account, "license.account.signOut"),

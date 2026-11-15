@@ -121,6 +121,59 @@ back as `ProfileEvent.configurationSaved` for the manager to record).
 A new device unlocks with the master password because `vault.json` (salt, KDF parameters and
 wrapped VMK) is synced in plaintext.
 
+### Unlocking with Touch ID: what is kept, and when the password is still asked
+
+Off unless the person turns it on (**Settings → Security → Unlock with Touch ID**), with the master
+password typed once more. It is offered only where it can work: a Mac with Touch ID, and a build
+whose signature carries the application identifier, to which this Mac's data-protection keychain
+opens (`TouchIDUnlock.isOfferedHere`; a build made with the provisioning profile — `NE=1` or `CAM=1`
+in `scripts/build-app.sh`). Everywhere else the setting and the lock screen's button are absent.
+
+```
+Touch ID (the system's question: "Lumen is trying to unlock the vault")
+   │ releases, to this app only, on this Mac only
+   ▼
+K (random 256-bit) ── a generic-password item of the data-protection keychain: service
+   │                  io.lumenbrowser.Lumen.touch-id-unlock, account = the vault's id;
+   │                  access control biometryCurrentSet, WhenUnlockedThisDeviceOnly, not synchronizable
+   │ AES-256-GCM unwrap (unlock-touchid.json beside vault.json: wrappedMasterKey; AAD
+   │ "touch-id-unlock:v1:<vaultID>:<passwordRevision>:<passwordTypedAt>:<bootTime>:<fingerprints>")
+   ▼
+VMK ── the same key the master password unwraps; everything below it is as above
+```
+
+**What changes in "the keys live only in memory".** Without this setting the VMK exists only in
+memory, between an unlock and a Lock, and on disk only wrapped under the master password. With it
+on, the VMK is also on this Mac's disk wrapped under K, and K is in this Mac's keychain behind its
+Touch ID: whoever can pass Touch ID on this Mac, signed in to this account, with this copy of the
+app, opens the vault without the master password — within the limits below. Never kept: the master
+password itself, the VMK in the clear, anything on another device or in a backup (the item is
+this-device-only and never synced; the record is useless without it). Lock still forgets every key
+in memory, K included: it is read from the keychain for one unlock and its bytes are cleared.
+
+**The master password still rules** (`BiometricUnlock.decide`, tested without a Mac):
+- asked at the first unlock after this Mac restarts (`kern.boottime` is not the one the record
+  names, within 15 s for the clock's corrections), and after 14 days without typing it
+  (`passwordEveryDays`) — the record is rewritten, with a new K, at every unlock with the password;
+- asked when Touch ID does not recognise the finger or does not answer; cancelled, the question
+  goes away and the password's field is where it was;
+- asked for everything that asks for it by itself: changing it, showing saved passwords
+  (`verifyMasterPassword`), turning this setting on. None of them accepts Touch ID.
+
+**What ends it** (what is kept is removed, and it is turned on again in Settings): turning it off;
+changing the master password (the record names the header's `passwordRevision`, and one made before
+a change does not open the vault even with its key); a fingerprint added or removed (the keychain
+drops a `biometryCurrentSet` item, and the record names the system's hash of the enrolled set);
+"Forgot password…" (the vault set aside); a record that is another vault's.
+
+The dates in the record are in the clear, so that the rule is asked before Touch ID is; they are
+bound into the seal, so a record edited by hand — a later date, another start — does not open.
+
+**A profile's process cannot read K**: it is started from `LumenProfile`, signed without any
+entitlement that opens a keychain, and locks itself out of securityd before Safari's code loads
+(docs/IDENTITY.md, "The keychain"). The self-test keeps an item under this service and asks a
+profile's process for it, on a build that can keep one; elsewhere that check is skipped, by name.
+
 ### Changing the master password: what it does, and what it does not
 
 **What it does.** The VMK is wrapped anew under a key derived from the new password, and written
@@ -129,7 +182,8 @@ header counts the change (`passwordRevision`), and goes to the sync location rig
 (or at the next sync, when the location is out of reach): a new device then sets up with the new
 password and not with the old one. The sync location keeps the header with the most changes; a
 device whose header has fewer never puts it back (`SyncEngine.publishVaultHeader`), and says so in
-its sync status.
+its sync status. Unlocking with Touch ID, where it was on, is turned off by the change: what it kept
+is removed, and it is turned on again with the new password.
 
 **What it does not.**
 - A copy of `vault.json` made before the change — in a backup, in Time Machine, on another disk —

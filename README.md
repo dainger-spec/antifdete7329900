@@ -287,7 +287,14 @@ CI (`.github/workflows/ci.yml`) runs on every push:
    waiting one starts; the rest of the queue can be cancelled.
 9. **Stop**, or closing the last window, saves history and encrypts the profile's website
    data. **Lock** stops every profile and forgets the keys. Quitting (⌘Q) does the same,
-   and waits until every profile is sealed.
+   and waits until every profile is sealed. **Unlock with Touch ID** (Settings → Security; off by
+   default; on a Mac with Touch ID, in a build signed with the provisioning profile) opens the
+   vault in place of the master password: turned on with the password typed once more, it keeps
+   the vault's key on this Mac behind Touch ID — no longer in memory alone, which the setting and
+   the lock screen say. The password is still asked after the Mac restarts, after 14 days without
+   typing it, when Touch ID does not recognise the finger, and to change it or show saved
+   passwords; changing it, or the Mac's fingerprints, turns Touch ID unlocking off
+   ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), "Unlocking with Touch ID").
 10. **Sync (optional):** **More → Sync…** offers the **Lumen account** (while this Mac is signed
    in: the Lumen server, reached with this Mac's own sign-in, which Lumen for iPhone syncs with
    too), a folder (local-only), or an **own server** (client for the documented API; its address

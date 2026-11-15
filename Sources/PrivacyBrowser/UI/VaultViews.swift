@@ -253,6 +253,38 @@ private struct LockPressStyle: ButtonStyle {
     }
 }
 
+/// The lock screen's second action, Unlock with Touch ID: the first one's shape, quieter — 44 pt,
+/// a contour and no fill, the system's Touch ID glyph before its words.
+struct LockTouchIDButton: View {
+    let title: String
+    var enabled = true
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                Image(systemName: "touchid")
+                    .font(.system(size: 17, weight: .regular))
+                    .accessibilityHidden(true)
+                Text(title)
+                    .font(.system(size: 14, weight: .medium))
+            }
+            .foregroundStyle(hovered ? Theme.textPrimary : Theme.textSecondary)
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(hovered ? Theme.edge : Theme.strongBorder, lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.5)
+        .onHover { hovered = enabled && $0 }
+        .animation(Motion.hover(hovered), value: hovered)
+    }
+}
+
 /// A quiet link under the action ("I don't remember the password"): `t2`, white and underlined
 /// under the pointer.
 struct LockLink: View {
@@ -532,10 +564,21 @@ struct UnlockView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 10)
                 }
+                if let touchIDLine {
+                    // Touch ID, where it is turned on: why the password is asked this time, or why
+                    // it did not unlock.
+                    LockNote(symbol: "touchid", text: touchIDLine)
+                        .padding(.top, 12)
+                }
                 VStack(spacing: 14) {
                     LockActionButton(title: L("unlock.action.unlock"), working: model.isWorking,
                                      workingTitle: L("unlock.working"), enabled: !password.isEmpty, action: unlock)
                         .keyboardShortcut(.defaultAction)
+                    if model.touchID.unlocksNow && !model.touchIDSpent {
+                        LockTouchIDButton(title: L("touchid.unlock"), enabled: !model.isWorking) {
+                            Task { await model.unlockWithTouchID() }
+                        }
+                    }
                     LockLink(title: L("unlock.reset.action")) { confirmingReset = true }
                         .disabled(model.isWorking)
                 }
@@ -553,7 +596,8 @@ struct UnlockView: View {
                         .textSelection(.enabled)
                         .padding(.top, 18)
                 } else {
-                    LockNote(symbol: "key", text: L("unlock.keys"))
+                    // With Touch ID unlocking on, the vault's key is no longer in memory alone: said.
+                    LockNote(symbol: "key", text: L(model.touchID.isOn ? "unlock.keys.touchID" : "unlock.keys"))
                         .padding(.top, 26)
                 }
             }
@@ -562,11 +606,32 @@ struct UnlockView: View {
         .onChange(of: model.isWorking) { _, working in
             if !working && model.unlockFailed { attempts += 1 }
         }
+        .task {
+            // At the app's start Touch ID is asked by itself, once, when the window has opened; after
+            // a Lock it is the button — a question that followed the click would be in the way.
+            guard !model.touchIDAskedAtStart else { return }
+            model.touchIDAskedAtStart = true
+            guard model.touchID.unlocksNow else { return }
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard NSApp.isActive, model.phase == .locked else { return }
+            await model.unlockWithTouchID()
+        }
         .confirmationDialog(L("unlock.reset.title"), isPresented: $confirmingReset, titleVisibility: .visible) {
             Button(L("unlock.reset.confirm"), role: .destructive) { model.startOver() }
             Button(L("common.cancel"), role: .cancel) {}
         } message: {
             Text(L("unlock.reset.message"))
+        }
+    }
+
+    /// What is said of Touch ID under the password's field; nil where it is not turned on.
+    private var touchIDLine: String? {
+        if let note = model.touchIDNote { return note }
+        guard model.touchID.offered else { return nil }
+        switch model.touchID.decision {
+        case .off: return nil
+        case .password(let reason): return TouchIDText.passwordAsked(reason)
+        case .touchID: return TouchIDText.sensorNote(model.touchID.sensor)
         }
     }
 

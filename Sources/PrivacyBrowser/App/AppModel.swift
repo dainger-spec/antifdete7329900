@@ -47,6 +47,17 @@ final class AppModel: ObservableObject {
     /// The last unlock attempt failed with a wrong password (the unlock screen then shows which
     /// vault it tried).
     @Published private(set) var unlockFailed = false
+    /// Unlocking with Touch ID, as the lock screen and Settings › Security show it (AppModel+TouchID).
+    @Published var touchID = TouchIDStatus()
+    /// What the lock screen says of Touch ID under the password's field: why it did not unlock, or
+    /// why it was turned off.
+    @Published var touchIDNote: String?
+    /// Touch ID did not recognise the finger on this showing of the lock screen: the master
+    /// password is typed, and Touch ID is offered again after it.
+    @Published var touchIDSpent = false
+    /// Touch ID was asked by itself once in this run of the app (at its start): after a Lock it is a
+    /// button, not a question that follows the click.
+    var touchIDAskedAtStart = false
     /// Where `startOver()` moved the previous vault (shown on the setup screen).
     @Published private(set) var movedAsideVaultPath: String?
     /// The vault's profile index not read as it should be, or profile folders on disk that it does
@@ -231,6 +242,7 @@ final class AppModel: ObservableObject {
             ExpiryNotifications.update(at: .stateChanged, license: self.license)
         }
         license.start()
+        refreshTouchID()
     }
 
     /// The unlocked vault, for the license's key (`AccountKeyVault`); nil while locked.
@@ -316,6 +328,8 @@ final class AppModel: ObservableObject {
                 throw CoreError.wrongPassword
             }
             try self.didUnlock(vault)
+            // With Touch ID unlocking on: the days start anew from this typing of the password.
+            self.touchIDAfterPasswordUnlock(vault)
             // §10.1 later: the account's password and the master password typed in one session are
             // the same — the data is already locked with it, so it is said, not refused; the same for
             // the license's key (typed in this session, or kept in the vault just opened).
@@ -326,6 +340,41 @@ final class AppModel: ObservableObject {
             }
             self.license.forgetComparisons()
         }
+    }
+
+    /// Unlock with Touch ID (`TouchIDUnlock`, `BiometricUnlock`): offered while the rule allows it —
+    /// turned on, the master password typed since this Mac started and within the days, the same
+    /// master password and fingerprints. Touch ID's own question is asked; the key it releases
+    /// opens the vault exactly as the password does. Cancelled, it changes nothing: the password's
+    /// field is right there. Not recognised, or the key gone: said under the field, and the
+    /// password is typed.
+    func unlockWithTouchID() async {
+        guard phase == .locked, !isWorking else { return }
+        refreshTouchID()
+        guard touchID.unlocksNow, !touchIDSpent, let record = BiometricUnlock.load(in: root) else { return }
+        touchIDNote = nil
+        unlockFailed = false
+        isWorking = true
+        defer { isWorking = false }
+        switch await TouchIDUnlock.open(root: root, record: record, reason: L("touchid.reason"), cancelTitle: L("touchid.prompt.cancel")) {
+        case .vault(let vault):
+            do {
+                try didUnlock(vault)
+                license.forgetComparisons()
+            } catch {
+                showError(errorText(error))
+            }
+        case .cancelled:
+            break
+        case .keyGone, .recordRefused:
+            // What was kept no longer opens the vault: it goes, and is turned on again in Settings.
+            forgetTouchID()
+            touchIDNote = L("touchid.ended.fingerprintsChanged")
+        case .failed:
+            touchIDSpent = true
+            touchIDNote = L("touchid.failed")
+        }
+        refreshTouchID()
     }
 
     /// For the unlock screen after a wrong password: when the vault this build opens was created
@@ -366,6 +415,8 @@ final class AppModel: ObservableObject {
             movedAsideVaultPath = Self.displayPath(backup)
             unlockFailed = false
             phase = .setup
+            // The vault set aside is not opened with Touch ID if it is put back: its key goes.
+            forgetTouchID()
         } catch {
             showError(errorText(error))
         }
@@ -680,6 +731,10 @@ final class AppModel: ObservableObject {
         deviceSettings = DeviceSettings()
         deviceSettingsUnreadable = false
         phase = MasterVault.exists(in: root) ? .locked : .setup
+        // The lock screen offers Touch ID as the rule stands now (AppModel+TouchID).
+        touchIDSpent = false
+        touchIDNote = nil
+        refreshTouchID()
         // The camera preview's window, its copy of a video in plaintext and its decoded image go
         // with the vault (the editor went with the profiles).
         CameraPreviewWindowController.closeIfOpen()
@@ -714,6 +769,8 @@ final class AppModel: ObservableObject {
             }.value
             changed = true
         }
+        // A new master password ends unlocking with Touch ID: it is turned on again with the new one.
+        if changed { forgetTouchID() }
         if changed, let target { await publishPasswordChange(target, repository: repository) }
         return changed
     }
