@@ -9,6 +9,8 @@ final class SyncTransportTests: XCTestCase {
         var objects: [String: (revision: Int, data: Data)] = [:]
         var generation: String? = "0123456789abcdef0123456789abcdef"
         var refuseNext: (status: Int, code: String)?
+        /// How many vaults the writes made.
+        var made = 0
         var requests: [(method: String, path: String, headers: [String: String])] = []
         let lock = NSLock()
 
@@ -40,7 +42,13 @@ final class SyncTransportTests: XCTestCase {
                     return .init(status: 412, data: Data(), headers: out)
                 }
                 objects[id] = (Int(headers["X-PB-Revision"] ?? "0") ?? 0, body ?? Data())
-                if generation == nil { generation = "fedcba9876543210fedcba9876543210"; out["x-lumen-server-generation"] = generation }
+                // No vault yet, or its data deleted ("none", CONTRACT.md §16.2): the write makes one,
+                // of a new generation each time.
+                if generation == nil || generation == "none" {
+                    made += 1
+                    generation = made == 1 ? "fedcba9876543210fedcba9876543210" : String(format: "%032lx", made)
+                    out["x-lumen-server-generation"] = generation
+                }
                 return .init(status: 201, data: Data(), headers: out)
             }
         }

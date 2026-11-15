@@ -228,6 +228,36 @@ final class SyncReadTests: XCTestCase {
         XCTAssertEqual(try repository.summary(for: shop.id).name, "Магазин", "the Mac's profile is not touched")
     }
 
+    /// Audit 4: after "Delete sync data" in the cabinet the server has no vault (generation "none"),
+    /// and a run of the iPhone, which keeps its copy, makes it again (CONTRACT.md §16.2). The generation
+    /// kept is the one the server gave the vault made anew — not the "none" read before the run, with
+    /// which the next run would forget its records and send every object once more.
+    func testAVaultMadeAgainKeepsItsNewGeneration() async throws {
+        let (server, mac, repository, macTransport, phone) = try macAndPhone()
+        _ = try repository.create(name: "Магазин", configuration: ProfileConfiguration())
+        _ = try await SyncEngine(repository: repository, transport: macTransport).sync()
+        let key = try phoneKey(server)
+        let root = try folder().appendingPathComponent("vault")
+        let first = try await SyncRead.pull(root: root, key: key, transport: phone, keptGeneration: nil)
+
+        // The sync data deleted in the cabinet: nothing on the server, and no generation.
+        server.objects = [:]
+        server.generation = "none"
+        let again = LumenSyncTransport(vaultID: mac.vaultID) { m, p, b, h in server.answer(m, p, b, h) }
+        let second = try await SyncRead.pull(root: root, key: key, transport: again, keptGeneration: first.generation)
+        XCTAssertNotNil(server.objects["vault-header"], "the iPhone's run made the vault again")
+        XCTAssertNotEqual(server.generation, "none")
+        XCTAssertNotEqual(server.generation, first.generation, "a vault made again is of a new generation")
+        XCTAssertEqual(second.generation, server.generation, "the new vault's generation is kept, not the one read before the run")
+
+        // The next run: the same generation, the records kept — nothing is sent again.
+        let before = server.requests.count
+        let next = LumenSyncTransport(vaultID: mac.vaultID) { m, p, b, h in server.answer(m, p, b, h) }
+        let third = try await SyncRead.pull(root: root, key: key, transport: next, keptGeneration: second.generation)
+        XCTAssertEqual(third.generation, second.generation)
+        XCTAssertEqual(server.requests[before...].filter { $0.method == "PUT" }.count, 0, "nothing is sent again")
+    }
+
     func testAProxyTheIPhoneCannotUseComesBoundAndLocked() throws {
         let repository = try ProfileRepository(vault: MasterVault.create(in: try folder(), password: "p", iterations: 1_000))
         let tlsID = try repository.create(name: "TLS", configuration: ProfileConfiguration(

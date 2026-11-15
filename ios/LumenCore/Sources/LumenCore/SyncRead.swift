@@ -75,7 +75,10 @@ public struct SyncedEditRefusal: Equatable, Sendable {
 public enum SyncRead {
     public struct Outcome: Sendable {
         public var profiles: [SyncedProfile]
-        /// The server's generation to keep for the next run (`SyncGeneration`).
+        /// The server's generation to keep for the next run (`SyncGeneration`): the one the run ended
+        /// with — the list's, or the one a write of the run was answered with (a vault the run made
+        /// anew, after its data was deleted in the cabinet, has a new one). Never the one from before
+        /// the run: with it the next run would forget its records and send everything again.
         public var generation: String?
         /// Objects the server refused for their size or the plan's space (deferred).
         public var deferredForSpace: [String]
@@ -174,7 +177,10 @@ public enum SyncRead {
             guard !notHere.contains(summary.id), let configuration = try? repository.loadConfiguration(summary.id) else { return nil }
             return profile(summary, configuration)
         }
-        var outcome = Outcome(profiles: profiles, generation: generation, deferredForSpace: transport.deferredForSpace)
+        // The generation the records are now of: a write of the run may have made the vault anew
+        // (CONTRACT.md §16.2, 6).
+        var outcome = Outcome(profiles: profiles, generation: transport.generation ?? generation,
+                              deferredForSpace: transport.deferredForSpace)
         // Only this iPhone's profiles: one deleted here takes no place of it.
         let gone = Set(notHere.compactMap { try? SyncProfileToken.token(for: $0, vault: repository.vault) })
         outcome.profileTokens = SyncProfileToken.tokens(in: repository).filter { !gone.contains($0) }
