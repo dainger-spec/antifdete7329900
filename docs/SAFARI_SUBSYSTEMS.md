@@ -24,6 +24,7 @@ the row says what would show it.
 |---|---|---|
 | Window, tabs, toolbar, address bar (`BrowserWindowController`, `BrowserTabViewItem`, `UnifiedField…`, `UnifiedTabBar`, `ToolbarController`) | window and UI state: the profile's defaults domain (`Library/PrivacyBrowser/SafariDefaults.plist`) | self-test "Safari chrome" (65 checks), menu walk |
 | Navigation and page delegates (`BrowserNavigationDelegate`, `BrowserUIDelegate`, `BrowserInputDelegate`) | — | self-test "Safari chrome" |
+| Ours, in Safari's window: whose window it is — the profile's chip at the toolbar's trailing end (a titlebar accessory) and its name before the window's title (`SafariProfileMarker`, 15 November) | — | self-test "Safari's window, every day": a page measures the same with it and without (first CI run pending) |
 | Menu bar (Safari's `MainMenu.nib`) | — | menu walk (fails on change) |
 | Search providers and the address bar's local completion (`SearchProvidersController`, `Safari::UnifiedFieldCompletionController`, `CompletionListCollectionViewController`) | the profile's defaults | self-test (Safari's services set as the profile needs them) |
 | Favicons, touch icons, template icons (`FaviconProvider`, `WBSFaviconProviderDatabaseController`, `TemplateIconCache`) | `Library/Safari/Favicon Cache`, `Template Icons` | capture's coverage (a SKIP on runners: Safari fetched no touch icon there) |

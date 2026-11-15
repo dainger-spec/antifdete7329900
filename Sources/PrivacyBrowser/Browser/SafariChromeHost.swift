@@ -194,6 +194,9 @@ enum SafariChromeHost {
                 WindowSizing.apply(size, to: window)
             }
         }
+        // Whose window it is, before it is seen: the profile's name and colour (`SafariProfileMarker`).
+        SafariProfileMarker.install(session: session)
+        if let window = controller.window { SafariProfileMarker.mark(window) }
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
@@ -247,7 +250,11 @@ enum SafariChromeHost {
             return nil
         }
         let tab = SafariChrome.newestTab()
-        if let window = controller.window { automationWindows.add(window) }
+        if let window = controller.window {
+            automationWindows.add(window)
+            SafariProfileMarker.install(session: session)
+            SafariProfileMarker.mark(window)
+        }
         if let window = controller.window, let size = session.configuration.windowSize {
             WindowSizing.apply(size, to: window)
         }

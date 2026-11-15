@@ -431,6 +431,7 @@ enum SafariTabs {
                 var window: NSWindow? = first
                 if index > 0 {
                     let controller = SafariChrome.openWindow(address: kept.tabs.first)
+                    if let opened = controller?.window { SafariProfileMarker.mark(opened) }
                     controller?.showWindow(nil)
                     window = controller?.window
                     if window != nil { opened += 1 }

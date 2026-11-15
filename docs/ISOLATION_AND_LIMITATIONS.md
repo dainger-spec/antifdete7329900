@@ -1795,6 +1795,32 @@ mark, a title and the form. While the key is derived (Argon2id), the form gives 
 progress line, and the Profiles window fades in once the vault is open. Lock fades back to
 the same screen. Under Reduce Motion the screen and the start page appear without motion.
 
+**Whose window it is, in Safari's window** (the owner, 15 November; `SafariProfileMarker`).
+Until then nothing in Safari's window said which profile it was — only the Dock icon's letters
+did — and with several profiles open, acting in the wrong one is the mistake to prevent. Two
+things say it now, neither of which a page can measure:
+- **A chip at the trailing end of Safari's toolbar**: the profile's glyph, its name and the flag
+  of where it exits, on the profile's own colour (its glyph's in the Profiles window, chosen in
+  the editor or given by its id), the name in that colour's light tone — the same chip a window
+  of ours has, on a ground of its own, since Safari's toolbar is light or dark with the Mac. A
+  name too long is cut at 200 pt. It is a titlebar accessory, laid by AppKit beside the toolbar's
+  items in the room the toolbar has: the toolbar's height, the window's frame and the page's area
+  stay as they are. That is checked each time, not assumed: the window's frame, its content's area
+  and the page's own frame are read before the chip goes in and after, and a chip that changed
+  any of them is taken out at once and stays out for the run (the profile's process reports it).
+- **The window's title begins with the profile's name** — "[Name] page", as a window of ours is
+  titled — wherever the system lists windows by title: the Window menu, the Dock icon's menu,
+  Mission Control. Safari's toolbar shows no title.
+Nothing of it reaches a page: no script, no style, nothing of the web view is changed.
+**Checked by the self-test** ("Safari's window, every day"): everything the page in front
+measures of its window and screen — outer and inner sizes, the chrome's height, the window's
+place, the screen, the viewport — is read with the marker, with it taken out and with it back,
+and must be the same; the title must name the profile and the chip must be there. Not measured
+here (no Mac): that a trailing accessory keeps Safari's toolbar as it is on macOS 26 and 27 —
+the first CI run says. `PB_PROFILE_MARKER=0` in the app's environment leaves Safari's window as
+Safari draws it. **Not covered:** a window's title is readable by other apps on this Mac that
+have the Accessibility or Screen Recording permission, as a window of ours has always been.
+
 **Browser window.** The toolbar is flat: the window's dark colour under a transparent title
 bar, with no glass behind its items (macOS 26 would add it). It holds the Lumen mark, the
 navigation buttons, the address field and the profile chip. The chip shows the profile's

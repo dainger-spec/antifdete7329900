@@ -42,6 +42,12 @@ enum WindowProbeAction: Codable, Equatable {
     /// Safari's own Bookmarks › Add Bookmark… (⌘D), sent as its item sends it; the sheet it brings
     /// is told and its default button pressed, and then what the Bookmarks menu lists.
     case addBookmark
+    /// What the page in front measures of its window and screen, in `detail`, with the window's
+    /// title and whether it carries the profile's chip (`SafariProfileMarker`).
+    case measure
+    /// The profile's name and colour taken out of Safari's windows (false) or put back (true): what
+    /// a page measures is compared between the two.
+    case marker(Bool)
 }
 
 struct WindowLook: Codable, Equatable {
@@ -57,6 +63,11 @@ struct WindowLook: Codable, Equatable {
     var urls: [String] = []
     /// In Safari's window: how its tabs' pages were read (`SafariTabs.source`).
     var tabsSource = ""
+    /// The window's title, and whether the window says whose it is: by its title, by the chip in
+    /// its toolbar (`SafariProfileMarker`).
+    var windowTitle = ""
+    var titleNamesProfile = false
+    var hasProfileChip = false
     /// The accessibility identifiers of the window's controls that are shown.
     var controls: [String] = []
     /// The menu bar's items with a ⌘ shortcut: "⌘T New Tab".
@@ -192,6 +203,19 @@ enum WindowProbe {
                 look.found = look.found && !page.isEmpty && listed.contains(page)
                 look.detail = said.joined(separator: "; ")
             }
+        case .measure:
+            look.action = "measure"
+            if let window, let page = controller?.selectedTab?.webView
+                ?? (SafariChromeHost.isBrowserWindow(window) ? SafariChromeHost.frontPage(in: window) : nil) {
+                look.detail = await measured(by: page)
+                look.found = !look.detail.hasPrefix("error")
+            }
+        case .marker(let shown):
+            look.action = shown ? "the profile's marker back" : "the profile's marker out"
+            if SafariChromeHost.isHosting {
+                SafariProfileMarker.suspend(!shown)
+                look.found = true
+            }
         case .downloads:
             look.action = "downloads"
             if SafariChromeHost.isHosting {
@@ -231,9 +255,33 @@ enum WindowProbe {
             look.urls = own.map { $0.url?.absoluteString ?? "" }
             look.tabsSource = SafariTabs.source
         }
-        if let window { look.controls = identifiers(in: window) }
+        if let window {
+            look.controls = identifiers(in: window)
+            look.windowTitle = window.title
+            if SafariChromeHost.isHosting, SafariChromeHost.isBrowserWindow(window) {
+                let state = SafariProfileMarker.state(of: window)
+                look.titleNamesProfile = state.title
+                look.hasProfileChip = state.chip
+            }
+        }
         look.menuItems = menuShortcuts(NSApp.mainMenu)
         return look
+    }
+
+    /// Everything a page can measure of its window and its screen, as the page in front measures
+    /// it: one line, the same for the same window.
+    private static func measured(by page: WKWebView) async -> String {
+        let script = """
+        [window.outerWidth, window.outerHeight, window.innerWidth, window.innerHeight, window.outerHeight - window.innerHeight,
+         window.screenX, window.screenY, screen.width, screen.height, screen.availWidth, screen.availHeight, window.devicePixelRatio,
+         document.documentElement.clientWidth, document.documentElement.clientHeight,
+         window.visualViewport ? window.visualViewport.width : -1, window.visualViewport ? window.visualViewport.height : -1].join(' ')
+        """
+        return await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
+            page.evaluateJavaScript(script) { value, error in
+                continuation.resume(returning: (value as? String) ?? "error: \(error.map { String(describing: $0) } ?? "no value")")
+            }
+        }
     }
 
     /// The titles of what Safari's Bookmarks menu lists, its submenus with it, filled as AppKit

@@ -1191,6 +1191,7 @@ enum ProfileNetworkGuard {
         report.downloads = HostedDownloads.counts.text
         report.downloadsInMenu = HostedDownloads.shared.isRouted
         report.untitledMenuItems = SafariChrome.untitledMenuItems
+        report.profileMarkerDropped = SafariProfileMarker.droppedForGeometry
         if let menu = NSApp?.mainMenu {
             let pdf = NSSelectorFromString("saveDocumentToPDF:")
             // The File menu's submenus filled first, as AppKit fills one before it shows it.
@@ -1380,6 +1381,9 @@ struct ProfileNetworkReport: Codable, Equatable {
     var downloadsInMenu = false
     /// Menu items Safari's code made without a title, which got one (`SafariChrome`).
     var untitledMenuItems = 0
+    /// The profile's chip changed what a page can measure of Safari's window and was taken out
+    /// (`SafariProfileMarker`): false is right.
+    var profileMarkerDropped = false
     /// Safari's File menu has Safari's own import and export of the profile's bookmarks, whichever
     /// File menu Safari built, and whether they were put back where the Browsing Data items were
     /// (`SafariChrome.keepBookmarksImportAndExport`).

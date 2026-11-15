@@ -50,4 +50,26 @@ final class ProfileLabelsTests: XCTestCase {
         XCTAssertEqual(held.notes.count, ProfileConfiguration.maximumNotesLength)
         XCTAssertEqual(held.tags, ["a", "b"])
     }
+
+    func testAWindowsTitleBeginsWithItsProfilesName() {
+        XCTAssertEqual(ProfileWindowTitle.marked("Inbox — Mail", profile: "Shop US 3"), "[Shop US 3] Inbox — Mail")
+        XCTAssertEqual(ProfileWindowTitle.marked("", profile: "Shop US 3"), "[Shop US 3]", "a window with no page yet")
+        XCTAssertEqual(ProfileWindowTitle.marked("Страница", profile: " Магазин \n"), "[Магазин] Страница")
+        // Marked once, however often the browser's own title passes through.
+        let once = ProfileWindowTitle.marked("Start Page", profile: "A")
+        XCTAssertEqual(ProfileWindowTitle.marked(once, profile: "A"), once)
+        XCTAssertEqual(ProfileWindowTitle.marked("[A]", profile: "A"), "[A]")
+        // Another profile's name, or a page that only begins alike, is a page's title like any other.
+        XCTAssertEqual(ProfileWindowTitle.marked("[B] Page", profile: "A"), "[A] [B] Page")
+        XCTAssertEqual(ProfileWindowTitle.marked("[A]bout us", profile: "A"), "[A] [A]bout us")
+        XCTAssertEqual(ProfileWindowTitle.marked("Page", profile: "  "), "Page", "a profile without a name marks nothing")
+    }
+
+    func testTheBrowsersOwnTitleComesBackFromAMarkedOne() {
+        for title in ["Inbox — Mail", "", "[B] Page", "[A]bout us"] {
+            XCTAssertEqual(ProfileWindowTitle.unmarked(ProfileWindowTitle.marked(title, profile: "A"), profile: "A"), title)
+        }
+        XCTAssertEqual(ProfileWindowTitle.unmarked("Page", profile: "A"), "Page", "a title never marked is left alone")
+        XCTAssertEqual(ProfileWindowTitle.unmarked("[A] Page", profile: ""), "[A] Page")
+    }
 }

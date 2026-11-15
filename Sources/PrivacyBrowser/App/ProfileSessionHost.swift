@@ -192,7 +192,11 @@ enum ProfileSessionHost {
             // Where the proxy exits could not be found: the manager says so, where the user looks.
             manager.onProxyLocationUnknown = { _ in ProfileSessionHost.send(.proxyLocationUnknown) }
             // Where it exits, when known: the country's flag on this process's Dock tile.
-            BrowserSession.onExitLocation = { _, location in DockIcon.showExit(country: location?.countryCode) }
+            // And in Safari's window, on the profile's chip (`SafariProfileMarker`).
+            BrowserSession.onExitLocation = { _, location in
+                DockIcon.showExit(country: location?.countryCode)
+                SafariProfileMarker.exitChanged()
+            }
             // A scenario's run log and its end, to the manager as they come.
             manager.onScenarioLine = { _, runID, line in ProfileSessionHost.send(.scenarioLine(runID: runID, line)) }
             manager.onScenarioEnded = { _, runID, outcome in ProfileSessionHost.send(.scenarioEnded(runID: runID, outcome)) }

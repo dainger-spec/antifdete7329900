@@ -5812,7 +5812,8 @@ final class SelfTest {
         let bookmarkName = "Safari chrome: Bookmarks › Add Bookmark… (⌘D) brings Safari's sheet, and its Add puts the page in the Bookmarks menu"
         let keptName = "Safari chrome: a profile stopped with two tabs open in Safari's window keeps both, and the one shown"
         let reopenedName = "Safari chrome: its next start opens both again in Safari's window, through its proxy, the same tab in front"
-        let names = [savedName, listedName, bookmarkName, keptName, reopenedName]
+        let markerName = "Safari chrome: Safari's window says whose it is — the profile's chip in its toolbar, its name before the window's title — and a page measures the same window and screen with it and without"
+        let names = [markerName, savedName, listedName, bookmarkName, keptName, reopenedName]
         guard !AppEnvironment.isSandboxed else {
             for name in names { skip(name, "the sandboxed build runs no process per profile", .build) }
             return
@@ -5898,6 +5899,27 @@ final class SelfTest {
         }
         _ = await window(holding: [one.absoluteString], within: 10)
 
+        // Whose window it is (`SafariProfileMarker`), and that no page can tell: everything the page
+        // in front measures of its window and screen, with the marker, with it taken out, and with
+        // it back. The chip is beside the toolbar's items, never under them.
+        let marked = await ask(.measure)
+        _ = await ask(.marker(false))
+        let bare = await ask(.measure)
+        _ = await ask(.marker(true))
+        let markedAgain = await ask(.measure)
+        info("Safari's window, whose it is: titled '\(marked.windowTitle)', chip \(marked.hasProfileChip ? "there" : "NOT there"); "
+             + "a page measures (outer w h, inner w h, chrome, screenX Y, screen w h, avail w h, ratio, client w h, viewport w h) "
+             + "with it \(marked.detail) | without \(bare.detail) | with it again \(markedAgain.detail)")
+        check(markerName,
+              marked.found && bare.found && markedAgain.found
+                && marked.hasProfileChip && marked.titleNamesProfile && marked.windowTitle.hasPrefix("[Safari's window, every day]")
+                && !bare.hasProfileChip && !bare.windowTitle.hasPrefix("[Safari's window, every day]")
+                && markedAgain.hasProfileChip && markedAgain.titleNamesProfile
+                && marked.detail == bare.detail && marked.detail == markedAgain.detail,
+              "with the marker: title '\(marked.windowTitle)', chip \(marked.hasProfileChip), measured \(marked.detail); "
+              + "without: title '\(bare.windowTitle)', chip \(bare.hasProfileChip), measured \(bare.detail); "
+              + "back: title '\(markedAgain.windowTitle)', chip \(markedAgain.hasProfileChip), measured \(markedAgain.detail)")
+
         // Downloads: the page in front is sent to a file, as a link on it sends it — one the server
         // sends to be saved (an attachment of a type a browser could show), one of a type no
         // browser shows, with no word about saving it.
@@ -5915,6 +5937,9 @@ final class SelfTest {
         networkReport = nil
         _ = manager.checkNetwork(profile.id)
         _ = await waitUntil(timeout: 40) { networkReport != nil }
+        if let report = networkReport, report.profileMarkerDropped {
+            info("Safari's window, whose it is: the chip changed the window's geometry on this Mac and was taken out (the title alone says whose it is)")
+        }
         info("Safari's window, downloads: the profile's process says \(networkReport?.downloads ?? "nothing (no report)"); "
              + "the folder holds \(inFolder); asked of the proxy: \(downloadPaths)")
         check(savedName, saved && downloadPaths.count >= 2,

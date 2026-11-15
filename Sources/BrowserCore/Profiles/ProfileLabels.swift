@@ -70,3 +70,30 @@ public struct ProfileAvatarStyle: Codable, Equatable, Sendable {
         return ProfileAvatarStyle(color: color, letters: letters)
     }
 }
+
+/// The title of a profile's browser window: the profile's name before the page's, so that the
+/// window is told from another profile's wherever the system lists windows by title — the Window
+/// menu, the Dock's menu, Mission Control — in a window of ours and in Safari's alike.
+public enum ProfileWindowTitle {
+    /// The profile's name as a title begins with it.
+    public static func mark(of profile: String) -> String {
+        "[\(profile.trimmingCharacters(in: .whitespacesAndNewlines))]"
+    }
+
+    /// `title` with the profile's name before it; one that has it already stays as it is, and a
+    /// window with no page yet is titled with the name alone. A profile without a name marks nothing.
+    public static func marked(_ title: String, profile: String) -> String {
+        guard !profile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return title }
+        let name = mark(of: profile)
+        if title == name || title.hasPrefix(name + " ") { return title }
+        return title.isEmpty ? name : name + " " + title
+    }
+
+    /// `title` without the profile's name before it, as the browser gave it.
+    public static func unmarked(_ title: String, profile: String) -> String {
+        guard !profile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return title }
+        let name = mark(of: profile)
+        if title == name { return "" }
+        return title.hasPrefix(name + " ") ? String(title.dropFirst(name.count + 1)) : title
+    }
+}
