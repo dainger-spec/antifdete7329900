@@ -40,8 +40,10 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
 
 ## Controls
 
-- Buttons: `LumenButtonStyle` — `.lumenPrimary` and `.lumenSecondary` are contours (the main action
-  is 32 pt), `.lumenGhost` is quiet, `.lumenDestructive` red. Icon buttons: `LumenIconButtonStyle`
+- Buttons: `LumenButtonStyle` — contours, and one of them leads: `.lumenPrimary` (32 pt, semibold) is lit
+  from above — a lighter face toward its top, its contour brighter along the top, a faint light under it;
+  `.lumenSecondary` is a quiet contour (16 %); `.lumenGhost` is quiet (Cancel in a sheet, at the main
+  button's height), `.lumenDestructive` red; `.lumenFieldButton` beside a 32 pt field. No filled button. Icon buttons: `LumenIconButtonStyle`
   (`isOn` keeps the selected tone, e.g. an inspector's toggle).
 - Switches and checkboxes: `.lumenSwitch`, `.lumenCheckbox` (a real Toggle underneath for
   VoiceOver). Segmented choices: `LumenSegmented` — give it an accessibility label when it has a

@@ -179,7 +179,7 @@ struct ProxyLineField: View {
                 Button(action: onCheck) {
                     Label(L("proxyLine.check"), systemImage: "checkmark.shield")
                 }
-                .buttonStyle(.lumenSecondary)
+                .buttonStyle(.lumenFieldButton)
                 .disabled(checking || line.checkable == nil)
                 .help(L("proxyLine.check.help"))
             }

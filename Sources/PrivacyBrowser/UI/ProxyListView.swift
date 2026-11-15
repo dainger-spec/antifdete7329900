@@ -863,7 +863,7 @@ struct ProxyEditView: View {
             .padding(.bottom, 18)
             SheetFooter {
                 Button(L("common.cancel")) { dismiss() }
-                    .buttonStyle(.lumenSecondary)
+                    .buttonStyle(LumenButtonStyle(kind: .ghost, height: Theme.buttonHeight))
                     .keyboardShortcut(.cancelAction)
                 Button(L(entry == nil ? "proxies.add.action" : "common.save"), action: save)
                     .buttonStyle(.lumenPrimary)

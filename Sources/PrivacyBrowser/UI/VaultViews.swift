@@ -793,7 +793,7 @@ struct ChangePasswordView: View {
             .scrollBounceBehavior(.basedOnSize)
             SheetFooter {
                 Button(L("common.cancel")) { dismiss() }
-                    .buttonStyle(.lumenSecondary)
+                    .buttonStyle(LumenButtonStyle(kind: .ghost, height: Theme.buttonHeight))
                     .keyboardShortcut(.cancelAction)
                 Button(L("changepw.action.change"), action: change)
                     .buttonStyle(.lumenPrimary)

@@ -221,7 +221,7 @@ struct TouchIDTurnOnView: View {
             .padding(.bottom, 20)
             SheetFooter {
                 Button(L("common.cancel")) { dismiss() }
-                    .buttonStyle(.lumenSecondary)
+                    .buttonStyle(LumenButtonStyle(kind: .ghost, height: Theme.buttonHeight))
                     .keyboardShortcut(.cancelAction)
                 Button(L("touchid.on.action"), action: turnOn)
                     .buttonStyle(.lumenPrimary)
