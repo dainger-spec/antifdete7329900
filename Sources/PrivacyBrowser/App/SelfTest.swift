@@ -382,6 +382,7 @@ final class SelfTest {
         await group("profile transfer") { try await profileTransfer(repository) }
         await group("automation API") { try await automationAPI(repository) }
         await group("profile sync") { try await profileSync(repository) }
+        await group("a vault brought back from sync") { try await vaultBroughtBack() }
         await group("warm-up") { try await warmUp(repository) }
         await group("warm-up queue") { try await warmUpQueue(repository) }
         await group("the page cannot tell") { try await pageCannotTell(repository) }
@@ -7198,6 +7199,123 @@ final class SelfTest {
               "\(zones) \(conflict.resolvedConflicts)")
         check("profile sync: no errors reported", messages.isEmpty, "\(messages)")
         try await managerA.deleteBecauseThePersonAsked(profile.id)
+    }
+
+    // MARK: A vault brought back from its sync location
+
+    /// A Mac without a vault brings one back from where another Mac synced it (`VaultRestore`: what
+    /// "I already have a vault" on the setup screen runs), in this build, with the app's own key
+    /// derivation: a wrong master password leaves nothing; a run the person stops leaves no vault in
+    /// place, and the same restore asked again goes on from it; the vault moves into place whole,
+    /// opens with its own master password, and has the place it came from as this Mac's sync
+    /// target; the sync folder is byte for byte as it was, and what else the vault's folder held too;
+    /// the next sync goes on with that vault; and every state a restore can stop in is said in the
+    /// interface's language. The interruptions between two objects and between two renames are the
+    /// unit tests' (`VaultRestoreTests`).
+    private func vaultBroughtBack() async throws {
+        let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("pb-selftest-restore-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        // A Mac with two profiles, synced to a folder; its vault made as the app makes one (Argon2id).
+        let password = "the vault's own"
+        let mac = try ProfileRepository(vault: MasterVault.create(in: scratch.appendingPathComponent("Mac"), password: password))
+        var settings = ProfileConfiguration(ephemeral: true)
+        settings.timeZoneIdentifier = "Europe/Paris"
+        let first = try mac.create(name: "Restore one", configuration: settings)
+        let second = try mac.create(name: "Restore two", configuration: ProfileConfiguration(ephemeral: true))
+        _ = try mac.bookmarkStore(for: first.id, key: mac.profileKey(for: first.id)).add(title: "kept", url: URL(string: "https://kept.example/")!)
+        let place = scratch.appendingPathComponent("place")
+        _ = try await SyncEngine(repository: mac, transport: LocalDirectorySyncTransport(directory: place)).sync()
+        func placeContents() -> [String: Data] {
+            var found: [String: Data] = [:]
+            for name in (try? FileManager.default.contentsOfDirectory(atPath: place.path)) ?? [] {
+                found[name] = try? Data(contentsOf: place.appendingPathComponent(name))
+            }
+            return found
+        }
+        let before = placeContents()
+
+        // The Mac without a vault: its folder holds what a signed-in Mac's does before a vault.
+        let root = scratch.appendingPathComponent("New Mac")
+        let account = root.appendingPathComponent("account.json")
+        try SecureFile.write(Data("{}".utf8), to: account)
+        let header = try await VaultRestore.header(at: LocalDirectorySyncTransport(directory: place))
+        var refused: VaultRestore.Problem?
+        do {
+            _ = try VaultRestore.open(header, password: "not the vault's", root: root)
+        } catch {
+            refused = error as? VaultRestore.Problem
+        }
+        check("a vault brought back: a wrong master password is said as one, and leaves nothing on this Mac",
+              refused == .wrongPassword && !FileManager.default.fileExists(atPath: VaultRestore.stagingRoot(in: root).path),
+              String(describing: refused))
+
+        // Stopped before the first object: the task is cancelled while it still waits to begin.
+        let staged = try VaultRestore.open(header, password: password, root: root)
+        let target = DeviceSettings.SyncTarget.folder(bookmark: Data(), path: place.path)
+        let stoppedRun = Task { () -> VaultRestore.Problem? in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            do {
+                _ = try await VaultRestore.download(into: staged.vault, from: LocalDirectorySyncTransport(directory: place), target: target)
+                return nil
+            } catch {
+                return error as? VaultRestore.Problem
+            }
+        }
+        stoppedRun.cancel()
+        let stopped = await stoppedRun.value
+        let unfinished = VaultRestore.unfinished(in: root)
+        check("a vault brought back: a run the person stops leaves no vault in place, and the restore is kept to go on with",
+              stopped == .stopped && !MasterVault.exists(in: root) && unfinished.map(\.vaultID) == [mac.vault.vaultID],
+              "\(String(describing: stopped)) \(unfinished.count)")
+
+        // Asked again, as after the app was quit: opened anew, brought whole, moved into place.
+        let again = try VaultRestore.open(header, password: password, root: root)
+        let outcome = try await VaultRestore.download(into: again.vault, from: LocalDirectorySyncTransport(directory: place), target: target)
+        let inPlaceBefore = MasterVault.exists(in: root)
+        let vault = try VaultRestore.moveIntoPlace(again.vault, root: root)
+        let here = try ProfileRepository.openedAtUnlock(vault: vault)
+        let zone = try? here.loadConfiguration(first.id).timeZoneIdentifier
+        let marks = (try? here.bookmarkStore(for: first.id, key: here.profileKey(for: first.id)).all().map(\.title)) ?? []
+        check("a vault brought back: it is in place only once all of it is here — both profiles, their settings and what is in them — and its staging is gone",
+              again.continued && !inPlaceBefore && MasterVault.exists(in: root) && Set(here.list().map(\.id)) == [first.id, second.id]
+                  && zone == "Europe/Paris" && marks == ["kept"] && outcome.withoutSettings.isEmpty
+                  && !FileManager.default.fileExists(atPath: VaultRestore.stagingRoot(in: root).path),
+              "continued \(again.continued) in place before \(inPlaceBefore) \(here.list().map(\.name)) \(zone ?? "?") \(marks) \(outcome.withoutSettings.count)")
+        let reopened = try? MasterVault.unlock(in: root, password: password)
+        let kept = (try? DeviceSettings.load(from: vault))?.syncTarget
+        check("a vault brought back: it is the same vault, opens with its own master password, and this Mac's sync target is the place it came from",
+              reopened?.vaultID == mac.vault.vaultID && kept == target, "\(reopened?.vaultID == mac.vault.vaultID) \(kept == target)")
+        check("a vault brought back: nothing was written where it is kept, and what else this Mac's folder held is as it was",
+              placeContents() == before && (try? Data(contentsOf: account)) == Data("{}".utf8))
+        let next = try await SyncEngine(repository: here, transport: LocalDirectorySyncTransport(directory: place)).sync()
+        check("a vault brought back: the next sync goes on with that vault — nothing started over, nothing in conflict",
+              !next.startedOver && next.resolvedConflicts.isEmpty && next.merged.isEmpty,
+              "started over \(next.startedOver) \(next.resolvedConflicts) \(next.merged)")
+
+        // What a restore can stop in, as the screen says it.
+        let problems: [VaultRestore.Problem] = [
+            .noVaultThere, .newerApp(what: "x.bin"), .notThisVault, .wrongPassword, .vaultHere, .filesInTheWay(["index.bin"]),
+            .notEnoughSpace(free: 1, needed: 2), .diskFull, .changedMeanwhile, .stopped,
+        ]
+        let states: [AccountVaults.State] = [
+            .noVaults, .notInPlan, .onHold(until: Date()), .onHold(until: nil), .accountDisabled, .signedOut,
+            .rateLimited(retryAfter: 5), .unreachable, .refused(status: 404, code: "not_found"),
+        ]
+        var unsaid: [String] = []
+        for problem in problems {
+            let shown = errorText(problem)
+            if shown.contains("restore.") || (Localization.languageCode != "en" && shown == problem.description) { unsaid.append(shown) }
+            for shownAt in [RestoreModel.Place.account, .folder(path: "/x"), .server(host: "x")] {
+                let text = RestoreText.text(problem, place: shownAt, root: root)
+                if text.isEmpty || text.contains("restore.") { unsaid.append(text) }
+            }
+        }
+        for state in states {
+            let shown = RestoreText.text(state)
+            if shown.isEmpty || shown.contains("restore.") { unsaid.append(shown) }
+        }
+        check("a vault brought back: every state it can stop in is said in the interface's language (\(problems.count + states.count))",
+              unsaid.isEmpty, unsaid.joined(separator: " | "))
     }
 
     // MARK: Session warm-up robot
