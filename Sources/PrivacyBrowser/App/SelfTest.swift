@@ -7124,8 +7124,9 @@ final class SelfTest {
 
     /// A scenario's JavaScript run through `ScenarioRunner` on a profile's page: it does what it
     /// says and logs it; an error ends the run with its reason; Stop ends a waiting script and one
-    /// that loops without end (the app answering meanwhile); a plan that loses automation lets the
-    /// step under way finish and runs no other.
+    /// that loops without end (the app answering meanwhile); commands asked for without await are
+    /// held to a limit, and a loop that logs ends with its run after Stop; a plan that loses
+    /// automation lets the step under way finish and runs no other.
     private func scenarioRuns(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
             skip("scenario runs: a scenario runs, fails, stops as it should", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the pages)")
@@ -7210,6 +7211,25 @@ final class SelfTest {
         check("scenario runs: Stop ends a waiting script and one that loops without end, and the app answers meanwhile",
               waiting == .stopped(.byUser) && waitingTime < 4 && looping == .stopped(.byUser) && loopingTime < 4 && ticks >= 4,
               "waiting \(String(describing: waiting)) in \(String(format: "%.1f", waitingTime)) s; looping \(String(describing: looping)) in \(String(format: "%.1f", loopingTime)) s; main-thread ticks \(ticks)")
+
+        // A loop that asks for commands without awaiting them: past the limit the call throws, and
+        // the run fails saying to await them (they queued without end). One that logs without end:
+        // Stop makes its `log` throw, so the loop, and the script's thread, end with the run (it ran
+        // on after Stop until the profile stopped).
+        let (flooded, _, floodedTime) = await run("for (;;) { page.scroll(1); }", timeout: 20)
+        let logging = ScenarioRunner(driver: PageDriver(webView: tab.webView) { url in _ = tab.load(url) })
+        logging.start("for (;;) { log('tick'); }")
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        logging.stop()
+        let loggingEnded = await waitUntil(timeout: 5) { !logging.scriptThreadIsAlive }
+        if case .failed(let message)? = flooded {
+            check("scenario runs: commands asked for without await are held to a limit, past which the run fails saying to await them; after Stop a loop's log throws and the loop ends",
+                  message.contains("write await before each one") && floodedTime < 10 && logging.outcome == .stopped(.byUser) && loggingEnded,
+                  "\(message) in \(String(format: "%.1f", floodedTime)) s; logging \(String(describing: logging.outcome)), its thread ended \(loggingEnded)")
+        } else {
+            check("scenario runs: commands asked for without await are held to a limit, past which the run fails saying to await them; after Stop a loop's log throws and the loop ends",
+                  false, "\(String(describing: flooded)) in \(String(format: "%.1f", floodedTime)) s")
+        }
 
         // The plan loses automation after two commands: the third never runs.
         var commands = 0

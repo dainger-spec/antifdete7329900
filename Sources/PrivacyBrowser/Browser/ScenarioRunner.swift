@@ -40,6 +40,9 @@ final class ScenarioRunner {
     private(set) var lines: [Line] = []
     private(set) var outcome: Outcome?
     var isRunning: Bool { thread != nil && outcome == nil }
+    /// The script's thread has not ended yet. It ends with the run, unless the script loops without
+    /// calling anything of the run's (`stop`); the self-test reads it.
+    var scriptThreadIsAlive: Bool { thread.map { !$0.isFinished } ?? false }
     /// Told of each line of the run's log, and of its end.
     var onLine: ((Line) -> Void)?
     var onEnd: ((Outcome) -> Void)?
@@ -49,6 +52,10 @@ final class ScenarioRunner {
     private var thread: ScriptThread?
     private var stopRequest: StopReason?
     private var commandsInFlight = 0
+    /// Between the script's thread and this one: closed by Stop and by the run's end, after which
+    /// every command and `log` the script calls throws at once; and the commands asked for and not
+    /// answered yet, held to `ScriptGate.commandLimit`.
+    private let gate = ScriptGate()
 
     init(driver: PageDriver) {
         self.driver = driver
@@ -68,13 +75,18 @@ final class ScenarioRunner {
         thread.start()
         thread.waitUntilReady()
         let parametersJSON = (try? JSONSerialization.data(withJSONObject: parameters)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        let gate = self.gate
         thread.perform { [weak self] in
-            Self.run(source, parametersJSON: parametersJSON, on: thread, runner: self)
+            Self.run(source, parametersJSON: parametersJSON, on: thread, gate: gate, runner: self)
         }
     }
 
     /// Stops the run: a command under way finishes (a button pressed is let go), then the run
-    /// ends; a script between commands ends at once.
+    /// ends; a script between commands ends at once. From here on every command, `sleep` and `log`
+    /// the script calls throws "stopped" on its own thread, without reaching this one: a loop that
+    /// never awaits them ends with the run (it went on after Stop, each call a hop to the main
+    /// thread). A loop that calls none of them (`while (true) {}`) cannot be interrupted: its thread
+    /// stays busy until the profile's process ends.
     ///
     /// A command that is waiting — `sleep`, `waitFor`, a page still loading — stops waiting: it
     /// was let run to its end, and a script sleeping an hour kept its run "running", and its
@@ -83,6 +95,7 @@ final class ScenarioRunner {
     func stop(_ reason: StopReason = .byUser) {
         guard outcome == nil, thread != nil else { return }
         stopRequest = reason
+        gate.close()
         if reason != .rightsEnded { inFlight.values.forEach { $0.cancel() } }
         if commandsInFlight == 0 { end(.stopped(reason)) }
     }
@@ -105,6 +118,7 @@ final class ScenarioRunner {
     private func end(_ outcome: Outcome) {
         guard self.outcome == nil else { return }
         self.outcome = outcome
+        gate.close()
         switch outcome {
         case .finished: add(.outcome, "Finished")
         case .failed(let message): add(.outcome, "Failed: \(message)")
@@ -129,6 +143,7 @@ final class ScenarioRunner {
         if stopRequest != nil || outcome != nil { return .failure(Stopped()) }
         guard allowed() else {
             stopRequest = .rightsEnded
+            gate.close()
             if commandsInFlight == 0 { end(.stopped(.rightsEnded)) }
             return .failure(Stopped())
         }
@@ -228,7 +243,8 @@ final class ScenarioRunner {
                                        "isVisible", "url", "title", "screenshot", "pause"]
 
     /// Builds the script's world and runs `source` in it, on `thread`.
-    nonisolated private static func run(_ source: String, parametersJSON: String, on thread: ScriptThread, runner owner: ScenarioRunner?) {
+    nonisolated private static func run(_ source: String, parametersJSON: String, on thread: ScriptThread, gate commands: ScriptGate,
+                                        runner owner: ScenarioRunner?) {
         weak var runner = owner
         let context = JSContext()!
         // Held by its thread, for as long as the run's thread lives; the script's functions hold it
@@ -255,6 +271,11 @@ final class ScenarioRunner {
         // waiting, the rest are counted, not queued, and the log says how many it left out.
         let gate = LogGate()
         let logged: @convention(block) (String) -> Void = { text in
+            // Stopped, or ended: said to the script, not to the log.
+            guard !commands.isClosed else {
+                Self.throwInScript("stopped")
+                return
+            }
             guard gate.take() else { return }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
@@ -266,9 +287,25 @@ final class ScenarioRunner {
                 }
             }
         }
+        // A script that asks for commands in a loop without awaiting them queued a hop to the main
+        // thread, a task and a promise for each, without end: the process's memory grew until the
+        // profile stopped. Past `ScriptGate.commandLimit` asked for and not answered, the call
+        // throws, saying to await them; after Stop, or once the run has ended, every call throws
+        // "stopped" at once — on this thread, so that such a loop ends with the run.
         let command: @convention(block) (String, JSValue) -> JSValue = { [weak context] name, arguments in
+            switch commands.takeCommand() {
+            case .closed:
+                return Self.throwInScript("stopped")
+            case .full:
+                return Self.throwInScript("\(ScriptGate.commandLimit) page commands are waiting to run: write await before each one, as in await page.click('#login')")
+            case .taken:
+                break
+            }
             let values = arguments.toArray() ?? []
-            guard let context else { return JSValue(undefinedIn: JSContext.current()) }
+            guard let context else {
+                commands.commandAnswered()
+                return JSValue(undefinedIn: JSContext.current())
+            }
             return JSValue(newPromiseIn: context) { resolve, reject in
                 let resolve = resolve, reject = reject
                 DispatchQueue.main.async {
@@ -281,6 +318,7 @@ final class ScenarioRunner {
                         let result = await runner.perform(name, values)
                         runner.inFlight[id] = nil
                         thread.perform {
+                            commands.commandAnswered()
                             switch result {
                             case .success(let value):
                                 resolve?.call(withArguments: [value ?? NSNull()])
@@ -322,6 +360,16 @@ final class ScenarioRunner {
         let script = "(async () => {" + source + "\n})().then(() => __ended(true, ''), (e) => __ended(false, String(e && e.stack ? e + '\\n' + e.stack : e)));"
         context.evaluateScript(script, withSourceURL: URL(string: "scenario.js"))
     }
+
+    /// Throws an error with `message` in the script, from inside a call of it into this code
+    /// (`__command`, `__log`): JavaScriptCore throws the context's exception set during the call
+    /// when the call returns.
+    @discardableResult
+    nonisolated private static func throwInScript(_ message: String) -> JSValue {
+        let context = JSContext.current()
+        context?.exception = JSValue(newErrorFromMessage: message, in: context)
+        return JSValue(undefinedIn: context)
+    }
 }
 
 /// A thread with a run loop, for one scenario's JavaScript: work is handed to it in order.
@@ -355,6 +403,49 @@ private final class ScriptThread: Thread, @unchecked Sendable {
         guard let loop else { return }
         CFRunLoopPerformBlock(loop, CFRunLoopMode.defaultMode.rawValue, block)
         CFRunLoopWakeUp(loop)
+    }
+}
+
+/// A run's commands, between its script's thread and the main one: whether the run still takes any
+/// (Stop and the run's end close it, from the main thread; the script's thread reads it at each
+/// call), and how many the script has asked for that have not been answered on its thread yet — at
+/// most `commandLimit`: a script that awaits its commands has one, `Promise.all` over a page's
+/// elements a few hundred at most.
+private final class ScriptGate: @unchecked Sendable {
+    static let commandLimit = 1000
+    enum Answer { case taken, closed, full }
+    private let lock = NSLock()
+    private var closed = false
+    private var waiting = 0
+
+    /// Stop, or the run's end: no command or log line is taken any more.
+    func close() {
+        lock.lock()
+        closed = true
+        lock.unlock()
+    }
+
+    var isClosed: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return closed
+    }
+
+    /// One more command asked for: `.taken` counts it until `commandAnswered`.
+    func takeCommand() -> Answer {
+        lock.lock()
+        defer { lock.unlock() }
+        if closed { return .closed }
+        guard waiting < Self.commandLimit else { return .full }
+        waiting += 1
+        return .taken
+    }
+
+    /// A command taken has its answer on the script's thread (or was never sent).
+    func commandAnswered() {
+        lock.lock()
+        waiting = max(0, waiting - 1)
+        lock.unlock()
     }
 }
 
