@@ -551,6 +551,39 @@ final class SelfTest {
             return value;
             """) as? String
         check("shim: a frame reached as window[i] right after insertion is patched", indexed == "Asia/Tokyo,undefined", indexed ?? "nil")
+        // The page's windows are one family (the script's channel, PrivacyScripts): a frame prints
+        // the page's replacements as the engine prints its own, and the page the frame's; no symbol
+        // given to Function.prototype.toString gets anything but the engine's TypeError (it once
+        // handed out the script's registry); a frame reached through contentWindow after its own
+        // copy of the script ran keeps the functions it had; and a frame taken to another document,
+        // and to one more (the same window to the page, a new realm each time), is in the profile's
+        // zone there and of the family still.
+        let family = try await js(webA!, """
+            const frame = document.createElement('iframe');
+            document.body.appendChild(frame);
+            const child = window[window.length - 1];
+            const native = (text) => /^function [\\w$]*\\(\\) \\{\\s*\\[native code\\]\\s*\\}$/.test(text);
+            const printed = [child.Function.prototype.toString.call(Date), child.Function.prototype.toString.call(Date.prototype.getHours),
+                             Function.prototype.toString.call(child.Date), Function.prototype.toString.call(child.Date.prototype.getHours),
+                             Function.prototype.toString.call(child.Function.prototype.toString)].map(native).join();
+            let key;
+            try { key = typeof Function.prototype.toString.call(Symbol.for('wk.shim.registry')); } catch (e) { key = e.name; }
+            const had = child.Date;
+            const once = frame.contentWindow.Date === had;
+            frame.remove();
+            const moved = document.createElement('iframe');
+            document.body.appendChild(moved);
+            const load = (html) => new Promise((done) => { moved.onload = () => done(); moved.srcdoc = html; setTimeout(done, 3000); });
+            await load('<p>one</p>');
+            await load('<p>two</p>');
+            const there = window[window.length - 1];
+            const after = [there.Intl.DateTimeFormat().resolvedOptions().timeZone, native(Function.prototype.toString.call(there.Date)),
+                           native(there.Function.prototype.toString.call(Date))].join();
+            moved.remove();
+            return [printed, key, once, after].join('|');
+            """) as? String
+        check("shim: a frame and the page print each other's replacements as native, no symbol opens the script's registry, a frame is patched once, and one taken to other documents is patched in each",
+              family == "true,true,true,true,true|TypeError|true|Asia/Tokyo,true,true", family ?? "nil")
         check("native: custom user agent",
               try await js(webA!, "return navigator.userAgent;") as? String == "PrivacyBrowserSelfTest/1.0")
 
@@ -1753,6 +1786,15 @@ final class SelfTest {
                   secure["tz"] as? String == zone && secure["workerTZ"] as? String == zone
                     && worker["tz"] as? String == zone,
                   "page \(secure["tz"] ?? "nil"), worker \(secure["workerTZ"] ?? "nil"), service worker \(worker["tz"] ?? "nil")")
+            // …so the page script replaces nothing of Date there: the page's Date is the engine's
+            // own, not a copy that answers alike — its own properties in the engine's order, and
+            // the engine's own function on top of the error it throws for a wrong receiver —
+            // exactly as in a worker loaded from a URL, which no script of ours reaches
+            // (scripts/selftest_proxy.py: the page's and the worker's "date").
+            let pageDate = secure["date"] as? String ?? ""
+            check("Safari chrome: in the profile's own process the page's Date is the engine's own — as in a worker no script reaches",
+                  !pageDate.isEmpty && pageDate == secure["workerDate"] as? String,
+                  "page \(secure["date"] ?? "nil"), worker \(secure["workerDate"] ?? "nil")")
         } else {
             check("Safari chrome: the secure half of the leak page ran in a secure context", false, "\(secure)")
         }
@@ -2979,6 +3021,13 @@ final class SelfTest {
         check("storage quota: a persistent profile's store gives a site Safari's share itself (WebKit's own answer, no script)",
               madeWithRatios && nativeQuota?.doubleValue == macQuota,
               "made with a browser's ratios: \(madeWithRatios), quota \(nativeQuota?.stringValue ?? "nil") vs \(String(format: "%.0f", macQuota))")
+        // The page's own world, where the profile's script runs: it is no longer given a quota to
+        // say for a persistent store (`PrivacyScripts.needsQuotaScript`), so what a page reads is
+        // that same answer of WebKit's.
+        let pageQuota = try await js(quotaTab.webView, "return (await navigator.storage.estimate()).quota;") as? NSNumber
+        check("storage quota: a persistent profile's page reads that share with no script in between",
+              !PrivacyScripts.needsQuotaScript(for: quotaSession.configuration) && pageQuota?.doubleValue == nativeQuota?.doubleValue,
+              "page \(pageQuota?.stringValue ?? "nil") vs WebKit's \(nativeQuota?.stringValue ?? "nil")")
         quotaTab.tearDown()
         quotaSession.shutDown()
         await WebDataStoreVault(repository: repository).deleteData(profileID: persistent.id)

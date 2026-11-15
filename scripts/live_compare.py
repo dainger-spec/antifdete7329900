@@ -35,8 +35,10 @@ SITE_PROBES = os.path.join(ROOT, "Resources", "SiteProbes")
 
 
 def profiles(zone):
-    """A profile as a new user gets it, and one that runs the time-zone and WebRTC wrappers with
-    Safari's own zone (whatever a page then notices is the wrapper itself, not a different value)."""
+    """A profile as a new user gets it, and one with WebRTC relay-only and a time zone named,
+    Safari's own: whatever a page then notices is a wrapper itself, not a different value. Of the
+    two it is the WebRTC wrapper: the page script replaces nothing of Date where the engine is in
+    the profile's zone already (PrivacyScripts' ZONE), as it is here."""
     return [{"name": "default"}, {"name": "shimmed", "timeZone": zone or "host", "webRTC": "relayOnly"}]
 
 
