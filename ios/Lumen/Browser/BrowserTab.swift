@@ -122,6 +122,17 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         runtime?.adoptTab(configuration: configuration)
     }
 
+    /// A page's getUserMedia: refused, camera and microphone alike, as WebKit refused it itself while
+    /// Info.plist had no purpose for them. Those purposes (project.yml) are for the photo or video a
+    /// person takes in a site's file field — WebKit's own upload menu, which iOS ends the app for
+    /// without them — not for pages.
+    @objc(webView:requestMediaCapturePermissionForOrigin:initiatedByFrame:type:decisionHandler:)
+    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                 initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
+                 decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        decisionHandler(.deny)
+    }
+
     // MARK: The long-press menu
 
     /// A long press on a link, or on an image: the app's own menu (`menu(for:)`), always — never

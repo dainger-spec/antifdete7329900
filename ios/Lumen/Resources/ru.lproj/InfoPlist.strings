@@ -1,3 +1,5 @@
 /* Lumen for iPhone: the Russian of Info.plist's texts (as in project.yml). */
 
 "NSFaceIDUsageDescription" = "Face ID открывает ключ хранилища Lumen для Mac, сохранённый на этом iPhone.";
+"NSCameraUsageDescription" = "Камера снимает фото или видео, которое вы загружаете на сайт через поле выбора файла.";
+"NSMicrophoneUsageDescription" = "Микрофон записывает звук видео, которое вы снимаете для загрузки на сайт.";
