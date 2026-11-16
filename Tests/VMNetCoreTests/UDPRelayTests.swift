@@ -167,11 +167,17 @@ final class UDPRelayTests: XCTestCase {
             XCTAssertEqual(endpoint?.port, 5000, local)
         }
         // IPv6: a public one as named; loopback, link-local, unique-local, documentation: the proxy's own.
-        let public6: [UInt8] = [0x26, 0x06, 0x47, 0] + [UInt8](repeating: 0, count: 11) + [1]
+        // Sixteen bytes: the head given, zeros, then the tail given (kept simple for the type checker).
+        func v6(_ head: [UInt8], _ tail: [UInt8] = []) -> [UInt8] {
+            var bytes = head
+            bytes.append(contentsOf: [UInt8](repeating: 0, count: 16 - head.count - tail.count))
+            bytes.append(contentsOf: tail)
+            return bytes
+        }
+        let public6 = v6([0x26, 0x06, 0x47, 0], [1])
         XCTAssertEqual(UDPRelayRules.relayEndpoint(bound: .ipv6(public6), port: 7, proxy: proxy)?.address, .ipv6(public6))
-        for local: [UInt8] in [[UInt8](repeating: 0, count: 15) + [1], [0xFE, 0x80] + [UInt8](repeating: 0, count: 13) + [1],
-                               [0xFD, 0x12] + [UInt8](repeating: 0, count: 14), [0x20, 0x01, 0x0D, 0xB8] + [UInt8](repeating: 0, count: 12),
-                               [0xFF, 0x02] + [UInt8](repeating: 0, count: 13) + [1]] {
+        let locals: [[UInt8]] = [v6([], [1]), v6([0xFE, 0x80], [1]), v6([0xFD, 0x12]), v6([0x20, 0x01, 0x0D, 0xB8]), v6([0xFF, 0x02], [1])]
+        for local in locals {
             XCTAssertEqual(UDPRelayRules.relayEndpoint(bound: .ipv6(local), port: 7, proxy: proxy)?.address, .ipv4(0xCB00_7101))
         }
     }
