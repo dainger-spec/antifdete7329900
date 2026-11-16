@@ -804,7 +804,8 @@ final class ProfileManager: ObservableObject {
         var silent = false
         if case .off = decision, children[id] === child,
            WebRTCGate.silence(proxy: proxy, ownProcess: true, guardState: NetworkGuard.shared.state) == .afterHold {
-            silent = await NetworkGuard.shared.hold(pid: child.processIdentifier, proxy: proxy)
+            // Its TCP port only: a process whose WebRTC connects nowhere needs nothing else of the proxy.
+            silent = await NetworkGuard.shared.hold(pid: child.processIdentifier, proxy: proxy, relaysUDP: false)
             if !silent { log.notice("WebRTC of \(id.uuidString, privacy: .public) is off: the guard did not take its process") }
         }
         // Stopped meanwhile: nothing to say, and nothing this decision made is kept (a relaunch's

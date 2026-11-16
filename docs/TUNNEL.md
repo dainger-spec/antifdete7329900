@@ -314,7 +314,10 @@ CreatePermission, ChannelBind, Send/Data indications, ChannelData. What libwebrt
   send theirs — which it keeps (the last 64) and logs one by one, with whom each was counted for.
 - **The rules for a held process** (`GuardPolicy.verdict`): loopback (the relay, this Mac's own
   services); the proxy, by the name the flow was opened by with its port, or by an address the app
-  resolved for it (any port: a proxy's UDP relay port is its own); DNS over UDP only when every
+  resolved for it (any port: a proxy's UDP relay port is its own) — or, for a process held only so
+  that its WebRTC can stay present and connect nowhere (`relaysUDP` false), TCP to the proxy's port
+  alone, never UDP and no other port of the proxy's host (a STUN or TURN server it might also run
+  would show a page this Mac's address); DNS over UDP only when every
   question asks for the proxy's own name (each datagram looked into); everything else — another
   host, the local network, multicast, DNS over TCP, a flow whose remote end is not known, another
   transport — is dropped.
