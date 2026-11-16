@@ -211,6 +211,12 @@
 "Не сохраняется: после перезапуска приложения сайт спросит снова." = "Not saved: after the app restarts, the site asks again.";
 "Имя пользователя" = "User Name";
 
+/* A link to a host whose app may take it from the session (BrowserTab, LinkHandoff). */
+"Ссылку может открыть приложение %@" = "The %@ app can open this link";
+"В приложении она откроется вне этой сессии и её прокси: с собственного адреса этого iPhone и под аккаунтом, с которым вы вошли в %@." = "In the app it opens outside this session and its proxy: from this iPhone’s own address, with the account you are signed in to in %@.";
+"Открыть здесь" = "Open Here";
+"Открыть в приложении" = "Open in the App";
+
 /* The sync with the Mac's vault (SyncView). */
 "Синхронизация" = "Sync";
 "Синхронизация с Mac — в платных тарифах. Профили на этом iPhone остаются как есть." = "Sync with your Mac comes with a paid plan. The profiles on this iPhone stay as they are.";

@@ -22,6 +22,16 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     /// The dialog this tab's page is waiting on (`showDialog`), and the answer it gets if the tab
     /// closes under it: WebKit raises an exception for a completion handler dropped unanswered.
     private var pendingDialog: (alert: UIAlertController, dismissed: () -> Void)?
+    /// A load this tab started itself — the address bar, its menu, a restore, a link held back and
+    /// loaded again (`loadOwn`) — is under way in its main frame: WebKit offers neither it nor its
+    /// redirects to another app, so `decidePolicyFor` lets them through (`LinkHandoff`). Over when a
+    /// page commits, when that load fails, or when a link is tapped.
+    private var ownLoad = false
+    /// That load's navigation (nil: a restore), and its address, let through once whatever WebKit
+    /// calls its navigation — a link loaded again is never held back a second time.
+    private var ownNavigation: WKNavigation?
+    private var ownLoadURL: URL?
+    private var tornDown = false
 
     init(record: TabRecord, configuration: WKWebViewConfiguration, runtime: SessionRuntime) {
         id = record.id
@@ -57,15 +67,32 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     /// The tab as it was left: its back/forward list (WebKit's interaction state), else its address.
     func restore() {
         if let state = saved.interactionState {
+            ownLoad = true
+            ownNavigation = nil
+            ownLoadURL = nil
             webView.interactionState = state
         } else if let url {
-            webView.load(URLRequest(url: url))
+            loadOwn(URLRequest(url: url))
         }
     }
 
     func load(_ url: URL) {
         self.url = url
-        webView.load(URLRequest(url: url))
+        loadOwn(URLRequest(url: url))
+    }
+
+    /// A load of the tab's own (see `ownLoad`).
+    private func loadOwn(_ request: URLRequest) {
+        guard !tornDown else { return }
+        ownLoad = true
+        ownLoadURL = request.url
+        ownNavigation = webView.load(request)
+    }
+
+    private func endOwnLoad() {
+        ownLoad = false
+        ownNavigation = nil
+        ownLoadURL = nil
     }
 
     /// What is written for the tab: the interaction state when WebKit gives it as data.
@@ -84,6 +111,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     }
 
     func tearDown() {
+        tornDown = true
         if let pending = pendingDialog {
             pendingDialog = nil
             if pending.alert.presentingViewController != nil { pending.alert.dismiss(animated: false) }
@@ -115,12 +143,95 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         }
     }
 
-    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
-        // Schemes a web view cannot load (tg:, mailto:, …) are not handed to other apps here: a
-        // session's link must not leave its proxy and its data for another app.
-        guard let scheme = navigationAction.request.url?.scheme?.lowercased() else { return .allow }
-        guard ["http", "https", "about", "blob", "data", "file"].contains(scheme) else { return .cancel }
-        return .allow
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        endOwnLoad()   // the tab's own load, or a navigation that took its place
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        if navigation === ownNavigation { endOwnLoad() }
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        if navigation === ownNavigation { endOwnLoad() }
+    }
+
+    /// A session's link must not leave its proxy and its data for another app. Schemes a web view
+    /// cannot load (tg:, mailto:, …) are refused. A web address that WebKit would first offer to the
+    /// app claiming it — a page's navigation to another host (`LinkHandoff`) — is held back and
+    /// loaded by the tab itself, which WebKit never offers to an app; for a host an app commonly
+    /// claims, after the person is told and chooses (`warnBeforeLeaving`). Answered with the
+    /// decision handler, so the navigation is cancelled before the tab's own load starts.
+    @objc(webView:decidePolicyForNavigationAction:decisionHandler:)
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        let request = navigationAction.request
+        guard let url = request.url, let scheme = url.scheme?.lowercased() else { return decisionHandler(.allow) }
+        guard ["http", "https", "about", "blob", "data", "file"].contains(scheme) else { return decisionHandler(.cancel) }
+        let target: LinkHandoff.Target
+        if let frame = navigationAction.targetFrame {
+            target = frame.isMainFrame ? .mainFrame : .frame
+        } else {
+            target = .newWindow
+        }
+        let kind = LinkHandoff.Kind(navigationAction.navigationType)
+        if target == .mainFrame {
+            if let own = ownLoadURL, own == url {
+                ownLoadURL = nil
+                return decisionHandler(.allow)
+            }
+            if kind == .link { endOwnLoad() }   // a tap takes the place of whatever the tab was loading
+        }
+        switch LinkHandoff.decide(url: url, currentHost: webView.url?.host, target: target, kind: kind,
+                                  method: request.httpMethod, ownLoad: ownLoad) {
+        case .allow:
+            decisionHandler(.allow)
+        case .openHere:
+            decisionHandler(.cancel)
+            openHere(request, target: target)
+        case let .warn(app):
+            decisionHandler(.cancel)
+            warnBeforeLeaving(request, app: app, target: target)
+        }
+    }
+
+    /// A held-back navigation, loaded by the tab itself: in this tab, or a new window's in a new tab
+    /// of the session.
+    private func openHere(_ request: URLRequest, target: LinkHandoff.Target) {
+        guard !tornDown else { return }
+        if target == .newWindow {
+            if let url = request.url { runtime?.newTab(opening: url) }
+        } else {
+            loadOwn(request)
+        }
+    }
+
+    /// A link to a host whose app may take it (`LinkHandoff.apps`): the person is told that the app
+    /// would open it outside the session — from the iPhone's own address, with the account signed in
+    /// there — and chooses. "Open Here" is the default, and what happens when the warning cannot be
+    /// shown (a tab not on screen).
+    private func warnBeforeLeaving(_ request: URLRequest, app: String, target: LinkHandoff.Target) {
+        guard let url = request.url else { return }
+        let choice = DialogAnswer<Bool> { [weak self] inApp in
+            if inApp { self?.openInApp(url, request: request, target: target) } else { self?.openHere(request, target: target) }
+        }
+        let alert = UIAlertController(
+            title: L("Ссылку может открыть приложение %@", app),
+            message: L("В приложении она откроется вне этой сессии и её прокси: с собственного адреса этого iPhone и под аккаунтом, с которым вы вошли в %@.", app),
+            preferredStyle: .alert)
+        let here = UIAlertAction(title: L("Открыть здесь"), style: .default) { _ in choice.give(false) }
+        alert.addAction(here)
+        alert.addAction(UIAlertAction(title: L("Открыть в приложении"), style: .default) { _ in choice.give(true) })
+        alert.preferredAction = here
+        showDialog(alert) { choice.give(false) }
+    }
+
+    /// "Open in the App": handed to the app that claims the address and to nothing else — not to
+    /// Safari when none does (`.universalLinksOnly`); then it opens here after all.
+    private func openInApp(_ url: URL, request: URLRequest, target: LinkHandoff.Target) {
+        Task { [weak self] in
+            let opened = await UIApplication.shared.open(url, options: [.universalLinksOnly: true])
+            if !opened { self?.openHere(request, target: target) }
+        }
     }
 
     // MARK: WKUIDelegate
@@ -332,5 +443,18 @@ private final class DialogAnswer<Value> {
         guard let handler else { return }
         self.handler = nil
         handler(value)
+    }
+}
+
+extension LinkHandoff.Kind {
+    init(_ type: WKNavigationType) {
+        switch type {
+        case .linkActivated: self = .link
+        case .formSubmitted, .formResubmitted: self = .form
+        case .backForward: self = .backForward
+        case .reload: self = .reload
+        case .other: self = .other
+        @unknown default: self = .other
+        }
     }
 }
