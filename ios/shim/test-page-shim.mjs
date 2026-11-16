@@ -8,7 +8,10 @@
 //     throws its TypeError), and printing a function calls nothing the page can replace;
 //   - a page and its frame are one family when the runtime gives a channel (PageSettings.makeChannel):
 //     each window's Function.prototype.toString prints the other's replacements as native. Without
-//     one each window is a family of its own, which the same check tells (the control).
+//     one each window is a family of its own, which the same check tells (the control);
+//   - the canvas and audio noise (ios/shim/fingerprint.js) calls none of the DOM methods and built-ins
+//     a page can replace while toDataURL, toBlob, convertToBlob, getImageData, getChannelData or
+//     copyFromChannel runs, and a page that makes them throw still gets the noised canvas.
 // The Mac's own body is tested in full by scripts/test-shims.mjs; this is the iPhone's build of it.
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -46,6 +49,7 @@ const DOM = String.raw`
   delete globalThis.__engine;
   const R = Reflect.apply, defineProperty = Object.defineProperty, ownDescriptor = Object.getOwnPropertyDescriptor;
   const ownKeys = Reflect.ownKeys, create = Object.create, NativeTypeError = TypeError, NativeString = String;
+  const imul = Math.imul, min = Math.min, sin = Math.sin; // the engine's C++, which no page reaches
   // An engine function: what runs inside it is the engine's.
   const native = (fn) => function (...args) { engine.depth++; try { return R(fn, this, args); } finally { engine.depth--; } };
   const nativeMembers = (C) => {
@@ -82,12 +86,16 @@ const DOM = String.raw`
 
   // Canvases (a page's and an OffscreenCanvas) and their 2D contexts, over one pixel store.
   const canvases = new WeakMap(), contexts = new WeakMap(), images = new WeakMap(), buffers = new WeakMap();
+  // Each kind's own receiver check (a page's canvas is no OffscreenCanvas, and the other way round).
+  const pageCanvases = new WeakSet(), offscreens = new WeakSet();
+  const branded = (set, o) => { if (!set.has(o)) throw new NativeTypeError('Illegal invocation'); return o; };
   const newCanvas = (proto, width, height) => {
     const c = create(proto);
     canvases.set(c, { width, height, px: new Uint8ClampedArray(width * height * 4), context: null });
+    pageCanvases.add(c);
     return c;
   };
-  const digest = (px) => { let h = 2166136261; for (let i = 0; i < px.length; i++) h = Math.imul(h ^ px[i], 16777619) >>> 0; return h.toString(16); };
+  const digest = (px) => { let h = 2166136261; for (let i = 0; i < px.length; i++) h = imul(h ^ px[i], 16777619) >>> 0; return h.toString(16); };
   const sized = (s) => { s.px = new Uint8ClampedArray(s.width * s.height * 4); };
   class Node extends EventTarget {}
   class Element extends Node {}
@@ -107,7 +115,7 @@ const DOM = String.raw`
     putImageData(image, x, y) { slot(canvases, slot(contexts, this)).px.set(slot(images, image).data); },
     drawImage(source, x, y) {
       const c = slot(canvases, slot(contexts, this)), s = slot(canvases, source);
-      c.px.set(s.px.subarray(0, Math.min(s.px.length, c.px.length)));
+      c.px.set(s.px.subarray(0, min(s.px.length, c.px.length)));
     },
     // Text's antialiased edges: every alpha but 0 and 255.
     fillText(text, x, y) {
@@ -133,12 +141,22 @@ const DOM = String.raw`
     },
   });
   class HTMLCanvasElement extends HTMLElement {
-    toDataURL() { return 'data:image/png;digest=' + digest(slot(canvases, this).px); }
-    toBlob(callback) { R(callback, undefined, ['blob;digest=' + digest(slot(canvases, this).px)]); }
+    toDataURL() { return 'data:image/png;digest=' + digest(slot(canvases, branded(pageCanvases, this)).px); }
+    toBlob(callback) { R(callback, undefined, ['blob;digest=' + digest(slot(canvases, branded(pageCanvases, this)).px)]); }
   }
   class OffscreenCanvas {
-    constructor(width, height) { canvases.set(this, { width: width >>> 0, height: height >>> 0, px: new Uint8ClampedArray((width >>> 0) * (height >>> 0) * 4), context: null }); }
-    convertToBlob() { return Promise.resolve('blob;digest=' + digest(slot(canvases, this).px)); }
+    constructor(width, height) {
+      engine.depth++;
+      try {
+        canvases.set(this, { width: width >>> 0, height: height >>> 0, px: new Uint8ClampedArray((width >>> 0) * (height >>> 0) * 4), context: null });
+        offscreens.add(this);
+      } finally { engine.depth--; }
+    }
+    // A promise-returning operation rejects a wrong receiver rather than throw (WebIDL).
+    convertToBlob() {
+      try { return Promise.resolve('blob;digest=' + digest(slot(canvases, branded(offscreens, this)).px)); }
+      catch (e) { return Promise.reject(e); }
+    }
   }
   for (const [C, Context] of [[HTMLCanvasElement, CanvasRenderingContext2D], [OffscreenCanvas, OffscreenCanvasRenderingContext2D]]) {
     const members = canvasMembers(Context);
@@ -148,7 +166,7 @@ const DOM = String.raw`
   class AudioBuffer {
     constructor(options) {
       const data = new Float32Array(options.length);
-      for (let i = 0; i < data.length; i++) data[i] = Math.sin(i / 7) * 0.5;
+      for (let i = 0; i < data.length; i++) data[i] = sin(i / 7) * 0.5;
       buffers.set(this, [data]);
     }
     getChannelData(channel) { const d = slot(buffers, this)[channel]; if (!d) throw new RangeError('Index out of range'); return d; }
@@ -270,6 +288,124 @@ test('a window of another channel (another session, or a launch before) is not l
   frame.context.__other = page.window;
   assert.notEqual(printedBy(frame, page), NATIVE_DATE);
 });
+
+// ---- The canvas and audio noise ----------------------------------------------------------------
+
+// The page draws, then counts what is called while it reads its canvas and audio back.
+const READ_BACK = String.raw`(() => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 32; canvas.height = 8;
+  const context = canvas.getContext('2d');
+  context.fillText('Lumen', 0, 0);
+  const offscreen = new OffscreenCanvas(32, 8);
+  offscreen.getContext('2d').fillText('Lumen', 0, 0);
+  const buffer = new AudioBuffer({ length: 4096, numberOfChannels: 1, sampleRate: 44100 });
+  ${SPIES}
+  const TypedArray = getProto(Uint8Array.prototype), ArrayIterator = getProto([][Symbol.iterator]());
+  spyAll([
+    [Document.prototype, 'createElement', 'createElement'],
+    [HTMLCanvasElement.prototype, 'getContext', 'getContext'], [HTMLCanvasElement.prototype, 'width', 'canvas.width'],
+    [HTMLCanvasElement.prototype, 'height', 'canvas.height'],
+    [OffscreenCanvas.prototype, 'getContext', 'OffscreenCanvas.getContext'], [OffscreenCanvas.prototype, 'width', 'OffscreenCanvas.width'],
+    [OffscreenCanvas.prototype, 'height', 'OffscreenCanvas.height'],
+    [CanvasRenderingContext2D.prototype, 'drawImage', 'drawImage'], [CanvasRenderingContext2D.prototype, 'putImageData', 'putImageData'],
+    [OffscreenCanvasRenderingContext2D.prototype, 'drawImage', 'offscreen drawImage'],
+    [OffscreenCanvasRenderingContext2D.prototype, 'putImageData', 'offscreen putImageData'],
+    [ImageData.prototype, 'data', 'ImageData.data'],
+    [TypedArray, 'length', 'TypedArray.length'], [TypedArray, 'fill', 'TypedArray.fill'], [TypedArray, 'set', 'TypedArray.set'],
+    [Math, 'imul', 'Math.imul'], [Math, 'min', 'Math.min'], [Math, 'floor', 'Math.floor'], [Math, 'random', 'Math.random'],
+    [WeakSet.prototype, 'has', 'WeakSet.has'], [WeakSet.prototype, 'add', 'WeakSet.add'],
+    [WeakMap.prototype, 'get', 'WeakMap.get'], [WeakMap.prototype, 'has', 'WeakMap.has'],
+    [Function.prototype, 'call', 'Function.call'], [Function.prototype, 'apply', 'Function.apply'], [Reflect, 'apply', 'Reflect.apply'],
+    [Object, 'getOwnPropertyDescriptor', 'Object.getOwnPropertyDescriptor'], [Object, 'defineProperty', 'Object.defineProperty'],
+    [Array.prototype, Symbol.iterator, 'Array[Symbol.iterator]'], [ArrayIterator, 'next', 'ArrayIterator.next'],
+    [globalThis, 'String', 'String'],
+  ]);
+  const read = {};
+  read.dataURL = canvas.toDataURL();
+  canvas.toBlob((blob) => { read.blob = blob; });
+  context.getImageData(0, 0, 32, 8);
+  offscreen.convertToBlob();
+  const samples = buffer.getChannelData(0);
+  const copied = new Float32Array(4096);
+  buffer.copyFromChannel(copied, 0);
+  read.seen = seen;
+  // As text: the page's own arrays iterate with its spied iterator.
+  return JSON.stringify(read);
+})()`;
+
+test('reading a canvas or a buffer back calls nothing a page can replace, as without the shim', () => {
+  const safari = JSON.parse(makeWindow(null).run(READ_BACK));
+  assert.deepEqual(safari.seen, [], 'the stand-in itself calls a spy: the check would see nothing');
+  for (const mode of ['noise', 'off']) {
+    const config = { ...session, fingerprint: { ...session.fingerprint, canvas: mode, audio: mode, webgl: mode } };
+    const shimmed = JSON.parse(makeWindow(config).run(READ_BACK));
+    assert.deepEqual(shimmed.seen, [], `${mode}: the page saw the shim call ${[...new Set(shimmed.seen)].join(', ')}`);
+    assert.notEqual(shimmed.dataURL, safari.dataURL, `${mode}: toDataURL is not the canvas as drawn`);
+  }
+});
+
+// The same canvas read back: normally, then with each method the copy needs made to throw.
+const BROKEN = String.raw`(() => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 32; canvas.height = 8;
+  canvas.getContext('2d').fillText('Lumen', 0, 0);
+  const R = Reflect.apply, defineProperty = Object.defineProperty, ownDescriptor = Object.getOwnPropertyDescriptor;
+  const normal = canvas.toDataURL();
+  const breakIt = (holder, key) => {
+    const d = ownDescriptor(holder, key);
+    const fail = function () { throw new Error('broken by the page'); };
+    if (d.get) d.get = fail; else d.value = fail;
+    defineProperty(holder, key, d);
+  };
+  breakIt(Document.prototype, 'createElement');
+  breakIt(HTMLCanvasElement.prototype, 'getContext');
+  breakIt(CanvasRenderingContext2D.prototype, 'drawImage');
+  breakIt(CanvasRenderingContext2D.prototype, 'putImageData');
+  breakIt(ImageData.prototype, 'data');
+  breakIt(Math, 'imul');
+  return JSON.stringify({ normal, broken: canvas.toDataURL() });
+})()`;
+
+test('a page that breaks createElement, getContext, drawImage, putImageData or ImageData.data still gets the noised canvas', () => {
+  const safari = JSON.parse(makeWindow(null).run(BROKEN));
+  const shimmed = JSON.parse(makeWindow(session).run(BROKEN));
+  assert.notEqual(shimmed.normal, safari.normal, 'the canvas is noised');
+  assert.equal(shimmed.broken, shimmed.normal, 'with its methods broken the page read the canvas without the noise');
+});
+
+test('the audio noise reaches the samples, once, whichever way they are read', () => {
+  const read = (config) => makeWindow(config).run(String.raw`(() => {
+    const buffer = new AudioBuffer({ length: 4096, numberOfChannels: 1, sampleRate: 44100 });
+    const first = Array.from(buffer.getChannelData(0)), again = Array.from(buffer.getChannelData(0));
+    const copied = new Float32Array(4096);
+    const other = new AudioBuffer({ length: 4096, numberOfChannels: 1, sampleRate: 44100 });
+    other.copyFromChannel(copied, 0);
+    return JSON.stringify({ first, again, copied: Array.from(copied) });
+  })()`);
+  const safari = JSON.parse(read(null)), shimmed = JSON.parse(read(session));
+  const changed = shimmed.first.filter((v, i) => v !== safari.first[i]).length;
+  assert.ok(changed > 0, 'no sample changed');
+  assert.deepEqual(shimmed.again, shimmed.first, 'a second read noised the samples again');
+  assert.deepEqual(shimmed.copied, shimmed.first, 'copyFromChannel gives what getChannelData gives');
+});
+
+// An OffscreenCanvas is copied into an OffscreenCanvas: convertToBlob gives the noised picture. (Until
+// 16 November its copy was a page's canvas, which OffscreenCanvas's convertToBlob refuses: the page's
+// promise was rejected wherever the noise was on.)
+{
+  const blobOf = (config) => makeWindow(config).run(String.raw`(() => {
+    const offscreen = new OffscreenCanvas(32, 8);
+    offscreen.getContext('2d').fillText('Lumen', 0, 0);
+    return offscreen.convertToBlob().then((blob) => 'resolved ' + blob, (e) => 'rejected ' + e.name);
+  })()`);
+  const [safari, noised] = await Promise.all([blobOf(null), blobOf(session)]);
+  test('an OffscreenCanvas\'s convertToBlob resolves, with the noise', () => {
+    assert.match(safari, /^resolved /);
+    assert.match(noised, /^resolved /);
+    assert.notEqual(noised, safari);
+  });
+}
 
 // ---- End --------------------------------------------------------------------------------------------
 
