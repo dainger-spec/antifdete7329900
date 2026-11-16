@@ -190,9 +190,13 @@ the detail line always shows the system's own words beside Lumen's.
 Proxies section's words for each way of failing (a login the proxy rejects, a name that does not
 resolve, a port that refuses, one that takes the connection and says nothing) and its advice —
 not "does not answer" for all of them (`VMCenter.proxyProblem`). That check is the Proxies
-section's without what a machine does not use (`VMCenter.checkProxy`): one tunnel instead of
-three (the list shows no latency), and nothing asked of a SOCKS5 proxy's UDP, which never leaves
-a machine — a start no longer waits up to nine seconds for an association nobody uses.
+section's with one tunnel instead of three (`VMCenter.checkProxy`; the list shows no latency) — and,
+for a SOCKS5 proxy, its UDP, found as the Proxies section finds it: a UDP
+association and a STUN request through it, then where its UDP leaves from against where its pages
+do. The machine's UDP (HTTP/3, WebRTC) goes through the proxy in that run only where the two are
+the same (`VMUDPRoute`); the UDP check runs beside the lookup of where the proxy comes out, so a
+proxy that answers costs a second or two more, one that takes the association and carries nothing
+up to nine. (Before 16 November the start asked nothing of UDP, which then never left a machine.)
 
 **A disk that is nearly full** is said before the machine is started (`VMStartRoom`): with less
 than 2 GB free a machine is not started — its macOS writes from its first second, to a disk that
@@ -249,13 +253,18 @@ public name to an address of the local network takes a machine there as it takes
 in a guest is kept from the Mac's local network by this Mac's rules only so far as the tool keeps
 to them (docs/VM_NETWORK.md). A proxy set by a configuration file (PAC, WPAD) is not followed, and
 the machine then has no network, with its row saying why. A machine with a proxy of its own has
-no way to this Mac's network at all. **UDP does not leave a machine**, with a proxy or without: QUIC
-falls back to TCP, and WebRTC has no path that could show this Mac's address. Apple's software-update hosts are answered "no
-such name", so a machine does not fetch gigabytes of updates through a paid proxy. docs/VM_NETWORK.md
-has the details and the tests.
+no way to this Mac's network at all. **UDP (HTTP/3, WebRTC) goes through the proxy's own relay**
+(SOCKS5 UDP ASSOCIATE) where the check before the start found the proxy carries it from the
+address its pages leave from, and WebRTC then shows the proxy's address; with an HTTP proxy, a
+proxy that does not carry UDP, or one whose UDP leaves from elsewhere, it does not leave at all —
+QUIC falls back to TCP, WebRTC has no path — and the machine's row says so. Never around the
+proxy. Without a proxy a machine's UDP goes out as this Mac's own, as its TCP does — not while
+the Mac's network settings name a proxy. DNS and the time are answered by Lumen and never leave.
+Apple's software-update hosts are answered "no such name", so a machine does not fetch gigabytes of
+updates through a paid proxy. docs/VM_NETWORK.md has the details and the tests.
 
-Before each start the proxy is checked, as a profile's is: where it comes out, and its time zone.
-A machine whose proxy does not answer is not started. With "time zone and language follow the
+Before each start the proxy is checked, as a profile's is: where it comes out, its time zone, and
+whether it carries UDP. A machine whose proxy does not answer is not started. With "time zone and language follow the
 proxy" the profile takes them from that check.
 
 A proxy reached over TLS (`https://`) is not supported for machines yet; the editor does not offer
@@ -436,7 +445,8 @@ on a machine: none could be run here):
   compares them with what it asked for (`VMGuestStatus.differences(from:)` — only once the script
   says it applied these very settings): a difference is said in the machine's row.
 
-What was looked at and needs nothing: the network (no DNS query, UDP or IPv6 leaves, by
+What was looked at and needs nothing: the network (no DNS query or IPv6 leaves, UDP only through
+the proxy's relay, by
 `docs/VM_NETWORK.md`), where the time zone and language come from (the proxy's exit, looked up
 anew at every start, not the last check in the list), the clock (the host's; automatic time zone
 is switched off). The layouts' numbers and names are macOS's own, as known; that a machine takes
@@ -799,8 +809,10 @@ called off), a file that is not there.
   By WebGL a machine is that Mac. **Not measured**: WebGPU, the 2D canvas, audio, timing — no
   claim is made of them, and "cannot be told from a Mac" is not said.
 - **No camera.** A guest has no camera device; a site that asks for one finds none.
-- **UDP through a proxy**: none, by design (above). A site that needs WebRTC media will not have it
-  in a proxied machine.
+- **UDP through a proxy**: only a SOCKS5 proxy that carries UDP from its pages' address (checked
+  before every start); with any other proxy a site that needs WebRTC media or HTTP/3 will not have
+  them in the machine. A macOS guest's own QUIC and WebRTC through a real provider's relay are
+  checked on a Mac (detectme.pro, browserleaks.com/webrtc, cloudflare-quic.com), not in CI.
 - **macOS updates** are off in the machines. Safari in them is the base's until the base is set up
   again from a newer macOS; machines made before keep theirs.
 - **Two machines at once**, and Apple silicon only. A sandboxed build has no machines.
@@ -830,8 +842,9 @@ What is checked where:
   helper's own failures, the events that carry them, and the room a start needs — on a volume
   that clones and on one that cannot; and where a machine's window opens (`VMWindowPlacement`):
   where it was left, and not at a place that is no longer one. The self-test checks that every kind has its words in the
-  interface's language, and the start's proxy check against its loopback proxies (one tunnel, no
-  UDP asked; a rejected login said as that). The UI snapshots draw the list's rows saying each of
+  interface's language, and the start's proxy check against its loopback proxies (one tunnel, the
+  UDP found and the machine's UDP through the proxy, a proxy that refuses UDP ASSOCIATE leaving it
+  off; a rejected login said as that). The UI snapshots draw the list's rows saying each of
   these (`vm-list-states`: running, asleep, a rejected login, a full disk, Apple's limit with the
   system's words under Lumen's, a machine shut down instead of kept).
 - `Tests/BrowserCoreTests/VMImageFetchTests.swift` (Linux and macOS): **the download itself**,

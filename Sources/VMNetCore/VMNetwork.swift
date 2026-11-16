@@ -5,9 +5,11 @@ import Foundation
 /// The guest's only network card is one end of a datagram socket; this is the other end. It
 /// answers the guest's ARP, DHCP and DNS itself and ends every TCP connection the guest opens,
 /// carrying its bytes on through the profile's proxy (SOCKS5 or HTTP CONNECT) — by host name
-/// where the guest asked for a name, so the proxy resolves it. There is no other way out: no
-/// route, no NAT, no socket that is not a connection to the proxy. What the proxy does not carry
-/// (UDP, IPv6, connections to private addresses) is refused here.
+/// where the guest asked for a name, so the proxy resolves it. Its UDP goes through the proxy's
+/// own relay (SOCKS5 UDP ASSOCIATE) where the run carries it (`VMNetConfiguration.relaysUDP`).
+/// There is no other way out: no route, no NAT, no socket that is not to the proxy or the relay
+/// it names. What the proxy does not carry (UDP without the relay, IPv6, anything to a private
+/// address) is refused here.
 ///
 /// No root and no kernel extension: it is all sockets this process may open anyway.
 public final class VMNetwork: @unchecked Sendable {

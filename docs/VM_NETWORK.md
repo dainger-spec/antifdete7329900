@@ -8,7 +8,8 @@ process that **is** the guest's whole network.
 Everything the guest sends to the internet leaves through the profile's proxy — SOCKS5 or HTTP
 CONNECT — and through nothing else. This is not a rule that is enforced on a network that could do
 otherwise: there is no route, no NAT and no bridge to this Mac's network at all. The only sockets
-the stack ever opens are connections to the proxy. What the proxy cannot carry does not leave.
+the stack ever opens are connections to the proxy and, for UDP, sockets to the relay the proxy
+names (SOCKS5 UDP ASSOCIATE). What the proxy cannot carry does not leave.
 
 No root, no kernel or system extension, no entitlement beyond the virtualization one, no code from
 anybody else: Swift, Foundation and BSD sockets (`Sources/VMNetCore`, no dependency on the rest of
@@ -27,7 +28,7 @@ itself from DHCP.
 | a DNS query — to the router or to **any** other address | answers it itself and asks nobody (below) |
 | opens a TCP connection | ends it here and carries its bytes through the proxy (below) |
 | a question for the time (NTP, port 123) — to **any** address | answers it itself with this Mac's clock, "from" the server asked; nothing leaves (`TimeResponder`) |
-| any other UDP (QUIC, STUN, …) | drops it and answers "port unreachable" at once, so that the guest gives up now instead of after a timeout; nothing is said to broadcasts and multicast |
+| any other UDP (QUIC, STUN, WebRTC, …) | where the run carries UDP (a SOCKS5 proxy that carried it in the check before the start, `relaysUDP`): sends it through the proxy's own UDP relay and shows the answers "from" where the guest sent (below). Otherwise drops it and answers "port unreachable" at once, so that the guest gives up now instead of after a timeout. Broadcasts and multicast are never relayed and never answered |
 | IPv6, in any form | nothing. No router advertisement is ever sent, so the guest has no IPv6 address but a link-local one, and no IPv6 route |
 
 ### DNS: a name for every address, and no query that leaves
@@ -42,7 +43,14 @@ it does for a browser profile. The guest's own resolver choice changes nothing: 
 - Up to 60 000 names are remembered; past that, the name unused the longest is forgotten. An
   address is given to another name only after every other address of the range has been given out.
 - AAAA, HTTPS (type 65), SVCB and every other record type: "no such record". The guest therefore
-  never learns an IPv6 address, nor that a site speaks HTTP/3, and stays on TCP over IPv4.
+  never learns an IPv6 address, and learns that a site speaks HTTP/3 only from the site itself.
+  **HTTPS and SVCB stay "no such record" on purpose**, with UDP carried or not: the real record
+  cannot be known without the query leaving this Mac (it never does — the proxy is asked for
+  names in connections, not in DNS); a record made up here would claim HTTP/3 for every name,
+  sending QUIC to sites that do not speak it, and could carry neither the site's ECH keys nor its
+  real ports. A browser learns HTTP/3 from the site's `Alt-Svc` header over TCP (Safari and Chrome
+  both do), and the QUIC that follows goes to the same name — the same fake address, so the relay
+  is asked for the name — or to a name the header gives, which the guest asks here like any other.
 - A name under one of the configuration's blocked suffixes (`blockedHostSuffixes`: the name itself
   and every subdomain) does not exist (NXDOMAIN). This is how a guest is kept from downloading
   gigabytes of system updates through a paid proxy.
@@ -76,6 +84,65 @@ still work, so the guest sees a network on which nothing answers.
 
 The guest never receives a connection: nothing outside can open one towards it.
 
+### UDP: through the proxy's own relay
+
+HTTP/3 (QUIC) and WebRTC are UDP. With `VMNetConfiguration.relaysUDP` on and a SOCKS5 proxy, the
+guest's datagrams go through the proxy's UDP relay (RFC 1928 §7: UDP ASSOCIATE, with the sign-in
+of RFC 1929 on its TCP connection); a site sees the proxy's address in WebRTC, as in its pages.
+The app turns it on for a run only where the check before the start found that the proxy carries
+UDP from the address its pages leave from (`VMUDPRoute`, below); off, or with an HTTP CONNECT
+proxy, or none, UDP is answered "port unreachable" as before. **There is never a direct path.**
+
+- **One association per address and port the guest sends from**, whatever it sends to — so one
+  relay port at the proxy per guest port, as a home router's NAT keeps it, and a WebRTC peer that
+  learned the relay's address (a server-reflexive candidate) reaches that port. It is made as a
+  connection is — the proxy's address, a TCP connection, the greeting and sign-in, then UDP
+  ASSOCIATE with an address of all zeros — and lives as long as that TCP connection: when the
+  proxy closes it, the association ends, and the guest's next datagram makes a new one. The
+  datagrams that come while it is being made wait for it (at most 32, 64 KiB).
+- **Where a datagram may go is decided as for a connection** (`DestinationPolicy`): to a fake
+  address, the relay is asked for its **name** (address type 3), and the proxy resolves it; to a
+  public address, for the address. A private, loopback, link-local, carrier-NAT, multicast,
+  reserved or own-network address, a fake address nobody was given, port 0 and a blocked name are
+  answered "port unreachable", and the proxy never hears of them. DNS (53) and the time (123) are
+  answered here and never relayed, whatever the address; nor are DHCP, NetBIOS, SSDP, mDNS and
+  LLMNR (67, 68, 137, 138, 1900, 5353, 5355). Broadcasts and multicast never leave.
+- **An answer is shown from exactly where the guest sent.** Each association remembers the
+  destinations the guest sent to (64, the one unused the longest forgotten): an answer from an
+  address the guest wrote is from that address; a name's first answer teaches the address the
+  proxy answers it from (or the relay names the name), and is shown from the fake address and
+  port the guest used. An answer from anywhere the guest sent nothing, one with a header that is
+  not SOCKS5's, a fragment (FRAG ≠ 0, which is not reassembled), and one larger than the guest's
+  network takes (1472 bytes of payload) are dropped. The relay's socket is connected to the relay,
+  so a datagram from any other address does not even reach the stack.
+- **Where the relay is**: the address and port the proxy names (BND.ADDR, BND.PORT) — the proxy's
+  own address where it names 0.0.0.0, itself, or an address that is not public (a proxy behind
+  NAT names its address inside its own network): nothing of this Mac's is sent to a local network
+  on a proxy's word. A relay named by a name, or on port 0, fails the association.
+- **A proxy that refuses UDP ASSOCIATE** (7, not supported; 2, not allowed) is not asked again in
+  the run: what waited, and what comes, is answered "port unreachable", and the log says so once.
+  An association that fails otherwise (no answer within 10 s, not reached, not understood) answers
+  what waited for it with "port unreachable"; failures one after another make the next attempt wait
+  longer (a quarter of a second, doubling, at most 30 s).
+- **Limits**: 128 associations at once (an eighth of the connections, so fewer where the process
+  has few descriptors; each holds two), 32 new ones a second (64 at once); an association on which
+  nothing moved for two minutes is closed (one quiet for half a minute makes room for a new one when
+  the table is full). The relay's datagrams wait in its socket while the guest's wire is full, and
+  are lost past that, as on any congested path.
+- **The counters** add datagrams and bytes each way and associations opened, failed and open;
+  the log says whether UDP is carried in the run, and the reasons for what was refused, as counts
+  — never a name or an address.
+
+**The check before the start** (the app, `VMCenter.checkProxy`): the Proxies section's own check of a
+SOCKS5 proxy's UDP (`ProxyChecker.udp`) — one UDP association, a STUN Binding through it to a STUN
+server named so that the proxy resolves it, then where the proxy's UDP leaves from (the STUN
+answer) against where its pages leave from (Cloudflare's trace through the proxy). Only the proxy
+is talked to. UDP is on for that run only when both are the same address
+(`VMUDPRoute.throughProxy`); a proxy that refuses, carries nothing, sends UDP out from another
+address (a site would see two), or could not be checked leaves it off, and the machine's row says
+which. It runs beside the lookup of where the proxy comes out: a proxy that answers costs a second
+or two, one that takes the association and carries nothing up to nine.
+
 ## What the app does with it
 
 ```swift
@@ -100,7 +167,9 @@ close(ends[1])                  // the descriptor stays the app's
 
 `guestMAC` must be the address of the virtual machine's network card (DHCP answers no other), and
 `counters()` may be asked at any time from any thread: bytes each way, connections opened, failed
-and open now, DNS queries and how many were blocked, datagrams dropped, questions for the time.
+and open now, DNS queries and how many were blocked, datagrams dropped, questions for the time,
+and the UDP carried (datagrams and bytes each way, associations). `VMNetConfiguration.relaysUDP`
+turns the guest's UDP through the proxy's relay on (above); it is off unless set.
 
 ### Where a machine connects, and blocking a host as it runs
 
@@ -128,8 +197,10 @@ still holds those addresses — in its resolver's cache, in connections it is ab
 
 ## Limits
 
-- **TCP over IPv4 only.** No UDP gets out (so no QUIC/HTTP/3, no WebRTC media), no IPv6, no ICMP
-  beyond the router's ping. The guest's clock is this Mac's: set from the virtual Mac's as it
+- **IPv4 only.** TCP through the proxy; UDP through the proxy's relay where the run carries it,
+  and not at all where it does not (no QUIC/HTTP/3, no WebRTC media then); no IPv6, no ICMP beyond
+  the router's ping and "port unreachable". The guest's IP fragments are dropped, and no answer
+  larger than its network's MTU is delivered (no fragments are made for it). The guest's clock is this Mac's: set from the virtual Mac's as it
   starts, and told again whenever it asks (NTP is answered here, by this Mac's clock) — which is
   what sets a machine woken from a saved state right, and one that stood still while this Mac
   slept (the helper has its boot script ask at both, docs/VM.md).
@@ -169,7 +240,8 @@ still holds those addresses — in its resolver's cache, in connections it is ab
 | `DHCPServer.swift`, `DNSResponder.swift` | the two servers and the pool of fake addresses |
 | `DestinationPolicy.swift` | where a connection may go |
 | `TCPConnection.swift` | one connection's TCP: segments in, segments out, a clock passed in |
-| `ProxyHandshake.swift` | SOCKS5 (RFC 1928, 1929) and HTTP CONNECT as bytes in and bytes out |
+| `ProxyHandshake.swift` | SOCKS5 (RFC 1928, 1929) CONNECT and UDP ASSOCIATE, and HTTP CONNECT, as bytes in and bytes out |
+| `UDPRelay.swift` | the guest's UDP through the relay as data: the datagram header, where the relay is, which destination an answer is from, what is never relayed |
 | `Wire.swift`, `ByteQueue.swift` | Ethernet, ARP, IPv4, ICMP, UDP and TCP frames; checksums; a queue of bytes |
 | `Sys.swift` | the system calls, under one set of names on macOS and Linux; the proxy's resolver |
 
@@ -188,6 +260,20 @@ there. Last, the guest as an adversary: frames cut short, grown and changed byte
 plain noise, through every parser and through a running network — whatever the guest sends
 arrives in Lumen's own process, where a trap would end the app.
 
+UDP (`UDPRelayTests`, `UDPRelayLoopTests`, `DirectConnectorUDPTests`): UDP ASSOCIATE byte by byte,
+with and without a sign-in, refused and in pieces; the datagram header both ways, fragments,
+malformed headers and noise; where the relay is (unspecified, the proxy's own, public, private,
+IPv6, a name); which destination an answer is from (an address, a name's first answer, two names
+on one port, a fake address given to another name, blocked names, the limits); what the link layer
+hands over and what it never does (DNS, the time, the local ports, broadcasts, multicast). Then
+over real sockets with a SOCKS5 relay double: by name and by address, one association per guest
+port, DNS and the time kept here, private destinations and blocked names refused and never seen
+by the proxy, a proxy that refuses UDP (not asked again), stalls or is not there, answers from
+another socket, fragments and answers from nowhere dropped, an answer too large for the guest,
+noise from the guest, the proxy ending an association, a quiet one closed, the limits, no
+descriptor left after `stop()`, and a log that names nothing. Run on Linux with Swift 6.1.3
+(16 November): all 239 tests of VMNetCore pass, 48 of them new for UDP.
+
 **Interop** (`scripts/vmnet_interop.sh`, Linux, in a privileged container). A scripted guest proves
 the code agrees with its author; this proves it agrees with a real TCP/IP stack. The stack is put
 on a TAP device whose interface lives in a network namespace, so Linux's kernel is the guest:
@@ -195,21 +281,39 @@ on a TAP device whose interface lives in a network namespace, so Linux's kernel 
 and uploads 32 MB through a SOCKS5 and an HTTP CONNECT test double, compared by SHA-256. Also: 64
 parallel downloads and uploads, a thousand short connections, half-close, a reader and an origin
 that are slow, transfers cut off in the middle, refused names and addresses, UDP answered
-"unreachable", a wire that loses 1 % of its frames each way, no proxy at all, and that the stack
-uses no CPU when nothing happens. One PASS or FAIL line per check and the throughput of the large
-download (some hundreds of MB/s on a build machine, the test doubles included).
+"unreachable" without the relay, a wire that loses 1 % of its frames each way, no proxy at all,
+and that the stack uses no CPU when nothing happens. With the relay on (`--relay-udp`), the SOCKS5
+double does UDP ASSOCIATE and relays to an echo, a STUN server and an HTTP/3 server on loopback:
+an echo by name (asked of the relay as the name, answered from the fake address) and by address,
+DNS and the time still answered here and never relayed, private and reserved addresses refused
+and never relayed, a STUN Binding by name whose mapped address is the relay's own egress, an
+HTTP/3 download over QUIC by name compared by SHA-256 (aioquic, the test's own), a proxy that
+refuses UDP ASSOCIATE (unreachable at once, asked once, its TCP still working), UDP through a
+proxy with a sign-in, and an HTTP CONNECT proxy with the relay asked for (nothing relayed). One
+PASS or FAIL line per check and the throughput of the large download (some hundreds of MB/s on a
+build machine, the test doubles included).
 
 ```
 docker run --rm --privileged -v "$PWD":/src -w /src swift:6.0-noble bash -c \
-  'apt-get update && apt-get install -y python3 curl iproute2 iputils-ping dnsutils udhcpc && scripts/vmnet_interop.sh'
+  'apt-get update && apt-get install -y python3 python3-venv curl iproute2 iputils-ping dnsutils udhcpc \
+   && python3 -m venv /opt/quic && /opt/quic/bin/pip install aioquic \
+   && VMNET_INTEROP_QUIC_PYTHON=/opt/quic/bin/python scripts/vmnet_interop.sh'
 ```
+
+Run on 16 November in an Ubuntu 26.04 root (Swift 6.1.3, aioquic 1.8.0) on a Linux kernel without
+IPv6: every check passed, the 64 MB download at 572 MB/s, the 4 MB over QUIC in half a second.
+**CI** runs the unit tests (`swift test` in `core-linux` and `macos-checks`, ci.yml), not the
+interop, which needs a privileged container.
 
 The interop is what found that data ahead of a gap has to be kept: answered with duplicate
 acknowledgements and then dropped, it made Linux take the wire for one that reorders packets and
 stop retransmitting on duplicates.
 
-**Not tested here**: the code on macOS (CI compiles and runs the unit tests there), and a macOS
-guest's own TCP — the interop's guest is Linux.
+**Not tested here**: the code on macOS (CI compiles and runs the unit tests there), a macOS guest's
+own TCP, QUIC and WebRTC — the interop's guest is Linux, its HTTP/3 aioquic's — and a real
+provider's relay: the doubles relay as RFC 1928 says. What a site sees (detectme.pro's "UDP",
+"HTTP/3", "WebRTC"; browserleaks.com/webrtc; cloudflare-quic.com) is checked on a Mac with a
+machine and a SOCKS5 proxy that carries UDP.
 
 ## Without a proxy: the direct connector
 
@@ -220,7 +324,7 @@ ordinary socket. The guest's traffic then goes wherever any app's on this Mac go
 VPN, by its routes. Behind Apple's NAT a guest's packets go by a network of the system's own, and
 on a Mac that runs a VPN or a proxy tool they went nowhere.
 
-- CONNECT only, and only with a sign-in (RFC 1929): a user name and password of 16 random bytes
+- CONNECT, and UDP ASSOCIATE (below), and only with a sign-in (RFC 1929): a user name and password of 16 random bytes
   each, made up for each connector and given to the machine's network alone (`upstream`). Any
   process on this Mac can reach a port on loopback; without the sign-in any of them could have its
   connections made by the helper. A client that offers no sign-in (method 0) is told no method is
@@ -304,6 +408,19 @@ on a Mac that runs a VPN or a proxy tool they went nowhere.
   Mac asks for when it joins a network; by the same way as a guest's, at most once in half a
   minute, not counted in the report): a page's blocked trackers fail one after another on a Mac
   with a filtering resolver, and that is not a machine without internet.
+- **UDP** (HTTP/3, WebRTC): the app turns the machine's UDP on (`VMUDPRoute.direct`), and the
+  connector takes UDP ASSOCIATE. The network's datagrams come in on a loopback socket (the first
+  one's sender is the association's; no other is heard) and go out from one socket of this process
+  per address family — one port for every destination of a guest port. The rules are a
+  connection's: a name that is local by the way it is written is not looked up; a name's
+  addresses are taken when public, or private ones this Mac sends into a tunnel; an address the
+  guest wrote only when public; never the Mac's own or a network it is on. An answer is taken only
+  from where a datagram went. A site sees the address it sees for the machine's TCP. **Not while
+  this Mac's network settings name a proxy** (a tool in "system proxy" mode, or a configuration
+  file): that proxy is not asked for UDP, and UDP around it would leave from where the Mac's apps
+  do not, so the association is refused (2) and the machine's network asks no more in the run;
+  its row says HTTP/3 and WebRTC are off while the Mac's settings name a proxy. Tested by
+  `DirectConnectorUDPTests`.
 - A thread per direction of a connection, blocking; at most `maximumConnections` at once. Each
   connection holds three of the helper's descriptors (the network's socket to the connector, the
   one the connector accepted, the one to the destination), and both the network and the connector

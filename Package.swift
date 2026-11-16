@@ -13,8 +13,8 @@
 //   NetworkGuardCore Platform-independent rules of the network guard (what a profile's process
 //                   may reach while its WebRTC goes through its proxy), tested on Linux and macOS.
 //   VMNetCore       Platform-independent network of a virtual machine profile (docs/VM_NETWORK.md): a
-//                   userspace stack on the guest's Ethernet frames — ARP, DHCP, DNS, a TCP terminator —
-//                   whose only way out is the profile's proxy. Tested on Linux and macOS; on Linux also
+//                   userspace stack on the guest's Ethernet frames — ARP, DHCP, DNS, a TCP terminator,
+//                   UDP through the proxy's relay — whose only way out is the profile's proxy. Tested on Linux and macOS; on Linux also
 //                   against the kernel's own TCP (vmnet-interop, scripts/vmnet_interop.sh).
 //   TunnelTransport macOS only: the relay's network side (SOCKS5 over Network.framework), the
 //                   TURN server's UDP socket on loopback, the proxy's UDP check.

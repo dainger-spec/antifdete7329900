@@ -1774,7 +1774,9 @@ What that changes for isolation, and what it does not:
   construction, not by a rule the app keeps.
 - **The network**: a machine with a proxy has no network card on this Mac's network at all. Its
   card is a socket to `VMNetCore`, which reaches the outside only through the proxy; with the proxy
-  down the machine reaches nothing. UDP does not leave it. Names are resolved by the proxy.
+  down the machine reaches nothing. Its UDP (HTTP/3, WebRTC) leaves only through the proxy's own
+  relay, where the check before the start found the proxy carries it from its pages' address, and
+  otherwise not at all. Names are resolved by the proxy.
 - **At rest**: a machine's disk is **not** encrypted by the vault — FileVault on this Mac is what
   encrypts it. The profile's settings (name, proxy and its password) are in the vault.
 - **What sites see**: a real Safari on a real macOS, with nothing injected; the system's time zone
