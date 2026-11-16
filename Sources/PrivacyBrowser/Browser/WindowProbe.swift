@@ -50,6 +50,10 @@ enum WindowProbeAction: Codable, Equatable {
     /// `local()`, and by a canvas in a worker — and whether CSS `cursive` is Snell Roundhand, as JSON
     /// in `detail` (`PhoneFonts`).
     case fonts
+    /// Typed into the window's address bar one key press at a time, as a person types, and nothing
+    /// pressed after: what the field holds then and every exception thrown meanwhile, as JSON in
+    /// `detail` (`AddressBarTyping`).
+    case typeInAddressBar(String)
 }
 
 struct WindowLook: Codable, Equatable {
@@ -206,6 +210,12 @@ enum WindowProbe {
             look.action = shown ? "the profile's marker back" : "the profile's marker out"
             if SafariChromeHost.isHosting {
                 SafariProfileMarker.suspend(!shown)
+                look.found = true
+            }
+        case .typeInAddressBar(let text):
+            look.action = "type in the address bar"
+            if let window, let field = addressField(in: window) {
+                look.detail = await AddressBarTyping.type(text, into: field, in: window).json
                 look.found = true
             }
         case .search(let text):

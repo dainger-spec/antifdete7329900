@@ -872,6 +872,62 @@ enum SafariChrome {
     /// Safari's providers, kept for the lifetime of the process because `+shared` hands them out.
     private static var searchProviders: NSObject?
 
+    /// Notices asked of the profile's window so far (`presentNotice`), shown or not: what the
+    /// address bar's typing check reads.
+    private(set) static var noticesPresented = 0
+
+    /// Safari's search providers as this process has them — the default one and each one's name and
+    /// templates, as far as they answer — for the address bar's typing check. Asked only through
+    /// methods the objects have, each call caught: a description, never a failure.
+    static func searchProvidersDescription() -> String {
+        guard let controller = searchProviders else { return "no providers controller" }
+        var parts: [String] = ["controller \(String(describing: Swift.type(of: controller)))"]
+        func ask(_ object: NSObject, _ name: String) -> AnyObject? {
+            let selector = NSSelectorFromString(name)
+            guard object.responds(to: selector) else { return nil }
+            var answer: AnyObject?
+            let thrown = PBCatchException { answer = object.perform(selector)?.takeUnretainedValue() }
+            if let thrown { parts.append("\(name) threw \(thrown.name.rawValue)") }
+            return answer
+        }
+        func describe(_ provider: NSObject) -> String {
+            var fields: [String] = [String(describing: Swift.type(of: provider))]
+            var count: UInt32 = 0
+            if let methods = class_copyMethodList(Swift.type(of: provider), &count) {
+                for index in 0..<Int(count) {
+                    let name = NSStringFromSelector(method_getName(methods[index]))
+                    guard !name.contains(":"), !name.hasPrefix("_"), !name.hasPrefix("."),
+                          name.localizedCaseInsensitiveContains("name") || name.localizedCaseInsensitiveContains("template")
+                            || name.localizedCaseInsensitiveContains("suggest") || name.localizedCaseInsensitiveContains("identifier") else { continue }
+                    let returns = method_copyReturnType(methods[index])
+                    let isObject = String(cString: returns) == "@"
+                    free(returns)
+                    guard isObject else { continue }
+                    let value = ask(provider, name)
+                    fields.append("\(name)=\(value.map { String(describing: $0).prefix(90) } ?? "nil")")
+                }
+                free(methods)
+            }
+            return fields.joined(separator: ", ")
+        }
+        for name in ["defaultSearchEngineName", "defaultSearchProvider", "defaultSearchProviderForPrivateBrowsing"] {
+            guard let value = ask(controller, name) else { continue }
+            if let object = value as? NSObject, !(value is NSString) {
+                parts.append("\(name): " + describe(object))
+            } else {
+                parts.append("\(name)=\(String(describing: value))")
+            }
+        }
+        for name in ["providers", "allProviders", "searchProviders", "availableProviders"] {
+            if let list = ask(controller, name) as? [NSObject] {
+                parts.append("\(name): \(list.count)")
+                for provider in list.prefix(12) { parts.append("  " + describe(provider)) }
+                break
+            }
+        }
+        return parts.joined(separator: "\n")
+    }
+
     /// Features of Safari's chrome that need services only Safari has, and take the process down
     /// when they do not find them. None of them is wanted here.
     ///
@@ -1239,6 +1295,7 @@ enum SafariChrome {
     /// Shows a notice in the profile's window: a sheet on it, one at a time. `--exception-check`
     /// prints it instead.
     static var presentNotice: @MainActor (String, String) -> Void = { title, text in
+        noticesPresented += 1
         guard !isShowingUnavailable else { return }
         isShowingUnavailable = true
         let alert = NSAlert()

@@ -138,6 +138,12 @@ MainActor.assumeIsolated {
         // scripts/scenario_safari_check.sh starts the proxy that serves the page).
         Localization.applyProcessLanguage()
         ScenarioSafariCheck.start(arguments: arguments)
+    } else if arguments.contains("--address-bar-check") {
+        // Typing into Safari's address bar in a profile's own process, one key press at a time, for
+        // each search engine: the field must hold what was typed, with no exception and no notice
+        // (CI; AddressBarCheck; scripts/address_bar_check.sh starts the proxy).
+        Localization.applyProcessLanguage()
+        AddressBarCheck.start(arguments: arguments)
     } else if arguments.contains("--camera-safari-check") {
         // A profile that substitutes the camera, in its own process with Safari's window: a secure
         // loopback page must get our synthetic stream from getUserMedia and list our camera from
