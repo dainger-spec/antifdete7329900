@@ -545,6 +545,13 @@ private struct VMRow: View {
                         .foregroundStyle(Theme.textTertiary)
                         .lineLimit(1)
                 }
+                if let udp = udpNote {
+                    // Whether HTTP/3 and WebRTC (UDP) leave the machine in this run, and why not.
+                    Label(udp.text, systemImage: udp.carried ? "checkmark.circle" : "nosign")
+                        .font(.lumenSecondary)
+                        .foregroundStyle(udp.carried ? Theme.textTertiary : Theme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer(minLength: 10)
             if let state, state.phase == .running {
@@ -562,6 +569,17 @@ private struct VMRow: View {
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .card(padding: 0)
+    }
+
+    /// What the row says of the machine's UDP while it runs: with a proxy, whether the proxy carries
+    /// it (the check before this start); without one, only that it is off while this Mac's own
+    /// settings name a proxy — otherwise it goes as the machine's TCP does, which needs no word.
+    private var udpNote: (text: String, carried: Bool)? {
+        guard let state, state.phase == .running, let udp = state.udp else { return nil }
+        if udp == .direct {
+            return state.viaSystemProxy ? (L("vm.row.udp.directViaSystemProxy"), false) : nil
+        }
+        return (L("vm.row.udp.\(udp.rawValue)"), udp.carriesUDP)
     }
 
     /// The keyboard's layouts, or browser mode's menu bar, were written in the machine's macOS at
@@ -1011,10 +1029,27 @@ struct VMEditorView: View {
             .labelsHidden()
             .fixedSize()
             note(proxyChoice.isEmpty ? L("vm.editor.proxy.direct.note") : L("vm.editor.proxy.note"), warns: proxyChoice.isEmpty)
+            note(udpNote)
             if proxies.isEmpty {
                 note(L("vm.editor.proxy.empty"))
             }
         }
+    }
+
+    /// What the machine's UDP (HTTP/3, WebRTC) does with the proxy chosen, as far as its last check
+    /// said; it is checked again at every start.
+    private var udpNote: String {
+        let route: VMUDPRoute
+        switch proxyChoice {
+        case "":
+            route = .direct
+        case "current":
+            route = VMUDPRoute.expected(for: draft.profile.proxy, check: center.exits[draft.profile.id])
+        default:
+            guard let entry = chosenEntry else { return L("vm.editor.udp.unknown") }
+            route = VMUDPRoute.forProxy(entry.proxy, check: entry.lastCheck)
+        }
+        return L("vm.editor.udp.\(route.rawValue)")
     }
 
     // MARK: Where it says it is

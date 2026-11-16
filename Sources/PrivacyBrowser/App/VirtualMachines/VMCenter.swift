@@ -68,6 +68,8 @@ final class VMCenter: ObservableObject {
         var woke = false
         /// Its macOS is being shut down (`shutDown`), not put to sleep.
         var shuttingDown = false
+        /// Where its UDP (HTTP/3, WebRTC) goes in this run, as the check before the start found it.
+        var udp: VMUDPRoute?
     }
 
     @Published private(set) var list: VMProfiles
@@ -745,15 +747,17 @@ final class VMCenter: ObservableObject {
         problems[id] = nil
         wakeNotes[id] = nil
         guard let proxy = profile.proxy else {
+            // Without a proxy the machine's UDP goes out as this Mac's own, as its TCP does — not
+            // while the Mac's settings name a proxy, which the helper's connector then refuses.
             guard profile.asksWhereTheConnectionComesOut else {
-                running[id] = Running(phase: .starting)
-                return launch(profile)
+                running[id] = Running(phase: .starting, udp: .direct)
+                return launch(profile, udp: .direct)
             }
             // The person's choice for this machine: its time zone and language are those of the
             // place this Mac's own connection comes out at (its VPN, when one is on) — asked now,
             // by this Mac, as a profile without a proxy asks. No answer does not keep the machine
             // from starting: it keeps the time zone and language it had, and the row says so.
-            running[id] = Running(phase: .checkingProxy)
+            running[id] = Running(phase: .checkingProxy, udp: .direct)
             Task { [weak self] in
                 let userAgent = ProfileConfiguration().userAgent(hostSafariVersion: HostSafari.version)
                 let exit = ProxyChecker.result(of: await ProxyGeoLookup.lookUp(proxy: nil, userAgent: userAgent,
@@ -780,7 +784,7 @@ final class VMCenter: ObservableObject {
                     return
                 }
                 self.running[id]?.phase = .starting
-                self.launch(profile)
+                self.launch(profile, udp: .direct)
             }
             return
         }
@@ -799,6 +803,10 @@ final class VMCenter: ObservableObject {
                 profile = followed
                 try? self.save(profile)
             }
+            // UDP (HTTP/3, WebRTC) for this run only where the check found the proxy carries it,
+            // from where its pages leave; what could not be told keeps it off.
+            let udp = VMUDPRoute.forProxy(proxy, check: check)
+            self.running[id]?.udp = udp
             // The limit again: another machine may have started while the proxy was asked.
             guard self.runningCount < VMRequirements.runningLimit else {
                 self.running[id] = nil
@@ -813,18 +821,21 @@ final class VMCenter: ObservableObject {
                 return
             }
             self.running[id]?.phase = .starting
-            self.launch(profile)
+            self.launch(profile, udp: udp)
         }
     }
 
-    /// The check of a machine's proxy before its start: does it work, where does it come out, and
-    /// its time zone — and nothing a machine does not use. The Proxies section's check also sets
-    /// up two more tunnels for a steady latency, which the machines' list does not show, and waits
-    /// for a SOCKS5 proxy's UDP (up to nine seconds where the proxy takes the association and
-    /// carries nothing, then a request for where it leaves from) — and UDP never leaves a machine
-    /// (docs/VM.md). A start, and a wake above all, is shorter by those.
+    /// The check of a machine's proxy before its start: does it work, where does it come out, its
+    /// time zone — and, for a SOCKS5 proxy, whether it carries UDP: a UDP association and a STUN
+    /// request through it to a STUN server named so that the proxy resolves it, then where its
+    /// UDP leaves from against where its pages do (`ProxyChecker.udp`; only the proxy is talked
+    /// to, never anything from this Mac directly). A machine's UDP (HTTP/3, WebRTC) goes through
+    /// the proxy in that run only when it does (`VMUDPRoute`). The UDP check runs beside the
+    /// lookup of where the proxy comes out: a proxy that answers costs a second or two more, one
+    /// that takes the association and carries nothing up to nine. The Proxies section's two more
+    /// tunnels for a steady latency, which the machines' list does not show, are not made.
     static func checkProxy(_ proxy: ProxySettings) async -> ProxyCheckResult {
-        await ProxyChecker.check(proxy, latencySamples: 1, triesUDP: false)
+        await ProxyChecker.check(proxy, latencySamples: 1, triesUDP: true)
     }
 
     /// Why a machine whose proxy did not pass its check was not started: what the check found, in
@@ -836,7 +847,8 @@ final class VMCenter: ObservableObject {
         return ([L("vm.error.proxyFailed"), explanation] + [report.advice].compactMap { $0 }).joined(separator: " ")
     }
 
-    private func launch(_ profile: VMProfile) {
+    /// `udp`: where the machine's UDP goes in this run (`VMUDPRoute`); nil keeps it off.
+    private func launch(_ profile: VMProfile, udp: VMUDPRoute? = nil) {
         let id = profile.id
         let files = library.machine(for: id)
         do {
@@ -866,7 +878,8 @@ final class VMCenter: ObservableObject {
             let helper = VMHelperProcess(onEvent: { [weak self] event in self?.take(event, of: id) },
                                          onEnd: { [weak self] failure in self?.ended(id, failure: failure) })
             var request = VMHelperRequest.run(profile: profile, library: library,
-                                              hostCores: ProcessInfo.processInfo.activeProcessorCount, texts: Self.helperTexts)
+                                              hostCores: ProcessInfo.processInfo.activeProcessorCount, texts: Self.helperTexts,
+                                              udp: udp)
             // The app's own "animations off": the start's cover moves nothing, as under Reduce Motion.
             if !AppearancePreferences.animationsEnabled { request.reducesMotion = true }
             try helper.start(request)

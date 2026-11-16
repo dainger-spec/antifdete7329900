@@ -73,6 +73,12 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
     public var macAddress: String?
     public var network: Network
     public var proxy: ProxySettings?
+    /// The machine's UDP — HTTP/3 (QUIC), WebRTC — goes out in this run: through the proxy's own
+    /// UDP relay (`VMUDPRoute.throughProxy`, found by the check before the start), or, without a
+    /// proxy, as this Mac's own (`direct`). Nil or false: answered "port unreachable", as a
+    /// helper before this did for every datagram but DNS and the time. Not in `stamp`: the
+    /// network is made anew at each start.
+    public var relaysUDP: Bool?
     /// Names the machine's network answers "no such name" for (`VMRequirements.blockedHosts`).
     public var blockedHosts: [String]
     /// What the guest plays is heard on this Mac. Off: the machine keeps its speakers, silent.
@@ -143,8 +149,10 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
     }
 
     /// The request to start a profile's machine. A profile with a proxy never gets the direct
-    /// network: without a usable proxy it is closed.
-    public static func run(profile: VMProfile, library: VMLibrary, hostCores: Int, texts: [String: String]) -> VMHelperRequest {
+    /// network: without a usable proxy it is closed. `udp`: where the machine's UDP goes in this
+    /// run, as the check before the start found it; nil — not decided — keeps it off.
+    public static func run(profile: VMProfile, library: VMLibrary, hostCores: Int, texts: [String: String],
+                           udp: VMUDPRoute? = nil) -> VMHelperRequest {
         var request = VMHelperRequest(mode: .run, machineDirectory: library.machineDirectory(for: profile.id).path,
                                       baseDirectory: library.baseDirectory.path,
                                       cores: min(profile.cores ?? VMRequirements.coresWanted, VMRequirements.cores(hostCores: hostCores)),
@@ -159,6 +167,9 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
         request.stateStamp = request.stamp(settingsRevision: revision)
         request.settingsRevision = revision
         request.sleepsScreenWhenHidden = profile.sleepsScreenWhenHidden ? true : nil
+        // UDP only by the route decided for this run, and only the way the machine's network goes:
+        // a proxy's relay for a machine with a proxy, this Mac's own for one without.
+        if let udp, udp.carriesUDP, (udp == .direct) == (profile.proxy == nil) { request.relaysUDP = true }
         return request
     }
 

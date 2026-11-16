@@ -536,6 +536,57 @@ final class VMHelperProtocolTests: XCTestCase {
         XCTAssertNil(VMHelperEvent.parse("2026-11-13 12:00:00.000 LumenVM[1:2] a line of the system's own"))
         XCTAssertNil(VMHelperEvent.parse(#"{"kind":"something-new"}"#), "an event of a later helper is not this version's")
     }
+
+    /// A machine's UDP (HTTP/3, WebRTC) goes out only where the check before its start found the
+    /// proxy carries it — from the address its pages leave from — and never around the proxy.
+    func testAMachinesUDPGoesOutOnlyWhereTheCheckFoundAWayAndNeverAroundTheProxy() throws {
+        let socks = ProxySettings(kind: .socks5, host: "de.example", port: 1080, username: "u", password: "p")
+        let http = ProxySettings(kind: .httpConnect, host: "de.example", port: 8080)
+        let https = ProxySettings(kind: .httpConnect, host: "de.example", port: 8443, tlsToProxy: true)
+        func check(_ udp: ProxyUDPSupport?, alive: Bool = true) -> ProxyCheckResult {
+            var result = alive ? ProxyCheckResult.alive(location: nil, latency: 0.1) : ProxyCheckResult.dead(.noAnswer)
+            result.udp = udp
+            return result
+        }
+        XCTAssertEqual(VMUDPRoute.forProxy(socks, check: check(.supported)), .throughProxy)
+        XCTAssertEqual(VMUDPRoute.forProxy(socks, check: check(.unsupported)), .notCarried)
+        XCTAssertEqual(VMUDPRoute.forProxy(socks, check: check(.elsewhere)), .elsewhere)
+        // What cannot be told keeps UDP off.
+        for unknown: ProxyUDPSupport? in [.exitUnknown, .unknown, nil] {
+            XCTAssertEqual(VMUDPRoute.forProxy(socks, check: check(unknown)), .unknown)
+        }
+        XCTAssertEqual(VMUDPRoute.forProxy(socks, check: check(.supported, alive: false)), .unknown)
+        XCTAssertEqual(VMUDPRoute.forProxy(socks, check: nil), .unknown)
+        // An HTTP proxy carries TCP only, whatever a check says.
+        XCTAssertEqual(VMUDPRoute.forProxy(http, check: check(.supported)), .httpProxy)
+        XCTAssertEqual(VMUDPRoute.forProxy(https, check: check(.supported)), .httpProxy)
+        XCTAssertEqual(VMUDPRoute.expected(for: nil, check: nil), .direct)
+        XCTAssertEqual(VMUDPRoute.expected(for: socks, check: check(.supported)), .throughProxy)
+        XCTAssertEqual(VMUDPRoute.allCases.filter(\.carriesUDP), [.throughProxy, .direct])
+
+        // The request carries it — only the way the machine's network goes.
+        let library = VMLibrary(root: URL(fileURLWithPath: "/tmp/lib"))
+        let proxied = VMProfile(name: "A", proxy: socks)
+        let direct = VMProfile(name: "B")
+        func relays(_ profile: VMProfile, _ udp: VMUDPRoute?) -> Bool? {
+            VMHelperRequest.run(profile: profile, library: library, hostCores: 8, texts: [:], udp: udp).relaysUDP
+        }
+        XCTAssertNil(relays(proxied, nil), "off unless decided")
+        XCTAssertEqual(relays(proxied, .throughProxy), true)
+        for off: VMUDPRoute in [.httpProxy, .notCarried, .elsewhere, .unknown] { XCTAssertNil(relays(proxied, off), off.rawValue) }
+        XCTAssertNil(relays(proxied, .direct), "never this Mac's own UDP for a machine with a proxy")
+        XCTAssertEqual(relays(direct, .direct), true)
+        XCTAssertNil(relays(direct, .throughProxy))
+        let request = VMHelperRequest.run(profile: proxied, library: library, hostCores: 8, texts: [:], udp: .throughProxy)
+        XCTAssertEqual(try VMHelperRequest.parse(try request.line()), request)
+        XCTAssertTrue(try request.line().contains(#""relaysUDP":true"#))
+        // Not a part of what a saved state goes with: the network is made anew at each start.
+        XCTAssertEqual(request.stateStamp, VMHelperRequest.run(profile: proxied, library: library, hostCores: 8, texts: [:]).stateStamp)
+        // A request without it (an app before this) is a machine without UDP.
+        let before = VMHelperRequest.run(profile: proxied, library: library, hostCores: 8, texts: [:])
+        XCTAssertFalse(try before.line().contains("relaysUDP"))
+        XCTAssertNil(try VMHelperRequest.parse(try before.line()).relaysUDP)
+    }
 }
 
 /// What a machine may be told about itself beyond where it is: its processors, its sound, its

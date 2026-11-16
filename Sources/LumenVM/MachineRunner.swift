@@ -134,6 +134,11 @@ final class MachineNetwork {
                                                guestAddress: VMNetIPv4(string: "192.168.1.\(last)")!,
                                                prefixLength: 24, upstream: upstream, blockedHostSuffixes: request.blockedHosts)
         configuration.knownNames = knownNames
+        // UDP (HTTP/3, WebRTC) where the app's check before this start found a way for it: the
+        // proxy's own relay, or, without a proxy, this Mac's own sockets (the connector refuses
+        // while the Mac's settings name a proxy). The network itself never relays UDP for an
+        // HTTP proxy or none, whatever it is told.
+        configuration.relaysUDP = request.relaysUDP == true
         let network = VMNetwork(configuration: configuration, frameDescriptor: descriptor)
         // Without a proxy each connection holds three descriptors of this process, not one.
         if direct != nil { network.descriptorsPerConnection = VMNetDirectConnector.descriptorsPerConnection }
@@ -1147,7 +1152,9 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         lastTrouble = trouble
         lastTroubleDetail = troubleDetail
         lastViaSystemProxy = viaSystemProxy
-        HelperIO.emit(VMHelperEvent(kind: .traffic, bytesUp: counters.bytesFromGuest, bytesDown: counters.bytesToGuest,
+        // What went each way, UDP (QUIC, WebRTC) with TCP.
+        HelperIO.emit(VMHelperEvent(kind: .traffic, bytesUp: counters.bytesFromGuest &+ counters.udpBytesFromGuest,
+                                    bytesDown: counters.bytesToGuest &+ counters.udpBytesToGuest,
                                     connections: counters.connectionsActive, trouble: trouble, troubleDetail: troubleDetail,
                                     viaSystemProxy: report == nil ? nil : viaSystemProxy))
     }

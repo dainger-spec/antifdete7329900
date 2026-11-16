@@ -2851,6 +2851,12 @@
 "vm.row.trouble.proxyConfigurationFile" = "No internet in this machine: the Mac's proxy is set by a configuration file (PAC or automatic discovery), which a machine cannot follow — and it does not go out past the proxy instead. Choose a proxy for the machine in its profile, or name the proxy in System Settings → Network → Proxies.";
 "vm.row.trouble.detail" = "Technical detail: %@";
 "vm.row.viaSystemProxy" = "Goes through the proxy in this Mac's network settings";
+"vm.row.udp.throughProxy" = "HTTP/3 and WebRTC (UDP) go through the proxy: sites see the proxy's address in WebRTC.";
+"vm.row.udp.httpProxy" = "HTTP/3 and WebRTC are off in this machine: an HTTP proxy does not carry UDP. They need a SOCKS5 proxy with UDP.";
+"vm.row.udp.notCarried" = "HTTP/3 and WebRTC are off in this machine: this proxy does not carry UDP (it refused UDP ASSOCIATE, or nothing came back through it).";
+"vm.row.udp.elsewhere" = "HTTP/3 and WebRTC are off in this machine: this proxy sends UDP out from another address than its pages, and a site would see two addresses.";
+"vm.row.udp.unknown" = "HTTP/3 and WebRTC are off in this machine: whether its proxy carries UDP could not be found out before the start. Start the machine again to check anew.";
+"vm.row.udp.directViaSystemProxy" = "HTTP/3 and WebRTC are off while this Mac's network settings name a proxy: that proxy is not asked for UDP.";
 "vm.row.tools.old" = "This machine was made with Lumen's first tools: the wallpaper, the appearance, the accent colour and the computer's name are not applied in it. Update the tools in the base system (⋯ → Open the Base System → Install Lumen Tools) and make the machine again.";
 "vm.row.wallpaper.failed" = "Lumen's wallpaper was not set in this machine. What its macOS said: %@";
 "vm.window.trouble" = "no internet — Lumen's list of machines says why";
@@ -2865,6 +2871,12 @@
 "vm.editor.proxy.note" = "Everything the machine sends goes through this proxy, and nothing any other way.";
 "vm.editor.proxy.direct.note" = "Without a proxy, sites see this Mac's own address — or its VPN's, if one is on.";
 "vm.editor.proxy.empty" = "Proxies are added in the Proxies section. A machine takes a SOCKS5 or an HTTP proxy; one reached over TLS (https://) is not supported yet.";
+"vm.editor.udp.throughProxy" = "HTTP/3 and WebRTC (UDP): this proxy carried UDP at its last check, so they go through it. It is checked again at every start.";
+"vm.editor.udp.httpProxy" = "HTTP/3 and WebRTC (UDP): off with an HTTP proxy, which carries TCP only. They need a SOCKS5 proxy with UDP.";
+"vm.editor.udp.notCarried" = "HTTP/3 and WebRTC (UDP): this proxy did not carry UDP at its last check, so they are off in the machine. It is checked again at every start.";
+"vm.editor.udp.elsewhere" = "HTTP/3 and WebRTC (UDP): at its last check this proxy sent UDP out from another address than its pages, so they stay off.";
+"vm.editor.udp.unknown" = "HTTP/3 and WebRTC (UDP) are checked at every start: they go through this proxy if it carries UDP, and are off if it does not — never around it.";
+"vm.editor.udp.direct" = "HTTP/3 and WebRTC (UDP) go out as this Mac's own, as the machine's pages do — not while this Mac's network settings name a proxy.";
 "vm.editor.follow" = "Time zone and language follow the proxy";
 "vm.editor.follow.detail" = "Checked at every start: the machine's macOS gets the time zone and the language of the country the proxy comes out in.";
 "vm.editor.locale" = "Time zone and language";
@@ -2948,7 +2960,7 @@
 "help.vm.costs.hidden" = "A machine's macOS draws its screen even while its window is hidden. Screen off while hidden (in a machine's settings, under Device) puts its display to sleep once the window has been out of sight for half a minute, which spares this Mac; it wakes a second or two after the window is seen again. Meanwhile pages in the machine are hidden, as on a Mac whose display slept.";
 "help.vm.know" = "Good to know";
 "help.vm.know.disks" = "The machines' disks are not encrypted by Lumen's vault: they are files in the vault's folder. Turn on FileVault on your Mac to have them encrypted. Names, proxies and their passwords are in the vault.";
-"help.vm.know.udp" = "A machine has TCP only: QUIC and WebRTC over UDP do not leave it, so WebRTC cannot show your address.";
+"help.vm.know.udp" = "UDP — HTTP/3 (QUIC) and WebRTC — goes through the machine's proxy when the proxy carries it: a SOCKS5 proxy with UDP, checked before every start; WebRTC then shows the proxy's address. With an HTTP proxy, or one that does not carry UDP, they are off: UDP never goes around the proxy. Without a proxy it goes out as this Mac's own, as the machine's pages do. DNS and the time are always answered inside Lumen.";
 "help.vm.know.updates" = "Automatic macOS updates are off in the machines: each would download gigabytes. To move to a newer macOS, remove the base system (⋯) and add it again; the machines you have keep theirs.";
 "help.vm.know.speed" = "The download's speed is that of the way between your connection and Apple's servers; a VPN or proxy on this Mac slows it, since the download goes through them. If it is slow: turn the VPN off while it downloads, or try another network. Or use a file you have: \"I have the file…\" takes macOS's restore image (.ipsw) downloaded on another Mac, by a download manager (\"Copy Apple's link\" while it downloads gives the address), or given by a colleague — Apple checks it when it installs, and your file is not moved or changed.";
 "help.vm.know.base" = "⋯ → Open the Base System starts the base itself, to change what every new machine should have. Machines made before keep what they had.";

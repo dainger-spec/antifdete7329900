@@ -3661,20 +3661,28 @@ final class SelfTest {
             let http = await ProxyChecker.check(ProxySettings(kind: .httpConnect, host: loopback, port: httpPort))
             check("proxy checker, UDP: an HTTP proxy is not tried and nothing is said of its UDP",
                   http.isAlive && http.udp == nil && http.udpLabel == nil, String(describing: http))
-            // A virtual machine's start asks only what a machine uses (`VMCenter.checkProxy`): UDP
-            // never leaves a machine, and its list shows no latency. The same proxy — which
-            // relays UDP — comes back alive with its exit, one tunnel, and nothing asked of its UDP.
+            // A virtual machine's start asks what a machine uses (`VMCenter.checkProxy`): one tunnel
+            // (its list shows no latency) — and the proxy's UDP, which the machine's HTTP/3 and
+            // WebRTC go through in that run only where the proxy carries it (`VMUDPRoute`). The
+            // same proxy, which relays UDP from its pages' address, comes back alive with its exit
+            // and its UDP; the plain SOCKS5 one, which refuses the association, without.
+            ProxyExitLookup.endpoints = [URL(string: "http://exit.selftest.invalid/cdn-cgi/trace")!]
             let machineStarted = Date()
             let forMachine = await VMCenter.checkProxy(withUDP)
             let machineSeconds = Date().timeIntervalSince(machineStarted)
             // On loopback, where nothing is far away: what is saved on a real proxy is its own
-            // round trips — two tunnels, the UDP association, the STUN answer or the wait for one.
+            // round trips — the two more tunnels.
             info(String(format: "virtual machines: the check before a start took %.0f ms on the loopback proxy; the Proxies section's whole check of the same proxy, %.0f ms",
                         machineSeconds * 1000, wholeSeconds * 1000))
-            check("virtual machines: the check before a machine's start sets up one tunnel and asks nothing of the proxy's UDP — alive, with the exit IP and time zone",
-                  forMachine.isAlive && forMachine.udp == nil && forMachine.exitIP == "203.0.113.21"
-                      && forMachine.timeZoneIdentifier == "Europe/Berlin" && forMachine.diagnosis?.latencies.count == 1,
+            check("virtual machines: the check before a machine's start sets up one tunnel and finds the proxy's UDP — alive, with the exit IP and time zone, HTTP/3 and WebRTC through the proxy",
+                  forMachine.isAlive && forMachine.udp == .supported && VMUDPRoute.forProxy(withUDP, check: forMachine) == .throughProxy
+                      && forMachine.exitIP == "203.0.113.21" && forMachine.timeZoneIdentifier == "Europe/Berlin"
+                      && forMachine.diagnosis?.latencies.count == 1,
                   String(describing: forMachine))
+            let refusing = ProxySettings(kind: .socks5, host: loopback, port: socksPort)
+            let withoutUDP = await VMCenter.checkProxy(refusing)
+            check("virtual machines: a SOCKS5 proxy that refuses UDP ASSOCIATE — the machine starts with HTTP/3 and WebRTC off, never around the proxy",
+                  withoutUDP.isAlive && VMUDPRoute.forProxy(refusing, check: withoutUDP) == .notCarried, String(describing: withoutUDP))
         }
         // And a proxy that did not pass it: the machine's row says what the check found, in the
         // Proxies section's words, with what to do — not "does not answer" whatever it was.

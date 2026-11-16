@@ -1138,7 +1138,8 @@ enum UISnapshots {
         let gigabyte = VMRequirements.gibibyte
         let samples: [VMListPreview.Sample] = [
             .init(profile: machine("Shop DE", "de.proxy.example", "DE"), // l10n: not text
-                  state: VMCenter.Running(phase: .running, bytesUp: 48_300_000, bytesDown: 912_000_000, connections: 14),
+                  state: VMCenter.Running(phase: .running, bytesUp: 48_300_000, bytesDown: 912_000_000, connections: 14,
+                                          udp: .throughProxy),
                   exit: sampleWorks(.socks5, "203.0.113.30", "DE", "Europe/Berlin", "Frankfurt", [61]), guest: guest,
                   disk: 6 * gigabyte + gigabyte / 5),
             .init(profile: machine("Ads US", "us.proxy.example", "US", display: "macbook-pro-14", memory: 8, instantWake: true), // l10n: not text

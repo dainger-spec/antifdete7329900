@@ -50,9 +50,9 @@ enum ProxyChecker {
     ///
     /// `latencySamples` and `triesUDP` are what the Proxies section's check measures beside "does
     /// it work, and where does it come out": three tunnels for a latency that is steady, and a
-    /// SOCKS5 proxy's UDP. A caller that shows neither asks for one tunnel and no UDP, and does
-    /// not wait for them — a virtual machine's start (`VMCenter.checkProxy`): UDP never leaves a
-    /// machine, and its list shows no latency.
+    /// SOCKS5 proxy's UDP. A caller that shows no latency asks for one tunnel — a virtual
+    /// machine's start (`VMCenter.checkProxy`), which asks for the UDP: a machine's HTTP/3 and
+    /// WebRTC go through the proxy only where it carries UDP.
     static func check(_ proxy: ProxySettings, latencySamples: Int = 3, triesUDP: Bool = true) async -> ProxyCheckResult {
         let time = Date()
         // Settings that cannot be applied: nothing is sent at all (there would be nothing to send
