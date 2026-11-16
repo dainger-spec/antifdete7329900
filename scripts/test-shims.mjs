@@ -910,6 +910,74 @@ test('no rendering patches: canvas, audio and fonts stay native', () => {
   assert.doesNotMatch(body, /getImageData|createAnalyser|document\.fonts|deviceMemory/);
 });
 
+// An iPhone view's fonts are the engine's: WebKit is given the iPhone's font list
+// (PhoneEngine.engageFonts, WKContextSetFontAllowList) and finds a family by name only when it is
+// on it, so a font this Mac has and an iPhone has not is not installed for the page, by any way it
+// asks. What WebKit does with the list the self-test measures in a profile's own process
+// (WindowProbe.fontsScript); here the engine is a model that finds only the families of its list,
+// and the test is that the page meets that engine's answers through the engine's own functions —
+// the script, in either disguise, puts nothing of its own between a page and the fonts.
+const fontEngine = (list) => `
+  // Widths of a test string, per family; the generic families are always found.
+  const WIDTHS = { monospace: 600, serif: 500, 'sans-serif': 520, Monaco: 610, 'Apple Chancery': 700, Zapfino: 900, Optima: 530 };
+  const LIST = ${JSON.stringify(list)};
+  const finds = (family) => family in WIDTHS && (LIST === null || LIST.includes(family) || ['monospace', 'serif', 'sans-serif'].includes(family));
+  const families = (font) => font.replace(/^\\s*\\d+px\\s*/, '').split(',').map((f) => f.trim().replace(/^"|"$/g, ''));
+  const fonts = new WeakMap();
+  globalThis.CanvasRenderingContext2D = class CanvasRenderingContext2D {
+    get font() { return fonts.get(this) || '10px sans-serif'; }
+    set font(value) { fonts.set(this, String(value)); }
+    measureText(text) { const found = families(this.font).find(finds) || 'serif'; return { width: WIDTHS[found] * String(text).length / 10 }; }
+  };
+  globalThis.FontFace = class FontFace {
+    constructor(family, source) { this.family = family; this.source = String(source); }
+    load() { const m = /local\\("(.+)"\\)/.exec(this.source); return m && finds(m[1]) ? Promise.resolve(this) : Promise.reject(new Error('A network error occurred.')); }
+  };
+  globalThis.FontFaceSet = class FontFaceSet { check(font) { return families(font).some(finds); } };
+  globalThis.fontSet = new FontFaceSet();
+  globalThis.engineFonts = { measureText: CanvasRenderingContext2D.prototype.measureText, FontFace: FontFace,
+    check: FontFaceSet.prototype.check, font: Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, 'font') };
+`;
+const iPhoneFontList = (() => {
+  const swiftList = readFileSync(new URL('../Sources/BrowserCore/Profiles/PhoneFonts.swift', import.meta.url), 'utf8')
+    .split('iOSFamilies: [String] = [')[1].split(']')[0];
+  return [...swiftList.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+})();
+const askFonts = `(async () => {
+  const ctx = new CanvasRenderingContext2D();
+  const width = (font) => { ctx.font = font; return ctx.measureText('mmmmmmmmmm').width; };
+  const found = (family) => ['monospace', 'serif'].some((g) => width('40px "' + family + '", ' + g) !== width('40px ' + g));
+  const local = async (family) => { try { await new FontFace('probe', 'local("' + family + '")').load(); return true; } catch (e) { return false; } };
+  return JSON.stringify({ monaco: found('Monaco'), chancery: found('Apple Chancery'), zapfino: found('Zapfino'), optima: found('Optima'),
+                          localMonaco: await local('Monaco'), localZapfino: await local('Zapfino'),
+                          checkMonaco: fontSet.check('12px "Monaco"'), checkZapfino: fontSet.check('12px "Zapfino"') });
+})()`;
+test('an iPhone view, both disguises: a font only the Mac has measures as the fallback, an iPhone\'s as installed — the engine\'s answer, through the engine\'s own functions', async () => {
+  assert.ok(iPhoneFontList.includes('Zapfino') && iPhoneFontList.includes('Optima') && !iPhoneFontList.includes('Monaco')
+            && !iPhoneFontList.includes('Apple Chancery'), 'the iPhone list (PhoneFonts.swift)');
+  const mac = makeWindow(base, null, fontEngine(null));
+  assert.deepEqual(JSON.parse(await run(mac, askFonts)), { monaco: true, chancery: true, zapfino: true, optima: true,
+                                                         localMonaco: true, localZapfino: true, checkMonaco: true, checkZapfino: true });
+  for (const config of [{ ...everything, safariObject: false, phone }, { ...base, safariObject: false }]) {
+    const w = makeWindow(config, null, fontEngine(iPhoneFontList));
+    assert.deepEqual(JSON.parse(await run(w, askFonts)), { monaco: false, chancery: false, zapfino: true, optima: true,
+                                                         localMonaco: false, localZapfino: true, checkMonaco: false, checkZapfino: true },
+                     config.phone ? 'full disguise' : 'engine only');
+    // No tells: every font function the page reaches is the engine's own object, and prints as the
+    // engine prints it — also through a toString the full disguise replaced for its own getters.
+    assert.equal(run(w, `CanvasRenderingContext2D.prototype.measureText === engineFonts.measureText && FontFace === engineFonts.FontFace
+      && FontFaceSet.prototype.check === engineFonts.check
+      && Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, 'font').set === engineFonts.font.set`), true);
+    assert.match(run(w, `Function.prototype.toString.call(CanvasRenderingContext2D.prototype.measureText)`), /families\(this\.font\)/);
+    assert.match(run(w, `Function.prototype.toString.call(FontFace)`), /^class FontFace/);
+    assert.equal(run(w, `Object.getOwnPropertyNames(CanvasRenderingContext2D.prototype).join()`), 'constructor,font,measureText');
+  }
+  // Nothing of the fonts in the script, nor in what a worker is given.
+  assert.doesNotMatch(body, /measureText|FontFace|fontFamily|queryLocalFonts|getComputedStyle|offsetWidth/);
+  assert.doesNotMatch(swift.split('struct ShimConfiguration')[1].split('static func shimConfiguration')[0], /font/i,
+                     'the script\'s configuration carries no font list');
+});
+
 test('window.safari, as Safari on the Mac exposes it', () => {
   const w = makeWindow({ ...base, safariObject: true });
   assert.equal(run(w, `typeof safari + '|' + Object.prototype.toString.call(safari) + '|' + Object.getOwnPropertyNames(safari).join()`), 'object|[object Object]|pushNotification');

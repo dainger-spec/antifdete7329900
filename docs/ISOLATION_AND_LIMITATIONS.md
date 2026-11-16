@@ -29,7 +29,7 @@ since):
 | Crash-recovery sealing | leftover website data from a crashed run is archived and deleted WITHOUT `WKWebsiteDataStore.remove(forIdentifier:)` (which aborted on an unknown id), then restores cleanly |
 | Device generation → UA | a profile's generation UA reaches `navigator.userAgent`; an explicit custom UA overrides it |
 | Container migration | an unsandboxed vault is moved into the container on the sandboxed build's first launch (separate CI step) |
-| Fingerprint surface | a macOS profile measures the same as a plain WKWebView on the same Mac (navigator, screen, canvas, WebGL, audio, fonts, feature list) except for the Fullscreen API, which Safari has and a bare WKWebView lacks, and `window.safari` where the Safari it names has one (up to Safari 27.1; Safari 27.2 has none); every profile has `window.browser`, WebKit's own WebPageNamespace (`runtime.sendMessage`, `runtime.connect`), as Safari gives every page on the Mac (27.0.1 and 27.2, with no extension installed) and on an iPhone — from an extension controller with no extension in the profile's web views, not a script; an iPhone or iPad view measures the same, under its device's User-Agent, and never has `window.safari` — no iPhone or iPad does; user-installed fonts are hidden from pages, as in Safari. CI also compares the macOS profile with the runner's real Safari (§2) |
+| Fingerprint surface | a macOS profile measures the same as a plain WKWebView on the same Mac (navigator, screen, canvas, WebGL, audio, fonts, feature list) except for the Fullscreen API, which Safari has and a bare WKWebView lacks, and `window.safari` where the Safari it names has one (up to Safari 27.1; Safari 27.2 has none); every profile has `window.browser`, WebKit's own WebPageNamespace (`runtime.sendMessage`, `runtime.connect`), as Safari gives every page on the Mac (27.0.1 and 27.2, with no extension installed) and on an iPhone — from an extension controller with no extension in the profile's web views, not a script; an iPhone or iPad view measures the same, under its device's User-Agent, and never has `window.safari` — no iPhone or iPad does; user-installed fonts are hidden from pages, as in Safari, and in a profile's own process an iPhone view's pages find an iPhone's fonts only (§2, *An iPhone view's fonts*; the self-test's phone window group). CI also compares the macOS profile with the runner's real Safari (§2) |
 | Shims in workers and frames | a worker made from a blob runs the page's substitutions — the time zone, an iPhone's platform, the storage quota — with the profile's time zone or this Mac's alike (it answers the storage quota and the time zone as its page does), stays strict and keeps its line numbers; it is given only that part of the profile's settings — never the camera's chosen media (until the third audit, 14 November 2026, every frame built a copy of the whole video for its workers, tens of MB each) nor the WebRTC relay's credentials, which a worker could read back from its own script — and the engine's own `Blob` makes it, so a page that put its own in place is not handed the script; workers are hooked whenever any substitution that reaches them is on, and only then (until 8 November only with a time zone set, so a profile with this Mac's zone gave its workers the app's quota beside Safari's on the page); a frame reached as `window[i]` right after insertion is patched; `permissions.query({name:'geolocation'})` returns the engine's own `PermissionStatus`, 'prompt' until the page asks |
 | Proxy: IPv6, unresolvable host | an HTTP proxy on `[::1]` tunnels the load; a proxy whose host does not resolve fails closed |
 | Proxy: WebRTC | a proxied profile whose stored setting is "unrestricted" has no `RTCPeerConnection` or `RTCDataChannel` while the network guard is not ready (§5), and says why; with the self-test standing in for the guard, the same profile makes a video call through the relay and its proxy, inside the capture of every packet ([TUNNEL.md](TUNNEL.md)) |
@@ -435,6 +435,48 @@ for it). The self-test takes a snapshot and checks that nothing was handed to th
 compares with Safari and checks that exactly one address went — the measuring page, for Safari —
 and asks `SystemOpen` from a profile's own process, which must refuse.
 
+### An iPhone view's fonts
+
+A real iPhone gives a page about 85 of the fonts pixelscan.net tries; an iPhone view used to give
+this Mac's 178 (the owner's reading, 16 November, an iPhone 17 Pro on iOS 27.0 against an iPhone
+view). Since then an iPhone view's pages find, by name, only the families an iPhone has
+(`PhoneFonts.iOSFamilies`): a font this Mac has and an iPhone has not — Monaco, Apple Chancery,
+Andale Mono, Lucida Grande, Comic Sans MS, Tahoma… — is not installed for the page, however it
+asks: CSS fallback measured by an element's width or `getComputedStyle`, a canvas's
+`measureText`, `FontFace` with `local()`, `document.fonts.check` — in every frame and every worker.
+
+**How.** WebKit's own font allow list, not a script: the process pool's
+`WKContextSetFontAllowList` (WebKit's C API, which its test runner uses to give pages a fixed set of
+fonts; looked up at run time, as the geolocation provider is). Each web content process the pool
+starts takes the list, and its font lookup finds a family by name only when it is on it; the
+system's interface font (`-apple-system`, `system-ui`), the fonts the system falls back to for
+letters no named font has, and web fonts a page loads are not affected. The list goes on every pool
+the profile's process makes or meets before the pool starts a process for a page (`PhoneEngine.
+engageFonts`, `restrictFonts`). Nothing in the page is a script's, so there is nothing for a page to
+find: `measureText`, `FontFace` and `document.fonts` are the engine's own. CSS `cursive` is an
+iPhone's too, Snell Roundhand (WebKit's default on iOS; the Mac's is Apple Chancery), through
+WebKit's own preference. Both disguises (it is the engine's), never a Mac profile or the iPad view
+(which sends the Mac's User-Agent, as an iPad does by default).
+
+**The list.** The families Apple lists as included with iOS (developer.apple.com/fonts/system-fonts,
+the iOS column, and Apple's iOS font list support pages, as of iOS 17 and 18), as a page names them,
+and in lower case as well; checked against the owner's iPhone reading: every family it found is on
+the list (BrowserCore's `PhoneFontsTests`). Written from Apple's list, not read off an iOS 26 or 27
+device: should pixelscan show a family on a real iPhone that an iPhone view lacks, or the other way
+round, the family is added to or taken from `PhoneFonts.iOSFamilies`.
+
+**Where.** Only where a profile runs in a process of its own (the released build): the list is the
+process pool's and so every web view's of the process. The in-app path (the sandboxed build, the
+emergency switch) shares a pool between profiles and keeps this Mac's fonts, as does a macOS
+whose WebKit lacks the API (the log says so). The self-test measures it in a profile's own process
+(the phone window group: four fonts only a Mac has and four an iPhone has too, by a canvas, CSS
+fallback, `local()` and a worker's canvas, in both disguises, a Mac profile as the control).
+
+**Not changed.** A font iOS has and this Mac has not cannot be added (of Apple's iOS list, every
+family is on macOS; the owner's iPhone also answers "Microsoft JhengHei", which macOS does not ship), so a
+count can still differ by such a name. And the fonts that are found draw as this Mac draws them:
+text in a canvas still differs from an iPhone's (the table below).
+
 ### What remains impossible with public APIs
 
 FINGERPRINTING LIMITATION. Each of the following would require private WebKit API, a
@@ -444,9 +486,9 @@ modified WebKit, or different hardware. None is attempted:
 |---|---|
 | Canvas 2D / WebGL pixels, WebGL renderer and vendor strings, extensions, limits | produced by the Mac's GPU and driver; WebKit exposes them as is |
 | AudioContext output | the Mac's audio stack |
-| Text drawn into a canvas (`fillText`, `measureText`), and so every canvas hash that includes text | the glyphs come from macOS's fonts and its text rasteriser; an iPhone draws the same string with iOS's, so the pixels and the widths differ. Making them an iPhone's would mean forging the pixels a page reads back, which this project does not do: an honest limit of an iPhone view, as decided by the owner on 8 November |
+| Text drawn into a canvas (`fillText`, `measureText`), and so every canvas hash that includes text | the glyphs come from macOS's fonts and its text rasteriser; an iPhone draws the same string with iOS's, so the pixels and the widths differ. Making them an iPhone's would mean forging the pixels a page reads back, which this project does not do: an honest limit of an iPhone view, as decided by the owner on 8 November. So the canvas hash of an iPhone view is not a real iPhone's (pixelscan.net, 16 November: 71577baf… on the owner's iPhone 17 Pro, another in the view) while its WebGL and audio hashes are the same. It is not noise: the Mac app adds none to any profile's canvas, and has no setting for it — a new profile's canvas is the engine's, which is what an iPhone view should have (iPhones of one model draw a canvas alike, so noise that differs from profile to profile would itself set a profile apart). Canvas noise is a setting of Lumen for iPhone, a different app on a real device |
 | The window's own properties and the interfaces a page can find (`Object.getOwnPropertyNames(window)`: 950 on the owner's iPhone, 1008 in an iPhone view, 1045 in his Mac's Safari, 8 November) — one of the differences, `window.browser`, closed since (every profile has WebKit's own, as Safari) | they follow the features this Mac's WebKit is built with, which are not iOS WebKit's: an iPhone view can take away what a script may take away, but cannot add what iOS has and the Mac's engine lacks, nor make the count an iPhone's. An honest limit of an iPhone view, as decided by the owner on 8 November |
-| Fonts (measured via text metrics) | macOS system fonts; iOS has a different font set. As in Safari, fonts the user installed are hidden from pages (the WebKit preference Safari sets, `_shouldAllowUserInstalledFonts`; it has no public API, so it is applied only when this WebKit has it, which the self-test checks) |
+| Fonts (measured via text metrics) | macOS system fonts; iOS has a different font set. As in Safari, fonts the user installed are hidden from pages (the WebKit preference Safari sets, `_shouldAllowUserInstalledFonts`; it has no public API, so it is applied only when this WebKit has it, which the self-test checks). **An iPhone view finds an iPhone's fonts only** (since 16 November): see *An iPhone view's fonts* below. What it cannot do is add a font iOS has and this Mac has not (none of Apple's iOS list, but "Microsoft JhengHei", which the owner's iPhone answers), nor make the iPhone's fonts draw as an iPhone draws them |
 | Screen size, colour depth, device pixel ratio, `matchMedia` results | the real display. The device pixel ratio has a per-view override, WKWebView's `_overrideDeviceScaleFactor`: an iPhone view renders at an iPhone's 3× and says so, `resolution` media queries included (`PhoneEngine`, measured on macOS 26 and 27). The screen has no override a WKWebView can reach on the Mac (WebKit's `setOverrideScreenSize` is called only by the Web Inspector). WebKit's screen-size override exists only on iOS (`WebPageCreationParameters.overrideScreenSize`, iOS-only in WebKit's source); on macOS `screen.*` and CSS `device-width` both come from the window's real `NSScreen`. An iPhone view's full disguise says an iPhone's screen to scripts (`screen.*` and `matchMedia('(device-width…)')`, below); CSS `@media` in a stylesheet still sees this Mac's. So a profile's **window size** (editor → Window: a MacBook's screen, a size of its own, or a random size for a new profile) is a real window — a page measures it (`outerWidth`, `innerWidth`, its viewport), checked by the self-test against the window's frame — and the screen stays this Mac's: a declared screen would be given away by CSS `device-width` and by full screen. A size larger than the screen opens as large as the screen allows, and the editor says so |
 | `navigator.platform`, `vendor`, `maxTouchPoints` | engine and hardware; `customUserAgent` changes only the UA string. A Mac profile and the iPad view keep the native values. An iPhone view's page and frames say `platform` "iPhone" with the engine's own getter — WebKit's `_customNavigatorPlatform`, the setting Safari uses for an iPad's desktop sites (`PhoneEngine`, measured on macOS 26 and 27); its workers keep "MacIntel" (`NavigatorBase::platform`), which only a script changes. `maxTouchPoints` has no setting on the Mac (WebKit's is iOS-only); an iPhone view's full disguise says 5 by a script (below) |
 | `navigator.hardwareConcurrency` | WebKit's own answer from the processor count it is given: 4 below 8 cores, 8 from 8 up (`NavigatorBase::hardwareConcurrency`), so most Macs say 8 and a real iPhone 4. An iPhone view's process gives its WebKit processes an iPhone's six cores (`DeviceGeneration.processorCores`, through libxpc as `__XPC_WTF_numberOfProcessorCores`, the way the time zone reaches them), so the page, its frames of any origin and every worker — blob, URL, nested, shared, service — say 4, with the engine's own getter; no script is involved. A Mac profile and the iPad view (the Mac's User-Agent) keep this Mac's count. Only where a profile runs in a process of its own (the released build); the self-test checks it on a stand-in ten-core Mac, a Mac profile as the control. Not hidden: how fast eight workers run side by side on this Mac's real cores |
@@ -545,6 +587,7 @@ What a profile changed to get there (each was a difference before):
   languages, read from the global domain, as Safari does.
 - **Fonts.** A WKWebView lets pages use fonts the user installed; Safari shows them only the
   system's. The profile sets the WebKit preference Safari sets (private, applied only if present).
+  An iPhone view goes further: its pages find an iPhone's fonts only (*An iPhone view's fonts*).
 - **Storage quota.** Safari reports 60 % of a *standard* 128 GB volume per origin (WebKit reports a
   standard capacity rather than the real disk's, so the figure is 82 463 372 084 on every Mac, a
   tenth of it in a third-party frame). WebKit gives an app that is not a browser less: 15 % of that

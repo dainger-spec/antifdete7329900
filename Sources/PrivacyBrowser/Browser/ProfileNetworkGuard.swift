@@ -672,6 +672,9 @@ enum ProfileNetworkGuard {
         webViews.add(webView)
         // The profile's geolocation from the engine itself, where it answers (`NativeGeolocation`).
         NativeGeolocation.cover(webView)
+        // An iPhone view's font list on this web view's pool too — one Safari's code made, say —
+        // for every process it starts from now on (`PhoneEngine.restrictFonts`).
+        PhoneEngine.restrictFonts(of: webView.configuration)
         webView.allowsLinkPreview = false // and kept off (`HandOffs`)
         HostedPageHistory.follow(webView)
         // The profile's User-Agent, not whatever Safari's code computes (and kept: `pinUserAgent`).
