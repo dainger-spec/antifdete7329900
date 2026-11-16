@@ -19,19 +19,26 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            if let welcome = model.welcome, !model.welcomeFinished {
-                // The launch screen, before the first screen or the lock screen (WelcomeSplash). It
-                // opens by itself; when that is over it goes.
-                WelcomeSplash(greeting: welcome.greeting, firstLaunch: welcome.firstLaunch,
-                              opening: { openFromWelcome() }, finished: { model.welcomeFinished = true })
-                    // Its window closed meanwhile: a window opened again starts at the first screen.
-                    .onDisappear { model.welcomeFinished = true }
+            if let welcome = model.welcome, !model.welcomeFinished, welcome.firstLaunch {
+                // The first launch: the launch screen, before the first screen (WelcomeSplash). Its
+                // button opens it; when that is over it goes.
+                welcomeSplash(welcome)
             }
-            if model.welcome == nil || model.welcomeFinished || welcomeOpening {
-                // Over the launch screen while it opens, as the prototype has it.
+            if showsScreens {
+                // At the first launch, over the launch screen while it opens, as the prototype has it.
                 screens
+                    .scaleEffect(screensUnderWelcome && !welcomeOpening && !Motion.isReduced(reduceMotion) ? 0.98 : 1)
                     .transition(welcomeArriving)
                     .zIndex(1)
+            }
+            if let welcome = model.welcome, !model.welcomeFinished, !welcome.firstLaunch {
+                // A start with a vault: the lock screen is there from the start, under the launch
+                // screen, its password's field holding the keyboard. The launch screen takes no
+                // focus: a key opens it and goes on to the field, so a password typed at once is
+                // typed whole (it swallowed the first key). It opens by itself, at a key or a
+                // click, fading off the lock screen as that scales in from 98 %.
+                welcomeSplash(welcome)
+                    .zIndex(2)
             }
         }
         .onAppear { showsProfiles = model.phase == .unlocked }
@@ -60,6 +67,28 @@ struct RootView: View {
         } message: {
             Text(model.errorMessage ?? "")
         }
+    }
+
+    /// The launch screen of this start, before the window's screens or over them.
+    private func welcomeSplash(_ welcome: WelcomeLaunch.Decision) -> some View {
+        WelcomeSplash(greeting: welcome.greeting, firstLaunch: welcome.firstLaunch,
+                      opening: { openFromWelcome() }, finished: { model.welcomeFinished = true },
+                      overScreens: !welcome.firstLaunch)
+            // Its window closed meanwhile: a window opened again starts at the first screen.
+            .onDisappear { model.welcomeFinished = true }
+    }
+
+    /// The window's screens are in: with no launch screen or once it has gone; at the first launch
+    /// once it opens; on a start with a vault from the start, under it.
+    private var showsScreens: Bool {
+        guard let welcome = model.welcome, !model.welcomeFinished else { return true }
+        return !welcome.firstLaunch || welcomeOpening
+    }
+
+    /// The launch screen is over the window's screens now (a start with a vault).
+    private var screensUnderWelcome: Bool {
+        guard let welcome = model.welcome else { return false }
+        return !welcome.firstLaunch && !model.welcomeFinished
     }
 
     private var lockPhase: EclipseLight.Phase {

@@ -106,7 +106,11 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
   Metal Performance Shaders, four samples a pixel; where Metal is missing, the outline drawn in
   SwiftUI. Then one light along the greeting, "LUMEN"; the first launch's "Get started", or a
   0.9 s hold; then the opening (0.6 s: the screen eases up 30 pt and fades, the window's content
-  scales in from 98 % over it). Any click or key goes on at once. It is shown at every start a
+  scales in from 98 % over it). Any click or key goes on at once. On a start with a vault the lock
+  screen is under it from the start, its password's field holding the keyboard: the launch screen
+  takes no focus, fades off the lock screen (its backdrop too) as that scales in, and a key opens
+  it and goes on to the field — a password typed at once is typed whole (the launch screen had
+  swallowed its first key); Touch ID is asked once the launch screen has gone. It is shown at every start a
   person makes of the app, after a full quit too, and always writes the English "welcome" (the
   owner, 16 November); the other languages' outlines stay in the file and are not shown.
   `design/tools/welcome_lettering.py` makes the outlines, the pen's way (from the outline's skeleton)
