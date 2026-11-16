@@ -484,6 +484,9 @@ final class ProfileManager: ObservableObject {
             // One profile in this process: its geolocation is the engine's own answer, before any
             // web view exists (`NativeGeolocation`; the page script answers where WebKit cannot).
             NativeGeolocation.engage(configuration.geolocation)
+            // An iPhone view's pages find an iPhone's fonts only: the process pool's list, given
+            // before any web content process starts (`PhoneEngine.engageFonts`).
+            PhoneEngine.engageFonts(for: configuration)
             systemCameraActive = ProfileProcess.systemCameraActiveForThisProcess
         } else {
             let usesSystemCamera = configuration.cameraSubstitution.usesSystemCamera
