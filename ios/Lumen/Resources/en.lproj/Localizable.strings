@@ -202,6 +202,15 @@
 "Открыть в новой вкладке" = "Open in New Tab";
 "Скопировать ссылку" = "Copy Link";
 
+/* A page's dialogs and a site's own sign-in (BrowserTab). */
+"Эта страница" = "This page";
+"ОК" = "OK";
+"Вход на %@" = "Sign In to %@";
+"Имя пользователя или пароль не подошли." = "The user name or password was not accepted.";
+"Сайт пишет: «%@»" = "The site says: “%@”";
+"Не сохраняется: после перезапуска приложения сайт спросит снова." = "Not saved: after the app restarts, the site asks again.";
+"Имя пользователя" = "User Name";
+
 /* The sync with the Mac's vault (SyncView). */
 "Синхронизация" = "Sync";
 "Синхронизация с Mac — в платных тарифах. Профили на этом iPhone остаются как есть." = "Sync with your Mac comes with a paid plan. The profiles on this iPhone stay as they are.";

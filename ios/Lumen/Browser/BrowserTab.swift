@@ -19,6 +19,9 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     @Published private(set) var thumbnail: UIImage?
     private var saved: TabRecord
     private var observations: [NSKeyValueObservation] = []
+    /// The dialog this tab's page is waiting on (`showDialog`), and the answer it gets if the tab
+    /// closes under it: WebKit raises an exception for a completion handler dropped unanswered.
+    private var pendingDialog: (alert: UIAlertController, dismissed: () -> Void)?
 
     init(record: TabRecord, configuration: WKWebViewConfiguration, runtime: SessionRuntime) {
         id = record.id
@@ -81,6 +84,11 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     }
 
     func tearDown() {
+        if let pending = pendingDialog {
+            pendingDialog = nil
+            if pending.alert.presentingViewController != nil { pending.alert.dismiss(animated: false) }
+            pending.dismissed()
+        }
         observations = []
         webView.stopLoading()
         webView.navigationDelegate = nil
@@ -131,6 +139,124 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                  initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
                  decisionHandler: @escaping (WKPermissionDecision) -> Void) {
         decisionHandler(.deny)
+    }
+
+    // MARK: The page's dialogs and a site's sign-in
+
+    /// `alert()`: the page's message, under the name of its host, with OK.
+    @objc(webView:runJavaScriptAlertPanelWithMessage:initiatedByFrame:completionHandler:)
+    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+        let answer = DialogAnswer<Bool> { _ in completionHandler() }
+        let alert = UIAlertController(title: Self.dialogTitle(frame), message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: L("ОК"), style: .default) { _ in answer.give(true) })
+        showDialog(alert) { answer.give(true) }
+    }
+
+    /// `confirm()`: OK is true; Cancel, or a dialog that could not be shown, is false.
+    @objc(webView:runJavaScriptConfirmPanelWithMessage:initiatedByFrame:completionHandler:)
+    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+        let answer = DialogAnswer<Bool>(completionHandler)
+        let alert = UIAlertController(title: Self.dialogTitle(frame), message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: L("Отмена"), style: .cancel) { _ in answer.give(false) })
+        let ok = UIAlertAction(title: L("ОК"), style: .default) { _ in answer.give(true) }
+        alert.addAction(ok)
+        alert.preferredAction = ok
+        showDialog(alert) { answer.give(false) }
+    }
+
+    /// `prompt()`: the text typed (the page's default to start with); Cancel is null.
+    @objc(webView:runJavaScriptTextInputPanelWithPrompt:defaultText:initiatedByFrame:completionHandler:)
+    func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
+        let answer = DialogAnswer<String?>(completionHandler)
+        let alert = UIAlertController(title: Self.dialogTitle(frame), message: prompt, preferredStyle: .alert)
+        alert.addTextField { field in field.text = defaultText }
+        alert.addAction(UIAlertAction(title: L("Отмена"), style: .cancel) { _ in answer.give(nil) })
+        let ok = UIAlertAction(title: L("ОК"), style: .default) { [weak alert] _ in
+            answer.give(alert?.textFields?.first?.text ?? "")
+        }
+        alert.addAction(ok)
+        alert.preferredAction = ok
+        showDialog(alert) { answer.give(nil) }
+    }
+
+    /// A site's own sign-in (HTTP Basic or Digest, the server's 401): asked for in a sheet — only over
+    /// https, where the password goes to the site encrypted; over plain http the site's 401 page is
+    /// shown, as before. What is typed is kept for this session only while the app runs
+    /// (`.forSession`: WebKit keeps it in the session's own data store, in memory), never written
+    /// anywhere — the Mac's rule for HTTP sign-in (a saved login is sent only over https).
+    /// Everything else — server trust, client certificates, the relay's own proxy sign-in — is
+    /// answered as WebKit answers it by itself.
+    @objc(webView:didReceiveAuthenticationChallenge:completionHandler:)
+    func webView(_ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge,
+                 completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        let space = challenge.protectionSpace
+        let siteSignIn = space.authenticationMethod == NSURLAuthenticationMethodHTTPBasic
+            || space.authenticationMethod == NSURLAuthenticationMethodHTTPDigest
+        guard siteSignIn, !space.isProxy() else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+        guard space.protocol?.lowercased() == "https" else {
+            completionHandler(.rejectProtectionSpace, nil)
+            return
+        }
+        let answer = DialogAnswer<URLCredential?> { credential in
+            if let credential { completionHandler(.useCredential, credential) } else { completionHandler(.rejectProtectionSpace, nil) }
+        }
+        var lines: [String] = []
+        if challenge.previousFailureCount > 0 { lines.append(L("Имя пользователя или пароль не подошли.")) }
+        if let realm = space.realm, !realm.isEmpty { lines.append(L("Сайт пишет: «%@»", String(realm.prefix(200)))) }
+        lines.append(L("Не сохраняется: после перезапуска приложения сайт спросит снова."))
+        let alert = UIAlertController(title: L("Вход на %@", space.host), message: lines.joined(separator: "\n\n"), preferredStyle: .alert)
+        alert.addTextField { field in
+            field.placeholder = L("Имя пользователя")
+            field.autocapitalizationType = .none
+            field.autocorrectionType = .no
+            field.spellCheckingType = .no
+        }
+        alert.addTextField { field in
+            field.placeholder = L("Пароль")
+            field.isSecureTextEntry = true
+        }
+        alert.addAction(UIAlertAction(title: L("Отмена"), style: .cancel) { _ in answer.give(nil) })
+        let signIn = UIAlertAction(title: L("Войти"), style: .default) { [weak alert] _ in
+            let user = alert?.textFields?.first?.text ?? "", password = alert?.textFields?.last?.text ?? ""
+            answer.give(URLCredential(user: user, password: password, persistence: .forSession))
+        }
+        alert.addAction(signIn)
+        alert.preferredAction = signIn
+        showDialog(alert) { answer.give(nil) }
+    }
+
+    /// A dialog's title: the host of the page that shows it, as Safari names it.
+    private static func dialogTitle(_ frame: WKFrameInfo) -> String {
+        let host = frame.securityOrigin.host
+        return host.isEmpty ? L("Эта страница") : host
+    }
+
+    /// Shows a dialog of this tab over whatever is on top of its window. `dismissed` is the page's
+    /// answer when it cannot be shown — the tab is not on screen, another of its dialogs is still
+    /// open, UIKit refuses — or when the tab closes under it (`tearDown`; an answer already given
+    /// stands, `DialogAnswer`).
+    private func showDialog(_ alert: UIAlertController, dismissed: @escaping () -> Void) {
+        if let open = pendingDialog?.alert, open.presentingViewController != nil, !open.isBeingDismissed {
+            dismissed()
+            return
+        }
+        guard var top = webView.window?.rootViewController else {
+            dismissed()
+            return
+        }
+        while let presented = top.presentedViewController, !presented.isBeingDismissed { top = presented }
+        pendingDialog = (alert, dismissed)
+        top.present(alert, animated: true)
+        if alert.presentingViewController == nil {
+            pendingDialog = nil
+            dismissed()
+        }
     }
 
     // MARK: The long-press menu
@@ -190,5 +316,21 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     static func copyLink(_ url: URL) {
         UIPasteboard.general.setItems([[UTType.url.identifier: url, UTType.plainText.identifier: url.absoluteString]],
                                       options: [.localOnly: true])
+    }
+}
+
+/// A WebKit completion handler given exactly once, whichever comes first: the person's answer, or
+/// the one the page gets when its dialog cannot be shown or is closed with its tab.
+private final class DialogAnswer<Value> {
+    private var handler: ((Value) -> Void)?
+
+    init(_ handler: @escaping (Value) -> Void) {
+        self.handler = handler
+    }
+
+    func give(_ value: Value) {
+        guard let handler else { return }
+        self.handler = nil
+        handler(value)
     }
 }
