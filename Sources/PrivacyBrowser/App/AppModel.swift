@@ -741,9 +741,12 @@ final class AppModel: ObservableObject {
         automationServer?.stop()
         automationServer = nil
         automationState = .stopped
-        // Before the profiles stop: nothing waiting in the warm-up queue may launch one again.
+        // Before the profiles stop: nothing waiting in the warm-up queue may launch one again,
+        // nor a run on many profiles start its next (it would change a proxy's IP for a launch
+        // that cannot happen, and write the profile down as one that did not start).
         warmUps?.shutDown()
         warmUps = nil
+        scenarioBatches.shutDown()
         scheduleCoordinator?.shutDown()
         scheduleCoordinator = nil
         scenarioSchedules = ScenarioSchedules()

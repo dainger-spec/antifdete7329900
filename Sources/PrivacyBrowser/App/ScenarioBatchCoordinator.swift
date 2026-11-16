@@ -31,6 +31,9 @@ final class ScenarioBatchCoordinator: ObservableObject {
     /// The log of each profile's run, while the app runs: a run's table opens it.
     private var logs: [UUID: [UUID: [ScenarioRunner.Line]]] = [:]
     private var ticker: Task<Void, Never>?
+    /// The vault is being locked, or the app quits (`shutDown`): nothing more is started, and a
+    /// start under way that did not happen is not written down as skipped.
+    private var closing = false
     private static let log = Logger(subsystem: "PrivacyBrowser", category: "Scenario")
 
     init(model: AppModel) {
@@ -41,6 +44,7 @@ final class ScenarioBatchCoordinator: ObservableObject {
 
     func load(from vault: UnlockedVault) {
         self.vault = vault
+        closing = false
         do {
             var loaded = try ScenarioRunHistory.load(from: vault)
             // A run the app did not see the end of: it quit, or the vault was locked, meanwhile.
@@ -52,6 +56,25 @@ final class ScenarioBatchCoordinator: ObservableObject {
             history = ScenarioRunHistory()
             isRefused = true
         }
+    }
+
+    /// Lock or Quit begins, before the profiles stop: no profile waiting in a run is started any
+    /// more (its proxy's IP is not changed for it, it is not written down as "did not start").
+    /// Each run going on is stopped as its Stop does — those waiting are written down as stopped,
+    /// so that Run the Failed Again has them — and the clock stops looking. Those at work end as
+    /// their profiles stop; a run left open is closed as stopped when the vault opens next
+    /// (`ScenarioRunHistory.closeUnfinished`).
+    func shutDown() {
+        closing = true
+        ticker?.cancel()
+        ticker = nil
+        let now = Date()
+        var changed = false
+        for batch in history.runs where batch.isRunning {
+            update(batch.id) { $0.stop(at: now) }
+            changed = true
+        }
+        if changed { save() }
     }
 
     /// The vault is locked: what is going is stopped, and nothing is held.
@@ -140,7 +163,7 @@ final class ScenarioBatchCoordinator: ObservableObject {
     // MARK: The clock
 
     private func wake() {
-        guard ticker == nil else { return }
+        guard ticker == nil, !closing else { return }
         ticker = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 guard let self, self.tick() else { break }
@@ -197,7 +220,8 @@ final class ScenarioBatchCoordinator: ObservableObject {
                     let started = await model?.runScenario(scenario, on: profile, runID: runID) ?? false
                     guard let self else { return }
                     self.starting[batch.id]?.remove(profile)
-                    if !started {
+                    // A start cut short by Lock or Quit: the run is closed as stopped (`shutDown`).
+                    if !started, !self.closing {
                         self.update(batch.id) { $0.ended(profile, .skipped(reason: L("scenarios.run.notStarted"))) }
                         self.save()
                     }

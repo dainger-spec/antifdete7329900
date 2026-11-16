@@ -237,7 +237,9 @@ The editor's **Check** is a run of one profile, and marks the failed step among 
 The runs are kept: `scenario-runs.bin` at the vault's root, sealed under the scenarios' key — the
 last 100, newest first; for a profile whose run failed, the last 300 lines of its log; never a
 profile's values. A run the app did not see the end of (it quit, the vault was locked) is found as
-one that was stopped. This Mac's; not synced. Runs a schedule makes are not among them yet: a
+one that was stopped. Lock and Quit stop a run going on before the profiles stop
+(`ScenarioBatchCoordinator.shutDown`): no profile waiting is started meanwhile — no proxy's IP is
+changed for it — and those waiting are written down as stopped, so Run the Failed Again has them. This Mac's; not synced. Runs a schedule makes are not among them yet: a
 schedule's own row says how its last run ended.
 
 ### A scenario as a file
