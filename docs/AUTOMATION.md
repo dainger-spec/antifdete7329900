@@ -93,7 +93,8 @@ the page's own record.
   `page.evaluate(fn, arg, {world: 'page'})` takes a function or a function body;
   `page.url()` and `page.title()` are promises too (in Playwright they are not);
 - `log(...)` for the run's log, `sleep(ms)`, `params` (the run's parameters, read-only: the
-  profile's own values — "A profile's values" below — under what an API request gave).
+  profile's own values that the scenario's text names — "A profile's values" below — under what
+  an API request gave).
   `sleep(Infinity)` — or any wait longer than a year — waits until Stop; a negative number or
   `NaN` does not wait. A `type` delay is held to a year a key the same way (`ScenarioWait`:
   a number past what the system's sleep holds stopped the profile's process).
@@ -152,9 +153,18 @@ an empty password.
   (64 at most); a value up to 4,096 characters, 64 values a profile. `scenario-values.bin` at the
   vault's root, sealed under the scenarios' key — a file of its own, as the schedules' is. This
   Mac's; not synced, not part of a profile's export or copy.
-- **A run's `params`** (`ScenarioValues.parametersJSON`): the profile's values, each as text —
-  from the editor's Run, from a schedule, and from an API request that names a **saved** scenario,
-  where what the request gave in `params` wins name by name. A text sent with the request
+- **A run's `params`** (`ScenarioValues.parametersJSON`): of the profile's values, **those the
+  scenario's text names** (`ScenarioValues.namesRead`: `params.name`, `params['name']`, in a
+  comment too — the recorder's note names `params.password`), each as text — from the editor's
+  Run and Check, from a run on many, from a schedule, and from an API request that names a
+  **saved** scenario, where what the request gave in `params` wins name by name. A value the text
+  does not name is not given, however its code reads `params` (as a whole, `JSON.stringify(params)`;
+  by a name it builds, `params[key]`; `eval`): what the import's review, the list and the editor
+  say a scenario reads is all of the profile's it gets — a scenario from someone else cannot
+  collect the passwords kept for the others. Code that reads `params` that way
+  (`ScenarioValues.readsByBuiltNames`) is said on the scenario's line in the list, under its name
+  in the editor and in the import's review: "reads values by names its code builds — none given".
+  The templates and the recorder name their values. A text sent with the request
   (`{"source": …}`) gets the request's own `params` and no more: what is kept for a profile is
   read by the scenarios the person wrote, not by whatever holds the API's token.
 - **In the editor**: the values of the chosen profile open from the button beside the profile's
@@ -232,7 +242,12 @@ schedule's own row says how its last run ended.
 text — no folder, no schedule, nothing of a profile). **Import a Scenario File…** reads one (at
 most 2 MB, refused when it is not one or is a newer version's) and shows, before anything is added,
 its steps, the sites its text names and the profile's values it reads: a scenario does in a profile
-whatever a person can.
+whatever a person can. The sites are the addresses written out in it (`ScenarioFile.hosts`); when
+its code may open others — a `goto` given an address it builds rather than one in quotes or a
+setting of its head, code run in the page (`page.evaluate`), `eval` — the review says "and
+addresses its code builds" (`ScenarioFile.buildsAddresses`, a reading of the text, not a proof).
+The values are those its text names, which is all a run of it is given; code that reads `params`
+otherwise is said ("reads values by names its code builds — none given").
 
 Checked: `ScenarioStepsTests` (the cut is lossless on every template, a recording and hostile texts;
 what is read as which step; each change leaves the other steps as they were; settings read and

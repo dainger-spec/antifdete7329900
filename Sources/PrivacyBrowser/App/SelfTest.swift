@@ -1339,15 +1339,18 @@ final class SelfTest {
                   && state.body.contains("from the API 3"),
               "\(ran.status) \(ran.body.prefix(120)) / \(state.status) \(state.body.prefix(400))")
         // What a scenario returns is the run's result. A saved scenario has the profile's own
-        // values for scenarios under what the request gave; a text sent with the request has the
+        // values for scenarios that its text names, under what the request gave — not one kept
+        // for another scenario, however it reads `params`; a text sent with the request has the
         // request's alone — a profile's password is not for whatever holds the token to read.
         handler.savedScenario = { name in
-            name == "Saved \(run)" ? Scenario(name: name, source: "return {login: params.login, city: params.city, n: params.n};") : nil
+            name == "Saved \(run)"
+                ? Scenario(name: name, source: "return {login: params.login, city: params.city, n: params.n, all: Object.keys(params).sort().join(',')};") : nil
         }
-        handler.profileParameters = { id, given in
+        handler.profileParameters = { id, scenario, given in
             var values = ScenarioValues()
-            values.set([ScenarioValues.Value(name: "login", value: "alice"), ScenarioValues.Value(name: "city", value: "Paris")], for: id)
-            return values.parametersJSON(for: id, over: given)
+            values.set([ScenarioValues.Value(name: "login", value: "alice"), ScenarioValues.Value(name: "city", value: "Paris"),
+                        ScenarioValues.Value(name: "password", value: "kept-for-another")], for: id)
+            return values.parametersJSON(for: id, readBy: scenario.source, over: given)
         }
         let savedRun = await call("POST", base + "/scenario", body: "{\"scenario\": \"Saved \(run)\", \"params\": {\"city\": \"Rome\", \"n\": 2}}")
         _ = await waitUntil(timeout: 20) { manager.scenarioRuns[profile.id]?.isRunning == false }
@@ -1356,9 +1359,10 @@ final class SelfTest {
         _ = await waitUntil(timeout: 20) { manager.scenarioRuns[profile.id]?.isRunning == false }
         let sentState = await call("GET", base + "/scenario")
         handler.savedScenario = { _ in nil }
-        check("automation: what a scenario returns is the run's result; a saved scenario has the profile's own values under the request's, a text sent with the request only its own",
+        check("automation: what a scenario returns is the run's result; a saved scenario has the profile's own values it names under the request's, a text sent with the request only its own",
               savedRun.status == 202 && savedState.body.contains("\"result\" : {") && savedState.body.contains("\"login\" : \"alice\"")
                   && savedState.body.contains("\"city\" : \"Rome\"") && savedState.body.contains("\"n\" : 2")
+                  && savedState.body.contains("\"all\" : \"city,login,n\"") && !savedState.body.contains("kept-for-another")
                   && sentRun.status == 202 && sentState.body.contains("\"result\" : \"none\""),
               "\(savedRun.status) \(savedState.body.prefix(400)) / \(sentRun.status) \(sentState.body.prefix(300))")
         let unknown = await call("POST", base + "/scenario", body: "{\"scenario\": \"no such \(run)\"}")

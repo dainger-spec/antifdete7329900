@@ -2027,7 +2027,7 @@
 "scenarios.log.copy" = "Copy the Log";
 "scenarios.values.open" = "This profile’s values for scenarios…";
 "scenarios.values.title" = "Values of “%@” for scenarios";
-"scenarios.values.subtitle" = "What a scenario reads as params.name when it runs on this profile: a login, a password, a city. The same scenario on another profile reads that profile’s own.";
+"scenarios.values.subtitle" = "What a scenario reads as params.name when it runs on this profile: a login, a password, a city. A scenario is given only the values its text names; the same scenario on another profile reads that profile’s own.";
 "scenarios.values.name" = "name";
 "scenarios.values.value" = "value";
 "scenarios.values.add" = "Add a Value";
@@ -2039,6 +2039,7 @@
 "scenarios.values.problem.name" = "“%@” cannot be a name: Latin letters, digits and _, not beginning with a digit. A scenario reads it as params.name.";
 "scenarios.values.problem.twice" = "Two values are named “%@”.";
 "scenarios.values.missing" = "This profile has no value for: %@";
+"scenarios.values.built" = "reads values by names its code builds — none given";
 "scenarios.values.fill" = "Fill In…";
 "scenarios.values.unreadable" = "The profiles’ values for scenarios could not be read. Their file is kept as it is, and moved aside when values are next saved.";
 "scenarios.values.newer" = "The profiles’ values for scenarios were written by a newer version of Lumen. Update Lumen to change them.";
@@ -2257,7 +2258,7 @@
 "help.commands.screenshot" = "A picture of the part of the page in view, or of an element with page.screenshot(selector). The result is a PNG in base64.";
 "help.commands.script" = "In the scenario itself";
 "help.commands.log" = "A line in the run’s log.";
-"help.commands.params" = "The run’s parameters: the profile’s own values for scenarios (Scenarios window, the profile’s values), so that one scenario has each profile’s login and password; and what a request of the automation API gives in params, which wins.";
+"help.commands.params" = "The run’s parameters: the profile’s own values for scenarios (Scenarios window, the profile’s values) that the scenario’s text names as params.name or params['name'], so that one scenario has each profile’s login and password; and what a request of the automation API gives in params, which wins.";
 "help.commands.result" = "What the scenario returns is the run’s result: shown in the log, and given as result by the automation API.";
 "help.api.intro" = "A script on this Mac can do what the Profiles window does: list the profiles, start and stop one, open a page in it, read and write its cookies, run a scenario. It connects only from this Mac (127.0.0.1) and only with the token.";
 "help.api.plan" = "The API is part of the Professional and Team plans, and of the trial. Without it every request is refused with 403 automation_not_in_plan.";
@@ -2276,7 +2277,7 @@
 "help.api.request.open" = "A new window of the running profile at the body’s address: {\"url\": \"https://…\"}.";
 "help.api.request.cookies" = "Every cookie of the profile. ?format=playwright (the default), netscape or extension.";
 "help.api.request.importCookies" = "Imports the cookies in the body: a JSON or a Netscape file.";
-"help.api.request.scenario" = "Runs a scenario on the running profile: {\"source\": \"…\", \"params\": {…}}, or a saved one, {\"scenario\": \"Its name\"}. A saved scenario also has the profile’s own values in params.";
+"help.api.request.scenario" = "Runs a scenario on the running profile: {\"source\": \"…\", \"params\": {…}}, or a saved one, {\"scenario\": \"Its name\"}. A saved scenario also has in params the profile’s own values that its text names.";
 "help.api.request.scenarioState" = "The profile’s last run: whether it is running, how it ended, its log, and its result — what the scenario returned.";
 "help.api.request.scenarioStop" = "Stops the run: a wait under way ends, a pressed button or key is let go.";
 "help.api.scenario" = "A scenario from a script";
@@ -3379,6 +3380,8 @@
 "scenarios.import.subtitle" = "A scenario does in a profile whatever a person can. Add one only from someone you trust.";
 "scenarios.import.sites" = "Sites it names";
 "scenarios.import.sites.none" = "none written out";
+"scenarios.import.sites.built" = "%@ — and addresses its code builds";
+"scenarios.import.sites.builtOnly" = "none written out — its code builds the addresses it opens";
 "scenarios.import.values" = "Profile's values it reads";
 "scenarios.import.add" = "Add";
 "scenarios.import.refused.notAScenario" = "This file is not a Lumen scenario.";

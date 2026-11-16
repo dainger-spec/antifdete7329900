@@ -509,13 +509,32 @@ enum ScenarioWords {
         return whole < 60 ? String(format: L("scenarios.length.seconds"), whole) : String(format: L("scenarios.length.minutes"), whole / 60, whole % 60)
     }
 
-    /// A scenario's line under its name: "6 steps · takes login, password".
+    /// A scenario's line under its name: "6 steps · takes login, password" — and, when its code
+    /// reads `params` by names it builds, that those get nothing (`ScenarioValues.parametersJSON`
+    /// gives a run only the values its text names).
     static func summary(_ scenario: Scenario) -> String {
         let cut = ScenarioSteps(scenario.source)
         var parts = [cut.isCut ? String(format: L("scenarios.steps.count"), cut.steps.count) : L("scenarios.steps.code")]
         let names = ScenarioValues.namesRead(by: scenario.source)
         if !names.isEmpty { parts.append(String(format: L("scenarios.takes"), names.joined(separator: ", "))) }
+        if ScenarioValues.readsByBuiltNames(scenario.source) { parts.append(L("scenarios.values.built")) }
         return parts.joined(separator: " · ")
+    }
+
+    /// The import's "Profile's values it reads": the names its text has — all a run of it is given —
+    /// and, when its code reads `params` by names it builds, that those get nothing.
+    static func valuesRead(_ names: [String], builtNames: Bool) -> String {
+        let listed = names.joined(separator: ", ")
+        guard builtNames else { return names.isEmpty ? "—" : listed }
+        return names.isEmpty ? L("scenarios.values.built") : listed + "; " + L("scenarios.values.built")
+    }
+
+    /// The import's "Sites it names": the hosts written out in it, and whether it may open
+    /// addresses its code builds (`ScenarioFile.buildsAddresses`).
+    static func sitesNamed(_ hosts: [String], builtAddresses: Bool) -> String {
+        if hosts.isEmpty { return builtAddresses ? L("scenarios.import.sites.builtOnly") : L("scenarios.import.sites.none") }
+        let listed = hosts.joined(separator: ", ")
+        return builtAddresses ? String(format: L("scenarios.import.sites.built"), listed) : listed
     }
 }
 
@@ -1019,8 +1038,8 @@ struct ScenarioImportReview: View {
             SheetHeader(title: String(format: L("scenarios.import.title"), file.name), subtitle: L("scenarios.import.subtitle"))
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    fact(L("scenarios.import.sites"), file.hosts.isEmpty ? L("scenarios.import.sites.none") : file.hosts.joined(separator: ", "))
-                    fact(L("scenarios.import.values"), names.isEmpty ? "—" : names.joined(separator: ", "))
+                    fact(L("scenarios.import.sites"), ScenarioWords.sitesNamed(file.hosts, builtAddresses: file.buildsAddresses))
+                    fact(L("scenarios.import.values"), ScenarioWords.valuesRead(names, builtNames: ScenarioValues.readsByBuiltNames(file.source)))
                     Text(cut.isCut ? String(format: L("scenarios.steps.count"), cut.steps.count) : L("scenarios.steps.code"))
                         .font(.lumenLabel)
                         .foregroundStyle(Theme.textSecondary)

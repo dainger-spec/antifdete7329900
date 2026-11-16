@@ -1621,7 +1621,8 @@ final class AppModel: ObservableObject {
     /// when the plan has no automation, the profile did not start, or a run of it is going.
     /// `inBackground`: a schedule's run, which must not take the keyboard from what the person is
     /// doing (`SafariChromeHost.openScenarioPage`). The run's `params` are the profile's own
-    /// values (`scenarioValues`): the same scenario on another profile has that one's.
+    /// values (`scenarioValues`) that the scenario's text names — none it reads otherwise: the same
+    /// scenario on another profile has that one's.
     func runScenario(_ scenario: Scenario, on id: UUID, inBackground: Bool = false, runID: UUID = UUID()) async -> Bool {
         guard license.allowsAutomation, manager != nil else { return false }
         // A stopped profile is started without a window of its own: the run opens the one it acts
@@ -1629,7 +1630,8 @@ final class AppModel: ObservableObject {
         if !isRunning(id) { await launch(id, openingWindow: false) }
         guard let manager, isRunning(id) else { return false }
         return manager.runScenario(id, name: scenario.name, source: scenario.source,
-                                   parametersJSON: scenarioValues.parametersJSON(for: id), runID: runID, inBackground: inBackground)
+                                   parametersJSON: scenarioValues.parametersJSON(for: id, readBy: scenario.source), runID: runID,
+                                   inBackground: inBackground)
     }
 
     // MARK: A profile's values for scenarios
@@ -1930,8 +1932,10 @@ final class AppModel: ObservableObject {
             let matching = self?.scenarios.scenarios.filter { $0.name == name } ?? []
             return matching.count == 1 ? matching[0] : nil
         }
-        // A saved scenario run through the API has the profile's own values under the request's.
-        handler.profileParameters = { [weak self] id, given in self?.scenarioValues.parametersJSON(for: id, over: given) ?? given }
+        // A saved scenario run through the API has the profile's own values that it names, under the request's.
+        handler.profileParameters = { [weak self] id, scenario, given in
+            self?.scenarioValues.parametersJSON(for: id, readBy: scenario.source, over: given) ?? given
+        }
         let server = AutomationServer(settings: settings, handler: handler)
         // WebDriver, on the same listener: a session starts a profile as the API's start does.
         let webDriver = WebDriverService(manager: manager, repository: repository)

@@ -206,6 +206,109 @@ public struct ScenarioSteps: Equatable, Sendable {
         return parts.enumerated().map { index, part in index < parts.count - 1 || endsWithNewline ? part + "\n" : part }
     }
 
+    /// The text with its comments blanked out — and, with `blankingTexts`, the insides of its
+    /// quoted texts (a template's `${…}` stays code) — each character a space: its line breaks are
+    /// kept, and as many UTF-16 units as it had, so an offset in it is the same place in the text.
+    /// What the import's review reads for what the code does (`ScenarioValues.readsByBuiltNames`,
+    /// `ScenarioFile.buildsAddresses`). One pass. A regular expression's literal is not known: a
+    /// quote in one is read as a text's beginning, which ends with the line.
+    static func withoutComments(_ source: String, blankingTexts: Bool = false) -> String {
+        let scalars = Array(source.unicodeScalars)
+        let space: Unicode.Scalar = " ", newline: Unicode.Scalar = "\n"
+        var out = String.UnicodeScalarView()
+        func blank(_ scalar: Unicode.Scalar) {
+            if scalar == newline {
+                out.append(newline)
+                return
+            }
+            out.append(space)
+            if scalar.value > 0xFFFF { out.append(space) }
+        }
+        var quote: Unicode.Scalar?
+        var escaped = false
+        var inTemplate = false
+        // The brace depth each open template's `${` began at.
+        var templates: [Int] = []
+        var depth = 0
+        var index = 0
+        while index < scalars.count {
+            let scalar = scalars[index]
+            let next: Unicode.Scalar? = index + 1 < scalars.count ? scalars[index + 1] : nil
+            index += 1
+            if let open = quote {
+                if escaped {
+                    escaped = false
+                } else if scalar == "\\" {
+                    escaped = true
+                } else if scalar == open || scalar == newline {
+                    quote = nil
+                    out.append(scalar)
+                    continue
+                }
+                if blankingTexts { blank(scalar) } else { out.append(scalar) }
+                continue
+            }
+            if inTemplate {
+                if escaped {
+                    escaped = false
+                } else if scalar == "\\" {
+                    escaped = true
+                } else if scalar == "`" {
+                    inTemplate = false
+                    out.append(scalar)
+                    continue
+                } else if scalar == "$", next == "{" {
+                    inTemplate = false
+                    templates.append(depth)
+                    depth += 1
+                    out.append(scalar)
+                    out.append("{")
+                    index += 1
+                    continue
+                }
+                if blankingTexts { blank(scalar) } else { out.append(scalar) }
+                continue
+            }
+            if scalar == "/", next == "/" {
+                blank(scalar)
+                while index < scalars.count, scalars[index] != newline {
+                    blank(scalars[index])
+                    index += 1
+                }
+                continue
+            }
+            if scalar == "/", next == "*" {
+                blank(scalar)
+                blank(space)
+                index += 1
+                while index < scalars.count, !(scalars[index] == "*" && index + 1 < scalars.count && scalars[index + 1] == "/") {
+                    blank(scalars[index])
+                    index += 1
+                }
+                if index < scalars.count {
+                    blank(space)
+                    blank(space)
+                    index += 2
+                }
+                continue
+            }
+            out.append(scalar)
+            switch scalar {
+            case "'", "\"": quote = scalar
+            case "`": inTemplate = true
+            case "{": depth += 1
+            case "}":
+                depth -= 1
+                if let began = templates.last, began == depth {
+                    templates.removeLast()
+                    inTemplate = true
+                }
+            default: break
+            }
+        }
+        return String(out)
+    }
+
     private static func trimmed(_ line: String) -> String { line.trimmingCharacters(in: .whitespacesAndNewlines) }
     private static func isComment(_ line: String) -> Bool { trimmed(line).hasPrefix("//") }
     private static func isOff(_ line: String) -> Bool { trimmed(line).hasPrefix("//-") }
