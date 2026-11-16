@@ -6390,6 +6390,30 @@ final class SelfTest {
                  + "menu \(seen.menuItems.prefix(6).joined(separator: ", "))\(seen.detail.isEmpty ? "" : ", \(seen.detail)")")
             return seen
         }
+        // What fonts the page in front finds (`WindowProbe.fontsScript`): an iPhone view only an
+        // iPhone's, by every way a page has — the engine's own list (`PhoneEngine.engageFonts`) —
+        // and CSS cursive as an iPhone's; a Mac profile this Mac's (the control).
+        func fontChecks(_ look: WindowLook, prefix: String, iPhone: Bool) {
+            let found = (try? JSONSerialization.jsonObject(with: Data(look.detail.utf8))) as? [String: Any] ?? [:]
+            func names(_ way: String, _ kind: String) -> [String]? { (found[way] as? [String: Any])?[kind] as? [String] }
+            let workerAnswered = found["worker"] is [String: Any]
+            let ways = ["canvas", "css", "local"] + (workerAnswered ? ["worker"] : [])
+            let summary = ways.map { way in
+                "\(way): Mac's [\((names(way, "mac") ?? ["?"]).joined(separator: ", "))], iPhone's [\((names(way, "ios") ?? ["?"]).joined(separator: ", "))]"
+            }.joined(separator: "; ") + (workerAnswered ? "" : "; the worker did not answer")
+            let detail = look.found ? summary : look.detail
+            let cursive = (found["canvas"] as? [String: Any])?["cursiveIsSnell"] as? Bool
+            if iPhone {
+                check("\(prefix): fonts only this Mac has are not installed for the page — by a canvas, by CSS fallback, by FontFace local(), by a worker's canvas",
+                      look.found && ways.allSatisfy { names($0, "mac") == [] }, detail)
+                check("\(prefix): an iPhone's fonts are found (a canvas, CSS fallback), and CSS cursive is an iPhone's (Snell Roundhand)",
+                      look.found && ["canvas", "css"].allSatisfy { names($0, "ios")?.count == 4 } && cursive == true,
+                      detail + ", cursive Snell Roundhand: \(cursive.map { "\($0)" } ?? "?")")
+            } else {
+                check("\(prefix): a Mac profile's pages find this Mac's fonts (the control: the probe sees a font only the Mac has)",
+                      look.found && names("canvas", "mac")?.count == 4 && names("canvas", "ios")?.count == 4, detail)
+            }
+        }
         func targets(since: Int) async -> (count: Int, hosts: [String]) {
             let url = URL(string: "http://proxied.selftest.invalid/pb-targets.json?since=\(since)")!
             guard let text = try? await loadThroughProxy(repository, proxy, url: url),
@@ -6433,6 +6457,7 @@ final class SelfTest {
         // it, a page that cancels touchstart gets no mouse events, click or focus from it.
         let taps = tapsHeard(await act(phone, phoneID, .tap))
         tapChecks(taps, prefix: prefix, disguised: true)
+        fontChecks(await act(phone, phoneID, .fonts), prefix: prefix, iPhone: true)
         let firstPicture = await act(phone, phoneID, .picture)
         if let base64 = firstPicture.picture, let data = Data(base64Encoded: base64),
            let folder = ProcessInfo.processInfo.environment["PB_SELFTEST_SHOTS"] {
@@ -6495,6 +6520,8 @@ final class SelfTest {
             deviceGenerationID: "ios-27", matchProxyLocation: false, phoneDisguise: .engineOnly), "Phone window, no script's trace")
         defer { try? repository.delete(plainID) }
         tapChecks(tapsHeard(await act(plain, plainID, .tap)), prefix: "\(prefix), no script's trace", disguised: false)
+        // The fonts are the engine's in both disguises.
+        fontChecks(await act(plain, plainID, .fonts), prefix: "\(prefix), no script's trace", iPhone: true)
         try? await plain.stop(plainID)
 
         // A profile in Safari's window: Safari's address bar, the profile's engine.
@@ -6502,6 +6529,7 @@ final class SelfTest {
             startURL: URL(string: "http://proxied.selftest.invalid/one?desk=\(run)"), proxy: proxy, ephemeral: true,
             matchProxyLocation: false, searchEngine: .bing), "Search in Safari's window")
         defer { try? repository.delete(deskID) }
+        fontChecks(await act(desk, deskID, .fonts), prefix: "\(prefix), Mac profile", iPhone: false)
         if hosts == true {
             let deskBefore = await targets(since: 0)
             let deskSearch = await act(desk, deskID, .search("pbq\(run) news"))

@@ -45,6 +45,11 @@ enum WindowProbeAction: Codable, Equatable {
     /// The profile's name and colour taken out of Safari's windows (false) or put back (true): what
     /// a page measures is compared between the two.
     case marker(Bool)
+    /// Which of a few fonts only this Mac has, and a few an iPhone has too, the page in front finds
+    /// — by a canvas's text width, by an element's width (CSS fallback), by `FontFace` with
+    /// `local()`, and by a canvas in a worker — and whether CSS `cursive` is Snell Roundhand, as JSON
+    /// in `detail` (`PhoneFonts`).
+    case fonts
 }
 
 struct WindowLook: Codable, Equatable {
@@ -186,6 +191,17 @@ enum WindowProbe {
                 look.detail = await measured(by: page)
                 look.found = !look.detail.hasPrefix("error")
             }
+        case .fonts:
+            look.action = "fonts"
+            if let window, let page = controller?.selectedTab?.webView
+                ?? (SafariChromeHost.isBrowserWindow(window) ? SafariChromeHost.frontPage(in: window) : nil) {
+                do {
+                    look.detail = try await page.callAsyncJavaScript(fontsScript, contentWorld: .defaultClient) as? String ?? "error: no value"
+                } catch {
+                    look.detail = "error: \(error)"
+                }
+                look.found = !look.detail.hasPrefix("error")
+            }
         case .marker(let shown):
             look.action = shown ? "the profile's marker back" : "the profile's marker out"
             if SafariChromeHost.isHosting {
@@ -236,6 +252,64 @@ enum WindowProbe {
         look.menuItems = menuShortcuts(NSApp.mainMenu)
         return look
     }
+
+    /// The fonts a page finds (`WindowProbeAction.fonts`): four only this Mac has (an iPhone has
+    /// none of them: Apple's iOS font list) and four both have. A family is found when text in it,
+    /// with a generic family behind it, is not as wide as the generic family alone, for any of three.
+    /// In the page's world of the self-test's own (the page's scripts are not asked), whose fonts are
+    /// the page's. (No backslash in it: a plain string literal.)
+    static let fontsScript = """
+    const families = { mac: ['Monaco', 'Apple Chancery', 'Andale Mono', 'Lucida Grande'],
+                       ios: ['Zapfino', 'Optima', 'Snell Roundhand', 'Hoefler Text'] };
+    const seen = (ctx, families) => {
+      const width = (font) => { ctx.font = font; return ctx.measureText('mmmmmmmmmmlli WwQq 0123').width; };
+      const out = {};
+      for (const kind of ['mac', 'ios']) {
+        out[kind] = families[kind].filter((f) => ['monospace', 'serif', 'sans-serif']
+          .some((g) => width('40px "' + f + '", ' + g) !== width('40px ' + g)));
+      }
+      out.cursiveIsSnell = width('40px cursive') === width('40px "Snell Roundhand", serif');
+      return out;
+    };
+    const canvas = seen(document.createElement('canvas').getContext('2d'), families);
+    const span = document.createElement('span');
+    span.style.cssText = 'position:absolute;left:-9999px;top:0;font-size:40px;white-space:nowrap';
+    span.textContent = 'mmmmmmmmmmlli WwQq 0123';
+    (document.body || document.documentElement).appendChild(span);
+    const css = {};
+    for (const kind of ['mac', 'ios']) {
+      css[kind] = families[kind].filter((f) => ['monospace', 'serif', 'sans-serif'].some((g) => {
+        span.style.fontFamily = g;
+        const alone = span.offsetWidth;
+        span.style.fontFamily = '"' + f + '", ' + g;
+        return span.offsetWidth !== alone;
+      }));
+    }
+    span.remove();
+    const local = {};
+    for (const kind of ['mac', 'ios']) {
+      local[kind] = [];
+      for (const f of families[kind]) {
+        try {
+          await new FontFace('pb-probe-' + Math.random().toString(36).slice(2), 'local("' + f + '")').load();
+          local[kind].push(f);
+        } catch (e) {}
+      }
+    }
+    let worker = null;
+    try {
+      const source = 'const seen = ' + seen.toString() + '; postMessage(seen(new OffscreenCanvas(8, 8).getContext("2d"), '
+        + JSON.stringify(families) + '));';
+      const w = new Worker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
+      worker = await new Promise((resolve) => {
+        w.onmessage = (e) => resolve(e.data);
+        w.onerror = () => resolve(null);
+        setTimeout(() => resolve(null), 4000);
+      });
+      w.terminate();
+    } catch (e) {}
+    return JSON.stringify({ canvas, css, local, worker });
+    """
 
     /// Everything a page can measure of its window and its screen, as the page in front measures
     /// it: one line, the same for the same window.
