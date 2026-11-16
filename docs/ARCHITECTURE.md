@@ -687,7 +687,11 @@ SettingsView (Settings scene: ⌘, — and ⋯ → Settings…) ── AppSettin
    │                 Safari's engine (SafariChrome's search providers);
    │                 newProfileRandomWindowSize → WindowSize.randomSafe(fitting: visible screen) →
    │                 ProfileConfiguration.windowSize → WindowSizing.apply on each BrowserWindowController
-   │                 (and the first window of Safari's chrome): a real frame, never a declared screen
+   │                 (and the first window of Safari's chrome): a real frame, never a declared screen;
+   │                 newProfileWebRTCAutomatic (on) → ProfileDraft.webRTC = .automatic →
+   │                 ProfileConfiguration.webRTCAutomatic → webRTCLaunchPolicy → WebRTCGate (the relay
+   │                 through SOCKS5, Safari's own without a proxy, else WebRTCGate.silence: present,
+   │                 connecting nowhere where nothing can go around the connection)
    │  Behavior       BrowsingPreferences (AutoFill, tab position, closing several tabs, zoom,
    │  Downloads      download folder, ask each time, Dock letters) → BrowsingPreferences.current here;
    │                 ProfileCommand.preferences to every profile process (ProfileManager.sendPreferences),

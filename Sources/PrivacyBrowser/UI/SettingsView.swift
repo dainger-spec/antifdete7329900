@@ -624,6 +624,8 @@ private struct StartupSettings: View {
 
 private struct NewProfileSettings: View {
     @ObservedObject var settings: AppSettings
+    @EnvironmentObject private var model: AppModel
+    @ObservedObject private var networkGuard = NetworkGuard.shared
 
     var body: some View {
         SettingsPage(title: L("settings.section.newProfiles"), subtitle: L("settings.newProfiles.subtitle")) {
@@ -644,6 +646,16 @@ private struct NewProfileSettings: View {
             SettingRow(L("settings.newProfiles.randomWindow"), detail: L("settings.newProfiles.randomWindow.detail"),
                        effect: .newProfiles) {
                 SettingSwitch(isOn: $settings.newProfileRandomWindowSize, label: L("settings.newProfiles.randomWindow"))
+            }
+            SettingRow(L("settings.newProfiles.webRTC"), detail: L("settings.newProfiles.webRTC.detail"), effect: .newProfiles) {
+                SettingSwitch(isOn: $settings.newProfileWebRTCAutomatic, label: L("settings.newProfiles.webRTC"))
+            }
+            // Through a SOCKS5 proxy it needs the network guard: said here, with the way to it.
+            if settings.newProfileWebRTCAutomatic, BuildKind.carriesGuard, networkGuard.state != .ready {
+                SettingsNote(text: L("settings.newProfiles.webRTC.guard"))
+                Button(L("settings.newProfiles.webRTC.guardButton")) { model.settingsSection = .webRTC }
+                    .buttonStyle(.link)
+                    .foregroundStyle(Theme.accent)
             }
             SettingRow(L("settings.newProfiles.quic"), detail: L("settings.newProfiles.quic.detail"), effect: .always) {
                 Text(L("settings.newProfiles.quic.value"))

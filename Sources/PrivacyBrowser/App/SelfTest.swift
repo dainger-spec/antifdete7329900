@@ -534,11 +534,31 @@ final class SelfTest {
             """) as? String
         check("shim: a blob worker runs in the profile's zone, strict and with its own line numbers",
               worker == "Asia/Tokyo,-540,true|error line 3|true", worker ?? "nil")
-        // Off in the engine (as in Lockdown Mode): no RTC interface at all, not only the constructors.
-        let rtcNames = try await js(webA!, "return Object.getOwnPropertyNames(window).filter((n) => /^(webkit)?RTC/.test(n)).join();") as? String
-        check("WebRTC disabled: off in the engine, no RTC interface left",
-              rtcNames == "" && WebKitPreferences.bool(webA!.configuration.preferences, "_peerConnectionEnabled") == false,
-              rtcNames ?? "nil")
+        // Disabled, without a proxy: present as in Safari, connecting nowhere (`WebRTCRouting.silent`)
+        // — the engine's interfaces and capabilities, an offer, and not one candidate gathered for
+        // the page's STUN server (a documentation address: nothing is sent to it).
+        let silentRTC = try await js(webA!, """
+            if (typeof RTCPeerConnection !== 'function') return 'no RTCPeerConnection';
+            const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:192.0.2.1:3478' }] });
+            const seen = [];
+            pc.onicecandidate = (e) => { if (e.candidate && e.candidate.candidate) seen.push(e.candidate.candidate); };
+            pc.createDataChannel('x');
+            await pc.setLocalDescription(await pc.createOffer());
+            await new Promise((resolve) => {
+              pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') resolve(); };
+              if (pc.iceGatheringState === 'complete') resolve();
+              setTimeout(resolve, 8000);
+            });
+            const config = pc.getConfiguration();
+            const capabilities = typeof RTCRtpSender.getCapabilities === 'function' ? RTCRtpSender.getCapabilities('video') : null;
+            const result = [seen.length, config.iceTransportPolicy, config.iceServers.length,
+                            !!(capabilities && capabilities.codecs.length), pc.localDescription.sdp.includes('m=application')].join();
+            pc.close();
+            return result;
+            """) as? String
+        check("WebRTC disabled: present as in Safari and connecting nowhere — no candidate, the page's own configuration, the engine's capabilities and offer",
+              silentRTC == "0,all,1,true,true" && WebKitPreferences.bool(webA!.configuration.preferences, "_peerConnectionEnabled") == true,
+              silentRTC ?? "nil")
         // WebKit says 'prompt' until the page asks (Geolocation::hasBeenRequested); the status is the
         // engine's own PermissionStatus (a fake one threw on its onchange setter before).
         let permission = "return await navigator.permissions.query({ name: 'geolocation' }).then((s) => [s.state, s instanceof PermissionStatus, Object.getOwnPropertyNames(s).length].join());"
@@ -562,7 +582,7 @@ final class SelfTest {
             frame.remove();
             return value;
             """) as? String
-        check("shim: a frame reached as window[i] right after insertion is patched", indexed == "Asia/Tokyo,undefined", indexed ?? "nil")
+        check("shim: a frame reached as window[i] right after insertion is patched", indexed == "Asia/Tokyo,function", indexed ?? "nil")
         // The page's windows are one family (the script's channel, PrivacyScripts): a frame prints
         // the page's replacements as the engine prints its own, and the page the frame's; no symbol
         // given to Function.prototype.toString gets anything but the engine's TypeError (it once
@@ -2117,6 +2137,8 @@ final class SelfTest {
                   let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] else { return nil }
             return (object["reports"] as? [[String: Any]])?.first { $0["rtcPage"] != nil }
         }
+        // Whether the last launch kept WebRTC in the pages, connecting nowhere (`WebRTCGate.silence`).
+        var lastSilenced = false
         // One launch of the proxied profile in its own process, on the WebRTC page in `mode`.
         func launch(mode: String) async throws -> (report: [String: Any], refusals: [WebRTCRefusal], messages: [String], started: Bool) {
             let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
@@ -2149,6 +2171,7 @@ final class SelfTest {
                 if report.isEmpty { try? await Task.sleep(nanoseconds: 2_000_000_000) }
             }
             let refusals = Array(manager.webRTCRefusals.values)
+            lastSilenced = manager.webRTCSilenced.contains(profile.id)
             await manager.shutDown()
             info("egress-window end \(Date().timeIntervalSince1970)")
             return (report, refusals, messages, started)
@@ -2254,9 +2277,13 @@ final class SelfTest {
         NetworkGuard.shared.selfTestStandIn = false
         ProxyExitLookup.endpoints = [URL(string: exitTrace)!]
         info("WebRTC through the proxy, one address, a launch: \(apart.report), refusals \(apart.refusals), messages \(apart.messages)")
-        check("WebRTC through the proxy, one address: a proxy whose UDP leaves from elsewhere — no RTCPeerConnection, in the page or in an about:blank frame",
-              apart.started && apart.report["rtc"] as? String == "undefined" && apart.report["rtcFrame"] as? String == "undefined",
-              apart.report.isEmpty ? "no report from the page (started \(apart.started))" : "\(apart.report)")
+        // The guard (its stand-in) holds the process: WebRTC that must not connect stays in the pages
+        // as Safari has it, and connects nowhere.
+        let apartSilenced = lastSilenced
+        check("WebRTC through the proxy, one address: a proxy whose UDP leaves from elsewhere — WebRTC present as in Safari, in the page and an about:blank frame, connecting nowhere (no candidate, the page's own policy), the process held",
+              apart.started && apartSilenced && apart.report["rtc"] as? String == "function" && apart.report["rtcFrame"] as? String == "function"
+                && apart.report["gathered"] as? Int == 0 && apart.report["offer"] as? Bool == true && apart.report["policySeen"] as? String == "all",
+              apart.report.isEmpty ? "no report from the page (started \(apart.started))" : "silenced \(apartSilenced), \(apart.report)")
         check("WebRTC through the proxy, one address: the profile is told why, in words",
               apart.refusals == [.proxyUDPElsewhere] && apart.messages.contains(ProfileManager.webRTCOffText(.proxyUDPElsewhere)),
               "refusals \(apart.refusals), messages \(apart.messages)")
@@ -5272,8 +5299,8 @@ final class SelfTest {
         let defaultFailure: Bool = fresh.proxyFailure == AppSettings.ProxyFailure.launchAndExplain
         let defaultBrowsing: Bool = fresh.browsing == BrowsingPreferences()
         let defaultSearch: Bool = fresh.newProfileSearchEngine == SearchEngine.standard
-        let defaultWindow: Bool = fresh.newProfileRandomWindowSize && fresh.newProfileBlocksLocalRequests
-        check("settings: the defaults — the Profiles window after unlocking, quitting asks, new profiles follow the connection, search with the standard engine, get a random window size and block local requests, a failing proxy's profile starts and says why, AutoFill on, new tabs next to the current one, closing several tabs asks, 100 %, the Downloads folder, two letters, no tabs restored",
+        let defaultWindow: Bool = fresh.newProfileRandomWindowSize && fresh.newProfileBlocksLocalRequests && fresh.newProfileWebRTCAutomatic
+        check("settings: the defaults — the Profiles window after unlocking, quitting asks, new profiles follow the connection, search with the standard engine, get a random window size, block local requests and have WebRTC Automatic, a failing proxy's profile starts and says why, AutoFill on, new tabs next to the current one, closing several tabs asks, 100 %, the Downloads folder, two letters, no tabs restored",
               defaultStart && fresh.confirmQuit && fresh.newProfileMatchesConnection && defaultSearch && defaultWindow
                 && defaultFailure && defaultBrowsing,
               String(describing: fresh.browsing))
@@ -5283,6 +5310,7 @@ final class SelfTest {
         fresh.newProfileSearchEngine = .ecosia
         fresh.newProfileRandomWindowSize = false
         fresh.newProfileBlocksLocalRequests = false
+        fresh.newProfileWebRTCAutomatic = false
         fresh.proxyFailure = .doNotLaunch
         fresh.browsing.passwordAutoFill = false
         fresh.browsing.newTabsNextToCurrent = false
@@ -5302,7 +5330,7 @@ final class SelfTest {
         let rereadFailure: Bool = reread.proxyFailure == AppSettings.ProxyFailure.doNotLaunch
         let rereadBrowsing: Bool = reread.browsing == expected
         let rereadSearch: Bool = reread.newProfileSearchEngine == SearchEngine.ecosia
-        let rereadWindow: Bool = !reread.newProfileRandomWindowSize && !reread.newProfileBlocksLocalRequests
+        let rereadWindow: Bool = !reread.newProfileRandomWindowSize && !reread.newProfileBlocksLocalRequests && !reread.newProfileWebRTCAutomatic
         check("settings: every setting is read back as it was set, each from its own key",
               rereadStart && !reread.confirmQuit && !reread.newProfileMatchesConnection && rereadSearch && rereadWindow
                 && rereadFailure && rereadBrowsing,

@@ -2139,6 +2139,11 @@ struct ProfileDetails: Equatable {
     /// The WebRTC choice stored; what it amounts to with a proxy depends on the gate at launch
     /// (`ProfileConfiguration.webRTCRouting`), which the inspector says as the editor does.
     var webRTCChoice: WebRTCPolicy
+    /// The choice as the editor shows it, Automatic included, and what of the proxy decides what it
+    /// comes to (`WebRTCGate.outlook`): its kind, and whether some sites bypass it.
+    var webRTCMode: WebRTCMode
+    var proxyKindValue: ProxySettings.Kind?
+    var proxyBypassesSites: Bool
     /// It would carry WebRTC through its SOCKS5 proxy if the network guard worked
     /// (`WebRTCProtectionNotice`): the profiles window says when the guard does not.
     var wantsNetworkGuard: Bool
@@ -2174,7 +2179,10 @@ struct ProfileDetails: Equatable {
             timeZone = L("inspector.asThisMac")
         }
         webRTCChoice = configuration.webRTCPolicy
-        wantsNetworkGuard = WebRTCProtectionNotice.wants(proxyKind: configuration.proxy?.kind, webRTC: configuration.webRTCPolicy)
+        webRTCMode = configuration.webRTCMode
+        proxyKindValue = configuration.proxy?.kind
+        proxyBypassesSites = !(configuration.proxy?.excludedDomains.isEmpty ?? true)
+        wantsNetworkGuard = WebRTCProtectionNotice.wants(proxyKind: configuration.proxy?.kind, webRTC: configuration.webRTCLaunchPolicy)
         // Nil: the connection's — its proxy's country when the profile follows it — else this Mac's.
         languages = configuration.languageOverride
             ?? (configuration.needsProxyLocation

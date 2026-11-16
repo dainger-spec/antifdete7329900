@@ -59,6 +59,9 @@ struct ProfileEditorForm: View {
     var error: String?
     /// The network guard is ready: WebRTC can go through a SOCKS5 proxy (`NetworkGuard`).
     var guardReady: Bool
+    /// Where the network guard stands, for what WebRTC comes to (`WebRTCGate.outlook`); nil: ready
+    /// or not installed, as `guardReady` says.
+    var guardState: NetworkGuardState? = nil
     var onCancel: () -> Void = {}
     var onSave: () -> Void = {}
     var onGuardSettings: () -> Void = {}
@@ -480,10 +483,50 @@ struct ProfileEditorForm: View {
             ? String(format: L("editor.safari.risky"), version) : version
     }
 
-    /// With a proxy, WebRTC can only be on through the relay, held there by the network guard, and only for
-    /// SOCKS5 (a proxy whose type is not known yet is not taken for one).
-    private var webRTCLocked: Bool {
-        draft.hasProxy && !(draft.chosenProxy?.kind == .socks5 && guardReady)
+    /// What the WebRTC choice comes to for this profile at its next launch, with its proxy as the
+    /// form has it now and the network guard as it stands (`WebRTCGate.outlook`). A proxy whose type
+    /// is not known yet is taken for one that carries no UDP.
+    private var webRTCOutlook: WebRTCOutlook {
+        var proxy: ProxySettings?
+        if draft.hasProxy {
+            proxy = draft.chosenProxy ?? ProxySettings(kind: .httpConnect, host: "proxy.invalid", port: 1)
+            proxy?.excludedDomains = draft.proxyExcludedDomains.split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        }
+        return WebRTCGate.outlook(mode: draft.webRTC, proxy: proxy, ownProcess: ProfileProcess.isEnabled,
+                                  guardState: guardState ?? (guardReady ? .ready : .notInstalled))
+    }
+
+    /// The outlook in words: what happens, said plainly, beginning with "Now:" (the inspector says
+    /// the same, shorter: `ProfileInspectorView`).
+    static func webRTCOutlookText(_ outlook: WebRTCOutlook) -> String {
+        switch outlook {
+        case .native(.unrestricted): return L("editor.webrtc.now.likeSafari")
+        case .native(.relayOnly): return L("editor.webrtc.now.relayNoProxy")
+        case .native(.disabled), .silentByChoice: return L("editor.webrtc.now.silent")
+        case .throughProxy: return L("editor.webrtc.now.throughProxy")
+        case .silentHTTPProxy: return L("editor.webrtc.now.silentHTTP")
+        case .removed(.guardNotInBuild?): return L("editor.webrtc.now.removedNoGuardInBuild")
+        case .removed(.notOwnProcess?): return L("editor.webrtc.now.removedNotOwnProcess")
+        case .removed(_?): return L("editor.webrtc.now.removedGuard")
+        case .removed(nil): return L("editor.webrtc.now.removed")
+        case .removedBypass: return L("editor.webrtc.now.removedBypass")
+        }
+    }
+
+    /// The network guard's settings help: it is in this build, the profile runs in its own process,
+    /// and only the guard keeps WebRTC out of the pages.
+    static func webRTCOutlookLeadsToGuard(_ outlook: WebRTCOutlook) -> Bool {
+        guard case .removed(let reason?) = outlook else { return false }
+        return reason != .guardNotInBuild && reason != .notOwnProcess
+    }
+
+    /// Said as a warning: WebRTC taken out of the pages, which a site can tell.
+    static func webRTCOutlookWarns(_ outlook: WebRTCOutlook) -> Bool {
+        switch outlook {
+        case .removed, .removedBypass: return true
+        case .native, .throughProxy, .silentByChoice, .silentHTTPProxy: return false
+        }
     }
 
     // MARK: Connection
@@ -521,31 +564,21 @@ struct ProfileEditorForm: View {
             }
             EditorDivider()
             EditorRow(L("editor.webrtc")) {
-                // The stored choice is kept while the proxy rules it out (ProfileConfiguration.webRTCRouting).
-                Picker(L("editor.webrtc"), selection: webRTCLocked ? .constant(WebRTCPolicy.disabled) : $draft.webRTC) {
-                    Text(L("editor.webrtc.disabled")).tag(WebRTCPolicy.disabled)
-                    Text(L("editor.webrtc.relay")).tag(WebRTCPolicy.relayOnly)
-                    Text(L("editor.webrtc.unrestricted")).tag(WebRTCPolicy.unrestricted)
+                Picker(L("editor.webrtc"), selection: $draft.webRTC) {
+                    Text(L("editor.webrtc.automatic")).tag(WebRTCMode.automatic)
+                    Text(L("editor.webrtc.disabled")).tag(WebRTCMode.disabled)
+                    Text(L("editor.webrtc.relay")).tag(WebRTCMode.relayOnly)
+                    Text(L("editor.webrtc.unrestricted")).tag(WebRTCMode.unrestricted)
                 }
                 .labelsHidden()
                 .fixedSize()
-                .disabled(webRTCLocked)
             }
-            // Said for a proxy whose type is known; without one WebRTC stays off.
-            if draft.hasProxy, let kind = draft.chosenProxy?.kind {
-                if kind != .socks5 {
-                    EditorNote(L("editor.webrtc.httpProxy"))
-                } else if guardReady {
-                    EditorNote(L("editor.webrtc.viaGuard"))
-                } else if !BuildKind.carriesGuard {
-                    // Nothing to turn on in this build: said as it is, with no button to a guard it lacks.
-                    EditorNote(L("editor.webrtc.noGuardInBuild"), tone: .warning)
-                } else {
-                    EditorNote(L("editor.webrtc.guardNotReady"), tone: .warning)
-                    Button(L("editor.webrtc.guardSettings"), action: onGuardSettings)
-                        .buttonStyle(.link)
-                        .foregroundStyle(Theme.accent)
-                }
+            // What it comes to now, for this profile: its proxy's type, the network guard.
+            EditorNote(Self.webRTCOutlookText(webRTCOutlook), tone: Self.webRTCOutlookWarns(webRTCOutlook) ? .warning : .plain)
+            if Self.webRTCOutlookLeadsToGuard(webRTCOutlook) {
+                Button(L("editor.webrtc.guardSettings"), action: onGuardSettings)
+                    .buttonStyle(.link)
+                    .foregroundStyle(Theme.accent)
             }
             EditorNote(L("editor.network.footer"))
         }

@@ -14,8 +14,11 @@ help, and they are kept apart on purpose:
   proxy and this Mac (127.0.0.1) only; everything else is dropped.
 
 A profile gets WebRTC through its proxy only when every condition holds (`WebRTCGate`); with the
-first that does not, WebRTC is off in the engine (no `RTCPeerConnection` at all) and the person is
-told why, in words, with what they can do.
+first that does not, WebRTC cannot connect. Where the guard is ready, it then holds the profile's
+process to its proxy all the same and WebRTC stays in the pages, as Safari has it, connecting
+nowhere (relay-only with no ICE server: `WebRTCGate.silence`, ISOLATION_AND_LIMITATIONS §5); where
+it is not, WebRTC is off in the engine (no `RTCPeerConnection` at all). The person is told why, in
+words, with what they can do (with Automatic, an HTTP proxy is not said: nothing to do about it).
 
 | Traffic of a proxied profile | Path | How it is known |
 |---|---|---|
@@ -25,7 +28,8 @@ told why, in words, with what they can do.
 | WebRTC: STUN, TURN, media, data channels (UDP) | **the relay** on 127.0.0.1 → the profile's SOCKS5 UDP association; the page's own ICE servers are never contacted | self-test (a video call inside a capture of every packet of the runner), leak check, unit tests |
 | A peer's candidate named by a host name (FQDN, mDNS `.local`) | dropped before the engine sees it: nothing is resolved | shim tests, self-test (no packet carries the name) |
 | Anything else a held profile's process or WebKit's processes for it open | dropped by the network guard | unit tests of its rules; on a Mac: the check below |
-| WebRTC with an HTTP CONNECT proxy, a proxy without UDP, a proxy whose UDP leaves from another address than its TCP, the guard not ready | off, said why | self-test (the controls: off, not direct) |
+| WebRTC with an HTTP CONNECT proxy, a proxy without UDP, a proxy whose UDP leaves from another address than its TCP — the guard ready | present, connecting nowhere: no ICE server, nothing gathered; the guard holds the process | shim tests, unit tests, self-test (one address: no candidate) |
+| The same, the guard not ready | off, said why | self-test (the controls: off, not direct) |
 
 A page cannot send other UDP: WebRTC is the only UDP a web page can start.
 
@@ -455,14 +459,16 @@ the guard drops each of those flows, because they are counted for the held profi
 |---|---|---|
 | A build without the guard (no `NE=1`) | off | "this version has no network guard" (release) / how the developer builds it |
 | Not installed, awaiting approval, off, a restart needed | off | the state and the next step |
-| Installed, not answering (updating, crashed) | off; held profiles are stopped | "not answering", Check Again; a stopped profile says why |
+| Installed, not answering (updating, crashed) | off; held profiles are stopped — with the guard ready every proxied profile in its own process is held (through the relay, or present and connecting nowhere), so all of them are | "not answering", Check Again; a stopped profile says why |
 | Installed, not checked on this Mac / check failed | off | "being checked" / "the check failed", Check Again |
-| Ready, HTTP proxy | off | "an HTTP proxy cannot carry UDP" |
-| Ready, SOCKS5 without UDP / UDP unknown | off | "the proxy does not pass UDP" / "could not find out" |
-| Ready, the proxy's UDP leaves from another address than its TCP | off | "its proxy sends UDP out from another address than its TCP" |
-| Ready, the proxy's TCP exit could not be found out | off | "the address its proxy leaves from could not be found out" |
+| Ready, HTTP proxy | present, connecting nowhere, the process held | "an HTTP proxy cannot carry UDP" (not with Automatic) |
+| Ready, SOCKS5 without UDP / UDP unknown | present, connecting nowhere, the process held | "the proxy does not pass UDP" / "could not find out" |
+| Ready, the proxy's UDP leaves from another address than its TCP | present, connecting nowhere, the process held | "its proxy sends UDP out from another address than its TCP" |
+| Ready, the proxy's TCP exit could not be found out | present, connecting nowhere, the process held | "the address its proxy leaves from could not be found out" |
+| Ready, WebRTC Disabled | present, connecting nowhere, the process held | nothing (the person's choice) |
+| Ready, a proxy with sites that bypass it | off (holding the process would cut those sites off) | the editor says so |
 | Running, a later association of the proxy leaves from another address | that allocation refused (403): no relayed address, nothing sent | nothing new: the call fails as with a dead proxy |
-| Ready, the guard does not take the process, the relay does not start | off | "the guard did not take the profile's process, or its relay did not start" |
+| Ready, the guard does not take the process, the relay does not start | off (present only once a hold is taken) | "the guard did not take the profile's process, or its relay did not start" |
 | Ready, all of it holds | through the relay and the proxy | the editor and the inspector say so |
 | The sandboxed build (profiles inside the app's process) | off | "only for a profile in its own process" |
 

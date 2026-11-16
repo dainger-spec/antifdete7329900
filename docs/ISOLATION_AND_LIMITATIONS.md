@@ -1172,9 +1172,10 @@ network process opens them with plain Network.framework parameters). Its default
 IPs behind mDNS host candidates, but STUN still discovers the public IP. WKWebView on macOS 15
 and 26 exposes a native `RTCPeerConnection` (observed by the self-test).
 
-**With a proxy, WebRTC goes through the proxy or is off** (`ProfileConfiguration.webRTCRouting`),
+**With a proxy, WebRTC goes through the proxy, or connects nowhere** (`ProfileConfiguration.webRTCRouting`),
 whatever the profile's setting, because any other policy sends the page's ICE traffic from this
-Mac's own address:
+Mac's own address. WebRTC that must not connect is kept in the pages, as Safari has it, where that
+is safe, and taken out of them only where it is not (below, "Present, connecting nowhere"):
 
 - **SOCKS5 proxy with UDP, the network guard ready, WebRTC setting not Disabled**: the page's only
   ICE server is a TURN relay on 127.0.0.1 in the app's own process, under
@@ -1186,16 +1187,21 @@ Mac's own address:
   it. The page keeps seeing its own configuration; its STUN servers are not contacted, and the urls
   that would name the relay name the page's own server. Design, limits and signing:
   [TUNNEL.md](TUNNEL.md).
-- **HTTP CONNECT proxy**: off. CONNECT cannot carry UDP.
-- **A SOCKS5 proxy without UDP, one whose UDP leaves from another address than its TCP (or whose
-  TCP exit could not be found out), the guard not in the build, not installed, not answering, not
-  yet checked on this Mac, or the profile inside the app's process (the sandboxed build)**: off, and
-  the launch says which, with what to do. Without the relay and the guard, UDP would leave from this
-  Mac's real IP; from another address of the proxy than its pages', it would show a site two
+- **HTTP CONNECT proxy, or a SOCKS5 proxy without UDP, one whose UDP leaves from another address
+  than its TCP (or whose TCP exit could not be found out), or WebRTC Disabled — the network guard
+  ready**: present, connecting nowhere. The guard holds the profile's process to its proxy first;
+  only then is the engine's WebRTC on, given relay-only with no ICE server by the user script. CONNECT
+  cannot carry UDP; from another address of the proxy than its pages', UDP would show a site two
   addresses (TUNNEL.md, "One address").
+- **The guard not in the build, not installed, not answering, not yet checked on this Mac, the
+  guard refusing the process, a proxy with sites that bypass it, or the profile inside the app's
+  process (the sandboxed build)**: off in the engine, no `RTC*` interface — as before — and the
+  launch says which, with what to do. Without the guard, a page that got past the script would send
+  UDP from this Mac's real IP.
 
-The editor shows the setting as off (or "through the proxy, relay only") while a proxy is set,
-and keeps the stored choice for when the proxy is removed.
+The editor says under the setting what it comes to now for that profile — its proxy's type, the
+network guard (`WebRTCGate.outlook`) — with a link to the guard's settings where only the guard is
+missing, and keeps the stored choice for when the proxy is removed.
 
 **Decided (October 2026): WebRTC stays off in a profile with a proxy.** The deciding reason: a
 page that reaches WebRTC learns an address from it, and that address has to be the one its HTTP
@@ -1209,9 +1215,43 @@ is ready on that Mac ([TUNNEL.md](TUNNEL.md)). `scripts/release.sh` builds witho
 the owner's signed build has passed the hardware checklist (`NE` unset), so a released app's
 proxied profiles run with WebRTC off until then.
 
+**Automatic (the owner, 16 November 2026): WebRTC goes the way the connection goes.** Settings →
+New Profiles → "WebRTC through the profile's connection automatically" (on by default) gives new
+profiles the choice *Automatic* (`WebRTCMode.automatic`, stored as `webRTCAutomatic` beside the
+policy, which is set to `relayOnly` so that a build that does not know it reads a safe choice): with
+a SOCKS5 proxy, through the relay as above; without a proxy, as Safari (Unrestricted: over this
+Mac's own connection, the address the pages show); with an HTTP proxy, present and connecting
+nowhere. Existing profiles keep their explicit choice; the editor offers Automatic to each. With
+Automatic, an HTTP proxy's "cannot carry UDP" is not said at each launch (there is nothing to do
+about it); the guard's states still are.
+
+**Present, connecting nowhere (`WebRTCRouting.silent`, the owner, 16 November 2026).** A WebRTC taken
+out of the page — no `RTCPeerConnection`, and creepjs's "blocked" for host, STUN, SDP and even SDP
+capabilities — is a mark no Safari shows. Where WebRTC must not connect (Disabled, an HTTP proxy, a
+proxy whose UDP does not hold), it is kept: the engine's WebRTC is on, so the interfaces, codecs,
+`getCapabilities()`, offers and media devices are the engine's own, and the user script gives the
+engine `iceTransportPolicy: "relay"` with no ICE server at all — libwebrtc then gathers no
+candidate (no host address, no server-reflexive one) and sends nothing, as Safari on a network
+that lets no UDP through. The page sees its own configuration; a peer's candidate named by a host
+name is dropped, as through the relay. A script is not a wall, so this is done only where a page
+that got past it still could not show another address than its pages show (`WebRTCGate.silence`):
+without a proxy (the engine's own WebRTC goes out as this Mac, as the pages do), or with the network
+guard holding the profile's own process to its proxy, the hold taken before the process builds
+anything (a hold refused leaves WebRTC removed). Everywhere else WebRTC is removed, as before. With
+the guard ready every proxied profile in its own process is therefore held — the guard drops
+whatever of it does not go to its proxy, and a guard that stops answering stops the profiles it
+held, as it always stopped those whose WebRTC went through the relay. Proved
+by the shim tests (no candidate or server survives any tampering the relay's tests try; the engine's
+interfaces and capabilities untouched), the BrowserCore tests (with a proxy the engine's WebRTC is
+on only while the guard holds the process, in every combination) and the self-test (no candidate
+in WebKit itself, without a proxy and with the guard's stand-in). What only a Mac shows: creepjs's
+WebRTC block — "sdp capabilities" with Safari's own hash, no "blocked".
+
 The profile setting:
 
-- `disabled` (default) switches WebRTC off in the engine (`WKPreferences._setPeerConnectionEnabled:`,
+- `automatic` (new profiles, by the setting above): as described above.
+- `disabled` (the default before Automatic): present, connecting nowhere, where that is safe;
+  elsewhere WebRTC is off in the engine (`WKPreferences._setPeerConnectionEnabled:`,
   a private property; Lockdown Mode turns off the same setting): no `RTC*` interface exists
   in any frame. Where WebKit lacks that property, the document-start user script removes
   every `RTC*` interface from the window instead, as in an engine built without WebRTC.

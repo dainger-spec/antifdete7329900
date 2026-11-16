@@ -1013,6 +1013,27 @@ const timeout = (ms, value) => new Promise((resolve) => setTimeout(() => resolve
   document.body.appendChild(frame);
   const presence = { rtc: typeof RTCPeerConnection, rtcFrame: typeof frame.contentWindow.RTCPeerConnection,
                      dataChannel: typeof RTCDataChannel };
+  if ('MODE' !== 'call' && typeof RTCPeerConnection === 'function') {
+    // Present: what it gathers for the page's own STUN server, named after the run. WebRTC that
+    // must not connect (present, connecting nowhere) gathers nothing and asks that server nothing:
+    // a DNS question for it, or a packet to it, is a leak the capture sees.
+    const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun-RUN.leak.example.com:3478' }] });
+    const seen = [];
+    pc.onicecandidate = (event) => { if (event.candidate && event.candidate.candidate) seen.push(event.candidate.candidate); };
+    pc.createDataChannel('presence');
+    try {
+      await pc.setLocalDescription(await pc.createOffer());
+      await Promise.race([new Promise((resolve) => {
+        pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') resolve(); };
+        if (pc.iceGatheringState === 'complete') resolve();
+      }), timeout(8000)]);
+    } catch (e) { presence.gatherError = String(e); }
+    presence.gathered = seen.length;
+    presence.gathering = pc.iceGatheringState;
+    presence.policySeen = pc.getConfiguration().iceTransportPolicy;
+    presence.offer = !!(pc.localDescription && pc.localDescription.sdp && pc.localDescription.sdp.includes('m=application'));
+    pc.close();
+  }
   if ('MODE' !== 'call' || typeof RTCPeerConnection !== 'function') { await report(presence); return; }
   // The page's own STUN server, named after the run: through the relay it is never asked, and a
   // DNS question for it, or a packet to it, is a leak the capture sees.

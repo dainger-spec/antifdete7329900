@@ -53,6 +53,7 @@ enum SettingsSearch {
         SettingsSearchEntry(.newProfiles, "settings.newProfiles.search", detail: "settings.newProfiles.search.detail"),
         SettingsSearchEntry(.newProfiles, "settings.newProfiles.local", detail: "settings.newProfiles.local.detail"),
         SettingsSearchEntry(.newProfiles, "settings.newProfiles.randomWindow", detail: "settings.newProfiles.randomWindow.detail"),
+        SettingsSearchEntry(.newProfiles, "settings.newProfiles.webRTC", detail: "settings.newProfiles.webRTC.detail"),
         SettingsSearchEntry(.newProfiles, "settings.newProfiles.quic", detail: "settings.newProfiles.quic.detail"),
 
         SettingsSearchEntry(.behavior, "settings.behavior.autoFill", detail: "settings.behavior.autoFill.detail"),

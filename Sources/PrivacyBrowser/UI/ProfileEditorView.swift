@@ -69,7 +69,7 @@ struct ProfileDraft {
     var menusInAppLanguage = false
     /// An iPhone view's full disguise (ProfileConfiguration.phoneDisguise); on by default.
     var phoneFullDisguise = true
-    var webRTC: WebRTCPolicy = .disabled
+    var webRTC: WebRTCMode = .disabled
     /// What a page's camera (and, with it, the microphone) is handed; `.off` by default
     /// (`CameraSubstitution`). Bound field by field in the editor's Camera part.
     var camera = CameraSubstitution.off
@@ -214,7 +214,7 @@ struct ProfileDraft {
         warnOnProxyIPChange = c.warnOnProxyIPChange
         menusInAppLanguage = c.menusInAppLanguage
         phoneFullDisguise = c.phoneDisguise == .full
-        webRTC = c.webRTCPolicy
+        webRTC = c.webRTCMode
         camera = c.cameraSubstitution
         cameraWidth = String(c.cameraSubstitution.width)
         cameraHeight = String(c.cameraSubstitution.height)
@@ -485,7 +485,7 @@ struct ProfileDraft {
         configuration.warnOnProxyIPChange = warnOnProxyIPChange
         configuration.menusInAppLanguage = menusInAppLanguage
         configuration.phoneDisguise = phoneFullDisguise ? .full : .engineOnly
-        configuration.webRTCPolicy = webRTC
+        configuration.webRTCMode = webRTC
         configuration.cameraSubstitution = try makeCamera()
         configuration.ephemeral = ephemeral
         configuration.safeBrowsingEnabled = safeBrowsing
@@ -666,7 +666,7 @@ struct ProfileEditorView: View {
 
     private func form(saved: [ProxyListEntry]) -> some View {
         ProfileEditorForm(draft: $draft, topic: $topic, isNew: target.isNew, avatarID: avatarID, error: error,
-                          guardReady: networkGuard.state == .ready,
+                          guardReady: networkGuard.state == .ready, guardState: networkGuard.state,
                           onCancel: cancel, onSave: save, onGuardSettings: { showingGuard = true },
                           savedProxies: saved, checkingProxy: checking, onCheckProxy: checkProxy,
                           knownTags: knownTags, visibleScreen: WindowSizing.visibleScreen,
@@ -714,6 +714,8 @@ struct ProfileEditorView: View {
             }
             draft.searchEngine = model.settings.newProfileSearchEngine
             draft.localRequests = model.settings.newProfileBlocksLocalRequests ? .protected : .allowed
+            // WebRTC the way the connection goes (Settings → New Profiles), or off as before.
+            draft.webRTC = model.settings.newProfileWebRTCAutomatic ? .automatic : .disabled
             if model.settings.newProfileRandomWindowSize, let visible = WindowSizing.visibleScreen {
                 var generator = SystemRandomNumberGenerator()
                 draft.setWindowSize(WindowSize.randomSafe(fitting: (Int(visible.width), Int(visible.height)), using: &generator))

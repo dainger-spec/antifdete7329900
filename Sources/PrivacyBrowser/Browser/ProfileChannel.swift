@@ -93,6 +93,9 @@ struct WebRTCLaunchMessage: Codable, Equatable {
 
     var relay: Relay?
     var refusal: WebRTCRefusal?
+    /// No relay, and WebRTC stays in the pages, connecting nowhere: the network guard holds the
+    /// process to its proxy (`WebRTCGate.silence`). Nil or false: off in the engine.
+    var silent: Bool? = nil
 }
 
 enum ProfileEvent: Codable {

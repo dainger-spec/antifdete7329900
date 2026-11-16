@@ -163,7 +163,7 @@
 "editor.location.unknown" = "Exit location not checked yet";
 "editor.location.unknown.detail" = "At the next launch the app asks a location service through the proxy.";
 "editor.name" = "Name";
-"editor.network.footer" = "Native per-profile proxy, fail-closed (no direct fallback). WebRTC goes through the proxy only with the network extension and SOCKS5; otherwise it is off.";
+"editor.network.footer" = "Native per-profile proxy, fail-closed (no direct fallback). WebRTC goes through the proxy only with the network guard and SOCKS5; otherwise it stays in the pages connecting nowhere where the guard can hold the profile, and is taken out where it cannot.";
 "editor.passwords.autoFill" = "AutoFill user names and passwords";
 "editor.passwords.footer" = "After a sign-in the browser offers to save the password, encrypted with this profile; a login field then lists the saved logins for its site. Nothing is filled until you choose a login.";
 "editor.privacy.footer" = "Safe Browsing looks sites up outside the profile's proxy (WebKit does it itself), so it is off by default.";
@@ -384,9 +384,19 @@
 "editor.ua.useCustom" = "Custom user agent";
 "editor.webrtc" = "WebRTC";
 "editor.webrtc.disabled" = "Disabled";
-"editor.webrtc.httpProxy" = "An HTTP proxy cannot carry UDP: WebRTC is off with it. WebRTC through a proxy needs SOCKS5.";
 "editor.webrtc.relay" = "Relay (TURN) only";
 "editor.webrtc.unrestricted" = "Unrestricted";
+"editor.webrtc.automatic" = "Automatic (through the connection)";
+"editor.webrtc.now.likeSafari" = "Now: as in Safari, over this Mac's own connection — WebRTC shows the same address as the pages.";
+"editor.webrtc.now.relayNoProxy" = "Now: only through a site's own TURN server. The page is not shown this Mac's address; the TURN server sees it.";
+"editor.webrtc.now.silent" = "Now: present in the pages as in Safari, but connects nowhere — no address is gathered or sent, as on a network that lets no UDP through.";
+"editor.webrtc.now.throughProxy" = "Now: through the SOCKS5 proxy, from its address; the network guard keeps the profile from going around it. If at the start the proxy turns out not to carry UDP, WebRTC stays in the pages and connects nowhere.";
+"editor.webrtc.now.silentHTTP" = "Now: present in the pages as in Safari, but connects nowhere — an HTTP proxy cannot carry UDP, and the network guard keeps the profile from going around it. Through a proxy WebRTC works with SOCKS5.";
+"editor.webrtc.now.removedGuard" = "Now: taken out of the pages until the network guard is ready — without it WebRTC could go around the proxy from this Mac's address. Sites can notice that WebRTC is missing.";
+"editor.webrtc.now.removedNoGuardInBuild" = "Now: taken out of the pages — this version of Lumen has no network guard, and without it WebRTC could go around the proxy.";
+"editor.webrtc.now.removedNotOwnProcess" = "Now: taken out of the pages — with a proxy, WebRTC needs the profile in a process of its own, and this build runs profiles inside the app.";
+"editor.webrtc.now.removed" = "Now: taken out of the pages.";
+"editor.webrtc.now.removedBypass" = "Now: taken out of the pages — some sites bypass this proxy, so the network guard cannot hold the profile to it.";
 "error.core.authenticationFailed" = "The data could not be decrypted: a wrong key, or the data was changed.";
 "error.core.wrongPassword" = "Wrong master password.";
 "error.core.vaultAlreadyExists" = "A vault already exists here.";
@@ -651,6 +661,7 @@
 "check.webRTC.off" = "WebRTC is off: this Mac's real address cannot be learned through it.";
 "check.webRTC.throughProxy" = "WebRTC goes through the proxy: sites see the proxy's address in it.";
 "check.webRTC.directNoProxy" = "No proxy: WebRTC shows the same address of this Mac as ordinary requests do.";
+"check.webRTC.silent" = "WebRTC is in the pages as in Safari but connects nowhere: no address of this Mac can be learned through it.";
 "check.webRTC.direct" = "WebRTC is on and goes around the proxy: a site can learn this Mac's real address. Turn WebRTC off in the profile's settings.";
 "check.webRTC.onWhereOff" = "WebRTC is on in the profile's windows (windows: %1$@) where it should be off. Restart the profile.";
 "check.dns.throughProxy" = "Sites' names are looked up by the proxy, not by this Mac: requests go to the proxy by name, DNS prefetching is off, UDP is closed to the process (checked from how the profile is built, with no outside service).";
@@ -1712,6 +1723,10 @@
 "settings.newProfiles.local.detail" = "A new profile's pages from the internet cannot reach this Mac or the local network — a page could otherwise scan them. Each profile changes it in its editor (Privacy).";
 "settings.newProfiles.randomWindow" = "Random safe window size";
 "settings.newProfiles.randomWindow.detail" = "A new profile gets a window size of its own, at random among those that fit this Mac's screen (two thirds to nine tenths of it each way), so that profiles do not all open with the same window. A real window: a page measures it.";
+"settings.newProfiles.webRTC" = "WebRTC through the profile's connection automatically";
+"settings.newProfiles.webRTC.detail" = "New profiles get WebRTC “Automatic”: through a SOCKS5 proxy with the network guard, as in Safari without a proxy, and with an HTTP proxy present but connecting nowhere — never another address than the pages show. Off: new profiles start with WebRTC Disabled. Existing profiles keep their choice; change it in a profile's settings.";
+"settings.newProfiles.webRTC.guard" = "Through a proxy this needs Lumen's network guard, which is not ready on this Mac. Until it is, WebRTC is taken out of the pages of profiles with a proxy.";
+"settings.newProfiles.webRTC.guardButton" = "Set up the network guard…";
 "settings.behavior.subtitle" = "How the app's browser windows behave, in every profile.";
 "settings.behavior.autoFill" = "AutoFill passwords";
 "settings.behavior.autoFill.detail" = "Offers saved logins and asks to save new ones. Each profile has its own switch too; both must be on.";
@@ -1894,7 +1909,11 @@
 "profiles.exit.directIn" = "Direct, no proxy";
 "inspector.webRTC" = "WebRTC";
 "inspector.webRTC.viaProxy" = "Through the proxy, relay only";
-"inspector.webRTC.offHTTP" = "Off: an HTTP proxy does not carry UDP";
+"inspector.webRTC.likeSafari" = "As in Safari, over this Mac's connection";
+"inspector.webRTC.silent" = "Present, connects nowhere";
+"inspector.webRTC.silentHTTP" = "Present, connects nowhere: an HTTP proxy does not carry UDP";
+"inspector.webRTC.notOwnProcess" = "Off: profiles run inside the app in this build";
+"inspector.webRTC.bypass" = "Off: some sites bypass the proxy";
 "inspector.checkProxy" = "Check the proxy";
 "inspector.seen" = "How sites see it";
 "inspector.device" = "Device";
@@ -2703,9 +2722,6 @@
 "license.masterPassword.change" = "Change Master Password";
 
 /* The network guard (NetworkGuard, NetworkGuardSettingsView; docs/TUNNEL.md). */
-"editor.webrtc.viaGuard" = "With a proxy, WebRTC goes through the relay only and leaves from the proxy's address; the network guard keeps the profile from connecting around the proxy. Needs a SOCKS5 proxy with UDP.";
-"editor.webrtc.noGuardInBuild" = "This version of Lumen has no network guard: WebRTC is off in a profile with a proxy, or its UDP could go around the proxy from the real address.";
-"editor.webrtc.guardNotReady" = "The network guard is not ready: until it is, WebRTC is off in a profile with a proxy, or its UDP could go around the proxy.";
 "editor.webrtc.guardSettings" = "Network guard…";
 "inspector.webRTC.guardNotReady" = "Off: the network guard is not ready";
 "inspector.webRTC.noGuardInBuild" = "Off: no network guard in this version";
@@ -2762,7 +2778,7 @@
 "guard.how.guard.title" = "The network guard";
 "guard.how.guard" = "Lumen's system extension is a content filter. It carries and reads nothing — it isn't even allowed to open a connection: it only lets a connection through or drops it. The process of a profile whose WebRTC goes through its proxy, and whatever WebKit and macOS open for it, may connect only to its proxy and to this Mac (127.0.0.1); everything else is dropped. Other apps' connections, and Lumen's own — updates, the account, sync — are let through at once.";
 "guard.how.limits.title" = "Limits";
-"guard.how.limits" = "It needs a SOCKS5 proxy whose UDP ASSOCIATE works: this is checked before the profile starts, and without UDP WebRTC is off in the profile. An HTTP proxy cannot carry UDP. The relay carries UDP only: WebRTC over TCP (TURN/TCP) is not supported. To know a profile's connections, the filter sees the start of every new connection of this Mac — its address and app; none of it is recorded or sent anywhere.";
+"guard.how.limits" = "It needs a SOCKS5 proxy whose UDP ASSOCIATE works: this is checked before the profile starts, and without UDP WebRTC stays in the profile's pages but connects nowhere. An HTTP proxy cannot carry UDP: there too WebRTC stays present and connects nowhere, the guard holding the profile to its proxy. The relay carries UDP only: WebRTC over TCP (TURN/TCP) is not supported. To know a profile's connections, the filter sees the start of every new connection of this Mac — its address and app; none of it is recorded or sent anywhere.";
 "guard.state.proving" = "Being checked on this Mac…";
 "guard.todo.proving" = "Lumen checks that the guard sees the connections WebKit opens for a profile: a helper process with no profile's data sends one WebRTC request to an address that leads nowhere, and the guard must drop it. About 10 seconds.";
 "guard.todo.proofFailed" = "The check failed: the guard did not see the connection WebKit opened for a profile — it would have nothing to hold the profile to its proxy with. So WebRTC is off in profiles with a proxy. Click Check Again; after an update of macOS or Safari the check runs again by itself.";

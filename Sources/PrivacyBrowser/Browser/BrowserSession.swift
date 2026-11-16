@@ -267,10 +267,12 @@ final class BrowserSession {
     /// for the ones Safari's chrome builds, so that neither can have them the other way round.
     ///
     ///   * WebRTC opens its sockets outside the data store's proxy: off in the engine, as Lockdown
-    ///     Mode does, whenever the profile's WebRTC is off (the default, and always with a proxy
-    ///     whose WebRTC the gate did not allow: `webRTCRouting`). No RTC interface in any frame, nothing for a
-    ///     page to reach before the shim runs; the shim's removal stays as the fallback for a
-    ///     WebKit without this preference.
+    ///     Mode does, whenever the profile's WebRTC is off (with a proxy whose WebRTC the gate did
+    ///     not allow, and the network guard not holding the process: `webRTCRouting`). No RTC
+    ///     interface in any frame, nothing for a page to reach before the shim runs; the shim's
+    ///     removal stays as the fallback for a WebKit without this preference. WebRTC that must not
+    ///     connect but may stay in the pages (`WebRTCRouting.silent`: no proxy, or the guard holding
+    ///     the process) keeps the engine's on, and the shim gives it no ICE server.
     ///   * Safe Browsing lookups are made by a system service, outside the proxy: per profile,
     ///     off by default. Safari's own configuration has it on.
     ///   * With a proxy, the features whose traffic does not go through the data store's proxy

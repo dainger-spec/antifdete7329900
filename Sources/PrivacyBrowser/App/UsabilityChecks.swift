@@ -72,11 +72,13 @@ enum UsabilityChecks {
             ("en", "download folder", .downloads, nil),
             ("en", "token", .automation, "automation.token"),
             ("en", "updates", .updates, nil),
+            ("en", "welcome every start", .appearance, "settings.appearance.welcome"),
             ("ru", "масштаб", .behavior, "settings.behavior.zoom"),
             ("ru", "выход", .startup, "settings.startup.confirmQuit"),
             ("ru", "мастер-пароль", .security, "settings.security.password"),
             ("ru", "загрузок", .downloads, nil),
             ("ru", "обновления", .updates, nil),
+            ("ru", "welcome при каждом запуске", .appearance, "settings.appearance.welcome"),
         ]
         var wrong: [String] = []
         for item in wanted {
