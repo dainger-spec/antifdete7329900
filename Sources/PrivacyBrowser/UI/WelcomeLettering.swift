@@ -10,7 +10,7 @@
 import CoreGraphics
 
 extension WelcomeLettering {
-    /// Every greeting, in the order later launches go through them (WelcomeSplashPolicy.nextGreeting).
+    /// Every greeting, of which the app writes the English one (WelcomeSplashPolicy.greetingLanguage).
     /// Each is the greeting itself in its own language: never translated.
     static let all: [WelcomeLettering] = [
         WelcomeLettering(

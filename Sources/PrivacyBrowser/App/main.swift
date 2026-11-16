@@ -234,8 +234,6 @@ MainActor.assumeIsolated {
         // The app as a person opens it: the one start that may show the launch screen
         // (WelcomeLaunch) — not CI's Settings window check, which runs this same branch.
         WelcomeLaunch.interactiveStart = !arguments.contains("--settings-window-check")
-        // `open -a Lumen --args --welcome`: the launch screen on a Mac past its first launch, to look at.
-        WelcomeLaunch.asked = arguments.contains("--welcome")
         PrivacyBrowserApp.main()
     }
 }

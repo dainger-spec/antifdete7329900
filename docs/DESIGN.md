@@ -106,10 +106,9 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
   Metal Performance Shaders, four samples a pixel; where Metal is missing, the outline drawn in
   SwiftUI. Then one light along the greeting, "LUMEN"; the first launch's "Get started", or a
   0.9 s hold; then the opening (0.6 s: the screen eases up 30 pt and fades, the window's content
-  scales in from 98 % over it). Any click or key goes on at once. It is shown once, at the first
-  launch of an app that has no vault yet (the owner, 15 November: "only at the first launch"), its
-  greeting in the interface's language; `open -a Lumen --args --welcome` shows it on any Mac, to
-  look at it, each time in the next of twelve languages.
+  scales in from 98 % over it). Any click or key goes on at once. It is shown at every start a
+  person makes of the app, after a full quit too, and always writes the English "welcome" (the
+  owner, 16 November); the other languages' outlines stay in the file and are not shown.
   `design/tools/welcome_lettering.py` makes the outlines, the pen's way (from the outline's skeleton)
   and its pace for the app (`WelcomeLettering.swift`) and the prototype the owner approved
   (`design/prototypes/welcome.html`, the same shader in WebGL; `design/tools/record_welcome.mjs`
