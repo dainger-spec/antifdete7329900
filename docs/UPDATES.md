@@ -430,7 +430,12 @@ with curl's own S3 signing (nothing installed):
 - **Before anything is built**, the release's two names are checked free in the bucket (which
   also tries the keys), and the appcast published now is fetched from it, so that the new appcast
   keeps its releases (`PREVIOUS_APPCAST` still names another). A VERSION already published stops
-  the release there, not after notarization.
+  the release there, not after notarization; so does a BUILD that is not greater than every build of
+  that appcast (`pbupdate verify --new-build`; `pbupdate appcast` refuses it too). The appcast lists a
+  build once, so a build listed already would put the new release in place of the published one —
+  whose users would then be told they are up to date — and the app is offered the highest build, so
+  a lower one would never reach a Mac on the newer build, while a Mac with it would be offered the
+  older release, a downgrade (R3).
 - **At the end**, the zip and the image first, the appcast last — a feed never names a file not
   there yet. Each upload signs the file's SHA-256 (`x-amz-content-sha256`), so R2 itself refuses
   bytes that did not arrive as built; the object keeps it (`x-amz-meta-sha256`). The versioned
