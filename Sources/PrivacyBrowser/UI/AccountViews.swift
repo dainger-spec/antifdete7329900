@@ -1294,7 +1294,7 @@ struct EmailLinkSheet: View {
             .scrollBounceBehavior(.basedOnSize)
             SheetFooter {
                 Button(L("common.cancel"), action: close)
-                    .buttonStyle(.lumenSecondary)
+                    .buttonStyle(LumenButtonStyle(kind: .ghost, height: Theme.buttonHeight))
                     .keyboardShortcut(.cancelAction)
                 if step == .code {
                     Button(L("license.emailLink.back")) {
@@ -1459,7 +1459,7 @@ struct KeyReplaceSheet: View {
             SheetFooter {
                 if result == nil {
                     Button(L("common.cancel"), action: close)
-                        .buttonStyle(.lumenSecondary)
+                        .buttonStyle(LumenButtonStyle(kind: .ghost, height: Theme.buttonHeight))
                         .keyboardShortcut(.cancelAction)
                     Button(L("license.keyReplace.button"), action: replace)
                         .buttonStyle(.lumenDestructive)

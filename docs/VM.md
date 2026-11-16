@@ -41,7 +41,12 @@ licensing, and has the machines.
    this Mac's connection the setup stood on a screen with its buttons off). "Open with Internet"
    is there for a setup that will not go on without one;
 5. from then on **New Machine** makes a profile. Its machine is a copy-on-write clone of the base,
-   made in seconds at its first start, with an identity of its own.
+   made in seconds at its first start, with an identity of its own. **New Machine with These
+   Settings…** in a machine's menu opens the editor with that machine's settings under the next
+   free name ("Shop DE 2"): another Mac made from the base — its own id, disk, identifier and
+   network card address, an accent colour drawn anew — with nothing of the first machine's disk
+   in it (`VMProfile.duplicate`). The editor says so, and that with the same proxy sites see both
+   at one address.
 
 A build has the section only when it was made with `VM=1` (below). On a Mac with an Intel processor
 the section says that macOS runs as a guest only on Apple silicon.
@@ -71,9 +76,14 @@ Sources/BrowserCore/VirtualMachines/   the model, platform-independent, unit-tes
   VMDownload.swift       the resumable download's decisions (Range, If-Range), the chunk map
   VMImageFetch.swift     the download: several connections, chunk by chunk (tested on Linux)
   VMGuestSettings.swift  what the guest is told, what it says back
+  VMStartCover.swift     when a start's cover goes (the steps, the guest's word, the limits)
+  VMFailure.swift        the kind of a failure, from the system's error; the room a start needs
+  VMWindowPlacement.swift where a machine's window was left, and whether to go back there
   VMHelperProtocol.swift the app's conversation with the helper
 Sources/VMNetCore/                     the machine's network through a proxy (docs/VM_NETWORK.md)
 Sources/LumenVM/                       the helper: Apple's Virtualization.framework
+  StartCover.swift       the cover over a start's screen, and what takes the events under it
+Sources/MachineCover/                  the cover's look (SwiftUI): the helper shows it, the app's snapshots draw it
 Sources/PrivacyBrowser/App/VirtualMachines/
   VMCenter.swift         the setup, the profiles, the machines running now
   VMHelperProcess.swift  one run of the helper
@@ -100,7 +110,11 @@ The helper answers in JSON lines on its standard output and ends when the machin
 |---|---|---|
 | `catalog` | asks Apple which macOS this Mac can run as a guest | `catalog` (address, version, build) |
 | `install` | installs the restore image into the base's folder | `progress`…, `installed` |
-| `run` | runs a machine in a window until its macOS has shut down | `started`, `traffic`…, `stopped` |
+| `run` | runs a machine in a window until its macOS has shut down | `started`, `traffic`…, (`notKept`,) `stopped` |
+
+A helper that cannot do what it was asked says `failed`, with the system's own words for why
+(`message`) and, where the reason is one the app has words for, its kind (`failure`, "When
+something fails" below).
 
 After the request the app may write `stop` (shut the guest down) or `kill` (end the machine now).
 The end of the helper's input reads as `stop`: a machine does not outlive the app that started it,
@@ -116,12 +130,76 @@ What the helper does about the Mac and the app around it:
   helper says goes to a pipe nobody reads then; those writes fail quietly (`SIGPIPE` is ignored
   and the writes are the throwing kind) instead of ending the helper in the middle of the
   shutdown it had just begun.
+- **The Mac slept** with a machine open: nothing in the machine ran meanwhile, and its clock is
+  that of the moment the Mac went to sleep until its macOS next asks for the time — a clock that
+  is behind is what sites and certificates see until then. When the Mac wakes
+  (`NSWorkspace.didWakeNotification`) the helper leaves the word a wake from a saved state leaves
+  (`lumen-woke`), and the boot script asks for the time at once (tools 11); the machine's network
+  answers with this Mac's clock, and nothing leaves. A profile's machine only: the base's shared
+  folder is the person's to look into, and gets no such file.
+- **Where the window was left.** A profile's machine opened in the middle of the main screen at
+  every start — on the wrong display for whoever keeps it on a second one, and exactly over the
+  other machine's window. Its window now opens where the person last put it, at the size they
+  gave it: the frame is kept in a note beside the machine's disk (`window.json`,
+  `VMWindowPlacement`) — the machine's own, not in the app's preferences, which every machine
+  would share — written when the window has been let go of for a moment and at the machine's
+  end, never while it is full screen or minimised. It is gone back to only while it is still a
+  place: the machine has the same screen (the window has its proportions), the frame fits the
+  display most of it is on, and enough of its title bar is on that display to take hold of;
+  otherwise — a display that is gone — the window opens as a new one does. The base's window is
+  not kept: its guide panel is part of it.
 - **Force Stop**: the helper is asked to end the machine; if it has not ended in eight seconds
   the app ends it with `SIGKILL` — the polite signal is one a running helper takes for another
   request to shut down, and a helper whose main thread is stuck took neither.
 - **The base and a machine being made**: a machine not made yet is a copy of the base's disk,
   so it is not started while the base is open (checked again after its proxy was asked), and
   the base is not opened while such a machine is starting.
+
+### When something fails
+
+A start, an installation or a question to Apple that fails used to be said in whatever words the
+helper had: an English sentence of its own in a Russian interface, or the framework's ("The
+operation couldn't be completed. (VZErrorDomain error 6.)"), which says what and never what to
+do. Now the helper says the **kind** of failure beside those words, and the app has its own for
+each kind, in the person's language, with what to do; the system's words stay under them as a
+technical detail. The kinds (`VMFailureKind`, BrowserCore) are decided from the error's domain
+and code and those of the errors under it — Virtualization's, Cocoa's, POSIX's, as numbers, so
+that the decision is tested on Linux too:
+
+| kind | when | what the person is told to do |
+|---|---|---|
+| `noRoom` | the Mac's disk is full — whichever error says so, and whatever error is over it | free some space; Disk Space… shows what the machines take |
+| `limit` | Apple's limit of two machines, which counts every app's | shut one down, in Lumen or in the other app |
+| `disk` | the framework does not take the machine's disk | quit what else may hold it, or restart the Mac |
+| `files` | files the machine is made of are missing or unreadable | the folder, in the Finder |
+| `notSupportedHere` | this macOS does not run as a guest on this Mac as it is (the helper asks the framework exactly that) | update this Mac's macOS |
+| `noBase` | the machine has no disk yet and the base is not there | add the base system |
+| `catalog`, `nothingOffered` | Apple could not be asked; or offers nothing for this Mac | the connection; or update this Mac |
+| `image` | the restore image does not load | download it again, or another file |
+| `needsUpdate` | the installer wants this Mac's software updated first | Software Update, then Continue |
+| `installation` | the installation did not finish | Continue starts it over; nothing is downloaded again |
+
+A failure of none of these kinds is said in the system's words alone, as before — among them the
+framework's "invalid configuration" and "not supported", each of which covers too many things for
+one piece of advice to be true of. The numbers are
+Apple's as their headers have them; what a given failure on a Mac really carries is seen there —
+the detail line always shows the system's own words beside Lumen's.
+
+**A proxy that does not pass the check before a start** is said by what the check found — the
+Proxies section's words for each way of failing (a login the proxy rejects, a name that does not
+resolve, a port that refuses, one that takes the connection and says nothing) and its advice —
+not "does not answer" for all of them (`VMCenter.proxyProblem`). That check is the Proxies
+section's without what a machine does not use (`VMCenter.checkProxy`): one tunnel instead of
+three (the list shows no latency), and nothing asked of a SOCKS5 proxy's UDP, which never leaves
+a machine — a start no longer waits up to nine seconds for an association nobody uses.
+
+**A disk that is nearly full** is said before the machine is started (`VMStartRoom`): with less
+than 2 GB free a machine is not started — its macOS writes from its first second, to a disk that
+is a file on this Mac's, and writes that fail are a failing disk to it — and a machine not made
+yet, on a volume that cannot clone a file (not APFS), is not started where there is no room for a
+whole copy of the base's disk: said with the numbers, not after minutes of copying. The room is
+the larger of the system's two figures (the one "for important usage" is zero on volumes that
+have no such thing); where the system gives none, nothing is refused.
 
 ### A machine's identity
 
@@ -214,6 +292,20 @@ checked against the characters it may have, **never run** — and applies the ti
 language and region (for the signed-in account), the computer's name; opens Safari (on the
 profile's start page, if it has one); writes back which macOS and Safari this is; then waits for a
 file named `lumen-shutdown`, which it answers by quitting Safari and shutting macOS down.
+
+As it goes it says which step it is at (tools 13), in the status file: `LUMEN_STAGE` is `signin`
+from its first word (it waits for the person's session), then `locale` (the language and region,
+the keyboard), `look` (the appearance and accent, the clock and week, the scroll bars, the Dock),
+`wallpaper` (Lumen's picture, when the profile has it), `safari` and `ready`. Once this start's
+settings are in — the language and region written for the signed-in person, the first picture set
+and the four seconds the desktop is given — it names them (`LUMEN_READY_REVISION`, this start's
+`LUMEN_REVISION`), **before** it opens Safari, which then starts in them; not after the picture's
+later looks. `LUMEN_APPLIED_REVISION` is written after Safari was opened, as before. The machine's
+window keeps its screen behind a cover until then ("The start's cover" below). A base with tools 7
+to 12 needs nothing done to it: the app puts this script into the tools' folder at every start,
+and the older script there takes it and runs it before it reads the settings — so the first start
+with this Lumen already says its steps. (Tools 2 to 6 take it from the shared folder, once; tools 1
+must be installed again.)
 
 Before all that — at the start, before the automatic sign-in — it marks macOS's panes for a new
 Mac as seen for the person who signs in by themselves (`com.apple.SetupAssistant`: `DidSee…`,
@@ -369,9 +461,12 @@ What holds it together, in `MachineRunner` and `VMSavedState`:
   machine the framework still refuses is shut down when closed, as before, and the row says so
   (`.unsupported`).
 - **Nothing is lost on the way.** A save that fails (the machine cannot be paused, the framework
-  says no) is no reason to lose what is open in it: the machine goes on and is shut down as a Mac
-  is. "Shut Down macOS" in the row's menu and in the window's is a real shutdown; "Start Anew…"
-  gives a sleeping machine's state up, after a question.
+  says no, the disk has no room for the state) is no reason to lose what is open in it: the
+  machine goes on and is shut down as a Mac is — and says so (`notKept`): the row reads
+  "shutting down…" from that moment, not "saving…", and keeps why until the machine's next start —
+  a full disk by name, anything else with the system's words. A state saved whose note could not
+  be written is removed and said the same way. "Shut Down macOS" in the row's menu and in the
+  window's is a real shutdown; "Start Anew…" gives a sleeping machine's state up, after a question.
 - **Closed while it wakes.** For the seconds a wake takes (the state read, then the machine
   resumed) it can be neither paused nor saved. A close in that time — its window, the row's Close,
   Lock, Quit, this Mac's logout or shutdown — is kept for when it is awake, and the machine is put
@@ -400,7 +495,9 @@ A sleeping machine takes about as much disk as it has memory. Lock, Quit and thi
 shutdown put such a machine to sleep too — faster than shutting it down.
 
 Not run on a Mac: that the framework takes this set of devices (it is the set other tools use
-for it), how long a save and a wake take, and that `sntp` sets the clock as written.
+for it), how long a save and a wake take, that `sntp` sets the clock as written, and how far a
+machine's clock falls behind while the Mac sleeps (reasoned from the machine standing still with
+it; the word left at the Mac's wake costs nothing where it does not).
 
 ## Browser mode
 
@@ -416,8 +513,9 @@ A machine is a Mac in a window: a desktop, a Dock, a menu bar, Safari somewhere 
   Control-Command-F on the machine's own keyboard — events made for the machine's view, as a
   person's are; nothing in the guest is asked for a permission — which puts Safari over the
   machine's whole screen;
-- until then the machine's screen is behind a cover with its name (a click takes it away; two
-  minutes do too), so that the sign-in and the desktop are not what the person opened.
+- until then the machine's screen is behind the start's cover (below): its settings are in
+  place, then Safari is put over the machine's whole screen with its own keys, and then the
+  person is let in — the sign-in and the desktop are not what the person opened.
 
 With instant wake a machine in browser mode opens as a browser window in seconds, with no cover:
 it is as it was closed. "Safari Full Screen (in the Machine)" in the row's menu and "Full Screen
@@ -427,6 +525,50 @@ when it was pressed, or to leave full screen.
 Not run on a Mac: that the machine's view takes events made here as it takes a person's, and how
 the menu bar's setting reads on the newest macOS. The key is a toggle: a Safari that macOS
 itself brought back full screen would leave it; the menu's command puts it back.
+
+## The start's cover
+
+A machine's macOS shows its desktop well before the boot script has made it the profile's, and
+what the person opened in that time stayed as it was: Safari clicked at once was in the base's
+language for good, and the language, the Dock and the picture changed under the person's hands
+(the owner, 15 November). So from the start of a profile's machine its window shows a cover over
+the machine's screen, and lets nobody in until the guest says this start's settings are in.
+
+- **The look** (`Sources/MachineCover`, the owner approved it on 15 November): the machine's own
+  eclipse — the wallpaper's numbers, line for line, so that the horizon stays where it is as the
+  cover fades into a desktop with Lumen's picture —, a bead of light gliding along the horizon and
+  the haze over it breathing, "Setting up the machine", the profile's name, the step in words
+  ("Starting macOS…", "Signing in…", "Setting the language and region…", "Setting up the look…",
+  "Setting the wallpaper…", "Almost ready…") and six thin dashes for the steps. Under Reduce
+  Motion — macOS's, or the app's own animations turned off (`VMHelperRequest.reducesMotion`) —
+  nothing glides or breathes and the words only cross-fade. VoiceOver reads the name and the step.
+  The light is images made once per window size and moved on the GPU: a frame changes only
+  opacities and the glint's turn. `design/prototypes/vm-cover.html` is the same, frame for frame,
+  and `design/tools/record_vm_cover.mjs` records it.
+- **Who says when** (`VMStartCover.state`, unit-tested): the helper reads the guest's status file
+  itself, once a second, off its main thread and as a file of the guest's (`VMShareFile`). The
+  helper owns the machine's files and knows the moment its macOS started — a status written
+  before it is of a macOS that has since shut down; the app's own readings come at 25, 60, 120
+  and 240 seconds and would only add a hop. It compares with this start's settings
+  (`VMHelperRequest.settingsRevision`): tools 13 name them as ready before Safari is opened
+  (`LUMEN_READY_REVISION`); an older script, which says no steps, names them as applied once it
+  has opened Safari (`LUMEN_APPLIED_REVISION`). A machine shown as a browser waits for Safari.
+- **Nothing reaches the guest** while it is up: the machine's view is hidden (a hidden view takes
+  no event, and its tracking areas none), the screen's container is the window's first responder
+  and takes every key and key equivalent, and the cover takes every click and scroll. The title
+  bar's buttons, Shut Down in the window's menu and the app's commands work as ever; shutting down
+  or putting the machine to sleep halts the cover where it is. A failed start is said as before.
+- **Nobody is kept out**: "Taking longer than usual. Show the screen" after a minute; the cover
+  goes by itself after two minutes without a word from the guest at this start, or three while
+  its script says it is at work, and says so at the top of the window for eight seconds. The
+  helper's log says when and why it went ("cover: …").
+- **Not covered**: the base's window (its setup), and a machine woken as it was put to sleep —
+  its state is tied to its settings, so changed settings start it anew, covered. A machine closed
+  during its first start, before its settings were in, is covered as it wakes until they are.
+
+Not run on a Mac: that a hidden `VZVirtualMachineView` leaves the machine's display as it is
+(the framework draws the guest's screen into it; nothing of the guest's configuration depends on
+it), and how long the steps take on a machine's first start.
 
 ## What machines have in common
 
@@ -459,7 +601,8 @@ one base system, and this is what that means:
 <vault folder>/VirtualMachines/
   base.json               which macOS the base is, and how far its setup got
   base/                   disk.img, aux.img, hardware-model.bin, machine-id.bin, share/
-  machines/<profile id>/  the same, per profile: the disk a clone of the base's
+  machines/<profile id>/  the same, per profile: the disk a clone of the base's; window.json,
+                          where its window was last put
   downloads/              Apple's restore image while it is fetched (removed after the installation)
 ```
 
@@ -579,6 +722,15 @@ What is checked where:
 - `Tests/BrowserCoreTests/VirtualMachineTests.swift` (Linux and macOS): the profile list's format
   and its tolerance of a later version's, validation, the download's decisions for every answer a
   server gives, the settings file's text and what it refuses, the helper protocol's round trip.
+- `Tests/BrowserCoreTests/VMFailureTests.swift` (Linux and macOS): the kind of a failure for each
+  of the system's errors the app has words for, a full disk found under another error, the
+  helper's own failures, the events that carry them, and the room a start needs — on a volume
+  that clones and on one that cannot; and where a machine's window opens (`VMWindowPlacement`):
+  where it was left, and not at a place that is no longer one. The self-test checks that every kind has its words in the
+  interface's language, and the start's proxy check against its loopback proxies (one tunnel, no
+  UDP asked; a rejected login said as that). The UI snapshots draw the list's rows saying each of
+  these (`vm-list-states`: running, asleep, a rejected login, a full disk, Apple's limit with the
+  system's words under Lumen's, a machine shut down instead of kept).
 - `Tests/BrowserCoreTests/VMImageFetchTests.swift` (Linux and macOS): **the download itself**,
   against a file server on loopback that speaks ranges as Apple's does and can be told to be
   worse: the file whole over several connections (and no more than it was given), a file smaller
@@ -586,6 +738,11 @@ What is checked where:
   one stream from before taken up at its whole chunks, a file replaced between two runs started
   over, a server without ranges given one stream, connections cut short taken up again, a refusal
   said, only https fetched. Each time the file byte for byte.
+- `Tests/BrowserCoreTests/VMStartCoverTests.swift` (Linux and macOS): the start's cover — the
+  steps and the ready settings read from the status, this start's settings only, a status from
+  before the start, an older script, the limits, browser mode, which starts are covered. The UI
+  snapshots draw the cover in both languages (`vm-cover-signin`, `vm-cover-look`,
+  `vm-cover-longer`).
 - `Tests/BrowserCoreTests/VMGuestScriptTests.swift` (Linux and macOS): **the boot script itself,
   run from its first line to the shutdown** by `/bin/sh`, with every command it calls by its full
   path replaced by one of the test's own that writes down how it was called (a command the script
@@ -614,7 +771,9 @@ What is checked where:
 4. A new machine with a proxy: its first start clones the base in seconds; the guest reaches the
    web only through the proxy (its address at a "what is my IP" page is the proxy's), the time zone
    and Safari's language are the proxy's country's.
-5. The same machine with the proxy turned off at the provider: it is not started, and says why.
+5. The same machine with the proxy turned off at the provider: it is not started, and says why —
+   what the check found (a wrong password in the proxy's entry reads as a rejected login, not as
+   a proxy that does not answer).
 6. Shut Down closes the guest within some seconds; Lock with a machine running waits for it.
 7. "What sites see" in the machine's Safari, beside a real Mac's: the first measurement of the
    paravirtual GPU's fingerprint.
@@ -633,3 +792,15 @@ What is checked where:
    cover goes and Safari is in a window, the machine's view did not take the key made for it.
 10. "Network…" in a running machine's menu: hosts appear as pages load, with their counts;
     Block ends a host's connections at once and the page that needs it stops loading.
+11. A new machine's first start: the cover names the steps as they come and goes when the
+    language and region are in; Safari then opens in the machine's language, and a click, a
+    scroll or a key on the cover before that does nothing in the machine. The helper's log says
+    after how many seconds ("cover: the guest says this start's settings are in, after … s"). A
+    machine at its sign-in window (no automatic sign-in) offers "Show the screen" after a minute.
+12. A machine left open while the Mac sleeps for ten minutes: seconds after the Mac wakes, the
+    clock in the machine's menu bar is this Mac's (the helper's log: "clock: this Mac woke from
+    sleep…"). Without it the clock would stay behind until macOS in the machine next asked.
+13. Move a machine's window to a second display and resize it; shut the machine down and start
+    it again: the window opens there, at that size. Disconnect the display and start it: the
+    window opens on the Mac's own screen as a new one does. Two machines moved apart once open
+    apart from then on.

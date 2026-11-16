@@ -91,9 +91,18 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
     /// The machine is shown as a browser: its guest's front window (Safari) is put full screen
     /// once its macOS has started, and the window covers the desktop until then.
     public var browserMode: Bool?
+    /// The settings a profile's machine starts with (`VMGuestSettings.revision`), as its guest's
+    /// boot script names them back once they are in place (`VMGuestStatus.readyRevision`): until
+    /// then a start's window keeps the machine's screen behind a cover (`VMStartCover`). Nil: no
+    /// cover — the base system, whose window is for its setup.
+    public var settingsRevision: String?
+    /// The app's own "animations off" (Settings → Appearance): the cover moves nothing, as under
+    /// macOS's Reduce Motion, which the helper reads itself.
+    public var reducesMotion: Bool?
     /// The window's title, and its few words, in the person's language (the helper has no strings
-    /// of its own): `stop`, `stopQuestion`, `stopDetail`, `stopNow`, `cancel`, `stopping` — and
-    /// `hint`, a line shown above the machine's screen (what is left to do in the base).
+    /// of its own): `stop`, `stopQuestion`, `stopDetail`, `stopNow`, `cancel`, `stopping`, the
+    /// start's cover's (`cover.…`) — and `hint`, a line shown above the machine's screen (what is
+    /// left to do in the base).
     public var windowTitle: String
     public var texts: [String: String]
 
@@ -102,7 +111,8 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
                 display: Display = Display(VMDisplay.standard), macAddress: String? = nil, network: Network = .closed,
                 proxy: ProxySettings? = nil, blockedHosts: [String] = [], sound: Bool = true, fullScreen: Bool? = nil,
                 keepsState: Bool? = nil, stateStamp: String? = nil, browserMode: Bool? = nil,
-                windowTitle: String = "", texts: [String: String] = [:]) {
+                settingsRevision: String? = nil, reducesMotion: Bool? = nil, windowTitle: String = "",
+                texts: [String: String] = [:]) {
         self.mode = mode
         self.restoreImagePath = restoreImagePath
         self.machineDirectory = machineDirectory
@@ -120,6 +130,8 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
         self.keepsState = keepsState
         self.stateStamp = stateStamp
         self.browserMode = browserMode
+        self.settingsRevision = settingsRevision
+        self.reducesMotion = reducesMotion
         self.windowTitle = windowTitle
         self.texts = texts
     }
@@ -137,7 +149,9 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
                                       sound: profile.soundEnabled, fullScreen: profile.startsFullScreen ? true : nil,
                                       keepsState: profile.instantWake ? true : nil, browserMode: profile.browserMode ? true : nil,
                                       windowTitle: profile.name, texts: texts)
-        request.stateStamp = request.stamp(settingsRevision: VMGuestSettings(profile: profile).revision)
+        let revision = VMGuestSettings(profile: profile).revision
+        request.stateStamp = request.stamp(settingsRevision: revision)
+        request.settingsRevision = revision
         return request
     }
 
@@ -171,6 +185,9 @@ public struct VMHelperEvent: Codable, Equatable, Sendable {
         /// Where the machine connects (`hosts`): said every few seconds while the app asks for
         /// it (`hosts on`).
         case hosts
+        /// A machine with instant wake was asked to close and its state could not be saved: it
+        /// is being shut down instead (`failure` and `message` say why), and `stopped` follows.
+        case notKept
     }
 
     /// One host a machine's macOS talks to (`VMNetHost`, which the app does not link).
@@ -217,8 +234,12 @@ public struct VMHelperEvent: Codable, Equatable, Sendable {
     /// `traffic`, a machine without a proxy: its connections go through the proxy this Mac's own
     /// network settings name.
     public var viaSystemProxy: Bool?
-    /// `failed`: why, in the system's own words (shown to the person as given).
+    /// `failed`, `notKept`: why, in the system's own words (shown to the person as given — as
+    /// the whole reason, or as a technical detail under the app's own words for `failure`).
     public var message: String?
+    /// `failed`, `notKept`: the kind of reason, where it is one the app has words for in the
+    /// person's language — `VMFailureKind`'s raw value.
+    public var failure: String?
     /// `started`: the machine was woken from a saved state — it is as it was closed.
     public var woke: Bool?
     /// `started`: a saved state was there and was not used — `VMWakeRefusal`'s raw value.
@@ -231,7 +252,7 @@ public struct VMHelperEvent: Codable, Equatable, Sendable {
     public init(kind: Kind, image: VMRestoreImage? = nil, fraction: Double? = nil, bytesUp: UInt64? = nil,
                 bytesDown: UInt64? = nil, connections: Int? = nil, trouble: String? = nil, troubleDetail: String? = nil,
                 viaSystemProxy: Bool? = nil, message: String? = nil, woke: Bool? = nil, notWoken: String? = nil,
-                asleep: Bool? = nil, hosts: [Host]? = nil) {
+                asleep: Bool? = nil, hosts: [Host]? = nil, failure: String? = nil) {
         self.kind = kind
         self.image = image
         self.fraction = fraction
@@ -246,7 +267,11 @@ public struct VMHelperEvent: Codable, Equatable, Sendable {
         self.notWoken = notWoken
         self.asleep = asleep
         self.hosts = hosts
+        self.failure = failure
     }
+
+    /// The kind of a `failed` or `notKept` event's reason; nil when it names none the app knows.
+    public var failureKind: VMFailureKind? { failure.flatMap(VMFailureKind.init(rawValue:)) }
 
     public func line() -> String {
         (try? JSONCoding.encoder.encode(self)).map { String(decoding: $0, as: UTF8.self) } ?? #"{"kind":"failed"}"#

@@ -255,6 +255,21 @@ public struct ProxyList: Codable, Equatable, Sendable {
         [proxy.host.lowercased(), String(proxy.port), proxy.username ?? ""].joined(separator: "\u{0}")
     }
 
+    /// `entries` by what makes each one's proxy the proxy it is (`identity(of:)`): for every
+    /// identity, the first entry that has it — the one `entries.first { identity(of: $0.proxy) ==
+    /// … }` finds. For where many proxies are looked up at once: the Profiles window looks up the
+    /// proxy of every profile each time it is drawn, and went through the list — up to
+    /// `maximumEntries` of them, an identity made for each — once per profile.
+    public static func entriesByIdentity(_ entries: [ProxyListEntry]) -> [String: ProxyListEntry] {
+        var found: [String: ProxyListEntry] = [:]
+        found.reserveCapacity(entries.count)
+        for entry in entries {
+            let identity = Self.identity(of: entry.proxy)
+            if found[identity] == nil { found[identity] = entry }
+        }
+        return found
+    }
+
     public struct AddResult: Equatable, Sendable {
         /// The new entries, in the order given.
         public var added: [UUID] = []

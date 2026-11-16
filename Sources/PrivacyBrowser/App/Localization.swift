@@ -214,6 +214,8 @@ func translatedErrorText(_ error: Error) -> String? {
         if refusal.status == 401 || refusal.status == 403 { return String(format: L("error.core.syncServerToken"), refusal.status) }
         return String(format: L("error.core.syncServer"), refusal.status, refusal.code)
     }
+    // What stops a vault being brought back from its sync location (`VaultRestore`).
+    if let problem = error as? VaultRestore.Problem { return RestoreText.text(problem) }
     if let error = error as? PasswordVaultError {
         return L(error == .duplicate ? "passwords.error.duplicate" : "passwords.error.notFound")
     }

@@ -613,15 +613,27 @@ struct ProfileEditorView: View {
 
     /// An image or video chosen for the substituted camera: its bytes are read into the draft (the
     /// app reads the file; the profile's pages never touch the disk). Too large, or unreadable, and
-    /// the camera part shows why.
+    /// the camera part shows why. Both are kept in the profile's settings, whichever is the source,
+    /// and synced with them: an image up to `maxImageBytes`, and the two together no more than one
+    /// sync object holds (`CameraSubstitution.maxMediaBytes`, `mediaFitsSync`) — before, a video of
+    /// up to 12 MB was taken, and the profile's settings then never synced.
     private func readCameraMedia(_ url: URL, isVideo: Bool) {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        let limit = isVideo ? CameraSubstitution.maxVideoBytes : CameraSubstitution.maxImageBytes
+        let limit = isVideo ? CameraSubstitution.maxMediaBytes : min(CameraSubstitution.maxImageBytes, CameraSubstitution.maxMediaBytes)
+        let tooLarge = String(format: L("editor.camera.error.tooLarge"), CameraSubstitution.maxImageBytes / (1024 * 1024),
+                              CameraSubstitution.maxMediaBytes / (1024 * 1024))
+        // A file far over it is not read at all.
+        if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > limit {
+            error = tooLarge
+            return
+        }
         do {
             let data = try Data(contentsOf: url)
-            guard data.count <= limit else {
-                error = String(format: L("editor.camera.error.tooLarge"), limit / (1024 * 1024))
+            var camera = draft.camera
+            if isVideo { camera.videoData = data } else { camera.imageData = data }
+            guard data.count <= limit, camera.mediaFitsSync else {
+                error = tooLarge
                 return
             }
             let type = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType

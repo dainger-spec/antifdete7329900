@@ -13,7 +13,8 @@ import Foundation
 ///     share/                  the folder the guest sees during setup: the tools' installer, its status
 ///   machines/<profile id>/    one per profile: disk.img (a copy-on-write clone), aux.img,
 ///                             hardware-model.bin, machine-id.bin, share/ (settings in, status out),
-///                             tools/ (the boot script, shared read-only)
+///                             tools/ (the boot script, shared read-only), window.json (where its
+///                             window was last put)
 ///   downloads/
 ///     restore.ipsw.partial    Apple's restore image while it is fetched; restore.ipsw when whole
 ///     restore.json            VMDownloadState: what is being fetched, and how to go on with it
@@ -71,6 +72,9 @@ public struct VMLibrary: Equatable, Sendable {
         /// between a close and the next start, which uses them once or removes them.
         public var state: URL { directory.appendingPathComponent("state.vzvmsave") }
         public var stateInfo: URL { directory.appendingPathComponent("state.json") }
+        /// Where the machine's window was last put (`VMWindowPlacement`): the machine's own note,
+        /// beside its disk and gone with it.
+        public var window: URL { directory.appendingPathComponent("window.json") }
         /// A saved state waits for the machine's next start.
         public var hasSavedState: Bool {
             FileManager.default.fileExists(atPath: state.path) && FileManager.default.fileExists(atPath: stateInfo.path)
@@ -260,8 +264,15 @@ public enum VMSetupState: Equatable, Sendable {
 ///
 /// 12: the status says when browser mode's menu bar was changed at this start, which macOS takes
 /// at the next sign-in — a machine with instant wake is shut down once for it, as for a layout.
+///
+/// 13: the status says, as the script goes, which step of the start it is at (`LUMEN_STAGE`) and,
+/// once this start's settings are in — before Safari is opened —, which settings those were
+/// (`LUMEN_READY_REVISION`): the machine's window keeps its screen behind a cover until then
+/// (`VMStartCover`).
 public enum VMGuestTools {
-    public static let version = 12
+    public static let version = 13
+    /// The first tools whose script says which step it is at and when the settings are in.
+    public static let saysWhenReady = 13
     /// From this version on an installed boot script takes a newer copy of itself at a machine's
     /// start: a base with tools this new needs nothing done to it for a later version's settings.
     public static let updatesItselfFrom = 2

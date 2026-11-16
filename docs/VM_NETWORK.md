@@ -131,7 +131,8 @@ still holds those addresses — in its resolver's cache, in connections it is ab
 - **TCP over IPv4 only.** No UDP gets out (so no QUIC/HTTP/3, no WebRTC media), no IPv6, no ICMP
   beyond the router's ping. The guest's clock is this Mac's: set from the virtual Mac's as it
   starts, and told again whenever it asks (NTP is answered here, by this Mac's clock) — which is
-  what sets a machine woken from a saved state right.
+  what sets a machine woken from a saved state right, and one that stood still while this Mac
+  slept (the helper has its boot script ask at both, docs/VM.md).
 - **One guest per network**, one address. Guests do not see each other or this Mac.
 - **No TLS is opened or read.** The stack moves bytes; what the proxy and the site see is the
   guest's own TLS.

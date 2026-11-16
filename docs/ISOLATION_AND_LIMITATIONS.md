@@ -132,7 +132,7 @@ Background tabs keep running. WebKit may throttle timers in views that aren't in
 |---|---|---|
 | WebKit networking process | WebKit runs one network process per app, with one session per data store inside it | Isolation is per session (logical), not per OS process |
 | Device fingerprint | see §2 | Profiles can be linked by fingerprinting |
-| Downloads folder | Downloads go to `~/Downloads` in plaintext — or the folder Settings → Downloads names, or where the save panel is told (asking each time: also for a download of a background tab or a minimised window, whose tab and window are brought up for the panel; until the third audit, 14 November 2026, those went to the folder unasked) | Outside the encrypted storage |
+| Downloads folder | Downloads go to `~/Downloads` in plaintext — or the folder Settings → Downloads names, or where the save panel is told (asking each time: also for a download of a background tab or a minimised window, whose tab and window are brought up for the panel; until the third audit, 14 November 2026, those went to the folder unasked). In Safari's window the same, since 15 November (`HostedDownloads`; before, a download there did nothing): taken at WebKit's own download interface, never by Safari's download code, whose services a profile is refused. What is a download is decided as Safari decides it — a response the engine cannot show, one sent as an attachment, a link with `download` — but Safari's once-per-site question whether a site may download is not asked, as it never was in a window of ours. View › Show Downloads (⌥⌘L) lists the run's files with where each went and how it ended, and the profile's Dock icon counts those ended since the list was looked at; no file is opened or shown in the Finder from a profile's process | Outside the encrypted storage |
 
 ## 2. Fingerprinting and "Apple device" consistency
 
@@ -186,8 +186,12 @@ decision before anything changes):
   has none, nor his Mac's Safari.
 - The storage quota of an ephemeral profile: the same script wraps `navigator.storage.estimate()`
   to answer Safari's quota (`patchStorageQuota`) where WebKit answers an app's 1000 MiB (rule 1).
-  A persistent profile no longer needs it: its store is made with a browser's ratios and WebKit
-  answers Safari's figure itself (`BrowserStorageQuota`; the script leaves any larger figure alone).
+  A persistent profile does not need it — its store is made with a browser's ratios and WebKit
+  answers Safari's figure itself (`BrowserStorageQuota`) — and since 15 November its script is not
+  given a quota at all (`PrivacyScripts.needsQuotaScript`): until then `estimate` was wrapped in
+  every profile, to change nothing in a persistent one, and `Worker`, `SharedWorker` and
+  `URL.createObjectURL` with it for the workers' sake. The self-test reads a persistent profile's
+  quota in the page's own world and in one without the script: the same figure.
 
 **WebKit's behaviors that follow the SDK.** WebKit turns some of its features on for an app only
 when the app's executable declares a recent enough SDK (`linkedOnOrAfterSDKWithBehavior`), and for
@@ -285,7 +289,7 @@ same for every SDK once it had moved (CI run 448, macOS 26 and 27).
 | Storage (cookies, localStorage, IndexedDB, cache, service workers) | `WKWebsiteDataStore(forIdentifier:)` | native, complete |
 | Egress IP and DNS | `proxyConfigurations` (SOCKS5 remote DNS, fail-closed) | native, verified |
 | User-Agent string (HTTP header + `navigator.userAgent`) | `customUserAgent` | native; changes the string only |
-| Time zone | JS shim (`Intl`, `Date` getters, offsets) | approximation; blob workers covered, URL-loaded and service workers not |
+| Time zone | In a profile's own process (the released build): the engine's own — WebKit's processes are started in the profile's zone, and the page script, which asks the engine its zone first, replaces nothing. Elsewhere: JS shim (`Intl`, `Date` getters, offsets) | native in a profile's own process, in every frame and worker; an approximation elsewhere — blob workers covered, URL-loaded and service workers not |
 | Geolocation | In a profile's own process (the released build): the engine itself (`NativeGeolocation` — WebKit's geolocation provider and its permission question), no script in the page. Elsewhere: JS shim (deny / fixed coordinates) | engine-level in Safari's window; approximation in the app's own windows |
 | WebRTC exposure | off in the engine (private `WKPreferences` property, as Lockdown Mode) or a JS shim (relay-only) | native when off; approximation for relay-only |
 
@@ -476,8 +480,11 @@ driving Safari through `safaridriver`:
   0 must-match keys differ.
 - `scripts/live_compare.py` loads the same pages in Safari and in on-screen profile windows of the
   same outer size (`Lumen --capture-sites`, `SiteCapture.swift`), once for a default profile
-  and once with the time-zone and WebRTC wrappers running on Safari's own values. Both JSON sets
-  are kept in the `fingerprint-surfaces` artifact.
+  and once with a time zone named — Safari's own — and WebRTC relay-only. Until 15 November that
+  second profile ran the time-zone wrapper on Safari's own zone, so that whatever a page noticed
+  was the wrapper itself; the script now asks the engine its zone and replaces nothing of `Date`
+  where it is the profile's already, so there the WebRTC wrapper is the one measured. Both JSON
+  sets are kept in the `fingerprint-surfaces` artifact.
 
 When Safari runs a WebKit of its own. A Mac whose Safari was updated beyond the WebKit the system
 gives apps has two engines: CI run 718, a runner on macOS 26.7.2 with Safari 27.2, where the app
@@ -573,9 +580,13 @@ What still differs, and why it cannot be changed from the app:
 - **WebRTC** is switched off by the default policy, and with a proxy unless it goes through the
   relay, held there by the network guard (SOCKS5 with UDP only, relay candidates only;
   [TUNNEL.md](TUNNEL.md)). Without a proxy, `relayOnly` and `unrestricted` keep it.
-- **The replacement `Date` and `Intl.DateTimeFormat`** (only with a time zone set) list `length`
-  and `name` before their statics: JavaScriptCore orders a script function's own properties that
-  way whatever the definition order.
+- **The replacement `Date` and `Intl.DateTimeFormat`** list `length` and `name` before their
+  statics: JavaScriptCore orders a script function's own properties that way whatever the
+  definition order. Only where the script, not the engine, gives the profile's time zone — a
+  profile inside the app's process (the sandboxed build, the emergency switch), or one whose
+  process was started in another zone than the profile came to have. In a profile's own process
+  the engine is in the profile's zone and `Date` is the engine's own (*What a page can ask the
+  script*, §6).
 - **Media devices before permission.** On the CI runner Safari lists `audioinput,videoinput`, a
   profile `audioinput` only. WebKit hides a kind the app has no capture authorisation for (macOS
   privacy settings, per app); granting the app camera access once aligns it.
@@ -665,6 +676,7 @@ storage and network (§1, §4).
 | Bookmarks | encrypted (`bookmarks.bin`) | encrypted | in memory, saved encrypted on every change |
 | Sync target and token | encrypted (`settings.bin`, not synced) | in memory | — |
 | Proxy list (addresses, credentials, labels, last checks) | encrypted (`proxies.bin`, this Mac only, not synced) | in memory | — (a profile has its own copy of its proxy in `config.bin`) |
+| The vault's master key | wrapped under the master password (`vault.json`). With **Unlock with Touch ID** on (off by default; Settings → Security): also wrapped under a random key (`unlock-touchid.json`), and that key in this Mac's data-protection keychain, readable by this app after Touch ID only, this device only | in memory | a profile's own process never has it |
 | WebKit website data | encrypted (`webdata.pbsa`) | encrypted | **plaintext on disk** in WebKit's directories |
 
 **Why WebKit data is plaintext while a profile runs.** WebKit chooses the location of an
@@ -686,8 +698,10 @@ restore it on launch. `WebDataStoreVault` does this.
 2. *No flush/close API.* WebKit tears a session down asynchronously after the last
    reference to its store is released. The vault waits, archives, then calls
    `WKWebsiteDataStore.remove(forIdentifier:)`, which fails while the store is still in
-   use, and retries with backoff (1+2+3+5+8 s). A write that lands between the archive
-   and the successful removal is lost. It is not leaked. If WebKit never releases the
+   use, and retries with backoff (1+2+3+5+8 s). An attempt archives again only when the data
+   is not what the last archive read: every file's size, times and number are looked at before
+   it is read, and compared at the next attempt (`DirectoryStamp`). A write that lands between
+   the archive and the successful removal is lost. It is not leaked. If WebKit never releases the
    store, the app reports an error and the data stays in plaintext until the next stop
    or unlock.
 3. *Crashes.* If the app crashes or is force-quit while a profile runs, the plaintext
@@ -865,7 +879,11 @@ anything is written — into a file only its owner can read (0600).
 **One proxy, one line.** Wherever one proxy is entered — the profile editor's *New*, the list's
 *Add* and *Edit* — it is one field, read by the same parser as a line of Import
 (`ProxyListImport.readField`): `host:port:user:pass`, `user:pass@host:port`,
-`scheme://user:pass@host:port`, `host:port`. A string the field takes is one Import takes, and a
+`scheme://user:pass@host:port`, `host:port`. A line that does not read as written is read once
+more as a table's row (`ProxyListImport.columns`): its parts separated by tabs, spaces, `;`, `,`
+or `|`, the type as a word of its own, the IP-change link as a last column — never a line that
+reads as written, so a password with one of those characters stays a password, and never two
+proxies on one line as one with a login (unit-tested, `ProxyImportFormatsTests`). A string the field takes is one Import takes, and a
 proxy written back (`ProxyListImport.line(for:)`, also what Export writes) reads back as the same
 proxy (unit-tested). The type comes from the scheme; without one it is **not known** — never
 taken from a default — until a check finds it (both handshakes are tried, `ProxyProbe`), or, while
@@ -1215,7 +1233,8 @@ cannot be inspected from the page anyway.
 | Setting | Implementation | Native? | Gaps |
 |---|---|---|---|
 | User agent | `WKWebView.customUserAgent`, with presets in the editor | yes (string only) | `navigator.platform`, vendor, feature set and TLS fingerprint still identify WebKit on macOS (§2). Use the *Safari on macOS* preset; iPhone/iPad presets are UA-only and inconsistent |
-| Time zone | JS: `Intl.DateTimeFormat` default `timeZone`; `Date` local getters and setters, `getTimezoneOffset` (with the sub-minute offsets of historical dates), the local constructor forms `new Date(y, m, d, …)`, `Date.parse` and `new Date(string)` for strings without an offset, `toString`, `toDateString`, `toTimeString`, `toLocale*String`, `getYear`/`setYear`. A worker made from a blob of the page (how fingerprinting scripts make theirs) starts with the same shim: the blob is handed to the engine as [shim, page's blob], so the worker keeps its blob: location, relative URLs, CSP, strict mode and line numbers | no | Workers loaded from a URL and service workers use the host zone (rewriting them would change their location); under a CSP without `'unsafe-eval'` a blob worker does too. JavaScriptCore lists the replacement `Date`'s and `Intl.DateTimeFormat`'s `length`/`name` before their statics (`Object.getOwnPropertyNames(Date)`), which no script function can avoid. `Intl.DateTimeFormat().format()` without an explicit zone follows the shim; other `Intl` constructors carry no zone |
+| Time zone, engine-level | In a profile's own process (the released build) WebKit's processes are started in the profile's zone (`ProfileProcess`: `TZ`, and `__XPC_TZ` for the processes WebKit starts), so `Date` and `Intl` are the engine's own in the page, in every frame and in every worker — blob, URL, shared, service. The page script is still told the zone, asks the engine for its own as a page would, and replaces nothing when they agree (its `ZONE`): `Date`, `Intl.DateTimeFormat` and every method of `Date.prototype` are then the very functions Safari has, not copies. Checked in CI in Safari's window: the page's `Date` has its own properties in the engine's order and the engine's own function on top of an error it throws, exactly as in a worker loaded from a URL, which no script reaches | yes | The zone is the one the process was started in; one that changes while the profile runs applies from the next launch. A profile whose process is in another zone than its configuration names (a lookup that came back differently) gets the script's replacement, below |
+| Time zone | Only where the engine is in another zone than the profile's (a profile inside the app's process: the sandboxed build, the emergency switch). JS: `Intl.DateTimeFormat` default `timeZone`; `Date` local getters and setters (the local time keeps the seconds of an offset before standard time; `getTimezoneOffset` says whole minutes, as the engines do), the local constructor forms `new Date(y, m, d, …)`, `Date.parse` and `new Date(string)` for strings without an offset, `toString`, `toDateString`, `toTimeString`, `toLocale*String`, `getYear`/`setYear`. A worker made from a blob of the page (how fingerprinting scripts make theirs) starts with the same shim: the blob is handed to the engine as [shim, page's blob], so the worker keeps a blob: location (another than the page made), relative URLs, CSP, strict mode and line numbers | no | Workers loaded from a URL and service workers use the host zone (rewriting them would change their location); under a CSP without `'unsafe-eval'` a blob worker does too. JavaScriptCore lists the replacement `Date`'s and `Intl.DateTimeFormat`'s `length`/`name` before their statics (`Object.getOwnPropertyNames(Date)`), which no script function can avoid. `Intl.DateTimeFormat().format()` without an explicit zone follows the shim; other `Intl` constructors carry no zone |
 | Geolocation, engine-level | In a profile's own process WebKit is given the profile's place the way Safari gives it its own: on macOS the engine has no location source and takes positions from the app that hosts it (`WKGeolocationManagerSetProvider`; WebGeolocationManagerProxy has a built-in CoreLocation provider on iOS only). `NativeGeolocation` hands it a provider on every web view's engine (a `WKProcessPool` is the C API's `WKContextRef` in Cocoa's WebKit) and answers the engine's permission question on whatever UI delegate Safari's code gives a web view (`_webView:requestGeolocationPermissionForOrigin:…`, and the older form): a fixed place allowed, Deny denied — as Safari answers a site its settings allow or deny. The page script is told `mode: 'native'` and leaves `navigator.geolocation` alone, so positions, errors and permission states are the engine's own, in every frame. The functions are looked up at run time; where one is missing the script answers as before. Checked in CI by `--geolocation-safari-check` (scripts/geolocation_safari_check.sh): a page in Safari's window must get the profile's place, 'prompt' before it asks and 'granted' after. The editor picks the place on a map (`LocationPicker`: Apple Maps' search and tiles, asked from the app's own process, not through the profile's proxy). |
 | Geolocation | JS: `navigator.geolocation` answers as WebKit does for a user who said no ("User denied Geolocation") or who allowed the fixed coordinates; positions and errors are instances of the real interfaces with no own properties (values from the prototype getters and `toJSON`); `permissions.query({name:'geolocation'})` returns the engine's own `PermissionStatus`, 'prompt' until the page asks (WebKit's `hasBeenRequested`), then 'denied'/'granted' | no | The IP address (proxy) is what most sites actually use. The app has no `NSLocationUsageDescription` and no location entitlement, so CoreLocation can't be reached even if the shim is bypassed |
 | Time zone from the proxy | At launch, a geolocation service (ipinfo.io, then geojs.io, ipwho.is, ipapi.co — one waited for alone at most 3 s, after which the next is asked as well, at once when one fails: a proxy that blocks or holds one leaves time for the others, and a slow one that answers is not cut off) is asked *through the profile's proxy* where it exits; the profile runs in that zone. The last answer per proxy is used on later launches when the new lookup takes over 1 s (and when a lookup fails), that lookup finishing in the background; with nothing remembered the launch waits for it at most 3 s (§4); a profile in a process of its own is not asked again by that process when the launch just found its location | — | A third-party request per launch (HTTPS, via the proxy only, no cookies). Editor → Location and Language → **Time zone and language**: *From the connection* (this), *Manual* (a time zone and a language of the profile's own; "this Mac's languages" is a choice) or *Random* (a place's own pair — a country's time zone and language, `LocalePlaces` — picked once and kept until another is picked). A time zone of the profile's own that is not where its proxy was last seen to come out is warned about: a page that compares the time zone with the IP's location sees they differ. Without any answer the host zone is used, and that is said where the user looks — a message, a mark in the profile's row and a line in the editor's location card, until the next launch — not only logged; a time zone that changed applies from the next launch |
@@ -1226,6 +1245,81 @@ fixed-offset zones, DST transitions, 30-minute shifts and pre-1900 offsets, toge
 the function-shape checks CreepJS runs (toString from the window and from a frame, own
 keys, receiver errors). The key cases are also checked under JavaScriptCore by the self-test,
 whose surface checks compare a macOS profile with a plain WKWebView key by key.
+
+**The replacement `Date` against the engine itself.** Where `Date` is replaced, what a page reads
+must be what the engine answers in that zone, so the tests ask the engine: some 1100 expressions
+for each of ten zones — getters, setters, the constructor's forms, `Date.parse`, `toString`, the
+formatters and their options, wrong receivers — in a window without the script while the test's
+process is in the zone, and in a window with the script while it is elsewhere, in V8 (Node) and in
+JavaScriptCore (Bun), each against itself. What that found in the replacement as it was until 15
+November, each now as the engine has it: a local time the zone's clocks skip
+(`new Date(2024, 2, 10, 2, 30)` in Los Angeles) was read with the offset after the change, an hour
+early (ECMAScript, and both engines: the offset before it); a local time string in an hour *this
+Mac's* zone skips was read an hour late, whatever the profile's zone; `getTimezoneOffset()` gave
+seconds as a fraction for dates before standard time (−53.4666… in Berlin; both engines: −53);
+`toString()` named the zone "GMT+09:00" for every date before 1970 and far ahead (the engines: the
+zone's name of today, "Japan Standard Time"); a negative year was written with six digits (the
+engines: four); `new Date(-271821, 3, 20)` threw a RangeError (an invalid Date), and the getters
+gave NaN within a day of the range's ends; `new Date(2024, 0, 1, NaN)` was a valid date;
+`new Date(2020n, 1)` did not throw; a Date of another frame lost its milliseconds;
+`new Intl.DateTimeFormat('en', null)` did not throw, options with an inherited `timeZone` were
+not heard, and the options were copied (`Object.assign`) instead of read as the engine reads
+them. Left as they are, and left out of the comparison: within two days of the range's ends the
+engines themselves disagree on what a setter or a local date gives; and the name `toString()`
+gives a zone for dates when it kept another zone's time (Lord Howe before 1981) is the name of
+that time, where the engines say today's.
+
+**The zone's name.** An engine names some zones by an older name (its ICU's: `Asia/Calcutta` for
+Asia/Kolkata, `Europe/Kiev` for Europe/Kyiv) and says that name for the zone it is in, while it may
+hand a name given to a formatter back as given. The script knows the profile's zone by the name
+the engine lists for it (`Intl.supportedValuesOf('timeZone')`, with the pairs of names it may be
+under): the question whether the engine is already in the profile's zone is asked on that name,
+and where `Date` is replaced, `Intl.DateTimeFormat().resolvedOptions().timeZone` says it — what a
+page reads in that engine on a Mac in that zone (CI, 15 November: Node 22 said Asia/Calcutta where
+the script said Asia/Kolkata).
+
+### What a page can ask the script
+
+What the script replaces prints as native code and has the engine's shape; a page can still ask
+other things, and since 15 November these have the engine's answers (`scripts/test-shims.mjs`,
+in both engines; the first three also by the self-test in WebKit):
+
+- **Whether the script is there at all — nothing, in a profile that needs none.** The script
+  replaces a function only where the engine does not already answer as the profile: `Date` and
+  `Intl.DateTimeFormat` only in another zone than the engine's, `navigator.storage.estimate` only
+  for an ephemeral store, `Worker`, `SharedWorker` and `URL.createObjectURL` only when one of those
+  must reach a worker, `Function.prototype.toString` only once something is replaced, and
+  `contentWindow`, `contentDocument` and `window.open` only then too. Until then every profile had
+  the last five replaced, and every profile with a time zone — every one with a proxy — `Date`. A
+  macOS profile of the released build as it comes (its own process, a persistent store, WebRTC
+  off in the engine, geolocation the engine's) has no replaced function, but for `window.safari`
+  where the Safari it names gives pages one and Safari's window has not brought its own.
+- **The script's registry.** The windows of a page share one registry of what is replaced, so
+  that a frame's `toString` prints the page's replacements as native. It was handed out by
+  `Function.prototype.toString` itself to whoever called it with a well-known symbol
+  (`Symbol.for('wk.shim.registry')`): one line of JavaScript told a profile from Safari, and the
+  object it got answered which functions were replaced. The windows now find each other by an
+  event whose type is made at random for each launch (`ShimConfiguration.channel`), sent with the
+  realm's own untouched `dispatchEvent` to the window above and to the opener and heard by a
+  listener registered when that window's document started: no function a page can replace is
+  called, nothing is left on an object a page reaches, and `toString` answers every receiver as
+  the engine does. A window a page opened is of the family too (it printed the opener's
+  replacements as their source before), and a frame is gone through once: the page reaching it
+  through `contentWindow` after its own copy ran replaced its functions a second time.
+- **Who calls the built-ins a page has replaced.** A page that puts its own function in place
+  of `Function.prototype.call`, `WeakMap.prototype.get`, `Promise.prototype.then`, `isNaN`,
+  `Intl.DateTimeFormat.prototype.formatToParts` and the like, and counts the calls, sees the same
+  calls with the script's `toString`, `estimate`, `Date` and child-window accessors as with the
+  engine's: they run on the engine's functions as they were when the document started.
+  `estimate()` hands back the engine's own promise.
+
+What a page can still tell, where something is replaced: an error thrown through a replacement
+(a wrong receiver) has the script's frames in its `stack` — in a profile that replaces nothing
+there are none; a blob worker that was given the script has another `blob:` address than the page
+made, and can read the script in front of its own code; and the iPhone view's full disguise is a
+script by design (§2). Not hidden either: `Intl.DateTimeFormat` called on an object that inherits
+from its prototype (ECMA-402's first edition's pattern) makes a new formatter instead of marking
+that object.
 
 **Mobile views (iPhone, iPad):** the browser window is the declared device's screen (content
 size and maximum size); nothing else is the device's. `navigator`, `screen`, the touch points,
@@ -1422,6 +1516,73 @@ persistent cookies sync between Macs, encrypted with the profile's key inside th
 
 ## 8c. Session warm-up robot
 
+**Since November 2026 (the Warm-up section).** What follows describes the robot as it was built;
+where this paragraph says otherwise, this paragraph holds.
+- *Where it is.* Warm-up is a section of the main window (sidebar → **Warm-up**): the profiles by
+  their warm-up state (running now, waiting, need attention, never warmed, warmed and when), the
+  templates, and the history. **New warm-up** is one sheet for one profile or a selection; a
+  profile's **Warm Up…** and the selection's bar open it with those profiles ticked. The two older
+  sheets are gone.
+- *Templates.* A template is a kind of browsing (`WarmUpInterest`: an ordinary day, news, shopping,
+  video, forums, travel, technology, finance, sport, food, games, home and cars) or a list of the
+  person's own; several are mixed in turn. `WarmUpCatalog` names each country's sites by interest
+  (the 43 countries' lists, tagged) and resolves a template for the country the profile's proxy
+  exits in; a country with fewer than three sites of its own for an interest gets the world's list
+  added, and the screen says so. Nothing is fetched to choose sites. A list of one's own is pasted
+  or read from a text file, each line checked as before, and by default gets the country's everyday
+  sites around it.
+- *Intensity.* Light, Normal, Deep (`WarmUpIntensity`): 8, 16 or 24 sites, up to 2, 3 or 4 pages
+  on each, 1 to 3 searches; the sheet's numbers are computed from these, not written beside them.
+- *Arriving.* A share of the sites (25–40 % by intensity; off with the sheet's switch) is reached
+  through the profile's search engine: the site's name typed as a search is typed, the results
+  looked at, the site's own result clicked. Whenever any step cannot be done as a person does it —
+  the engine's page does not load or shows a check, no such result in view after one scroll — the
+  address is opened as before, and an engine that showed a check is not asked again in that run.
+- *Reading.* With a plan of this kind (`readsByPage`) the stay follows the page: its text
+  (`WarmUpPageScripts.measure`, the page's main part) at a skimming pace plus a little per screen
+  of height, within the intensity's two times (`WarmUpReading.dwell`); scrolling goes in bursts
+  with reading pauses down to a depth of its own and never past the end; the pause before the next
+  site is a few seconds, now and then 12–40.
+- *Links.* Never a link whose words or address speak of signing in, registering or an account,
+  besides the older refusals. Among the rest a link is weighed (`WarmUpLinkPolicy.weight`): the
+  page's main part and headline-length text first, navigation and footer seldom, legal pages
+  hardly ever. After a followed page it goes back about one time in three and takes another.
+- *Cookie banners.* Twenty-six tools by their own buttons (`WarmUpConsent.tools`), and a banner of
+  no known tool only by a strict rule: a fixed or sticky box whose id or class speaks of cookies or
+  consent, a button whose whole text is one of the accept words, no form with fields around it.
+  Pressed with the pointer when its trusted moves are seen to reach the button, else with the
+  button's `click()` as before (a button inside a tool's shadow root is always the latter). The
+  sheet's choice: accept (the default), as people do (about one time in eight the tool's "only
+  necessary", where it has one), or leave banners alone. Banners inside cross-site frames are
+  still not reached.
+- *Pages it leaves at once.* After a page loads the robot's reader reports its marks
+  (`WarmUpPageScripts.signals`). A check or a refusal — Cloudflare, Google's "unusual traffic",
+  PerimeterX, DataDome, Akamai, Yandex, Amazon, a page that is only a reCAPTCHA or hCaptcha, an
+  "Access denied" title (`WarmUpBlockPage`) — is left after two to four seconds with nothing
+  pressed and named in the report; a widget on a page with text of its own is not taken for one.
+  A page with a password or card field in view, or a sign-in, checkout or payment address
+  (`WarmUpSensitivePage`), is left after one to two seconds: nothing is pressed, scrolled or
+  followed there. The marks are known tools' own elements and titles: a check of a tool not
+  listed is read as a page.
+- *A dead proxy.* Three pages in a row that do not load end the run ("the proxy does not answer",
+  `WarmUpHealth`) instead of going through the plan's timeouts.
+- *The report and the history.* A run is kept with its sites — how each was reached, pages, time,
+  cookies added, what went wrong — and its cookies split into those of the sites visited and those
+  of other domains (`WarmUpRun`; in a WebKit profile the second number is small by design:
+  cross-site tracking prevention). The last 50 runs of a profile are in `warmup-history.bin`,
+  sealed under the profile's key like `warmup-last.bin`, on this Mac only, not synced, not in an
+  export. A profile's state follows its last run (`WarmUpWarmth`); the Profiles list marks a warmed
+  profile and gathers the never-warmed under **Not warmed up**.
+- *The queue.* As many profiles at once as this Mac allows (`WarmUpConcurrency.automatic`: half the
+  processors, one profile per three gigabytes beyond the first four) or the person's number, 1–8;
+  Pause (the runs going on finish, none starts), take a waiting profile off, make it the next,
+  run the failed ones again. Profiles start 4–15 seconds apart. A profile that does not start is
+  said in its history and the section, not in an alert each.
+- *Not changed.* Everything goes through the profile's proxy and stays in the profile; nothing is
+  typed but a search, nothing submitted, bought or downloaded; a CAPTCHA is never answered. The
+  schedule is still "every N hours" (set for a selection from New warm-up's **Repeat**); a daily
+  rhythm in the profile's own time zone is not built.
+
 **⋯ → Warm Up…** visits a list of pages in one profile, one after the other, to give it a
 browsing past (cookies, history, site preferences) before it is used: a search first if one is
 given (with the profile's search engine — DuckDuckGo unless the profile's editor names another;
@@ -1558,12 +1719,12 @@ because this one was told to. The plan a scheduled run uses is the profile's sav
 ready-made or composed choice is cut and shuffled anew for each run, for the country the proxy
 exits in at that time.
 
-**Limits.** No browsing intelligence: the order is the list's, the links are chosen at random
-among the allowed ones in view, the timing is random within fixed ranges. Rhythm and paths are
+**Limits.** Little browsing intelligence: the reading time follows a page's length and the links
+are weighed, but by simple rules, and the rhythm is drawn from fixed ranges. Rhythm and paths are
 still a robot's, and sites that profile behaviour (or ask for a CAPTCHA) can tell; a CAPTCHA is not
 answered, and a cookie banner of a tool not listed above is left as it is. It does not sign in,
 fill forms (but a search box), play media or open new windows. Only one run per profile at a
-time, and the queue runs at most three profiles at once; the plan (`warmup.bin`), the schedule
+time, and the queue runs at most eight profiles at once; the plan (`warmup.bin`), the schedule
 (`warmup-schedule.bin`) and the last run (`warmup-last.bin`) stay on this Mac. A
 schedule only runs while the app is open and unlocked: it is a timer in the app, not a system
 job. The ready-made lists (general, by interest, and 43 countries) are part of the app; nothing is
@@ -1723,6 +1884,12 @@ locations.
 - Device fingerprinting that links profiles through hardware or rendering
   characteristics (§2).
 - Offline guessing of a weak master password by anyone holding `vault.json`.
+- With **Unlock with Touch ID** turned on: someone who can pass Touch ID on this Mac in this
+  account (an enrolled finger) opens the vault without the master password, until this Mac
+  restarts or 14 days pass since the password was last typed. The vault's key is then kept on this
+  Mac behind its Touch ID and no longer in memory alone (docs/ARCHITECTURE.md, "Unlocking with
+  Touch ID"). Adding a fingerprint — which takes the Mac's own password — ends it: the master
+  password is asked. Off by default.
 - A sync server rolling back to an older complete snapshot (no signed manifest).
 
 **What other programs on this Mac can reach.** The app registers no URL scheme, no AppleScript
@@ -1754,13 +1921,25 @@ is out of scope either way (above).
   addresses a profile left open (`tabs.bin`, encrypted with the profile's key, never synced or
   exported) and opens them at its next start: never for an ephemeral profile or one that keeps no
   history, and turning it off forgets them at the profile's next stop. What a file holds is
-  filtered again when read: only web addresses are ever opened from it.
+  filtered again when read: only web addresses are ever opened from it. In Safari's window too,
+  since 15 November (`SafariTabs`; before, the setting did nothing there and every Mac profile
+  started on its start page): Safari's own way back to a session is its saved window state, which
+  a profile's window does not have, so the tabs are read from Safari's windows as they stand —
+  every few seconds while the person is in them, as a window closes and as the profile stops —
+  and opened again by Safari's own File › New Tab at End and the tab's `loadURL:`, the tab that
+  was shown brought in front with Window › Show Next/Previous Tab. Kept there: the pages of the
+  person's windows, in order, and the tab shown. Not kept: a pinned tab's pin, tab groups other
+  than the one shown, a window opened for a scenario's run or a WebDriver session, and a tab left
+  on an address that became a download. Windows that held no page at the end leave nothing open.
+  Should this Safari's tabs not tell their pages (the names are private), each window is kept as
+  the one page in front of it; should it make no tab our way, what was kept stays as it was.
 - **Settings** are this Mac's, in the app's defaults (per key; nothing secret in them — a chosen
   download folder is its path, and in the App Sandbox a bookmark to it). A profile in its own
   process gets the browsing ones over its channel when it starts and whenever they change
   (`ProfileCommand.preferences`), the download folder written out as a path, since that
-  process's home is the profile's own. In Safari's own window, tabs, zoom and downloads follow
-  Safari's settings instead.
+  process's home is the profile's own. In Safari's own window, where a new tab opens and the
+  page zoom are Safari's own; the download folder, asking each time and Restore tabs apply there
+  as in a window of ours.
 
 **Crash fix.** Earlier builds released a browser window's controller from inside
 `windowWillClose`. That could free the `NSWindow` while AppKit was still closing it (a
@@ -1782,6 +1961,32 @@ reports dark. Web content is not restyled; pages render as their sites define th
 mark, a title and the form. While the key is derived (Argon2id), the form gives way to a
 progress line, and the Profiles window fades in once the vault is open. Lock fades back to
 the same screen. Under Reduce Motion the screen and the start page appear without motion.
+
+**Whose window it is, in Safari's window** (the owner, 15 November; `SafariProfileMarker`).
+Until then nothing in Safari's window said which profile it was — only the Dock icon's letters
+did — and with several profiles open, acting in the wrong one is the mistake to prevent. Two
+things say it now, neither of which a page can measure:
+- **A chip at the trailing end of Safari's toolbar**: the profile's glyph, its name and the flag
+  of where it exits, on the profile's own colour (its glyph's in the Profiles window, chosen in
+  the editor or given by its id), the name in that colour's light tone — the same chip a window
+  of ours has, on a ground of its own, since Safari's toolbar is light or dark with the Mac. A
+  name too long is cut at 200 pt. It is a titlebar accessory, laid by AppKit beside the toolbar's
+  items in the room the toolbar has: the toolbar's height, the window's frame and the page's area
+  stay as they are. That is checked each time, not assumed: the window's frame, its content's area
+  and the page's own frame are read before the chip goes in and after, and a chip that changed
+  any of them is taken out at once and stays out for the run (the profile's process reports it).
+- **The window's title begins with the profile's name** — "[Name] page", as a window of ours is
+  titled — wherever the system lists windows by title: the Window menu, the Dock icon's menu,
+  Mission Control. Safari's toolbar shows no title.
+Nothing of it reaches a page: no script, no style, nothing of the web view is changed.
+**Checked by the self-test** ("Safari's window, every day"): everything the page in front
+measures of its window and screen — outer and inner sizes, the chrome's height, the window's
+place, the screen, the viewport — is read with the marker, with it taken out and with it back,
+and must be the same; the title must name the profile and the chip must be there. Not measured
+here (no Mac): that a trailing accessory keeps Safari's toolbar as it is on macOS 26 and 27 —
+the first CI run says. `PB_PROFILE_MARKER=0` in the app's environment leaves Safari's window as
+Safari draws it. **Not covered:** a window's title is readable by other apps on this Mac that
+have the Accessibility or Screen Recording permission, as a window of ours has always been.
 
 **Browser window.** The toolbar is flat: the window's dark colour under a transparent title
 bar, with no glass behind its items (macOS 26 would add it). It holds the Lumen mark, the

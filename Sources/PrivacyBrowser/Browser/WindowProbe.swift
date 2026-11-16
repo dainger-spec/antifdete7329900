@@ -30,6 +30,21 @@ enum WindowProbeAction: Codable, Equatable {
     /// coordinates (a runner's process cannot be the active app, run 42429698672) — and what the
     /// page heard, as JSON in `detail` (`TapProbe`).
     case tap
+    /// A new tab on this address, after the window's last one: in Safari's window as File › New Tab
+    /// at End and the address bar make one (`SafariTabs.openTab`), in ours as ⌘T and the address do.
+    case openTab(String)
+    /// The profile's downloads as View › Show Downloads lists them, in `detail`; found when the
+    /// menu bar's item is routed to that list (`HostedDownloads`).
+    case downloads
+    /// The page in front goes to this address, as a link on it would send it (the web view's own
+    /// load): a link to a file, say.
+    case go(String)
+    /// What the page in front measures of its window and screen, in `detail`, with the window's
+    /// title and whether it carries the profile's chip (`SafariProfileMarker`).
+    case measure
+    /// The profile's name and colour taken out of Safari's windows (false) or put back (true): what
+    /// a page measures is compared between the two.
+    case marker(Bool)
 }
 
 struct WindowLook: Codable, Equatable {
@@ -43,6 +58,13 @@ struct WindowLook: Codable, Equatable {
     var selected = -1
     var overviewShown = false
     var urls: [String] = []
+    /// In Safari's window: how its tabs' pages were read (`SafariTabs.source`).
+    var tabsSource = ""
+    /// The window's title, and whether the window says whose it is: by its title, by the chip in
+    /// its toolbar (`SafariProfileMarker`).
+    var windowTitle = ""
+    var titleNamesProfile = false
+    var hasProfileChip = false
     /// The accessibility identifiers of the window's controls that are shown.
     var controls: [String] = []
     /// The menu bar's items with a ⌘ shortcut: "⌘T New Tab".
@@ -129,6 +151,47 @@ enum WindowProbe {
                 look.detail = await TapProbe.run(webView, in: window)
                 look.found = !look.detail.isEmpty
             }
+        case .openTab(let address):
+            look.action = "open a tab"
+            if let window, let url = URL(string: address) {
+                if SafariChromeHost.isHosting, SafariChromeHost.isBrowserWindow(window) {
+                    look.found = await SafariTabs.openTab(url, in: window)
+                } else if let controller {
+                    controller.addTab(url: url)
+                    look.found = true
+                }
+            }
+        case .go(let address):
+            look.action = "go"
+            if let window, let url = URL(string: address) {
+                let page = controller?.selectedTab?.webView ?? (SafariChromeHost.isBrowserWindow(window) ? SafariChromeHost.frontPage(in: window) : nil)
+                if let page {
+                    _ = page.load(URLRequest(url: url))
+                    look.found = true
+                }
+            }
+        case .downloads:
+            look.action = "downloads"
+            if SafariChromeHost.isHosting {
+                look.found = HostedDownloads.shared.isRouted
+                look.detail = HostedDownloads.shared.listText() + "\n" + HostedDownloads.counts.text
+            } else {
+                look.found = controller != nil
+                look.detail = BrowserTab.finishedDownloads.map(\.lastPathComponent).joined(separator: "\n")
+            }
+        case .measure:
+            look.action = "measure"
+            if let window, let page = controller?.selectedTab?.webView
+                ?? (SafariChromeHost.isBrowserWindow(window) ? SafariChromeHost.frontPage(in: window) : nil) {
+                look.detail = await measured(by: page)
+                look.found = !look.detail.hasPrefix("error")
+            }
+        case .marker(let shown):
+            look.action = shown ? "the profile's marker back" : "the profile's marker out"
+            if SafariChromeHost.isHosting {
+                SafariProfileMarker.suspend(!shown)
+                look.found = true
+            }
         case .search(let text):
             look.action = "search"
             if let window, let field = addressField(in: window) {
@@ -150,10 +213,44 @@ enum WindowProbe {
             look.selected = controller.selectedTabIndex
             look.overviewShown = controller.isShowingTabOverview
             look.urls = controller.tabs.map { $0.url?.absoluteString ?? "" }
+        } else if SafariChromeHost.isHosting, let window, SafariChromeHost.isBrowserWindow(window) {
+            // Safari's window: its tabs as Safari hands them out, and how their pages were read.
+            _ = SafariTabs.snapshot()
+            let own = SafariTabs.tabs().filter { $0.window === window }
+            look.tabs = own.count
+            look.selected = own.firstIndex(where: \.isSelected) ?? -1
+            look.urls = own.map { $0.url?.absoluteString ?? "" }
+            look.tabsSource = SafariTabs.source
         }
-        if let window { look.controls = identifiers(in: window) }
+        if let window {
+            look.controls = identifiers(in: window)
+            // What the Window menu lists the window as, where it lists it; else the window's own title.
+            let listed = NSApp.windowsMenu?.items.first { $0.target === window }?.title
+            look.windowTitle = listed ?? window.title
+            if SafariChromeHost.isHosting, SafariChromeHost.isBrowserWindow(window) {
+                let state = SafariProfileMarker.state(of: window)
+                look.titleNamesProfile = state.title
+                look.hasProfileChip = state.chip
+            }
+        }
         look.menuItems = menuShortcuts(NSApp.mainMenu)
         return look
+    }
+
+    /// Everything a page can measure of its window and its screen, as the page in front measures
+    /// it: one line, the same for the same window.
+    private static func measured(by page: WKWebView) async -> String {
+        let script = """
+        [window.outerWidth, window.outerHeight, window.innerWidth, window.innerHeight, window.outerHeight - window.innerHeight,
+         window.screenX, window.screenY, screen.width, screen.height, screen.availWidth, screen.availHeight, window.devicePixelRatio,
+         document.documentElement.clientWidth, document.documentElement.clientHeight,
+         window.visualViewport ? window.visualViewport.width : -1, window.visualViewport ? window.visualViewport.height : -1].join(' ')
+        """
+        return await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
+            page.evaluateJavaScript(script) { value, error in
+                continuation.resume(returning: (value as? String) ?? "error: \(error.map { String(describing: $0) } ?? "no value")")
+            }
+        }
     }
 
     private static func bottomBar(in view: NSView?) -> MobileBottomBar? {

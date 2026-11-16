@@ -26,14 +26,18 @@ enum HelperIO {
         try? FileHandle.standardError.write(contentsOf: Data(("LumenVM: " + line + "\n").utf8))
     }
 
-    /// Says why and ends.
-    static func fail(_ message: String) -> Never {
-        emit(VMHelperEvent(kind: .failed, message: message))
+    /// Says why and ends. `kind`: the reason as one the app has words for in the person's language
+    /// (`VMFailureKind`); the message — the helper's own words, or the system's — is then shown
+    /// under them as a technical detail.
+    static func fail(_ message: String, kind: VMFailureKind? = nil) -> Never {
+        emit(VMHelperEvent(kind: .failed, message: message, failure: kind?.rawValue))
         exit(1)
     }
 
+    /// The same for an error: its kind by what it is (`VMFailureKind.of` — the helper's own, or
+    /// the system's by its domain and code), its message the system's words for it.
     static func fail(_ error: Error) -> Never {
-        fail((error as NSError).localizedDescription)
+        fail((error as NSError).localizedDescription, kind: VMFailureKind.of(error))
     }
 
     /// The app's lines after the request — `stop`, `kill` — and the end of its input (the app is

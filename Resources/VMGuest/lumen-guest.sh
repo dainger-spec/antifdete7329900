@@ -10,6 +10,11 @@
 # and from then on waits for Lumen's request to shut down (a file named lumen-shutdown), which it
 # answers by quitting Safari and shutting macOS down, as the Apple menu would.
 #
+# Lumen keeps the machine's screen behind a cover until this start's settings are in (tools 13):
+# the status file says, as the script goes, which step it is at (LUMEN_STAGE) and, once the
+# settings are in — before Safari is opened, which then starts in the machine's language —
+# which settings those were (LUMEN_READY_REVISION). Only then does the person get the screen.
+#
 # Nothing here reaches the network. From the shared folder it reads those two names and Lumen's
 # desktop picture for this machine's screen (lumen-wallpaper.png). A newer copy of itself
 # (lumen-guest.sh) it takes from a second folder of the Mac's, which the Mac shares read-only and
@@ -22,7 +27,7 @@
 # link left in its place is replaced, not followed. What it keeps for itself is in a folder of
 # root's (/Library/Application Support/Lumen), not in /Users/Shared.
 
-TOOLS_VERSION=12
+TOOLS_VERSION=13
 SHARE="/Volumes/My Shared Files"
 OWN_MOUNT=/var/run/lumen-share
 TAG=com.apple.virtio-fs.automount
@@ -273,6 +278,17 @@ put() {
   /bin/mv -f "$1" "$2"
 }
 
+# Which step of the start this script is at (tools 13), for the cover Lumen keeps over the
+# machine's screen until the settings are in: signin (waiting for the person's session), locale,
+# look, wallpaper, safari (the settings are in; Safari is being opened), ready. And, once this
+# start's settings are in, which settings those were: the cover goes then.
+stage=signin
+ready_revision=""
+# What this macOS and its Safari are: read once, at the first status written.
+macos_version=""
+macos_build=""
+safari_version=""
+
 # What this script says back, into the shared folder: written to a new file of its own and put in
 # the status file's place, so that whatever was left there (a link) is replaced, not written
 # through.
@@ -280,11 +296,17 @@ write_status() {
   [ -n "$share" ] || return 0
   said_file="$(/usr/bin/mktemp "$share/.lumen-status.XXXXXX" 2>/dev/null)" || return 0
   [ -n "$said_file" ] || return 0
+  [ -n "$macos_version" ] || macos_version="$(/usr/bin/sw_vers -productVersion 2>/dev/null)"
+  [ -n "$macos_build" ] || macos_build="$(/usr/bin/sw_vers -buildVersion 2>/dev/null)"
+  [ -n "$safari_version" ] \
+    || safari_version="$(/usr/bin/defaults read /Applications/Safari.app/Contents/Info CFBundleShortVersionString 2>/dev/null)"
   {
     printf 'LUMEN_TOOLS_VERSION=%s\n' "$TOOLS_VERSION"
-    printf 'LUMEN_MACOS_VERSION=%s\n' "$(/usr/bin/sw_vers -productVersion 2>/dev/null)"
-    printf 'LUMEN_MACOS_BUILD=%s\n' "$(/usr/bin/sw_vers -buildVersion 2>/dev/null)"
-    printf 'LUMEN_SAFARI_VERSION=%s\n' "$(/usr/bin/defaults read /Applications/Safari.app/Contents/Info CFBundleShortVersionString 2>/dev/null)"
+    printf 'LUMEN_MACOS_VERSION=%s\n' "$macos_version"
+    printf 'LUMEN_MACOS_BUILD=%s\n' "$macos_build"
+    printf 'LUMEN_SAFARI_VERSION=%s\n' "$safari_version"
+    printf 'LUMEN_STAGE=%s\n' "$stage"
+    [ -z "$ready_revision" ] || printf 'LUMEN_READY_REVISION=%s\n' "$ready_revision"
     [ -z "$1" ] || printf 'LUMEN_APPLIED_REVISION=%s\n' "$1"
     [ -z "$wallpaper_state" ] || printf 'LUMEN_WALLPAPER_STATE=%s\n' "$wallpaper_state"
     [ -z "$wallpaper_note" ] || printf 'LUMEN_WALLPAPER_NOTE=%s\n' "$wallpaper_note"
@@ -437,6 +459,9 @@ apply_for_user() {
   esac
   uid="$(/usr/bin/id -u "$user" 2>/dev/null)"
   [ -n "$uid" ] || { user=""; return 1; }
+  # Signed in: the person's language and region, and the keyboard, first.
+  stage=locale
+  write_status ""
   if [ -n "$language" ]; then
     as_user /usr/bin/defaults write -g AppleLanguages -array "$language"
     if [ -n "$locale" ]; then
@@ -459,6 +484,8 @@ apply_for_user() {
     fi
   fi
   set_keyboard
+  stage=look
+  write_status ""
   # The system's look, which a page can read: set before Safari is opened, which takes it then.
   case "$appearance" in
     dark)
@@ -533,10 +560,22 @@ apply_for_user() {
   # The desktop first: Safari opened before the Dock is there opens behind it. The picture
   # before the wait, so that the desktop appears with it — and after, for a session that was not
   # ready to take it.
+  if [ "$wallpaper" = 1 ]; then
+    stage=wallpaper
+    write_status ""
+  fi
   set_wallpaper
   /bin/sleep 4
   set_wallpaper
-  if [ -n "$share" ] && [ -f "$settings" ] && [ "$open_safari" = 1 ]; then
+  # This start's settings are in — the language and region, the look, the Dock, the picture —
+  # and Lumen may give the person the screen: said before Safari is opened (it starts in them),
+  # not after the picture's later looks.
+  ready_revision="$revision"
+  opens=0
+  if [ -n "$share" ] && [ -f "$settings" ] && [ "$open_safari" = 1 ]; then opens=1; fi
+  if [ "$opens" = 1 ]; then stage=safari; else stage=ready; fi
+  write_status ""
+  if [ "$opens" = 1 ]; then
     if [ -n "$start_url" ]; then
       # The first page, and those after it: each in a tab of its own.
       set -- "$start_url"
@@ -548,6 +587,7 @@ apply_for_user() {
       as_user /usr/bin/open -a Safari 2>/dev/null
     fi
   fi
+  stage=ready
   write_status "$revision"
   user_done=1
   return 0

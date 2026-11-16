@@ -32,6 +32,22 @@ final class BrowserChromeModel: ObservableObject {
         self.avatar = avatar
     }
 
+    /// Whose window this is and where it exits, in words: the chip's tooltip and what VoiceOver
+    /// reads of it, in a window of ours and in Safari's alike.
+    var summary: String {
+        switch exit {
+        case .direct:
+            return String(format: L("chip.direct"), profileName)
+        case let .proxy(endpoint, code?):
+            return String(format: L("chip.exits"), profileName, CountryNames.name(for: code), endpoint)
+        case let .proxy(endpoint, nil):
+            return String(format: L("chip.proxy"), profileName, endpoint)
+        case .unreadable:
+            // Not for a window: a profile whose settings cannot be read does not start.
+            return profileName
+        }
+    }
+
     /// Top-level bookmarks (the favourites bar's) and the latest web pages from history.
     func update(bookmarks: [Bookmark], history: [HistoryEntry]) {
         favorites = bookmarks.filter { $0.folder == nil }.compactMap { bookmark in
@@ -84,24 +100,59 @@ struct ProfileChipView: View {
         .frame(height: 24)
         .background(RoundedRectangle(cornerRadius: ProfileWindowTheme.controlRadius, style: .continuous).fill(ProfileWindowTheme.accentTint))
         .fixedSize()
-        .help(description)
+        .help(model.summary)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(description))
+        .accessibilityLabel(Text(model.summary))
         .environment(\.colorScheme, .dark)
     }
+}
 
-    private var description: String {
-        switch model.exit {
-        case .direct:
-            return String(format: L("chip.direct"), model.profileName)
-        case let .proxy(endpoint, code?):
-            return String(format: L("chip.exits"), model.profileName, CountryNames.name(for: code), endpoint)
-        case let .proxy(endpoint, nil):
-            return String(format: L("chip.proxy"), model.profileName, endpoint)
-        case .unreadable:
-            // Not for a window: a profile whose settings cannot be read does not start.
-            return model.profileName
+/// The same chip at the end of Safari's own toolbar (`SafariProfileMarker`): the profile's glyph,
+/// its name and where it exits, on the profile's own colour — the fill of its glyph in the
+/// Profiles window, the name in that colour's light tone, ringed with it. A window of ours is
+/// dark, and its chip a tint on it; Safari's toolbar is light or dark with the Mac, so here the
+/// chip brings its own ground and reads the same on either. Two profiles side by side are two
+/// colours and two names. A long name is cut: the toolbar keeps its room for Safari's own.
+struct SafariProfileMarkerView: View {
+    @ObservedObject var model: BrowserChromeModel
+
+    /// The widest the chip gets, and its height: well inside Safari's toolbar (52 pt).
+    static let maximumWidth: CGFloat = 200
+    static let height: CGFloat = 22
+
+    var body: some View {
+        let colors = ProfileAvatar.colors(for: model.profileID, style: model.avatar)
+        let tone = Color(hex: colors.text)
+        HStack(spacing: 5) {
+            ProfileAvatar(name: model.profileName, id: model.profileID, size: 16, style: model.avatar)
+            Text(model.profileName)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(tone)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if case let .proxy(_, code) = model.exit {
+                Rectangle().fill(tone.opacity(0.35)).frame(width: 1, height: 12)
+                if let code {
+                    CountryFlag(code: code, size: 12)
+                } else {
+                    Image(systemName: "network")
+                        .font(.system(size: 10))
+                        .foregroundStyle(tone)
+                }
+            }
         }
+        .padding(.leading, 3)
+        .padding(.trailing, 8)
+        .frame(height: Self.height)
+        .background(RoundedRectangle(cornerRadius: ProfileWindowTheme.controlRadius, style: .continuous).fill(Color(hex: colors.fill)))
+        .overlay(RoundedRectangle(cornerRadius: ProfileWindowTheme.controlRadius, style: .continuous)
+            .strokeBorder(tone.opacity(0.45), lineWidth: 1))
+        .frame(maxWidth: Self.maximumWidth)
+        .fixedSize()
+        .help(model.summary)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(model.summary))
+        .environment(\.colorScheme, .dark)
     }
 }
 
@@ -171,7 +222,7 @@ struct StartPageView: View {
                 let width = Self.contentWidth(columns: columns)
                 ScrollView {
                     VStack(spacing: 0) {
-                        LumenLockup.large
+                        LumenBrandLockup.large
                             .padding(.top, proxy.size.height > 560 ? 96 : 48)
                             .padding(.bottom, 28)
                         searchField

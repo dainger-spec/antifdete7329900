@@ -106,23 +106,30 @@ extension ProfileRepository {
     /// copy went another way — a password changed in its editor, not in the list — keeps it: the
     /// list never overwrites what a profile was given since. Profiles with another proxy, or none,
     /// are not touched.
+    ///
+    /// `among`: the profiles to look at, of those listed — the ones the caller knows may use that
+    /// proxy; nil: every profile. A check that finds a proxy's type follows it, and with several
+    /// hundred proxies checked every profile's settings were read for each, on the main thread.
     @discardableResult
-    public func follow(_ entry: ProxyListEntry, previous: ProxySettings, at time: Date = Date()) -> ProxyAssignmentOutcome {
+    public func follow(_ entry: ProxyListEntry, previous: ProxySettings, among candidates: [UUID]? = nil,
+                       at time: Date = Date()) -> ProxyAssignmentOutcome {
         var outcome = ProxyAssignmentOutcome()
         guard let proxy = entry.usableProxy else { return outcome }
-        for summary in list() {
+        let listed = list().map(\.id)
+        let ids = candidates.map { wanted in listed.filter(Set(wanted).contains) } ?? listed
+        for id in ids {
             do {
-                let stored = try loadConfiguration(summary.id)
+                let stored = try loadConfiguration(id)
                 guard let current = stored.proxy, ProxyList.sameConnection(current, previous) else { continue }
                 let followed = stored.assigning(current.withConnection(of: proxy), check: entry.lastCheck, at: time)
                 guard followed != stored else {
-                    outcome.unchanged.append(summary.id)
+                    outcome.unchanged.append(id)
                     continue
                 }
-                try saveConfiguration(followed, for: summary.id)
-                outcome.changed.append(summary.id)
+                try saveConfiguration(followed, for: id)
+                outcome.changed.append(id)
             } catch {
-                outcome.failed[summary.id] = error.localizedDescription
+                outcome.failed[id] = error.localizedDescription
             }
         }
         return outcome

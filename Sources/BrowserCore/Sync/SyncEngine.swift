@@ -41,11 +41,29 @@ public struct SyncReport: Equatable, Sendable {
     /// the run went on with the rest (the Lumen server's CONTRACT §16.1).
     public var deferredOverQuota: [String] = []
     public var deferredTooLarge: [String] = []
+
+    /// The profiles whose files the server refused for their size (`deferredTooLarge`), each with the
+    /// names of those files as in its folder (`config.bin`: its settings, which hold the camera's
+    /// image and video), in the order refused — what the app names to the person. What is no
+    /// profile's file (the index, the tags' colours) is not here.
+    public var tooLargeByProfile: [(profileID: UUID, files: [String])] {
+        var order: [UUID] = []
+        var files: [UUID: [String]] = [:]
+        for name in deferredTooLarge {
+            let parts = name.split(separator: "/", omittingEmptySubsequences: false)
+            guard parts.count == 3, parts[0] == "profile", let id = UUID(uuidString: String(parts[1])),
+                  let file = ProfileSyncFile(rawValue: String(parts[2])) else { continue }
+            if files[id] == nil { order.append(id) }
+            files[id, default: []].append(file.rawValue + ".bin")
+        }
+        return order.map { (profileID: $0, files: files[$0] ?? []) }
+    }
     /// This run forgot what the device last synced before comparing anything: the sync location's
-    /// data is not what those records describe — the server's generation is another one (put back
-    /// from a copy, its data deleted, another server), or an object they name is gone from it or
-    /// older there (CONTRACT §16.2). Every object was compared anew; nothing here was lost or taken
-    /// over by an older copy.
+    /// data is not what those records describe — they are another place's (another folder or server,
+    /// the account after a folder, a folder after the account), the server's generation is another
+    /// one (put back from a copy, its data deleted), or an object they name is gone from it or older
+    /// there (CONTRACT §16.2). Every object was compared anew; nothing here was lost or taken over by
+    /// an older copy.
     public var startedOver = false
 
     public struct UnreadableCopy: Equatable, Sendable {
@@ -110,10 +128,13 @@ public struct SyncReport: Equatable, Sendable {
 /// `cookies.bin` instead). They are large and only consistent while the profile is stopped.
 ///
 /// The sync location's data is not always the one this device synced with: a server put back from a
-/// copy, its data deleted, another folder or server chosen. When the server names a generation of its
-/// data (`ServerGenerationTransport`, the Lumen server's CONTRACT §16.2) and it is not the one kept
-/// with the records, or an object the records name is missing there or older, the records are
-/// forgotten at the run's start (`SyncReport.startedOver`): every object is then compared anew —
+/// copy, its data deleted, another folder or server chosen. The records are of one place — a folder,
+/// or a server's address and the vault (`SyncEngine.place(of:)`) — and kept with it. When the place
+/// is another than the records' (the account after a folder, back to a folder used before, another
+/// server), when the server names a generation of its data (`ServerGenerationTransport`, the Lumen
+/// server's CONTRACT §16.2) and it is not the one kept with the records, or an object the records
+/// name is missing there or older, the records are forgotten at the run's start
+/// (`SyncReport.startedOver`): every object is then compared anew —
 /// merged where both sides have it, pushed where only this device has it, never an older copy taken
 /// for a newer one. A conflict without a record (no times to tell, or equal) keeps this device's
 /// version and keeps the other beside it. `409 generation_changed` on a write stops the run: nothing
@@ -136,22 +157,29 @@ public final class SyncEngine: @unchecked Sendable {
         var value: String
     }
 
-    /// `sync-state.bin`: what was last synced, object by object, and the server generation those
-    /// records are of. Format 1 — the map of records alone, as every version before wrote it — while
-    /// no generation is kept; format 2 with one.
+    /// `sync-state.bin`: what was last synced, object by object, the place those records are of
+    /// (`place(of:)`), and the server generation they are of. Format 1 — the map of records alone, as
+    /// every version before wrote it — while neither is known; format 2 with a generation (its server
+    /// and vault are the place, as the version that brought generations reads it); format 3 with a
+    /// place and no generation (a folder, a server that keeps none): a version from before places
+    /// refuses it rather than take another place's older copies for newer.
     private struct SyncState {
         var items: [String: ItemState] = [:]
         var server: KeptGeneration?
+        var place: String?
     }
 
-    /// Format 2 of `sync-state.bin`.
+    /// Formats 2 and 3 of `sync-state.bin`.
     private struct StateDocument: Codable {
         var format: Int
         var items: [String: ItemState]
-        var serverGeneration: KeptGeneration
+        var serverGeneration: KeptGeneration?
+        var place: String?
     }
 
-    static let stateFormat = 2
+    static let stateFormat = 3
+    /// The format of a state with a server generation kept: the one the version before places reads.
+    static let generationStateFormat = 2
 
     private let repository: ProfileRepository
     private let transport: SyncTransport
@@ -168,6 +196,8 @@ public final class SyncEngine: @unchecked Sendable {
 
     /// New-device setup: download the vault header, verify the master password against it,
     /// and write it locally. Follow with `ProfileRepository(vault:)` + `SyncEngine.sync()`.
+    /// The app does not set a Mac up this way: `VaultRestore` builds the vault aside, writing nothing
+    /// to the sync location, and moves it into place only once all of it is there.
     public static func bootstrap(transport: SyncTransport, root: URL, password: String) async throws -> UnlockedVault {
         guard !MasterVault.exists(in: root) else { throw CoreError.vaultAlreadyExists }
         guard let blob = try await transport.fetch(objectID: vaultHeaderObjectID) else { throw CoreError.vaultNotFound }
@@ -250,8 +280,8 @@ public final class SyncEngine: @unchecked Sendable {
         let remote = Dictionary(remoteObjects.map { ($0.objectID, $0.revision) }, uniquingKeysWith: max)
         // The records describe another server's data, or data this one no longer has: forgotten before
         // anything is compared or written (§16.2, 3–4). This device's files are not touched.
-        report.startedOver = startOver(&state, listed: remote, scope: generational?.generationScope,
-                                       generation: generational?.serverGeneration)
+        report.startedOver = startOver(&state, listed: remote, place: Self.place(of: transport),
+                                       scope: generational?.generationScope, generation: generational?.serverGeneration)
         // The vault's header there: this device's when it is the newer — a change of the master
         // password made here, so that new devices set up with the new password and not the old,
         // or the vault's generation raised here, so that a version from before refuses the sync
@@ -305,17 +335,27 @@ public final class SyncEngine: @unchecked Sendable {
     // MARK: Starting over
 
     /// Forgets the records when they are not of the sync location's data as it is now; true when it
-    /// forgot any. `scope` and `generation`: the transport's, when it speaks of generations.
+    /// forgot any. `place`: the transport's (`place(of:)`); `scope` and `generation`: the transport's,
+    /// when it speaks of generations.
+    /// - The records are of another place — the account after a folder, a folder after the account,
+    ///   another folder or server — or of none said (a version from before places kept them): the
+    ///   records go, and this place is kept with them from now on. Another place's revisions say
+    ///   nothing of this one's: a folder used before the account holds older copies at higher
+    ///   revisions than the account's, and with the account's records they were taken for newer.
     /// - The server named a generation, and it is not the one kept for this server and vault (none
     ///   kept counts as another): the records go, and this one is kept with them from now on.
     /// - It named none: a server that keeps no generations, as before. One kept for another address
-    ///   (or a folder now) is dropped — returning there later starts over.
-    /// - Whatever the generation: an object the records name that is not listed, or listed at a lower
-    ///   revision, means the location went back or lost it (a disk snapshot put back, a file removed,
-    ///   another folder chosen): the records go. Objects are never deleted one by one there, and
-    ///   revisions only grow.
-    private func startOver(_ state: inout SyncState, listed: [String: Int], scope: String?, generation: String?) -> Bool {
+    ///   (or a folder now) is dropped.
+    /// - Whatever the place and generation: an object the records name that is not listed, or listed
+    ///   at a lower revision, means the location went back or lost it (a disk snapshot put back, a
+    ///   file removed): the records go. Objects are never deleted one by one there, and revisions only
+    ///   grow.
+    private func startOver(_ state: inout SyncState, listed: [String: Int], place: String?, scope: String?, generation: String?) -> Bool {
         var forget = false
+        if state.place != place {
+            forget = true
+            state.place = place
+        }
         if let scope, let generation {
             let current = KeptGeneration(scope: scope, value: generation)
             if state.server != current {
@@ -335,6 +375,22 @@ public final class SyncEngine: @unchecked Sendable {
         state.items = [:]
         return true
     }
+
+    /// The place a transport syncs with, as the records keep it: a server's address and the vault
+    /// (`ServerGenerationTransport.generationScope`: the account's, or a server of one's own), or a
+    /// folder (its path). Nil for a transport that says neither.
+    static func place(of transport: SyncTransport) -> String? {
+        // A restore reads the place through a transport that writes nothing (`VaultRestore`): the
+        // records it leaves are of the place it read, so that the first sync after it goes on from them.
+        if let readOnly = transport as? ReadOnlySyncTransport { return place(of: readOnly.inner) }
+        if let server = transport as? ServerGenerationTransport { return serverPlace(server.generationScope) }
+        if let folder = transport as? LocalDirectorySyncTransport { return "folder|" + folder.place }
+        return nil
+    }
+
+    /// The place of a server generation's scope: the records of a state with a generation kept are of
+    /// that server and vault.
+    static func serverPlace(_ scope: String) -> String { "server|" + scope }
 
     // MARK: Index
 
@@ -659,30 +715,40 @@ public final class SyncEngine: @unchecked Sendable {
     /// The server generation `sync-state.bin` keeps, and for whom; nil when it keeps none.
     func keptServerGeneration() throws -> KeptGeneration? { try loadState().server }
 
+    /// The place `sync-state.bin` keeps its records for (`place(of:)`); nil when it names none.
+    func keptPlace() throws -> String? { try loadState().place }
+
     private func loadState() throws -> SyncState {
         guard FileManager.default.fileExists(atPath: stateURL.path) else { return SyncState() }
         let plaintext = try AEAD.open(SecureFile.read(stateURL), key: repository.vault.syncEnvelopeKey, aad: stateAAD)
         return try Self.decodeState(plaintext)
     }
 
-    /// A map of items is format 1, the items with a server generation format 2; a newer version's
-    /// state stops the sync before anything is fetched (starting over from nothing would push this
-    /// device's files over newer ones).
+    /// A map of items is format 1 (no place said: a version from before places kept it); the items
+    /// with a server generation format 2, whose server and vault are the place; the items with a place
+    /// format 3. A newer version's state stops the sync before anything is fetched (starting over from
+    /// nothing would push this device's files over newer ones).
     private static func decodeState(_ plaintext: Data) throws -> SyncState {
         try DocumentFormat.check(plaintext, supported: stateFormat, what: "sync-state.bin")
-        if DocumentFormat.declared(in: plaintext) == stateFormat {
+        if let format = DocumentFormat.declared(in: plaintext), format > 1 {
             let document = try JSONCoding.decoder.decode(StateDocument.self, from: plaintext)
-            return SyncState(items: document.items, server: document.serverGeneration)
+            return SyncState(items: document.items, server: document.serverGeneration,
+                             place: document.place ?? document.serverGeneration.map { serverPlace($0.scope) })
         }
         return SyncState(items: try JSONCoding.decoder.decode([String: ItemState].self, from: plaintext))
     }
 
-    /// Format 1 while no server generation is kept — what every version before reads — and format 2
-    /// with one.
+    /// Format 2 while a server generation is kept for the records' place — what the version that
+    /// brought generations reads — format 3 with a place and no generation, and format 1 (what every
+    /// version before reads) with neither.
     private func saveState(_ state: SyncState) throws {
         let plaintext: Data
-        if let server = state.server {
-            plaintext = try JSONCoding.encoder.encode(StateDocument(format: Self.stateFormat, items: state.items, serverGeneration: server))
+        if let server = state.server, state.place == Self.serverPlace(server.scope) {
+            plaintext = try JSONCoding.encoder.encode(StateDocument(format: Self.generationStateFormat, items: state.items,
+                                                                    serverGeneration: server, place: nil))
+        } else if state.place != nil || state.server != nil {
+            plaintext = try JSONCoding.encoder.encode(StateDocument(format: Self.stateFormat, items: state.items,
+                                                                    serverGeneration: state.server, place: state.place))
         } else {
             plaintext = try JSONCoding.encoder.encode(state.items)
         }

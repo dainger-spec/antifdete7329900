@@ -127,7 +127,9 @@ final class AppUpdater: ObservableObject, Updater {
     /// left open found a release up to six hours after it was out (the owner, 14 November, after
     /// publishing 0.1.13). The appcast is a few kilobytes.
     static let interval: TimeInterval = 3600
-    static var firstCheckDelay: TimeInterval = 60
+    /// The first check comes a few seconds after a launch: it was a minute, and a person who quit
+    /// and opened Lumen to get a release looked before the minute was out (the owner, 16 November).
+    static var firstCheckDelay: TimeInterval = 3
     /// The person comes back to Lumen — brings it to the front, or the Mac wakes — and the last
     /// check is older than this: the feed is asked again then, a few seconds on, rather than at
     /// the next hour. Zero: never (the update scenarios, which count the feed's requests).

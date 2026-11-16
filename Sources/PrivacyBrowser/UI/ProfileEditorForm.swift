@@ -917,7 +917,13 @@ struct ProfileEditorForm: View {
         if draft.camera.source == .video {
             cameraMediaRow(name: draft.cameraVideoName, hasData: draft.camera.videoData != nil,
                            choose: onChooseCameraVideo, clear: { draft.clearCameraVideo() })
-            EditorNote(L("editor.camera.video.note"))
+            EditorNote(String(format: L("editor.camera.video.note"), CameraSubstitution.maxMediaBytes / (1024 * 1024)))
+        }
+        // Media chosen before the editor kept them within what syncs (a video of up to 12 MB): kept,
+        // and the camera works here as before, but the profile's settings wait at every sync.
+        if draft.camera.mediaBytes > CameraSubstitution.maxMediaBytes {
+            EditorNote(String(format: L("editor.camera.media.tooLargeToSync"), CameraSubstitution.maxMediaBytes / (1024 * 1024)),
+                       tone: .warning)
         }
         EditorRow(L("editor.camera.color")) {
             ColorPicker(L("editor.camera.color"), selection: cameraColor, supportsOpacity: false)

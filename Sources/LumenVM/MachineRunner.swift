@@ -184,16 +184,6 @@ final class MachineNetwork {
     private var stopped = false
 }
 
-/// What covers the machine's screen while a machine shown as a browser starts: its macOS's
-/// sign-in and desktop are not what the person opened. A click takes it away — nobody is ever
-/// kept from the machine by it.
-private final class StartCover: NSView {
-    var dismiss: (() -> Void)?
-
-    override func mouseDown(with event: NSEvent) { dismiss?() }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-}
-
 /// The guide's scrolled content, top to bottom.
 private final class GuideDocument: NSView {
     override var isFlipped: Bool { true }
@@ -230,9 +220,19 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     private var woken = false
     /// The app's panel of where the machine connects is open (`hosts on`).
     private var watchingHosts = false
-    /// Browser mode's cover, while it is up, and when the machine was started.
-    private var cover: NSView?
+    /// The machine's screen in the window (a profile's machine), and the cover over it while a
+    /// start's settings are put in place (`StartCover`); when the machine's macOS was started.
+    private var screen: MachineScreen?
+    private var startCover: StartCover?
     private var startedAt = Date()
+    /// Told when this Mac wakes from sleep (`macWoke`).
+    private var macWakeObserver: NSObjectProtocol?
+    /// Where the window was last kept (`VMWindowPlacement`), the write that is waiting for the
+    /// person to let go of the window, and whether the window is full screen or on its way there
+    /// or back (its frame is then this Mac's screen's, not one to go back to).
+    private var keptPlacement: VMWindowPlacement?
+    private var placementWrite: DispatchWorkItem?
+    private var fullScreenBusy = false
 
     init(request: VMHelperRequest) {
         self.request = request
@@ -249,10 +249,11 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
             try prepareMachine()
             guard let hardwareModel = VZMacHardwareModel(dataRepresentation: try Data(contentsOf: files.hardwareModel)),
                   hardwareModel.isSupported else {
-                HelperIO.fail("This machine's macOS cannot run on this Mac (its virtual Mac model is not supported here).")
+                HelperIO.fail("This machine's macOS cannot run on this Mac (its virtual Mac model is not supported here).",
+                              kind: .notSupportedHere)
             }
             guard let identifier = VZMacMachineIdentifier(dataRepresentation: try Data(contentsOf: files.machineIdentifier)) else {
-                HelperIO.fail("This machine's identifier cannot be read.")
+                HelperIO.fail("This machine's identifier cannot be read.", kind: .files)
             }
             // A request the guest made before, and never took: not this start's. The same for
             // the word that says the machine was woken.
@@ -284,8 +285,10 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
             let machine = VZVirtualMachine(configuration: configuration)
             machine.delegate = self
             self.machine = machine
-            showWindow(for: machine, covered: request.browserMode == true && saved == nil)
+            showWindow(for: machine)
             if saved != nil {
+                // Put to sleep before its settings were in, it is covered until they are.
+                putUpCover(woken: true)
                 wake(machine)
             } else {
                 start(machine, notWoken: refusal)
@@ -308,9 +311,25 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
                 }
             }
             trafficTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.reportTraffic() }
+            macWakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification,
+                                                                               object: nil, queue: .main) { [weak self] _ in
+                self?.macWoke()
+            }
         } catch {
             fail(error)
         }
+    }
+
+    /// This Mac slept with the machine open, and has woken. The machine stood still for as long —
+    /// nothing in it ran — and its clock is that of the moment the Mac went to sleep until its
+    /// macOS next asks for the time, which it does now and then. It is told at once, the way a
+    /// machine woken from a saved state is: the word in the shared folder, on which the boot
+    /// script asks for the time (tools 11), answered by this Mac's clock (docs/VM_NETWORK.md).
+    /// A profile's machine only: the base's shared folder is the person's to look into.
+    private func macWoke() {
+        guard request.settingsRevision != nil, machine != nil, !finished, !stopping, !waking else { return }
+        HelperIO.log("clock: this Mac woke from sleep; the machine is told to ask for the time")
+        tellTheGuestItWoke()
     }
 
     // MARK: The machine's files
@@ -322,11 +341,11 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     private func prepareMachine() throws {
         guard !files.isComplete else { return }
         guard let basePath = request.baseDirectory else {
-            throw CocoaError(.fileNoSuchFile, userInfo: [NSLocalizedDescriptionKey: "This machine has no disk, and no base system to make it from."])
+            throw VMFailure(.noBase, "This machine has no disk, and no base system to make it from.")
         }
         let base = VMLibrary.MachineFiles(directory: URL(fileURLWithPath: basePath, isDirectory: true))
         guard base.isComplete else {
-            throw CocoaError(.fileNoSuchFile, userInfo: [NSLocalizedDescriptionKey: "The base system is not installed."])
+            throw VMFailure(.noBase, "The base system is not installed.")
         }
         let manager = FileManager.default
         try manager.createDirectory(at: files.share, withIntermediateDirectories: true)
@@ -347,7 +366,7 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
 
     // MARK: The window
 
-    private func showWindow(for machine: VZVirtualMachine, covered: Bool) {
+    private func showWindow(for machine: VZVirtualMachine) {
         let view = VZVirtualMachineView()
         machineView = view
         view.virtualMachine = machine
@@ -377,18 +396,26 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
             // What is left to do in this machine, said in its own window: the app's window, which
             // has the same words, is behind this one.
             window.contentView = Self.content(of: view, under: hint)
-        } else if covered {
-            // A machine shown as a browser, starting: its macOS's sign-in and desktop are behind
-            // a cover until Safari is over its whole screen.
-            window.contentAspectRatio = NSSize(width: display.pixelsWide, height: display.pixelsHigh)
-            window.contentView = content(of: view, coveredWith: text("opening", "Opening…"))
         } else {
+            // A profile's machine: its screen, in a view a start's cover is put over
+            // (`putUpCover`).
             window.contentAspectRatio = NSSize(width: display.pixelsWide, height: display.pixelsHigh)
-            window.contentView = view
+            let screen = MachineScreen()
+            view.translatesAutoresizingMaskIntoConstraints = false
+            screen.addSubview(view)
+            NSLayoutConstraint.activate([
+                view.topAnchor.constraint(equalTo: screen.topAnchor),
+                view.bottomAnchor.constraint(equalTo: screen.bottomAnchor),
+                view.leadingAnchor.constraint(equalTo: screen.leadingAnchor),
+                view.trailingAnchor.constraint(equalTo: screen.trailingAnchor),
+            ])
+            window.contentView = screen
+            self.screen = screen
         }
         window.delegate = self
         window.isReleasedWhenClosed = false
         window.center()
+        restoreWindowPlacement(window)
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(view)
         self.window = window
@@ -408,90 +435,99 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
 
     static let guideWidth: CGFloat = 320
 
-    /// The machine's screen under a cover with the machine's name and a word on it.
-    private func content(of view: NSView, coveredWith words: String) -> NSView {
-        let cover = StartCover()
-        cover.wantsLayer = true
-        cover.layer?.backgroundColor = NSColor(calibratedWhite: 0.07, alpha: 1).cgColor
-        cover.dismiss = { [weak self] in self?.uncover() }
-        let title = NSTextField(labelWithString: request.windowTitle)
-        title.font = .systemFont(ofSize: 20, weight: .semibold)
-        title.textColor = NSColor(calibratedWhite: 0.96, alpha: 1)
-        let label = NSTextField(labelWithString: words)
-        label.font = .systemFont(ofSize: 13)
-        label.textColor = NSColor(calibratedWhite: 0.62, alpha: 1)
-        let spinner = NSProgressIndicator()
-        spinner.style = .spinning
-        spinner.controlSize = .small
-        spinner.appearance = NSAppearance(named: .darkAqua)
-        spinner.startAnimation(nil)
-        let stack = NSStackView(views: [title, spinner, label])
-        stack.orientation = .vertical
-        stack.alignment = .centerX
-        stack.spacing = 12
-        let container = NSView()
-        for subview in [view, cover] {
-            subview.translatesAutoresizingMaskIntoConstraints = false
-            container.addSubview(subview)
+    // MARK: Where the window was left
+
+    /// A profile's machine opens where its window was left (`VMWindowPlacement`, a note beside
+    /// its disk): on the display the person put it on, at the size they gave it — not in the
+    /// middle of the main screen at every start, over the other machine's window. Where the note
+    /// is none, the machine's screen has changed, or the place is no longer on a screen (a
+    /// display is gone), the window stays where a new one opens.
+    private func restoreWindowPlacement(_ window: NSWindow) {
+        guard screen != nil, let kept = VMWindowPlacement.read(from: files.window) else { return }
+        let screens = NSScreen.screens.map { display -> VMWindowPlacement.Rect in
+            let visible = display.visibleFrame
+            return VMWindowPlacement.Rect(x: Double(visible.origin.x), y: Double(visible.origin.y),
+                                          width: Double(visible.size.width), height: Double(visible.size.height))
         }
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        cover.addSubview(stack)
-        NSLayoutConstraint.activate([
-            view.topAnchor.constraint(equalTo: container.topAnchor),
-            view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            cover.topAnchor.constraint(equalTo: container.topAnchor),
-            cover.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            cover.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            cover.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            stack.centerXAnchor.constraint(equalTo: cover.centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo: cover.centerYAnchor),
-        ])
-        self.cover = cover
-        return container
+        guard let frame = kept.restored(onScreens: screens, pixelsWide: request.display.pixelsWide,
+                                        pixelsHigh: request.display.pixelsHigh) else { return }
+        keptPlacement = kept
+        window.setFrame(NSRect(x: frame.x, y: frame.y, width: frame.width, height: frame.height), display: false)
     }
 
-    /// Takes the cover away, and gives the keys back to the machine.
-    private func uncover() {
-        guard let cover else { return }
-        self.cover = nil
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.25
-            cover.animator().alphaValue = 0
-        }, completionHandler: { cover.removeFromSuperview() })
-        if let machineView { window?.makeFirstResponder(machineView) }
+    /// The window as it stands, kept for the machine's next start — not while it is full screen
+    /// or minimised, when its frame is not one to go back to.
+    private func keepWindowPlacement() {
+        placementWrite?.cancel()
+        placementWrite = nil
+        guard screen != nil, !fullScreenBusy, let window, !window.isMiniaturized, !window.styleMask.contains(.fullScreen) else { return }
+        let frame = window.frame
+        let placement = VMWindowPlacement(frame: VMWindowPlacement.Rect(x: Double(frame.origin.x), y: Double(frame.origin.y),
+                                                                        width: Double(frame.size.width), height: Double(frame.size.height)),
+                                          pixelsWide: request.display.pixelsWide, pixelsHigh: request.display.pixelsHigh)
+        guard placement != keptPlacement else { return }
+        keptPlacement = placement
+        try? placement.write(to: files.window)
+    }
+
+    /// The window was moved or resized: kept once the person has let go of it for a moment.
+    private func windowPlacementChanged() {
+        guard screen != nil, !finished else { return }
+        placementWrite?.cancel()
+        let write = DispatchWorkItem { [weak self] in self?.keepWindowPlacement() }
+        placementWrite = write
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: write)
+    }
+
+    func windowDidMove(_ notification: Notification) { windowPlacementChanged() }
+    func windowDidResize(_ notification: Notification) { windowPlacementChanged() }
+    func windowWillEnterFullScreen(_ notification: Notification) { fullScreenBusy = true }
+    func windowDidExitFullScreen(_ notification: Notification) { fullScreenBusy = false }
+    /// Full screen that did not come about: the window is a window again.
+    func windowDidFailToEnterFullScreen(_ window: NSWindow) { fullScreenBusy = false }
+
+    // MARK: The start's cover
+
+    /// The machine's screen behind a cover until its guest says this start's settings are in
+    /// (`StartCover`, `VMStartCover`): a profile's machine started anew — not the base, whose
+    /// window is for its setup, and not a machine woken as it was put to sleep, unless that was
+    /// before its settings were in (then its script goes on with them as it wakes).
+    private func putUpCover(woken: Bool) {
+        guard startCover == nil, let screen, let machineView else { return }
+        var asleepWith: VMGuestStatus?
+        if woken, case .success(let said) = VMGuestStatus.read(from: files.status) { asleepWith = said }
+        guard VMStartCover.covers(settingsRevision: request.settingsRevision, woken: woken, asleepWith: asleepWith) else { return }
+        let request = self.request, status = files.status, since = woken ? Date() : startedAt
+        MainActor.assumeIsolated {
+            let cover = StartCover(screen: screen, machineView: machineView, request: request, statusURL: status, startedAt: since)
+            cover.onSafariOpen = { [weak self] in self?.safariOpened() }
+            self.startCover = cover
+        }
+    }
+
+    /// A machine shown as a browser whose guest says Safari is open: Safari is put over the
+    /// machine's whole screen, then the cover goes. Safari's window is on the screen a few seconds
+    /// after it was opened.
+    private func safariOpened() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self, !self.finished else { return }
+            self.pressGuestFullScreen()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.revealScreen() }
+        }
+    }
+
+    private func revealScreen() {
+        guard let startCover else { return }
+        MainActor.assumeIsolated { startCover.reveal() }
+    }
+
+    /// The machine is shutting down or going to sleep: a cover that is up stays, and no longer goes.
+    private func haltCover() {
+        guard let startCover else { return }
+        MainActor.assumeIsolated { startCover.halt() }
     }
 
     // MARK: Browser mode
-
-    /// A machine shown as a browser, started anew: when its boot script says it has opened
-    /// Safari (the status file, written after), Safari is put over the machine's whole screen
-    /// and the cover goes. A machine whose script never says so is uncovered after two minutes,
-    /// as it is.
-    private func watchForSafari() {
-        guard request.browserMode == true, cover != nil else { return }
-        let started = startedAt
-        let status = files.status
-        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] timer in
-            guard let self, !self.finished, self.cover != nil else { return timer.invalidate() }
-            let age = Date().timeIntervalSince(started)
-            var applied = false
-            if let modified = (try? FileManager.default.attributesOfItem(atPath: status.path))?[.modificationDate] as? Date,
-               modified > started, case .success(let said) = VMGuestStatus.read(from: status), said.appliedRevision != nil {
-                applied = true
-            }
-            guard applied || age > 120 else { return }
-            timer.invalidate()
-            guard applied else { return self.uncover() }
-            // Safari's window is on the screen a few seconds after it was opened.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
-                guard let self, !self.finished else { return }
-                self.pressGuestFullScreen()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.uncover() }
-            }
-        }
-    }
 
     /// Control-Command-F, as from the machine's own keyboard: what puts the front window of its
     /// macOS full screen, or back. The events are made here and given to the machine's view, which
@@ -698,13 +734,13 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
 
     private func start(_ machine: VZVirtualMachine, notWoken refusal: VMWakeRefusal?) {
         startedAt = Date()
+        putUpCover(woken: false)
         machine.start { result in
             DispatchQueue.main.async {
                 switch result {
                 case .failure(let error): self.fail(error)
                 case .success:
                     HelperIO.emit(VMHelperEvent(kind: .started, notWoken: refusal?.rawValue))
-                    self.watchForSafari()
                 }
             }
         }
@@ -832,24 +868,29 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
             return
         }
         stopping = true
+        haltCover()
         window?.title = request.windowTitle + " — " + text("sleeping", "saving…")
-        let giveUp: (String) -> Void = { [weak self] why in
+        let giveUp: (String, Error?) -> Void = { [weak self] why, error in
             HelperIO.log("sleep: the state was not saved (\(why)); the machine is shut down instead")
             guard let self, !self.finished else { return }
+            // Said to the app at once: the row then says the machine is shutting down, not being
+            // saved, and afterwards why it was not kept — a full disk above all.
+            HelperIO.emit(VMHelperEvent(kind: .notKept, message: error.map { ($0 as NSError).localizedDescription },
+                                        failure: error.flatMap { VMFailureKind.of($0) }?.rawValue))
             self.removeSavedState()
             self.canKeepState = false
             self.stopping = false
             guard machine.state == .paused, machine.canResume else { return self.shutDown(asking: false) }
             machine.resume { _ in DispatchQueue.main.async { self.shutDown(asking: false) } }
         }
-        guard machine.canPause else { return giveUp("the machine cannot be paused now") }
+        guard machine.canPause else { return giveUp("the machine cannot be paused now", nil) }
         machine.pause { result in
             DispatchQueue.main.async {
-                if case .failure(let error) = result { return giveUp(Self.kind(of: error)) }
+                if case .failure(let error) = result { return giveUp(Self.kind(of: error), error) }
                 self.removeSavedState()
                 machine.saveMachineStateTo(url: self.files.state) { error in
                     DispatchQueue.main.async {
-                        if let error { return giveUp(Self.kind(of: error)) }
+                        if let error { return giveUp(Self.kind(of: error), error) }
                         guard machine.canStop else { self.finishAsleep() }
                         machine.stop { _ in DispatchQueue.main.async { self.finishAsleep() } }
                     }
@@ -862,17 +903,32 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     /// it — this start's stamp, the disk as it was left, the names its network knew — and
     /// without that note the state is not kept.
     private func finishAsleep() -> Never {
+        keepWindowPlacement()
         finished = true
         trafficTimer?.invalidate()
         network?.stop()
         var asleep = false
+        var problem: Error?
         if let stamp = request.stateStamp, let mark = VMSavedState.mark(ofDisk: files.disk),
            FileManager.default.fileExists(atPath: files.state.path) {
             let names = (network?.knownNames() ?? []).map { VMSavedState.Name(name: $0.name, address: $0.address) }
             let info = VMSavedState(stamp: stamp, diskLength: mark.length, diskModified: mark.modified, names: names)
-            asleep = (try? info.write(to: files.stateInfo)) != nil
+            do {
+                try info.write(to: files.stateInfo)
+                asleep = true
+            } catch {
+                problem = error
+            }
         }
-        if !asleep { removeSavedState() }
+        if !asleep {
+            // A state without its note is nobody's: removed — and said, so that the machine's next
+            // start, an ordinary one, is not a surprise.
+            removeSavedState()
+            let why = problem.map { Self.kind(of: $0) } ?? "nothing to write it from"
+            HelperIO.log("sleep: the saved state's note was not written (\(why)); the state is not kept")
+            HelperIO.emit(VMHelperEvent(kind: .notKept, message: problem.map { ($0 as NSError).localizedDescription },
+                                        failure: problem.flatMap { VMFailureKind.of($0) }?.rawValue))
+        }
         try? FileManager.default.removeItem(at: shutdownRequestURL)
         HelperIO.emit(VMHelperEvent(kind: .stopped, asleep: asleep))
         exit(0)
@@ -896,6 +952,7 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
             return
         }
         stopping = true
+        haltCover()
         window?.title = request.windowTitle + " — " + text("stopping", "shutting down…")
         // The guest writes the share too: a link left in the request's place goes, itself, first.
         if !VMShareFile.isRegularFile(shutdownRequestURL) { try? FileManager.default.removeItem(at: shutdownRequestURL) }
@@ -994,6 +1051,7 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     }
 
     private func finish() -> Never {
+        keepWindowPlacement()
         finished = true
         trafficTimer?.invalidate()
         reportTraffic()

@@ -242,9 +242,51 @@ public struct CameraSubstitution: Codable, Equatable, Sendable {
     public static let maxFrameRate = 60
     public static let maxDeviceLabelLength = 120
     /// The embedded media travels with the profile (it is kept and synced with the settings), so
-    /// it is capped: a still photo and a short loop, not a film.
+    /// it is capped: a still photo and a short loop, not a film. These are what a stored profile is
+    /// held to (`validate`): profiles saved before `maxMediaBytes` may hold a video of up to 12 MB,
+    /// and keep working. A file chosen now is held to `maxMediaBytes` as well (`mediaFitsSync`).
     public static let maxImageBytes = 4 * 1024 * 1024
     public static let maxVideoBytes = 12 * 1024 * 1024
+
+    /// What the camera's media may take, the image and the video together (both are kept, whichever
+    /// is the source), so that the profile's settings still sync. Their bytes are in the settings
+    /// (`config.bin`), which sync sends as one object, and the Lumen server takes 16 MiB an object
+    /// (its CONTRACT §16.1; `413 too_large`). On the way they are written as base64 three times — in
+    /// the settings' JSON, in the sync payload, in its envelope — each 4/3 of what it encodes, and
+    /// JSON writes each `/` of it as `\/` (1 character in 64 for compressed media): 2.48 times in all,
+    /// so 6.44 MiB of media is the most that fits. 6 MiB makes a 14.9 MiB object, room for the rest
+    /// of the settings. Before, a video of up to 12 MiB was taken, and such a profile's settings
+    /// were refused at every sync, with a message that named no profile.
+    public static let maxMediaBytes = 6 * 1024 * 1024
+
+    /// The image's and the video's bytes together.
+    public var mediaBytes: Int { (imageData?.count ?? 0) + (videoData?.count ?? 0) }
+
+    /// What `data` takes in the settings' JSON: its base64, and a `\` before each `/` of it — for
+    /// compressed media 4/3 of its size and a little more, for an uncompressed image with long runs
+    /// of white up to twice that.
+    public static func encodedSize(of data: Data?) -> Int {
+        guard let data, !data.isEmpty else { return 0 }
+        let base64 = data.base64EncodedData()
+        var slashes = 0
+        for byte in base64 where byte == UInt8(ascii: "/") { slashes += 1 }
+        return base64.count + slashes
+    }
+
+    /// What `maxMediaBytes` of compressed media takes in the settings' JSON: its base64, the `\`
+    /// before one character in 64 of it, and a little room (1 in 256), so that a file of
+    /// `maxMediaBytes` is taken whatever its bytes happen to hold.
+    static var encodedMediaBudget: Int {
+        let base64 = (maxMediaBytes + 2) / 3 * 4
+        return base64 + base64 / 64 + base64 / 256
+    }
+
+    /// Whether the image and the video, together, keep the profile's settings within one sync object:
+    /// in the settings' JSON they take no more than `maxMediaBytes` of compressed media does. An
+    /// uncompressed image counts for what it takes there, up to twice its size.
+    public var mediaFitsSync: Bool {
+        Self.encodedSize(of: imageData) + Self.encodedSize(of: videoData) <= Self.encodedMediaBudget
+    }
 
     public init(mode: Mode = .off,
                 source: Source = .bars,

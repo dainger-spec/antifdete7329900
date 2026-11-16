@@ -29,6 +29,34 @@ final class ProfileCloneTests: XCTestCase {
         XCTAssertNil(ProfileClone.configuration(from: original, proxy: nil).proxy)
     }
 
+    /// The camera's choices are copied, its identity is not: each copy shows sites a camera of its own
+    /// (`deviceId`/`groupId` come from `deviceSecret`), and the bytes of its media stay as they were.
+    func testACopysCameraHasAnIdentityOfItsOwn() throws {
+        var original = ProfileConfiguration()
+        let image = Data([0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3])
+        original.cameraSubstitution = CameraSubstitution(mode: .substitute, source: .image, deviceLabel: "FaceTime HD Camera",
+                                                         deviceSecret: CameraSubstitution.newDeviceSecret(),
+                                                         imageData: image, imageType: "image/jpeg")
+        let copies = (0..<3).map { _ in ProfileClone.configuration(from: original, proxy: nil) }
+        let secrets = Set(copies.map(\.cameraSubstitution.deviceSecret))
+        XCTAssertEqual(secrets.count, 3, "each copy has a secret of its own")
+        XCTAssertFalse(secrets.contains(original.cameraSubstitution.deviceSecret), "no copy has the original's")
+        for copy in copies {
+            XCTAssertEqual(copy.cameraSubstitution.deviceSecret.count, 32)
+            XCTAssertTrue(copy.cameraSubstitution.deviceSecret.allSatisfy(\.isHexDigit))
+            var same = copy.cameraSubstitution
+            same.deviceSecret = original.cameraSubstitution.deviceSecret
+            XCTAssertEqual(same, original.cameraSubstitution, "every other camera choice, and the media, as the original's")
+            XCTAssertNoThrow(try copy.validate())
+        }
+
+        // A camera never turned on has no secret: the copy gets none either (the editor makes one when
+        // it is turned on, as for any profile).
+        let plain = ProfileClone.configuration(from: ProfileConfiguration(), proxy: nil)
+        XCTAssertEqual(plain.cameraSubstitution.deviceSecret, "")
+        XCTAssertEqual(plain.cameraSubstitution, ProfileConfiguration().cameraSubstitution)
+    }
+
     func testNamesGoOnFromTheOriginalsAndNeverRepeatOne() {
         XCTAssertEqual(ProfileClone.names(for: "Shop", count: 3, taken: ["Shop", "shop 3"]), ["Shop 2", "Shop 4", "Shop 5"])
         XCTAssertEqual(ProfileClone.names(for: "Shop 4", count: 2, taken: ["Shop 4"]), ["Shop 5", "Shop 6"])

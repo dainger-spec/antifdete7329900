@@ -78,7 +78,7 @@ final class ProxyListImportTests: XCTestCase {
             ftp://h.example:21
             h.example:99999
             h.example:port
-            1.2.3.4 1080
+            1.2.3.4:1080 5.6.7.8:1080
             a:b:c
             @h.example:80
             300.1.1.1:80
@@ -100,7 +100,8 @@ final class ProxyListImportTests: XCTestCase {
             .unreadable(.hasPath),
             .unreadable(.unterminatedIPv6),
         ])
-        XCTAssertEqual(report.problems[4].text, "1.2.3.4 1080")
+        // Two proxies on one line: not read as the first with the second for its login.
+        XCTAssertEqual(report.problems[4].text, "1.2.3.4:1080 5.6.7.8:1080")
         XCTAssertEqual(report.failures.count, 10)
     }
 
@@ -159,7 +160,9 @@ final class ProxyListImportTests: XCTestCase {
         XCTAssertEqual(ProxyListImport.readField("1.2.3.4"), .problem(.missingPort))
         XCTAssertEqual(ProxyListImport.readField("h.example:99999"), .problem(.unreadable(.invalidPort("99999"))))
         XCTAssertEqual(ProxyListImport.readField("ftp://h.example:21"), .problem(.unreadable(.unsupportedScheme("ftp"))))
-        XCTAssertEqual(ProxyListImport.readField("1.2.3.4 1080"), .problem(.unreadable(.containsWhitespace)))
+        XCTAssertEqual(ProxyListImport.readField("1.2.3.4:1080 5.6.7.8:1080"), .problem(.unreadable(.containsWhitespace)))
+        // Its parts with a space between them, as a table gives them (`ProxyImportFormatsTests`).
+        XCTAssertEqual(proxy("1.2.3.4 1080")?.proxy, ProxySettings(kind: .socks5, host: "1.2.3.4", port: 1080))
         XCTAssertEqual(ProxyListImport.readField("1.2.3.4:1080\n5.6.7.8:1080"), .several(2))
         XCTAssertEqual(ProxyListImport.readField("# provider\n1.2.3.4:1080  # Berlin"),
                        .proxy(ProxyListImport.Line(line: 2, proxy: ProxySettings(kind: .socks5, host: "1.2.3.4", port: 1080),
@@ -518,6 +521,47 @@ final class ProxyListTests: XCTestCase {
         XCTAssertEqual(list.format, 1)
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(list)) as? [String: Any])
         XCTAssertTrue((json["entries"] as? [[String: Any]])?.allSatisfy { $0["changeIPURL"] == nil && $0["changesIPOnLaunch"] == nil } == true)
+    }
+
+    /// The Profiles window finds every profile's proxy in the list each time it is drawn: through
+    /// `entriesByIdentity`, made once, it finds what going through the list for each profile found
+    /// — the first entry with the proxy's host (in any case), port and user name; none for a
+    /// proxy the list does not have. Two entries of one proxy (a list put together by hand, or by
+    /// an older build): the first, as before.
+    func testEntriesByIdentityFindWhatGoingThroughTheListFinds() {
+        var entries: [ProxyListEntry] = []
+        for index in 0..<300 {
+            let proxy = ProxySettings(kind: index % 2 == 0 ? .socks5 : .httpConnect, host: "Gate-\(index % 50).Example.com",
+                                      port: 1000 + index % 2, username: index % 3 == 0 ? nil : "user-\(index % 5)",
+                                      password: "p\(index)")
+            entries.append(ProxyListEntry(label: "entry \(index)", proxy: proxy,
+                                          lastCheck: index % 4 == 0 ? nil : ProxyCheckResult.alive(location: nil, latency: Double(index) / 1000)))
+        }
+        let list = ProxyList(entries: entries)
+        let byIdentity = ProxyList.entriesByIdentity(entries)
+        // Fewer identities than entries: the list above repeats proxies.
+        XCTAssertLessThan(byIdentity.count, entries.count)
+        var asked = entries.map(\.proxy)
+        // The same proxies as a profile may hold them: the host in another case, another password
+        // and type; and proxies the list does not have.
+        asked += entries.prefix(40).map { entry -> ProxySettings in
+            var proxy = entry.proxy
+            proxy.host = proxy.host.uppercased()
+            proxy.password = "another"
+            proxy.kind = .socks5
+            return proxy
+        }
+        asked.append(ProxySettings(kind: .socks5, host: "gate-1.example.com", port: 9))
+        asked.append(ProxySettings(kind: .socks5, host: "gate-1.example.com", port: 1001, username: "nobody"))
+        asked.append(ProxySettings(kind: .socks5, host: "elsewhere.example.com", port: 1001))
+        for proxy in asked {
+            let identity = ProxyList.identity(of: proxy)
+            let scanned = entries.first { ProxyList.identity(of: $0.proxy) == identity }
+            XCTAssertEqual(byIdentity[identity], scanned, identity)
+            XCTAssertEqual(byIdentity[identity], list.entry(for: proxy), identity)
+            XCTAssertEqual(byIdentity[identity]?.lastCheck, scanned?.lastCheck, identity)
+        }
+        XCTAssertTrue(ProxyList.entriesByIdentity([]).isEmpty)
     }
 }
 

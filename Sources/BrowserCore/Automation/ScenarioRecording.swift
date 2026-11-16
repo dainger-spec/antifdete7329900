@@ -13,6 +13,8 @@ public struct RecordedStep: Codable, Equatable, Sendable {
         case fill
         /// A key that does something by itself: Enter in a field.
         case press
+        /// A choice in a list (a `<select>`): its option's value, with the option's words (`label`).
+        case select
         /// Something that was done and cannot be replayed, said as a comment.
         case note
     }
@@ -26,13 +28,17 @@ public struct RecordedStep: Codable, Equatable, Sendable {
     /// The field held text before the typing: a replay selects it all first, so that what is
     /// typed takes its place as it did.
     public var replaces: Bool?
+    /// What the chosen option says (`select`): the line's comment, for whoever reads the scenario.
+    public var label: String?
 
-    public init(_ kind: Kind, selector: String? = nil, value: String? = nil, secret: Bool? = nil, replaces: Bool? = nil) {
+    public init(_ kind: Kind, selector: String? = nil, value: String? = nil, secret: Bool? = nil, replaces: Bool? = nil,
+                label: String? = nil) {
         self.kind = kind
         self.selector = selector
         self.value = value
         self.secret = secret
         self.replaces = replaces
+        self.label = label
     }
 }
 
@@ -61,13 +67,26 @@ public struct ScenarioRecording: Equatable, Sendable {
                 return [step]
             }
         }
-        if step.kind == .click || step.kind == .press { lastActionAt = date }
+        if step.kind == .select {
+            // A card's month or year: which list, never which choice — a comment, as it was
+            // before a list's choice could be replayed.
+            if step.secret == true { step = RecordedStep(.note, value: "select \(step.selector ?? ""): •••") }
+        }
+        if step.kind == .select {
+            // The same list chosen in again before anything else: the last choice is what counts.
+            if let last = steps.last, last.kind == .select, last.selector == step.selector {
+                lastActionAt = date
+                steps[steps.count - 1] = step
+                return [step]
+            }
+        }
+        if step.kind == .click || step.kind == .press || step.kind == .select { lastActionAt = date }
         steps.append(step)
         return [step]
     }
 
     /// The window's page loaded `address`. The first page, and one opened by its address, is a
-    /// `goto`; one that follows a click or Enter is waited for (`load`), once.
+    /// `goto`; one that follows a click, Enter or a choice in a list is waited for (`load`), once.
     public mutating func loaded(_ address: String, at date: Date = Date()) -> [RecordedStep] {
         guard address.lowercased().hasPrefix("http://") || address.lowercased().hasPrefix("https://") else { return [] }
         defer { lastAddress = address }
@@ -98,6 +117,9 @@ public struct ScenarioRecording: Equatable, Sendable {
             if step.secret == true { return select + "await page.type(\(selector), params.password || ''); // \(oneLine(passwordNote))" }
             return select + "await page.type(\(selector), \(quoted(step.value ?? "")));"
         case .press: return "await page.press(\(quoted(step.value ?? "Enter")));"
+        case .select:
+            let words = oneLine(step.label ?? "")
+            return "await page.selectOption(\(selector), \(quoted(step.value ?? "")));" + (words.isEmpty || words == step.value ? "" : " // \(words)")
         case .note: return "// \(oneLine(step.value ?? ""))"
         }
     }

@@ -8,6 +8,11 @@ public struct WarmUpTemplate: Codable, Equatable, Identifiable, Sendable {
     public var addresses: [String]
     public var searches: [String]
     public var createdAt: Date
+    /// Around the list, the everyday sites of the profile's country (`WarmUpPlanner.preset`). Nil
+    /// in a template from before there was the choice: yes.
+    public var addsEveryday: Bool?
+    /// The one country (ISO 3166-1 alpha-2) whose profiles the list is offered to; nil: all.
+    public var countryCode: String?
 
     public static let maximumNameLength = 60
 

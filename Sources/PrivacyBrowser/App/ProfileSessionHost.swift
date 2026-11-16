@@ -192,7 +192,11 @@ enum ProfileSessionHost {
             // Where the proxy exits could not be found: the manager says so, where the user looks.
             manager.onProxyLocationUnknown = { _ in ProfileSessionHost.send(.proxyLocationUnknown) }
             // Where it exits, when known: the country's flag on this process's Dock tile.
-            BrowserSession.onExitLocation = { _, location in DockIcon.showExit(country: location?.countryCode) }
+            // And in Safari's window, on the profile's chip (`SafariProfileMarker`).
+            BrowserSession.onExitLocation = { _, location in
+                DockIcon.showExit(country: location?.countryCode)
+                SafariProfileMarker.exitChanged()
+            }
             // A scenario's run log and its end, to the manager as they come.
             manager.onScenarioLine = { _, runID, line in ProfileSessionHost.send(.scenarioLine(runID: runID, line)) }
             manager.onScenarioEnded = { _, runID, outcome in ProfileSessionHost.send(.scenarioEnded(runID: runID, outcome)) }
@@ -279,20 +283,23 @@ enum ProfileSessionHost {
                 // The password window is the manager's own screen; from here the most it can do is
                 // bring the profile forward so the two are not fighting over the front.
                 NSApp.activate(ignoringOtherApps: true)
-            case .importCookies(let cookies):
+            case .importCookies(let cookies, let request):
+                // Answered with the request's id: the manager matches the answer to its import by it.
                 Task { @MainActor [weak self] in
-                    guard let self, let manager = self.manager else { return }
-                    let outcome = try? await manager.importCookies(cookies, into: self.profileID)
-                    ProfileSessionHost.send(.cookiesImported(outcome))
-                }
-            case .exportCookies:
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    guard let store = self.manager?.session(for: self.profileID)?.dataStore?.httpCookieStore else {
-                        ProfileSessionHost.send(.cookiesExported(nil))
+                    guard let self, let manager = self.manager else {
+                        ProfileSessionHost.send(.cookiesImported(nil, request: request))
                         return
                     }
-                    ProfileSessionHost.send(.cookiesExported(await CookieStoreSync.exportableCookies(in: store)))
+                    let outcome = try? await manager.importCookies(cookies, into: self.profileID)
+                    ProfileSessionHost.send(.cookiesImported(outcome, request: request))
+                }
+            case .exportCookies(let request):
+                Task { @MainActor [weak self] in
+                    guard let self, let store = self.manager?.session(for: self.profileID)?.dataStore?.httpCookieStore else {
+                        ProfileSessionHost.send(.cookiesExported(nil, request: request))
+                        return
+                    }
+                    ProfileSessionHost.send(.cookiesExported(await CookieStoreSync.exportableCookies(in: store), request: request))
                 }
             case .stopWarmUp:
                 manager?.stopWarmUp(profileID)

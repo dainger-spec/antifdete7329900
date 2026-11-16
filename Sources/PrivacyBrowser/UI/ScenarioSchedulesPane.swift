@@ -14,6 +14,8 @@ struct ScenarioSchedulesPane: View {
     var sample: Sample?
     /// A schedule to open the form with: "On a Schedule…" of the scenario editor.
     var proposed: ScenarioSchedule?
+    /// Under the Scenarios section's own header and tabs: without a title of its own.
+    var embedded = false
 
     struct Sample {
         var schedules: [ScenarioSchedule]
@@ -32,9 +34,16 @@ struct ScenarioSchedulesPane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(L("schedule.title"))
-                    .font(.lumenHeading)
-                    .foregroundStyle(Theme.textPrimary)
+                if embedded {
+                    Text(L("schedule.subtitle"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(L("schedule.title"))
+                        .font(.lumenHeading)
+                        .foregroundStyle(Theme.textPrimary)
+                }
                 Spacer()
                 Button {
                     draft = newSchedule()
@@ -42,15 +51,17 @@ struct ScenarioSchedulesPane: View {
                     .buttonStyle(.lumenPrimary)
                     .disabled(!allowed || refused || profiles.isEmpty || draft != nil)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 34)
-            .padding(.bottom, 6)
-            Text(L("schedule.subtitle"))
-                .font(.lumenSecondary)
-                .foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 14)
+            .padding(.horizontal, embedded ? 28 : 20)
+            .padding(.top, embedded ? 0 : 34)
+            .padding(.bottom, embedded ? 14 : 6)
+            if !embedded {
+                Text(L("schedule.subtitle"))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 14)
+            }
             if !allowed {
                 Text(L("schedule.notInPlan"))
                     .font(.lumenBody)
@@ -164,10 +175,7 @@ struct ScenarioSchedulesPane: View {
                         .foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if schedule.isEnabled, schedule.lastResult == .started, let last = schedule.lastRunAt {
-                    Text(String(format: L("schedule.state.last"), Self.shownRun(last)))
-                        .font(.lumenCaption)
-                        .foregroundStyle(Theme.textTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    lastRun(schedule, at: last)
                 }
             }
             Spacer(minLength: 12)
@@ -211,6 +219,51 @@ struct ScenarioSchedulesPane: View {
                 .disabled(!allowed || draft != nil)
             Button(L("common.delete"), role: .destructive) { pendingDelete = schedule }
         }
+    }
+
+    /// The run that was started last, and how it ended once it has: a run that failed is the
+    /// row's warning, in the run's own words (with the scenario's line); one that finished says
+    /// how long it took. While it is still going — and for a warm-up, whose own screen says how
+    /// it went — only when it was started.
+    @ViewBuilder
+    private func lastRun(_ schedule: ScenarioSchedule, at last: Date) -> some View {
+        let when = Self.shownRun(last)
+        if let end = schedule.lastEnd, end.kind == .failed {
+            Label(String(format: L("schedule.state.last.failed"), when, end.reason ?? "—"), systemImage: "exclamationmark.triangle.fill")
+                .font(.lumenSecondary)
+                .foregroundStyle(Theme.warning)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 2)
+        } else {
+            Text(Self.lastRunText(schedule.lastEnd, when: when))
+                .font(.lumenCaption)
+                .foregroundStyle(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// "Last run: Thu, 12 Nov, 10:07 — finished in 42 s", "— stopped by hand", or the time alone
+    /// while nothing is known of its end.
+    static func lastRunText(_ end: ScenarioSchedule.End?, when: String) -> String {
+        switch end?.kind {
+        case .finished?:
+            return String(format: L("schedule.state.last.finished"), when, shownLength(end?.duration ?? 0))
+        case .stopped?:
+            let why = end?.reason
+            if why == ScenarioRunner.StopReason.profileStopped.rawValue { return String(format: L("schedule.state.last.stopped.profile"), when) }
+            if why == ScenarioRunner.StopReason.rightsEnded.rawValue { return String(format: L("schedule.state.last.stopped.plan"), when) }
+            return String(format: L("schedule.state.last.stopped"), when)
+        case .failed?, nil:
+            return String(format: L("schedule.state.last"), when)
+        }
+    }
+
+    /// How long a run took: "42 s", "3 min 05 s", "2 h 10 min".
+    static func shownLength(_ seconds: TimeInterval) -> String {
+        let whole = Int(min(max(seconds, 0), 360_000).rounded())
+        if whole < 60 { return String(format: L("schedule.length.seconds"), whole) }
+        if whole < 3600 { return String(format: L("schedule.length.minutes"), whole / 60, whole % 60) }
+        return String(format: L("schedule.length.hours"), whole / 3600, (whole % 3600) / 60)
     }
 
     private func symbol(_ action: ScenarioSchedule.Action) -> String {
@@ -346,6 +399,7 @@ struct ScenarioSchedulesPane: View {
                         value.nextRunAt = saved.nextRunAt
                         value.lastRunAt = saved.lastRunAt
                         value.lastResult = saved.lastResult
+                        value.lastEnd = saved.lastEnd
                     }
                     if model.saveSchedule(value) { draft = nil }
                 }

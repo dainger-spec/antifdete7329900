@@ -152,9 +152,15 @@ final class ProfileManager: ObservableObject {
     private var lookupsInFlight: Set<UUID> = []
     /// The session warm-up robot of each profile that used one since unlock.
     private var warmUpRobots: [UUID: WarmUpRobot] = [:]
-    /// A cookie import sent to a profile's own process, waiting for its answer.
-    private var pendingCookieExports: [UUID: CheckedContinuation<[ImportedCookie], Error>] = [:]
-    private var pendingCookieImports: [UUID: CheckedContinuation<CookieImportOutcome, Error>] = [:]
+    /// Cookie imports and exports sent to profiles' own processes, waiting for their answers — by
+    /// the request's id, which the process sends back with its answer — each with the timer that
+    /// stops waiting for it. They were kept by the profile's id, and a timer was never cancelled:
+    /// an earlier request's timer ended a later one as "busy", and its answer could then end a
+    /// retry with the earlier request's counts.
+    private var pendingCookieImports: [UUID: (profile: UUID, continuation: CheckedContinuation<CookieImportOutcome, Error>,
+                                              timeout: Task<Void, Never>)] = [:]
+    private var pendingCookieExports: [UUID: (profile: UUID, continuation: CheckedContinuation<[ImportedCookie], Error>,
+                                              timeout: Task<Void, Never>)] = [:]
     /// WebDriver calls sent to profiles' own processes, waiting for their answers (by the call's id).
     private var pendingWebDriver: [UUID: (profile: UUID, continuation: CheckedContinuation<WebDriverAnswer, Never>)] = [:]
     /// The WebDriver's page of each profile run in this process that has a session (`webDriver`).
@@ -300,10 +306,11 @@ final class ProfileManager: ObservableObject {
         if sessions[id] == nil, children[id] == nil { proxyLocationUnknown.remove(id) }
         if let session = sessions[id] {
             // A profile that is only being warmed up has no window yet: a launch now gives it one.
-            if !session.hasVisibleWindow, openingWindow,
-               !SafariChromeHost.open(session: session, url: session.configuration.startURL) {
-                session.openFirstWindows(restoring: restorableTabs(of: id, session.configuration),
-                                         startURL: session.configuration.startURL)
+            if !session.hasVisibleWindow, openingWindow {
+                let tabs = restorableTabs(of: id, session.configuration)
+                if !SafariChromeHost.open(session: session, url: session.configuration.startURL, restoring: tabs) {
+                    session.openFirstWindows(restoring: tabs, startURL: session.configuration.startURL)
+                }
             }
             session.bringToFront()
             return
@@ -534,8 +541,12 @@ final class ProfileManager: ObservableObject {
         // view is its content (SafariChromeHost); everywhere else, and on a macOS where that is
         // not available, our own window as before. A launch for a warm-up opens none: the robot
         // browses in a window of its own that the user never sees.
-        if openingWindow, !SafariChromeHost.open(session: session, url: configuration.startURL) {
-            session.openFirstWindows(restoring: restorableTabs(of: id, configuration), startURL: configuration.startURL)
+        if openingWindow {
+            // The tabs it left open come back in either window (Settings → Startup → Restore tabs).
+            let tabs = restorableTabs(of: id, configuration)
+            if !SafariChromeHost.open(session: session, url: configuration.startURL, restoring: tabs) {
+                session.openFirstWindows(restoring: tabs, startURL: configuration.startURL)
+            }
         }
         try? repository.markLaunched(id)
         if lookup == nil, let lookupTask {
@@ -640,12 +651,18 @@ final class ProfileManager: ObservableObject {
                 self.scenarioLine(id, runID, line)
             case .scenarioEnded(let runID, let outcome):
                 self.scenarioEnded(id, runID, outcome)
-            case .cookiesImported(let outcome):
-                let pending = self.pendingCookieImports.removeValue(forKey: id)
-                if let outcome { pending?.resume(returning: outcome) } else { pending?.resume(throwing: CookieImportError.busy) }
-            case .cookiesExported(let cookies):
-                let pending = self.pendingCookieExports.removeValue(forKey: id)
-                if let cookies { pending?.resume(returning: cookies) } else { pending?.resume(throwing: CookieImportError.busy) }
+            case .cookiesImported(let outcome, let request):
+                if let outcome {
+                    self.endCookieImport(request, of: id, with: .success(outcome))
+                } else {
+                    self.endCookieImport(request, of: id, with: .failure(CookieImportError.busy))
+                }
+            case .cookiesExported(let cookies, let request):
+                if let cookies {
+                    self.endCookieExport(request, of: id, with: .success(cookies))
+                } else {
+                    self.endCookieExport(request, of: id, with: .failure(CookieImportError.busy))
+                }
             case .networkReport(let report):
                 for waiting in self.pendingNetworkReports.removeValue(forKey: id) ?? [] { waiting.resume(returning: report) }
                 self.onNetworkReport?(id, report)
@@ -667,7 +684,7 @@ final class ProfileManager: ObservableObject {
             case .proxyLocationUnknown:
                 self.noteProxyLocationUnknown(id, name: summary.name, last: stored.rememberedProxyLocation)
             case .sealed(let report):
-                self.log.notice("Profile \(id.uuidString, privacy: .public) sealed its data in \(Int(report.seconds), privacy: .public) s, attempts \(report.attempts, privacy: .public), forced \(report.forced, privacy: .public), pages closed \(report.pagesClosed, privacy: .public)")
+                self.log.notice("Profile \(id.uuidString, privacy: .public) sealed its data in \(Int(report.seconds), privacy: .public) s, attempts \(report.attempts, privacy: .public), forced \(report.forced, privacy: .public), pages closed \(report.pagesClosed, privacy: .public), archived \(Int(report.archivePasses ?? -1), privacy: .public) time(s), unchanged at \(Int(report.archivePassesSkipped ?? -1), privacy: .public) more attempt(s)")
                 self.onChildSealed?(id, report)
             case .menuWalk(let line):
                 self.onMenuWalk?(id, line)
@@ -686,8 +703,7 @@ final class ProfileManager: ObservableObject {
                 self.log.notice("Profile \(id.uuidString, privacy: .public)'s process \(child.processIdentifier, privacy: .public) ended with status \(status, privacy: .public) after the manager had let it go")
                 return
             }
-            self.pendingCookieImports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
-            self.pendingCookieExports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
+            self.endCookieRequests(of: id)
             self.children[id] = nil
             self.endWebDriver(of: id)
             self.releaseWebRTC(of: id, pid: child.processIdentifier)
@@ -947,12 +963,19 @@ final class ProfileManager: ObservableObject {
     /// What a stopping profile leaves open is kept for its next start; with the setting off, or a
     /// profile that keeps none, what was kept is forgotten. A run without a window of the user's (a
     /// warm-up) leaves what was kept as it was.
-    private func rememberOpenTabs(of id: UUID, _ tabs: OpenTabs?, configuration: ProfileConfiguration) {
+    ///
+    /// `emptyForgets`: in Safari's window, where the person's windows are read as they stand
+    /// (`SafariTabs`), windows that held no page at the end — start pages alone — leave nothing
+    /// open: the tabs of the run before, closed since, are forgotten rather than opened again.
+    private func rememberOpenTabs(of id: UUID, _ tabs: OpenTabs?, configuration: ProfileConfiguration,
+                                  emptyForgets: Bool = false) {
         do {
             if !keepsOpenTabs(configuration) {
                 try repository.removeOpenTabs(for: id)
             } else if let tabs, !tabs.windows.isEmpty {
                 try repository.saveOpenTabs(tabs, for: id)
+            } else if tabs != nil, emptyForgets {
+                try repository.removeOpenTabs(for: id)
             }
         } catch {
             log.error("The open tabs of \(id.uuidString, privacy: .public) could not be kept: \(error.logKind, privacy: .public)")
@@ -1354,8 +1377,11 @@ final class ProfileManager: ObservableObject {
         }
         if let child = children.removeValue(forKey: id) {
             // Its exit is not heard from here on (`onExit` is taken away below): the WebDriver
-            // calls still waiting for this process get their answer now.
+            // calls and the cookie imports and exports still waiting for this process get their
+            // answer now (the cookies' waited for their timer, and held the profile "busy" for a
+            // launch after this stop).
             endWebDriver(of: id)
+            endCookieRequests(of: id)
             runningProfileIDs.remove(id)
             releaseWebRTC(of: id, pid: child.processIdentifier)
             windowsUp.remove(id)
@@ -1403,14 +1429,16 @@ final class ProfileManager: ObservableObject {
             }
         }
         session.shutDown()
-        rememberOpenTabs(of: id, session.lastOpenTabs, configuration: session.configuration)
+        rememberOpenTabs(of: id, session.lastOpenTabs, configuration: session.configuration,
+                         emptyForgets: SafariChromeHost.isHosting && SafariChromeHost.canHost(session.configuration))
         // `session` is now the last reference; it is released when this scope ends, but its
         // data store reference was already dropped in shutDown().
         if !ephemeral, let key {
             let started = Date()
             let result = try await webDataVault.seal(profileID: id, key: key)
             onSealed?(id, ProfileSealReport(forced: result.forced, attempts: result.attempts,
-                                            seconds: Date().timeIntervalSince(started), pagesClosed: pagesClosedForQuit))
+                                            seconds: Date().timeIntervalSince(started), pagesClosed: pagesClosedForQuit,
+                                            archivePasses: result.archivePasses, archivePassesSkipped: result.archivePassesSkipped))
         }
     }
 
@@ -1701,7 +1729,41 @@ final class ProfileManager: ObservableObject {
 
     enum CookieImportError: LocalizedError {
         case busy
-        var errorDescription: String? { L("cookies.error.busy") }
+        /// The profile stopped, or its process ended, before it answered.
+        case profileStopped
+        var errorDescription: String? {
+            switch self {
+            case .busy: return L("cookies.error.busy")
+            case .profileStopped: return L("cookies.error.stopped")
+            }
+        }
+    }
+
+    /// The import `request` sent to profile `profile`'s process ends with `result` — its answer, or
+    /// a failure — and its timer is let go. An answer for a request no longer waited for (it timed
+    /// out) is dropped.
+    private func endCookieImport(_ request: UUID, of profile: UUID, with result: Result<CookieImportOutcome, Error>) {
+        guard pendingCookieImports[request]?.profile == profile, let pending = pendingCookieImports.removeValue(forKey: request) else { return }
+        pending.timeout.cancel()
+        pending.continuation.resume(with: result)
+    }
+
+    /// `endCookieImport`, for an export.
+    private func endCookieExport(_ request: UUID, of profile: UUID, with result: Result<[ImportedCookie], Error>) {
+        guard pendingCookieExports[request]?.profile == profile, let pending = pendingCookieExports.removeValue(forKey: request) else { return }
+        pending.timeout.cancel()
+        pending.continuation.resume(with: result)
+    }
+
+    /// The profile's process stopped or exited: every import and export it was asked for and has
+    /// not answered fails now, saying so.
+    private func endCookieRequests(of profile: UUID) {
+        for (request, pending) in pendingCookieImports where pending.profile == profile {
+            endCookieImport(request, of: profile, with: .failure(CookieImportError.profileStopped))
+        }
+        for (request, pending) in pendingCookieExports where pending.profile == profile {
+            endCookieExport(request, of: profile, with: .failure(CookieImportError.profileStopped))
+        }
     }
 
     /// Imports `cookies` into a profile: at once when it runs, else at its next launch, before
@@ -1709,15 +1771,18 @@ final class ProfileManager: ObservableObject {
     func importCookies(_ cookies: [ImportedCookie], into id: UUID) async throws -> CookieImportOutcome {
         // A profile in its own process imports into its own store, and says how it went.
         if let child = children[id] {
-            guard pendingCookieImports[id] == nil else { throw CookieImportError.busy }
+            // One import into a profile at a time, as before.
+            guard !pendingCookieImports.values.contains(where: { $0.profile == id }) else { throw CookieImportError.busy }
+            let request = UUID()
             return try await withCheckedThrowingContinuation { continuation in
-                pendingCookieImports[id] = continuation
-                child.send(.importCookies(cookies))
                 // A process that does not answer (it is sealing on its way out) is not waited on.
-                Task { @MainActor [weak self] in
+                let timeout = Task { @MainActor [weak self] in
                     try? await Task.sleep(nanoseconds: 30_000_000_000)
-                    self?.pendingCookieImports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
+                    guard !Task.isCancelled else { return }
+                    self?.endCookieImport(request, of: id, with: .failure(CookieImportError.busy))
                 }
+                pendingCookieImports[request] = (id, continuation, timeout)
+                child.send(.importCookies(cookies, request: request))
             }
         }
         if let store = sessions[id]?.dataStore {
@@ -1751,15 +1816,17 @@ final class ProfileManager: ObservableObject {
 
     private func cookiesOf(_ id: UUID) async throws -> [ImportedCookie] {
         if let child = children[id] {
-            guard pendingCookieExports[id] == nil else { throw CookieImportError.busy }
+            guard !pendingCookieExports.values.contains(where: { $0.profile == id }) else { throw CookieImportError.busy }
+            let request = UUID()
             return try await withCheckedThrowingContinuation { continuation in
-                pendingCookieExports[id] = continuation
-                // Sent at once: a process that is still starting acts on it once the profile is up.
-                child.send(.exportCookies)
-                Task { @MainActor [weak self] in
+                let timeout = Task { @MainActor [weak self] in
                     try? await Task.sleep(nanoseconds: 60_000_000_000)
-                    self?.pendingCookieExports.removeValue(forKey: id)?.resume(throwing: CookieImportError.busy)
+                    guard !Task.isCancelled else { return }
+                    self?.endCookieExport(request, of: id, with: .failure(CookieImportError.busy))
                 }
+                pendingCookieExports[request] = (id, continuation, timeout)
+                // Sent at once: a process that is still starting acts on it once the profile is up.
+                child.send(.exportCookies(request: request))
             }
         }
         guard let store = sessions[id]?.dataStore?.httpCookieStore else { throw CookieImportError.busy }

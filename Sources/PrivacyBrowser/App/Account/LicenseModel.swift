@@ -219,12 +219,13 @@ final class LicenseModel: ObservableObject {
         return nil
     }
 
-    /// A new profile may be made here: a working mode and room under the limit (§8.4).
-    func refusalToCreate() -> LicenseRefusal? {
+    /// A new profile may be made here: a working mode and room under the limit (§8.4). `adding`:
+    /// profiles made since the list was last read, counted with it (copies made in one go).
+    func refusalToCreate(adding: Int = 0) -> LicenseRefusal? {
         recompute()
         guard let state else { return nil }
         guard state.mode.allowsWork else { return LicenseRefusal(text: Self.exportOnlyRefusal(state)) }
-        let here = profilesHere().count
+        let here = profilesHere().count + adding
         guard let p = state.entitlement else { return LicenseRefusal(text: L("license.refusal.notChecked")) }
         guard here < state.allowedProfilesHere else { return LicenseRefusal(text: LicenseText.limitProfiles(p)) }
         return nil
@@ -232,10 +233,20 @@ final class LicenseModel: ObservableObject {
 
     /// Whether a profile opens only for export (the row's mark, §8.4).
     func isExportOnly(_ id: UUID) -> Bool {
-        guard let state else { return false }
-        guard state.mode.allowsWork else { return true }
+        exportOnlyTest()(id)
+    }
+
+    /// `isExportOnly`, for many profiles asked about at once: the answer for each id, from the
+    /// state and the profiles as they are now. The profiles that open fully are found once
+    /// (`LicenseDecision.fullyOpen` sorts them all) — the Profiles window asks about every row
+    /// each time it is drawn, and found them again for each. What this returns is for that one
+    /// drawing: it is not kept, so a change of the rights or of the profiles is never missed.
+    func exportOnlyTest() -> (UUID) -> Bool {
+        guard let state else { return { _ in false } }
+        guard state.mode.allowsWork else { return { _ in true } }
         let profiles = profilesHere().map { (id: $0.id, createdAt: $0.createdAt) }
-        return !LicenseDecision.fullyOpen(profiles, allowed: state.allowedProfilesHere).contains(id)
+        let open = LicenseDecision.fullyOpen(profiles, allowed: state.allowedProfilesHere)
+        return { !open.contains($0) }
     }
 
     private static func exportOnlyRefusal(_ state: LicenseState) -> String {
@@ -493,6 +504,22 @@ final class LicenseModel: ObservableObject {
             while refreshing { try? await Task.sleep(nanoseconds: 100_000_000) }
         }
         return renewedForSync
+    }
+
+    /// The vaults this Mac's account keeps on the Lumen server (CONTRACT §16.1), asked with the
+    /// device's token: what a Mac without a vault asks before it brings one back (`RestoreModel`).
+    /// After a renewal of this run, as a sync (`renewForSync`): a token the server no longer knows is
+    /// gone by then. Nothing is changed by asking.
+    func syncVaults() async -> AccountVaults.State {
+        guard !isPreview, let client else { return .unreachable }
+        guard await renewForSync(), let token = record.deviceToken, !token.isEmpty else {
+            return record.isSignedIn ? .unreachable : .signedOut
+        }
+        let state = AccountVaults.state(of: await client.syncVaults(deviceToken: token))
+        // The server does not know the token: the renewal says why, and signs this Mac out when it
+        // was unlinked (§9.4) — as after a sync the server refused with `401`.
+        if state == .signedOut { _ = await renewForSync(again: true) }
+        return state
     }
 
     // MARK: Signing in

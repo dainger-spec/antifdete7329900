@@ -134,7 +134,9 @@ public struct CookieImportReport: Equatable, Sendable {
 
 /// Reads cookie exports: Netscape `cookies.txt` (curl, wget, yt-dlp, browser extensions) and JSON
 /// (EditThisCookie / Cookie-Editor, Puppeteer and the DevTools protocol, Playwright `cookies` and
-/// `storageState`, Selenium, exports of Chrome's and Firefox's cookie databases, JSON Lines).
+/// `storageState`, Selenium, exports of Chrome's and Firefox's cookie databases, JSON Lines) —
+/// and either of them wrapped in Base64, as accounts are handed over with their cookies and as
+/// other multi-profile browsers take and give them (`base64Wrapped`).
 ///
 /// Built to import whatever is importable from a damaged file: bytes that are not text spoil only
 /// the cookies they are in; a Netscape file is read line by line; a JSON file that does not parse
@@ -169,6 +171,12 @@ public enum CookieImporter {
         guard data.count <= maximumFileSize else { return failedFile(.fileTooLarge(data.count)) }
         if let kind = otherFileKind(data) { return failedFile(.unsupportedFile(kind)) }
         let decoded = decodeText(data)
+        // An export wrapped in Base64: what it wraps is read, and the report says how it came.
+        if let wrapped = base64Wrapped(decoded.text) {
+            var inner = read(wrapped, now: now)
+            if inner.format != nil { inner.encoding += ", Base64" }
+            return inner
+        }
         var report = CookieImportReport(format: nil, encoding: decoded.encoding, damagedByteSequences: decoded.damaged,
                                         entriesFound: 0, cookies: [], problems: [])
         let text = decoded.text
@@ -217,6 +225,41 @@ public enum CookieImporter {
         }
         report.problems.sort { $0.location.sortKey < $1.location.sortKey }
         return report
+    }
+
+    /// What `text` wraps, when it is a cookie export in Base64 and nothing else: only Base64's own
+    /// characters (the standard alphabet or the URL-safe one, padded or not) and line breaks, and,
+    /// decoded, text that starts as JSON does or holds a Netscape cookie line. Nil for everything
+    /// else — a JSON or Netscape file is never taken for Base64 (braces, tabs and dots are not in
+    /// its alphabet), and Base64 of anything but a cookie export is left to be reported as what
+    /// it is: not a cookie file.
+    static func base64Wrapped(_ text: String) -> Data? {
+        var symbols = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars {
+            switch scalar {
+            case "A"..."Z", "a"..."z", "0"..."9", "+", "/", "=":
+                symbols.append(scalar)
+            case "-":
+                symbols.append("+")
+            case "_":
+                symbols.append("/")
+            case " ", "\t", "\n", "\r", "\u{FEFF}":
+                continue
+            default:
+                return nil
+            }
+        }
+        var encoded = String(symbols)
+        // Shorter than any export; and a short word of letters is not taken for one.
+        guard encoded.count >= 24 else { return nil }
+        while encoded.hasSuffix("=") { encoded.removeLast() }
+        guard !encoded.contains("="), encoded.count % 4 != 1 else { return nil }
+        encoded += String(repeating: "=", count: (4 - encoded.count % 4) % 4)
+        guard let data = Data(base64Encoded: encoded), !data.isEmpty, data.count <= maximumFileSize else { return nil }
+        let inner = decodeText(data).text
+        let start = inner.drop { $0.isWhitespace || $0 == "\u{FEFF}" }.first
+        if start == "[" || start == "{" { return data }
+        return NetscapeReader.read(inner).cookieLikeLines > 0 ? data : nil
     }
 
     /// Files people pick instead of an export: browser databases, archives, a saved web page.

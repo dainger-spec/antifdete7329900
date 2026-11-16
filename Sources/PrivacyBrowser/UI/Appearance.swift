@@ -4,8 +4,9 @@ import SwiftUI
 // MARK: - Settings → Appearance
 
 /// How the app's own windows look and move (Settings → Appearance): the light at entry, the
-/// profile list's density, the interface's animations. Kept in this Mac's defaults, outside the
-/// vault: the lock screen needs them before the vault opens, and none of it is secret.
+/// greeting at launch, the profile list's density, the interface's animations. Kept in this Mac's
+/// defaults, outside the vault: the lock screen needs them before the vault opens, and none of it
+/// is secret.
 @MainActor
 final class AppearancePreferences: ObservableObject {
     static let shared = AppearancePreferences()

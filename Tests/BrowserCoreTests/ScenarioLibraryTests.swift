@@ -111,4 +111,44 @@ final class ScenarioLibraryTests: XCTestCase {
             XCTAssertLessThan(range.upperBound * 1_000_000_000, Double(UInt64.max))
         }
     }
+
+    /// What `page.waitForURL` waits for: an address written out, with `*` and `**`, or a regular
+    /// expression.
+    func testAnAddressToWaitFor() throws {
+        func glob(_ text: String) throws -> ScenarioURLPattern { try XCTUnwrap(ScenarioURLPattern(text)) }
+        // Written out: that address, with or without the slash at its end, and no other.
+        XCTAssertTrue(try glob("https://shop.example/account").matches("https://shop.example/account"))
+        XCTAssertTrue(try glob("https://shop.example").matches("https://shop.example/"))
+        XCTAssertTrue(try glob("https://shop.example/account/").matches("https://shop.example/account"))
+        XCTAssertFalse(try glob("https://shop.example/account").matches("https://shop.example/account/orders"))
+        XCTAssertFalse(try glob("https://shop.example/account").matches("https://shop.example/account?next=1"))
+        XCTAssertFalse(try glob("https://shop.example/a.c").matches("https://shop.example/abc"), "a dot is a dot")
+        XCTAssertTrue(try glob("https://shop.example/find?q=a+b").matches("https://shop.example/find?q=a+b"), "? and + are themselves")
+        // ** is any run; * a run within one part of the path.
+        XCTAssertTrue(try glob("**/account").matches("https://shop.example/en/account"))
+        XCTAssertTrue(try glob("**/account**").matches("https://shop.example/account?tab=orders#top"))
+        XCTAssertFalse(try glob("**/account").matches("https://shop.example/account/orders"))
+        XCTAssertTrue(try glob("https://shop.example/orders/*").matches("https://shop.example/orders/1042"))
+        XCTAssertFalse(try glob("https://shop.example/orders/*").matches("https://shop.example/orders/1042/items"))
+        XCTAssertTrue(try glob("https://*.example/**").matches("https://shop.example/any/where"))
+        XCTAssertEqual(try glob("**/account").shown, "**/account")
+        // A regular expression of the script's own is looked for in the address.
+        let orders = try XCTUnwrap(ScenarioURLPattern(["regex": #"/orders/\d+$"#, "flags": ""] as [String: Any]))
+        XCTAssertTrue(orders.matches("https://shop.example/orders/1042"))
+        XCTAssertFalse(orders.matches("https://shop.example/orders/new"))
+        XCTAssertEqual(orders.shown, #"//orders/\d+$/"#)
+        let anyCase = try XCTUnwrap(ScenarioURLPattern(["regex": "ACCOUNT", "flags": "gi"] as [String: Any]))
+        XCTAssertTrue(anyCase.matches("https://shop.example/account"))
+        XCTAssertFalse(try XCTUnwrap(ScenarioURLPattern(["regex": "ACCOUNT"] as [String: Any])).matches("https://shop.example/account"))
+        // What cannot be read matches nothing, and says so before it is waited for.
+        let broken = try XCTUnwrap(ScenarioURLPattern(["regex": "(unclosed"] as [String: Any]))
+        XCTAssertFalse(broken.isReadable)
+        XCTAssertFalse(broken.matches("(unclosed"))
+        XCTAssertTrue(orders.isReadable)
+        // Nothing to wait for is no pattern.
+        XCTAssertNil(ScenarioURLPattern(""))
+        XCTAssertNil(ScenarioURLPattern(nil))
+        XCTAssertNil(ScenarioURLPattern(42))
+        XCTAssertNil(ScenarioURLPattern(["flags": "i"] as [String: Any]))
+    }
 }

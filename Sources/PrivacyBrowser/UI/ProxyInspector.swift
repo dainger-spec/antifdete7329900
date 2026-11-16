@@ -6,6 +6,9 @@ struct ProxyProfileReference: Identifiable {
     let id: UUID
     let name: String
     var avatar: ProfileAvatarStyle?
+    /// Where the profile was last seen to come out (ISO 3166-1 alpha-2), when known: a proxy
+    /// offered in this one's place is first of all one of that country.
+    var countryCode: String?
 }
 
 /// The inspector at the right of the Proxies section (the design's proxy inspector): the selected
@@ -26,6 +29,9 @@ struct ProxyInspectorView: View {
     /// Nil while the list cannot be written.
     var edit: (() -> Void)?
     var assign: () -> Void = {}
+    /// Other proxies for the profiles that use this one (`ProxyListPanel.replace`); nil while no
+    /// profile uses it.
+    var replace: (() -> Void)?
 
     var body: some View {
         let report = ProxyReport(proxy: entry.proxy, check: entry.lastCheck, checking: checking)
@@ -99,6 +105,14 @@ struct ProxyInspectorView: View {
                         .buttonStyle(.lumenGhost)
                         .padding(.top, 6)
                         .padding(.leading, -11)
+                    if let replace {
+                        // A proxy that does not answer, with profiles on it: the way out is here.
+                        Button(L("proxies.menu.replace"), action: replace)
+                            .buttonStyle(LumenButtonStyle(kind: entry.lastCheck?.isAlive == false ? .secondary : .ghost))
+                            .padding(.top, entry.lastCheck?.isAlive == false ? 6 : 0)
+                            .padding(.leading, entry.lastCheck?.isAlive == false ? 0 : -11)
+                            .help(L("proxies.menu.replace.help"))
+                    }
                 }
             }
         }

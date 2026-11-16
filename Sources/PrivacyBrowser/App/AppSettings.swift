@@ -7,7 +7,8 @@ import Foundation
 /// it starts and whenever the settings change.
 ///
 /// These apply to the app's own browser windows. A profile that shows Safari's own window (a build
-/// without the App Sandbox) browses by Safari's settings, in its window's Safari menu.
+/// without the App Sandbox) places its new tabs and zooms its pages as Safari does; where its
+/// downloads go and whether its tabs come back apply there too (`HostedDownloads`, `SafariTabs`).
 struct BrowsingPreferences: Codable, Equatable {
     /// Saved passwords are offered (and new ones asked about) at all; a profile has its own switch
     /// as well, and both must be on.

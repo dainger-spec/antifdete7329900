@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lumen — a machine's start</title>
+<!--
+  The cover over a virtual machine's screen while its start makes it the profile's (MachineCover's
+  MachineCoverView, Sources/MachineCover), frame for frame: the eclipse as the machine's wallpaper
+  has it (VMWallpaper / MachineHorizon: the same numbers), the light gliding along its rim and the
+  haze over it breathing, the profile's name, the step in words, the thin steps, "Show the screen"
+  after a minute; then the fade into the machine's desktop (a stand-in: the same eclipse with
+  macOS's menu bar and Dock, and Safari opening in the machine's language).
+
+  ?lang=ru|en         the interface's language          ?name=Vienna   the profile's name
+  ?stage=locale       one still step (boot, signin, locale, look, wallpaper, safari)
+  ?offer=1            "Taking longer than usual · Show the screen"
+  ?rm=1               Reduce Motion: no gliding, no breathing; words cross-fade
+  ?t=4.2              one still frame of the whole start at 4.2 s (no playing)
+  window.__render(t)  draws the frame at t seconds (design/tools/record_vm_cover.mjs records with it).
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: #08090B; overflow: hidden; }
+  canvas { display: block; position: fixed; inset: 0; width: 100vw; height: 100vh; }
+  .layer { position: fixed; inset: 0; pointer-events: none; }
+  #cover { z-index: 2; }
+  #desktop { z-index: 1; }
+  .text { position: absolute; left: 0; right: 0; text-align: center; white-space: nowrap;
+          font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, sans-serif;
+          -webkit-font-smoothing: antialiased; }
+  #caption { font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: 0.14em; text-indent: 0.14em;
+             text-transform: uppercase; color: rgba(244, 244, 245, 0.46); }
+  #name { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter Display", Inter, sans-serif;
+          font-size: 30px; line-height: 36px; font-weight: 600; letter-spacing: -0.012em; color: #F4F4F5; }
+  .stage { font-size: 14px; line-height: 20px; font-weight: 400; color: #A1A1AA; letter-spacing: 0.005em; }
+  #steps { position: absolute; left: 50%; height: 2px; display: flex; gap: 6px; transform: translateX(-50%); }
+  #steps i { display: block; width: 26px; height: 2px; border-radius: 1px; background: rgba(255, 255, 255, 0.10);
+             position: relative; overflow: hidden; }
+  #steps i b { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 1px; background: #F4F4F5; }
+  #longer { font-size: 12px; line-height: 16px; color: rgba(244, 244, 245, 0.46); }
+  #longer a { color: rgba(244, 244, 245, 0.88); font-weight: 500; text-decoration: underline;
+              text-decoration-color: rgba(244, 244, 245, 0.32); text-underline-offset: 3px; pointer-events: auto; cursor: pointer; }
+  #wordmark { color: rgba(244, 244, 245, 0.42); font-weight: 600; }
+  /* The machine's desktop behind (a stand-in for macOS's own). */
+  #menubar { position: absolute; left: 0; right: 0; top: 0; height: 24px; background: rgba(28, 29, 33, 0.55);
+             backdrop-filter: blur(20px); display: flex; align-items: center; padding: 0 14px; gap: 18px;
+             font: 500 13px/24px -apple-system, BlinkMacSystemFont, Inter, sans-serif; color: rgba(255, 255, 255, 0.92); }
+  #menubar .app { font-weight: 700; }
+  #menubar .clock { margin-left: auto; font-weight: 500; }
+  #menubar .apple { width: 12px; height: 14px; border-radius: 6px 6px 7px 7px; background: rgba(255, 255, 255, 0.92); }
+  #dock { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); height: 64px; padding: 0 8px;
+          border-radius: 18px; background: rgba(48, 49, 55, 0.38); box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.18) inset;
+          backdrop-filter: blur(24px); display: flex; align-items: center; gap: 8px; }
+  #dock i { width: 48px; height: 48px; border-radius: 11px; display: block; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35); }
+  #safari { position: absolute; border-radius: 12px; overflow: hidden; background: #1E1F23;
+            box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.16), 0 24px 70px rgba(0, 0, 0, 0.55);
+            font-family: -apple-system, BlinkMacSystemFont, Inter, sans-serif; color: #F4F4F5; }
+  #safari .bar { height: 52px; background: #2A2B30; display: flex; align-items: center; padding: 0 16px; gap: 8px; }
+  #safari .dot { width: 12px; height: 12px; border-radius: 6px; }
+  #safari .field { margin: 0 auto; width: 46%; height: 30px; border-radius: 8px; background: rgba(255, 255, 255, 0.08);
+                   font-size: 13px; line-height: 30px; text-align: center; color: rgba(255, 255, 255, 0.55); }
+  #safari h2 { margin: 44px 0 0 64px; font-size: 22px; font-weight: 700; }
+  #safari .tiles { display: flex; gap: 22px; margin: 18px 0 0 64px; }
+  #safari .tiles span { display: block; width: 64px; text-align: center; font-size: 11px; color: rgba(255, 255, 255, 0.7); }
+  #safari .tiles span i { display: block; width: 64px; height: 64px; border-radius: 14px; margin-bottom: 8px;
+                          background: rgba(255, 255, 255, 0.09); }
+</style>
+</head>
+<body>
+<div id="desktop" class="layer">
+  <canvas id="wallpaper"></canvas>
+  <div id="menubar"></div>
+  <div id="dock"></div>
+  <div id="safari"></div>
+</div>
+<div id="cover" class="layer">
+  <canvas id="horizon"></canvas>
+  <div id="block">
+    <div id="caption" class="text"></div>
+    <div id="name" class="text"></div>
+    <div id="stageA" class="text stage"></div>
+    <div id="stageB" class="text stage"></div>
+    <div id="steps"></div>
+    <div id="longer" class="text"></div>
+  </div>
+  <div id="wordmark" class="text">LUMEN</div>
+</div>
+<script>
+'use strict';
+const query = new URLSearchParams(location.search);
+const lang = query.get('lang') === 'en' ? 'en' : 'ru';
+const reduced = query.get('rm') === '1';
+const NAME = query.get('name') || 'Vienna';
+// The strings as Localizable.strings has them (vm.cover.*).
+const TEXT = {
+  ru: { caption: 'Настраиваем машину', boot: 'Запускаем macOS…', signin: 'Входим в систему…', locale: 'Ставим язык и регион…',
+        look: 'Настраиваем внешний вид…', wallpaper: 'Ставим обои…', safari: 'Почти готово…', ready: 'Почти готово…',
+        longer: 'Дольше обычного.', show: 'Показать экран' },
+  en: { caption: 'Setting up the machine', boot: 'Starting macOS…', signin: 'Signing in…', locale: 'Setting the language and region…',
+        look: 'Setting up the look…', wallpaper: 'Setting the wallpaper…', safari: 'Almost ready…', ready: 'Almost ready…',
+        longer: 'Taking longer than usual.', show: 'Show the screen' },
+}[lang];
+const STEPS = ['boot', 'signin', 'locale', 'look', 'wallpaper', 'safari'];
+const ORDER = [...STEPS, 'ready'];
+
+// MARK: Timing — the same numbers as MachineCoverTiming (MachineCoverView.swift).
+const T = {
+  enter: 0.6,         // the words come in, rising 6 pt
+  wordOut: 0.22,      // a step's words go, rising 4 pt…
+  wordInDelay: 0.12,  // …and the next step's come, from 4 pt below
+  wordIn: 0.45,
+  stepFill: 0.4,      // a step's segment fills
+  shimmer: 1.4,       // the light in the current step's segment
+  breath: 6.0,        // the haze over the rim, once in and out
+  offerIn: 0.6,       // "Show the screen" comes in
+  revealDelay: 0.25,  // ready: the last steps fill, then…
+  wordsOut: 0.4,      // …the words go, rising 6 pt, while…
+  reveal: 0.9,        // …the cover fades into the machine's screen
+  reducedReveal: 0.4,
+};
+// The whole start, as the video shows it: a step every 3.6 s, then the machine's desktop.
+// The glint: its bloom's radius and strength, its run's length (σ, of the width) and strokes (width, alpha).
+const GLINT = { glide: 6.4, rest: 1.6, bloomRadius: 0.06, bloom: 0.42, length: 0.045, strokes: [[5, 0.22], [2.2, 0.9]] };
+/** The glint's strokes along the rim, each (width, alpha): a hot core and a narrow glow around it. */
+function glintStrokes() { return GLINT.strokes; }
+const SCRIPT = [[0, 'boot'], [3.6, 'signin'], [7.2, 'locale'], [10.8, 'look'], [14.4, 'wallpaper'], [18.0, 'ready']];
+const READY_AT = 18.0;
+const SAFARI_AT = READY_AT + T.revealDelay + T.reveal + 0.9;
+const END = SAFARI_AT + 2.6;
+
+// MARK: Easing
+
+function bezier(x1, y1, x2, y2) {
+  const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx;
+  const cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+  const sx = (t) => ((ax * t + bx) * t + cx) * t, sy = (t) => ((ay * t + by) * t + cy) * t;
+  const dx = (t) => (3 * ax * t + 2 * bx) * t + cx;
+  return (x) => {
+    if (x <= 0) return 0;
+    if (x >= 1) return 1;
+    let t = x;
+    for (let i = 0; i < 8; i++) { const d = dx(t); if (Math.abs(d) < 1e-6) break; t -= (sx(t) - x) / d; }
+    t = Math.min(1, Math.max(0, t));
+    return sy(t);
+  };
+}
+const entry = bezier(0.16, 1, 0.3, 1);         // Motion.entry
+const inOut = bezier(0.4, 0, 0.2, 1);
+const smooth = (x) => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); };
+const part = (t, start, duration) => duration <= 0 ? (t >= start ? 1 : 0) : Math.min(1, Math.max(0, (t - start) / duration));
+
+// MARK: Geometry — MachineHorizon.Geometry (VMWallpaper's numbers)
+
+function layout() {
+  const W = innerWidth, H = innerHeight;
+  const radius = W * 0.78, top = H * 0.54;
+  const cx = W * 0.5, cy = top + radius;
+  const lightRadius = radius * 0.992;
+  const ly = cy - (radius - lightRadius) - radius * 0.0035;
+  // The words: their block's middle at 36 % of the height, in the sky over the light.
+  const blockHeight = 14 + 12 + 36 + 10 + 20 + 22 + 2;
+  const blockTop = Math.round(H * 0.36 - blockHeight / 2);
+  return { W, H, radius, top, cx, cy, lightRadius, ly, blockTop };
+}
+
+// MARK: The horizon, in layers: what is behind the light, then the light's own motion, then the disc.
+
+const cache = {};
+function layer(key, L, scale, draw) {
+  const k = `${key}:${L.W}x${L.H}@${scale}`;
+  if (cache[key]?.k === k) return cache[key].c;
+  const c = document.createElement('canvas');
+  c.width = Math.round(L.W * scale); c.height = Math.round(L.H * scale);
+  const g = c.getContext('2d');
+  g.scale(scale, scale);
+  draw(g);
+  cache[key] = { k, c };
+  return c;
+}
+function drawBack(g, L) {
+  const { W, H, cx, ly, lightRadius } = L;
+  g.fillStyle = '#08090B';
+  g.fillRect(0, 0, W, H);
+  const lift = g.createRadialGradient(W * 0.5, H * 0.62, 0, W * 0.5, H * 0.62, W * 0.75);
+  lift.addColorStop(0, 'rgba(255,255,255,0.045)');
+  lift.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = lift;
+  g.fillRect(0, 0, W, H);
+  const from = 0.90, to = 1.22, at = (f) => (f - from) / (to - from);
+  const glow = g.createRadialGradient(cx, ly, lightRadius * from, cx, ly, lightRadius * to);
+  [[0, 0], [at(0.985), 0], [at(0.9995), 0.95], [at(1.0), 0.62], [at(1.006), 0.34], [at(1.02), 0.17],
+   [at(1.06), 0.07], [at(1.13), 0.022], [1, 0]].forEach(([o, a]) => glow.addColorStop(o, `rgba(255,255,255,${a})`));
+  g.fillStyle = glow;
+  g.fillRect(0, 0, W, H);
+}
+function drawDisc(g, L) {
+  const { radius, cx, cy } = L;
+  const disc = g.createRadialGradient(cx, cy, radius * 0.9, cx, cy, radius);
+  disc.addColorStop(0, 'rgba(8,9,11,1)');
+  disc.addColorStop(0.999, 'rgba(8,9,11,1)');
+  disc.addColorStop(1, 'rgba(8,9,11,0)');
+  g.fillStyle = disc;
+  g.fillRect(0, 0, L.W, L.H);
+}
+function drawWord(g, L) {
+  // "LUMEN" under the light, as the wallpaper writes it.
+  const size = Math.round(L.W * 0.0125), spacing = L.W * 0.0085;
+  g.font = `600 ${size}px -apple-system, BlinkMacSystemFont, Inter, sans-serif`;
+  g.fillStyle = 'rgba(244,244,245,0.42)';
+  g.textBaseline = 'alphabetic';
+  const letters = 'LUMEN'.split('');
+  const widths = letters.map((l) => g.measureText(l).width);
+  const total = widths.reduce((a, b) => a + b, 0) + spacing * (letters.length - 1);
+  let x = L.cx - total / 2;
+  letters.forEach((l, i) => { g.fillText(l, x, L.top + L.H * 0.11); x += widths[i] + spacing; });
+}
+
+/** The haze over the rim, breathing: 0…1. */
+function breath(t) { return reduced ? 0.5 : 0.5 - 0.5 * Math.cos((2 * Math.PI * t) / T.breath); }
+
+/** The light's run along the horizon: where it is (radians from the top, to the right) and how
+ *  bright (0…1). It rises at the left a little past the screen's edge, glides to the right on an
+ *  ease-in-out, and fades there; then the horizon rests a moment, and it comes again. */
+function glide(t, L) {
+  if (reduced) return { phi: 0, strength: 0 };
+  const half = Math.asin(Math.min(1, (L.W / 2) / L.radius));
+  const span = half + 0.05;
+  const cycle = GLINT.glide + GLINT.rest;
+  const p = (t % cycle) / GLINT.glide;
+  if (p >= 1) return { phi: span, strength: 0 };
+  return { phi: -span + 2 * span * inOut(p), strength: Math.pow(Math.sin(Math.PI * p), 1.4) };
+}
+
+function drawLight(g, L, t, strength) {
+  const { cx, cy, ly, radius, lightRadius, W } = L;
+  // The haze over the rim: wide and faint, breathing.
+  const b = 0.45 + 0.55 * breath(t);
+  const wide = g.createRadialGradient(cx, ly, lightRadius * 0.99, cx, ly, lightRadius * 1.12);
+  [[0, 0], [0.04, 0.11 * b], [0.2, 0.05 * b], [0.5, 0.015 * b], [1, 0]]
+    .forEach(([o, a]) => wide.addColorStop(o, `rgba(255,255,255,${a * strength})`));
+  g.fillStyle = wide;
+  g.fillRect(0, 0, L.W, L.H);
+  // The glint: a run of brighter light hugging the horizon, and a bloom over it — added to the
+  // light that is there ("plus lighter"), the disc drawn over its inner half.
+  const { phi, strength: run } = glide(t, L);
+  if (run <= 0) return;
+  const half = Math.asin(Math.min(1, (W / 2) / radius));
+  const nearTop = Math.max(0, 1 - Math.pow(phi / half, 2));
+  const peak = run * (0.45 + 0.55 * nearTop) * strength;
+  const theta = -Math.PI / 2 + phi;
+  const r = radius + 0.5;
+  const gx = cx + r * Math.cos(theta), gy = cy + r * Math.sin(theta);
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  const bloom = g.createRadialGradient(gx, gy, 0, gx, gy, W * GLINT.bloomRadius);
+  [[0, 1], [0.12, 0.62], [0.3, 0.3], [0.55, 0.1], [0.8, 0.025], [1, 0]]
+    .forEach(([o, a]) => bloom.addColorStop(o, `rgba(255,255,255,${a * GLINT.bloom * peak})`));
+  g.fillStyle = bloom;
+  g.fillRect(0, 0, L.W, L.H);
+  const sigma = (W * GLINT.length) / r;  // radians
+  const span = 3 * sigma;
+  for (const [width, alpha] of glintStrokes()) {
+    const cone = g.createConicGradient(theta - Math.PI, cx, cy);
+    cone.addColorStop(0, 'rgba(255,255,255,0)');
+    for (let k = -12; k <= 12; k++) {
+      const a = (k / 12) * span;
+      cone.addColorStop(0.5 + a / (2 * Math.PI), `rgba(255,255,255,${alpha * peak * Math.exp(-(a * a) / (2 * sigma * sigma))})`);
+    }
+    cone.addColorStop(1, 'rgba(255,255,255,0)');
+    g.strokeStyle = cone;
+    g.lineWidth = width;
+    g.beginPath();
+    g.arc(cx, cy, r, theta - span, theta + span);
+    g.stroke();
+  }
+  g.restore();
+}
+
+// MARK: The machine's desktop (a stand-in)
+
+const desktop = {
+  menus: { finder: ['Finder', 'Ablage', 'Bearbeiten', 'Darstellung', 'Gehe zu', 'Fenster', 'Hilfe'],
+           safari: ['Safari', 'Ablage', 'Bearbeiten', 'Darstellung', 'Verlauf', 'Lesezeichen', 'Fenster', 'Hilfe'] },
+  dock: ['linear-gradient(#5AC8FA,#1E7BF0)', 'linear-gradient(#FDFDFD,#D9D9DE)', 'linear-gradient(#36D16C,#18A64A)',
+         'linear-gradient(#FFD25A,#F5A623)', 'linear-gradient(#FF6B6B,#E0393E)', 'linear-gradient(#B9A6FF,#7A5AF8)',
+         'linear-gradient(#8E8E93,#5A5A60)'],
+};
+function setMenus(app) {
+  const bar = document.getElementById('menubar');
+  if (bar.dataset.app === app) return;
+  bar.dataset.app = app;
+  bar.innerHTML = '<i class="apple"></i>' + desktop.menus[app].map((m, i) => `<span class="${i ? '' : 'app'}">${m}</span>`).join('')
+    + '<span class="clock">Fr. 15. Nov. 14:32</span>';
+}
+document.getElementById('dock').innerHTML = desktop.dock.map((b) => `<i style="background:${b}"></i>`).join('');
+document.getElementById('safari').innerHTML = '<div class="bar"><i class="dot" style="background:#FF5F57"></i>'
+  + '<i class="dot" style="background:#FEBC2E"></i><i class="dot" style="background:#28C840"></i>'
+  + '<div class="field">Suchbegriff oder Website-Name eingeben</div></div><h2>Favoriten</h2><div class="tiles">'
+  + ['Apple', 'iCloud', 'Wikipedia', 'Karten', 'Nachrichten'].map((n) => `<span><i></i>${n}</span>`).join('') + '</div>';
+
+// MARK: The frame at t
+
+const steps = document.getElementById('steps');
+steps.innerHTML = STEPS.map(() => '<i><b></b></i>').join('');
+document.getElementById('caption').textContent = TEXT.caption;
+document.getElementById('name').textContent = NAME;
+document.getElementById('longer').innerHTML = `${TEXT.longer}&nbsp;&nbsp;<a>${TEXT.show}</a>`;
+
+const still = { stage: query.get('stage'), offer: query.get('offer') === '1' };
+/** The step at t, when it began, and the one before it. */
+function stageAt(t) {
+  if (still.stage) return { stage: still.stage, since: -10, previous: null };
+  let i = 0;
+  while (i + 1 < SCRIPT.length && SCRIPT[i + 1][0] <= t) i++;
+  return { stage: SCRIPT[i][1], since: SCRIPT[i][0], previous: i ? SCRIPT[i - 1][1] : null };
+}
+
+function render(t) {
+  const L = layout();
+  const scale = devicePixelRatio || 1;
+  const { stage, since, previous } = stageAt(t);
+  const readyAt = stage === 'ready' ? since : Infinity;
+
+  // The cover's own fade, at the end.
+  const revealT = part(t, readyAt + T.revealDelay, reduced ? T.reducedReveal : T.reveal);
+  const coverAlpha = 1 - (reduced ? revealT : inOut(revealT));
+  document.getElementById('cover').style.opacity = coverAlpha;
+
+  // The horizon and its light.
+  const canvas = document.getElementById('horizon');
+  if (canvas.width !== Math.round(L.W * scale)) { canvas.width = Math.round(L.W * scale); canvas.height = Math.round(L.H * scale); }
+  const g = canvas.getContext('2d');
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.drawImage(layer('back', L, scale, (c) => drawBack(c, L)), 0, 0);
+  g.setTransform(scale, 0, 0, scale, 0, 0);
+  drawLight(g, L, t, 1);
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.drawImage(layer('disc', L, scale, (c) => { drawDisc(c, L); }), 0, 0);
+  const wordmark = document.getElementById('wordmark');
+  const wordSize = Math.round(L.W * 0.0125);
+  wordmark.style.fontSize = `${wordSize}px`;
+  wordmark.style.letterSpacing = `${L.W * 0.0085}px`;
+  wordmark.style.textIndent = `${L.W * 0.0085}px`;
+  wordmark.style.top = `${L.top + L.H * 0.11 - wordSize * 0.95}px`;
+
+  // The words: in at the start; a step's words cross-fade; all of them go at the end.
+  const block = document.getElementById('block');
+  const enter = still.stage ? 1 : entry(part(t, 0.1, T.enter));
+  const leave = reduced ? part(t, readyAt + T.revealDelay, T.wordsOut) : entry(part(t, readyAt + T.revealDelay, T.wordsOut));
+  block.style.opacity = enter * (1 - leave);
+  block.style.transform = `translateY(${reduced ? 0 : (1 - enter) * 6 - leave * 6}px)`;
+  let y = L.blockTop;
+  const put = (el, height) => { el.style.top = `${y}px`; y += height; };
+  put(document.getElementById('caption'), 14 + 12);
+  put(document.getElementById('name'), 36 + 10);
+  const a = document.getElementById('stageA'), b = document.getElementById('stageB');
+  a.style.top = b.style.top = `${y}px`;
+  y += 20 + 22;
+  steps.style.top = `${y}px`;
+  document.getElementById('longer').style.top = `${y + 2 + 26}px`;
+
+  const shown = stage === 'ready' ? 'ready' : stage;
+  const outT = part(t, since, T.wordOut), inT = part(t, since + T.wordInDelay, T.wordIn);
+  a.textContent = TEXT[shown];
+  const changing = previous && TEXT[previous] !== TEXT[shown] && t - since < T.wordInDelay + T.wordIn;
+  a.style.opacity = changing ? entry(inT) : 1;
+  a.style.transform = `translateY(${changing && !reduced ? (1 - entry(inT)) * 4 : 0}px)`;
+  b.textContent = previous ? TEXT[previous] : '';
+  b.style.opacity = changing ? 1 - entry(outT) : 0;
+  b.style.transform = `translateY(${changing && !reduced ? -entry(outT) * 4 : 0}px)`;
+
+  // The steps: those behind filled, the current one with a light running in it.
+  const done = ORDER.indexOf(stage);
+  const doneBefore = previous ? ORDER.indexOf(previous) : done;
+  [...steps.children].forEach((segment, i) => {
+    const fill = segment.firstChild;
+    let width, left = 0, alpha = 0.85;
+    if (i < doneBefore) { width = 1; }
+    else if (i < done) { width = still.stage ? 1 : entry(part(t, since, T.stepFill)); }
+    else if (i === done && stage !== 'ready') {
+      if (reduced) { width = 0.5; left = 0.25; alpha = 0.55; }
+      else {
+        const p = ((t % T.shimmer) / T.shimmer);
+        const e = smooth(p);
+        width = 0.42; left = -0.42 + 1.42 * e; alpha = 0.7;
+      }
+    } else { width = 0; }
+    fill.style.left = `${left * 100}%`;
+    fill.style.width = `${width * 100}%`;
+    fill.style.opacity = alpha;
+  });
+
+  // "Show the screen", after a minute.
+  const offer = still.offer ? 1 : 0;
+  const longer = document.getElementById('longer');
+  longer.style.opacity = offer;
+
+  // The machine's desktop: the menu bar and the Dock are there under the cover; Safari opens after.
+  setMenus(t >= SAFARI_AT ? 'safari' : 'finder');
+  const wall = document.getElementById('wallpaper');
+  if (wall.width !== Math.round(L.W * scale)) {
+    wall.width = Math.round(L.W * scale); wall.height = Math.round(L.H * scale);
+    const w = wall.getContext('2d');
+    w.scale(scale, scale);
+    drawBack(w, L); drawDisc(w, L); drawWord(w, L);
+  }
+  const safari = document.getElementById('safari');
+  const sw = Math.round(L.W * 0.62), sh = Math.round(L.H * 0.66);
+  safari.style.width = `${sw}px`; safari.style.height = `${sh}px`;
+  safari.style.left = `${Math.round((L.W - sw) / 2)}px`; safari.style.top = `${Math.round(L.H * 0.11)}px`;
+  const open = entry(part(t, SAFARI_AT, 0.45));
+  safari.style.opacity = open;
+  safari.style.transform = `scale(${0.94 + 0.06 * open})`;
+}
+
+window.__render = render;
+window.__info = () => ({ readyAt: READY_AT, safariAt: SAFARI_AT, end: END, script: SCRIPT });
+document.fonts.ready.then(() => {
+  window.__ready = true;
+  const fixed = query.get('t');
+  if (fixed !== null) { render(Number(fixed)); return; }
+  const begin = performance.now();
+  const frame = () => {
+    const t = (performance.now() - begin) / 1000;
+    render(still.stage ? t : Math.min(t, END));
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+});
+</script>
+</body>
+</html>

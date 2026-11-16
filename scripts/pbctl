@@ -10,6 +10,13 @@
     pbctl cookies <profile> [--format playwright|netscape|extension]
     pbctl import-cookies <profile> <file>
     pbctl webdriver <profile>
+    pbctl run <profile> (--scenario NAME | --file SCRIPT.js | --source TEXT) [--param name=value]… [--wait [SECONDS]]
+    pbctl log <profile>
+    pbctl stop-run <profile>
+
+`run` starts a scenario on a running profile: a saved one by its name (with the profile's own values
+for scenarios in params, --param over them), or a text. With --wait it follows the run to its end,
+prints its log and its result, and exits 1 unless the run finished.
 
 <profile> is a profile's id or its exact name. The token comes from PB_API_TOKEN (Automation API…
 → Copy in the app), the port from PB_API_PORT (default 50777). Nothing is installed: Python 3 only.
@@ -21,6 +28,7 @@ import hmac
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -42,6 +50,26 @@ def webdriver_token(token, profile_id):
     base64url without padding of HMAC-SHA256(key = the API's token, "webdriver:" + its UUID)."""
     mac = hmac.new(token.encode(), ("webdriver:" + profile_id.upper()).encode(), hashlib.sha256).digest()
     return base64.urlsafe_b64encode(mac).decode().rstrip("=")
+
+
+def print_run(state, since=0):
+    """A run's log lines from `since` on, each after the seconds since the run started; how many there are."""
+    started = state.get("startedAt", "")
+    lines = state.get("lines", [])
+    for line in lines[since:]:
+        mark = "!" if line.get("kind") == "error" else " "
+        print(f'{seconds_between(started, line.get("at", "")):8.1f} {mark} {line.get("text", "")}', flush=True)
+    return len(lines)
+
+
+def seconds_between(start, end):
+    """Seconds from one of the API's times (ISO 8601, UTC) to another; 0 for what is not one."""
+    def parse(text):
+        return time.mktime(time.strptime(text, "%Y-%m-%dT%H:%M:%SZ"))
+    try:
+        return max(0.0, parse(end) - parse(start))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def call(method, path, body=None, raw=False):
@@ -96,6 +124,17 @@ def main():
     imports.add_argument("profile")
     imports.add_argument("file")
     commands.add_parser("webdriver", help="a profile's WebDriver address (for Selenium's command_executor)").add_argument("profile")
+    run = commands.add_parser("run", help="run a scenario on a running profile: a saved one by name, or a text")
+    run.add_argument("profile")
+    what = run.add_mutually_exclusive_group(required=True)
+    what.add_argument("--scenario", help="a saved scenario's exact name (its params: the profile's own values, --param over them)")
+    what.add_argument("--file", help="a file of the scenario's JavaScript")
+    what.add_argument("--source", help="the scenario's JavaScript")
+    run.add_argument("--param", action="append", default=[], metavar="name=value", help="a value for params (text); may be given several times")
+    run.add_argument("--wait", nargs="?", type=float, const=3600.0, default=None, metavar="SECONDS",
+                     help="follow the run to its end (an hour at most unless SECONDS is given), print its log and result; exit 1 unless it finished")
+    commands.add_parser("log", help="a profile's last run: its log, how it ended, its result").add_argument("profile")
+    commands.add_parser("stop-run", help="stop a profile's run").add_argument("profile")
     args = parser.parse_args()
 
     if args.command == "list":
@@ -125,6 +164,50 @@ def main():
     elif args.command == "webdriver":
         profile_id = call("GET", profile_path(args.profile))["id"]
         print(f"http://127.0.0.1:{api_port()}/wd/{webdriver_token(api_token(), profile_id)}/{profile_id.upper()}")
+    elif args.command == "run":
+        params = {}
+        for pair in args.param:
+            name, separator, value = pair.partition("=")
+            if not separator or not name:
+                sys.exit(f"pbctl: --param takes name=value, not {pair!r}")
+            params[name] = value
+        if args.scenario:
+            body = {"scenario": args.scenario}
+        elif args.file:
+            with open(args.file, encoding="utf-8") as handle:
+                body = {"source": handle.read()}
+        else:
+            body = {"source": args.source}
+        if params:
+            body["params"] = params
+        started = call("POST", profile_path(args.profile, "/scenario"), body)
+        if args.wait is None:
+            print(json.dumps(started, indent=2))
+            return
+        # The run's log as it grows, then how it ended.
+        shown, deadline = 0, time.monotonic() + max(args.wait, 0)
+        while True:
+            state = call("GET", profile_path(args.profile, "/scenario"))
+            if state.get("runID") != started.get("runID"):
+                sys.exit("pbctl: another run of this profile took this one's place")
+            shown = print_run(state, shown)
+            if not state.get("running"):
+                break
+            if time.monotonic() >= deadline:
+                sys.exit(f"pbctl: the run is still going after {args.wait:g} s (pbctl stop-run stops it)")
+            time.sleep(0.5)
+        if "result" in state:
+            print(json.dumps(state["result"], indent=2, ensure_ascii=False))
+        if state.get("outcome") != "finished":
+            sys.exit(f'pbctl: the run {state.get("outcome")}: {state.get("reason") or ""}'.rstrip(": "))
+    elif args.command == "log":
+        state = call("GET", profile_path(args.profile, "/scenario"))
+        print_run(state)
+        print("running" if state.get("running") else f'{state.get("outcome")}{": " + state["reason"] if state.get("reason") else ""}')
+        if "result" in state:
+            print(json.dumps(state["result"], indent=2, ensure_ascii=False))
+    elif args.command == "stop-run":
+        print(json.dumps(call("POST", profile_path(args.profile, "/scenario/stop"), {}), indent=2))
 
 
 if __name__ == "__main__":

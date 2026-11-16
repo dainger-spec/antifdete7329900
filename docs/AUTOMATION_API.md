@@ -35,7 +35,7 @@ profiles share is refused (`409 ambiguous`) — use the id.
 | Request | What it does | Answer |
 |---|---|---|
 | `GET /v1/profiles` | Every profile | `[Profile]` |
-| `POST /v1/profiles` | Makes a profile, as the app's New Profile does (the plan's profile limit counts it): body `{"name": "…", "temporary": true, "proxy": "socks5://user:pass@host:port", "start": false, "window": true}` — all optional. By default a **temporary** profile ("Temporary 2", "Temporary 3"…), which keeps nothing between launches; `"start": true` starts it in the same call, so one request gives a fresh browser whose WebDriver address is `/wd/<profile's token>/<id>` (the profile's token is made from the API's: docs/AUTOMATION.md, "WebDriver"; `pbctl webdriver <profile>` prints the address). The proxy needs its scheme (its type is not guessed). The API never deletes it: deleting a profile is the person's alone, from the app (scripts/check_deletion_paths.py); a temporary one has nothing in it to delete but its line in the list. | `201`, `Profile`; `409 launch_failed` (the message names the profile made) |
+| `POST /v1/profiles` | Makes a profile, as the app's New Profile does (the plan's profile limit counts it): body `{"name": "…", "temporary": true, "proxy": "socks5://user:pass@host:port", "start": false, "window": true}` — all optional. By default a **temporary** profile ("Temporary 2", "Temporary 3"…), which keeps nothing between launches; `"start": true` starts it in the same call, so one request gives a fresh browser whose WebDriver address is `/wd/<profile's token>/<id>` (the profile's token is made from the API's: docs/AUTOMATION.md, "WebDriver"; `scripts/pbctl webdriver <profile>`, the source repository's developer script, prints the address). The proxy needs its scheme (its type is not guessed). The API never deletes it: deleting a profile is the person's alone, from the app (scripts/check_deletion_paths.py); a temporary one has nothing in it to delete but its line in the list. | `201`, `Profile`; `409 launch_failed` (the message names the profile made) |
 | `GET /v1/profiles/{profile}` | One profile | `Profile` |
 | `POST /v1/profiles/{profile}/start` | Starts it; body `{"window": false}` starts it out of sight (as a warm-up does), default `true`. A running profile is left as it is. | `Profile` |
 | `POST /v1/profiles/{profile}/stop` | Stops it; its data is sealed before the answer comes. | `Profile` |
@@ -70,7 +70,9 @@ curl -s -H "Authorization: Bearer $PB_API_TOKEN" \
      'http://127.0.0.1:50777/v1/profiles/Shop%20DE/cookies?format=netscape' > cookies.txt
 ```
 
-`scripts/pbctl` does the same from the command line (Python 3, nothing to install):
+`scripts/pbctl` does the same from the command line (Python 3, nothing to install). It is a developer
+script of this source repository: no build of the app and no DMG ships it, and the app's Settings name
+curl and any HTTP client instead. A script needs nothing but the requests above and the token.
 
 ```sh
 scripts/pbctl list
@@ -79,8 +81,15 @@ scripts/pbctl start "Shop DE" --hidden
 scripts/pbctl open "Shop DE" https://example.com/
 scripts/pbctl cookies "Shop DE" --format playwright > state-cookies.json
 scripts/pbctl import-cookies "Shop DE" cookies.txt
+scripts/pbctl run "Shop DE" --scenario "Sign in" --wait        # a saved scenario, followed to its end: its log, its result
+scripts/pbctl run "Shop DE" --file orders.js --param city=Rome --wait 120
+scripts/pbctl log "Shop DE"                                    # the last run again
+scripts/pbctl stop-run "Shop DE"
 scripts/pbctl stop "Shop DE"
 ```
+
+`run … --wait` exits 1 unless the run finished, with why it did not ("the run failed: … (line 7)"):
+a shell script or a cron job can stand on it.
 
 It reads the token from `PB_API_TOKEN` and the port from `PB_API_PORT` (default 50777).
 
@@ -109,8 +118,8 @@ pointer, wheel and keyboard, which pages cannot tell from a person's.
 | Request | Does |
 |---|---|
 | `POST /v1/profiles/{profile}/scenario` `{"source": "…JavaScript…", "params": {…}}` | Runs that text on the running profile, in a window of its own — Safari's where the profile's process hosts Safari's chrome, the app's elsewhere (docs/AUTOMATION.md); **202** `{"runID": …}`. `params` is optional (the script's `params`) |
-| `POST /v1/profiles/{profile}/scenario` `{"scenario": "Sign in"}` | Runs the saved scenario of that exact name (**404** `no_scenario` when there is not one) |
-| `GET /v1/profiles/{profile}/scenario` | The profile's last run: `running`, `outcome` (`finished`, `failed`, `stopped`), `reason`, and its `lines` (`at`, `kind`, `text`) |
+| `POST /v1/profiles/{profile}/scenario` `{"scenario": "Sign in"}` | Runs the saved scenario of that exact name (**404** `no_scenario` when there is not one). Its `params` are the profile's own values for scenarios (docs/AUTOMATION.md, "A profile's values") with the request's `params` over them, name by name: `{"scenario": "Sign in"}` sent to fifty profiles signs each in with its own password. A text sent as `source` gets the request's `params` alone |
+| `GET /v1/profiles/{profile}/scenario` | The profile's last run: `running`, `outcome` (`finished`, `failed`, `stopped`), `reason` (a failure's names the scenario's line: "… (line 12)"), `result` — what the scenario returned (`return {…}`), any JSON value, absent when it returned nothing or did not finish — and its `lines` (`at`, `kind`, `text`) |
 | `POST /v1/profiles/{profile}/scenario/stop` | Stops it: a wait under way ends, a pressed button or key is let go first |
 
 A profile not running answers **409** `not_running`; a run already going, or a WebDriver session
@@ -119,8 +128,20 @@ never holds what was typed — only how many characters.
 
 ```sh
 curl -s -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:50777/v1/profiles/Shop%20DE/scenario \
-  -d '{"source": "await page.goto(params.url); log(await page.title());", "params": {"url": "https://example.com/"}}'
+  -d '{"source": "await page.goto(params.url); return {title: await page.title()};", "params": {"url": "https://example.com/"}}'
 curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:50777/v1/profiles/Shop%20DE/scenario
+```
+
+```json
+{
+  "lines" : [ { "at" : "2026-11-15T10:07:42Z", "kind" : "command", "text" : "goto https://example.com/" }, … ],
+  "name" : "API",
+  "outcome" : "finished",
+  "result" : { "title" : "Example Domain" },
+  "runID" : "0E6B…",
+  "running" : false,
+  "startedAt" : "2026-11-15T10:07:41Z"
+}
 ```
 
 ## What it does not do
@@ -142,5 +163,6 @@ refused (401, before the plan); every route — the old ones too — refused wit
 the plan (403 `automation_not_in_plan`; red on the code before the gate, claude/measure-api-gate-red);
 the list without the proxy's credentials; a profile started out of sight, a cookie
 imported into it and read back out, a `file:` address refused, the profile stopped; nothing
-answering once the API is off; a scenario run with its parameters and its log read back, an unknown saved scenario not found, a
-run stopped. The sandboxed build: does not listen, and says why.
+answering once the API is off; a scenario run with its parameters and its log read back; what a scenario returns given as
+`result`, a saved scenario with the profile's own values under the request's and a sent text
+with the request's alone; an unknown saved scenario not found, a run stopped. The sandboxed build: does not listen, and says why.

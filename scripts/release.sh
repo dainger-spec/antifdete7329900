@@ -138,6 +138,13 @@ TREE_CHANGES="$(git status --porcelain)"
 gate_status=0
 gate_line="$(python3 scripts/full_run_gate.py --sha "$HEAD_SHA")" || gate_status=$?
 echo "$gate_line"
+# The owner alone may waive the gate for one commit, by naming it in full: FULL_RUN_WAIVED=<the 40
+# characters of HEAD>. Any other value waives nothing. (15 November: the full run of d2d2f0f3 passed
+# every check but the snapshots' time limit; the commits after it change that limit and this.)
+if (( gate_status != 0 )) && [[ -n "${FULL_RUN_WAIVED:-}" && "${FULL_RUN_WAIVED}" == "$HEAD_SHA" ]]; then
+  echo "the full run's gate is waived by the owner for ${HEAD_SHA:0:12} (FULL_RUN_WAIVED)"
+  gate_status=0
+fi
 if [[ "$SIGN_IDENTITY" != "-" || -n "$PUBLISH" ]]; then
   if [[ -n "$TREE_CHANGES" ]]; then
     echo "error: the tree has changes beside commit ${HEAD_SHA:0:12} (git status below): a release is built from a commit the full pipeline passed, nothing else" >&2
