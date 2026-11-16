@@ -115,6 +115,12 @@ public struct VMNetConfiguration: Sendable {
     /// addresses: a machine woken from a saved state still holds them (in its resolver's cache,
     /// in connections it is about to open) and must find the same names behind them.
     public var knownNames: [VMNetKnownName] = []
+    /// The guest's UDP — QUIC (HTTP/3), WebRTC, anything but DNS and the time — is carried through
+    /// the proxy's own UDP relay (SOCKS5 UDP ASSOCIATE, RFC 1928 §7), and no other way. Off, or
+    /// with a proxy that is not SOCKS5, or one that refuses: answered "port unreachable", as
+    /// before. The app turns it on for a run only when its check before the start found that the
+    /// proxy carries UDP; DNS and the time are answered here either way, and never relayed.
+    public var relaysUDP = false
 
     public init(guestMAC: VMNetMAC, gatewayMAC: VMNetMAC,
                 gatewayAddress: VMNetIPv4 = VMNetIPv4(0xC0A8_0101), guestAddress: VMNetIPv4 = VMNetIPv4(0xC0A8_0117),
@@ -149,10 +155,22 @@ public struct VMNetCounters: Equatable, Sendable {
     public var dnsQueries: UInt64 = 0
     /// Queries answered "no such name" because the name is under a blocked suffix.
     public var dnsBlocked: UInt64 = 0
-    /// UDP that is not DHCP, DNS or a question for the time.
+    /// UDP that is not DHCP, DNS or a question for the time and was not carried: answered "port
+    /// unreachable" (or, for broadcasts, multicast and a full queue, nothing).
     public var datagramsDropped: UInt64 = 0
     /// Questions for the time (NTP) answered with this Mac's clock.
     public var timeQueries: UInt64 = 0
+    /// The guest's datagrams sent on through the proxy's UDP relay (`relaysUDP`), and their payload.
+    public var datagramsRelayed: UInt64 = 0
+    public var udpBytesFromGuest: UInt64 = 0
+    /// Datagrams from the relay delivered to the guest, and their payload.
+    public var datagramsToGuest: UInt64 = 0
+    public var udpBytesToGuest: UInt64 = 0
+    /// UDP associations with the proxy that came up, that did not (refused, not answered, not
+    /// understood), and that are open now. One per port the guest sends from.
+    public var udpAssociationsOpened: UInt64 = 0
+    public var udpAssociationsFailed: UInt64 = 0
+    public var udpAssociationsActive: Int = 0
 
     public init() {}
 }
