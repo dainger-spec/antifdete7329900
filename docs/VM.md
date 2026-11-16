@@ -638,12 +638,78 @@ what was in this app's hands, and was found slowing a machine on a person's Mac 
   `synchronizationMode: .fsync` instead. What is given up: if the Mac loses power — not if the
   app or the machine ends — the guest's last seconds of writes may not be on the drive.
 - **App Nap.** macOS rests a process whose window is covered; the guest's processors are that
-  process's. The helper holds an activity (`userInitiatedAllowingIdleSystemSleep`,
-  `latencyCritical`) for as long as it runs; the Mac may still sleep when idle.
+  process's. The helper holds an activity (`userInitiatedAllowingIdleSystemSleep`) for as long as
+  it runs; the Mac may still sleep when idle.
 - **A machine's first start** is slower than its later ones: to its macOS it is a Mac it has not
   seen, and it rebuilds what it keeps per Mac. Spotlight's index is off in machines (the tools).
 
 Not measured: how much each of these is worth on a given Mac.
+
+### What a machine costs this Mac while nobody looks at it
+
+The owner, 16 November: one running machine — "Virtual Machine Service" (where the guest's
+processors run) about 57 % of a core, WindowServer 35 %, and two of Apple's paravirtual graphics
+processes 13 % and 5 %. A guest draws its screen whether anyone sees the window or not: its pages
+animate, its window server composes them, the virtual graphics card does that work on this Mac's,
+and a visible window is composed again by this Mac's WindowServer. Most of that is the price of a
+Mac shown at a real Mac's resolution, which a page reads and which stays (`VMDisplay`). What was
+in this app's hands:
+
+- **Timer precision only while the window is in sight.** The helper asked for the highest timer
+  and I/O precision (`latencyCritical`, which keeps macOS from gathering a process's wake-ups
+  together) for as long as it ran. It now holds that only while the machine's window is in sight
+  (AppKit's occlusion state: not minimised, covered, on another desktop, or behind this Mac's
+  sleeping or locked screen) — someone may be at the machine then, and its pointer and pages
+  answer at once. Out of sight it keeps the activity that holds App Nap off, so the guest runs on
+  as before, and its wake-ups may be gathered with this Mac's others. Nothing in the guest
+  changes. Inferred, not measured: how far the framework's own process (Virtual Machine Service)
+  follows the helper's precision; the helper's own wake-ups (its network, its two-second count of
+  the traffic, which now has half a second of tolerance) are gathered for certain.
+- **The app's rows** are told of a machine's traffic once per count, and only when something
+  changed, not once for each of six fields every two seconds.
+
+Looked at, and left as it is (Apple's documentation, read 16 November; what it does not say is
+said so):
+
+- **Memory balloon** (`VZVirtioTraditionalMemoryBalloonDevice`). The machine has one, and nothing
+  ever sets its target, so the guest keeps all its memory — as before. Apple documents the device
+  as asking the guest to give pages back when the target is lowered, "if the guest complies"; it
+  does not say whether macOS as a guest does, and no source found says either way. Lowering the
+  target would also shrink what the guest has, which a page can come to notice; not done.
+- **The disk's caching** (`cachingMode`): `.automatic` stays. `.uncached` would keep the disk's
+  blocks out of this Mac's file cache (memory it frees at once when asked anyway) at the price of
+  reads the guest's own cache misses; unmeasured, so unchanged. Its synchronisation is `.fsync`
+  since 13 November (above).
+- **Sound.** The machine keeps its speakers and microphone either way: a page can read which audio
+  devices a Mac has. With "Sound from the machine" off they are connected to nothing on this Mac.
+  (Apple's sample for macOS guests, macOS 27, has a sound device and calls
+  `validateSaveRestoreSupport` with it; whether instant wake still needs a silent machine on newer
+  macOS is to be tried on a Mac.)
+- **The source of random numbers** (`VZVirtioEntropyDevice`) and the second pointer cost nothing
+  while nothing asks them; no console device is attached.
+- **Processors.** An idle virtual processor waits without taking this Mac's time; more of them
+  cost little while the guest idles. A page reads the count (`navigator.hardwareConcurrency`):
+  "As a Mac (8 cores)" stays the default, and 4 or 6 are the person's choice.
+- **The screen** (its size, pixels per inch) is what a page reads, and stays the profile's, whatever
+  it costs to draw. The window scales the picture and never changes it
+  (`automaticallyReconfiguresDisplay` off).
+- **The guest's background work.** The tools turn off the Spotlight index, sleep, the screen lock
+  and automatic updates (and Apple's update hosts are blocked by the machine's network); the base's
+  setup guide has Location, analytics, Screen Time and Siri off and no Apple ID, so iCloud, Photos'
+  and Game Center's work has nothing to do. Nothing else is turned off: what remains is macOS as
+  any Mac runs it, and the work in a machine is mostly its pages.
+- **The boot script's own look** at the shared folder every two seconds (a few file lookups) and
+  the network's: event-driven, with nothing to do while the guest is quiet.
+
+What to look at on a Mac (Activity Monitor, the CPU tab, with "% CPU", "Idle Wake Ups" and, in
+the Energy tab, "Energy Impact" shown; a machine started, a page with animation open in it, and
+left a minute to settle):
+
+1. The machine's window in sight: note "Virtual Machine Service", "LumenVM", WindowServer and the
+   `com.apple.gpusw…Paravirtualized…` processes. Then minimise the window and wait a minute: with
+   this version, LumenVM's (and perhaps Virtual Machine Service's) Idle Wake Ups go down;
+   WindowServer goes down as for any hidden window. Bring the window back: the machine answers the
+   pointer and the keys at once, as before.
 
 ## The download
 

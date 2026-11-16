@@ -233,6 +233,9 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     private var keptPlacement: VMWindowPlacement?
     private var placementWrite: DispatchWorkItem?
     private var fullScreenBusy = false
+    /// The highest timer and I/O precision this process can ask for (`latencyCritical`), held
+    /// while the machine's window is in sight (`holdPrecision`).
+    private var precision: NSObjectProtocol?
 
     init(request: VMHelperRequest) {
         self.request = request
@@ -311,6 +314,8 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
                 }
             }
             trafficTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.reportTraffic() }
+            // Counters for the app's row: whenever macOS has other wake-ups to go with them.
+            trafficTimer?.tolerance = 0.5
             macWakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification,
                                                                                object: nil, queue: .main) { [weak self] _ in
                 self?.macWoke()
@@ -419,6 +424,8 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(view)
         self.window = window
+        // In sight as it opens; AppKit says when that changes (`windowDidChangeOcclusionState`).
+        holdPrecision(true)
         if request.fullScreen == true {
             // The profile's choice: the machine takes this Mac's whole screen, as the window's
             // green button would have it.
@@ -485,6 +492,31 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     func windowDidExitFullScreen(_ notification: Notification) { fullScreenBusy = false }
     /// Full screen that did not come about: the window is a window again.
     func windowDidFailToEnterFullScreen(_ window: NSWindow) { fullScreenBusy = false }
+
+    // MARK: Out of sight
+
+    /// The window came into sight or went out of it — minimised, covered by other windows, on
+    /// another desktop, this Mac's screen off or locked (AppKit's occlusion state).
+    func windowDidChangeOcclusionState(_ notification: Notification) {
+        guard let window, !finished else { return }
+        holdPrecision(window.occlusionState.contains(.visible))
+    }
+
+    /// The highest timer precision (`latencyCritical`: macOS does not gather this process's
+    /// wake-ups together) while the machine's window is in sight: someone may be at the machine,
+    /// and its pointer and its pages answer at once. Out of sight the helper keeps only the
+    /// activity begun at its start (main.swift) — App Nap stays away, the guest runs on, and its
+    /// wake-ups may be gathered with this Mac's others, which saves energy.
+    private func holdPrecision(_ wanted: Bool) {
+        if wanted {
+            guard precision == nil else { return }
+            precision = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
+                                                              reason: "A virtual machine's window is in sight")
+        } else if let held = precision {
+            ProcessInfo.processInfo.endActivity(held)
+            precision = nil
+        }
+    }
 
     // MARK: The start's cover
 

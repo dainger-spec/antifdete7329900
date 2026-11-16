@@ -907,12 +907,16 @@ final class VMCenter: ObservableObject {
                 }
             }
         case .traffic:
-            running[id]?.bytesUp = event.bytesUp ?? 0
-            running[id]?.bytesDown = event.bytesDown ?? 0
-            running[id]?.connections = event.connections ?? 0
-            running[id]?.trouble = event.trouble.flatMap(VMNetworkTrouble.init(rawValue:))
-            running[id]?.troubleDetail = event.troubleDetail
-            running[id]?.viaSystemProxy = event.viaSystemProxy ?? false
+            // Said every two seconds while the machine's network carries anything: the rows that
+            // show it are told once, and only of a change — not once for each of six fields.
+            guard var state = running[id] else { break }
+            state.bytesUp = event.bytesUp ?? 0
+            state.bytesDown = event.bytesDown ?? 0
+            state.connections = event.connections ?? 0
+            state.trouble = event.trouble.flatMap(VMNetworkTrouble.init(rawValue:))
+            state.troubleDetail = event.troubleDetail
+            state.viaSystemProxy = event.viaSystemProxy ?? false
+            if state != running[id] { running[id] = state }
         case .hosts:
             // Only while the panel asks: an answer that comes after it was closed is dropped.
             if hosts[id] != nil { hosts[id] = event.hosts ?? [] }
