@@ -121,6 +121,8 @@ public enum ProfileCheck {
     /// How the launched profile does WebRTC.
     public enum WebRTC: String, Sendable {
         case off, throughProxy, direct
+        /// Present as in Safari, connecting nowhere (`WebRTCRouting.silent`).
+        case silent
     }
 
     /// What the profile's own process says of its web views (`ProfileNetworkReport`).
@@ -235,11 +237,13 @@ public enum ProfileCheck {
         if let network = facts.network, network.webViewsWithWebRTC > 0 {
             return Finding(.webRTC, .attention, "onWhereOff", [String(network.webViewsWithWebRTC)])
         }
+        if facts.webRTC == .silent { return Finding(.webRTC, .ok, "silent") }
         guard facts.configuration.proxy != nil else {
             return Finding(.webRTC, .ok, facts.webRTC == .off ? "off" : "directNoProxy")
         }
         switch facts.webRTC {
         case .off: return Finding(.webRTC, .ok, "off")
+        case .silent: return Finding(.webRTC, .ok, "silent")
         case .throughProxy: return Finding(.webRTC, .ok, "throughProxy")
         case .direct: return Finding(.webRTC, .attention, "direct")
         }

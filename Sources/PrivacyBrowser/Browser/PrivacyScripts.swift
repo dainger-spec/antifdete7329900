@@ -47,7 +47,8 @@ enum PrivacyScripts {
     struct ShimConfiguration: Encodable {
         var timeZone: String?
         var geolocation: Geolocation
-        /// "disabled", "relayOnly", "unrestricted", or "tunnel" (with `webRTCRelay`).
+        /// "disabled", "relayOnly", "unrestricted", "tunnel" (with `webRTCRelay`), or "silent"
+        /// (present, connecting nowhere: `WebRTCRouting.silent`).
         var webRTC: String
         /// The app's TURN relay for this launch (`ProfileConfiguration.webRTCRouting`).
         var webRTCRelay: Relay?
@@ -152,6 +153,7 @@ enum PrivacyScripts {
         var relay: ShimConfiguration.Relay?
         switch configuration.webRTCRouting {
         case .off: webRTC = WebRTCPolicy.disabled.rawValue
+        case .silent: webRTC = "silent"
         case let .native(policy): webRTC = policy.rawValue
         case let .relay(tunnel):
             webRTC = "tunnel"
@@ -1480,7 +1482,13 @@ function patchWebRTC(w, policy, relay) {
   const nativeClose = nativeProto.close;
   // 'tunnel': the app's TURN relay (127.0.0.1) is the only ICE server, so every candidate is a
   // relay through the profile's proxy. The page keeps seeing its own configuration.
-  const viaTunnel = policy === 'tunnel' && relay ? relay : null;
+  // 'silent': WebRTC stays in the page as Safari has it — the engine's own interfaces, codecs,
+  // capabilities and offers — but connects nowhere, as on a network that lets no UDP through:
+  // relay-only with no ICE server at all, so the engine gathers no candidate (no host address, no
+  // server-reflexive one) and sends nothing. Everything else is the tunnel's: the page sees its own
+  // configuration, and a remote candidate named by a host name never reaches the resolver.
+  const viaTunnel = policy === 'tunnel' && relay ? relay
+    : policy === 'silent' ? { urls: [], username: '', credential: '' } : null;
   const relayServers = [];
   if (viaTunnel) {
     for (let i = 0; i < viaTunnel.urls.length; i++) {

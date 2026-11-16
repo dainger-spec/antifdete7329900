@@ -183,6 +183,14 @@ final class ProfileCheckTests: XCTestCase {
         XCTAssertEqual(finding(.webRTC, direct).key, "check.webRTC.directNoProxy")
         XCTAssertEqual(finding(.dns, direct).key, "check.dns.direct")
         XCTAssertEqual(ProfileCheck.attention(in: ProfileCheck.findings(direct, now: winter)), 0)
+
+        // Present and connecting nowhere, with a proxy or without: nothing to learn through it.
+        for configuration in [ProfileConfiguration(), proxied()] {
+            var silentRTC = facts(configuration)
+            silentRTC.webRTC = .silent
+            XCTAssertEqual(finding(.webRTC, silentRTC).key, "check.webRTC.silent")
+            XCTAssertEqual(finding(.webRTC, silentRTC).level, .ok)
+        }
     }
 
     func testAPageFromASnapshotsValues() {

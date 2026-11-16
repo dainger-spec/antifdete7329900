@@ -48,6 +48,13 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// APPROXIMATION: JavaScript removal/wrapping of `RTCPeerConnection`.
     public var webRTCPolicy: WebRTCPolicy
 
+    /// WebRTC goes the way the profile's connection goes, by itself (`WebRTCMode.automatic`): through
+    /// a SOCKS5 proxy where the network guard can hold it there, as Safari's without a proxy, and
+    /// present but connecting nowhere where neither can be (an HTTP proxy). Stored beside the policy
+    /// rather than as a fourth policy, so that a build that does not know it reads the profile as
+    /// "Relay (TURN) only" (`webRTCPolicy`, set with it) instead of failing to read it.
+    public var webRTCAutomatic: Bool
+
     /// NATIVE: use `WKWebsiteDataStore.nonPersistent()` — no website data written to disk,
     /// everything discarded when the profile stops. History is kept in memory only;
     /// bookmarks (explicit user data) are still saved, encrypted.
@@ -103,6 +110,12 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// Set by the app for one launch, never stored: the relay (on 127.0.0.1, the app's own) that
     /// carries this profile's WebRTC through its SOCKS5 proxy. Nil unless `WebRTCGate` decided so.
     public var webRTCRelay: WebRTCRelay?
+
+    /// Set by the app for one launch, never stored: WebRTC that must not connect stays in the pages,
+    /// as Safari has it, connecting nowhere (`WebRTCRouting.silent`). Only where nothing can leave
+    /// around the profile's connection even if a page got past the script: without a proxy, or with
+    /// the network guard holding the profile's process to its proxy (`WebRTCGate.silence`).
+    public var webRTCSilent = false
 
     /// What the address bar searches with (and the warm-up's searches). Nil: `SearchEngine.standard`
     /// — every profile from before there was a choice, and one a later build gave an engine this
@@ -173,6 +186,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 geolocation: GeolocationSetting = .deny,
                 timeZoneIdentifier: String? = nil,
                 webRTCPolicy: WebRTCPolicy = .disabled,
+                webRTCAutomatic: Bool = false,
                 ephemeral: Bool = false,
                 safeBrowsingEnabled: Bool = false,
                 historyEnabled: Bool = true,
@@ -203,6 +217,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.geolocation = geolocation
         self.timeZoneIdentifier = timeZoneIdentifier
         self.webRTCPolicy = webRTCPolicy
+        self.webRTCAutomatic = webRTCAutomatic
         self.ephemeral = ephemeral
         self.safeBrowsingEnabled = safeBrowsingEnabled
         self.historyEnabled = historyEnabled
@@ -266,22 +281,43 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// (`webRTCRelay`, set at launch when `WebRTCGate` allows it: a SOCKS5 proxy that carries UDP,
     /// the network guard holding the profile's process); otherwise it is switched off. The stored
     /// choice is kept either way.
+    ///
+    /// WebRTC that must not connect is `.silent` where the launch found that safe (`webRTCSilent`):
+    /// present in the pages, connecting nowhere.
     public var webRTCRouting: WebRTCRouting {
-        if webRTCPolicy == .disabled { return .off }
-        guard let proxy else { return .native(webRTCPolicy) }
+        let policy = webRTCLaunchPolicy
+        if policy == .disabled { return webRTCSilent ? .silent : .off }
+        guard let proxy else { return .native(policy) }
         if proxy.kind == .socks5, let webRTCRelay { return .relay(webRTCRelay) }
-        return .off
+        return webRTCSilent ? .silent : .off
     }
 
     /// The policy the routing amounts to: `.disabled` when WebRTC is off, `.relayOnly` through the
-    /// app's relay, the stored policy without a proxy.
+    /// app's relay or present and connecting nowhere (the engine's WebRTC is on, the page's script
+    /// gives it relay-only), the stored policy without a proxy.
     public var effectiveWebRTCPolicy: WebRTCPolicy {
         switch webRTCRouting {
         case .off: return .disabled
         case let .native(policy): return policy
-        case .relay: return .relayOnly
+        case .relay, .silent: return .relayOnly
         }
     }
+
+    /// The choice as the editor shows it: Automatic, or one of the three policies.
+    public var webRTCMode: WebRTCMode {
+        get { webRTCAutomatic ? .automatic : WebRTCMode(webRTCPolicy) }
+        set {
+            webRTCAutomatic = newValue == .automatic
+            // What a build that does not know Automatic reads: relay only — through the proxy's
+            // relay where it can, otherwise only through a site's own TURN server, never around.
+            webRTCPolicy = newValue.policy ?? .relayOnly
+        }
+    }
+
+    /// The policy a launch decides with (`WebRTCGate`): the stored one, or for Automatic the one
+    /// that lets WebRTC go wherever the connection goes — the proxy's relay through a SOCKS5 proxy
+    /// (what Unrestricted and Relay only both amount to there), Safari's own without a proxy.
+    public var webRTCLaunchPolicy: WebRTCPolicy { webRTCAutomatic ? .unrestricted : webRTCPolicy }
 
     /// The profile runs in its proxy's time zone (`matchProxyLocation`).
     /// With no proxy too: a direct connection's exit is looked up as a proxy's is (the lead, 7 November).
@@ -336,6 +372,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
             settings.settingsModifiedAt = nil
             settings.lastProxyLocation = nil
             settings.webRTCRelay = nil
+            settings.webRTCSilent = false
             return settings
         }
         return other.map { settings($0) == settings(self) } ?? false
@@ -360,7 +397,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case startURL, userAgent, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, ephemeral,
+        case startURL, userAgent, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, webRTCAutomatic, ephemeral,
              safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID,
              matchProxyLocation, lastProxyLocation, warnOnProxyIPChange, passwordAutoFill, passwordNeverSaveSites,
              syncCookies, settingsModifiedAt, searchEngine, tags, notes, avatar, windowSize, safariVersion,
@@ -379,6 +416,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         geolocation = try c.decodeIfPresent(GeolocationSetting.self, forKey: .geolocation) ?? defaults.geolocation
         timeZoneIdentifier = try c.decodeIfPresent(String.self, forKey: .timeZoneIdentifier)
         webRTCPolicy = try c.decodeIfPresent(WebRTCPolicy.self, forKey: .webRTCPolicy) ?? defaults.webRTCPolicy
+        webRTCAutomatic = (try? c.decodeIfPresent(Bool.self, forKey: .webRTCAutomatic)) ?? false
         ephemeral = try c.decodeIfPresent(Bool.self, forKey: .ephemeral) ?? defaults.ephemeral
         safeBrowsingEnabled = try c.decodeIfPresent(Bool.self, forKey: .safeBrowsingEnabled) ?? defaults.safeBrowsingEnabled
         historyEnabled = try c.decodeIfPresent(Bool.self, forKey: .historyEnabled) ?? defaults.historyEnabled
@@ -430,6 +468,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         try c.encode(geolocation, forKey: .geolocation)
         try c.encodeIfPresent(timeZoneIdentifier, forKey: .timeZoneIdentifier)
         try c.encode(webRTCPolicy, forKey: .webRTCPolicy)
+        // Written only when it is on: a profile with one of the three policies is written as before.
+        if webRTCAutomatic { try c.encode(true, forKey: .webRTCAutomatic) }
         try c.encode(ephemeral, forKey: .ephemeral)
         try c.encode(safeBrowsingEnabled, forKey: .safeBrowsingEnabled)
         try c.encode(historyEnabled, forKey: .historyEnabled)
@@ -594,8 +634,36 @@ public enum WebRTCRouting: Equatable, Sendable {
     case native(WebRTCPolicy)
     /// Switched off in the engine.
     case off
+    /// Present as Safari has it — the engine's interfaces, codecs, capabilities, offers — and
+    /// connecting nowhere: the page's script gives the engine relay-only with no ICE server, so it
+    /// gathers no candidate and sends nothing (as Safari on a network that lets no UDP through).
+    case silent
     /// Relay-only through the app's TURN server on 127.0.0.1 and the profile's SOCKS5 proxy.
     case relay(WebRTCRelay)
+}
+
+/// The WebRTC choice the editor offers: Automatic (`ProfileConfiguration.webRTCAutomatic`), or one
+/// of the three stored policies.
+public enum WebRTCMode: String, CaseIterable, Sendable {
+    case automatic, disabled, relayOnly, unrestricted
+
+    public init(_ policy: WebRTCPolicy) {
+        switch policy {
+        case .disabled: self = .disabled
+        case .relayOnly: self = .relayOnly
+        case .unrestricted: self = .unrestricted
+        }
+    }
+
+    /// The stored policy it is; nil for Automatic.
+    public var policy: WebRTCPolicy? {
+        switch self {
+        case .automatic: return nil
+        case .disabled: return .disabled
+        case .relayOnly: return .relayOnly
+        case .unrestricted: return .unrestricted
+        }
+    }
 }
 
 public enum WebRTCPolicy: String, Codable, CaseIterable, Sendable {
