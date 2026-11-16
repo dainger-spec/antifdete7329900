@@ -13,6 +13,10 @@ passed is not allowed. This asks GitHub for the full workflow's runs of the comm
     exit 2  GitHub could not be asked (no network, an answer that is not GitHub's): not a yes
 
 A run on another commit, however close, is not this commit's: the commit is what is released.
+Only a run that checks counts: one started on request (`workflow_dispatch`, Run workflow — the
+nightly run starts its checks that way) or by a pushed tag full/… (`push`). The schedule's own run
+of full.yml checks nothing (only its job `nightly` runs, every check job is skipped) and still ends
+"success": it never says yes, and never hides a real run that failed.
 `--runs-json` reads a saved answer of the API instead of asking (the tests, scripts/test_full_run_gate.sh).
 GITHUB_TOKEN, when set, is sent (the API's limit for a caller without one is 60 an hour).
 """
@@ -26,6 +30,8 @@ import urllib.error
 import urllib.request
 
 WORKFLOW = "full.yml"
+# The events whose runs of full.yml run the checks (full.yml's `on:`; the schedule's run only starts one).
+CHECKING_EVENTS = ("push", "workflow_dispatch")
 
 
 def repo_from_origin():
@@ -82,8 +88,15 @@ def main():
     if not isinstance(runs, list):
         print("full run: GitHub's answer has no list of runs: not a yes")
         return 2
-    mine = [run for run in runs if str(run.get("head_sha", "")).lower() == sha
-            and str(run.get("path", "")).split("@")[0].endswith(f".github/workflows/{WORKFLOW}")]
+    of_commit = [run for run in runs if str(run.get("head_sha", "")).lower() == sha
+                 and str(run.get("path", "")).split("@")[0].endswith(f".github/workflows/{WORKFLOW}")]
+    # A run that checked nothing (the schedule's own) is not a full run of this commit.
+    mine = [run for run in of_commit if run.get("event") in CHECKING_EVENTS]
+    others = len(of_commit) - len(mine)
+    if others:
+        # On stderr: the answer itself is one line (release.sh keeps it for its DRY RUN block).
+        print(f"full run: {others} run(s) of {WORKFLOW} on {short} by another event (the schedule's own runs no check): not counted",
+              file=sys.stderr)
     passed = [run for run in mine if run.get("status") == "completed" and run.get("conclusion") == "success"]
     if passed:
         run = max(passed, key=lambda r: r.get("run_number", 0))

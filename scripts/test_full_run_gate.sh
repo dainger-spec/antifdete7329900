@@ -1,7 +1,8 @@
 #!/bin/bash
 # scripts/full_run_gate.py against saved answers of GitHub's API: only a passed run of full.yml on
-# exactly the commit says yes; everything else — none, still running, failed, another commit,
-# another workflow, an answer that is not GitHub's — says no. A gate that cannot say no checks nothing.
+# exactly the commit, started by a tag or on request, says yes; everything else — none, still
+# running, failed, another commit, another workflow, the schedule's own run that checks nothing, an
+# answer that is not GitHub's — says no. A gate that cannot say no checks nothing.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WORK="$(mktemp -d)"
@@ -10,9 +11,9 @@ SHA=0123456789abcdef0123456789abcdef01234567
 OTHER=89abcdef0123456789abcdef0123456789abcdef
 status=0
 
-run() { # <name> <head_sha> <path> <status> <conclusion> <number>
-  printf '{"head_sha": "%s", "path": ".github/workflows/%s", "status": "%s", "conclusion": %s, "run_number": %s, "html_url": "https://example.invalid/%s"}' \
-    "$2" "$3" "$4" "$5" "$6" "$1"
+run() { # <name> <head_sha> <path> <status> <conclusion> <number> [event: push unless given]
+  printf '{"head_sha": "%s", "path": ".github/workflows/%s", "status": "%s", "conclusion": %s, "run_number": %s, "event": "%s", "html_url": "https://example.invalid/%s"}' \
+    "$2" "$3" "$4" "$5" "$6" "${7:-push}" "$1"
 }
 case_() { # <expected exit> <what> <json>
   printf '%s' "$3" > "$WORK/runs.json"
@@ -30,6 +31,17 @@ case_ 1 "the full run is still running" "{\"workflow_runs\": [$(run a $SHA full.
 case_ 1 "cancelled" "{\"workflow_runs\": [$(run a $SHA full.yml completed '"cancelled"' 7)]}"
 case_ 1 "passed, but on another commit" "{\"workflow_runs\": [$(run a $OTHER full.yml completed '"success"' 7)]}"
 case_ 1 "passed, but the fast pipeline, not the full one" "{\"workflow_runs\": [$(run a $SHA ci.yml completed '"success"' 7)]}"
+case_ 0 "passed on request (Run workflow, or the nightly run's start)" \
+  "{\"workflow_runs\": [$(run a $SHA full.yml completed '"success"' 7 workflow_dispatch)]}"
+case_ 1 "the schedule's own run on this commit: every check skipped, ended success" \
+  "{\"workflow_runs\": [$(run a $SHA full.yml completed '"success"' 7 schedule)]}"
+case_ 1 "the full run failed; the schedule's own run on the same commit ended success" \
+  "{\"workflow_runs\": [$(run a $SHA full.yml completed '"failure"' 7), $(run b $SHA full.yml completed '"success"' 8 schedule)]}"
+case_ 1 "the full run is still running; the schedule's own run ended success" \
+  "{\"workflow_runs\": [$(run a $SHA full.yml in_progress null 7 workflow_dispatch), $(run b $SHA full.yml completed '"success"' 8 schedule)]}"
+case_ 1 "passed, but by another event (a pull request)" "{\"workflow_runs\": [$(run a $SHA full.yml completed '"success"' 7 pull_request)]}"
+case_ 1 "passed, but the answer does not say how the run started" \
+  "{\"workflow_runs\": [{\"head_sha\": \"$SHA\", \"path\": \".github/workflows/full.yml\", \"status\": \"completed\", \"conclusion\": \"success\", \"run_number\": 7}]}"
 case_ 2 "an answer that is not GitHub's" '{"message": "API rate limit exceeded"}'
 case_ 2 "not JSON at all" 'Service Unavailable'
 out="$(python3 -I "$HERE/full_run_gate.py" --sha abc --repo o/r --runs-json /dev/null 2>&1)"; code=$?

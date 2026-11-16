@@ -66,14 +66,20 @@ Full only (`full.yml`), and why:
 a Developer ID or published needs a tree with no change beside the commit and a run of `full.yml` on
 exactly that commit that completed with success — `scripts/full_run_gate.py` asks GitHub, before
 anything is built. A run on another commit, however close, does not count; a run still going, failed
-or cancelled does not; GitHub not answering is not a yes. A dry run says what it would need, in its
+or cancelled does not; GitHub not answering is not a yes. Only a run that checks counts — one started
+by a `full/…` tag (`push`) or on request (`workflow_dispatch`: Run workflow, and the nightly run's own
+start on claude/redesign): the schedule's own run of `full.yml` runs only its job `nightly`, every
+check skipped, and still ends "success", so it never says yes and never hides a run of the same commit
+that failed. A dry run says what it would need, in its
 DRY RUN block. Start a full run on the commit to release with
 
     git tag full/<sha12> <sha> && git push origin full/<sha12>
 
 (`scripts/test_full_run_gate.sh`: the gate against saved answers of GitHub's API — a passed run of
-the commit, a failed attempt then a passed one: yes; none, running, failed, cancelled, another
-commit, the fast pipeline's run, an answer that is not GitHub's, a short SHA: no.)
+the commit by a tag or on request, a failed attempt then a passed one: yes; none, running, failed,
+cancelled, another commit, the fast pipeline's run, the schedule's own run (alone, or beside a run
+that failed or is still going), another event, a run that does not say its event, an answer that is
+not GitHub's, a short SHA: no.)
 
 It also stops (step 0a) while the server signs no automation into the documents of rights: the
 automation API and scenario runs are the plan's (docs/AUTOMATION_API.md, "The plan"), and an app with
