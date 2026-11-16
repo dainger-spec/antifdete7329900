@@ -201,6 +201,10 @@ final class UDPAssociation {
         /// the first of them.
         var answeredFrom: SOCKSAddress?
         var lastUsed: Double
+        /// The transaction IDs of the last STUN requests the guest sent it before it answered: a
+        /// STUN answer names its request, which tells two names on one port apart (WebRTC asks
+        /// several STUN servers from one socket, often on the same port).
+        var stunRequests: [[UInt8]] = []
     }
 
     /// A datagram waiting for the association to come up: the SOCKS5 datagram ready to send, and
@@ -257,26 +261,45 @@ final class UDPAssociation {
         }
     }
 
-    /// Notes that the guest sends to `address`:`port` (`target` is where the proxy is asked to
-    /// send it). True when the destination is new to this association.
+    /// Notes that the guest sends `payload` to `address`:`port` (`target` is where the proxy is
+    /// asked to send it). True when the destination is new to this association.
     @discardableResult
-    func noteDestination(_ address: VMNetIPv4, port: UInt16, target: ProxyTarget, host: String, now: Double) -> Bool {
-        if let index = destinations.firstIndex(where: { $0.guestAddress == address && $0.port == port }) {
+    func noteDestination(_ address: VMNetIPv4, port: UInt16, target: ProxyTarget, host: String, now: Double,
+                         payload: UnsafeRawBufferPointer? = nil) -> Bool {
+        var isNew = false
+        var index: Int
+        if let known = destinations.firstIndex(where: { $0.guestAddress == address && $0.port == port }) {
+            index = known
             destinations[index].lastUsed = now
             if destinations[index].target != target {
                 // The fake address was given to another name since: what was learned is of the old one.
                 destinations[index].target = target
                 destinations[index].host = host
                 destinations[index].answeredFrom = nil
+                destinations[index].stunRequests = []
             }
-            return false
+        } else {
+            if destinations.count >= Self.destinationLimit,
+               let oldest = destinations.indices.min(by: { destinations[$0].lastUsed < destinations[$1].lastUsed }) {
+                destinations.remove(at: oldest)
+            }
+            destinations.append(Destination(guestAddress: address, port: port, target: target, host: host, answeredFrom: nil, lastUsed: now))
+            index = destinations.count - 1
+            isNew = true
         }
-        if destinations.count >= Self.destinationLimit,
-           let oldest = destinations.indices.min(by: { destinations[$0].lastUsed < destinations[$1].lastUsed }) {
-            destinations.remove(at: oldest)
+        if case .name = target, destinations[index].answeredFrom == nil, let payload, let transaction = Self.stunTransaction(payload) {
+            if destinations[index].stunRequests.count >= 4 { destinations[index].stunRequests.removeFirst() }
+            destinations[index].stunRequests.append(transaction)
         }
-        destinations.append(Destination(guestAddress: address, port: port, target: target, host: host, answeredFrom: nil, lastUsed: now))
-        return true
+        return isNew
+    }
+
+    /// The transaction ID of a STUN message (RFC 5389: the two top bits zero, the magic cookie),
+    /// nil for anything else.
+    static func stunTransaction(_ payload: UnsafeRawBufferPointer) -> [UInt8]? {
+        guard payload.count >= 20, payload[0] & 0xC0 == 0, payload[4] == 0x21, payload[5] == 0x12, payload[6] == 0xA4,
+              payload[7] == 0x42 else { return nil }
+        return Array(payload[8..<20])
     }
 
     /// Forgets the destinations whose name `isBlocked` says is blocked now: their answers are no
@@ -290,10 +313,11 @@ final class UDPAssociation {
 
     /// Which destination an answer from the relay comes from: the one the guest sent to that
     /// address and port; for a name, the one whose answers came from there before, or the one
-    /// the relay names; else the name with that port the guest sent to last that has had no
-    /// answer yet (its first answer: the proxy resolved the name, and answers from the address it
-    /// chose). Nil when the guest sent nothing there: the answer is not shown.
-    func destination(answering source: SOCKSAddress, port: UInt16, now: Double) -> Destination? {
+    /// the relay names; else, among the names with that port that have had no answer yet, the one
+    /// a STUN answer names the request of, or the one the guest sent to last (its first answer:
+    /// the proxy resolved the name, and answers from the address it chose). Nil when the guest
+    /// sent nothing there: the answer is not shown.
+    func destination(answering source: SOCKSAddress, port: UInt16, now: Double, payload: UnsafeRawBufferPointer? = nil) -> Destination? {
         let source = source.normalized
         var match: Int?
         if case .ipv4(let value) = source {
@@ -311,6 +335,13 @@ final class UDPAssociation {
                 return false
             }
         }
+        if match == nil, let payload, let transaction = Self.stunTransaction(payload) {
+            match = destinations.firstIndex { destination in
+                guard destination.port == port, destination.answeredFrom == nil, case .name = destination.target else { return false }
+                return destination.stunRequests.contains(transaction)
+            }
+            if let match { destinations[match].answeredFrom = source }
+        }
         if match == nil {
             var best: Int?
             for (index, destination) in destinations.enumerated() {
@@ -324,6 +355,7 @@ final class UDPAssociation {
         }
         guard let match else { return nil }
         destinations[match].lastUsed = now
+        if destinations[match].answeredFrom != nil { destinations[match].stunRequests = [] }
         return destinations[match]
     }
 

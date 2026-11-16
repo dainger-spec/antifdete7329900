@@ -244,6 +244,34 @@ final class UDPRelayTests: XCTestCase {
         XCTAssertNil(relay.destination(answering: .ipv4(0x0A0B_0C0F), port: 3478, now: 6))
     }
 
+    /// WebRTC asks several STUN servers from one socket, often on one port: the first answer is
+    /// the one whose request it names, whichever was sent to last.
+    func testTwoSTUNServersOnOnePortAreToldApartByTheRequestTheirAnswerNames() {
+        let relay = association()
+        func request(_ id: UInt8) -> [UInt8] { [0, 1, 0, 0, 0x21, 0x12, 0xA4, 0x42] + [UInt8](repeating: id, count: 12) }
+        func answer(_ id: UInt8) -> [UInt8] { [1, 1, 0, 0, 0x21, 0x12, 0xA4, 0x42] + [UInt8](repeating: id, count: 12) }
+        _ = request(1).withUnsafeBytes {
+            relay.noteDestination(fake, port: 19_302, target: .name("stun.example", port: 19_302), host: "stun.example", now: 1, payload: $0)
+        }
+        _ = request(2).withUnsafeBytes {
+            relay.noteDestination(otherFake, port: 19_302, target: .name("stun1.example", port: 19_302), host: "stun1.example", now: 2, payload: $0)
+        }
+        // The server sent to first answers first.
+        let first = answer(1).withUnsafeBytes { relay.destination(answering: .ipv4(0x4A7D_0001), port: 19_302, now: 3, payload: $0) }
+        XCTAssertEqual(first?.guestAddress, fake)
+        let second = answer(2).withUnsafeBytes { relay.destination(answering: .ipv4(0x4A7D_0002), port: 19_302, now: 4, payload: $0) }
+        XCTAssertEqual(second?.guestAddress, otherFake)
+        // From then on by where they answer from, whatever they carry.
+        XCTAssertEqual(relay.destination(answering: .ipv4(0x4A7D_0001), port: 19_302, now: 5)?.guestAddress, fake)
+        XCTAssertEqual(relay.destination(answering: .ipv4(0x4A7D_0002), port: 19_302, now: 6)?.guestAddress, otherFake)
+        // An answer to a request nobody sent, from a third address: nobody's.
+        XCTAssertNil(answer(9).withUnsafeBytes { relay.destination(answering: .ipv4(0x4A7D_0003), port: 19_302, now: 7, payload: $0) })
+        // What is not STUN has no transaction.
+        XCTAssertNil([UInt8](repeating: 0, count: 20).withUnsafeBytes { UDPAssociation.stunTransaction($0) })
+        XCTAssertNil(Array(request(1).prefix(19)).withUnsafeBytes { UDPAssociation.stunTransaction($0) })
+        XCTAssertEqual(request(7).withUnsafeBytes { UDPAssociation.stunTransaction($0) }, [UInt8](repeating: 7, count: 12))
+    }
+
     func testAFakeAddressGivenToAnotherNameForgetsWhatWasLearned() {
         let relay = association()
         relay.noteDestination(fake, port: 443, target: .name("old.example", port: 443), host: "old.example", now: 1)

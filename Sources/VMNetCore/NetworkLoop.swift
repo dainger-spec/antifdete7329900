@@ -1208,7 +1208,8 @@ extension NetworkLoop {
             association = made
         }
         let host = target.hostText
-        if association.noteDestination(packet.destination, port: datagram.destinationPort, target: target, host: host, now: now) {
+        if association.noteDestination(packet.destination, port: datagram.destinationPort, target: target, host: host, now: now,
+                                       payload: datagram.payload) {
             withHost(host, now) { $0.connections += 1 }
         }
         association.lastActivity = now
@@ -1523,11 +1524,11 @@ extension NetworkLoop {
             note("UDP dropped, a datagram from the relay was not understood (or was a fragment)", now)
             return
         }
-        guard let destination = association.destination(answering: header.source, port: header.port, now: now) else {
+        let payload = UnsafeRawBufferPointer(rebasing: bytes[header.payloadOffset...])
+        guard let destination = association.destination(answering: header.source, port: header.port, now: now, payload: payload) else {
             note("UDP dropped, an answer from where the guest sent nothing", now)
             return
         }
-        let payload = UnsafeRawBufferPointer(rebasing: bytes[header.payloadOffset...])
         guard payload.count + IPv4Packet.minimumHeaderLength + UDPDatagram.headerLength <= configuration.effectiveMTU else {
             note("UDP dropped, an answer larger than the guest's network takes", now)
             return

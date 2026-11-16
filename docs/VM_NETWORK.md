@@ -111,7 +111,9 @@ proxy, or none, UDP is answered "port unreachable" as before. **There is never a
   destinations the guest sent to (64, the one unused the longest forgotten): an answer from an
   address the guest wrote is from that address; a name's first answer teaches the address the
   proxy answers it from (or the relay names the name), and is shown from the fake address and
-  port the guest used. An answer from anywhere the guest sent nothing, one with a header that is
+  port the guest used. Where several names on one port wait for their first answer (WebRTC asks
+  several STUN servers from one socket), a STUN answer goes to the name its request went to — it
+  carries the request's transaction ID —, anything else to the name sent to last. An answer from anywhere the guest sent nothing, one with a header that is
   not SOCKS5's, a fragment (FRAG ≠ 0, which is not reassembled), and one larger than the guest's
   network takes (1472 bytes of payload) are dropped. The relay's socket is connected to the relay,
   so a datagram from any other address does not even reach the stack.
@@ -272,7 +274,7 @@ by the proxy, a proxy that refuses UDP (not asked again), stalls or is not there
 another socket, fragments and answers from nowhere dropped, an answer too large for the guest,
 noise from the guest, the proxy ending an association, a quiet one closed, the limits, no
 descriptor left after `stop()`, and a log that names nothing. Run on Linux with Swift 6.1.3
-(16 November): all 239 tests of VMNetCore pass, 48 of them new for UDP.
+(16 November): all 240 tests of VMNetCore pass, 49 of them new for UDP.
 
 **Interop** (`scripts/vmnet_interop.sh`, Linux, in a privileged container). A scripted guest proves
 the code agrees with its author; this proves it agrees with a real TCP/IP stack. The stack is put
