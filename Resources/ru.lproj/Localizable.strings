@@ -3384,6 +3384,7 @@
 "scenarios.import.sites.builtOnly" = "адресов в тексте нет — его код строит адреса сам";
 "scenarios.import.values" = "Значения профиля";
 "scenarios.import.add" = "Добавить";
+"scenarios.import.more" = "…и ещё шагов: %d";
 "scenarios.import.refused.notAScenario" = "Этот файл — не сценарий Lumen.";
 "scenarios.import.refused.newer" = "Этот сценарий сохранён более новой версией Lumen. Обновите Lumen.";
 "scenarios.editor.steps" = "Шаги";

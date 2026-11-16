@@ -196,7 +196,11 @@ and `if (await page.isVisible(…)) {}` are blocks with steps inside; anything e
 own code, shown as it is. Moving a step, removing it, switching it off (its lines become comments
 marked `//- `) and changing what a command is given are moves and rewrites of whole lines, so what
 is not understood is never touched. A text that cannot be cut safely — a bracket or a template left
-open — is one step, and the editor says so.
+open — is one step, and the editor says so. Blocks are read for the steps inside them 16 levels deep
+at most (`ScenarioSteps.maximumDepth`; steps switched off inside steps switched off count as
+levels): one deeper is a step of its own code, and a block of any other shape is not cut again — so
+a text nested thousands deep, or one long line, is read in a moment, each line a bounded number of
+times.
 
 The `const NAME = value; // what it is` lines at a scenario's head are its **settings**
 (`ScenarioSettings`): text, a number, `true`/`false`, or a list of texts. The editor shows them as
@@ -247,7 +251,9 @@ its code may open others — a `goto` given an address it builds rather than one
 setting of its head, code run in the page (`page.evaluate`), `eval` — the review says "and
 addresses its code builds" (`ScenarioFile.buildsAddresses`, a reading of the text, not a proof).
 The values are those its text names, which is all a run of it is given; code that reads `params`
-otherwise is said ("reads values by names its code builds — none given").
+otherwise is said ("reads values by names its code builds — none given"). The review reads the text
+off the main thread (`ScenarioImportReading`) and lists 300 steps at most, counting the others; Add
+waits until it has been read.
 
 Checked: `ScenarioStepsTests` (the cut is lossless on every template, a recording and hostile texts;
 what is read as which step; each change leaves the other steps as they were; settings read and

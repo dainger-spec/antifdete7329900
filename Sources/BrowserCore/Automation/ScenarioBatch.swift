@@ -294,7 +294,13 @@ public struct ScenarioFile: Codable, Equatable, Sendable {
         let named = Set(hosts(in: source))
         // The same text with its quoted texts: what each `goto` is given (an offset is the same place in both).
         let texts = Array(ScenarioSteps.withoutComments(source).utf16)
-        let settings = ScenarioSettings(source).settings
+        // The head's settings of text, and whether each is named again: looked up once, whatever
+        // the number of calls (each look is a pass over the whole text).
+        var settings: [String: String] = [:]
+        for setting in ScenarioSettings(source).settings {
+            if case .text(let text) = setting.value, settings[setting.name] == nil { settings[setting.name] = text }
+        }
+        var namedAgain: [String: Bool] = [:]
         let whole = code as NSString
         for match in calls.matches(in: code, range: NSRange(location: 0, length: whole.length)) {
             guard let given = firstArgument(texts, from: match.range.location + match.range.length) else { return true }
@@ -305,8 +311,10 @@ public struct ScenarioFile: Codable, Equatable, Sendable {
             } else if argument.count >= 2, argument.hasPrefix("\""), argument.hasSuffix("\""),
                       !argument.dropFirst().dropLast().contains(where: { $0 == "\"" || $0 == "\\" }) {
                 address = String(argument.dropFirst().dropLast())
-            } else if let setting = settings.first(where: { $0.name == argument }), case .text(let text) = setting.value,
-                      !isNamedAgain(argument, in: code) {
+            } else if let text = settings[argument] {
+                let again = namedAgain[argument] ?? isNamedAgain(argument, in: code)
+                namedAgain[argument] = again
+                if again { return true }
                 address = text
             } else {
                 return true

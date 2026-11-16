@@ -73,6 +73,11 @@ public struct ScenarioSteps: Equatable, Sendable {
     /// The mark of a line of a step that is switched off.
     public static let offMark = "//- "
 
+    /// How deep blocks (and steps switched off within steps switched off) are read for the steps
+    /// inside them; one deeper is a step of its own code. Each level reads its lines once more, so
+    /// a text from outside nested thousands deep is read in a moment, not for minutes.
+    public static let maximumDepth = 16
+
     public init(_ source: String) {
         let lines = Self.lines(of: source)
         if let pieces = Self.cut(lines, firstLine: 1) {
@@ -379,8 +384,9 @@ public struct ScenarioSteps: Equatable, Sendable {
         }
     }
 
-    /// The lines as pieces; nil when they cannot be cut safely.
-    private static func cut(_ lines: [String], firstLine: Int) -> [Piece]? {
+    /// The lines as pieces; nil when they cannot be cut safely, or lie deeper than `maximumDepth`.
+    private static func cut(_ lines: [String], firstLine: Int, depth: Int = 0) -> [Piece]? {
+        guard depth <= maximumDepth else { return nil }
         var pieces: [Piece] = []
         var index = 0
         while index < lines.count {
@@ -399,7 +405,7 @@ public struct ScenarioSteps: Equatable, Sendable {
                     guard let range = line.range(of: offMark) else { return line.replacingOccurrences(of: "//-", with: "") }
                     return String(line[line.startIndex..<range.lowerBound]) + String(line[range.upperBound...])
                 }
-                var step = (cut(inner, firstLine: firstLine + index)?.compactMap(\.step).first)
+                var step = (cut(inner, firstLine: firstLine + index, depth: depth + 1)?.compactMap(\.step).first)
                     ?? Step(kind: .code, title: nil, arguments: [], isOff: true, code: inner.joined(), lines: (firstLine + index)...(firstLine + end), children: [])
                 step.isOff = true
                 step.lines = (firstLine + index)...(firstLine + end)
@@ -444,7 +450,7 @@ public struct ScenarioSteps: Equatable, Sendable {
                 text.removeFirst(2)
                 return text.trimmingCharacters(in: .whitespaces)
             }.filter { !$0.isEmpty }.joined(separator: " ")
-            var step = read(codeLines, firstLine: firstLine + codeStart)
+            var step = read(codeLines, firstLine: firstLine + codeStart, depth: depth)
             step.title = title.isEmpty ? nil : title
             step.lines = (firstLine + start)...(firstLine + index - 1)
             pieces.append(Piece(text: lines[start..<index].joined(), step: step))
@@ -454,7 +460,8 @@ public struct ScenarioSteps: Equatable, Sendable {
 
     // MARK: Reading a statement
 
-    private static func read(_ codeLines: [String], firstLine: Int) -> Step {
+    /// `depth`: the cut's the statement is in.
+    private static func read(_ codeLines: [String], firstLine: Int, depth: Int) -> Step {
         let code = codeLines.joined()
         var step = Step(kind: .code, title: nil, arguments: [], isOff: false, code: code, lines: firstLine...(firstLine + codeLines.count - 1), children: [])
         // A comment at the line's end (the recorder's note beside a password) is not the command's.
@@ -466,29 +473,39 @@ public struct ScenarioSteps: Equatable, Sendable {
             }
             return step
         }
-        // A block of one of the two shapes, its body cut again.
+        // A block of one of the two shapes, its body cut again — one level deeper. Any other block
+        // is its own code, and is not cut again: its lines are read once.
         let head = trimmed(codeLines[0])
         guard trimmed(codeLines[codeLines.count - 1]) == "}", head.hasSuffix("{") else { return step }
-        let body = Array(codeLines[1..<(codeLines.count - 1)])
-        guard let inner = cut(body, firstLine: firstLine + 1) else { return step }
+        let kind: Kind, given: String
         if let match = firstMatch(#"^for \(let (\w+) = 0; \1 < ([^;]+); \1\+\+\) \{$"#, head), match.count == 3 {
-            step.kind = .repeatTimes
-            step.arguments = [argument(match[2])]
-            step.children = inner.compactMap(\.step)
+            (kind, given) = (.repeatTimes, match[2])
         } else if let match = firstMatch(#"^if \(await page\.isVisible\((.+)\)\) \{$"#, head), match.count == 2 {
-            step.kind = .ifVisible
-            step.arguments = [argument(match[1])]
-            step.children = inner.compactMap(\.step)
+            (kind, given) = (.ifVisible, match[1])
+        } else {
+            return step
         }
+        let body = Array(codeLines[1..<(codeLines.count - 1)])
+        guard let inner = cut(body, firstLine: firstLine + 1, depth: depth + 1) else { return step }
+        step.kind = kind
+        step.arguments = [argument(given)]
+        step.children = inner.compactMap(\.step)
         return step
     }
 
     /// A one-line command and what it is given; nil for any other line.
     static func command(_ text: String) -> (Kind, [Argument])? {
-        // The recorder's "type over what was there": a click, select all, then the typing.
-        if let match = firstMatch(#"^await page\.click\((.+?)\); await page\.press\('Meta\+a'\); await page\.type\((.+)\);$"#, text), match.count == 3,
-           let parts = arguments(match[2]), parts.count == 2 {
-            return (.type, parts)
+        // The recorder's "type over what was there": a click, select all, then the typing. Found
+        // by its first joint, not by a pattern that tries every one (a long line of them took minutes).
+        let click = "await page.click(", joint = "); await page.press('Meta+a'); await page.type("
+        if text.count > click.count + 2, text.hasPrefix(click), text.hasSuffix(");") {
+            // What is clicked is one character at least; what is typed too, before the last `);`.
+            let selector = text.index(text.startIndex, offsetBy: click.count + 1)
+            let end = text.index(text.endIndex, offsetBy: -2)
+            if selector < end, let middle = text.range(of: joint, range: selector..<text.endIndex), middle.upperBound < end,
+               let parts = arguments(String(text[middle.upperBound..<end])), parts.count == 2 {
+                return (.type, parts)
+            }
         }
         let shapes: [(String, Kind, Int)] = [
             (#"^await page\.goto\((.+)\);$"#, .open, 1), (#"^await page\.click\((.+)\);$"#, .click, 1),

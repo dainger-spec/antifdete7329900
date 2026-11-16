@@ -95,6 +95,43 @@ final class ScenarioStepsTests: XCTestCase {
         }
     }
 
+    /// A text from outside nested thousands deep, or one long line, is read in a moment (the
+    /// import's review read it on the main thread for minutes): blocks are read for their steps
+    /// `maximumDepth` levels deep, one deeper is its own code, and other blocks are not cut again.
+    func testADeepOrLongTextIsReadInAMoment() {
+        let started = Date()
+        // Blocks of the two shapes, 4,000 deep: 16 levels of steps, the 17th its own code.
+        let levels = 4_000
+        let deep = String(repeating: "for (let i = 0; i < 1; i++) {\n", count: levels) + "await sleep(1);\n" + String(repeating: "}\n", count: levels)
+        let cut = ScenarioSteps(deep)
+        XCTAssertTrue(cut.isCut)
+        XCTAssertEqual(cut.source, deep, "lossless")
+        var step = cut.steps.first
+        var depth = 0
+        while let current = step, current.kind == .repeatTimes {
+            depth += 1
+            step = current.children.first
+        }
+        XCTAssertEqual(depth, ScenarioSteps.maximumDepth)
+        XCTAssertEqual(step?.kind, .code, "past the deepest level read, a block is its own code")
+        XCTAssertEqual(step?.children.count, 0)
+        // Any other block, 20,000 deep: one step of its own code.
+        let braces = String(repeating: "{\n", count: 20_000) + String(repeating: "}\n", count: 20_000)
+        XCTAssertEqual(ScenarioSteps(braces).steps.map(\.kind), [.code])
+        // Steps switched off inside steps switched off, 200 deep: one step, off.
+        let off = String(repeating: ScenarioSteps.offMark, count: 200) + "await sleep(1);\n"
+        XCTAssertEqual(ScenarioSteps(off).steps.map(\.isOff), [true])
+        XCTAssertEqual(ScenarioSteps(off).source, off)
+        // A long line of the recorder's "type over" joints that is none of its commands: its own code.
+        let joint = "); await page.press('Meta+a'); await page.type("
+        let long = ScenarioSteps("await page.click(" + String(repeating: joint, count: 20_000) + "x) ;\n")
+        XCTAssertTrue(long.isCut, "one statement, read for a command")
+        XCTAssertEqual(long.steps.map(\.kind), [.code])
+        XCTAssertEqual(ScenarioSteps("await page.click('#q'); await page.press('Meta+a'); await page.type('#q', 'new');\n").steps.map(\.kind), [.type],
+                       "the recorder's own still is")
+        XCTAssertLessThan(Date().timeIntervalSince(started), 30, "read in a moment, not for minutes")
+    }
+
     func testMovingRemovingAndSwitchingOffLeaveEveryOtherStepAsItWas() {
         let source = "// first\nawait page.goto('https://a.example/');\n\n// second\nawait page.click('#b');\nawait page.press('Enter');\n"
         let cut = ScenarioSteps(source)

@@ -3384,6 +3384,7 @@
 "scenarios.import.sites.builtOnly" = "none written out — its code builds the addresses it opens";
 "scenarios.import.values" = "Profile's values it reads";
 "scenarios.import.add" = "Add";
+"scenarios.import.more" = "…and %d more steps";
 "scenarios.import.refused.notAScenario" = "This file is not a Lumen scenario.";
 "scenarios.import.refused.newer" = "This scenario was saved by a newer Lumen. Update Lumen.";
 "scenarios.editor.steps" = "Steps";
