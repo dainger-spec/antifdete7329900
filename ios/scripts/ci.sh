@@ -38,6 +38,9 @@ command -v xcodegen >/dev/null || brew install xcodegen >/dev/null 2>&1 || { say
 python3 "$HERE/scripts/build-shim.py" --check | tee -a "$LOG" || { say "page-shim.js is stale"; STATUS=1; }
 # The canvas noise is one a canvas can hold (and its control, the old noise, is not).
 node "$HERE/shim/test-fingerprint.mjs" | tee -a "$LOG"; [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "canvas noise check failed"; STATUS=1; }
+# What a page can learn of the bundled shim by calling what the engine lets it call: no registry for
+# a page, one family for a page and its frames with the runtime's channel (PageSettings.makeChannel).
+node "$HERE/shim/test-page-shim.mjs" | tee -a "$LOG"; [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "page shim check failed"; STATUS=1; }
 # The real-iPhone script's own pieces (run-device.sh): each test reproduces the owner's case with the
 # old rule (its red) beside the new one — the device it picks, and a recording that saw nothing. And the
 # owner's rules for the App Store build (release_rules.py: none of the positioning words, no App-Bound

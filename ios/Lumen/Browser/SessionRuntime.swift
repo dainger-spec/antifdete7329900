@@ -46,6 +46,9 @@ final class SessionRuntime: ObservableObject {
     private let store: LumenStore
     /// The session's relay: its data store's only proxy (Relay.swift).
     private let relay: Relay
+    /// The page shim's family channel for this runtime's pages (`PageSettings.ShimConfig.channel`):
+    /// one for every tab and window of the session, made anew at each launch, read by no page.
+    private let channel: String
     @Published private(set) var tabs: [BrowserTab] = []
     @Published private(set) var selectedID: UUID?
     @Published private(set) var history: [HistoryEntry]
@@ -64,6 +67,7 @@ final class SessionRuntime: ObservableObject {
         // The session's own store; the planted fault puts every session on WebKit's default one.
         dataStore = Faults.isActive(.sharedStore) ? .default() : WKWebsiteDataStore(forIdentifier: session.storeID)
         relay = Relay(label: session.id.uuidString)
+        channel = PageSettings.makeChannel()
         // What is kept of it (HistoryRetention: the Mac's 90 days, at most 10 000 visits).
         let saved = store.loadHistory(of: session.id)
         let kept = HistoryRetention.kept(saved)
@@ -134,7 +138,7 @@ final class SessionRuntime: ObservableObject {
         // Safari's application name after WebKit's own string: the User-Agent Safari on this iPhone sends.
         configuration.applicationNameForUserAgent = UserAgentPreset.safariApplicationName(systemVersion: UIDevice.current.systemVersion)
         if proxy != nil, let rules = ContentRules.proxied { configuration.userContentController.add(rules) }
-        configuration.userContentController.addUserScript(PageSettings.script(for: session, proxy: proxy))
+        configuration.userContentController.addUserScript(PageSettings.script(for: session, proxy: proxy, channel: channel))
         return configuration
     }
 
@@ -152,8 +156,8 @@ final class SessionRuntime: ObservableObject {
         applyPageSettings()
     }
 
-    /// What the pages were last given (User-Agent and shim configuration); a change reaches every
-    /// open tab, from its next page on.
+    /// What the pages were last given (User-Agent and shim configuration, without the runtime's
+    /// channel, which never changes); a change reaches every open tab, from its next page on.
     private var appliedPage: String?
 
     private func applyPageSettings() {
@@ -163,7 +167,7 @@ final class SessionRuntime: ObservableObject {
         let first = appliedPage == nil
         appliedPage = key
         guard !first else { return }   // the tabs were built with these already
-        let script = PageSettings.script(for: session, proxy: proxy)
+        let script = PageSettings.script(for: session, proxy: proxy, channel: channel)
         for tab in tabs {
             let controller = tab.webView.configuration.userContentController
             controller.removeAllUserScripts()
