@@ -2945,6 +2945,7 @@
 "help.vm.costs.memory" = "Memory: 3–8 GB per running machine (in its settings), taken only while it runs. A new machine gets what this Mac can spare — 8 GB on a Mac with 24 GB or more, 6 with 16, otherwise 4. With 4 GB, macOS in the machine stutters once a few pages are open.";
 "help.vm.costs.limit" = "Two machines at once: Apple's limit for macOS in virtual machines on one Mac.";
 "help.vm.costs.start" = "A machine starts in 20–40 seconds, as a Mac does; Shut Down closes its macOS properly.";
+"help.vm.costs.hidden" = "A machine's macOS draws its screen even while its window is hidden. Screen off while hidden (in a machine's settings, under Device) puts its display to sleep once the window has been out of sight for half a minute, which spares this Mac; it wakes a second or two after the window is seen again. Meanwhile pages in the machine are hidden, as on a Mac whose display slept.";
 "help.vm.know" = "Good to know";
 "help.vm.know.disks" = "The machines' disks are not encrypted by Lumen's vault: they are files in the vault's folder. Turn on FileVault on your Mac to have them encrypted. Names, proxies and their passwords are in the vault.";
 "help.vm.know.udp" = "A machine has TCP only: QUIC and WebRTC over UDP do not leave it, so WebRTC cannot show your address.";
@@ -3122,6 +3123,9 @@
 "vm.editor.cores.fewer" = "Lighter on this Mac, but a page sees fewer cores than any Mac of today has. For a machine where that does not matter.";
 "vm.editor.sound" = "Sound from the machine";
 "vm.editor.sound.detail" = "What plays in the machine is heard on this Mac. Off: the machine keeps its speakers, silent.";
+"vm.editor.screenSleep" = "Screen off while hidden";
+"vm.editor.screenSleep.detail" = "Once the machine's window has been out of sight for half a minute — minimised, under other windows, on another desktop, or with this Mac's screen off — the machine's display goes to sleep, as a Mac's does, and wakes a second or two after the window is seen again. This spares this Mac's processor and graphics, most of all with two machines open. Meanwhile the pages in the machine are hidden and stop drawing, as on a Mac whose display slept, and a site can notice that. Off unless you choose it.";
+"vm.editor.screenSleep.locks" = "When it was last asked, this machine left its display on: its screen lock is on, and waking the display would ask for the account's password. Lumen's tools turn the lock off; to turn it off yourself, in the machine: System Settings → Lock Screen → require a password after the display is turned off → Never.";
 "vm.editor.asBase" = "As in the base";
 "vm.editor.appearance" = "Appearance";
 "vm.editor.appearance.light" = "Light";

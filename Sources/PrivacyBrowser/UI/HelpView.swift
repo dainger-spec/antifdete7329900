@@ -212,7 +212,7 @@ enum HelpContent {
                 .points(["vm.what.system", "vm.what.proxy", "vm.what.noProxy", "vm.what.locale", "vm.what.screen", "vm.what.look", "vm.what.network",
                          "vm.what.wake", "vm.what.browser", "vm.what.livenetwork"]),
                 .heading("vm.costs"),
-                .points(["vm.costs.disk", "vm.costs.memory", "vm.costs.limit", "vm.costs.start"]),
+                .points(["vm.costs.disk", "vm.costs.memory", "vm.costs.limit", "vm.costs.start", "vm.costs.hidden"]),
                 .heading("vm.know"),
                 .note("vm.know.disks"),
                 .points(["vm.know.same", "vm.know.speed", "vm.know.udp", "vm.know.updates", "vm.know.base", "vm.know.license", "vm.know.local"]),

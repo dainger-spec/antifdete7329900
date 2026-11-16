@@ -646,6 +646,7 @@ final class VMMachineSettingsTests: XCTestCase {
         XCTAssertEqual(profile.moreStartURLs, [])
         XCTAssertEqual(profile.blockedHosts, [])
         XCTAssertFalse(profile.startsFullScreen)
+        XCTAssertFalse(profile.sleepsScreenWhenHidden)
         XCTAssertNoThrow(try profile.validate())
         // And what is set is kept through a save.
         var changed = profile
@@ -668,6 +669,7 @@ final class VMMachineSettingsTests: XCTestCase {
         changed.moreStartURLs = ["https://b.example/"]
         changed.blockedHosts = ["ads.example.com"]
         changed.startsFullScreen = true
+        changed.sleepsScreenWhenHidden = true
         XCTAssertNoThrow(try changed.validate())
         changed.notes = "shop"
         let again = try JSONCoding.decoder.decode(VMProfile.self, from: JSONCoding.encoder.encode(changed))
@@ -831,7 +833,7 @@ final class VMGuestToolsTests: XCTestCase {
                 // What came of Lumen's desktop picture, and what the system said when nothing did;
                 // and what waits for the machine's next start.
                 for key in ["LUMEN_WALLPAPER_STATE", "LUMEN_WALLPAPER_NOTE", "LUMEN_KEYBOARD_STATE", "LUMEN_MENU_BAR_STATE",
-                            "LUMEN_STAGE", "LUMEN_READY_REVISION"] {
+                            "LUMEN_STAGE", "LUMEN_READY_REVISION", "LUMEN_SCREEN_SLEEP", "LUMEN_SCREEN_SLEEP_NOTE"] {
                     XCTAssertTrue(text.contains("'\(key)="), "\(name) does not write \(key)")
                 }
             }
@@ -863,6 +865,9 @@ final class VMGuestToolsTests: XCTestCase {
         let runner = try String(contentsOf: Self.folder.deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/LumenVM/MachineRunner.swift"), encoding: .utf8)
         XCTAssertTrue(runner.contains("\"lumen-shutdown\""))
+        // So is the word to put the display to sleep (`VMScreenSleep`), which the helper leaves by its place.
+        XCTAssertTrue(boot.contains("\"$share/\(VMGuestSettings.screenSleepFileName)\""))
+        XCTAssertTrue(runner.contains("files.screenSleep"))
     }
 
     func testTheScriptsParse() throws {
@@ -932,6 +937,28 @@ final class VMWakeAndNetworkProtocolTests: XCTestCase {
         XCTAssertTrue(settings.browserMode)
         XCTAssertFalse(VMGuestSettings(profile: VMProfile(name: "A", opensSafari: false)).opensSafari)
         XCTAssertNotEqual(settings.revision, VMGuestSettings(profile: VMProfile(name: "A")).revision)
+    }
+
+    /// Whether a machine's display sleeps while its window is out of sight is the profile's own
+    /// choice, off unless made; it reaches the helper, and is no part of what a saved state goes
+    /// with — the guest is told while it runs, not at its start.
+    func testAMachinesScreenSleepIsItsOwnChoiceAndNoPartOfASavedState() throws {
+        XCTAssertFalse(VMProfile(name: "A").sleepsScreenWhenHidden)
+        XCTAssertNil(request(VMProfile(name: "A")).sleepsScreenWhenHidden)
+        let chosen = request(VMProfile(name: "A", sleepsScreenWhenHidden: true))
+        XCTAssertEqual(chosen.sleepsScreenWhenHidden, true)
+        XCTAssertEqual(try VMHelperRequest.parse(try chosen.line()), chosen)
+        let kept = try JSONDecoder().decode(VMProfile.self, from: JSONEncoder().encode(VMProfile(name: "A", sleepsScreenWhenHidden: true)))
+        XCTAssertTrue(kept.sleepsScreenWhenHidden)
+        // A machine made like another keeps it, as the person's setting.
+        XCTAssertTrue(VMProfile(name: "A", sleepsScreenWhenHidden: true).duplicate(named: "A 2").sleepsScreenWhenHidden)
+        let id = UUID()
+        XCTAssertEqual(request(VMProfile(id: id, name: "A", macAddress: "02:00:00:00:00:01", instantWake: true)).stateStamp,
+                       request(VMProfile(id: id, name: "A", macAddress: "02:00:00:00:00:01", instantWake: true,
+                                         sleepsScreenWhenHidden: true)).stateStamp)
+        // Nor is it a setting the guest starts with.
+        XCTAssertEqual(VMGuestSettings(profile: VMProfile(name: "A")).revision,
+                       VMGuestSettings(profile: VMProfile(name: "A", sleepsScreenWhenHidden: true)).revision)
     }
 
     func testASavedStateGoesWithTheMachinesHardwareAndItsSettingsAndNothingElse() {

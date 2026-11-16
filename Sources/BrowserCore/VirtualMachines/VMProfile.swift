@@ -106,6 +106,12 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
     /// The machine is shown as a browser: Safari over its whole screen, the menu bar and the Dock
     /// out of sight (docs/VM.md, "Browser mode").
     public var browserMode: Bool
+    /// The machine's display goes to sleep while its window has been out of sight for a while, and
+    /// wakes when the window is seen again (`VMScreenSleep`, guest tools 14): it spares this Mac's
+    /// processor and graphics, and a site in the machine sees its page hidden meanwhile — as on a
+    /// Mac whose display slept. The person's choice, off unless made (docs/VM.md, "How smooth a
+    /// machine is").
+    public var sleepsScreenWhenHidden: Bool
 
     public init(id: UUID = UUID(), name: String, createdAt: Date = Date(), lastLaunchedAt: Date? = nil,
                 proxy: ProxySettings? = nil, timeZoneIdentifier: String? = nil, language: String? = nil,
@@ -117,7 +123,8 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
                 regionCode: String? = nil, hourCycle: String? = nil, firstWeekday: Int? = nil, dockPosition: String? = nil,
                 dockAutohide: Bool? = nil, dockSize: String? = nil, scrollBars: String? = nil, moreStartURLs: [String] = [],
                 blockedHosts: [String] = [], startsFullScreen: Bool = false, localeFollowsConnection: Bool = false,
-                keyboard: String? = nil, instantWake: Bool = false, browserMode: Bool = false) {
+                keyboard: String? = nil, instantWake: Bool = false, browserMode: Bool = false,
+                sleepsScreenWhenHidden: Bool = false) {
         self.id = id
         self.name = name
         self.createdAt = createdAt
@@ -154,6 +161,7 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         self.keyboard = keyboard
         self.instantWake = instantWake
         self.browserMode = browserMode
+        self.sleepsScreenWhenHidden = sleepsScreenWhenHidden
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -161,7 +169,7 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
              displayID, memoryGB, macAddress, startURL, notes, cores, soundEnabled, appearance, accent, computerName,
              opensSafari, colorIndex, lumenWallpaper, regionCode, hourCycle, firstWeekday, dockPosition, dockAutohide, dockSize,
              scrollBars, moreStartURLs, blockedHosts, startsFullScreen, localeFollowsConnection, keyboard,
-             instantWake, browserMode
+             instantWake, browserMode, sleepsScreenWhenHidden
     }
 
     /// Tolerant of what a later version adds or an earlier one lacked: defaults for what is absent.
@@ -204,6 +212,7 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         keyboard = try c.decodeIfPresent(String.self, forKey: .keyboard)
         instantWake = try c.decodeIfPresent(Bool.self, forKey: .instantWake) ?? false
         browserMode = try c.decodeIfPresent(Bool.self, forKey: .browserMode) ?? false
+        sleepsScreenWhenHidden = try c.decodeIfPresent(Bool.self, forKey: .sleepsScreenWhenHidden) ?? false
     }
 
     /// How many pages Safari may be told to open at start beside the first.

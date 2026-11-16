@@ -15,6 +15,11 @@
 # settings are in — before Safari is opened, which then starts in the machine's language —
 # which settings those were (LUMEN_READY_REVISION). Only then does the person get the screen.
 #
+# For a machine whose profile chose it, Lumen leaves a word in the same folder while the
+# machine's window on the Mac has been out of sight for a while (lumen-screen-sleep, tools 14):
+# the display is put to sleep while it is there, as a Mac's display sleeps, and woken when it is
+# gone — only where the person's screen lock is off, so that waking asks for no password.
+#
 # Nothing here reaches the network. From the shared folder it reads those two names and Lumen's
 # desktop picture for this machine's screen (lumen-wallpaper.png). A newer copy of itself
 # (lumen-guest.sh) it takes from a second folder of the Mac's, which the Mac shares read-only and
@@ -27,7 +32,7 @@
 # link left in its place is replaced, not followed. What it keeps for itself is in a folder of
 # root's (/Library/Application Support/Lumen), not in /Users/Shared.
 
-TOOLS_VERSION=13
+TOOLS_VERSION=14
 SHARE="/Volumes/My Shared Files"
 OWN_MOUNT=/var/run/lumen-share
 TAG=com.apple.virtio-fs.automount
@@ -312,6 +317,8 @@ write_status() {
     [ -z "$wallpaper_note" ] || printf 'LUMEN_WALLPAPER_NOTE=%s\n' "$wallpaper_note"
     [ -z "$keyboard_state" ] || printf 'LUMEN_KEYBOARD_STATE=%s\n' "$keyboard_state"
     [ -z "$menu_bar_state" ] || printf 'LUMEN_MENU_BAR_STATE=%s\n' "$menu_bar_state"
+    [ -z "$screen_sleep" ] || printf 'LUMEN_SCREEN_SLEEP=%s\n' "$screen_sleep"
+    [ -z "$screen_sleep_note" ] || printf 'LUMEN_SCREEN_SLEEP_NOTE=%s\n' "$screen_sleep_note"
     # What the system has now, read back from it: Lumen compares it with what it asked for.
     zone_now="$(/usr/bin/readlink /etc/localtime 2>/dev/null)"
     zone_now="${zone_now#/var/db/timezone/zoneinfo/}"
@@ -423,6 +430,12 @@ set_wallpaper() {
 # person adds in the machine afterwards stay until the profile's choice changes.
 keyboard_state=""
 menu_bar_state=""
+# What came of Lumen's word to put the display to sleep (tools 14): asleep, awake, or locks (left
+# on: the screen lock is on); with locks, what the system said of its lock.
+screen_sleep=""
+screen_sleep_note=""
+screen_asleep=0
+screen_asked=0
 set_keyboard() {
   [ -n "$keyboard" ] || return 0
   if [ "$(as_user /usr/bin/defaults read io.lumenbrowser.guest keyboard 2>/dev/null)" = "$keyboard" ]; then
@@ -604,6 +617,37 @@ quit_safari() {
   done
 }
 
+# The display, asleep while Lumen's word for it is in the shared folder: the machine's window on
+# the Mac has been out of sight for a while (tools 14). Nobody sees it, and a Mac's display that
+# sleeps draws nothing — nor do the pages in it, which are hidden meanwhile, as on any Mac whose
+# display slept. Not where the person's screen lock is on (or the system does not say it is off):
+# waking the display would then ask for the account's password, which is the installer's to
+# turn off. Woken by a person's activity said to the system (caffeinate -u): no key or click
+# reaches anything in the machine.
+sleep_screen() {
+  said="$(as_user /usr/sbin/sysadminctl -screenLock status 2>&1)"
+  case "$said" in
+    *screenLock*" off"*) ;;
+    *)
+      screen_sleep=locks
+      screen_sleep_note="$(printf '%s' "$said" | /usr/bin/tr '\n' ' ' | /usr/bin/tr -cd 'A-Za-z0-9 .,:()_/-' | /usr/bin/cut -c 1-110)"
+      log "the display is left on: the screen lock is not off"
+      write_status "$revision"
+      return 0 ;;
+  esac
+  /usr/bin/pmset displaysleepnow >/dev/null 2>&1
+  screen_asleep=1
+  screen_sleep=asleep
+  screen_sleep_note=""
+  write_status "$revision"
+}
+wake_screen() {
+  /usr/bin/caffeinate -u -t 1 >/dev/null 2>&1
+  screen_asleep=0
+  screen_sleep=awake
+  write_status "$revision"
+}
+
 write_status ""
 ticks=0
 woke_word=""
@@ -644,5 +688,16 @@ while :; do
     /sbin/shutdown -h now
     exit 0
   fi
-  /bin/sleep 2
+  # Lumen's word to put the display to sleep: taken once each time it is left; the display is
+  # woken once it is gone — as soon as the window is seen, so looked for every second meanwhile.
+  if [ "$user_done" = 1 ] && [ -n "$share" ] && [ -f "$share/lumen-screen-sleep" ] && [ ! -L "$share/lumen-screen-sleep" ]; then
+    if [ "$screen_asked" = 0 ]; then
+      screen_asked=1
+      sleep_screen
+    fi
+  else
+    screen_asked=0
+    [ "$screen_asleep" = 0 ] || wake_screen
+  fi
+  if [ "$screen_asleep" = 1 ]; then /bin/sleep 1; else /bin/sleep 2; fi
 done

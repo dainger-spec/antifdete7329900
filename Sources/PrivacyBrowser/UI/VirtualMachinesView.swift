@@ -777,6 +777,7 @@ struct VMEditorView: View {
     /// 0: as a Mac has them.
     @State private var cores: Int
     @State private var soundEnabled: Bool
+    @State private var sleepsScreenWhenHidden: Bool
     /// "": as the base system has it.
     @State private var appearance: String
     @State private var accent: String
@@ -828,6 +829,7 @@ struct VMEditorView: View {
         _memoryGB = State(initialValue: profile.memoryGB)
         _cores = State(initialValue: profile.cores ?? 0)
         _soundEnabled = State(initialValue: profile.soundEnabled)
+        _sleepsScreenWhenHidden = State(initialValue: profile.sleepsScreenWhenHidden)
         _appearance = State(initialValue: profile.appearance ?? "")
         _accent = State(initialValue: profile.accent ?? "")
         _computerName = State(initialValue: profile.computerName ?? "")
@@ -1127,6 +1129,11 @@ struct VMEditorView: View {
         EditorToggle(L("vm.editor.sound"), detail: L(instantWake ? "vm.editor.sound.asleep" : "vm.editor.sound.detail"),
                      isOn: Binding(get: { soundEnabled && !instantWake }, set: { soundEnabled = $0 }))
             .disabled(instantWake)
+        EditorToggle(L("vm.editor.screenSleep"), detail: L("vm.editor.screenSleep.detail"), isOn: $sleepsScreenWhenHidden)
+        if sleepsScreenWhenHidden, center.guests[draft.profile.id]?.screenSleepWouldLock == true {
+            // The machine said so when it was last asked: its display was left on.
+            note(L("vm.editor.screenSleep.locks"), warns: true)
+        }
     }
 
     // MARK: How its system looks
@@ -1256,6 +1263,7 @@ struct VMEditorView: View {
         profile.memoryGB = memoryGB
         profile.cores = cores == 0 ? nil : cores
         profile.soundEnabled = soundEnabled
+        profile.sleepsScreenWhenHidden = sleepsScreenWhenHidden
         profile.appearance = appearance.isEmpty ? nil : appearance
         profile.accent = accent.isEmpty ? nil : accent
         profile.opensSafari = opensSafari || browserMode

@@ -111,6 +111,10 @@ public struct VMGuestSettings: Equatable, Sendable {
     /// (a word of its own each time): the boot script, which went on where it was, asks for the
     /// time then — the machine's clock is that of the moment it was put to sleep. (Tools 11.)
     public static let wokeFileName = "lumen-woke"
+    /// What the helper leaves in the shared folder while the machine's window has been out of
+    /// sight for a while, for a machine whose display sleeps meanwhile (`VMScreenSleep`): the boot
+    /// script puts the display to sleep while it is there, and wakes it once it is gone. (Tools 14.)
+    public static let screenSleepFileName = "lumen-screen-sleep"
     /// The tag of the second folder a machine is given: the tools' (`VMLibrary.MachineFiles.tools`),
     /// shared read-only, which the boot script mounts as root and takes a newer copy of itself
     /// from. Not the automount tag: macOS does not put it in front of the person.
@@ -243,6 +247,12 @@ public struct VMGuestStatus: Equatable, Sendable {
     /// The settings (`VMGuestSettings.revision`) the script has put in place at this start —
     /// written before Safari is opened, which then starts in them (tools 13): the cover goes.
     public var readyRevision: String?
+    /// What came of the helper's word to put the machine's display to sleep (tools 14): "asleep",
+    /// "awake" (woken again), or "locks" — left on, because the person's screen lock is on (or the
+    /// system did not say it is off) and waking the display would ask for the password.
+    public var screenSleep: String?
+    /// With "locks": what the guest's system said of its screen lock, as it said it.
+    public var screenSleepNote: String?
 
     /// The guest could not put Lumen's picture on its desktop.
     public var wallpaperFailed: Bool { wallpaperState == "failed" }
@@ -250,6 +260,8 @@ public struct VMGuestStatus: Equatable, Sendable {
     public var keyboardFromNextStart: Bool { keyboardState == "next" }
     /// The menu bar's setting was written at this start and is in use from the next one.
     public var menuBarFromNextStart: Bool { menuBarState == "next" }
+    /// The guest left its display on when asked to put it to sleep: its screen lock is on.
+    public var screenSleepWouldLock: Bool { screenSleep == "locks" }
     /// Something was written at this start that macOS takes only at the next one. A machine put
     /// to sleep (instant wake) is woken, not started: it has it only once its macOS starts again.
     public var waitsForTheNextStart: Bool { keyboardFromNextStart || menuBarFromNextStart }
@@ -321,6 +333,8 @@ public struct VMGuestStatus: Equatable, Sendable {
         menuBarState = values["LUMEN_MENU_BAR_STATE"]
         stage = values["LUMEN_STAGE"].flatMap(VMSetupStage.init(rawValue:))
         readyRevision = values["LUMEN_READY_REVISION"]
+        screenSleep = values["LUMEN_SCREEN_SLEEP"]
+        screenSleepNote = values["LUMEN_SCREEN_SLEEP_NOTE"]
         setupDone = values["LUMEN_SETUP_DONE"] == "1"
     }
 }

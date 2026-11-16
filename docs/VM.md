@@ -77,6 +77,7 @@ Sources/BrowserCore/VirtualMachines/   the model, platform-independent, unit-tes
   VMImageFetch.swift     the download: several connections, chunk by chunk (tested on Linux)
   VMGuestSettings.swift  what the guest is told, what it says back
   VMStartCover.swift     when a start's cover goes (the steps, the guest's word, the limits)
+  VMScreenSleep.swift    when a hidden machine's display is put to sleep, and woken
   VMFailure.swift        the kind of a failure, from the system's error; the room a start needs
   VMWindowPlacement.swift where a machine's window was left, and whether to go back there
   VMHelperProtocol.swift the app's conversation with the helper
@@ -307,6 +308,13 @@ and the older script there takes it and runs it before it reads the settings —
 with this Lumen already says its steps. (Tools 2 to 6 take it from the shared folder, once; tools 1
 must be installed again.)
 
+Afterwards it waits for Lumen's word (every two seconds): the request to shut down, and — for a
+machine with "Screen off while hidden" (tools 14) — `lumen-screen-sleep`, which the helper leaves
+while the machine's window has been out of sight for a while: the display is put to sleep while
+it is there and woken once it is gone, and `LUMEN_SCREEN_SLEEP` says what came of it ("How smooth
+a machine is" below). A machine with tools 13 or older takes tools 14 the same way at its next
+start; nobody has to run Install Lumen Tools again for it.
+
 Before all that — at the start, before the automatic sign-in — it marks macOS's panes for a new
 Mac as seen for the person who signs in by themselves (`com.apple.SetupAssistant`: `DidSee…`,
 `LastSeen…` with this macOS's version and build; tools 8). Every profile's machine is a Mac its
@@ -377,10 +385,12 @@ most, off the main thread; anything else is ignored and logged by its kind.
 | At start | Safari opened or not; its start page, and up to five more, each in a tab; the window full screen |
 | Instant wake | off unless chosen. Closing the machine keeps it as it is, and opening it brings it back in seconds ("Instant wake" below). Such a machine has no sound |
 | Browser mode | off unless chosen. The machine is shown as a browser: Safari over its whole screen, the menu bar and the Dock out of sight ("Browser mode" below) |
+| Screen off while hidden | off unless chosen. Once the machine's window has been out of sight for half a minute its display sleeps, and wakes when the window is seen again; pages in it are hidden meanwhile ("How smooth a machine is" below) |
 
 Those of the guest's own system are applied in it by the boot script and need **tools 2** (the
 wallpaper: tools 3; the region's clock and week, the scroll bars, the Dock and the pages after
-the first: tools 5; the keyboard: tools 10, `VMGuestTools.version`); a base set up with tools 1 says so in the list and in the
+the first: tools 5; the keyboard: tools 10; the display's sleep while the window is hidden:
+tools 14, `VMGuestTools.version`); a base set up with tools 1 says so in the list and in the
 editor, and running Install Lumen Tools in the base again updates it. From tools 2 on, the boot
 script takes a newer copy of itself from the shared folder at a machine's start (the app puts its
 own there), so later versions — tools 3 among them — need no visit to the base
@@ -664,7 +674,25 @@ in this app's hands:
   as before, and its wake-ups may be gathered with this Mac's others. Nothing in the guest
   changes. Inferred, not measured: how far the framework's own process (Virtual Machine Service)
   follows the helper's precision; the helper's own wake-ups (its network, its two-second count of
-  the traffic, which now has half a second of tolerance) are gathered for certain.
+  the traffic, which now has half a second of tolerance) may be gathered from then on.
+- **Screen off while hidden** (a machine's setting, off unless chosen, `VMScreenSleep`). Once the
+  window has been out of sight for 30 seconds, the helper leaves a word in the shared folder
+  (`lumen-screen-sleep`); the boot script (tools 14) puts the display to sleep while it is there
+  (`pmset displaysleepnow`), as a Mac's display sleeps, and wakes it when the window is seen again
+  and the word is gone — by a person's activity said to the system (`caffeinate -u`), so that no
+  key or click reaches anything in the machine; it looks every second while the display sleeps.
+  A display asleep draws nothing, nor do the pages in it, which are hidden meanwhile — as on a
+  Mac whose display slept, and a page can see that (`document.visibilityState`): that is why it
+  is the person's choice and not the rule. Not where the person's screen lock is on: waking would
+  ask for the account's password, so the script first asks the system
+  (`sysadminctl -screenLock status`, as the person) and puts the display to sleep only when it says
+  the lock is off — which the installer has set since tools 1. Otherwise the display stays on, the
+  status says so (`LUMEN_SCREEN_SLEEP=locks`, with the system's words), the helper's log too, the
+  machine is not asked again while it runs, and the editor says it under the setting. Not while
+  the start's cover is up, nor while the machine is being woken or closed: looked at again 30
+  seconds later. A machine put to sleep (instant wake) with its display asleep has it woken as it
+  wakes: the helper takes the word away at every start. A machine woken from a state saved under
+  tools 13 runs that script until its next real start, and its display is left as it is.
 - **The app's rows** are told of a machine's traffic once per count, and only when something
   changed, not once for each of six fields every two seconds.
 
@@ -710,6 +738,15 @@ left a minute to settle):
    this version, LumenVM's (and perhaps Virtual Machine Service's) Idle Wake Ups go down;
    WindowServer goes down as for any hidden window. Bring the window back: the machine answers the
    pointer and the keys at once, as before.
+2. Turn "Screen off while hidden" on for the machine (it takes at its next start), start it, open
+   the same page, minimise the window and wait a minute: Virtual Machine Service and the
+   paravirtual graphics processes should fall well below what they were in 1 with the window
+   minimised; the helper's log says "screen: … the machine's display is put to sleep" and then
+   "the guest says its display is asleep". Bring the window back: the machine's screen is there in
+   a second or two, as it was; the log says it was woken. If the log says the screen lock is on,
+   the machine's lock is not off (System Settings → Lock Screen in the machine).
+3. With two machines open and one of them behind the other's window for a minute, the same as 2 for
+   the one behind.
 
 ## The download
 
@@ -804,6 +841,12 @@ What is checked where:
   one stream from before taken up at its whole chunks, a file replaced between two runs started
   over, a server without ranges given one stream, connections cut short taken up again, a refusal
   said, only https fetched. Each time the file byte for byte.
+- `Tests/BrowserCoreTests/VMScreenSleepTests.swift` (Linux and macOS): when a hidden machine's
+  display is put to sleep and woken — off unless chosen, never the base, half a minute out of
+  sight, a glance away not enough, a busy machine looked at later, a screen lock that is on not
+  asked again; and the boot script (`VMGuestScriptTests`) putting the display to sleep once for
+  the word, waking it when the word goes, leaving it on behind a screen lock, and leaving it alone
+  without the word, without a person signed in, or with a link in the word's place.
 - `Tests/BrowserCoreTests/VMStartCoverTests.swift` (Linux and macOS): the start's cover — the
   steps and the ready settings read from the status, this start's settings only, a status from
   before the start, an older script, the limits, browser mode, which starts are covered. The UI
@@ -870,3 +913,9 @@ What is checked where:
     it again: the window opens there, at that size. Disconnect the display and start it: the
     window opens on the Mac's own screen as a new one does. Two machines moved apart once open
     apart from then on.
+14. A machine with "Screen off while hidden", its window minimised for a minute: the helper's log
+    says its display was put to sleep and the guest says it is asleep; Activity Monitor shows its
+    Virtual Machine Service and the paravirtual graphics processes far lower than before the
+    minute ("What a machine costs this Mac while nobody looks at it", steps 1–3). Brought back,
+    the machine's screen is there in a second or two, nothing in it was clicked or typed into, and
+    no password is asked. The same after this Mac's own screen was locked for a minute.

@@ -236,9 +236,15 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     /// The highest timer and I/O precision this process can ask for (`latencyCritical`), held
     /// while the machine's window is in sight (`holdPrecision`).
     private var precision: NSObjectProtocol?
+    /// Whether the machine's display sleeps while its window is out of sight, and where that
+    /// stands (`VMScreenSleep`); the look at it that waits for its time; when the word was left.
+    private var screenSleep: VMScreenSleep
+    private var screenSleepCheck: DispatchWorkItem?
+    private var screenSleepAskedAt: Date?
 
     init(request: VMHelperRequest) {
         self.request = request
+        screenSleep = VMScreenSleep(request: request)
     }
 
     var isRunning: Bool { machine != nil && !finished }
@@ -262,6 +268,9 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
             // the word that says the machine was woken.
             try? FileManager.default.removeItem(at: shutdownRequestURL)
             try? FileManager.default.removeItem(at: wokeURL)
+            // Nor is a word to put the display to sleep: the window opens in sight. (A machine
+            // woken with its display asleep has it woken by its script once the word is gone.)
+            try? FileManager.default.removeItem(at: files.screenSleep)
             // A saved state is used by this start or removed by it: never left beside a disk
             // that goes on without it.
             var (saved, refusal) = savedState()
@@ -499,7 +508,13 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     /// another desktop, this Mac's screen off or locked (AppKit's occlusion state).
     func windowDidChangeOcclusionState(_ notification: Notification) {
         guard let window, !finished else { return }
-        holdPrecision(window.occlusionState.contains(.visible))
+        let seen = window.occlusionState.contains(.visible)
+        holdPrecision(seen)
+        if screenSleep.window(seen: seen, at: Date()) == .wake {
+            leaveScreenSleepWord(false)
+            HelperIO.log("screen: the window is in sight again; the machine's display is woken")
+        }
+        scheduleScreenSleepCheck()
     }
 
     /// The highest timer precision (`latencyCritical`: macOS does not gather this process's
@@ -515,6 +530,77 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         } else if let held = precision {
             ProcessInfo.processInfo.endActivity(held)
             precision = nil
+        }
+    }
+
+    /// A look at whether the display is due to sleep (`VMScreenSleep.due`), when it is due.
+    private func scheduleScreenSleepCheck() {
+        screenSleepCheck?.cancel()
+        screenSleepCheck = nil
+        guard let due = screenSleep.due, !finished else { return }
+        let work = DispatchWorkItem { [weak self] in self?.checkScreenSleep() }
+        screenSleepCheck = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(due.timeIntervalSinceNow, 0.5), execute: work)
+    }
+
+    /// The window has been out of sight long enough: the word for the guest, unless the machine is
+    /// starting behind its cover (its script is at its settings), being woken or being closed.
+    private func checkScreenSleep() {
+        screenSleepCheck = nil
+        guard !finished else { return }
+        let coverUp = startCover.map { cover in MainActor.assumeIsolated { cover.isUp } } ?? false
+        if screenSleep.check(at: Date(), busy: stopping || waking || coverUp) == .sleep {
+            leaveScreenSleepWord(true)
+            screenSleepAskedAt = Date()
+            HelperIO.log("screen: the window has been out of sight for \(Int(VMScreenSleep.after)) s; the machine's display is put to sleep")
+            // The script looks every two seconds, and says what came of it in the status.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in self?.readScreenSleepAnswer() }
+        }
+        scheduleScreenSleepCheck()
+    }
+
+    /// The word in the shared folder (`VMGuestSettings.screenSleepFileName`): there while the
+    /// display may sleep, gone when it is to be awake. The guest writes the folder too: what it left
+    /// in the word's place that is not a plain file goes first, and the word is made without
+    /// following a link.
+    private func leaveScreenSleepWord(_ asleep: Bool) {
+        let url = files.screenSleep
+        guard asleep else {
+            try? FileManager.default.removeItem(at: url)
+            return
+        }
+        if !VMShareFile.isRegularFile(url) { try? FileManager.default.removeItem(at: url) }
+        let descriptor = open(url.path, O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o644)
+        if descriptor >= 0 { close(descriptor) }
+    }
+
+    /// What the guest said once asked: its display asleep — or left on, because the person's
+    /// screen lock is on, and then it is not asked again while this machine runs. A script older
+    /// than tools 14 says nothing, and its display stays as it is.
+    private func readScreenSleepAnswer() {
+        guard !finished, screenSleep.asked else { return }
+        // Off the main thread, as a file of the guest's (`VMShareFile`).
+        let url = files.status
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            // The time first: a file put in place meanwhile is then taken as older, not newer, than it is.
+            let written = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+            let said = try? VMGuestStatus.read(from: url).get()
+            DispatchQueue.main.async { self?.takeScreenSleepAnswer(said, written: written) }
+        }
+    }
+
+    private func takeScreenSleepAnswer(_ status: VMGuestStatus?, written: Date?) {
+        guard !finished, screenSleep.asked, let asked = screenSleepAskedAt else { return }
+        guard let written, written >= asked, let said = status, said.screenSleep != nil else {
+            HelperIO.log("screen: the guest has said nothing of its display yet (a script older than tools 14 says nothing)")
+            return
+        }
+        if screenSleep.guestSaid(said) == .wake {
+            leaveScreenSleepWord(false)
+            HelperIO.log("screen: the guest left its display on: its screen lock is on, and waking the display would ask for "
+                + "the password; not asked again while this machine runs" + (said.screenSleepNote.map { " (the system: \($0))" } ?? ""))
+        } else if said.screenSleep == "asleep" {
+            HelperIO.log("screen: the guest says its display is asleep")
         }
     }
 
@@ -962,6 +1048,8 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
                                         failure: problem.flatMap { VMFailureKind.of($0) }?.rawValue))
         }
         try? FileManager.default.removeItem(at: shutdownRequestURL)
+        screenSleepCheck?.cancel()
+        try? FileManager.default.removeItem(at: files.screenSleep)
         HelperIO.emit(VMHelperEvent(kind: .stopped, asleep: asleep))
         exit(0)
     }
@@ -1089,6 +1177,8 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         reportTraffic()
         network?.stop()
         try? FileManager.default.removeItem(at: shutdownRequestURL)
+        screenSleepCheck?.cancel()
+        try? FileManager.default.removeItem(at: files.screenSleep)
         HelperIO.emit(VMHelperEvent(kind: .stopped))
         exit(0)
     }
