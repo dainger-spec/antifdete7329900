@@ -1355,7 +1355,7 @@
 "updates.state.checking" = "Checking…";
 "updates.state.downloading" = "Downloading %@…";
 "updates.state.failed" = "The last check failed: %@";
-"updates.state.idle" = "Not checked yet: the first automatic check comes a minute after launch.";
+"updates.state.idle" = "Not checked yet: the first automatic check comes a few seconds after launch.";
 "updates.state.idleManual" = "Not checked: automatic checks are off.";
 "updates.state.notWritable" = "Version %@ is available, but you cannot replace the app where it is. Move it to a folder you can write, or install it from the download page.";
 "updates.state.ready" = "Version %@ is downloaded and checked. It installs when you quit, once every profile is encrypted.";
