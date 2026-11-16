@@ -133,10 +133,10 @@
 "editor.error.startURL" = "Start URL is not a valid URL";
 "editor.footer.note" = "Changes apply at the next launch.";
 "editor.generation" = "View for websites";
-"editor.generation.footer" = "Mac is Safari on this Mac as it is. A mobile view changes what the profile calls itself to websites (the User-Agent) and the size of its window; an iPhone view also answers as an iPhone where WebKit itself can (the platform, the screen's density) and, with the full disguise, in the screen, touch and pointer. The engine, fonts and hardware stay this Mac's — see docs/ISOLATION_AND_LIMITATIONS.md §2.";
+"editor.generation.footer" = "Mac is Safari on this Mac as it is. A mobile view changes what the profile calls itself to websites (the User-Agent) and the size of its window; an iPhone view also answers as an iPhone where WebKit itself can (the platform, the screen's density, the fonts: a page finds only an iPhone's) and, with the full disguise, in the screen, touch and pointer. The engine and hardware stay this Mac's. The canvas is drawn as it is, without noise: iPhones of one model draw a canvas alike, so noise that differs from profile to profile would itself set a profile apart; a canvas with text still differs from a real iPhone's, because this Mac draws the letters — see docs/ISOLATION_AND_LIMITATIONS.md §2.";
 "editor.generation.ipad" = "An iPad view in a window on a Mac is Safari on the Mac in an iPad-sized window (an iPad calls itself a Mac anyway): there is no touch, and the fonts, graphics and audio are this Mac's; a site that checks for touch will see it.";
 "editor.phoneDisguise" = "Full iPhone disguise";
-"editor.phoneDisguise.detail" = "On: a page sees an iPhone's screen (%ld×%ld at %ldx), %ld touch points, touch events from a press, a coarse pointer without hover, portrait. Part of it is a script, and a careful site can find the script's traces. Off: no traces of a substitution — only what WebKit itself answers as an iPhone (the platform, the density); the screen, touch and pointer stay this Mac's.";
+"editor.phoneDisguise.detail" = "On: a page sees an iPhone's screen (%ld×%ld at %ldx), %ld touch points, touch events from a press, a coarse pointer without hover, portrait. Part of it is a script, and a careful site can find the script's traces. Off: no traces of a substitution — only what WebKit itself answers as an iPhone (the platform, the density, the fonts); the screen, touch and pointer stay this Mac's.";
 "editor.geo" = "Geolocation";
 "editor.geo.accuracy" = "Accuracy (m)";
 "editor.geo.deny" = "Deny";
