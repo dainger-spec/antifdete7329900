@@ -1960,6 +1960,8 @@
 "settings.appearance.entry" = "Экран входа";
 "settings.appearance.light" = "Свет Lumen при входе";
 "settings.appearance.light.detail" = "Горизонт затмения на экране входа и свет в углах окна профилей. Появляются один раз, когда открываете приложение, и остаются приглушённым фоном.";
+"settings.appearance.welcome" = "Приветствовать окном welcome при каждом запуске";
+"settings.appearance.welcome.detail" = "Надпись «welcome», написанная будто пером, перед экраном входа — при каждом запуске Lumen. Выключено: она встречает только при самом первом запуске.";
 "settings.appearance.listAndMotion" = "Список и движение";
 "settings.appearance.density" = "Плотность списка профилей";
 "settings.appearance.density.detail" = "Компактно — строки ниже, на экране больше профилей.";

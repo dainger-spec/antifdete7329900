@@ -63,6 +63,7 @@ enum SettingsSearch {
         SettingsSearchEntry(.behavior, "settings.behavior.dockLetters", detail: "settings.behavior.dockLetters.detail"),
 
         SettingsSearchEntry(.appearance, "settings.appearance.light", detail: "settings.appearance.light.detail"),
+        SettingsSearchEntry(.appearance, "settings.appearance.welcome", detail: "settings.appearance.welcome.detail"),
         SettingsSearchEntry(.appearance, "settings.appearance.density", detail: "settings.appearance.density.detail"),
         SettingsSearchEntry(.appearance, "settings.appearance.animations", detail: "settings.appearance.animations.detail"),
         SettingsSearchEntry(.appearance, "settings.appearance.countryBackdrop", detail: "settings.appearance.countryBackdrop.detail"),
