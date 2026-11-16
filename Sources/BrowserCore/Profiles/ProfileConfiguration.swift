@@ -111,10 +111,10 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// carries this profile's WebRTC through its SOCKS5 proxy. Nil unless `WebRTCGate` decided so.
     public var webRTCRelay: WebRTCRelay?
 
-    /// Set by the app for one launch, never stored: WebRTC that must not connect stays in the pages,
-    /// as Safari has it, connecting nowhere (`WebRTCRouting.silent`). Only where nothing can leave
-    /// around the profile's connection even if a page got past the script: without a proxy, or with
-    /// the network guard holding the profile's process to its proxy (`WebRTCGate.silence`).
+    /// Set by the app for one launch, never stored: with a proxy, WebRTC that must not connect stays
+    /// in the pages, as Safari has it, connecting nowhere (`WebRTCRouting.silent`) — the network guard
+    /// holds the profile's process to its proxy (`WebRTCGate.silence`). Without a proxy that is so
+    /// without it.
     public var webRTCSilent = false
 
     /// What the address bar searches with (and the warm-up's searches). Nil: `SearchEngine.standard`
@@ -282,11 +282,13 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// the network guard holding the profile's process); otherwise it is switched off. The stored
     /// choice is kept either way.
     ///
-    /// WebRTC that must not connect is `.silent` where the launch found that safe (`webRTCSilent`):
-    /// present in the pages, connecting nowhere.
+    /// WebRTC that must not connect is `.silent` — present in the pages, connecting nowhere — where
+    /// that is safe (`WebRTCGate.silence`): always without a proxy (the engine's own WebRTC would go
+    /// out as this Mac, as the pages do), and with one where the launch had the network guard hold
+    /// the process (`webRTCSilent`).
     public var webRTCRouting: WebRTCRouting {
         let policy = webRTCLaunchPolicy
-        if policy == .disabled { return webRTCSilent ? .silent : .off }
+        if policy == .disabled { return proxy == nil || webRTCSilent ? .silent : .off }
         guard let proxy else { return .native(policy) }
         if proxy.kind == .socks5, let webRTCRelay { return .relay(webRTCRelay) }
         return webRTCSilent ? .silent : .off

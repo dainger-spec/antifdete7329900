@@ -128,7 +128,8 @@ enum Diagnostics {
             entry["windowSize"] = describe(c.windowSize)
             entry["localRequests"] = c.localRequests.rawValue
             entry["timeZoneAndLanguage"] = c.effectiveLocaleSource.rawValue
-            entry["webRTC"] = c.effectiveWebRTCPolicy.rawValue
+            entry["webRTC"] = c.webRTCRouting == .silent ? "silent" : c.effectiveWebRTCPolicy.rawValue
+            entry["webRTCChoice"] = c.webRTCMode.rawValue
             entry["searchEngine"] = (c.searchEngine ?? .standard).rawValue
             entry["history"] = c.historyEnabled
             entry["syncCookies"] = c.syncsCookies

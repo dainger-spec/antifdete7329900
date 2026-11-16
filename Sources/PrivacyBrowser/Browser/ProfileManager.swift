@@ -1374,10 +1374,8 @@ final class ProfileManager: ObservableObject {
     /// the network guard tells profiles apart by their processes (`WebRTCRefusal.notOwnProcess`).
     private func webRTCLaunch(for id: UUID, _ configuration: ProfileConfiguration) async -> (relay: WebRTCRelay?, silent: Bool) {
         let policy = configuration.webRTCLaunchPolicy
-        guard let proxy = configuration.proxy else {
-            return (nil, policy == .disabled && WebRTCGate.silence(proxy: nil, ownProcess: runsInProfileProcess,
-                                                                    guardState: .notInstalled) == .withoutHold)
-        }
+        // Without a proxy a WebRTC that is off is present, connecting nowhere, by itself (`webRTCRouting`).
+        guard let proxy = configuration.proxy else { return (nil, false) }
         if runsInProfileProcess, WebRTCGate.managerDecides(proxy: proxy) {
             // The manager answers within the time its proxy check takes (`ProxyUDPCheck`).
             guard let message = await Self.webRTCDecision(within: 40) else {

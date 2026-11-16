@@ -316,15 +316,18 @@ final class ProxiedWebRTCTests: XCTestCase {
     /// WebKit's WebRTC sockets never use the data store's proxy: a proxied profile gets no WebRTC.
     func testAProxyTurnsWebRTCOffWithoutForgettingTheChoice() throws {
         let proxy = ProxySettings(kind: .socks5, host: "127.0.0.1", port: 1080)
+        // Without a proxy, Disabled is present and connecting nowhere: the engine's WebRTC on,
+        // relay-only with no server (`WebRTCRouting.silent`).
+        let withoutProxy: (WebRTCPolicy) -> WebRTCPolicy = { $0 == .disabled ? .relayOnly : $0 }
         for policy in WebRTCPolicy.allCases {
-            XCTAssertEqual(ProfileConfiguration(webRTCPolicy: policy).effectiveWebRTCPolicy, policy)
+            XCTAssertEqual(ProfileConfiguration(webRTCPolicy: policy).effectiveWebRTCPolicy, withoutProxy(policy))
             var proxied = ProfileConfiguration(proxy: proxy, webRTCPolicy: policy)
             XCTAssertEqual(proxied.effectiveWebRTCPolicy, .disabled, policy.rawValue)
             // The stored choice is kept (and saved) for when the proxy is removed.
             let decoded = try JSONCoding.decoder.decode(ProfileConfiguration.self, from: JSONCoding.encoder.encode(proxied))
             XCTAssertEqual(decoded.webRTCPolicy, policy)
             proxied.proxy = nil
-            XCTAssertEqual(proxied.effectiveWebRTCPolicy, policy)
+            XCTAssertEqual(proxied.effectiveWebRTCPolicy, withoutProxy(policy))
         }
     }
 

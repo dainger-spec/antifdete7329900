@@ -79,9 +79,14 @@ final class WebRTCAutomaticTests: XCTestCase {
         XCTAssertEqual(configuration.webRTCRouting, .silent)
         // The engine's WebRTC is on; the page's script holds it to relay-only with no server.
         XCTAssertEqual(configuration.effectiveWebRTCPolicy, .relayOnly)
-        var disabled = ProfileConfiguration(webRTCPolicy: .disabled)
-        disabled.webRTCSilent = true
-        XCTAssertEqual(disabled.webRTCRouting, .silent)
+        // Without a proxy, Disabled is present and connecting nowhere by itself, whoever made the session.
+        XCTAssertEqual(ProfileConfiguration(webRTCPolicy: .disabled).webRTCRouting, .silent)
+        XCTAssertEqual(ProfileConfiguration(webRTCPolicy: .disabled).effectiveWebRTCPolicy, .relayOnly)
+        // With a proxy, only once the launch had the guard hold the process.
+        var held = ProfileConfiguration(proxy: socks, webRTCPolicy: .disabled)
+        XCTAssertEqual(held.webRTCRouting, .off)
+        held.webRTCSilent = true
+        XCTAssertEqual(held.webRTCRouting, .silent)
         // The relay wins where there is one; without a proxy a WebRTC that may connect is native.
         let relay = WebRTCRelay(urls: ["turn:127.0.0.1:50000?transport=udp"], username: "u", credential: "c")
         var both = ProfileConfiguration(proxy: socks, webRTCPolicy: .unrestricted)
