@@ -44,9 +44,11 @@ final class CookieBridge: SyncCookieStores, @unchecked Sendable {
 
     // MARK: WebKit
 
+    /// The session's cookie store, of its data store as `SyncedDataStores` holds it — never of one
+    /// made for this call alone, which is let go before WebKit has done the call (see there).
     @MainActor
     private static func cookieStore(_ storeID: UUID) -> WKHTTPCookieStore {
-        WKWebsiteDataStore(forIdentifier: storeID).httpCookieStore
+        SyncedDataStores.store(storeID).httpCookieStore
     }
 
     private static func allCookies(_ storeID: UUID) async -> [HTTPCookie] {

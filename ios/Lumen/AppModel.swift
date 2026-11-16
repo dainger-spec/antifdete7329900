@@ -299,6 +299,7 @@ final class AppModel: ObservableObject {
         catalog.delete(id)
         refresh()
         let storeID = session.storeID
+        SyncedDataStores.release(storeID)
         Task { try? await WKWebsiteDataStore.remove(forIdentifier: storeID) }
     }
 

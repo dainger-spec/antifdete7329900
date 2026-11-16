@@ -64,8 +64,10 @@ final class SessionRuntime: ObservableObject {
         self.proxy = proxy
         self.locked = locked
         self.store = store
-        // The session's own store; the planted fault puts every session on WebKit's default one.
-        dataStore = Faults.isActive(.sharedStore) ? .default() : WKWebsiteDataStore(forIdentifier: session.storeID)
+        // The session's own store — the one the sync's run wrote its cookies into, if it did
+        // (SyncedDataStores); the planted fault puts every session on WebKit's default one.
+        dataStore = Faults.isActive(.sharedStore) ? .default()
+            : SyncedDataStores.existing(session.storeID) ?? WKWebsiteDataStore(forIdentifier: session.storeID)
         relay = Relay(label: session.id.uuidString)
         channel = PageSettings.makeChannel()
         // What is kept of it (HistoryRetention: the Mac's 90 days, at most 10 000 visits).
