@@ -238,6 +238,13 @@ final class OpenVPNConfigurationTests: XCTestCase {
             XCTAssertFalse(lines.contains { $0.hasPrefix(forbidden) }, forbidden)
         }
         XCTAssertTrue(text.contains("<auth-user-pass>\nalice\npa ss\n</auth-user-pass>"))
+        // Keys before the servers' entries: OpenVPN takes tls-crypt per entry, and ignores one after them.
+        let firstEntry = try XCTUnwrap(lines.firstIndex(of: "<connection>"))
+        XCTAssertLessThan(try XCTUnwrap(lines.firstIndex(of: "<tls-crypt>")), firstEntry)
+        XCTAssertLessThan(try XCTUnwrap(lines.firstIndex(of: "<ca>")), firstEntry)
+        for global in ["nobind", "route-noexec", "auth SHA256"] {
+            XCTAssertLessThan(try XCTUnwrap(lines.firstIndex(of: global), global), firstEntry, global)
+        }
         // OpenVPN reads it back: the same tokens, a quoted path included.
         let spaced = try configuration.runtime(forwarders: [0: 1], tunnelProgram: "/Users/me/My Apps/Lumen.app/Contents/MacOS/LumenTunnel",
                                                username: "a", password: "b", listeningDescriptor: 3, statusDescriptor: 4, verifierHex: "00")

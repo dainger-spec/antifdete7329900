@@ -123,13 +123,21 @@ def capture(path, server_address):
                 inside_question += 1
             elif not (source.startswith(SERVER_TUNNEL_ADDRESS + ".53") and destination.startswith(TUNNEL_ADDRESS + ".")):
                 leaks.append("a question for the tunnel's name outside it: " + line)
-    # The client's own openvpn is not told apart by name from the server's (both "openvpn"): its
-    # packets to the server go through the forwarder on loopback, which the capture leaves out, so
-    # an openvpn packet to the server from anywhere but the server itself is the client's.
+    # The confined client: its process is "openvpn" (the server runs from a copy, "openvpn-server",
+    # and pktap counts a packet the server receives as the server's). It may send nothing outside
+    # loopback, which this capture leaves out: any packet counted for it is one around the forwarder.
     for line in lines:
-        flow = FLOW.search(line)
-        if flow and "openvpn" in line and flow.group(2).startswith(server_address + ".1194"):
-            leaks.append("an openvpn process reached the server around the forwarder: " + line)
+        proc, eproc = PROC.search(line), EPROC.search(line)
+        if any(m and m.group(1) == "openvpn" for m in (proc, eproc)):
+            leaks.append("the client's openvpn outside loopback: " + line)
+    # Every process the capture saw, for the record (this Mac's own services, the runner's agent,
+    # a Safari already running before any profile: none of them is the profile's).
+    counts = {}
+    for line in lines:
+        proc = PROC.search(line)
+        name = proc.group(1) if proc else "?"
+        counts[name] = counts.get(name, 0) + 1
+    print("  processes seen: " + ", ".join(f"{name} {count}" for name, count in sorted(counts.items(), key=lambda item: -item[1])[:20]))
     if leaks:
         for leak in leaks[:20]:
             print("  " + leak[:400])

@@ -639,6 +639,16 @@ public struct OpenVPNConfiguration: Equatable, Sendable {
         for words in directives where !["connect-retry", "server-poll-timeout"].contains(words[0]) {
             text.append(Self.line(words))
         }
+        // The keys and certificates before the servers' entries: OpenVPN 2.7 takes tls-auth,
+        // tls-crypt and tls-crypt-v2 per entry, and ignores one given after the entries.
+        for block in blocks {
+            text.append("<\(block.name)>")
+            text.append(block.content.trimmingCharacters(in: .newlines))
+            text.append("</\(block.name)>")
+        }
+        text.append("setenv LUMEN_SOCKS_FD \(listeningDescriptor)")
+        text.append("setenv LUMEN_STATUS_FD \(statusDescriptor)")
+        text.append("setenv LUMEN_SOCKS_VERIFIER \(verifierHex)")
         var anyRemote = false
         for (index, remote) in remotes.enumerated() {
             guard let port = forwarders[index] else { continue }
@@ -649,14 +659,6 @@ public struct OpenVPNConfiguration: Equatable, Sendable {
             text.append("</connection>")
         }
         guard anyRemote else { throw OpenVPNConfigProblem.noRemote }
-        text.append("setenv LUMEN_SOCKS_FD \(listeningDescriptor)")
-        text.append("setenv LUMEN_STATUS_FD \(statusDescriptor)")
-        text.append("setenv LUMEN_SOCKS_VERIFIER \(verifierHex)")
-        for block in blocks {
-            text.append("<\(block.name)>")
-            text.append(block.content.trimmingCharacters(in: .newlines))
-            text.append("</\(block.name)>")
-        }
         if needsCredentials {
             guard let username, !username.isEmpty, let password, !password.isEmpty else { throw OpenVPNConfigProblem.missing("auth-user-pass") }
             // One line each: a line break in either would be read as the next field.
